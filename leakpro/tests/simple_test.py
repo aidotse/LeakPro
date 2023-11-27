@@ -5,4 +5,4 @@ from leakpro.leakpro import (
 
 def test_add():
     a = LEAKPRO()
-    assert a.add(2, 3) == 5
+    assert a.add(2, 2) == 4
