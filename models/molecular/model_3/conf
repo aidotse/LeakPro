@@ -1,0 +1,7 @@
+{
+    "depth": 4,
+    "dropout": 0.05,
+    "ffn_hidden_size": 800,
+    "ffn_num_layers": 1,
+    "hidden_size": 800
+}
