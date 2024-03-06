@@ -10,8 +10,6 @@ from .metric import (
     GroupPopulationMetric,
     Metric,
     PopulationMetric,
-    ReferenceMetric,
-    ShadowMetric,
 )
 from .metric_result import MetricResult
 
@@ -27,9 +25,7 @@ class Audit:
         metrics: Union[Union[MetricEnum, Metric], List[Union[MetricEnum, Metric]]],
         inference_game_type: InferenceGame,
         target_info_sources: Union[InformationSource, List[InformationSource]] = None,
-        reference_info_sources: Union[
-            InformationSource, List[InformationSource]
-        ] = None,
+        reference_info_sources: Union[InformationSource, List[InformationSource]] = None,
         fpr_tolerances: Union[float, List[float]] = None,
         logs_directory_names: Union[str, List[str]] = None,
         save_logs: bool = True,
@@ -95,26 +91,6 @@ class Audit:
                 if metric == MetricEnum.POPULATION:
                     self.metric_objects.append(
                         PopulationMetric(
-                            target_info_source=self.target_info_sources[k],
-                            reference_info_source=self.reference_info_sources[k],
-                            signals=[ModelLoss()],
-                            hypothesis_test_func=linear_itp_threshold_func,
-                            logs_dirname=self.logs_directory_names[k],
-                        )
-                    )
-                elif metric == MetricEnum.SHADOW:
-                    self.metric_objects.append(
-                        ShadowMetric(
-                            target_info_source=self.target_info_sources[k],
-                            reference_info_source=self.reference_info_sources[k],
-                            signals=[ModelLoss()],
-                            hypothesis_test_func=None,
-                            logs_dirname=self.logs_directory_names[k],
-                        )
-                    )
-                elif metric == MetricEnum.REFERENCE:
-                    self.metric_objects.append(
-                        ReferenceMetric(
                             target_info_source=self.target_info_sources[k],
                             reference_info_source=self.reference_info_sources[k],
                             signals=[ModelLoss()],

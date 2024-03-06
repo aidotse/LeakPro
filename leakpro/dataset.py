@@ -251,7 +251,7 @@ class TabularDataset(Dataset):
         # Convert idx from tensor to list due to pandas bug (that arises when using pytorch's random_split)
         if isinstance(idx, torch.Tensor):
             idx = idx.tolist()
-        X =  np.float32(self.data[idx])
+        X = np.float32(self.data[idx])
         y = np.float32(self.targets[idx])
         return [X, y]
     
@@ -280,6 +280,7 @@ def get_dataset(dataset_name: str, data_dir: str):
         df_test = pd.read_csv(f"{path}/{dataset_name}.test", names=column_names, header=0)
         df_test['income'] = df_test['income'].str.replace('.', '', regex=False)
         df = pd.concat([df_train, df_test], axis=0)
+        df = df.replace(' ?', np.nan)
         df = df.dropna()
         X, y = df.iloc[:, :-1], df.iloc[:, -1]
         

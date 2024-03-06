@@ -135,6 +135,7 @@ class PytorchModel(Model):
         Returns:
             The loss value, as defined by the loss_fn attribute.
         """
+        batch_labels = batch_labels.long()
         if per_point:
             return (
                 self.loss_fn_no_reduction(

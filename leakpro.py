@@ -11,7 +11,7 @@ import time
 import leakpro.dataset as dataset
 import leakpro.models as models
 import leakpro.train as util
-from leakpro.core import prepare_information_source
+from leakpro.core import prepare_information_source, prepare_priavcy_risk_report
 from leakpro.audit import Audit
 
 def setup_log(name: str, save_file: bool):
@@ -73,7 +73,8 @@ if __name__ == "__main__":
     else:
         model = models.NN(configs["train"]["inputs"], configs["train"]["outputs"])
         model = util.train(model,train_loader,configs,test_loader,data_split_info)
-    
+        with open(f"{log_dir}/models_metadata.pkl", "rb") as f:
+            model_metadata_list = pickle.load(f)
     
     
     # Perform the auditing
@@ -103,4 +104,15 @@ if __name__ == "__main__":
             reference_info_sources=reference_info_source,
             fpr_tolerances=None,
             logs_directory_names=log_dir_list,
+        )
+    audit_obj.prepare()
+    audit_results = audit_obj.run()
+    
+    prepare_priavcy_risk_report(
+            log_dir,
+            audit_results,
+            configs["audit"],
+            save_path=f"{log_dir}/{configs['audit']['report_log']}",
+            target_info_source=target_info_source,
+            target_model_to_train_split_mapping = data_split_info["split"][0]["train"]
         )
