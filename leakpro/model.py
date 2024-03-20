@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from copy import deepcopy
-
+import numpy as np
 import torch
 
 ########################################################################################################################
@@ -135,19 +135,21 @@ class PytorchModel(Model):
         Returns:
             The loss value, as defined by the loss_fn attribute.
         """
-        batch_labels = batch_labels.long()
+        batch_samples_tensor = torch.tensor(np.array(batch_samples), dtype=torch.float32)
+        batch_labels_tensor = torch.tensor(batch_labels, dtype=torch.long)
+        
         if per_point:
             return (
                 self.loss_fn_no_reduction(
-                    self.model_obj(torch.tensor(batch_samples)),
-                    torch.tensor(batch_labels),
+                    self.model_obj(batch_samples_tensor),
+                    batch_labels_tensor,
                 )
                 .detach()
                 .numpy()
             )
         else:
             return self.loss_fn(
-                self.model_obj(torch.tensor(batch_samples)), torch.tensor(batch_labels)
+                self.model_obj(torch.tensor(batch_samples_tensor)), torch.tensor(batch_labels_tensor)
             ).item()
 
     def get_grad(self, batch_samples, batch_labels):

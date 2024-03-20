@@ -6,13 +6,13 @@ class NN(nn.Module):
 
     def __init__(self, in_shape, num_classes=10):
         super().__init__()
-        self.fc1 = nn.Linear(in_shape, num_classes)
-        #self.fc2 = nn.Linear(128, num_classes)
+        self.fc1 = nn.Linear(in_shape, 1000)
+        self.fc2 = nn.Linear(1000, num_classes)
 
     def forward(self, inputs):
         """Forward pass of the model."""
         inputs = inputs.flatten(1)
-        outputs = torch.tanh(self.fc1(inputs))
-        #outputs = self.fc2(inputs)
+        y = torch.tanh(self.fc1(inputs))
+        outputs = torch.tanh(self.fc2(y))
         return outputs
     

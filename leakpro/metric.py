@@ -5,9 +5,9 @@ from typing import Callable, List, Optional, Tuple, Union
 import numpy as np
 from sklearn.linear_model import LogisticRegression
 
-from .information_source import InformationSource
-from .signal import GroupInfo, Signal
-from .metric_result import CombinedMetricResult, MetricResult
+from .signals.information_source import InformationSource
+from .signals.signal import GroupInfo, Signal
+from .metrics.attack_result import CombinedMetricResult, MetricResult
 from .utils import default_quantile, flatten_array
 from .constants import NPZ_EXTENSION, MetricEnum, SignalSourceEnum
 

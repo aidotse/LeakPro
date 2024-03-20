@@ -100,7 +100,7 @@ def train(
         nn.Module: Trained model.
     """
     # Get the device for training
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = "cpu" #torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Set the model to the device
     model.to(device)
@@ -168,16 +168,14 @@ def save_model_and_metadata(model: torch.nn.Module, data_split: dict, configs: d
     with open(f"{log_dir}/model_{model_idx}.pkl", "wb") as f:
        torch.save(model.state_dict(), f)
     meta_data = {}
-    split=0
-    meta_data["train_split"] = data_split["split"][split]["train"]
-    meta_data["test_split"] = data_split["split"][split]["test"]
-    meta_data["audit_split"] = data_split["split"][split]["audit"]
-    meta_data["num_train"] = len(data_split["split"][split]["train"])
+
+    meta_data["train_split"] = data_split["train_indices"]
+    meta_data["test_split"] = data_split["test_indices"]
+    meta_data["num_train"] = len(data_split["train_indices"])
     meta_data["optimizer"] = configs["train"]["optimizer"]
     meta_data["batch_size"] = configs["train"]["batch_size"]
     meta_data["epochs"] = configs["train"]["epochs"]
     meta_data["model_name"] = configs["train"]["model_name"]
-    meta_data["split_method"] = data_split["split_method"]
     meta_data["model_idx"] = model_idx
     meta_data["learning_rate"] = configs["train"]["learning_rate"]
     meta_data["weight_decay"] = configs["train"]["weight_decay"]

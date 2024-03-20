@@ -11,8 +11,9 @@ import time
 import leakpro.dataset as dataset
 import leakpro.models as models
 import leakpro.train as util
-from leakpro.core import prepare_information_source, prepare_priavcy_risk_report
-from leakpro.audit import Audit
+#from leakpro.core import prepare_information_source, prepare_priavcy_risk_report
+#from leakpro.audit import Audit
+from leakpro.mia_attacks.attack_scheduler import AttackScheduler
 
 def setup_log(name: str, save_file: bool):
     """Generate the logger for the current run.
@@ -24,8 +25,15 @@ def setup_log(name: str, save_file: bool):
     """
     my_logger = logging.getLogger(name)
     my_logger.setLevel(logging.INFO)
+    log_format = logging.Formatter("%(asctime)s %(levelname)-8s %(message)s")
+    
+    # Console handler for output to the console
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(log_format)
+    my_logger.addHandler(console_handler)
+    
     if save_file:
-        log_format = logging.Formatter("%(asctime)s %(levelname)-8s %(message)s")
         filename = f"log_{name}.log"
         log_handler = logging.FileHandler(filename, mode="w")
         log_handler.setLevel(logging.INFO)
@@ -33,7 +41,6 @@ def setup_log(name: str, save_file: bool):
         my_logger.addHandler(log_handler)
 
     return my_logger
-
 
 if __name__ == "__main__":
     
@@ -56,63 +63,61 @@ if __name__ == "__main__":
     
     start_time = time.time()
     
-    # Load the data
-    data = dataset.get_dataset(configs["data"]["dataset"], configs["data"]["data_dir"])
-    data_split_info = dataset.prepare_datasets(len(data), configs["data"])
+    #------------------------------------------------
+    # Create the population dataset
+    population = dataset.get_dataset(configs["data"]["dataset"], configs["data"]["data_dir"])
+    N_population = len(population)
     
-    train_loader = dataset.get_dataloader(torch.utils.data.Subset(data, data_split_info["split"][0]["train"]),batch_size=configs["train"]["batch_size"],shuffle=True,)
-    test_loader = dataset.get_dataloader(torch.utils.data.Subset(data, data_split_info["split"][0]["test"]),batch_size=configs["train"]["test_batch_size"],)
+    # Create target training dataset and test dataset 
+    # NOTE: this should not be done as the model is provided by the user
+    train_test_dataset = dataset.prepare_train_test_datasets(N_population, configs["data"])
     
-    # Load the model
-    if os.path.exists((f"{log_dir}/models_metadata.pkl")):
-        with open(f"{log_dir}/models_metadata.pkl", "rb") as f:
-            model_metadata_list = pickle.load(f)
-        with open(f"{log_dir}/model_0.pkl", "rb") as f:
-            model = models.NN(configs["train"]["inputs"], configs["train"]["outputs"])
-            model.load_state_dict(torch.load(f))
-    else:
-        model = models.NN(configs["train"]["inputs"], configs["train"]["outputs"])
-        model = util.train(model,train_loader,configs,test_loader,data_split_info)
-        with open(f"{log_dir}/models_metadata.pkl", "rb") as f:
-            model_metadata_list = pickle.load(f)
+    train_loader = dataset.get_dataloader(torch.utils.data.Subset(population, 
+                                                                  train_test_dataset["train_indices"]),
+                                          batch_size=configs["train"]["batch_size"],
+                                          shuffle=True,)
+    test_loader = dataset.get_dataloader(torch.utils.data.Subset(population, 
+                                                                 train_test_dataset["test_indices"]),
+                                         batch_size=configs["train"]["test_batch_size"],
+                                         )
+    
+    # Train the target model
+    model = models.NN(configs["train"]["inputs"], configs["train"]["outputs"])
+    model = util.train(model, train_loader, configs, test_loader, train_test_dataset)
+    
+    #------------------------------------------------
+    # LEAKPRO starts here
+    # Read in model, population, and metadata    
+    dataset_path = f"{configs["data"]["data_dir"]}/{configs["data"]["dataset"]}.pkl"
+    with open(dataset_path, "rb") as file:
+        population = pickle.load(file)
     
     
-    # Perform the auditing
-    (
-        target_info_source,
-        reference_info_source,
-        metrics,
-        log_dir_list,
-        model_metadata_list,
-        ) = prepare_information_source(
-            log_dir,
-            data,
-            data_split_info,
-            [model],
-            configs["audit"],
-            model_metadata_list,
-            [0],
-            configs["train"]["model_name"],
-            configs["data"]["dataset"],
-        )
+    # Get the training and test data
+    train_test_data = train_test_dataset
     
-    inference_game_type = configs["audit"]["privacy_game"].upper()
-    audit_obj = Audit(
-            metrics=metrics,
-            inference_game_type=inference_game_type,
-            target_info_sources=target_info_source,
-            reference_info_sources=reference_info_source,
-            fpr_tolerances=None,
-            logs_directory_names=log_dir_list,
-        )
-    audit_obj.prepare()
-    audit_results = audit_obj.run()
+    # Get the target model + metadata
+    target_model_metadata_path = f"{log_dir}/models_metadata.pkl"
+    with open(target_model_metadata_path, "rb") as f:
+        target_model_metadata = pickle.load(f)
+    target_model_path = f"{log_dir}/model_0.pkl"
+    with open(target_model_path, "rb") as f:
+        target_model = models.NN(configs["train"]["inputs"], configs["train"]["outputs"]) # TODO: read metadata to get the model
+        target_model.load_state_dict(torch.load(f))
     
-    prepare_priavcy_risk_report(
-            log_dir,
-            audit_results,
-            configs["audit"],
-            save_path=f"{log_dir}/{configs['audit']['report_log']}",
-            target_info_source=target_info_source,
-            target_model_to_train_split_mapping = data_split_info["split"][0]["train"]
-        )
+    #------------------------------------------------
+    # Now we have the target model, its metadata, and the train/test dataset indices.
+    attack_scheduler = AttackScheduler(population, train_test_dataset, target_model, target_model_metadata, configs, log_dir,logger) #TODO metadata includes indices for train and test data
+    audit_results = attack_scheduler.run_attacks()
+    
+    logger.info(str(audit_results["attack_p"]["result_object"]))
+    
+    
+    # prepare_priavcy_risk_report(
+    #         log_dir,
+    #         audit_results,
+    #         configs["audit"],
+    #         save_path=f"{log_dir}/{configs['audit']['report_log']}",
+    #         target_info_source=target_info_source,
+    #         target_model_to_train_split_mapping = data_split_info["split"][0]["train"]
+    #     )

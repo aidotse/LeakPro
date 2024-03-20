@@ -60,6 +60,7 @@ class Dataset:
         # If preprocessing functions were passed as parameters, execute them
         if not preprocessed and preproc_fn_dict is not None:
             self.preprocess()
+    
 
     def preprocess(self):
         """
@@ -230,8 +231,6 @@ class Dataset:
             "=" * 48,
         ]
         return "\n".join(txt)
-    
-    
 
 class TabularDataset(Dataset):
     """Tabular dataset."""
@@ -239,20 +238,24 @@ class TabularDataset(Dataset):
     def __init__(self, X, y):
         """Initializes instance of class TabularDataset.
         Args:
-            csv_file (str): Path to the csv file with the students data.
+            X (str): features
+            y (str): target
         """
-        self.data = X
-        self.targets = y
+        super().__init__(
+            data_dict={"X": X, "y": y},
+            default_input="X",
+            default_output="y",
+        )
 
     def __len__(self):
-        return len(self.targets)
+        return len(self.data_dict["y"])
 
     def __getitem__(self, idx):
         # Convert idx from tensor to list due to pandas bug (that arises when using pytorch's random_split)
         if isinstance(idx, torch.Tensor):
             idx = idx.tolist()
-        X = np.float32(self.data[idx])
-        y = np.float32(self.targets[idx])
+        X = np.float32(self.data_dict["X"][idx])
+        y = np.float32(self.data_dict["y"][idx])
         return [X, y]
     
 class InfiniteRepeatDataset(Dataset):
@@ -342,7 +345,7 @@ def get_split(all_index: List(int), used_index: List(int), size: int, split_meth
 
     return selected_index
 
-def prepare_datasets(dataset_size: int, configs: dict):
+def prepare_train_test_datasets(dataset_size: int, configs: dict):
     """Prepare the dataset for training the target models when the training data are sampled uniformly from the distribution (pool of all possible data).
 
     Args:
@@ -359,36 +362,31 @@ def prepare_datasets(dataset_size: int, configs: dict):
     all_index = np.arange(dataset_size)
     train_size = int(configs["f_train"] * dataset_size)
     test_size = int(configs["f_test"] * dataset_size)
-    audit_size = int(configs["f_audit"] * dataset_size)
     
     selected_index = np.random.choice(all_index, train_size + test_size, replace=False)
     train_index, test_index = train_test_split(selected_index, test_size=test_size)
-    audit_index = get_split(all_index,selected_index,size=audit_size,split_method=configs["split_method"])
-    index_list.append({"train": train_index, "test": test_index, "audit": audit_index})
+    dataset_train_test = {"train_indices": train_index, "test_indices": test_index}
+    return dataset_train_test
 
-    dataset_splits = {"split": index_list, "split_method": configs["split_method"]}
-    return dataset_splits
-
-
-def get_dataset_subset(
-    dataset: Dataset, index: List(int), model_name="CNN", device="cuda"
-):
+def get_dataset_subset(dataset: Dataset, indices: List(int)):
     """Get a subset of the dataset.
 
     Args:
         dataset (torchvision.datasets): Whole dataset.
         index (list): List of index.
-        model_name (str): name of the model.
     """
-    assert max(index) < len(dataset) and min(index) >= 0, "Index out of range"
+    assert max(indices) < len(dataset) and min(indices) >= 0, "Index out of range"
     
-    data_loader = get_dataloader(
-        torch.utils.data.Subset(dataset, index),
-        batch_size=len(index),
-        shuffle=False,
-    )
-    for data, targets in data_loader:
-        return data, targets
+    # Initialize new dataset (this might need to be adjusted based on the specific dataset class)
+    data = dataset.data_dict["X"]
+    targets = dataset.data_dict["y"]
+    subset_data = [data[idx] for idx in indices]
+    subset_targets = [targets[idx] for idx in indices]
+    
+    new_dataset = dataset.__class__(subset_data, subset_targets)
+    
+    return new_dataset
+
     
     
 def get_dataloader(
