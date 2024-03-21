@@ -9,6 +9,7 @@ from ..attack_utils import AttackUtils
 # METRIC CLASS
 ########################################################################################################################
 
+
 class AttackAbstract(ABC):
     """
     Interface to construct and perform a membership inference attack on a target model and dataset using auxiliary
@@ -25,15 +26,15 @@ class AttackAbstract(ABC):
         self.target_model = attack_utils.attack_objects.target_model
         self.audit_dataset = attack_utils.attack_objects.audit_dataset
         self.signal_data = []
-    
+
     @property
     def get_population(self):
         return self.population
-    
+
     @property
     def get_population_size(self):
         return self.population_size
-    
+
     @property
     def get_target_model(self):
         return self.target_model
@@ -51,9 +52,7 @@ class AttackAbstract(ABC):
         pass
 
     @abstractmethod
-    def run_attack(
-        self, fpr_tolerance_rate_list=None
-    ) -> Union[AttackResult, List[AttackResult]]:
+    def run_attack(self, fpr_tolerance_rate_list=None) -> Union[AttackResult, List[AttackResult]]:
         """
         Function to run the metric on the target model and dataset.
 

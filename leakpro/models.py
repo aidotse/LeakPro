@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 
+
 class NN(nn.Module):
     """NN for Purchase dataset."""
 
@@ -15,4 +16,3 @@ class NN(nn.Module):
         y = torch.tanh(self.fc1(inputs))
         outputs = torch.tanh(self.fc2(y))
         return outputs
-    

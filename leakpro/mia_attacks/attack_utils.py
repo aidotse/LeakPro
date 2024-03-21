@@ -4,10 +4,11 @@ from scipy.stats import norm
 
 from .attack_objects import AttackObjects
 
-class AttackUtils():
-    def __init__(self, attack_objects:AttackObjects):
+
+class AttackUtils:
+    def __init__(self, attack_objects: AttackObjects):
         self.attack_objects = attack_objects
-    
+
     def flatten_array(self, arr):
         """
         Utility function to recursively flatten a list of lists.
@@ -36,21 +37,27 @@ class AttackUtils():
         """
         return np.logspace(-5, 0, 100)
 
-    def prepare_attack_dataset(self, configs: dict):    
+    def prepare_attack_dataset(self, configs: dict):
         audit_size = int(configs["data"]["f_audit"] * self.attack_objects.population_size)
         audit_index = self.sample_dataset_no_overlap(audit_size)
         audit_dataset = {"audit_indices": audit_index}
         return audit_dataset
-    
-    def sample_dataset_uniformly(self, size:float):
+
+    def sample_dataset_uniformly(self, size: float):
         all_index = np.arange(self.attack_objects.population_size)
         if size <= len(all_index):
             selected_index = np.random.choice(all_index, size, replace=False)
         return selected_index
 
-    def sample_dataset_no_overlap(self, size:float):
+    def sample_dataset_no_overlap(self, size: float):
         all_index = np.arange(self.attack_objects.population_size)
-        used_index = np.concatenate((self.attack_objects.train_test_dataset["train_indices"], self.attack_objects.train_test_dataset["test_indices"]),axis=0)
+        used_index = np.concatenate(
+            (
+                self.attack_objects.train_test_dataset["train_indices"],
+                self.attack_objects.train_test_dataset["test_indices"],
+            ),
+            axis=0,
+        )
         selected_index = np.setdiff1d(all_index, used_index, assume_unique=True)
         if size <= len(selected_index):
             selected_index = np.random.choice(selected_index, size, replace=False)
@@ -77,11 +84,12 @@ class AttackUtils():
         """
         threshold = np.quantile(distribution, q=alpha, interpolation="lower", **kwargs)
         return threshold
-    
+
     ########################################################################################################################
     # HYPOTHESIS TEST: LINEAR INTERPOLATION THRESHOLDING
     ########################################################################################################################
-    def linear_itp_threshold_func(self,
+    def linear_itp_threshold_func(
+        self,
         distribution: List[float],
         alpha: List[float],
         **kwargs,
@@ -100,23 +108,17 @@ class AttackUtils():
 
         if len(distribution.shape) > 1:
             # for reference attacks
-            threshold = np.quantile(
-                distribution, q=alpha[1:-1], method="linear", axis=1, **kwargs
-            )
+            threshold = np.quantile(distribution, q=alpha[1:-1], method="linear", axis=1, **kwargs)
             threshold = np.concatenate(
                 [
                     threshold,
-                    np.repeat(distribution.max() + 1e-4, distribution.shape[0]).reshape(
-                        1, -1
-                    ),
+                    np.repeat(distribution.max() + 1e-4, distribution.shape[0]).reshape(1, -1),
                 ],
                 axis=0,
             )
             threshold = np.concatenate(
                 [
-                    np.repeat(distribution.min() - 1e-4, distribution.shape[0]).reshape(
-                        1, -1
-                    ),
+                    np.repeat(distribution.min() - 1e-4, distribution.shape[0]).reshape(1, -1),
                     threshold,
                 ],
                 axis=0,
@@ -135,11 +137,11 @@ class AttackUtils():
 
         return threshold
 
-
-########################################################################################################################
-# HYPOTHESIS TEST: LOGIT RESCALE THRESHOLDING
-########################################################################################################################
-    def logit_rescale_threshold_func(self,
+    ########################################################################################################################
+    # HYPOTHESIS TEST: LOGIT RESCALE THRESHOLDING
+    ########################################################################################################################
+    def logit_rescale_threshold_func(
+        self,
         distribution: List[float],
         alpha: List[float],
         **kwargs,
@@ -160,9 +162,7 @@ class AttackUtils():
         distribution = np.log(np.divide(np.exp(-distribution), (1 - np.exp(-distribution))))
 
         if len(distribution.shape) > 1:
-            parameters = np.array(
-                [norm.fit(distribution[i]) for i in range(distribution.shape[0])]
-            )
+            parameters = np.array([norm.fit(distribution[i]) for i in range(distribution.shape[0])])
             num_threshold = alpha.shape[0]
             num_points = distribution.shape[0]
             loc = parameters[:, 0].reshape(-1, 1).repeat(num_threshold, 1)
@@ -178,11 +178,11 @@ class AttackUtils():
         threshold = np.log(np.exp(threshold) + 1) - threshold
         return threshold
 
-
-########################################################################################################################
-# HYPOTHESIS TEST: GAUSSIAN THRESHOLDING
-########################################################################################################################
-    def gaussian_threshold_func(self,
+    ########################################################################################################################
+    # HYPOTHESIS TEST: GAUSSIAN THRESHOLDING
+    ########################################################################################################################
+    def gaussian_threshold_func(
+        self,
         distribution: List[float],
         alpha: List[float],
         **kwargs,
@@ -199,9 +199,7 @@ class AttackUtils():
             threshold: alpha quantile of the provided distribution.
         """
         if len(distribution.shape) > 1:
-            parameters = np.array(
-                [norm.fit(distribution[i]) for i in range(distribution.shape[0])]
-            )
+            parameters = np.array([norm.fit(distribution[i]) for i in range(distribution.shape[0])])
             num_threshold = alpha.shape[0]
             num_points = distribution.shape[0]
             loc = parameters[:, 0].reshape(-1, 1).repeat(num_threshold, 1)
@@ -213,11 +211,11 @@ class AttackUtils():
             threshold = norm.ppf(alpha, loc=loc, scale=scale)
         return threshold
 
-
-########################################################################################################################
-# HYPOTHESIS TEST: MIN LINEAR LOGIT RESCALE THRESHOLDING
-########################################################################################################################
-    def min_linear_logit_threshold_func(self,
+    ########################################################################################################################
+    # HYPOTHESIS TEST: MIN LINEAR LOGIT RESCALE THRESHOLDING
+    ########################################################################################################################
+    def min_linear_logit_threshold_func(
+        self,
         distribution: List[float],
         alpha: List[float],
         **kwargs,

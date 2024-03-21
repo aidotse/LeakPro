@@ -137,7 +137,7 @@ class PytorchModel(Model):
         """
         batch_samples_tensor = torch.tensor(np.array(batch_samples), dtype=torch.float32)
         batch_labels_tensor = torch.tensor(batch_labels, dtype=torch.long)
-        
+
         if per_point:
             return (
                 self.loss_fn_no_reduction(
@@ -149,7 +149,8 @@ class PytorchModel(Model):
             )
         else:
             return self.loss_fn(
-                self.model_obj(torch.tensor(batch_samples_tensor)), torch.tensor(batch_labels_tensor)
+                self.model_obj(torch.tensor(batch_samples_tensor)),
+                torch.tensor(batch_labels_tensor),
             ).item()
 
     def get_grad(self, batch_samples, batch_labels):
@@ -163,9 +164,7 @@ class PytorchModel(Model):
         Returns:
             A list of gradients of the model loss (one item per layer) with respect to the model parameters.
         """
-        loss = self.loss_fn(
-            self.model_obj(torch.tensor(batch_samples)), torch.tensor(batch_labels)
-        )
+        loss = self.loss_fn(self.model_obj(torch.tensor(batch_samples)), torch.tensor(batch_labels))
         loss.backward()
         return [p.grad.numpy() for p in self.model_obj.parameters()]
 
@@ -189,7 +188,9 @@ class PytorchModel(Model):
                 layer_names.append(layer)
             else:
                 layer_names.append(list(self.model_obj._modules.keys())[layer])
-        return [self.intermediate_outputs[layer_name].detach().numpy() for layer_name in layer_names]
+        return [
+            self.intermediate_outputs[layer_name].detach().numpy() for layer_name in layer_names
+        ]
 
     def __forward_hook(self, layer_name):
         """Private helper function to access outputs of intermediate layers.
@@ -205,4 +206,3 @@ class PytorchModel(Model):
             self.intermediate_outputs[layer_name] = output
 
         return hook
-

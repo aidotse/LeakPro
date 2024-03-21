@@ -1,10 +1,12 @@
 """This file contains functions for training and testing the model."""
+
 import time
 from ast import Tuple
 
 import torch
 from torch import nn
 import pickle
+
 
 def get_optimizer(model: torch.nn.Module, configs: dict):
     optimizer = configs.get("optimizer", "SGD")
@@ -23,22 +25,20 @@ def get_optimizer(model: torch.nn.Module, configs: dict):
             momentum=momentum,
         )
     elif optimizer == "Adam":
-        return torch.optim.Adam(
-            model.parameters(), lr=learning_rate, weight_decay=weight_decay
-        )
+        return torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     elif optimizer == "AdamW":
-        return torch.optim.AdamW(
-            model.parameters(), lr=learning_rate, weight_decay=weight_decay
-        )
+        return torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
     else:
         raise NotImplementedError(
             f"Optimizer {optimizer} has not been implemented. Please choose from SGD or Adam"
         )
 
+
 # Test Function
 def inference(
-    model: torch.nn.Module, loader: torch.utils.data.DataLoader, device: str) -> Tuple(float, float):
+    model: torch.nn.Module, loader: torch.utils.data.DataLoader, device: str
+) -> Tuple(float, float):
     """Evaluate the model performance on the test loader
     Args:
         model (torch.nn.Module): Model for evaluation
@@ -84,6 +84,7 @@ def inference(
         # Return loss and accuracy
         return loss, acc
 
+
 def train(
     model: torch.nn.Module,
     train_loader: torch.utils.data.DataLoader,
@@ -100,7 +101,7 @@ def train(
         nn.Module: Trained model.
     """
     # Get the device for training
-    device = "cpu" #torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = "cpu"  # torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Set the model to the device
     model.to(device)
@@ -151,22 +152,31 @@ def train(
 
     # Move the model back to the CPU
     model.to("cpu")
-    
+
     save_model_and_metadata(model, data_split, configs, train_acc, test_acc, train_loss, test_loss)
 
     # Return the model
     return model
 
-def save_model_and_metadata(model: torch.nn.Module, data_split: dict, configs: dict, train_acc: float, test_acc: float, train_loss: float, test_loss: float):
+
+def save_model_and_metadata(
+    model: torch.nn.Module,
+    data_split: dict,
+    configs: dict,
+    train_acc: float,
+    test_acc: float,
+    train_loss: float,
+    test_loss: float,
+):
     # Save model and metadata
     model_metadata_dict = {"model_metadata": {}, "current_idx": 0}
     model_idx = model_metadata_dict["current_idx"]
     model_metadata_dict["current_idx"] += 1
-    
+
     log_dir = configs["run"]["log_dir"]
-    
+
     with open(f"{log_dir}/model_{model_idx}.pkl", "wb") as f:
-       torch.save(model.state_dict(), f)
+        torch.save(model.state_dict(), f)
     meta_data = {}
 
     meta_data["train_split"] = data_split["train_indices"]
@@ -189,4 +199,3 @@ def save_model_and_metadata(model: torch.nn.Module, data_split: dict, configs: d
     model_metadata_dict["model_metadata"][model_idx] = meta_data
     with open(f"{log_dir}/models_metadata.pkl", "wb") as f:
         pickle.dump(model_metadata_dict, f)
-    

@@ -64,9 +64,7 @@ class Metric(ABC):
             Signals computed using the specified information source and mapping object.
         """
         if self.logs_dirname is not None:
-            signal_filepath = (
-                f"{self.logs_dirname}/{type(self).__name__}_{signal_source.value}"
-            )
+            signal_filepath = f"{self.logs_dirname}/{type(self).__name__}_{signal_source.value}"
         else:
             signal_filepath = None
 
@@ -198,9 +196,7 @@ class Metric(ABC):
                     (0, "train000", "<default_group>")
                 ]
             if self.target_model_to_test_split_mapping_group is None:
-                self.target_model_to_test_split_mapping_group = [
-                    (0, "test000", "<default_group>")
-                ]
+                self.target_model_to_test_split_mapping_group = [(0, "test000", "<default_group>")]
             if self.reference_model_to_train_split_mapping_group is None:
                 self.reference_model_to_train_split_mapping_group = [
                     (0, f"train{k + 1:03d}", "<default_group>")
@@ -213,13 +209,9 @@ class Metric(ABC):
                 ]
         else:
             if self.target_model_to_train_split_mapping_group is None:
-                self.target_model_to_train_split_mapping_group = [
-                    (0, "train", "<default_group>")
-                ]
+                self.target_model_to_train_split_mapping_group = [(0, "train", "<default_group>")]
             if self.target_model_to_test_split_mapping_group is None:
-                self.target_model_to_test_split_mapping_group = [
-                    (0, "test", "<default_group>")
-                ]
+                self.target_model_to_test_split_mapping_group = [(0, "test", "<default_group>")]
             if self.reference_model_to_train_split_mapping_group is None:
                 self.reference_model_to_train_split_mapping_group = [
                     (k, "train", "<default_group>")
@@ -240,9 +232,7 @@ class Metric(ABC):
         pass
 
     @abstractmethod
-    def run_metric(
-        self, fpr_tolerance_rate_list=None
-    ) -> Union[MetricResult, List[MetricResult]]:
+    def run_metric(self, fpr_tolerance_rate_list=None) -> Union[MetricResult, List[MetricResult]]:
         """
         Function to run the metric on the target model and dataset.
 
@@ -317,7 +307,7 @@ class PopulationMetric(Metric):
         # Store the model to split mappings
         self.target_model_to_train_split_mapping = target_model_to_train_split_mapping
         self.target_model_to_test_split_mapping = target_model_to_test_split_mapping
-        self.reference_model_to_train_split_mapping = (reference_model_to_train_split_mapping)
+        self.reference_model_to_train_split_mapping = reference_model_to_train_split_mapping
         self._set_default_mappings(unique_dataset)
 
         # Variables used in prepare_metric and run_metric
@@ -361,23 +351,27 @@ class PopulationMetric(Metric):
         else:
             self.quantiles = default_quantile()
         # obtain the threshold values based on the reference dataset
-        thresholds = self.hypothesis_test_func(self.reference_signals, self.quantiles).reshape(-1, 1) 
+        thresholds = self.hypothesis_test_func(self.reference_signals, self.quantiles).reshape(
+            -1, 1
+        )
 
         num_threshold = len(self.quantiles)
         member_signals = self.member_signals.reshape(-1, 1).repeat(num_threshold, 1).T
-        non_member_signals = (self.non_member_signals.reshape(-1, 1).repeat(num_threshold, 1).T)
+        non_member_signals = self.non_member_signals.reshape(-1, 1).repeat(num_threshold, 1).T
         member_preds = np.less(member_signals, thresholds)
         non_member_preds = np.less(non_member_signals, thresholds)
 
         # what does the attack predict on test and train dataset
         predictions = np.concatenate([member_preds, non_member_preds], axis=1)
         # set true labels for being in the training dataset
-        true_labels = np.concatenate([np.ones(len(self.member_signals)), np.zeros(len(self.non_member_signals))])
+        true_labels = np.concatenate(
+            [np.ones(len(self.member_signals)), np.zeros(len(self.non_member_signals))]
+        )
         signal_values = np.concatenate([self.member_signals, self.non_member_signals])
-        
+
         # compute the difference between the signals and the thresholds
-        #predictions_proba = np.hstack([member_signals, non_member_signals]) - thresholds
-        
+        # predictions_proba = np.hstack([member_signals, non_member_signals]) - thresholds
+
         # compute ROC, TP, TN etc
         metric_result = CombinedMetricResult(
             metric_id=MetricEnum.REFERENCE.value,
@@ -386,10 +380,8 @@ class PopulationMetric(Metric):
             predictions_proba=None,
             signal_values=signal_values,
         )
-        
+
         return [metric_result]
-
-
 
 
 ########################################################################################################################
@@ -465,15 +457,9 @@ class GroupPopulationMetric(Metric):
         # Store the model to split mappings
         self.target_model_to_train_split_mapping = target_model_to_train_split_mapping
         self.target_model_to_test_split_mapping = target_model_to_test_split_mapping
-        self.reference_model_to_train_split_mapping = (
-            reference_model_to_train_split_mapping
-        )
-        self.target_model_to_train_split_mapping_group = (
-            target_model_to_train_split_mapping_group
-        )
-        self.target_model_to_test_split_mapping_group = (
-            target_model_to_test_split_mapping_group
-        )
+        self.reference_model_to_train_split_mapping = reference_model_to_train_split_mapping
+        self.target_model_to_train_split_mapping_group = target_model_to_train_split_mapping_group
+        self.target_model_to_test_split_mapping_group = target_model_to_test_split_mapping_group
         self.reference_model_to_train_split_mapping_group = (
             reference_model_to_train_split_mapping_group
         )
@@ -559,9 +545,7 @@ class GroupPopulationMetric(Metric):
             non_member_pred = np.less(non_member_signals, thresholds)
 
             member_signal_list.append(self.member_signals[self.member_groups == g])
-            non_member_signal_list.append(
-                self.non_member_signals[self.member_groups == g]
-            )
+            non_member_signal_list.append(self.non_member_signals[self.member_groups == g])
             member_preds.append(member_pred)
             non_member_preds.append(non_member_pred)
 
@@ -574,9 +558,7 @@ class GroupPopulationMetric(Metric):
             [np.ones(len(self.member_signals)), np.zeros(len(self.non_member_signals))]
         )
 
-        member_signals = np.concatenate(
-            member_signal_list, axis=0
-        )  # reoder based on the groups
+        member_signals = np.concatenate(member_signal_list, axis=0)  # reoder based on the groups
         non_member_signals = np.concatenate(non_member_signal_list, axis=0)
 
         signal_values = np.concatenate([member_signals, non_member_signals])

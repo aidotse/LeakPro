@@ -86,9 +86,7 @@ class AuditReport(ABC):
     @staticmethod
     @abstractmethod
     def generate_report(
-        metric_result: Union[
-            AttackResult, List[AttackResult], dict, CombinedMetricResult
-        ]
+        metric_result: Union[AttackResult, List[AttackResult], dict, CombinedMetricResult]
     ):
         """
         Core function of the AuditReport class that actually generates the report.
@@ -125,10 +123,7 @@ class ROCCurveReport(AuditReport):
         Returns:
             A tuple of aligned 1D numpy arrays, fpr and tpr.
         """
-        functions = [
-            interpolate.interp1d(fpr, tpr)
-            for (fpr, tpr) in zip(fpr_2d_list, tpr_2d_list)
-        ]
+        functions = [interpolate.interp1d(fpr, tpr) for (fpr, tpr) in zip(fpr_2d_list, tpr_2d_list)]
         fpr = np.linspace(0, 1, n)
         tpr = np.mean([f(fpr) for f in functions], axis=0)
         return fpr, tpr
@@ -198,14 +193,8 @@ class ROCCurveReport(AuditReport):
                     roc_auc = np.trapz(x=fpr, y=tpr)
                 else:
                     fpr, tpr = ROCCurveReport.__avg_roc(
-                        fpr_2d_list=[
-                            metric_result[i][0].roc[0]
-                            for i in range(len(metric_result))
-                        ],
-                        tpr_2d_list=[
-                            metric_result[i][0].roc[1]
-                            for i in range(len(metric_result))
-                        ],
+                        fpr_2d_list=[metric_result[i][0].roc[0] for i in range(len(metric_result))],
+                        tpr_2d_list=[metric_result[i][0].roc[1] for i in range(len(metric_result))],
                     )
                     roc_auc = np.trapz(x=fpr, y=tpr)
             else:
@@ -321,9 +310,7 @@ class ConfusionMatrixReport(AuditReport):
             )
         elif inference_game_type == InferenceGame.AVG_PRIVACY_LOSS_TRAINING_ALGO:
             assert isinstance(metric_result, list)
-            cm = np.mean(
-                [[[mr.tn, mr.fp], [mr.fn, mr.tp]] for mr in metric_result], axis=0
-            )
+            cm = np.mean([[[mr.tn, mr.fp], [mr.fn, mr.tp]] for mr in metric_result], axis=0)
         else:
             raise NotImplementedError
 
@@ -377,30 +364,20 @@ class SignalHistogramReport(AuditReport):
             threshold = metric_result.threshold
         elif inference_game_type == InferenceGame.AVG_PRIVACY_LOSS_TRAINING_ALGO:
             if not isinstance(metric_result[0], list):
-                values = np.concatenate(
-                    [mr.signal_values for mr in metric_result]
-                ).ravel()
-                labels = np.concatenate(
-                    [mr.true_labels for mr in metric_result]
-                ).ravel()
+                values = np.concatenate([mr.signal_values for mr in metric_result]).ravel()
+                labels = np.concatenate([mr.true_labels for mr in metric_result]).ravel()
                 threshold_list = [mr.threshold for mr in metric_result]
                 threshold = None if None in threshold_list else np.mean(threshold_list)
             else:
                 values = np.array(
                     [
-                        [
-                            metric_result[i][j].signal_values
-                            for j in range(len(metric_result[0]))
-                        ]
+                        [metric_result[i][j].signal_values for j in range(len(metric_result[0]))]
                         for i in range(len(metric_result))
                     ]
                 ).ravel()
                 labels = np.array(
                     [
-                        [
-                            metric_result[i][j].true_labels
-                            for j in range(len(metric_result[0]))
-                        ]
+                        [metric_result[i][j].true_labels for j in range(len(metric_result[0]))]
                         for i in range(len(metric_result))
                     ]
                 ).ravel()
@@ -414,9 +391,7 @@ class SignalHistogramReport(AuditReport):
             data=pd.DataFrame(
                 {
                     "Signal": values,
-                    "Membership": [
-                        "Member" if y == 1 else "Non-member" for y in labels
-                    ],
+                    "Membership": ["Member" if y == 1 else "Non-member" for y in labels],
                 }
             ),
             x="Signal",
@@ -499,7 +474,12 @@ class VulnerablePointsReport(AuditReport):
         if len(metric_results) == 1:
             mr = metric_results[0]
             # Sort the training points that were identified as such by their prediction probabilities
-            adjusted_values = np.where((np.array(mr.predicted_labels) == np.array(mr.true_labels)) & (np.array(mr.true_labels) == 1), -mr.predictions_proba, 10)
+            adjusted_values = np.where(
+                (np.array(mr.predicted_labels) == np.array(mr.true_labels))
+                & (np.array(mr.true_labels) == 1),
+                -mr.predictions_proba,
+                10,
+            )
             indices = np.argsort(adjusted_values)[:number_of_points]
             # Get the associated scores
             scores = mr.predictions_proba[indices]
@@ -630,12 +610,8 @@ class PDFReport(AuditReport):
                 best_index = np.argmax([r.accuracy for r in result])
                 best_result = result[best_index]
             elif inference_game_type == InferenceGame.AVG_PRIVACY_LOSS_TRAINING_ALGO:
-                best_indices = np.argmax(
-                    [[r2.accuracy for r2 in r1] for r1 in result], axis=1
-                )
-                best_result = [
-                    result[k][best_index] for k, best_index in enumerate(best_indices)
-                ]
+                best_indices = np.argmax([[r2.accuracy for r2 in r1] for r1 in result], axis=1)
+                best_result = [result[k][best_index] for k, best_index in enumerate(best_indices)]
             else:
                 raise NotImplementedError
 
@@ -683,9 +659,7 @@ class PDFReport(AuditReport):
                 )
 
         # Load template
-        template = latex_jinja_env.get_template(
-            f"{REPORT_FILES_DIR}/report_template.tex"
-        )
+        template = latex_jinja_env.get_template(f"{REPORT_FILES_DIR}/report_template.tex")
 
         # Render the template (i.e. generate the corresponding string)
         latex_content = template.render(
@@ -738,6 +712,4 @@ class PDFReport(AuditReport):
             )
             stdout, stderr = process.communicate()
 
-            print(
-                f'PDF file created:\t{os.path.abspath(f"{filename_no_extension}.pdf")}'
-            )
+            print(f'PDF file created:\t{os.path.abspath(f"{filename_no_extension}.pdf")}')

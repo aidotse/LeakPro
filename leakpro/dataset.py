@@ -1,5 +1,5 @@
 import torch
-import pickle 
+import pickle
 import os
 from torch.utils.data import Dataset
 import pandas as pd
@@ -60,13 +60,12 @@ class Dataset:
         # If preprocessing functions were passed as parameters, execute them
         if not preprocessed and preproc_fn_dict is not None:
             self.preprocess()
-    
 
     def preprocess(self):
         """
         Preprocessing function, executed by the constructor, based on the preproc_fn_dict attribute.
         """
-        for (split, feature) in product(self.splits, self.features):
+        for split, feature in product(self.splits, self.features):
             if feature in list(self.preproc_fn_dict):
                 fn = self.preproc_fn_dict[feature]
                 self.data_dict[split][feature] = fn(self.data_dict[split][feature])
@@ -139,9 +138,7 @@ class Dataset:
         for split in split_names:
 
             if split_size is not None:
-                parsed_split_size = (
-                    split_size if isinstance(split_size, int) else split_size[split]
-                )
+                parsed_split_size = split_size if isinstance(split_size, int) else split_size[split]
 
             # If method is random, then each sub-split is a random subset of the original split.
             if method == "random":
@@ -165,9 +162,7 @@ class Dataset:
                 assert (
                     split_size is not None
                 ), 'Argument split_size is required when method is "random" or "hybrid"'
-                available_indices = np.arange(
-                    self.data_dict[split][self.features[0]].shape[0]
-                )
+                available_indices = np.arange(self.data_dict[split][self.features[0]].shape[0])
                 indices_a = np.random.choice(
                     available_indices, size=(1, parsed_split_size), replace=False
                 )
@@ -187,16 +182,16 @@ class Dataset:
                 if in_place:
                     self.data_dict[f"{split}{split_n:03d}"] = {}
                     for feature in self.features:
-                        self.data_dict[f"{split}{split_n:03d}"][
+                        self.data_dict[f"{split}{split_n:03d}"][feature] = self.data_dict[split][
                             feature
-                        ] = self.data_dict[split][feature][indices[split_n]]
+                        ][indices[split_n]]
                 # Create new dictionaries if return_results is True
                 if return_results:
                     new_datasets_dict[split_n][f"{split}"] = {}
                     for feature in self.features:
-                        new_datasets_dict[split_n][f"{split}"][
+                        new_datasets_dict[split_n][f"{split}"][feature] = self.data_dict[split][
                             feature
-                        ] = self.data_dict[split][feature][indices[split_n]]
+                        ][indices[split_n]]
 
             # delete_original indicates if the original split should be deleted.
             if delete_original:
@@ -232,6 +227,7 @@ class Dataset:
         ]
         return "\n".join(txt)
 
+
 class TabularDataset(Dataset):
     """Tabular dataset."""
 
@@ -257,7 +253,8 @@ class TabularDataset(Dataset):
         X = np.float32(self.data_dict["X"][idx])
         y = np.float32(self.data_dict["y"][idx])
         return [X, y]
-    
+
+
 class InfiniteRepeatDataset(Dataset):
     def __init__(self, dataset):
         self.dataset = dataset
@@ -268,31 +265,46 @@ class InfiniteRepeatDataset(Dataset):
     def __getitem__(self, idx):
         return self.dataset[idx % len(self.dataset)]
 
+
 def get_dataset(dataset_name: str, data_dir: str):
     path = f"{data_dir}/{dataset_name}"
-    
+
     if os.path.exists(f"{path}.pkl"):
         with open(f"{path}.pkl", "rb") as file:
             all_data = pickle.load(file)
         print(f"Load data from {path}.pkl")
     elif os.path.exists(f"{path}/{dataset_name}.data"):
-        column_names = ["age", "workclass", "fnlwgt", "education", "education-num", "marital-status",
-                "occupation", "relationship", "race", "sex", "capital-gain", "capital-loss",
-                "hours-per-week", "native-country", "income"]
+        column_names = [
+            "age",
+            "workclass",
+            "fnlwgt",
+            "education",
+            "education-num",
+            "marital-status",
+            "occupation",
+            "relationship",
+            "race",
+            "sex",
+            "capital-gain",
+            "capital-loss",
+            "hours-per-week",
+            "native-country",
+            "income",
+        ]
         df_train = pd.read_csv(f"{path}/{dataset_name}.data", names=column_names)
         df_test = pd.read_csv(f"{path}/{dataset_name}.test", names=column_names, header=0)
-        df_test['income'] = df_test['income'].str.replace('.', '', regex=False)
+        df_test["income"] = df_test["income"].str.replace(".", "", regex=False)
         df = pd.concat([df_train, df_test], axis=0)
-        df = df.replace(' ?', np.nan)
+        df = df.replace(" ?", np.nan)
         df = df.dropna()
         X, y = df.iloc[:, :-1], df.iloc[:, -1]
-        
-        categorical_features = [col for col in X.columns if X[col].dtype == 'object']
-        numerical_features = [col for col in X.columns if X[col].dtype in ['int64', 'float64']]
-        
-        onehot_encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
+
+        categorical_features = [col for col in X.columns if X[col].dtype == "object"]
+        numerical_features = [col for col in X.columns if X[col].dtype in ["int64", "float64"]]
+
+        onehot_encoder = OneHotEncoder(sparse_output=False, handle_unknown="ignore")
         X_categorical = onehot_encoder.fit_transform(X[categorical_features])
-        
+
         scaler = StandardScaler()
         X_numerical = scaler.fit_transform(X[numerical_features])
 
@@ -300,7 +312,6 @@ def get_dataset(dataset_name: str, data_dir: str):
 
         # label encode the target variable to have the classes 0 and 1
         y = LabelEncoder().fit_transform(y)
-        
 
         all_data = TabularDataset(X, y)
         with open(f"{path}.pkl", "wb") as file:
@@ -311,6 +322,7 @@ def get_dataset(dataset_name: str, data_dir: str):
 
     print(f"the whole dataset size: {len(all_data)}")
     return all_data
+
 
 def get_split(all_index: List(int), used_index: List(int), size: int, split_method: str):
     """Select points based on the splitting methods
@@ -345,6 +357,7 @@ def get_split(all_index: List(int), used_index: List(int), size: int, split_meth
 
     return selected_index
 
+
 def prepare_train_test_datasets(dataset_size: int, configs: dict):
     """Prepare the dataset for training the target models when the training data are sampled uniformly from the distribution (pool of all possible data).
 
@@ -362,11 +375,12 @@ def prepare_train_test_datasets(dataset_size: int, configs: dict):
     all_index = np.arange(dataset_size)
     train_size = int(configs["f_train"] * dataset_size)
     test_size = int(configs["f_test"] * dataset_size)
-    
+
     selected_index = np.random.choice(all_index, train_size + test_size, replace=False)
     train_index, test_index = train_test_split(selected_index, test_size=test_size)
     dataset_train_test = {"train_indices": train_index, "test_indices": test_index}
     return dataset_train_test
+
 
 def get_dataset_subset(dataset: Dataset, indices: List(int)):
     """Get a subset of the dataset.
@@ -376,19 +390,18 @@ def get_dataset_subset(dataset: Dataset, indices: List(int)):
         index (list): List of index.
     """
     assert max(indices) < len(dataset) and min(indices) >= 0, "Index out of range"
-    
+
     # Initialize new dataset (this might need to be adjusted based on the specific dataset class)
     data = dataset.data_dict["X"]
     targets = dataset.data_dict["y"]
     subset_data = [data[idx] for idx in indices]
     subset_targets = [targets[idx] for idx in indices]
-    
+
     new_dataset = dataset.__class__(subset_data, subset_targets)
-    
+
     return new_dataset
 
-    
-    
+
 def get_dataloader(
     dataset: TabularDataset,
     batch_size: int,

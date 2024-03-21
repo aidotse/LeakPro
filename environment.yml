@@ -16,6 +16,7 @@ dependencies:
   - scikit-learn
   - pytest
   - python>=3.9 
+  - black
   - pip:
     - pyyaml
 

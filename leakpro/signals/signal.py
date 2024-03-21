@@ -86,9 +86,7 @@ class DatasetSample(Signal):
             input_feature,
             output_feature,
         ) = model_to_split_mapping[extra["model_num"]]
-        x = datasets[dataset_index].get_feature(split_name, input_feature)[
-            extra["point_num"]
-        ]
+        x = datasets[dataset_index].get_feature(split_name, input_feature)[extra["point_num"]]
         return x
 
 
@@ -276,8 +274,7 @@ class ModelLoss(Signal):
         self,
         models: List[Model],
         datasets: List[Dataset],
-        
-        extra: dict=None,
+        extra: dict = None,
     ):
         """Built-in call method.
 
