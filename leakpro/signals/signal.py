@@ -3,6 +3,7 @@ from typing import List, Tuple
 
 import numpy as np
 from torch.utils.data import DataLoader
+
 from ..dataset import Dataset
 from ..model import Model
 
@@ -12,8 +13,7 @@ from ..model import Model
 
 
 class Signal(ABC):
-    """
-    Abstract class, representing any type of signal that can be obtained from a Model and/or a Dataset.
+    """Abstract class, representing any type of signal that can be obtained from a Model and/or a Dataset.
     """
 
     @abstractmethod
@@ -26,6 +26,7 @@ class Signal(ABC):
         """Built-in call method.
 
         Args:
+        ----
             models: List of models that can be queried.
             datasets: List of datasets that can be queried.
             model_to_split_mapping: List of tuples, indicating how each model should query the dataset.
@@ -39,7 +40,9 @@ class Signal(ABC):
             extra: Dictionary containing any additional parameter that should be passed to the signal object.
 
         Returns:
+        -------
             The signal value.
+
         """
         pass
 
@@ -48,8 +51,7 @@ class Signal(ABC):
 # DATASET_SAMPLE CLASS
 ########################################################################################################################
 class DatasetSample(Signal):
-    """
-    Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a
+    """Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a
     Dataset.
     This particular class is used to get a given point from the Dataset.
     """
@@ -64,6 +66,7 @@ class DatasetSample(Signal):
         """Built-in call method.
 
         Args:
+        ----
             models: List of models that can be queried.
             datasets: List of datasets that can be queried.
             model_to_split_mapping: List of tuples, indicating how each model should query the dataset.
@@ -77,9 +80,10 @@ class DatasetSample(Signal):
             extra: Dictionary containing any additional parameter that should be passed to the signal object.
 
         Returns:
+        -------
             The sample point from the dataset.
-        """
 
+        """
         (
             dataset_index,
             split_name,
@@ -98,8 +102,7 @@ class DatasetSample(Signal):
 
 
 class ModelLogits(Signal):
-    """
-    Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a Dataset.
+    """Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a Dataset.
     This particular class is used to get the output of a model.
     """
 
@@ -112,12 +115,15 @@ class ModelLogits(Signal):
         """Built-in call method.
 
         Args:
+        ----
             models: List of models that can be queried.
             datasets: List of datasets that can be queried.
             extra: Dictionary containing any additional parameter that should be passed to the signal object.
 
         Returns:
+        -------
             The signal value.
+
         """        # Compute the signal for each model
         results = []
         for model in models:
@@ -143,8 +149,7 @@ class ModelLogits(Signal):
 
 
 class ModelNegativeRescaledLogits(Signal):
-    """
-    Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a Dataset.
+    """Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a Dataset.
     This particular class is used to get the output of a model.
     """
 
@@ -158,6 +163,7 @@ class ModelNegativeRescaledLogits(Signal):
         """Built-in call method.
 
         Args:
+        ----
             models: List of models that can be queried.
             datasets: List of datasets that can be queried.
             model_to_split_mapping: List of tuples, indicating how each model should query the dataset.
@@ -171,9 +177,10 @@ class ModelNegativeRescaledLogits(Signal):
             extra: Dictionary containing any additional parameter that should be passed to the signal object.
 
         Returns:
+        -------
             The signal value.
-        """
 
+        """
         results = []
         # Compute the signal for each model
         for k, model in enumerate(models):
@@ -201,8 +208,7 @@ class ModelNegativeRescaledLogits(Signal):
 
 
 class ModelIntermediateOutput(Signal):
-    """
-    Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a
+    """Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a
     Dataset.
     This particular class is used to get the value of an intermediate layer of model.
     """
@@ -217,6 +223,7 @@ class ModelIntermediateOutput(Signal):
         """Built-in call method.
 
         Args:
+        ----
             models: List of models that can be queried.
             datasets: List of datasets that can be queried.
             model_to_split_mapping: List of tuples, indicating how each model should query the dataset.
@@ -230,9 +237,10 @@ class ModelIntermediateOutput(Signal):
             extra: Dictionary containing any additional parameter that should be passed to the signal object.
 
         Returns:
+        -------
             The signal value.
-        """
 
+        """
         if "layers" not in list(extra):
             raise TypeError('extra parameter "layers" is required')
 
@@ -258,8 +266,7 @@ class ModelIntermediateOutput(Signal):
 
 
 class ModelLoss(Signal):
-    """
-    Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a
+    """Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a
     Dataset.
     This particular class is used to get the loss of a model.
     """
@@ -273,6 +280,7 @@ class ModelLoss(Signal):
         """Built-in call method.
 
         Args:
+        ----
             models: List of models that can be queried.
             datasets: List of datasets that can be queried.
             model_to_split_mapping: List of tuples, indicating how each model should query the dataset.
@@ -286,9 +294,10 @@ class ModelLoss(Signal):
             extra: Dictionary containing any additional parameter that should be passed to the signal object.
 
         Returns:
+        -------
             The signal value.
-        """
 
+        """
         results = []
         # Compute the signal for each model
         for k, model in enumerate(models):
@@ -304,8 +313,7 @@ class ModelLoss(Signal):
 # MODEL_GRADIENT CLASS
 ########################################################################################################################
 class ModelGradient(Signal):
-    """
-    Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a
+    """Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a
     Dataset.
     This particular class is used to get the gradient of a model.
     """
@@ -320,6 +328,7 @@ class ModelGradient(Signal):
         """Built-in call method.
 
         Args:
+        ----
             models: List of models that can be queried.
             datasets: List of datasets that can be queried.
             model_to_split_mapping: List of tuples, indicating how each model should query the dataset.
@@ -333,9 +342,10 @@ class ModelGradient(Signal):
             extra: Dictionary containing any additional parameter that should be passed to the signal object.
 
         Returns:
+        -------
             The signal value.
-        """
 
+        """
         results = []
         # Compute the signal for each model
         for k, model in enumerate(models):
@@ -358,8 +368,7 @@ class ModelGradient(Signal):
 
 
 class GroupInfo(Signal):
-    """
-    Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a
+    """Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a
     Dataset.
     This particular class is used to get the group membership of data records.
     """
@@ -374,6 +383,7 @@ class GroupInfo(Signal):
         """Built-in call method.
 
         Args:
+        ----
             models: List of models that can be queried.
             datasets: List of datasets that can be queried.
             model_to_split_mapping: List of tuples, indicating how each model should query the dataset.
@@ -386,9 +396,10 @@ class GroupInfo(Signal):
             extra: Dictionary containing any additional parameter that should be passed to the signal object.
 
         Returns:
+        -------
             The signal value.
-        """
 
+        """
         results = []
         # Given the group membership for each dataset used by each model
         for k in range(len(models)):
@@ -399,8 +410,7 @@ class GroupInfo(Signal):
 
 
 class ModelGradientNorm(Signal):
-    """
-    Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a
+    """Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a
     Dataset.
     This particular class is used to get the gradient norm of a model.
     """
@@ -415,6 +425,7 @@ class ModelGradientNorm(Signal):
         """Built-in call method.
 
         Args:
+        ----
             models: List of models that can be queried.
             datasets: List of datasets that can be queried.
             model_to_split_mapping: List of tuples, indicating how each model should query the dataset.
@@ -428,9 +439,10 @@ class ModelGradientNorm(Signal):
             extra: Dictionary containing any additional parameter that should be passed to the signal object.
 
         Returns:
+        -------
             The signal value.
-        """
 
+        """
         results = []
         # Compute the signal for each model
         for k, model in enumerate(models):

@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from copy import deepcopy
+
 import numpy as np
 import torch
 
@@ -9,16 +10,17 @@ import torch
 
 
 class Model(ABC):
-    """
-    Interface to query a model without any assumption on how it is implemented.
+    """Interface to query a model without any assumption on how it is implemented.
     """
 
     def __init__(self, model_obj, loss_fn):
         """Constructor
 
         Args:
+        ----
             model_obj: Model object.
             loss_fn: Loss function.
+
         """
         self.model_obj = model_obj
         self.loss_fn = loss_fn
@@ -28,10 +30,13 @@ class Model(ABC):
         """Function to get the model output from a given input.
 
         Args:
+        ----
             batch_samples: Model input.
 
         Returns:
+        -------
             Model output
+
         """
         pass
 
@@ -40,12 +45,15 @@ class Model(ABC):
         """Function to get the model loss on a given input and an expected output.
 
         Args:
+        ----
             batch_samples: Model input.
             batch_labels: Model expected output.
             per_point: Boolean indicating if loss should be returned per point or reduced.
 
         Returns:
+        -------
             The loss value, as defined by the loss_fn attribute.
+
         """
         pass
 
@@ -55,11 +63,14 @@ class Model(ABC):
         expected output.
 
         Args:
+        ----
             batch_samples: Model input.
             batch_labels: Model expected output.
 
         Returns:
+        -------
             A list of gradients of the model loss (one item per layer) with respect to the model parameters.
+
         """
         pass
 
@@ -68,13 +79,16 @@ class Model(ABC):
         """Function to get the intermediate output of layers (a.k.a. features), on a given input.
 
         Args:
+        ----
             layers: List of integers and/or strings, indicating which layers values should be returned.
             batch_samples: Model input.
             forward_pass: Boolean indicating if a new forward pass should be executed. If True, then a forward pass is
                 executed on batch_samples. Else, the result is the one of the last forward pass.
 
         Returns:
+        -------
             A list of intermediate outputs of layers.
+
         """
         pass
 
@@ -85,8 +99,7 @@ class Model(ABC):
 
 
 class PytorchModel(Model):
-    """
-    Inherits from the Model class, an interface to query a model without any assumption on how it is implemented.
+    """Inherits from the Model class, an interface to query a model without any assumption on how it is implemented.
     This particular class is to be used with pytorch models.
     """
 
@@ -94,10 +107,11 @@ class PytorchModel(Model):
         """Constructor
 
         Args:
+        ----
             model_obj: Model object.
             loss_fn: Loss function.
-        """
 
+        """
         # Imports torch with global scope
         globals()["torch"] = __import__("torch")
 
@@ -117,10 +131,13 @@ class PytorchModel(Model):
         """Function to get the model output from a given input.
 
         Args:
+        ----
             batch_samples: Model input.
 
         Returns:
+        -------
             Model output.
+
         """
         batch_samples_tensor = torch.tensor(
             np.array(batch_samples), dtype=torch.float32
@@ -131,12 +148,15 @@ class PytorchModel(Model):
         """Function to get the model loss on a given input and an expected output.
 
         Args:
+        ----
             batch_samples: Model input.
             batch_labels: Model expected output.
             per_point: Boolean indicating if loss should be returned per point or reduced.
 
         Returns:
+        -------
             The loss value, as defined by the loss_fn attribute.
+
         """
         batch_samples_tensor = torch.tensor(
             np.array(batch_samples), dtype=torch.float32
@@ -163,11 +183,14 @@ class PytorchModel(Model):
         expected output.
 
         Args:
+        ----
             batch_samples: Model input.
             batch_labels: Model expected output.
 
         Returns:
+        -------
             A list of gradients of the model loss (one item per layer) with respect to the model parameters.
+
         """
         loss = self.loss_fn(
             self.model_obj(torch.tensor(batch_samples)), torch.tensor(batch_labels)
@@ -179,13 +202,16 @@ class PytorchModel(Model):
         """Function to get the intermediate output of layers (a.k.a. features), on a given input.
 
         Args:
+        ----
             layers: List of integers and/or strings, indicating which layers values should be returned.
             batch_samples: Model input.
             forward_pass: Boolean indicating if a new forward pass should be executed. If True, then a forward pass is
                 executed on batch_samples. Else, the result is the one of the last forward pass.
 
         Returns:
+        -------
             A list of intermediate outputs of layers.
+
         """
         if forward_pass:
             _ = self.get_logits(torch.tensor(batch_samples))
@@ -204,10 +230,13 @@ class PytorchModel(Model):
         """Private helper function to access outputs of intermediate layers.
 
         Args:
+        ----
             layer_name: Name of the layer to access.
 
         Returns:
+        -------
             A hook to be registered using register_forward_hook.
+
         """
 
         def hook(module, input, output):

@@ -1,7 +1,6 @@
+from leakpro.mia_attacks.attack_utils import AttackUtils
 from leakpro.mia_attacks.attacks.attack_p import AttackP
 from leakpro.mia_attacks.attacks.rmia import AttackRMIA
-
-from leakpro.mia_attacks.attack_utils import AttackUtils
 
 
 class AttackFactory:

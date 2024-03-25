@@ -1,5 +1,6 @@
-import numpy as np
 from typing import List
+
+import numpy as np
 from scipy.stats import norm
 
 from .attack_objects import AttackObjects
@@ -10,16 +11,18 @@ class AttackUtils:
         self.attack_objects = attack_objects
 
     def flatten_array(self, arr):
-        """
-        Utility function to recursively flatten a list of lists.
+        """Utility function to recursively flatten a list of lists.
         Each element in the list can be another list, tuple, set, or np.ndarray,
         and can have variable sizes.
 
         Args:
+        ----
             arr: List of lists
 
         Returns:
+        -------
             Flattened 1D np.ndarray version of arr.
+
         """
         flat_array = []
         for item in arr:
@@ -32,8 +35,10 @@ class AttackUtils:
     def default_quantile():
         """Return the default fprs
 
-        Returns:
+        Returns
+        -------
             arr: Numpy array, indicating the default fprs
+
         """
         return np.logspace(-5, 0, 100)
 
@@ -66,24 +71,26 @@ class AttackUtils:
         else:
             raise ValueError("Not enough remaining data points.")
         return selected_index
-        
-    
+
+
 
     def threshold_func(
         distribution: List[float], alpha: List[float], **kwargs
     ) -> float:
-        """
-        Function that returns the threshold as the alpha quantile of
+        """Function that returns the threshold as the alpha quantile of
         the provided distribution.
 
         Args:
+        ----
             distribution: Sequence of values that form the distribution from which
             the threshold is computed.
             alpha: Quantile value that will be used to obtain the threshold from the
                 distribution.
 
         Returns:
+        -------
             threshold: alpha quantile of the provided distribution.
+
         """
         threshold = np.quantile(distribution, q=alpha, interpolation="lower", **kwargs)
         return threshold
@@ -97,18 +104,21 @@ class AttackUtils:
         alpha: List[float],
         **kwargs,
     ) -> float:
-        """
-        Function that returns the threshold as the alpha quantile of
+        """Function that returns the threshold as the alpha quantile of
         a linear interpolation curve fit over the provided distribution.
+
         Args:
+        ----
             distribution: Sequence of values that form the distribution from which
             the threshold is computed. (Here we only consider positive signal values.)
             alpha: Quantile value that will be used to obtain the threshold from the
                 distribution.
-        Returns:
-            threshold: alpha quantile of the provided distribution.
-        """
 
+        Returns:
+        -------
+            threshold: alpha quantile of the provided distribution.
+
+        """
         if len(distribution.shape) > 1:
             # for reference attacks
             threshold = np.quantile(
@@ -157,18 +167,19 @@ class AttackUtils:
         alpha: List[float],
         **kwargs,
     ) -> float:
-        """
-        Function that returns the threshold as the alpha quantile of a Gaussian fit
+        """Function that returns the threshold as the alpha quantile of a Gaussian fit
         over logit rescaling transform of the provided distribution
         Args:
             distribution: Sequence of values that form the distribution from which
             the threshold is computed. (Here we only consider positive signal values.)
             alpha: Quantile value that will be used to obtain the threshold from the
                 distribution.
-        Returns:
-            threshold: alpha quantile of the provided distribution.
-        """
 
+        Returns
+        -------
+            threshold: alpha quantile of the provided distribution.
+
+        """
         distribution = distribution + 0.000001  # avoid nan
         distribution = np.log(
             np.divide(np.exp(-distribution), (1 - np.exp(-distribution)))
@@ -202,16 +213,20 @@ class AttackUtils:
         alpha: List[float],
         **kwargs,
     ) -> float:
-        """
-        Function that returns the threshold as the alpha quantile of
+        """Function that returns the threshold as the alpha quantile of
         a Gaussian curve fit over the provided distribution.
+
         Args:
+        ----
             distribution: Sequence of values that form the distribution from which
             the threshold is computed.
             alpha: Quantile value that will be used to obtain the threshold from the
                 distribution.
+
         Returns:
+        -------
             threshold: alpha quantile of the provided distribution.
+
         """
         if len(distribution.shape) > 1:
             parameters = np.array(

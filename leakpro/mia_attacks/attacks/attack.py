@@ -10,8 +10,7 @@ from ..attack_utils import AttackUtils
 
 
 class AttackAbstract(ABC):
-    """
-    Interface to construct and perform a membership inference attack on a target model and dataset using auxiliary
+    """Interface to construct and perform a membership inference attack on a target model and dataset using auxiliary
     information specified by the user. This serves as a guideline for implementing a metric to be used for measuring
     the privacy leakage of a target model.
     """
@@ -44,8 +43,7 @@ class AttackAbstract(ABC):
 
     @abstractmethod
     def prepare_attack(self):
-        """
-        Function to prepare data needed for running the metric on the target model and dataset, using signals computed
+        """Function to prepare data needed for running the metric on the target model and dataset, using signals computed
         on the auxiliary model(s) and dataset.
         """
         pass
@@ -54,14 +52,16 @@ class AttackAbstract(ABC):
     def run_attack(
         self, fpr_tolerance_rate_list=None
     ) -> Union[AttackResult, List[AttackResult]]:
-        """
-        Function to run the metric on the target model and dataset.
+        """Function to run the metric on the target model and dataset.
 
         Args:
+        ----
             fpr_tolerance_rate_list (optional): List of FPR tolerance values that may be used by the threshold function
                 to compute the attack threshold for the metric.
 
         Returns:
+        -------
             Result(s) of the metric.
+
         """
         pass

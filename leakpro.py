@@ -8,24 +8,24 @@ import numpy as np
 import torch
 import yaml
 
-import leakpro.dataset as dataset
-import leakpro.models as models
 import leakpro.train as util
-
+from leakpro import dataset, models
 from leakpro.mia_attacks.attack_scheduler import AttackScheduler
-
 from leakpro.reporting.utils import prepare_priavcy_risk_report
 
 
-
-
-def setup_log(name: str, save_file: bool):
+def setup_log(name: str, save_file: bool) -> logging.Logger:
     """Generate the logger for the current run.
+
     Args:
+    ----
         name (str): Logging file name.
         save_file (bool): Flag about whether to save to file.
+
     Returns:
+    -------
         logging.Logger: Logger object for the current run.
+
     """
     my_logger = logging.getLogger(name)
     my_logger.setLevel(logging.INFO)
@@ -95,7 +95,7 @@ if __name__ == "__main__":
     elif "cifar10" in configs["data"]["dataset"]:
         model = models.ConvNet()
     if RETRAIN:
-        model = util.train(model, train_loader, configs, test_loader, train_test_dataset)
+        model = util.train(model, train_loader, configs, test_loader, train_test_dataset, logger)
 
 
     # ------------------------------------------------

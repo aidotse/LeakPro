@@ -1,7 +1,7 @@
-from leakpro.mia_attacks.attacks.attack import AttackAbstract
 from leakpro.mia_attacks.attack_factory import AttackFactory
 from leakpro.mia_attacks.attack_objects import AttackObjects
 from leakpro.mia_attacks.attack_utils import AttackUtils
+from leakpro.mia_attacks.attacks.attack import AttackAbstract
 
 
 class AttackScheduler:

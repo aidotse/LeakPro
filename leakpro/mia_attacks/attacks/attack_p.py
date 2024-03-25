@@ -1,10 +1,10 @@
 import numpy as np
 
-from leakpro.mia_attacks.attacks.attack import AttackAbstract
-from leakpro.mia_attacks.attack_utils import AttackUtils
-from leakpro.signals.signal import ModelLoss
 from leakpro.dataset import get_dataset_subset
 from leakpro.metrics.attack_result import CombinedMetricResult
+from leakpro.mia_attacks.attack_utils import AttackUtils
+from leakpro.mia_attacks.attacks.attack import AttackAbstract
+from leakpro.signals.signal import ModelLoss
 
 
 class AttackP(AttackAbstract):
@@ -24,8 +24,7 @@ class AttackP(AttackAbstract):
         self.hypothesis_test_func = attack_utils.linear_itp_threshold_func
 
     def prepare_attack(self):
-        """
-        Function to prepare data needed for running the metric on the target model and dataset, using signals computed
+        """Function to prepare data needed for running the metric on the target model and dataset, using signals computed
         on the auxiliary model(s) and dataset.
         """
         # sample dataset to compute histogram
@@ -43,15 +42,17 @@ class AttackP(AttackAbstract):
         self.attack_signal = self.signal([self.target_model], [attack_data])[0]
 
     def run_attack(self, fpr_tolerance_rate_list=None):
-        """
-        Function to run the attack on the target model and dataset.
+        """Function to run the attack on the target model and dataset.
 
         Args:
+        ----
             fpr_tolerance_rate_list (optional): List of FPR tolerance values that may be used by the threshold function
                 to compute the attack threshold for the metric.
 
         Returns:
+        -------
             Result(s) of the metric.
+
         """
         # map the threshold with the alpha
         if fpr_tolerance_rate_list is not None:

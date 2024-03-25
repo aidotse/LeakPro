@@ -1,14 +1,13 @@
-import torch
-from torch.nn import CrossEntropyLoss, Module
-from torch.utils.data import DataLoader, Subset
-from torch.optim import SGD, Adam, AdamW
 import time
 
 import numpy as np
+import torch
+from torch.nn import CrossEntropyLoss, Module
+from torch.optim import SGD, Adam, AdamW
+from torch.utils.data import DataLoader, Subset
 
-from ..model import Model
 from ..dataset import Dataset
-from ..model import PytorchModel
+from ..model import Model, PytorchModel
 
 
 class AttackObjects:
@@ -42,34 +41,34 @@ class AttackObjects:
                 + len(train_test_dataset["test_indices"]),
             ),
         }
-        
+
         # Train shadow models
         if self._num_shadow_models > 0:
             self._shadow_models = []
             self._shadow_train_indices = []
 
             f_shadow_data = configs["audit"]["f_attack_data_size"]
-            
+
             for k in range(self._num_shadow_models):
                 # Create shadow datasets by sampling from the population
-                shadow_data_indices = self.create_shadow_dataset(f_shadow_data)  
+                shadow_data_indices = self.create_shadow_dataset(f_shadow_data)
                 shadow_train_loader = DataLoader(Subset(population, shadow_data_indices), batch_size=configs["train"]["batch_size"], shuffle=True,)
                 self._shadow_train_indices.append(shadow_data_indices)
-                
+
                 # Initialize a shadow model
                 if "adult" in configs["data"]["dataset"]:
                     shadow_model = target_model.__class__(configs["train"]["inputs"], configs["train"]["outputs"])
                 elif "cifar10" in configs["data"]["dataset"]:
                     shadow_model = target_model.__class__()
-                
+
                 # Train the shadow model
                 shadow_model = self.train_shadow_model(shadow_model, shadow_train_loader, configs = configs)
-                
+
                 # TODO: come up with a way to use different loss functions
                 self._shadow_models.append(PytorchModel(shadow_model, CrossEntropyLoss()))
-                
-        
-                
+
+
+
     @property
     def shadow_models(self):
         return self._shadow_models
@@ -99,16 +98,16 @@ class AttackObjects:
         return self._audit_dataset
 
     def create_shadow_dataset(self, f_shadow_data: float, include_in_members:bool=False):
-        
+
         shadow_data_size = int(f_shadow_data * self.population_size)
         all_index = np.arange(self.population_size)
-        
+
         # Remove indices corresponding to training data
         if include_in_members is False:
             used_index = self.train_test_dataset["train_indices"]
         else:
             used_index = []
-            
+
         # pick allowed indices
         selected_index = np.setdiff1d(all_index, used_index, assume_unique=True)
         if shadow_data_size <= len(selected_index):
@@ -116,7 +115,7 @@ class AttackObjects:
         else:
             raise ValueError("Not enough remaining data points.")
         return selected_index
-    
+
     def get_optimizer(self, model: Module, configs: dict):
         optimizer = configs.get("optimizer", "SGD")
         learning_rate = configs.get("learning_rate", 0.01)
@@ -142,15 +141,18 @@ class AttackObjects:
                 f"Optimizer {optimizer} has not been implemented. Please choose from SGD or Adam"
             )
 
-        
+
     def train_shadow_model(self, shadow_model: Module, shadow_train_loader: DataLoader, shadow_test_loader: DataLoader = None, configs: dict = None):
         """Train the model based on on the train loader
         Args:
             model(nn.Module): Model for evaluation.
             train_loader(torch.utils.data.DataLoader): Data loader for training.
             configs (dict): Configurations for training.
+
         Return:
+        ------
             nn.Module: Trained model.
+
         """
         # Get the device for training
         device = ("cuda" if torch.cuda.is_available() else "cpu")

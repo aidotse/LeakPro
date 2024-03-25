@@ -15,8 +15,7 @@ from sklearn.metrics import (
 
 
 class AttackResult:
-    """
-    Contains results related to the performance of the attack.
+    """Contains results related to the performance of the attack.
     """
 
     def __init__(
@@ -27,17 +26,18 @@ class AttackResult:
         signal_values=None,
         threshold: float = None,
     ):
-        """
-        Constructor.
+        """Constructor.
         Computes and stores the accuracy, ROC AUC score, and the confusion matrix for a metric.
 
         Args:
+        ----
             metric_id: ID of the metric that was used (c.f. the report_files/explanations.json file).
             predicted_labels: Membership predictions of the metric.
             true_labels: True membership labels used to evaluate the metric.
             predictions_proba: Continuous version of the predicted_labels.
             signal_values: Values of the signal used by the metric.
             threshold: Threshold computed by the metric.
+
         """
         self.predicted_labels = predicted_labels
         self.true_labels = true_labels
@@ -62,8 +62,7 @@ class AttackResult:
         ).ravel()
 
     def __str__(self):
-        """
-        Returns a string describing the metric result.
+        """Returns a string describing the metric result.
         """
         txt = [
             f'{" METRIC RESULT OBJECT ":=^48}',
@@ -76,8 +75,7 @@ class AttackResult:
 
 
 class CombinedMetricResult:
-    """
-    Contains results related to the performance of the metric. It contains the results for multiple fpr.
+    """Contains results related to the performance of the metric. It contains the results for multiple fpr.
     """
 
     def __init__(
@@ -88,16 +86,17 @@ class CombinedMetricResult:
         signal_values=None,
         threshold: list = None,
     ):
-        """
-        Constructor.
+        """Constructor.
         Computes and stores the accuracy, ROC AUC score, and the confusion matrix for a metric.
 
         Args:
+        ----
             predicted_labels: Membership predictions of the metric.
             true_labels: True membership labels used to evaluate the metric.
             predictions_proba: Continuous version of the predicted_labels.
             signal_values: Values of the signal used by the metric.
             threshold: Threshold computed by the metric.
+
         """
         self.predicted_labels = predicted_labels
         self.true_labels = true_labels
@@ -120,8 +119,7 @@ class CombinedMetricResult:
         )
 
     def __str__(self):
-        """
-        Returns a string describing the metric result.
+        """Returns a string describing the metric result.
         """
         txt_list = []
         for idx in range(len(self.accuracy)):

@@ -1,9 +1,10 @@
-import leakpro.reporting.audit_report as audit_report
+from typing import List
+
+from leakpro.reporting import audit_report
 from leakpro.reporting.audit_report import (
     ROCCurveReport,
     SignalHistogramReport,
 )
-from typing import List
 
 
 def prepare_priavcy_risk_report(
@@ -15,12 +16,14 @@ def prepare_priavcy_risk_report(
     """Generate privacy risk report based on the auditing report
 
     Args:
+    ----
         log_dir(str): Log directory that saved all the information, including the models.
         audit_results(List): Privacy meter results.
         configs (dict): Auditing configuration.
         save_path (str, optional): Report path. Defaults to None.
 
     Raises:
+    ------
         NotImplementedError: Check if the report for the privacy game is implemented.
 
     """

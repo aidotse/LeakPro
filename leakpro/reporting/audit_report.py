@@ -11,7 +11,7 @@ import pandas as pd
 import seaborn as sn
 from scipy import interpolate
 
-from ..metrics.attack_result import CombinedMetricResult, AttackResult
+from ..metrics.attack_result import AttackResult, CombinedMetricResult
 
 ########################################################################################################################
 # GLOBAL SETTINGS
@@ -22,11 +22,11 @@ REPORT_FILES_DIR = "report_files"
 
 # Configure jinja for LaTex
 latex_jinja_env = jinja2.Environment(
-    block_start_string="\BLOCK{",
+    block_start_string=r"\BLOCK{",
     block_end_string="}",
-    variable_start_string="\VAR{",
+    variable_start_string=r"\VAR{",
     variable_end_string="}",
-    comment_start_string="\#{",
+    comment_start_string=r"\#{",
     comment_end_string="}",
     line_statement_prefix="%%",
     line_comment_prefix="%#",
@@ -77,8 +77,7 @@ EXPLANATIONS = {
 
 
 class AuditReport(ABC):
-    """
-    An abstract class to display and/or save some elements of a metric result object.
+    """An abstract class to display and/or save some elements of a metric result object.
     """
 
     @staticmethod
@@ -88,11 +87,12 @@ class AuditReport(ABC):
             AttackResult, List[AttackResult], dict, CombinedMetricResult
         ]
     ):
-        """
-        Core function of the AuditReport class that actually generates the report.
+        """Core function of the AuditReport class that actually generates the report.
 
         Args:
+        ----
             metric_result: MetricResult object, containing data for the report.
+
         """
         pass
 
@@ -103,8 +103,7 @@ class AuditReport(ABC):
 
 
 class ROCCurveReport(AuditReport):
-    """
-    Inherits from the AuditReport class, an interface class to display and/or save some elements of a metric result
+    """Inherits from the AuditReport class, an interface class to display and/or save some elements of a metric result
     object. This particular class is used to generate a ROC (Receiver Operating Characteristic) curve.
     """
 
@@ -112,16 +111,18 @@ class ROCCurveReport(AuditReport):
     def __avg_roc(
         fpr_2d_list: List[List[float]], tpr_2d_list: List[List[float]], n: int = 200
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Private helper function, to average a ROC curve from non-aligned list.
+        """Private helper function, to average a ROC curve from non-aligned list.
 
         Args:
+        ----
             fpr_2d_list: A 2D list of fpr values.
             tpr_2d_list: A 2D list of fpr values.
             n: Number of points in the resulting lists.
 
         Returns:
+        -------
             A tuple of aligned 1D numpy arrays, fpr and tpr.
+
         """
         functions = [
             interpolate.interp1d(fpr, tpr)
@@ -144,17 +145,17 @@ class ROCCurveReport(AuditReport):
         filename: str = "roc_curve.jpg",
         configs: dict = {},
     ):
-        """
-        Core function of the AuditReport class that actually generates the report.
+        """Core function of the AuditReport class that actually generates the report.
 
         Args:
+        ----
             metric_result: A list of MetricResult objects, containing data for the report.
             inference_game_type: Value from the InferenceGame ENUM type, indicating which inference game was used.
             show: Boolean specifying if the plot should be displayed on screen.
             save: Boolean specifying if the plot should be saved as a file.
             filename: File name to be used if the plot is saved as a file.
-        """
 
+        """
         # Check if it is the combined report:
         if not isinstance(metric_result, list):
             metric_result = [metric_result]
@@ -172,14 +173,11 @@ class ROCCurveReport(AuditReport):
             else:
                 fpr, tpr, _ = metric_result[0][0].roc
                 roc_auc = metric_result[0][0].roc_auc
-        else:
-            # Generate report for the combined report
-            # Computes fpr, tpr and auc in different ways, depending on the available information and inference game
-            if metric_result[0].predictions_proba is None:
-                mr = metric_result[0]
-                fpr = mr.fp / (mr.fp + mr.tn)
-                tpr = mr.tp / (mr.tp + mr.fn)
-                roc_auc = np.trapz(x=fpr, y=tpr)
+        elif metric_result[0].predictions_proba is None:
+            mr = metric_result[0]
+            fpr = mr.fp / (mr.fp + mr.tn)
+            tpr = mr.tp / (mr.tp + mr.fn)
+            roc_auc = np.trapz(x=fpr, y=tpr)
 
         # save the data to a csv file
         directory = os.path.dirname(filename)
@@ -193,7 +191,7 @@ class ROCCurveReport(AuditReport):
             f.write("fpr,tpr\n")
             for i in range(len(fpr)):
                 f.write(f"{fpr[i]},{tpr[i]}\n")
-        
+
         # Gets metric ID
         # TODO: add metric ID to the CombinedMetricResult class
         metric_id = "population_metric"
@@ -240,8 +238,7 @@ class ROCCurveReport(AuditReport):
 
 
 class ConfusionMatrixReport(AuditReport):
-    """
-    Inherits from the AuditReport class, an interface class to display and/or save some elements of a metric result
+    """Inherits from the AuditReport class, an interface class to display and/or save some elements of a metric result
     object. This particular class is used to generate a confusion matrix.
     """
 
@@ -252,17 +249,17 @@ class ConfusionMatrixReport(AuditReport):
         save: bool = True,
         filename: str = "confusion_matrix.jpg",
     ):
-        """
-        Core function of the AuditReport class that actually generates the report.
+        """Core function of the AuditReport class that actually generates the report.
 
         Args:
+        ----
             metric_result: MetricResult object, containing data for the report.
             inference_game_type: Value from the InferenceGame ENUM type, indicating which inference game was used.
             show: Boolean specifying if the plot should be displayed on screen.
             save: Boolean specifying if the plot should be saved as a file.
             filename: File name to be used if the plot is saved as a file.
-        """
 
+        """
         assert isinstance(metric_result, AttackResult)
         cm = np.array(
             [
@@ -291,8 +288,7 @@ class ConfusionMatrixReport(AuditReport):
 
 
 class SignalHistogramReport(AuditReport):
-    """
-    Inherits from the AuditReport class, an interface class to display and/or save some elements of a metric result
+    """Inherits from the AuditReport class, an interface class to display and/or save some elements of a metric result
     object. This particular class is used to generate a histogram of the signal values.
     """
 
@@ -303,17 +299,17 @@ class SignalHistogramReport(AuditReport):
         save: bool = True,
         filename: str = "signal_histogram.jpg",
     ):
-        """
-        Core function of the AuditReport class that actually generates the report.
+        """Core function of the AuditReport class that actually generates the report.
 
         Args:
+        ----
             metric_result: MetricResult object, containing data for the report.
             inference_game_type: Value from the InferenceGame ENUM type, indicating which inference game was used.
             show: Boolean specifying if the plot should be displayed on screen.
             save: Boolean specifying if the plot should be saved as a file.
             filename: File name to be used if the plot is saved as a file.
-        """
 
+        """
         values = np.array(metric_result.signal_values).ravel()
         labels = np.array(metric_result.true_labels).ravel()
         threshold = metric_result.threshold
@@ -361,8 +357,7 @@ class SignalHistogramReport(AuditReport):
 
 
 class VulnerablePointsReport(AuditReport):
-    """
-    Inherits from the AuditReport class, an interface class to display and/or save some elements of a metric result
+    """Inherits from the AuditReport class, an interface class to display and/or save some elements of a metric result
     object. This particular class is used to identify the most vulnerable points.
     """
 
@@ -378,6 +373,7 @@ class VulnerablePointsReport(AuditReport):
         """Core function of the AuditReport class that actually generates the report.
 
         Args:
+        ----
             metric_results: A dict of lists of MetricResult objects, containing data for the report.
             target_info_source: The InformationSource associated with the audited model training.
             target_model_to_train_split_mapping: The mapping associated with target_info_source.
@@ -388,10 +384,10 @@ class VulnerablePointsReport(AuditReport):
             point_type: Can be "any" or "image". If "image", then the images are displayed as such in the report.
 
         Returns:
+        -------
             Indices of the vulnerable points and their scores.
 
         """
-
         # Objects to be returned if return_raw_values is True
         indices, scores = [], []
 
@@ -481,8 +477,7 @@ class VulnerablePointsReport(AuditReport):
 
 
 class PDFReport(AuditReport):
-    """
-    Inherits from the AuditReport class, an interface class to display and/or save some elements of a metric result
+    """Inherits from the AuditReport class, an interface class to display and/or save some elements of a metric result
     object. This particular class is used to generate a user-friendly report, with multiple plots and some explanations.
     """
 
@@ -499,10 +494,10 @@ class PDFReport(AuditReport):
         filename_no_extension: str = "report",
         point_type: str = "any",
     ):
-        """
-        Core function of the AuditReport class that actually generates the report.
+        """Core function of the AuditReport class that actually generates the report.
 
         Args:
+        ----
             metric_results: A dict of lists of MetricResult objects, containing data for the report.
             inference_game_type: Value from the InferenceGame ENUM type, indicating which inference game was used.
             figures_dict: A dictionary containing the figures to include, for each metric result.
@@ -513,8 +508,8 @@ class PDFReport(AuditReport):
             show: Boolean specifying if the plot should be displayed on screen.
             save: Boolean specifying if the plot should be saved as a file.
             filename_no_extension: File name to be used if the plot is saved as a file, without the file extension.
-        """
 
+        """
         for metric in metric_results:
             if not isinstance(metric_results[metric], list):
                 metric_results[metric] = [metric_results[metric]]
