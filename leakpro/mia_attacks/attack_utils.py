@@ -38,7 +38,9 @@ class AttackUtils:
         return np.logspace(-5, 0, 100)
 
     def prepare_attack_dataset(self, configs: dict):
-        audit_size = int(configs["data"]["f_audit"] * self.attack_objects.population_size)
+        audit_size = int(
+            configs["data"]["f_audit"] * self.attack_objects.population_size
+        )
         audit_index = self.sample_dataset_no_overlap(audit_size)
         audit_dataset = {"audit_indices": audit_index}
         return audit_dataset
@@ -64,11 +66,12 @@ class AttackUtils:
         else:
             raise ValueError("Not enough remaining data points.")
         return selected_index
+        
+    
 
-    def train_shadow_models(self):
-        pass
-
-    def threshold_func(distribution: List[float], alpha: List[float], **kwargs) -> float:
+    def threshold_func(
+        distribution: List[float], alpha: List[float], **kwargs
+    ) -> float:
         """
         Function that returns the threshold as the alpha quantile of
         the provided distribution.
@@ -108,24 +111,32 @@ class AttackUtils:
 
         if len(distribution.shape) > 1:
             # for reference attacks
-            threshold = np.quantile(distribution, q=alpha[1:-1], method="linear", axis=1, **kwargs)
+            threshold = np.quantile(
+                distribution, q=alpha[1:-1], method="linear", axis=1, **kwargs
+            )
             threshold = np.concatenate(
                 [
                     threshold,
-                    np.repeat(distribution.max() + 1e-4, distribution.shape[0]).reshape(1, -1),
+                    np.repeat(distribution.max() + 1e-4, distribution.shape[0]).reshape(
+                        1, -1
+                    ),
                 ],
                 axis=0,
             )
             threshold = np.concatenate(
                 [
-                    np.repeat(distribution.min() - 1e-4, distribution.shape[0]).reshape(1, -1),
+                    np.repeat(distribution.min() - 1e-4, distribution.shape[0]).reshape(
+                        1, -1
+                    ),
                     threshold,
                 ],
                 axis=0,
             )
 
         else:
-            threshold = np.quantile(distribution, q=alpha[1:-1], method="linear", **kwargs)
+            threshold = np.quantile(
+                distribution, q=alpha[1:-1], method="linear", **kwargs
+            )
             threshold = np.concatenate(
                 [
                     np.array(distribution.min() - 1e-4).reshape(-1),
@@ -159,10 +170,14 @@ class AttackUtils:
         """
 
         distribution = distribution + 0.000001  # avoid nan
-        distribution = np.log(np.divide(np.exp(-distribution), (1 - np.exp(-distribution))))
+        distribution = np.log(
+            np.divide(np.exp(-distribution), (1 - np.exp(-distribution)))
+        )
 
         if len(distribution.shape) > 1:
-            parameters = np.array([norm.fit(distribution[i]) for i in range(distribution.shape[0])])
+            parameters = np.array(
+                [norm.fit(distribution[i]) for i in range(distribution.shape[0])]
+            )
             num_threshold = alpha.shape[0]
             num_points = distribution.shape[0]
             loc = parameters[:, 0].reshape(-1, 1).repeat(num_threshold, 1)
@@ -199,7 +214,9 @@ class AttackUtils:
             threshold: alpha quantile of the provided distribution.
         """
         if len(distribution.shape) > 1:
-            parameters = np.array([norm.fit(distribution[i]) for i in range(distribution.shape[0])])
+            parameters = np.array(
+                [norm.fit(distribution[i]) for i in range(distribution.shape[0])]
+            )
             num_threshold = alpha.shape[0]
             num_points = distribution.shape[0]
             loc = parameters[:, 0].reshape(-1, 1).repeat(num_threshold, 1)

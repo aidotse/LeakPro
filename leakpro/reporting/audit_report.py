@@ -9,10 +9,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sn
-from PIL import Image
 from scipy import interpolate
 
-from ..signals.signal import DatasetSample
 from ..metrics.attack_result import CombinedMetricResult, AttackResult
 
 ########################################################################################################################
@@ -86,7 +84,9 @@ class AuditReport(ABC):
     @staticmethod
     @abstractmethod
     def generate_report(
-        metric_result: Union[AttackResult, List[AttackResult], dict, CombinedMetricResult]
+        metric_result: Union[
+            AttackResult, List[AttackResult], dict, CombinedMetricResult
+        ]
     ):
         """
         Core function of the AuditReport class that actually generates the report.
@@ -123,7 +123,10 @@ class ROCCurveReport(AuditReport):
         Returns:
             A tuple of aligned 1D numpy arrays, fpr and tpr.
         """
-        functions = [interpolate.interp1d(fpr, tpr) for (fpr, tpr) in zip(fpr_2d_list, tpr_2d_list)]
+        functions = [
+            interpolate.interp1d(fpr, tpr)
+            for (fpr, tpr) in zip(fpr_2d_list, tpr_2d_list)
+        ]
         fpr = np.linspace(0, 1, n)
         tpr = np.mean([f(fpr) for f in functions], axis=0)
         return fpr, tpr
@@ -136,10 +139,10 @@ class ROCCurveReport(AuditReport):
             List[List[AttackResult]],
             CombinedMetricResult,
         ],
-        inference_game_type: InferenceGame,
         show: bool = False,
         save: bool = True,
         filename: str = "roc_curve.jpg",
+        configs: dict = {},
     ):
         """
         Core function of the AuditReport class that actually generates the report.
@@ -162,84 +165,45 @@ class ROCCurveReport(AuditReport):
             if not isinstance(metric_result[0], list):
                 metric_result = [metric_result]
             # Computes fpr, tpr and auc in different ways, depending on the available information and inference game
-            if inference_game_type == InferenceGame.PRIVACY_LOSS_MODEL:
-                if metric_result[0][0].predictions_proba is None:
-                    fpr = [mr.fp / (mr.fp + mr.tn) for mr in metric_result[0]]
-                    tpr = [mr.tp / (mr.tp + mr.fn) for mr in metric_result[0]]
-                    roc_auc = np.trapz(x=fpr, y=tpr)
-                else:
-                    fpr, tpr, _ = metric_result[0][0].roc
-                    roc_auc = metric_result[0][0].roc_auc
-            elif inference_game_type == InferenceGame.AVG_PRIVACY_LOSS_TRAINING_ALGO:
-                if metric_result[0][0].predictions_proba is None:
-                    fpr = [
-                        [
-                            metric_result[i][j].fp
-                            / (metric_result[i][j].fp + metric_result[i][j].tn)
-                            for j in range(len(metric_result[0]))
-                        ]
-                        for i in range(len(metric_result))
-                    ]
-                    tpr = [
-                        [
-                            metric_result[i][j].tp
-                            / (metric_result[i][j].tp + metric_result[i][j].fn)
-                            for j in range(len(metric_result[0]))
-                        ]
-                        for i in range(len(metric_result))
-                    ]
-                    fpr = np.mean(fpr, axis=0)
-                    tpr = np.mean(tpr, axis=0)
-                    roc_auc = np.trapz(x=fpr, y=tpr)
-                else:
-                    fpr, tpr = ROCCurveReport.__avg_roc(
-                        fpr_2d_list=[metric_result[i][0].roc[0] for i in range(len(metric_result))],
-                        tpr_2d_list=[metric_result[i][0].roc[1] for i in range(len(metric_result))],
-                    )
-                    roc_auc = np.trapz(x=fpr, y=tpr)
+            if metric_result[0][0].predictions_proba is None:
+                fpr = [mr.fp / (mr.fp + mr.tn) for mr in metric_result[0]]
+                tpr = [mr.tp / (mr.tp + mr.fn) for mr in metric_result[0]]
+                roc_auc = np.trapz(x=fpr, y=tpr)
             else:
-                raise NotImplementedError
+                fpr, tpr, _ = metric_result[0][0].roc
+                roc_auc = metric_result[0][0].roc_auc
         else:
             # Generate report for the combined report
             # Computes fpr, tpr and auc in different ways, depending on the available information and inference game
-            if inference_game_type == InferenceGame.PRIVACY_LOSS_MODEL:
-                if metric_result[0].predictions_proba is None:
-                    mr = metric_result[0]
-                    fpr = mr.fp / (mr.fp + mr.tn)
-                    tpr = mr.tp / (mr.tp + mr.fn)
-                    roc_auc = np.trapz(x=fpr, y=tpr)
-            elif inference_game_type == InferenceGame.AVG_PRIVACY_LOSS_TRAINING_ALGO:
-                if metric_result[0][0].predictions_proba is None:
-                    fpr = [
-                        [
-                            metric_result[i][j].fp
-                            / (metric_result[i][j].fp + metric_result[i][j].tn)
-                            for j in range(len(metric_result[0]))
-                        ]
-                        for i in range(len(metric_result))
-                    ]
-                    tpr = [
-                        [
-                            metric_result[i][j].tp
-                            / (metric_result[i][j].tp + metric_result[i][j].fn)
-                            for j in range(len(metric_result[0]))
-                        ]
-                        for i in range(len(metric_result))
-                    ]
-                    fpr = np.mean(fpr, axis=0).ravel()
-                    tpr = np.mean(tpr, axis=0).ravel()
-                    roc_auc = np.trapz(x=fpr, y=tpr)
-            else:
-                raise NotImplementedError
+            if metric_result[0].predictions_proba is None:
+                mr = metric_result[0]
+                fpr = mr.fp / (mr.fp + mr.tn)
+                tpr = mr.tp / (mr.tp + mr.fn)
+                roc_auc = np.trapz(x=fpr, y=tpr)
 
+        # save the data to a csv file
+        directory = os.path.dirname(filename)
+
+        # If the directory doesn't exist, create it
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+
+
+        with open(filename.replace(".png", ".csv"), "w") as f:
+            f.write("fpr,tpr\n")
+            for i in range(len(fpr)):
+                f.write(f"{fpr[i]},{tpr[i]}\n")
+        
         # Gets metric ID
-        if isinstance(metric_result, list):
-            if isinstance(metric_result[0], list):
-                metric_id = metric_result[0][0].metric_id
-            else:
-                metric_id = metric_result[0].metric_id
-        else:
-            metric_id = metric_result.metric_id
+        # TODO: add metric ID to the CombinedMetricResult class
+        metric_id = "population_metric"
+        # if isinstance(metric_result, list):
+        #     if isinstance(metric_result[0], list):
+        #         metric_id = metric_result[0][0].metric_id
+        #     else:
+        #         metric_id = metric_result[0].metric_id
+        # else:
+        #     metric_id = metric_result.metric_id
 
         # Generate plot
         range01 = np.linspace(0, 1)
@@ -283,8 +247,7 @@ class ConfusionMatrixReport(AuditReport):
 
     @staticmethod
     def generate_report(
-        metric_result: Union[MetricResult, List[MetricResult]],
-        inference_game_type: InferenceGame,
+        metric_result: Union[AttackResult, List[AttackResult]],
         show: bool = False,
         save: bool = True,
         filename: str = "confusion_matrix.jpg",
@@ -300,19 +263,13 @@ class ConfusionMatrixReport(AuditReport):
             filename: File name to be used if the plot is saved as a file.
         """
 
-        if inference_game_type == InferenceGame.PRIVACY_LOSS_MODEL:
-            assert isinstance(metric_result, MetricResult)
-            cm = np.array(
-                [
-                    [metric_result.tn, metric_result.fp],
-                    [metric_result.fn, metric_result.tp],
-                ]
-            )
-        elif inference_game_type == InferenceGame.AVG_PRIVACY_LOSS_TRAINING_ALGO:
-            assert isinstance(metric_result, list)
-            cm = np.mean([[[mr.tn, mr.fp], [mr.fn, mr.tp]] for mr in metric_result], axis=0)
-        else:
-            raise NotImplementedError
+        assert isinstance(metric_result, AttackResult)
+        cm = np.array(
+            [
+                [metric_result.tn, metric_result.fp],
+                [metric_result.fn, metric_result.tp],
+            ]
+        )
 
         cm = 100 * cm / np.sum(cm)
         index = ["Non-member", "Member"]
@@ -342,7 +299,6 @@ class SignalHistogramReport(AuditReport):
     @staticmethod
     def generate_report(
         metric_result: Union[AttackResult, List[AttackResult]],
-        inference_game_type: AttackResult,
         show: bool = False,
         save: bool = True,
         filename: str = "signal_histogram.jpg",
@@ -358,40 +314,17 @@ class SignalHistogramReport(AuditReport):
             filename: File name to be used if the plot is saved as a file.
         """
 
-        if inference_game_type == InferenceGame.PRIVACY_LOSS_MODEL:
-            values = np.array(metric_result.signal_values).ravel()
-            labels = np.array(metric_result.true_labels).ravel()
-            threshold = metric_result.threshold
-        elif inference_game_type == InferenceGame.AVG_PRIVACY_LOSS_TRAINING_ALGO:
-            if not isinstance(metric_result[0], list):
-                values = np.concatenate([mr.signal_values for mr in metric_result]).ravel()
-                labels = np.concatenate([mr.true_labels for mr in metric_result]).ravel()
-                threshold_list = [mr.threshold for mr in metric_result]
-                threshold = None if None in threshold_list else np.mean(threshold_list)
-            else:
-                values = np.array(
-                    [
-                        [metric_result[i][j].signal_values for j in range(len(metric_result[0]))]
-                        for i in range(len(metric_result))
-                    ]
-                ).ravel()
-                labels = np.array(
-                    [
-                        [metric_result[i][j].true_labels for j in range(len(metric_result[0]))]
-                        for i in range(len(metric_result))
-                    ]
-                ).ravel()
-                threshold_list = None
-                threshold = None
-
-        else:
-            raise NotImplementedError
+        values = np.array(metric_result.signal_values).ravel()
+        labels = np.array(metric_result.true_labels).ravel()
+        threshold = metric_result.threshold
 
         histogram = sn.histplot(
             data=pd.DataFrame(
                 {
                     "Signal": values,
-                    "Membership": ["Member" if y == 1 else "Non-member" for y in labels],
+                    "Membership": [
+                        "Member" if y == 1 else "Non-member" for y in labels
+                    ],
                 }
             ),
             x="Signal",
@@ -400,7 +333,7 @@ class SignalHistogramReport(AuditReport):
             kde=True,
         )
 
-        if threshold is not None and type(threshold) == float:
+        if threshold is not None and isinstance(threshold, float):
             histogram.axvline(x=threshold, linestyle="--", color="C{}".format(2))
             histogram.text(
                 x=threshold - (np.max(values) - np.min(values)) / 30,
@@ -436,9 +369,6 @@ class VulnerablePointsReport(AuditReport):
     @staticmethod
     def generate_report(
         metric_results: List[AttackResult],
-        inference_game_type: InferenceGame,
-        target_info_source: InformationSource,
-        target_model_to_train_split_mapping: List[Tuple[int, str, str, str]],
         number_of_points: int = 10,
         save_tex: bool = False,
         filename: str = "vulnerable_points.tex",
@@ -461,11 +391,6 @@ class VulnerablePointsReport(AuditReport):
             Indices of the vulnerable points and their scores.
 
         """
-
-        if inference_game_type != InferenceGame.PRIVACY_LOSS_MODEL:
-            raise NotImplementedError(
-                "For now, the only inference_game_type supported is InferenceGame.PRIVACY_LOSS_MODEL"
-            )
 
         # Objects to be returned if return_raw_values is True
         indices, scores = [], []
@@ -512,14 +437,14 @@ class VulnerablePointsReport(AuditReport):
 
         # If points are images and we are creating a LaTex file, then we read the information source to create image
         # files from the vulnerable
-        if save_tex and point_type == "image":
-            for k, point in enumerate(indices):
-                x = target_info_source.get_signal(
-                    signal=DatasetSample(),
-                    model_to_split_mapping=target_model_to_train_split_mapping,
-                    extra={"model_num": 0, "point_num": point},
-                )
-                Image.fromarray((x * 255).astype("uint8")).save(f"point{k:03d}.jpg")
+        # if save_tex and point_type == "image":
+        #     for k, point in enumerate(indices):
+        #         x = target_info_source.get_signal(
+        #             signal=DatasetSample(),
+        #             model_to_split_mapping=target_model_to_train_split_mapping,
+        #             extra={"model_num": 0, "point_num": point},
+        #         )
+        #         Image.fromarray((x * 255).astype("uint8")).save(f"point{k:03d}.jpg")
 
         # If we are creating a LaTex
         if save_tex:
@@ -564,17 +489,14 @@ class PDFReport(AuditReport):
     @staticmethod
     def generate_report(
         metric_results: Dict[
-            str, Union[MetricResult, List[MetricResult], List[List[MetricResult]]]
+            str, Union[AttackResult, List[AttackResult], List[List[AttackResult]]]
         ],
-        inference_game_type: InferenceGame,
         figures_dict: dict,
         system_name: str,
         call_pdflatex: bool = True,
         show: bool = False,
         save: bool = True,
         filename_no_extension: str = "report",
-        target_info_source: InformationSource = None,
-        target_model_to_train_split_mapping: List[Tuple[int, str, str, str]] = None,
         point_type: str = "any",
     ):
         """
@@ -606,14 +528,8 @@ class PDFReport(AuditReport):
             result = metric_results[metric]
 
             # Select one instance to display when necessary (e.g. for a confusion matrix with a PopulationMetric)
-            if inference_game_type == InferenceGame.PRIVACY_LOSS_MODEL:
-                best_index = np.argmax([r.accuracy for r in result])
-                best_result = result[best_index]
-            elif inference_game_type == InferenceGame.AVG_PRIVACY_LOSS_TRAINING_ALGO:
-                best_indices = np.argmax([[r2.accuracy for r2 in r1] for r1 in result], axis=1)
-                best_result = [result[k][best_index] for k, best_index in enumerate(best_indices)]
-            else:
-                raise NotImplementedError
+            best_index = np.argmax([r.accuracy for r in result])
+            best_result = result[best_index]
 
             if "roc_curve" in figures_dict[metric]:
                 figure = "roc_curve"
@@ -621,7 +537,6 @@ class PDFReport(AuditReport):
                 files_dict[metric][figure] = filename
                 ROCCurveReport.generate_report(
                     metric_result=result,
-                    inference_game_type=inference_game_type,
                     filename=filename,
                 )
             if "confusion_matrix" in figures_dict[metric]:
@@ -630,7 +545,6 @@ class PDFReport(AuditReport):
                 files_dict[metric][figure] = filename
                 ConfusionMatrixReport.generate_report(
                     metric_result=best_result,
-                    inference_game_type=inference_game_type,
                     filename=filename,
                 )
             if "signal_histogram" in figures_dict[metric]:
@@ -639,27 +553,23 @@ class PDFReport(AuditReport):
                 files_dict[metric][figure] = filename
                 SignalHistogramReport.generate_report(
                     metric_result=best_result,
-                    inference_game_type=inference_game_type,
                     filename=filename,
                 )
             if "vulnerable_points" in figures_dict[metric]:
-                assert target_info_source is not None
-                assert target_model_to_train_split_mapping is not None
                 figure = "vulnerable_points"
                 filename = f"{metric}_{figure}.tex"
                 files_dict[metric][figure] = filename
                 VulnerablePointsReport.generate_report(
                     metric_results=result,
-                    inference_game_type=inference_game_type,
                     save_tex=True,
                     filename=filename,
-                    target_info_source=target_info_source,
-                    target_model_to_train_split_mapping=target_model_to_train_split_mapping,
                     point_type=point_type,
                 )
 
         # Load template
-        template = latex_jinja_env.get_template(f"{REPORT_FILES_DIR}/report_template.tex")
+        template = latex_jinja_env.get_template(
+            f"{REPORT_FILES_DIR}/report_template.tex"
+        )
 
         # Render the template (i.e. generate the corresponding string)
         latex_content = template.render(
@@ -671,7 +581,6 @@ class PDFReport(AuditReport):
             explanations=EXPLANATIONS,
             figures_dict=figures_dict,
             files_dict=files_dict,
-            inference_game_type=inference_game_type.value,
         )
 
         # Write the result (the string) to a .tex file
@@ -712,4 +621,6 @@ class PDFReport(AuditReport):
             )
             stdout, stderr = process.communicate()
 
-            print(f'PDF file created:\t{os.path.abspath(f"{filename_no_extension}.pdf")}')
+            print(
+                f'PDF file created:\t{os.path.abspath(f"{filename_no_extension}.pdf")}'
+            )

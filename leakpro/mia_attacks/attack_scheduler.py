@@ -18,7 +18,9 @@ class AttackScheduler:
         self.attack_list = configs["audit"]["attack_list"]
         self.attacks = []
 
-        attack_objects = AttackObjects(population, train_test_dataset, target_model, configs)
+        attack_objects = AttackObjects(
+            population, train_test_dataset, target_model, configs
+        )
         attack_utils = AttackUtils(attack_objects)
 
         for attack_name in self.attack_list:

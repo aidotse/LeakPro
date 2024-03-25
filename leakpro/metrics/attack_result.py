@@ -106,10 +106,14 @@ class CombinedMetricResult:
         self.threshold = threshold
 
         self.accuracy = np.mean(predicted_labels == true_labels, axis=1)
-        self.tn = np.sum(true_labels == 0) - np.sum(predicted_labels[:, true_labels == 0], axis=1)
+        self.tn = np.sum(true_labels == 0) - np.sum(
+            predicted_labels[:, true_labels == 0], axis=1
+        )
         self.tp = np.sum(predicted_labels[:, true_labels == 1], axis=1)
         self.fp = np.sum(predicted_labels[:, true_labels == 0], axis=1)
-        self.fn = np.sum(true_labels == 1) - np.sum(predicted_labels[:, true_labels == 1], axis=1)
+        self.fn = np.sum(true_labels == 1) - np.sum(
+            predicted_labels[:, true_labels == 1], axis=1
+        )
 
         self.roc_auc = auc(
             self.fp / (np.sum(true_labels == 0)), self.tp / (np.sum(true_labels == 1))

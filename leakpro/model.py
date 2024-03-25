@@ -122,7 +122,10 @@ class PytorchModel(Model):
         Returns:
             Model output.
         """
-        return self.model_obj(torch.tensor(batch_samples)).detach().numpy()
+        batch_samples_tensor = torch.tensor(
+            np.array(batch_samples), dtype=torch.float32
+        )
+        return self.model_obj(batch_samples_tensor).detach().numpy()
 
     def get_loss(self, batch_samples, batch_labels, per_point=True):
         """Function to get the model loss on a given input and an expected output.
@@ -135,7 +138,9 @@ class PytorchModel(Model):
         Returns:
             The loss value, as defined by the loss_fn attribute.
         """
-        batch_samples_tensor = torch.tensor(np.array(batch_samples), dtype=torch.float32)
+        batch_samples_tensor = torch.tensor(
+            np.array(batch_samples), dtype=torch.float32
+        )
         batch_labels_tensor = torch.tensor(batch_labels, dtype=torch.long)
 
         if per_point:
@@ -164,7 +169,9 @@ class PytorchModel(Model):
         Returns:
             A list of gradients of the model loss (one item per layer) with respect to the model parameters.
         """
-        loss = self.loss_fn(self.model_obj(torch.tensor(batch_samples)), torch.tensor(batch_labels))
+        loss = self.loss_fn(
+            self.model_obj(torch.tensor(batch_samples)), torch.tensor(batch_labels)
+        )
         loss.backward()
         return [p.grad.numpy() for p in self.model_obj.parameters()]
 
@@ -189,7 +196,8 @@ class PytorchModel(Model):
             else:
                 layer_names.append(list(self.model_obj._modules.keys())[layer])
         return [
-            self.intermediate_outputs[layer_name].detach().numpy() for layer_name in layer_names
+            self.intermediate_outputs[layer_name].detach().numpy()
+            for layer_name in layer_names
         ]
 
     def __forward_hook(self, layer_name):

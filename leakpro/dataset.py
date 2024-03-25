@@ -1,4 +1,7 @@
 import torch
+import torchvision
+import torchvision.transforms as transforms
+
 import pickle
 import os
 from torch.utils.data import Dataset
@@ -6,226 +9,258 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
 from sklearn.model_selection import train_test_split
-from ast import List
 
-from itertools import product
-from typing import Dict, Union
+from typing import List
 
-import numpy as np
+class GeneralDataset(Dataset):
+    def __init__(self, data:np.ndarray, label:np.ndarray, transforms=None):
+        """
+        data_list: A list of GeneralData instances.
+        """
+        
+        self.X = data # Convert to tensor and specify the data type
+        self.y = label  # Assuming labels are for classification
+        self.transforms = transforms
+
+    def __len__(self):
+        return len(self.y)
+
+    def __getitem__(self, idx):
+        """
+        Returns the data and label for a single instance indexed by idx.
+        """
+        if self.transforms:
+            X = self.transforms(self.X[idx])
+        else:
+            X = self.X[idx]
+        
+        # ensure that X is a tensor
+        if not isinstance(X, torch.Tensor):
+            X = torch.tensor(X, dtype=torch.float32)
+            
+        y = torch.tensor(self.y[idx], dtype=torch.long)
+        return X, y
 
 ########################################################################################################################
 # DATASET CLASS
 ########################################################################################################################
 
 
-class Dataset:
-    """
-    Wrapper around a dictionary-like formatted dataset, with functions to run preprocessing, to define default
-    input/output features, and to split a dataset easily.
-    """
+# class Dataset:
+#     """
+#     Wrapper around a dictionary-like formatted dataset, with functions to run preprocessing, to define default
+#     input/output features, and to split a dataset easily.
+#     """
 
-    def __init__(
-        self,
-        data_dict: dict,
-        default_input: str,
-        default_output: str,
-        default_group: str = None,
-        preproc_fn_dict: dict = None,
-        preprocessed: bool = False,
-    ):
-        """Constructor
+#     def __init__(
+#         self,
+#         data_dict: dict,
+#         default_input: str,
+#         default_output: str,
+#         default_group: str = None,
+#         preproc_fn_dict: dict = None,
+#         preprocessed: bool = False,
+#     ):
+#         """Constructor
 
-        Args:
-            data_dict: Contains the dataset as a dict.
-            default_input: The key of the data_dict that should be used by default to get the input of a model.
-            default_output: The key of the data_dict that should be used by default to get the expected output
-                of a model.
-            default_group: The key of the data_dict that shouuld be used by default to get the group of the data points.
-                This is to contruct class dependent threshold.
-            preproc_fn_dict: Contains optional preprocessing functions for each feature.
-            preprocessed: Indicates if the preprocessing of preproc_fn_dict has already been applied.
-        """
+#         Args:
+#             data_dict: Contains the dataset as a dict.
+#             default_input: The key of the data_dict that should be used by default to get the input of a model.
+#             default_output: The key of the data_dict that should be used by default to get the expected output
+#                 of a model.
+#             default_group: The key of the data_dict that shouuld be used by default to get the group of the data points.
+#                 This is to contruct class dependent threshold.
+#             preproc_fn_dict: Contains optional preprocessing functions for each feature.
+#             preprocessed: Indicates if the preprocessing of preproc_fn_dict has already been applied.
+#         """
 
-        # Store parameters
-        self.data_dict = data_dict
-        self.default_input = default_input
-        self.default_output = default_output
-        self.default_group = default_group
-        self.preproc_fn_dict = preproc_fn_dict
+#         # Store parameters
+#         self.data_dict = data_dict
+#         self.default_input = default_input
+#         self.default_output = default_output
+#         self.default_group = default_group
+#         self.preproc_fn_dict = preproc_fn_dict
 
-        # Store splits names and features names
-        self.splits = list(self.data_dict)
-        self.features = list(self.data_dict[self.splits[0]])
+#         # Store splits names and features names
+#         self.splits = list(self.data_dict)
+#         self.features = list(self.data_dict[self.splits[0]])
 
-        # If preprocessing functions were passed as parameters, execute them
-        if not preprocessed and preproc_fn_dict is not None:
-            self.preprocess()
+#         # If preprocessing functions were passed as parameters, execute them
+#         if not preprocessed and preproc_fn_dict is not None:
+#             self.preprocess()
+    
+#     def __len__(self):
+#         return len(self.data_dict[self.default_output])
 
-    def preprocess(self):
-        """
-        Preprocessing function, executed by the constructor, based on the preproc_fn_dict attribute.
-        """
-        for split, feature in product(self.splits, self.features):
-            if feature in list(self.preproc_fn_dict):
-                fn = self.preproc_fn_dict[feature]
-                self.data_dict[split][feature] = fn(self.data_dict[split][feature])
+#     def preprocess(self):
+#         """
+#         Preprocessing function, executed by the constructor, based on the preproc_fn_dict attribute.
+#         """
+#         for split, feature in product(self.splits, self.features):
+#             if feature in list(self.preproc_fn_dict):
+#                 fn = self.preproc_fn_dict[feature]
+#                 self.data_dict[split][feature] = fn(self.data_dict[split][feature])
 
-    def get_feature(self, split_name: str, feature_name: str, indices: list = None):
-        """Returns a specific feature from samples of a specific split.
+#     def get_feature(self, split_name: str, feature_name: str, indices: list = None):
+#         """Returns a specific feature from samples of a specific split.
 
-        Args:
-            split_name: Name of the split.
-            feature_name: Name of the feature.
-            indices: Optional list of indices. If not specified, the entire subset is returned.
+#         Args:
+#             split_name: Name of the split.
+#             feature_name: Name of the feature.
+#             indices: Optional list of indices. If not specified, the entire subset is returned.
 
-        Returns:
-            The requested feature, from samples of the requested split.
-        """
+#         Returns:
+#             The requested feature, from samples of the requested split.
+#         """
 
-        # Two placeholders can be used to trigger either the default input or the default output, as specified during
-        # object creation
-        if feature_name == "<default_input>":
-            feature_name = self.default_input
-        elif feature_name == "<default_output>":
-            feature_name = self.default_output
-        elif feature_name == "<default_group>":
-            feature_name = self.default_group
+#         # Two placeholders can be used to trigger either the default input or the default output, as specified during
+#         # object creation
+#         if feature_name == "<default_input>":
+#             feature_name = self.default_input
+#         elif feature_name == "<default_output>":
+#             feature_name = self.default_output
+#         elif feature_name == "<default_group>":
+#             feature_name = self.default_group
 
-        # If 'indices' is not specified, returns the entire array. Else just return those indices
-        if indices is None:
-            return self.data_dict[split_name][feature_name]
-        else:
-            return self.data_dict[split_name][feature_name][indices]
+#         # If 'indices' is not specified, returns the entire array. Else just return those indices
+#         if indices is None:
+#             return self.data_dict[split_name][feature_name]
+#         else:
+#             return self.data_dict[split_name][feature_name][indices]
 
-    def subdivide(
-        self,
-        num_splits: int,
-        split_names: list = None,
-        method: str = "independent",
-        split_size: Union[int, Dict[str, int]] = None,
-        delete_original: bool = False,
-        in_place: bool = True,
-        return_results: bool = False,
-    ):
-        """Subdivides the splits contained in split_names into sub-splits, e.g. for shadow model training.
+#     def subdivide(
+#         self,
+#         num_splits: int,
+#         split_names: list = None,
+#         method: str = "independent",
+#         split_size: Union[int, Dict[str, int]] = None,
+#         delete_original: bool = False,
+#         in_place: bool = True,
+#         return_results: bool = False,
+#     ):
+#         """Subdivides the splits contained in split_names into sub-splits, e.g. for shadow model training.
 
-        Args:
-            num_splits: Number of sub-splits per original split.
-            split_names: The splits to subdivide (e.g. train and test). By default, includes all splits.
-            method: Either independent or random. If method is independent, then the sub-splits are a partition of the
-                original split (i.e. they contain the entire split without repetition). If method is random, then each
-                sub-split is a random subset of the original split (i.e. some samples might be missing or repeated). If
-                method is hybrid, then each sub-split is a random subset of the original split, with the guarantee that
-                the 1st one is not overlapping with the others.
-            split_size: If method is random, this is the size of one split (ignored if method is independent). Can
-                either be an integer, or a dictionary of integer (one per split).
-            delete_original: Indicates if the original split should be deleted.
-            in_place: Indicates if the new splits should be included in the parent object or not
-            return_results: Indicates if the new splits should be returned or not
+#         Args:
+#             num_splits: Number of sub-splits per original split.
+#             split_names: The splits to subdivide (e.g. train and test). By default, includes all splits.
+#             method: Either independent or random. If method is independent, then the sub-splits are a partition of the
+#                 original split (i.e. they contain the entire split without repetition). If method is random, then each
+#                 sub-split is a random subset of the original split (i.e. some samples might be missing or repeated). If
+#                 method is hybrid, then each sub-split is a random subset of the original split, with the guarantee that
+#                 the 1st one is not overlapping with the others.
+#             split_size: If method is random, this is the size of one split (ignored if method is independent). Can
+#                 either be an integer, or a dictionary of integer (one per split).
+#             delete_original: Indicates if the original split should be deleted.
+#             in_place: Indicates if the new splits should be included in the parent object or not
+#             return_results: Indicates if the new splits should be returned or not
 
-        Returns:
-            If in_place, a list of new Dataset objects, with the sub-splits. Otherwise, nothing, as the results are
-            stored in self.data_dict.
-        """
+#         Returns:
+#             If in_place, a list of new Dataset objects, with the sub-splits. Otherwise, nothing, as the results are
+#             stored in self.data_dict.
+#         """
 
-        # By default, includes all splits.
-        if split_names is None:
-            split_names = self.splits
+#         # By default, includes all splits.
+#         if split_names is None:
+#             split_names = self.splits
 
-        # List of results if in_place is False
-        new_datasets_dict = [{} for _ in range(num_splits)]
+#         # List of results if in_place is False
+#         new_datasets_dict = [{} for _ in range(num_splits)]
 
-        for split in split_names:
+#         for split in split_names:
 
-            if split_size is not None:
-                parsed_split_size = split_size if isinstance(split_size, int) else split_size[split]
+#             if split_size is not None:
+#                 parsed_split_size = (
+#                     split_size if isinstance(split_size, int) else split_size[split]
+#                 )
 
-            # If method is random, then each sub-split is a random subset of the original split.
-            if method == "random":
-                assert (
-                    split_size is not None
-                ), 'Argument split_size is required when method is "random" or "hybrid"'
-                indices = np.random.randint(
-                    self.data_dict[split][self.features[0]].shape[0],
-                    size=(num_splits, parsed_split_size),
-                )
+#             # If method is random, then each sub-split is a random subset of the original split.
+#             if method == "random":
+#                 assert (
+#                     split_size is not None
+#                 ), 'Argument split_size is required when method is "random" or "hybrid"'
+#                 indices = np.random.randint(
+#                     self.data_dict[split][self.features[0]].shape[0],
+#                     size=(num_splits, parsed_split_size),
+#                 )
 
-            # If method is independent, then the sub-splits are a partition of the original split.
-            elif method == "independent":
-                indices = np.arange(self.data_dict[split][self.features[0]].shape[0])
-                np.random.shuffle(indices)
-                indices = np.array_split(indices, num_splits)
+#             # If method is independent, then the sub-splits are a partition of the original split.
+#             elif method == "independent":
+#                 indices = np.arange(self.data_dict[split][self.features[0]].shape[0])
+#                 np.random.shuffle(indices)
+#                 indices = np.array_split(indices, num_splits)
 
-            # If method is hybrid, then each sub-split is a random subset of the original split, with the guarantee that
-            # the 1st one is not overlapping with the others
-            elif method == "hybrid":
-                assert (
-                    split_size is not None
-                ), 'Argument split_size is required when method is "random" or "hybrid"'
-                available_indices = np.arange(self.data_dict[split][self.features[0]].shape[0])
-                indices_a = np.random.choice(
-                    available_indices, size=(1, parsed_split_size), replace=False
-                )
-                available_indices = np.setdiff1d(available_indices, indices_a.flatten())
-                indices_b = np.random.choice(
-                    available_indices,
-                    size=(num_splits - 1, parsed_split_size),
-                    replace=True,
-                )
-                indices = np.concatenate((indices_a, indices_b))
+#             # If method is hybrid, then each sub-split is a random subset of the original split, with the guarantee that
+#             # the 1st one is not overlapping with the others
+#             elif method == "hybrid":
+#                 assert (
+#                     split_size is not None
+#                 ), 'Argument split_size is required when method is "random" or "hybrid"'
+#                 available_indices = np.arange(
+#                     self.data_dict[split][self.features[0]].shape[0]
+#                 )
+#                 indices_a = np.random.choice(
+#                     available_indices, size=(1, parsed_split_size), replace=False
+#                 )
+#                 available_indices = np.setdiff1d(available_indices, indices_a.flatten())
+#                 indices_b = np.random.choice(
+#                     available_indices,
+#                     size=(num_splits - 1, parsed_split_size),
+#                     replace=True,
+#                 )
+#                 indices = np.concatenate((indices_a, indices_b))
 
-            else:
-                raise ValueError(f'Split method "{method}" does not exist.')
+#             else:
+#                 raise ValueError(f'Split method "{method}" does not exist.')
 
-            for split_n in range(num_splits):
-                # Fill the dictionary if in_place is True
-                if in_place:
-                    self.data_dict[f"{split}{split_n:03d}"] = {}
-                    for feature in self.features:
-                        self.data_dict[f"{split}{split_n:03d}"][feature] = self.data_dict[split][
-                            feature
-                        ][indices[split_n]]
-                # Create new dictionaries if return_results is True
-                if return_results:
-                    new_datasets_dict[split_n][f"{split}"] = {}
-                    for feature in self.features:
-                        new_datasets_dict[split_n][f"{split}"][feature] = self.data_dict[split][
-                            feature
-                        ][indices[split_n]]
+#             for split_n in range(num_splits):
+#                 # Fill the dictionary if in_place is True
+#                 if in_place:
+#                     self.data_dict[f"{split}{split_n:03d}"] = {}
+#                     for feature in self.features:
+#                         self.data_dict[f"{split}{split_n:03d}"][feature] = (
+#                             self.data_dict[split][feature][indices[split_n]]
+#                         )
+#                 # Create new dictionaries if return_results is True
+#                 if return_results:
+#                     new_datasets_dict[split_n][f"{split}"] = {}
+#                     for feature in self.features:
+#                         new_datasets_dict[split_n][f"{split}"][feature] = (
+#                             self.data_dict[split][feature][indices[split_n]]
+#                         )
 
-            # delete_original indicates if the original split should be deleted.
-            if delete_original:
-                del self.data_dict[split]
+#             # delete_original indicates if the original split should be deleted.
+#             if delete_original:
+#                 del self.data_dict[split]
 
-        # Update the list of splits
-        self.splits = list(self.data_dict)
+#         # Update the list of splits
+#         self.splits = list(self.data_dict)
 
-        # Return new datasets if return_results is True
-        if return_results:
-            return [
-                Dataset(
-                    data_dict=new_datasets_dict[i],
-                    default_input=self.default_input,
-                    default_output=self.default_output,
-                    default_group=self.default_group,
-                    preproc_fn_dict=self.preproc_fn_dict,
-                    preprocessed=True,
-                )
-                for i in range(num_splits)
-            ]
+#         # Return new datasets if return_results is True
+#         if return_results:
+#             return [
+#                 Dataset(
+#                     data_dict=new_datasets_dict[i],
+#                     default_input=self.default_input,
+#                     default_output=self.default_output,
+#                     default_group=self.default_group,
+#                     preproc_fn_dict=self.preproc_fn_dict,
+#                     preprocessed=True,
+#                 )
+#                 for i in range(num_splits)
+#             ]
 
-    def __str__(self):
-        """
-        Returns a string describing the dataset.
-        """
-        txt = [
-            f'{" DATASET OBJECT ":=^48}',
-            f"Splits            = {self.splits}",
-            f"Features          = {self.features}",
-            f"Default features  = {self.default_input} --> {self.default_output}",
-            "=" * 48,
-        ]
-        return "\n".join(txt)
+#     def __str__(self):
+#         """
+#         Returns a string describing the dataset.
+#         """
+#         txt = [
+#             f'{" DATASET OBJECT ":=^48}',
+#             f"Splits            = {self.splits}",
+#             f"Features          = {self.features}",
+#             f"Default features  = {self.default_input} --> {self.default_output}",
+#             "=" * 48,
+#         ]
+#         return "\n".join(txt)
 
 
 class TabularDataset(Dataset):
@@ -266,6 +301,7 @@ class InfiniteRepeatDataset(Dataset):
         return self.dataset[idx % len(self.dataset)]
 
 
+
 def get_dataset(dataset_name: str, data_dir: str):
     path = f"{data_dir}/{dataset_name}"
 
@@ -273,58 +309,74 @@ def get_dataset(dataset_name: str, data_dir: str):
         with open(f"{path}.pkl", "rb") as file:
             all_data = pickle.load(file)
         print(f"Load data from {path}.pkl")
-    elif os.path.exists(f"{path}/{dataset_name}.data"):
-        column_names = [
-            "age",
-            "workclass",
-            "fnlwgt",
-            "education",
-            "education-num",
-            "marital-status",
-            "occupation",
-            "relationship",
-            "race",
-            "sex",
-            "capital-gain",
-            "capital-loss",
-            "hours-per-week",
-            "native-country",
-            "income",
-        ]
-        df_train = pd.read_csv(f"{path}/{dataset_name}.data", names=column_names)
-        df_test = pd.read_csv(f"{path}/{dataset_name}.test", names=column_names, header=0)
-        df_test["income"] = df_test["income"].str.replace(".", "", regex=False)
-        df = pd.concat([df_train, df_test], axis=0)
-        df = df.replace(" ?", np.nan)
-        df = df.dropna()
-        X, y = df.iloc[:, :-1], df.iloc[:, -1]
-
-        categorical_features = [col for col in X.columns if X[col].dtype == "object"]
-        numerical_features = [col for col in X.columns if X[col].dtype in ["int64", "float64"]]
-
-        onehot_encoder = OneHotEncoder(sparse_output=False, handle_unknown="ignore")
-        X_categorical = onehot_encoder.fit_transform(X[categorical_features])
-
-        scaler = StandardScaler()
-        X_numerical = scaler.fit_transform(X[numerical_features])
-
-        X = np.hstack([X_numerical, X_categorical])
-
-        # label encode the target variable to have the classes 0 and 1
-        y = LabelEncoder().fit_transform(y)
-
-        all_data = TabularDataset(X, y)
-        with open(f"{path}.pkl", "wb") as file:
-            pickle.dump(all_data, file)
-        print(f"Save data to {path}.pkl")
     else:
-        raise NotImplementedError(f"{dataset_name} is not implemented")
+        if "adult" in dataset_name:
+            column_names = [
+                "age",
+                "workclass",
+                "fnlwgt",
+                "education",
+                "education-num",
+                "marital-status",
+                "occupation",
+                "relationship",
+                "race",
+                "sex",
+                "capital-gain",
+                "capital-loss",
+                "hours-per-week",
+                "native-country",
+                "income",
+            ]
+            df_train = pd.read_csv(f"{path}/{dataset_name}.data", names=column_names)
+            df_test = pd.read_csv(
+                f"{path}/{dataset_name}.test", names=column_names, header=0
+            )
+            df_test["income"] = df_test["income"].str.replace(".", "", regex=False)
+            df = pd.concat([df_train, df_test], axis=0)
+            df = df.replace(" ?", np.nan)
+            df = df.dropna()
+            X, y = df.iloc[:, :-1], df.iloc[:, -1]
 
-    print(f"the whole dataset size: {len(all_data)}")
+            categorical_features = [col for col in X.columns if X[col].dtype == "object"]
+            numerical_features = [
+                col for col in X.columns if X[col].dtype in ["int64", "float64"]
+            ]
+
+            onehot_encoder = OneHotEncoder(sparse_output=False, handle_unknown="ignore")
+            X_categorical = onehot_encoder.fit_transform(X[categorical_features])
+
+            scaler = StandardScaler()
+            X_numerical = scaler.fit_transform(X[numerical_features])
+
+            X = np.hstack([X_numerical, X_categorical])
+
+            # label encode the target variable to have the classes 0 and 1
+            y = LabelEncoder().fit_transform(y)
+
+            all_data = GeneralDataset(X,y)
+            with open(f"{path}.pkl", "wb") as file:
+                pickle.dump(all_data, file)
+            print(f"Save data to {path}.pkl")
+        elif "cifar10" in dataset_name:
+            transform = transforms.Compose([transforms.ToTensor(),transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+            trainset = torchvision.datasets.CIFAR10(root='./data/cifar10', train=True, download=True, transform=transform)
+            testset = torchvision.datasets.CIFAR10(root='./data/cifar10', train=False,download=True, transform=transform)
+            X = np.vstack([trainset.data, testset.data])
+            y = np.hstack([trainset.targets, testset.targets])
+            
+            all_data = GeneralDataset(X, y, transform)
+            
+            with open(f"{path}.pkl", "wb") as file:
+                pickle.dump(all_data, file)
+            print(f"Save data to {path}.pkl")
+ 
     return all_data
 
 
-def get_split(all_index: List(int), used_index: List(int), size: int, split_method: str):
+def get_split(
+    all_index: List[int], used_index: List[int], size: int, split_method: str
+):
     """Select points based on the splitting methods
 
     Args:
@@ -371,7 +423,6 @@ def prepare_train_test_datasets(dataset_size: int, configs: dict):
     """
 
     # The index_list will save all the information about the train, test and auit for each target model.
-    index_list = []
     all_index = np.arange(dataset_size)
     train_size = int(configs["f_train"] * dataset_size)
     test_size = int(configs["f_test"] * dataset_size)
@@ -382,7 +433,7 @@ def prepare_train_test_datasets(dataset_size: int, configs: dict):
     return dataset_train_test
 
 
-def get_dataset_subset(dataset: Dataset, indices: List(int)):
+def get_dataset_subset(dataset: Dataset, indices: List[int]):
     """Get a subset of the dataset.
 
     Args:
@@ -391,27 +442,26 @@ def get_dataset_subset(dataset: Dataset, indices: List(int)):
     """
     assert max(indices) < len(dataset) and min(indices) >= 0, "Index out of range"
 
-    # Initialize new dataset (this might need to be adjusted based on the specific dataset class)
-    data = dataset.data_dict["X"]
-    targets = dataset.data_dict["y"]
+    data = dataset.X
+    targets = dataset.y
+    transforms = dataset.transforms
     subset_data = [data[idx] for idx in indices]
     subset_targets = [targets[idx] for idx in indices]
 
-    new_dataset = dataset.__class__(subset_data, subset_targets)
+    new_dataset = dataset.__class__(subset_data, subset_targets, transforms)
 
     return new_dataset
 
 
 def get_dataloader(
-    dataset: TabularDataset,
+    dataset: GeneralDataset,
     batch_size: int,
     loader_type="torch",
     shuffle: bool = True,
 ):
     if loader_type == "torch":
-        repeated_data = InfiniteRepeatDataset(dataset)
         return torch.utils.data.DataLoader(
-            repeated_data,
+            dataset,
             batch_size=batch_size,
             shuffle=shuffle,
             num_workers=4,

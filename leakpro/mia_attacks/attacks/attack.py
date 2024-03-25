@@ -52,7 +52,9 @@ class AttackAbstract(ABC):
         pass
 
     @abstractmethod
-    def run_attack(self, fpr_tolerance_rate_list=None) -> Union[AttackResult, List[AttackResult]]:
+    def run_attack(
+        self, fpr_tolerance_rate_list=None
+    ) -> Union[AttackResult, List[AttackResult]]:
         """
         Function to run the metric on the target model and dataset.
 

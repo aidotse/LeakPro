@@ -1,16 +1,16 @@
 """This file contains functions for training and testing the model."""
 
 import time
-from ast import Tuple
 
 import torch
 from torch import nn
 import pickle
+from typing import Tuple
 
 
 def get_optimizer(model: torch.nn.Module, configs: dict):
     optimizer = configs.get("optimizer", "SGD")
-    learning_rate = configs.get("learning_rate", 0.001)
+    learning_rate = configs.get("learning_rate", 0.01)
     weight_decay = configs.get("weight_decay", 0)
     momentum = configs.get("momentum", 0)
     print(f"Load the optimizer {optimizer}: ", end=" ")
@@ -25,9 +25,13 @@ def get_optimizer(model: torch.nn.Module, configs: dict):
             momentum=momentum,
         )
     elif optimizer == "Adam":
-        return torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+        return torch.optim.Adam(
+            model.parameters(), lr=learning_rate, weight_decay=weight_decay
+        )
     elif optimizer == "AdamW":
-        return torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+        return torch.optim.AdamW(
+            model.parameters(), lr=learning_rate, weight_decay=weight_decay
+        )
 
     else:
         raise NotImplementedError(
@@ -38,7 +42,7 @@ def get_optimizer(model: torch.nn.Module, configs: dict):
 # Test Function
 def inference(
     model: torch.nn.Module, loader: torch.utils.data.DataLoader, device: str
-) -> Tuple(float, float):
+) -> Tuple[float, float]:
     """Evaluate the model performance on the test loader
     Args:
         model (torch.nn.Module): Model for evaluation
@@ -79,11 +83,10 @@ def inference(
         acc = float(acc) / len(loader.dataset)
 
         # Move model back to CPU
-        model.to("cpu")
+        #model.to("cpu")
 
         # Return loss and accuracy
         return loss, acc
-
 
 def train(
     model: torch.nn.Module,
@@ -101,7 +104,7 @@ def train(
         nn.Module: Trained model.
     """
     # Get the device for training
-    device = "cpu"  # torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Set the model to the device
     model.to(device)
@@ -119,13 +122,16 @@ def train(
         # Loop over the training set
         model.train()
         for data, target in train_loader:
-            # Move data to the device
-            data, target = data.to(device, non_blocking=True), target.to(device, non_blocking=True)
             # Cast target to long tensor
             target = target.long()
+            
+            # Move data to the device
+            data, target = data.to(device, non_blocking=True), target.to(
+                device, non_blocking=True
+            )
 
             # Set the gradients to zero
-            optimizer.zero_grad(set_to_none=True)
+            optimizer.zero_grad()
 
             # Get the model output
             output = model(data)
@@ -153,7 +159,9 @@ def train(
     # Move the model back to the CPU
     model.to("cpu")
 
-    save_model_and_metadata(model, data_split, configs, train_acc, test_acc, train_loss, test_loss)
+    save_model_and_metadata(
+        model, data_split, configs, train_acc, test_acc, train_loss, test_loss
+    )
 
     # Return the model
     return model

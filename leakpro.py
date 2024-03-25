@@ -1,6 +1,4 @@
-import argparse
 import logging
-import os
 import pickle
 import random
 import time
@@ -14,9 +12,11 @@ import leakpro.dataset as dataset
 import leakpro.models as models
 import leakpro.train as util
 
-# from leakpro.core import prepare_information_source, prepare_priavcy_risk_report
-# from leakpro.audit import Audit
 from leakpro.mia_attacks.attack_scheduler import AttackScheduler
+
+from leakpro.reporting.utils import prepare_priavcy_risk_report
+
+
 
 
 def setup_log(name: str, save_file: bool):
@@ -49,7 +49,9 @@ def setup_log(name: str, save_file: bool):
 
 if __name__ == "__main__":
 
-    args = "./config/adult.yaml"
+    RETRAIN = True
+    #args = "./config/adult.yaml"
+    args = "./config/cifar10.yaml"
     with open(args, "rb") as f:
         configs = yaml.load(f, Loader=yaml.Loader)
 
@@ -88,8 +90,13 @@ if __name__ == "__main__":
     )
 
     # Train the target model
-    model = models.NN(configs["train"]["inputs"], configs["train"]["outputs"])
-    model = util.train(model, train_loader, configs, test_loader, train_test_dataset)
+    if "adult" in configs["data"]["dataset"]:
+        model = models.NN(configs["train"]["inputs"], configs["train"]["outputs"])
+    elif "cifar10" in configs["data"]["dataset"]:
+        model = models.ConvNet()
+    if RETRAIN:
+        model = util.train(model, train_loader, configs, test_loader, train_test_dataset)
+
 
     # ------------------------------------------------
     # LEAKPRO starts here
@@ -109,9 +116,12 @@ if __name__ == "__main__":
         target_model_metadata = pickle.load(f)
     target_model_path = f"{log_dir}/model_0.pkl"
     with open(target_model_path, "rb") as f:
-        target_model = models.NN(
-            configs["train"]["inputs"], configs["train"]["outputs"]
-        )  # TODO: read metadata to get the model
+        if "adult" in configs["data"]["dataset"]:
+            target_model = models.NN(
+                configs["train"]["inputs"], configs["train"]["outputs"]
+            )  # TODO: read metadata to get the model
+        elif "cifar10" in configs["data"]["dataset"]:
+            target_model = models.ConvNet()
         target_model.load_state_dict(torch.load(f))
 
     # ------------------------------------------------
@@ -128,13 +138,11 @@ if __name__ == "__main__":
     )  # TODO metadata includes indices for train and test data
     audit_results = attack_scheduler.run_attacks()
 
-    logger.info(str(audit_results["attack_p"]["result_object"]))
+    logger.info(str(audit_results["rmia"]["result_object"]))
 
-    # prepare_priavcy_risk_report(
-    #         log_dir,
-    #         audit_results,
-    #         configs["audit"],
-    #         save_path=f"{log_dir}/{configs['audit']['report_log']}",
-    #         target_info_source=target_info_source,
-    #         target_model_to_train_split_mapping = data_split_info["split"][0]["train"]
-    #     )
+    prepare_priavcy_risk_report(
+            log_dir,
+            [audit_results["rmia"]["result_object"]],
+            configs["audit"],
+            save_path=f"{log_dir}/{configs['audit']['report_log']}/{configs['audit']['privacy_game']}/ns_{configs["audit"]["num_shadow_models"]}_fs_{configs["audit"]["f_attack_data_size"]}",
+        )

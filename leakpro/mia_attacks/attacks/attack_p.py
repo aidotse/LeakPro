@@ -17,7 +17,9 @@ class AttackP(AttackAbstract):
         if "f_attack_data_size" in configs:
             self.f_attack_data_size = configs["audit"]["f_attack_data_size"]
         else:
-            self.f_attack_data_size = 0.1  # pick 10% of data to create histograms by default
+            self.f_attack_data_size = (
+                0.1  # pick 10% of data to create histograms by default
+            )
         self.signal = ModelLoss()
         self.hypothesis_test_func = attack_utils.linear_itp_threshold_func
 
@@ -28,9 +30,13 @@ class AttackP(AttackAbstract):
         """
         # sample dataset to compute histogram
         all_index = np.arange(self.population_size)
-        attack_data_size = np.round(self.f_attack_data_size * self.population_size).astype(int)
+        attack_data_size = np.round(
+            self.f_attack_data_size * self.population_size
+        ).astype(int)
 
-        self.attack_data_index = np.random.choice(all_index, attack_data_size, replace=False)
+        self.attack_data_index = np.random.choice(
+            all_index, attack_data_size, replace=False
+        )
         attack_data = get_dataset_subset(self.population, self.attack_data_index)
         # Load signals if they have been computed already; otherwise, compute and save them
         # signals based on training dataset
@@ -53,7 +59,9 @@ class AttackP(AttackAbstract):
         else:
             self.quantiles = AttackUtils.default_quantile()
         # obtain the threshold values based on the reference dataset
-        thresholds = self.hypothesis_test_func(self.attack_signal, self.quantiles).reshape(-1, 1)
+        thresholds = self.hypothesis_test_func(
+            self.attack_signal, self.quantiles
+        ).reshape(-1, 1)
 
         num_threshold = len(self.quantiles)
 
@@ -66,8 +74,12 @@ class AttackP(AttackAbstract):
         self.out_member_signals = audit_signal[self.audit_dataset["out_members"]]
 
         # compute the signals for the in-members and out-members
-        member_signals = self.in_member_signals.reshape(-1, 1).repeat(num_threshold, 1).T
-        non_member_signals = self.out_member_signals.reshape(-1, 1).repeat(num_threshold, 1).T
+        member_signals = (
+            self.in_member_signals.reshape(-1, 1).repeat(num_threshold, 1).T
+        )
+        non_member_signals = (
+            self.out_member_signals.reshape(-1, 1).repeat(num_threshold, 1).T
+        )
         member_preds = np.less(member_signals, thresholds)
         non_member_preds = np.less(non_member_signals, thresholds)
 
@@ -75,9 +87,14 @@ class AttackP(AttackAbstract):
         predictions = np.concatenate([member_preds, non_member_preds], axis=1)
         # set true labels for being in the training dataset
         true_labels = np.concatenate(
-            [np.ones(len(self.in_member_signals)), np.zeros(len(self.out_member_signals))]
+            [
+                np.ones(len(self.in_member_signals)),
+                np.zeros(len(self.out_member_signals)),
+            ]
         )
-        signal_values = np.concatenate([self.in_member_signals, self.out_member_signals])
+        signal_values = np.concatenate(
+            [self.in_member_signals, self.out_member_signals]
+        )
 
         # compute the difference between the signals and the thresholds
         # predictions_proba = np.hstack([member_signals, non_member_signals]) - thresholds

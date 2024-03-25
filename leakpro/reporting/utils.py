@@ -1,5 +1,9 @@
 import leakpro.reporting.audit_report as audit_report
-from audit_report import ROCCurveReport, SignalHistogramReport, VulnerablePointsReport
+from leakpro.reporting.audit_report import (
+    ROCCurveReport,
+    SignalHistogramReport,
+)
+from typing import List
 
 
 def prepare_priavcy_risk_report(
@@ -7,8 +11,6 @@ def prepare_priavcy_risk_report(
     audit_results: List,
     configs: dict,
     save_path: str = None,
-    target_info_source: InformationSource = None,
-    target_model_to_train_split_mapping: List[Tuple[int, str, str, str]] = None,
 ):
     """Generate privacy risk report based on the auditing report
 
@@ -26,18 +28,20 @@ def prepare_priavcy_risk_report(
     if save_path is None:
         save_path = log_dir
 
-    if configs["privacy_game"] in ["privacy_loss_model", "avg_privacy_loss_training_algo"]:
+    if configs["privacy_game"] in [
+        "privacy_loss_model",
+        "avg_privacy_loss_training_algo",
+    ]:
         # Generate privacy risk report for auditing the model
         if len(audit_results) == 1 and configs["privacy_game"] == "privacy_loss_model":
             ROCCurveReport.generate_report(
                 metric_result=audit_results[0],
-                inference_game_type=InferenceGame.PRIVACY_LOSS_MODEL,
                 save=True,
                 filename=f"{save_path}/ROC.png",
+                configs=configs,
             )
             SignalHistogramReport.generate_report(
-                metric_result=audit_results[0][0],
-                inference_game_type=InferenceGame.PRIVACY_LOSS_MODEL,
+                metric_result=audit_results[0],
                 save=True,
                 filename=f"{save_path}/Histogram.png",
             )
