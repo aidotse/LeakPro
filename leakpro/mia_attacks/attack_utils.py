@@ -228,32 +228,32 @@ class AttackUtils:
             threshold = norm.ppf(alpha, loc=loc, scale=scale)
         return threshold
 
-    ########################################################################################################################
-    # HYPOTHESIS TEST: MIN LINEAR LOGIT RESCALE THRESHOLDING
-    ########################################################################################################################
-    def min_linear_logit_threshold_func(
-        self,
-        distribution: List[float],
-        alpha: List[float],
-        **kwargs,
-    ) -> float:
-        """
-        Function that returns the threshold as the minimum of 1) alpha quantile of
-        a linear interpolation curve fit over the provided distribution, and 2) alpha
-        quantile of a Gaussian fit over logit rescaling transform of the provided
-        distribution
-        Args:
-            distribution: Sequence of values that form the distribution from which
-            the threshold is computed. (Here we only consider positive signal values.)
-            alpha: Quantile value that will be used to obtain the threshold from the
-                distribution.
-        Returns:
-            threshold: alpha quantile of the provided distribution.
-        """
+    # ########################################################################################################################
+    # # HYPOTHESIS TEST: MIN LINEAR LOGIT RESCALE THRESHOLDING
+    # ########################################################################################################################
+    # def min_linear_logit_threshold_func(
+    #     self,
+    #     distribution: List[float],
+    #     alpha: List[float],
+    #     **kwargs,
+    # ) -> float:
+    #     """
+    #     Function that returns the threshold as the minimum of 1) alpha quantile of
+    #     a linear interpolation curve fit over the provided distribution, and 2) alpha
+    #     quantile of a Gaussian fit over logit rescaling transform of the provided
+    #     distribution
+    #     Args:
+    #         distribution: Sequence of values that form the distribution from which
+    #         the threshold is computed. (Here we only consider positive signal values.)
+    #         alpha: Quantile value that will be used to obtain the threshold from the
+    #             distribution.
+    #     Returns:
+    #         threshold: alpha quantile of the provided distribution.
+    #     """
 
-        threshold_linear = linear_itp_threshold_func(distribution, alpha, **kwargs)
-        threshold_logit = logit_rescale_threshold_func(distribution, alpha, **kwargs)
+    #     threshold_linear = linear_itp_threshold_func(distribution, alpha, **kwargs)
+    #     threshold_logit = logit_rescale_threshold_func(distribution, alpha, **kwargs)
 
-        threshold = np.minimum(threshold_logit, threshold_linear)
+    #     threshold = np.minimum(threshold_logit, threshold_linear)
 
-        return threshold
+    #     return threshold

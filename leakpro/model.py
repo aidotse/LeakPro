@@ -106,8 +106,8 @@ class PytorchModel(Model):
 
         # Add hooks to the layers (to access their value during a forward pass)
         self.intermediate_outputs = {}
-        for i, l in enumerate(list(self.model_obj._modules.keys())):
-            getattr(self.model_obj, l).register_forward_hook(self.__forward_hook(l))
+        for i, layer in enumerate(list(self.model_obj._modules.keys())):
+            getattr(self.model_obj, layer).register_forward_hook(self.__forward_hook(layer))
 
         # Create a second loss function, per point
         self.loss_fn_no_reduction = deepcopy(loss_fn)

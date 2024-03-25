@@ -4,7 +4,7 @@ from leakpro.mia_attacks.attacks.attack import AttackAbstract
 from leakpro.mia_attacks.attack_utils import AttackUtils
 from leakpro.signals.signal import ModelLoss
 from leakpro.dataset import get_dataset_subset
-from leakpro.metrics.attack_result import AttackResult, CombinedMetricResult
+from leakpro.metrics.attack_result import CombinedMetricResult
 
 
 class AttackP(AttackAbstract):
