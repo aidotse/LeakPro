@@ -1,18 +1,19 @@
 """Main script to run LEAKPRO on a target model."""
 
-import joblib
 import logging
-import numpy as np
-from pathlib import Path
 import random
 import time
+from pathlib import Path
+
+import joblib
+import numpy as np
 import torch
 import yaml
 
+import leakpro.train as util
 from leakpro import dataset, models
 from leakpro.mia_attacks.attack_scheduler import AttackScheduler
 from leakpro.reporting.utils import prepare_priavcy_risk_report
-import leakpro.train as util
 
 
 def setup_log(name: str, save_file: bool) -> logging.Logger:
@@ -51,8 +52,8 @@ def setup_log(name: str, save_file: bool) -> logging.Logger:
 if __name__ == "__main__":
 
     RETRAIN = True
-    #args = "./config/adult.yaml"  # noqa: ERA001
-    args = "./config/cifar10.yaml"
+    args = "./config/adult.yaml"  # noqa: ERA001
+    #args = "./config/cifar10.yaml" # noqa: ERA001
     with open(args, "rb") as f:
         configs = yaml.safe_load(f)
 
@@ -73,7 +74,7 @@ if __name__ == "__main__":
 
     # ------------------------------------------------
     # Create the population dataset
-    population = dataset.get_dataset(configs["data"]["dataset"], configs["data"]["data_dir"])
+    population = dataset.get_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
     N_population = len(population)
 
     # Create target training dataset and test dataset
@@ -118,7 +119,7 @@ if __name__ == "__main__":
     target_model_path = f"{log_dir}/model_0.pkl"
     with open(target_model_path, "rb") as f:
         if "adult" in configs["data"]["dataset"]:
-            target_model = models.NN(s
+            target_model = models.NN(
                 configs["train"]["inputs"], configs["train"]["outputs"]
             )  # TODO: read metadata to get the model
         elif "cifar10" in configs["data"]["dataset"]:

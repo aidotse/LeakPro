@@ -31,19 +31,14 @@ class AttackRMIA(AttackAbstract):
         self.gamma = 2.0 # threshold for the attack
         self.temperature = 2.0 # temperature for the softmax
 
-        if "f_attack_data_size" in configs:
-            self.f_attack_data_size = configs["audit"]["f_attack_data_size"]
-        else:
-            self.f_attack_data_size = (
-                0.3  # pick 10% of data to create histograms by default
-            )
+        self.f_attack_data_size = configs["audit"].get("f_attack_data_size", 0.3)
 
         self.signal = ModelLogits()
         self.epsilon = 1e-6
 
 
-    def softmax(self:Self, all_logits:np.ndarray, 
-                true_label_indices:np.ndarray, 
+    def softmax(self:Self, all_logits:np.ndarray,
+                true_label_indices:np.ndarray,
                 return_full_distribution:bool=False) -> np.ndarray:
         """Compute the softmax function.
 
@@ -51,7 +46,7 @@ class AttackRMIA(AttackAbstract):
         ----
             all_logits (np.ndarray): Logits for each class.
             true_label_indices (np.ndarray): Indices of the true labels.
-            return_full_distribution (bool, optional): Whether to return the full distribution or just the true class probabilities.
+            return_full_distribution (bool, optional): return the full distribution or just the true class probabilities.
 
         Returns:
         -------
@@ -76,8 +71,8 @@ class AttackRMIA(AttackAbstract):
 
         Signals are computed on the auxiliary model(s) and dataset.
         """
-        # compute the ratio of p(z|theta) (target model) to p(z)=sum_{theta'} p(z|theta') (shadow models) for all points in the attack dataset
-        # output from signal: # models x # data points x # classes
+        # compute the ratio of p(z|theta) (target model) to p(z)=sum_{theta'} p(z|theta') (shadow models)
+        # for all points in the attack dataset output from signal: # models x # data points x # classes
 
         # get the true label indices
         z_label_indices = np.array(self.attack_data.y)
@@ -128,7 +123,8 @@ class AttackRMIA(AttackAbstract):
         logits_shadow_models = self.signal(self.shadow_models, audit_data)
         # collect the softmax output of the correct class for each shadow model
         p_x_given_shadow_models = [self.softmax(np.array(x).reshape(1,*x.shape), x_label_indices) for x in logits_shadow_models]
-        # stack the softmax output of the correct class for each shadow model to dimension # models x # data points
+        # stack the softmax output of the correct class for each shadow model
+        # to dimension # models x # data points
         p_x_given_shadow_models = np.array(p_x_given_shadow_models).squeeze()
         # evaluate the marginal p_out(x) by averaging the output of the shadow models
         p_x_out = np.mean(p_x_given_shadow_models, axis=0) if len(self.shadow_models) > 1 else p_x_given_shadow_models.squeeze()

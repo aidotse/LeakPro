@@ -216,9 +216,9 @@ class AttackObjects:
         learning_rate = configs.get("learning_rate", 0.01)
         weight_decay = configs.get("weight_decay", 0)
         momentum = configs.get("momentum", 0)
-        self.logger(f"Load the optimizer {optimizer}: ", end=" ")
-        self.logger(f"Learning rate {learning_rate}", end=" ")
-        self.logger(f"Weight decay {weight_decay} ")
+        self.logger.info(f"Load the optimizer {optimizer}")
+        self.logger.info(f"Learning rate {learning_rate}")
+        self.logger.info(f"Weight decay {weight_decay}")
 
         if optimizer == "SGD":
             return SGD(model.parameters(),
@@ -292,11 +292,8 @@ class AttackObjects:
                 # Add the loss to the total loss
                 train_loss += loss.item()
 
-            self.logger.info(f"Epoch: {epoch_idx+1}/{epochs} |", end=" ")
-            self.logger.info(f"Train Loss: {train_loss/len(shadow_train_loader):.8f} ", end=" ")
-            self.logger.info(f"Train Acc: {float(train_acc)/len(shadow_train_loader.dataset):.8f} ", end=" ")
-
-            self.logger.info(f"One step uses {time.time() - start_time:.2f} seconds")
+            log_train_str = f"Epoch: {epoch_idx+1}/{epochs} | Train Loss: {train_loss/len(shadow_train_loader):.8f} | Train Acc: {float(train_acc)/len(shadow_train_loader.dataset):.8f} | One step uses {time.time() - start_time:.2f} seconds"  # noqa: E501
+            self.logger.info(log_train_str)
 
         # Move the model back to the CPU
         shadow_model.to("cpu")

@@ -1,4 +1,5 @@
-from typing import List
+"""Contains the AttackResult class, which stores the results of an attack."""
+from typing import Any, List, Self
 
 import numpy as np
 from sklearn.metrics import (
@@ -15,19 +16,17 @@ from sklearn.metrics import (
 
 
 class AttackResult:
-    """Contains results related to the performance of the attack.
-    """
+    """Contains results related to the performance of the attack."""
 
-    def __init__(
-        self,
+    def __init__(  # noqa: PLR0913
+        self:Self,
         predicted_labels: list,
         true_labels: list,
         predictions_proba: List[List[float]] = None,
-        signal_values=None,
+        signal_values:List[Any]=None,
         threshold: float = None,
-    ):
-        """Constructor.
-        Computes and stores the accuracy, ROC AUC score, and the confusion matrix for a metric.
+    ) -> None:
+        """Compute and stores the accuracy, ROC AUC score, and the confusion matrix for a metric.
 
         Args:
         ----
@@ -61,9 +60,8 @@ class AttackResult:
             y_true=true_labels, y_pred=predicted_labels
         ).ravel()
 
-    def __str__(self):
-        """Returns a string describing the metric result.
-        """
+    def __str__(self:Self) -> str:
+        """Return a string describing the metric result."""
         txt = [
             f'{" METRIC RESULT OBJECT ":=^48}',
             f"Accuracy          = {self.accuracy}",
@@ -75,19 +73,17 @@ class AttackResult:
 
 
 class CombinedMetricResult:
-    """Contains results related to the performance of the metric. It contains the results for multiple fpr.
-    """
+    """Contains results related to the performance of the metric. It contains the results for multiple fpr."""
 
-    def __init__(
-        self,
+    def __init__(  # noqa: PLR0913
+        self:Self,
         predicted_labels: list,
         true_labels: list,
-        predictions_proba=None,
-        signal_values=None,
+        predictions_proba:list=None,
+        signal_values:list=None,
         threshold: list = None,
-    ):
-        """Constructor.
-        Computes and stores the accuracy, ROC AUC score, and the confusion matrix for a metric.
+    )-> None:
+        """Compute and store the accuracy, ROC AUC score, and the confusion matrix for a metric.
 
         Args:
         ----
@@ -118,9 +114,8 @@ class CombinedMetricResult:
             self.fp / (np.sum(true_labels == 0)), self.tp / (np.sum(true_labels == 1))
         )
 
-    def __str__(self):
-        """Returns a string describing the metric result.
-        """
+    def __str__(self:Self) -> str:
+        """Return a string describing the metric result."""
         txt_list = []
         for idx in range(len(self.accuracy)):
             txt = [

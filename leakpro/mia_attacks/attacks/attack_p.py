@@ -1,3 +1,7 @@
+"""Module that contains the implementation of the attack P."""
+
+from typing import Self
+
 import numpy as np
 
 from leakpro.dataset import get_dataset_subset
@@ -8,9 +12,17 @@ from leakpro.signals.signal import ModelLoss
 
 
 class AttackP(AttackAbstract):
+    """Implementation of the P-attack."""
 
-    def __init__(self, attack_utils: AttackUtils, configs: dict):
+    def __init__(self:Self, attack_utils: AttackUtils, configs: dict) -> None:
+        """Initialize the AttackP class.
 
+        Args:
+        ----
+            attack_utils (AttackUtils): An instance of the AttackUtils class.
+            configs (dict): A dictionary containing the attack configurations.
+
+        """
         # Initializes the parent metric
         super().__init__(attack_utils)
 
@@ -23,10 +35,8 @@ class AttackP(AttackAbstract):
         self.signal = ModelLoss()
         self.hypothesis_test_func = attack_utils.linear_itp_threshold_func
 
-    def prepare_attack(self):
-        """Function to prepare data needed for running the metric on the target model and dataset, using signals computed
-        on the auxiliary model(s) and dataset.
-        """
+    def prepare_attack(self:Self) -> None:
+        """Prepare data needed for running the metric on the target model and dataset."""
         # sample dataset to compute histogram
         all_index = np.arange(self.population_size)
         attack_data_size = np.round(
@@ -41,8 +51,8 @@ class AttackP(AttackAbstract):
         # signals based on training dataset
         self.attack_signal = self.signal([self.target_model], [attack_data])[0]
 
-    def run_attack(self, fpr_tolerance_rate_list=None):
-        """Function to run the attack on the target model and dataset.
+    def run_attack(self:Self) -> CombinedMetricResult:
+        """Run the attack on the target model and dataset.
 
         Args:
         ----
@@ -55,10 +65,7 @@ class AttackP(AttackAbstract):
 
         """
         # map the threshold with the alpha
-        if fpr_tolerance_rate_list is not None:
-            self.quantiles = fpr_tolerance_rate_list
-        else:
-            self.quantiles = AttackUtils.default_quantile()
+        self.quantiles = AttackUtils.default_quantile()
         # obtain the threshold values based on the reference dataset
         thresholds = self.hypothesis_test_func(
             self.attack_signal, self.quantiles
@@ -97,15 +104,10 @@ class AttackP(AttackAbstract):
             [self.in_member_signals, self.out_member_signals]
         )
 
-        # compute the difference between the signals and the thresholds
-        # predictions_proba = np.hstack([member_signals, non_member_signals]) - thresholds
-
         # compute ROC, TP, TN etc
-        metric_result = CombinedMetricResult(
+        return CombinedMetricResult(
             predicted_labels=predictions,
             true_labels=true_labels,
             predictions_proba=None,
             signal_values=signal_values,
         )
-
-        return metric_result

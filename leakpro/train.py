@@ -100,9 +100,6 @@ def inference(
         # Calculating accuracy
         acc = float(acc) / len(loader.dataset)
 
-        # Move model back to CPU
-        model.to("cpu")
-
         # Return loss and accuracy
         return loss, acc
 
@@ -171,15 +168,14 @@ def train(  # noqa: PLR0913
             # Add the loss to the total loss
             train_loss += loss.item()
 
-        logger.info(f"Epoch: {epoch_idx+1}/{epochs} |")
-        logger.info(f"Train Loss: {train_loss/len(train_loader):.8f} ")
-        logger.info(f"Train Acc: {float(train_acc)/len(train_loader.dataset):.8f}")
+        # Log the training loss and accuracy
+        log_train_str = f"Epoch: {epoch_idx+1}/{epochs} | Train Loss: {train_loss/len(train_loader):.8f} | Train Acc: {float(train_acc)/len(train_loader.dataset):.8f} | One step uses {time.time() - start_time:.2f} seconds"  # noqa: E501
+        logger.info(log_train_str)
 
         test_loss, test_acc = inference(model, test_loader, device)
 
-        logger.info(f"Test Loss: {float(test_loss):.8f} ")
-        logger.info(f"Test Acc: {float(test_acc):.8f} ")
-        logger.info(f"One step uses {time.time() - start_time:.2f} seconds")
+        log_test_str = f"Epoch: {epoch_idx+1}/{epochs} | Test Loss: {test_loss:.8f} | Test Acc: {test_acc:.8f}"
+        logger.info(log_test_str)
 
     # Move the model back to the CPU
     model.to("cpu")

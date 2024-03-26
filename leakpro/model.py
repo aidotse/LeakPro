@@ -15,7 +15,7 @@ import torch
 class Model(ABC):
     """Interface to query a model without any assumption on how it is implemented."""
 
-    def __init__(self:Self, model_obj: torch.Module, loss_fn: torch.nn.modules.loss._Loss) -> None:
+    def __init__(self:Self, model_obj: torch.nn.Module, loss_fn: torch.nn.modules.loss._Loss) -> None:
         """Initialize the Model.
 
         Args:
@@ -102,7 +102,7 @@ class PytorchModel(Model):
     This particular class is to be used with pytorch models.
     """
 
-    def __init__(self:Self, model_obj:torch.Module, loss_fn:torch.nn.modules.loss._Loss)->None:
+    def __init__(self:Self, model_obj:torch.nn.Module, loss_fn:torch.nn.modules.loss._Loss)->None:
         """Initialize the PytorchModel.
 
         Args:
