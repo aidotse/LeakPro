@@ -1,5 +1,8 @@
+"""Module containing the Model class, an interface to query a model without any assumption on how it is implemented."""
+
 from abc import ABC, abstractmethod
 from copy import deepcopy
+from typing import Callable, List, Self
 
 import numpy as np
 import torch
@@ -10,11 +13,10 @@ import torch
 
 
 class Model(ABC):
-    """Interface to query a model without any assumption on how it is implemented.
-    """
+    """Interface to query a model without any assumption on how it is implemented."""
 
-    def __init__(self, model_obj, loss_fn):
-        """Constructor
+    def __init__(self:Self, model_obj: torch.Module, loss_fn: torch.nn.modules.loss._Loss) -> None:
+        """Initialize the Model.
 
         Args:
         ----
@@ -26,8 +28,8 @@ class Model(ABC):
         self.loss_fn = loss_fn
 
     @abstractmethod
-    def get_logits(self, batch_samples):
-        """Function to get the model output from a given input.
+    def get_logits(self:Self, batch_samples:np.ndarray) -> np.ndarray:
+        """Get the model output from a given input.
 
         Args:
         ----
@@ -41,8 +43,8 @@ class Model(ABC):
         pass
 
     @abstractmethod
-    def get_loss(self, batch_samples, batch_labels, per_point=True):
-        """Function to get the model loss on a given input and an expected output.
+    def get_loss(self:Self, batch_samples:np.ndarray, batch_labels: np.ndarray, per_point:bool=True) -> np.ndarray:
+        """Get the model loss on a given input and an expected output.
 
         Args:
         ----
@@ -58,9 +60,8 @@ class Model(ABC):
         pass
 
     @abstractmethod
-    def get_grad(self, batch_samples, batch_labels):
-        """Function to get the gradient of the model loss with respect to the model parameters, on a given input and an
-        expected output.
+    def get_grad(self:Self, batch_samples:np.ndarray, batch_labels:np.ndarray) -> np.ndarray:
+        """Get the gradient of the model loss with respect to the model parameters, given an input and an expected output.
 
         Args:
         ----
@@ -75,8 +76,11 @@ class Model(ABC):
         pass
 
     @abstractmethod
-    def get_intermediate_outputs(self, layers, batch_samples, forward_pass=True):
-        """Function to get the intermediate output of layers (a.k.a. features), on a given input.
+    def get_intermediate_outputs(self:Self,
+                                 layers:List[int],
+                                 batch_samples:np.ndarray,
+                                 forward_pass: bool=True) -> List[np.ndarray]:
+        """Get the intermediate output of layers (a.k.a. features), on a given input.
 
         Args:
         ----
@@ -92,19 +96,14 @@ class Model(ABC):
         """
         pass
 
-
-########################################################################################################################
-# PYTORCH_MODEL CLASS
-########################################################################################################################
-
-
 class PytorchModel(Model):
     """Inherits from the Model class, an interface to query a model without any assumption on how it is implemented.
+
     This particular class is to be used with pytorch models.
     """
 
-    def __init__(self, model_obj, loss_fn):
-        """Constructor
+    def __init__(self:Self, model_obj:torch.Module, loss_fn:torch.nn.modules.loss._Loss)->None:
+        """Initialize the PytorchModel.
 
         Args:
         ----
@@ -120,15 +119,15 @@ class PytorchModel(Model):
 
         # Add hooks to the layers (to access their value during a forward pass)
         self.intermediate_outputs = {}
-        for i, layer in enumerate(list(self.model_obj._modules.keys())):
+        for _, layer in enumerate(list(self.model_obj._modules.keys())):
             getattr(self.model_obj, layer).register_forward_hook(self.__forward_hook(layer))
 
         # Create a second loss function, per point
         self.loss_fn_no_reduction = deepcopy(loss_fn)
         self.loss_fn_no_reduction.reduction = "none"
 
-    def get_logits(self, batch_samples):
-        """Function to get the model output from a given input.
+    def get_logits(self:Self, batch_samples:np.ndarray)->np.ndarray:
+        """Get the model output from a given input.
 
         Args:
         ----
@@ -144,8 +143,8 @@ class PytorchModel(Model):
         )
         return self.model_obj(batch_samples_tensor).detach().numpy()
 
-    def get_loss(self, batch_samples, batch_labels, per_point=True):
-        """Function to get the model loss on a given input and an expected output.
+    def get_loss(self:Self, batch_samples:np.ndarray, batch_labels:np.ndarray, per_point:bool=True)->np.ndarray:
+        """Get the model loss on a given input and an expected output.
 
         Args:
         ----
@@ -172,15 +171,14 @@ class PytorchModel(Model):
                 .detach()
                 .numpy()
             )
-        else:
-            return self.loss_fn(
-                self.model_obj(torch.tensor(batch_samples_tensor)),
-                torch.tensor(batch_labels_tensor),
-            ).item()
+        return self.loss_fn(
+            self.model_obj(torch.tensor(batch_samples_tensor)),
+            torch.tensor(batch_labels_tensor),
+        ).item()
 
-    def get_grad(self, batch_samples, batch_labels):
-        """Function to get the gradient of the model loss with respect to the model parameters, on a given input and an
-        expected output.
+
+    def get_grad(self:Self, batch_samples:np.ndarray, batch_labels:np.ndarray)->np.ndarray:
+        """Get the gradient of the model loss with respect to the model parameters, given an input and expected output.
 
         Args:
         ----
@@ -198,8 +196,11 @@ class PytorchModel(Model):
         loss.backward()
         return [p.grad.numpy() for p in self.model_obj.parameters()]
 
-    def get_intermediate_outputs(self, layers, batch_samples, forward_pass=True):
-        """Function to get the intermediate output of layers (a.k.a. features), on a given input.
+    def get_intermediate_outputs(self:Self,
+                                 layers:List[int],
+                                 batch_samples:np.ndarray,
+                                 forward_pass:bool=True) -> List[np.ndarray]:
+        """Get the intermediate output of layers (a.k.a. features), on a given input.
 
         Args:
         ----
@@ -226,7 +227,7 @@ class PytorchModel(Model):
             for layer_name in layer_names
         ]
 
-    def __forward_hook(self, layer_name):
+    def __forward_hook(self:Self, layer_name: str) -> Callable:
         """Private helper function to access outputs of intermediate layers.
 
         Args:
@@ -239,7 +240,7 @@ class PytorchModel(Model):
 
         """
 
-        def hook(module, input, output):
+        def hook(_: torch.Tensor, __: torch.Tensor, output: torch.Tensor) -> None:
             self.intermediate_outputs[layer_name] = output
 
         return hook

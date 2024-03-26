@@ -1,4 +1,8 @@
+"""Module for the AttackObjects class."""
+
+import logging
 import time
+from typing import List, Self
 
 import numpy as np
 import torch
@@ -6,23 +10,43 @@ from torch.nn import CrossEntropyLoss, Module
 from torch.optim import SGD, Adam, AdamW
 from torch.utils.data import DataLoader, Subset
 
-from ..dataset import Dataset
-from ..model import Model, PytorchModel
+from leakpro.dataset import Dataset
+from leakpro.model import Model, PytorchModel
 
 
 class AttackObjects:
-    def __init__(
-        self,
+    """Class representing the attack objects for the MIA attacks."""
+
+    def __init__(  # noqa: PLR0913
+        self:Self,
         population: Dataset,
-        train_test_dataset,
+        train_test_dataset: dict,
         target_model: Model,
         configs: dict,
-    ):
+        logger: logging.Logger = None
+    ) -> None:
+        """Initialize the AttackObjects class.
+
+        Parameters
+        ----------
+        population : Dataset
+            The population.
+        train_test_dataset : dict
+            The train test dataset.
+        target_model : Model
+            The target model.
+        configs : dict
+            The configurations.
+        logger : logging.Logger, optional
+            The logger, by default None.
+
+        """
         self._population = population
         self._population_size = len(population)
         self._target_model = PytorchModel(target_model, CrossEntropyLoss())
         self._train_test_dataset = train_test_dataset
         self._num_shadow_models = configs["audit"]["num_shadow_models"]
+        self.logger = logger
 
         self._audit_dataset = {
             # Assuming train_indices and test_indices are arrays of indices, not the actual data
@@ -49,10 +73,12 @@ class AttackObjects:
 
             f_shadow_data = configs["audit"]["f_attack_data_size"]
 
-            for k in range(self._num_shadow_models):
+            for _ in range(self._num_shadow_models):
                 # Create shadow datasets by sampling from the population
                 shadow_data_indices = self.create_shadow_dataset(f_shadow_data)
-                shadow_train_loader = DataLoader(Subset(population, shadow_data_indices), batch_size=configs["train"]["batch_size"], shuffle=True,)
+                shadow_train_loader = DataLoader(Subset(population, shadow_data_indices),
+                                                 batch_size=configs["train"]["batch_size"],
+                                                 shuffle=True,)
                 self._shadow_train_indices.append(shadow_data_indices)
 
                 # Initialize a shadow model
@@ -70,43 +96,100 @@ class AttackObjects:
 
 
     @property
-    def shadow_models(self):
+    def shadow_models(self: Self) -> List[Model]:
+        """Return the shadow models.
+
+        Returns
+        -------
+        List[Model]: The shadow models.
+
+        """
         return self._shadow_models
 
     @property
-    def shadow_train_indices(self):
+    def shadow_train_indices(self:Self) -> List[int]:
+        """Return the indices of the shadow training data.
+
+        Returns
+        -------
+        List[int]: The indices of the shadow training data.
+
+        """
         return self._shadow_train_indices
 
     @property
-    def population(self):
+    def population(self:Self) -> Dataset:
+        """Return the population.
+
+        Returns
+        -------
+        Dataset: The population.
+
+        """
         return self._population
 
     @property
-    def population_size(self):
+    def population_size(self:Self) -> int:
+        """Return the size of the population.
+
+        Returns
+        -------
+        int: The size of the population.
+
+        """
         return self._population_size
 
     @property
-    def target_model(self):
+    def target_model(self:Self) -> Model:
+        """Return the target model.
+
+        Returns
+        -------
+        Model: The target model.
+
+        """
         return self._target_model
 
     @property
-    def train_test_dataset(self):
+    def train_test_dataset(self:Self) -> dict:
+        """Return the train test dataset.
+
+        Returns
+        -------
+            dict: The train test dataset.
+
+        """
         return self._train_test_dataset
 
     @property
-    def audit_dataset(self):
+    def audit_dataset(self:Self) -> dict:
+        """Return the audit dataset.
+
+        Returns
+        -------
+            dict: The audit dataset.
+
+        """
         return self._audit_dataset
 
-    def create_shadow_dataset(self, f_shadow_data: float, include_in_members:bool=False):
+    def create_shadow_dataset(self:Self, f_shadow_data: float, include_in_members:bool=False) -> np.ndarray:
+        """Create a shadow dataset by sampling from the population.
 
+        Args:
+        ----
+            f_shadow_data (float): Fraction of shadow data to be sampled.
+            include_in_members (bool, optional): Include in-members in the shadow dataset. Defaults to False.
+
+        Returns:
+        -------
+            np.ndarray: Array of indices representing the shadow dataset.
+
+        """
         shadow_data_size = int(f_shadow_data * self.population_size)
         all_index = np.arange(self.population_size)
 
         # Remove indices corresponding to training data
-        if include_in_members is False:
-            used_index = self.train_test_dataset["train_indices"]
-        else:
-            used_index = []
+        used_index = self.train_test_dataset["train_indices"] if include_in_members is False else []
 
         # pick allowed indices
         selected_index = np.setdiff1d(all_index, used_index, assume_unique=True)
@@ -116,14 +199,26 @@ class AttackObjects:
             raise ValueError("Not enough remaining data points.")
         return selected_index
 
-    def get_optimizer(self, model: Module, configs: dict):
+    def get_optimizer(self:Self, model: Module, configs: dict) -> torch.optim.Optimizer:
+        """Get the optimizer for training the model.
+
+        Args:
+        ----
+            model (nn.Module): Model for training.
+            configs (dict): Configurations for training.
+
+        Returns:
+        -------
+            Optimizer: The optimizer for training the model.
+
+        """
         optimizer = configs.get("optimizer", "SGD")
         learning_rate = configs.get("learning_rate", 0.01)
         weight_decay = configs.get("weight_decay", 0)
         momentum = configs.get("momentum", 0)
-        print(f"Load the optimizer {optimizer}: ", end=" ")
-        print(f"Learning rate {learning_rate}", end=" ")
-        print(f"Weight decay {weight_decay} ")
+        self.logger(f"Load the optimizer {optimizer}: ", end=" ")
+        self.logger(f"Learning rate {learning_rate}", end=" ")
+        self.logger(f"Weight decay {weight_decay} ")
 
         if optimizer == "SGD":
             return SGD(model.parameters(),
@@ -131,22 +226,23 @@ class AttackObjects:
                 weight_decay=weight_decay,
                 momentum=momentum,
             )
-        elif optimizer == "Adam":
+        if optimizer == "Adam":
             return Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-        elif optimizer == "AdamW":
+        if optimizer == "AdamW":
             return AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
-        else:
-            raise NotImplementedError(
-                f"Optimizer {optimizer} has not been implemented. Please choose from SGD or Adam"
-            )
+        raise NotImplementedError(
+            f"Optimizer {optimizer} has not been implemented. Please choose from SGD or Adam"
+        )
 
 
-    def train_shadow_model(self, shadow_model: Module, shadow_train_loader: DataLoader, shadow_test_loader: DataLoader = None, configs: dict = None):
-        """Train the model based on on the train loader
+    def train_shadow_model(self:Self, shadow_model: Module, shadow_train_loader: DataLoader, configs: dict = None) -> Module:
+        """Train the model based on on the train loader.
+
         Args:
-            model(nn.Module): Model for evaluation.
-            train_loader(torch.utils.data.DataLoader): Data loader for training.
+        ----
+            shadow_model(nn.Module): Model for evaluation.
+            shadow_train_loader(torch.utils.data.DataLoader): Data loader for training.
             configs (dict): Configurations for training.
 
         Return:
@@ -174,11 +270,11 @@ class AttackObjects:
             shadow_model.train()
             for data, target in shadow_train_loader:
                 # Move data to the device
-                data, target = data.to(device, non_blocking=True), target.to(
+                data, target = data.to(device, non_blocking=True), target.to(  # noqa: PLW2901
                     device, non_blocking=True
                 )
                 # Cast target to long tensor
-                target = target.long()
+                target = target.long()  # noqa: PLW2901
 
                 # Set the gradients to zero
                 optimizer.zero_grad(set_to_none=True)
@@ -196,20 +292,14 @@ class AttackObjects:
                 # Add the loss to the total loss
                 train_loss += loss.item()
 
-            print(f"Epoch: {epoch_idx+1}/{epochs} |", end=" ")
-            print(f"Train Loss: {train_loss/len(shadow_train_loader):.8f} ", end=" ")
-            print(f"Train Acc: {float(train_acc)/len(shadow_train_loader.dataset):.8f} ", end=" ")
+            self.logger.info(f"Epoch: {epoch_idx+1}/{epochs} |", end=" ")
+            self.logger.info(f"Train Loss: {train_loss/len(shadow_train_loader):.8f} ", end=" ")
+            self.logger.info(f"Train Acc: {float(train_acc)/len(shadow_train_loader.dataset):.8f} ", end=" ")
 
-            #test_loss, test_acc = inference(shadow_model, shadow_test_loader, device)
-
-           #  print(f"Test Loss: {float(test_loss):.8f} ", end=" ")
-           # print(f"Test Acc: {float(test_acc):.8f} ", end=" ")
-            print(f"One step uses {time.time() - start_time:.2f} seconds")
+            self.logger.info(f"One step uses {time.time() - start_time:.2f} seconds")
 
         # Move the model back to the CPU
         shadow_model.to("cpu")
-
-        # save_model_and_metadata(shadow_model, configs, train_acc, test_acc, train_loss, test_loss)
 
         # Return the model
         return shadow_model

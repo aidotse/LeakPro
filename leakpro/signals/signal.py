@@ -1,11 +1,13 @@
+"""Signal class, which is an abstract class representing any type of signal that can be obtained."""
+
 from abc import ABC, abstractmethod
-from typing import List, Tuple
+from typing import List, Self, Tuple
 
 import numpy as np
 from torch.utils.data import DataLoader
 
-from ..dataset import Dataset
-from ..model import Model
+from leakpro.dataset import Dataset
+from leakpro.model import Model
 
 ########################################################################################################################
 # SIGNAL CLASS
@@ -13,12 +15,11 @@ from ..model import Model
 
 
 class Signal(ABC):
-    """Abstract class, representing any type of signal that can be obtained from a Model and/or a Dataset.
-    """
+    """Abstract class, representing any type of signal that can be obtained from a Model and/or a Dataset."""
 
     @abstractmethod
-    def __call__(
-        self,
+    def __call__(  # noqa: ANN204
+        self: Self,
         models: List[Model],
         datasets: List[Dataset],
         extra: dict,
@@ -48,70 +49,21 @@ class Signal(ABC):
 
 
 ########################################################################################################################
-# DATASET_SAMPLE CLASS
-########################################################################################################################
-class DatasetSample(Signal):
-    """Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a
-    Dataset.
-    This particular class is used to get a given point from the Dataset.
-    """
-
-    def __call__(
-        self,
-        models: List[Model],
-        datasets: List[Dataset],
-        model_to_split_mapping: List[Tuple[int, str, str, str]],
-        extra: dict,
-    ):
-        """Built-in call method.
-
-        Args:
-        ----
-            models: List of models that can be queried.
-            datasets: List of datasets that can be queried.
-            model_to_split_mapping: List of tuples, indicating how each model should query the dataset.
-                More specifically, for model #i:
-                model_to_split_mapping[i][0] contains the index of the dataset in the list,
-                model_to_split_mapping[i][1] contains the name of the split,
-                model_to_split_mapping[i][2] contains the name of the input feature,
-                model_to_split_mapping[i][3] contains the name of the output feature.
-                This can also be provided once and for all at the instantiation of InformationSource, through the
-                default_model_to_split_mapping argument.
-            extra: Dictionary containing any additional parameter that should be passed to the signal object.
-
-        Returns:
-        -------
-            The sample point from the dataset.
-
-        """
-        (
-            dataset_index,
-            split_name,
-            input_feature,
-            output_feature,
-        ) = model_to_split_mapping[extra["model_num"]]
-        x = datasets[dataset_index].get_feature(split_name, input_feature)[
-            extra["point_num"]
-        ]
-        return x
-
-
-########################################################################################################################
 # MODEL_LOGIT CLASS
 ########################################################################################################################
 
 
 class ModelLogits(Signal):
     """Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a Dataset.
+
     This particular class is used to get the output of a model.
     """
 
     def __call__(
-        self,
+        self: Self,
         models: List[Model],
         datasets: Dataset,
-        extra: dict=None,
-    ):
+    ) -> List[np.ndarray]:
         """Built-in call method.
 
         Args:
@@ -150,16 +102,16 @@ class ModelLogits(Signal):
 
 class ModelNegativeRescaledLogits(Signal):
     """Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a Dataset.
+
     This particular class is used to get the output of a model.
     """
 
     def __call__(
-        self,
+        self:Self,
         models: List[Model],
         datasets: List[Dataset],
         model_to_split_mapping: List[Tuple[int, str, str, str]],
-        extra: dict,
-    ):
+    ) -> List[np.ndarray]:
         """Built-in call method.
 
         Args:
@@ -193,10 +145,7 @@ class ModelNegativeRescaledLogits(Signal):
             ) = model_to_split_mapping[k]
             x = datasets[dataset_index].get_feature(split_name, input_feature)
             # Check if output feature has been provided, else pass None
-            if output_feature is not None:
-                y = datasets[dataset_index].get_feature(split_name, output_feature)
-            else:
-                y = None
+            y = datasets[dataset_index].get_feature(split_name, output_feature) if output_feature is not None else None
 
             results.append(-model.get_rescaled_logits(x, y))
         return results
@@ -208,18 +157,18 @@ class ModelNegativeRescaledLogits(Signal):
 
 
 class ModelIntermediateOutput(Signal):
-    """Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a
-    Dataset.
+    """Used to represent any type of signal that can be obtained from a Model and/or a Dataset.
+
     This particular class is used to get the value of an intermediate layer of model.
     """
 
     def __call__(
-        self,
+        self:Self,
         models: List[Model],
         datasets: List[Dataset],
         model_to_split_mapping: List[Tuple[int, str, str, str]],
         extra: dict,
-    ):
+    ) -> List[np.ndarray]:
         """Built-in call method.
 
         Args:
@@ -266,17 +215,16 @@ class ModelIntermediateOutput(Signal):
 
 
 class ModelLoss(Signal):
-    """Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a
-    Dataset.
+    """Used to represent any type of signal that can be obtained from a Model and/or a Dataset.
+
     This particular class is used to get the loss of a model.
     """
 
     def __call__(
-        self,
+        self:Self,
         models: List[Model],
         datasets: List[Dataset],
-        extra: dict = None,
-    ):
+    ) -> List[np.ndarray]:
         """Built-in call method.
 
         Args:
@@ -313,18 +261,17 @@ class ModelLoss(Signal):
 # MODEL_GRADIENT CLASS
 ########################################################################################################################
 class ModelGradient(Signal):
-    """Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a
-    Dataset.
+    """Used to represent any type of signal that can be obtained from a Model and/or a Dataset.
+
     This particular class is used to get the gradient of a model.
     """
 
     def __call__(
-        self,
+        self:Self,
         models: List[Model],
         datasets: List[Dataset],
         model_to_split_mapping: List[Tuple[int, str, str, str]],
-        extra: dict,
-    ):
+    ) -> List[np.ndarray]:
         """Built-in call method.
 
         Args:
@@ -368,18 +315,17 @@ class ModelGradient(Signal):
 
 
 class GroupInfo(Signal):
-    """Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a
-    Dataset.
+    """Used to represent any type of signal that can be obtained from a Model and/or a Dataset.
+
     This particular class is used to get the group membership of data records.
     """
 
     def __call__(
-        self,
+        self:Self,
         models: List[Model],
         datasets: List[Dataset],
         model_to_split_mapping: List[Tuple[int, str, str, str]],
-        extra: dict,
-    ):
+    ) -> List[np.ndarray]:
         """Built-in call method.
 
         Args:
@@ -410,18 +356,17 @@ class GroupInfo(Signal):
 
 
 class ModelGradientNorm(Signal):
-    """Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a
-    Dataset.
+    """sed to represent any type of signal that can be obtained from a Model and/or a Dataset.
+
     This particular class is used to get the gradient norm of a model.
     """
 
     def __call__(
-        self,
+        self:Self,
         models: List[Model],
         datasets: List[Dataset],
         model_to_split_mapping: List[Tuple[int, str, str, str]],
-        extra: dict,
-    ):
+    ) -> List[np.ndarray]:
         """Built-in call method.
 
         Args:

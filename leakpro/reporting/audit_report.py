@@ -1,7 +1,8 @@
+"""Module containing classes to generate reports from metric results."""
+import datetime
 import os
 import subprocess
 from abc import ABC, abstractmethod
-from datetime import date
 from typing import Dict, List, Tuple, Union
 
 import jinja2
@@ -11,7 +12,7 @@ import pandas as pd
 import seaborn as sn
 from scipy import interpolate
 
-from ..metrics.attack_result import AttackResult, CombinedMetricResult
+from leakpro.metrics.attack_result import AttackResult, CombinedMetricResult
 
 ########################################################################################################################
 # GLOBAL SETTINGS
@@ -31,7 +32,7 @@ latex_jinja_env = jinja2.Environment(
     line_statement_prefix="%%",
     line_comment_prefix="%#",
     trim_blocks=True,
-    autoescape=False,
+    autoescape=True,
     loader=jinja2.FileSystemLoader(os.path.abspath(".")),
 )
 
@@ -54,19 +55,19 @@ EXPLANATIONS = {
     "figure": {
         "roc_curve": {
             "name": "ROC curve",
-            "details": "shows the ROC (Receiver Operating Characteristic) curve, a graph illustrating the performance of a classification model at various decision thresholds. The AUC (Area Under the Curve), represented in blue, is a threshold-independant measure of the classifier performance.\n\nA higher AUC is an indicator of a system vulnerable to the chosen metric. For reference, a random classifier yields an AUC of 0.5, while a perfect classifier yields an AUC of 1.0",
+            "details": "shows the ROC (Receiver Operating Characteristic) curve, a graph illustrating the performance of a classification model at various decision thresholds. The AUC (Area Under the Curve), represented in blue, is a threshold-independant measure of the classifier performance.\n\nA higher AUC is an indicator of a system vulnerable to the chosen metric. For reference, a random classifier yields an AUC of 0.5, while a perfect classifier yields an AUC of 1.0",  # noqa: E501
         },
         "confusion_matrix": {
             "name": "Confusion matrix",
-            "details": "shows the confusion matrix, a graph illustrating the performance of a classification model for a specific decision threshold.\n\nHigher values on the top-left to bottom-right diagonal is an indicator of a system vulnerable to the chosen metric, while higher values on the top-right to bottom-left diagonal is an indicator of a system less vulnerable to the chosen metric.",
+            "details": "shows the confusion matrix, a graph illustrating the performance of a classification model for a specific decision threshold.\n\nHigher values on the top-left to bottom-right diagonal is an indicator of a system vulnerable to the chosen metric, while higher values on the top-right to bottom-left diagonal is an indicator of a system less vulnerable to the chosen metric.",  # noqa: E501
         },
         "signal_histogram": {
             "name": "Signal histogram",
-            "details": "shows the histogram of the signal used by the chosen metric, on both members and non-member samples.\n\nA clear separation between the two groups is an indicator of a system vulnerable to the chosen metric.",
+            "details": "shows the histogram of the signal used by the chosen metric, on both members and non-member samples.\n\nA clear separation between the two groups is an indicator of a system vulnerable to the chosen metric.",  # noqa: E501
         },
         "vulnerable_points": {
             "name": "Vulnerable points",
-            "details": "shows points that are most vulnerable to the chosen metric.\n\nThe score depends on the chosen metric, but is always between 0 and 1, with 0 meaning low vulnerability and 1 high vulnerability.",
+            "details": "shows points that are most vulnerable to the chosen metric.\n\nThe score depends on the chosen metric, but is always between 0 and 1, with 0 meaning low vulnerability and 1 high vulnerability.",  # noqa: E501
         },
     },
 }
@@ -77,8 +78,7 @@ EXPLANATIONS = {
 
 
 class AuditReport(ABC):
-    """An abstract class to display and/or save some elements of a metric result object.
-    """
+    """An abstract class to display and/or save some elements of a metric result object."""
 
     @staticmethod
     @abstractmethod
@@ -86,7 +86,7 @@ class AuditReport(ABC):
         metric_result: Union[
             AttackResult, List[AttackResult], dict, CombinedMetricResult
         ]
-    ):
+    ) -> None:
         """Core function of the AuditReport class that actually generates the report.
 
         Args:
@@ -103,8 +103,9 @@ class AuditReport(ABC):
 
 
 class ROCCurveReport(AuditReport):
-    """Inherits from the AuditReport class, an interface class to display and/or save some elements of a metric result
-    object. This particular class is used to generate a ROC (Receiver Operating Characteristic) curve.
+    """An interface class to display and/or save some elements of a metric result object.
+
+    This particular class is used to generate a ROC (Receiver Operating Characteristic) curve.
     """
 
     @staticmethod
@@ -143,8 +144,8 @@ class ROCCurveReport(AuditReport):
         show: bool = False,
         save: bool = True,
         filename: str = "roc_curve.jpg",
-        configs: dict = {},
-    ):
+        configs: dict = None,  # noqa: ARG004
+    ) -> None:
         """Core function of the AuditReport class that actually generates the report.
 
         Args:
@@ -154,6 +155,7 @@ class ROCCurveReport(AuditReport):
             show: Boolean specifying if the plot should be displayed on screen.
             save: Boolean specifying if the plot should be saved as a file.
             filename: File name to be used if the plot is saved as a file.
+            configs: Dictionary containing the configuration of the audit.
 
         """
         # Check if it is the combined report:
@@ -195,13 +197,6 @@ class ROCCurveReport(AuditReport):
         # Gets metric ID
         # TODO: add metric ID to the CombinedMetricResult class
         metric_id = "population_metric"
-        # if isinstance(metric_result, list):
-        #     if isinstance(metric_result[0], list):
-        #         metric_id = metric_result[0][0].metric_id
-        #     else:
-        #         metric_id = metric_result[0].metric_id
-        # else:
-        #     metric_id = metric_result.metric_id
 
         # Generate plot
         range01 = np.linspace(0, 1)
@@ -222,13 +217,12 @@ class ROCCurveReport(AuditReport):
             f"AUC = {roc_auc:.03f}",
             horizontalalignment="center",
             verticalalignment="center",
-            bbox=dict(facecolor="white", alpha=0.5),
+            bbox={"facecolor": "white", "alpha": 0.5},
         )
         if save:
             plt.savefig(fname=filename, dpi=1000)
         if show:
             plt.show()
-        print(f"AUC = {roc_auc:.03f}")
         plt.clf()
 
 
@@ -238,8 +232,9 @@ class ROCCurveReport(AuditReport):
 
 
 class ConfusionMatrixReport(AuditReport):
-    """Inherits from the AuditReport class, an interface class to display and/or save some elements of a metric result
-    object. This particular class is used to generate a confusion matrix.
+    """An interface class to display and/or save some elements of a metric result object.
+
+    This particular class is used to generate a confusion matrix.
     """
 
     @staticmethod
@@ -248,7 +243,7 @@ class ConfusionMatrixReport(AuditReport):
         show: bool = False,
         save: bool = True,
         filename: str = "confusion_matrix.jpg",
-    ):
+    ) -> None:
         """Core function of the AuditReport class that actually generates the report.
 
         Args:
@@ -260,7 +255,9 @@ class ConfusionMatrixReport(AuditReport):
             filename: File name to be used if the plot is saved as a file.
 
         """
-        assert isinstance(metric_result, AttackResult)
+        if not isinstance(metric_result, AttackResult):
+            raise ValueError("metric_result must be an instance of AttackResult"
+                             )
         cm = np.array(
             [
                 [metric_result.tn, metric_result.fp],
@@ -288,8 +285,9 @@ class ConfusionMatrixReport(AuditReport):
 
 
 class SignalHistogramReport(AuditReport):
-    """Inherits from the AuditReport class, an interface class to display and/or save some elements of a metric result
-    object. This particular class is used to generate a histogram of the signal values.
+    """An interface class to display and/or save some elements of a metric result object.
+
+    This particular class is used to generate a histogram of the signal values.
     """
 
     @staticmethod
@@ -298,7 +296,7 @@ class SignalHistogramReport(AuditReport):
         show: bool = False,
         save: bool = True,
         filename: str = "signal_histogram.jpg",
-    ):
+    ) -> None:
         """Core function of the AuditReport class that actually generates the report.
 
         Args:
@@ -357,19 +355,20 @@ class SignalHistogramReport(AuditReport):
 
 
 class VulnerablePointsReport(AuditReport):
-    """Inherits from the AuditReport class, an interface class to display and/or save some elements of a metric result
-    object. This particular class is used to identify the most vulnerable points.
+    """An interface class to display and/or save some elements of a metric result object.
+
+    This particular class is used to identify the most vulnerable points.
     """
 
     @staticmethod
-    def generate_report(
+    def generate_report(  # noqa: PLR0913
         metric_results: List[AttackResult],
         number_of_points: int = 10,
         save_tex: bool = False,
         filename: str = "vulnerable_points.tex",
         return_raw_values: bool = True,
         point_type: str = "any",
-    ):
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """Core function of the AuditReport class that actually generates the report.
 
         Args:
@@ -426,21 +425,10 @@ class VulnerablePointsReport(AuditReport):
         # Map indices stored in the metric_result object to indices in the training set
         indices_to_train_indices = []
         counter = 0
-        for k, v in enumerate(metric_results[0].true_labels):
+        for _, v in enumerate(metric_results[0].true_labels):
             indices_to_train_indices.append(counter)
             counter += v
         indices = np.array(indices_to_train_indices)[np.array(indices)]
-
-        # If points are images and we are creating a LaTex file, then we read the information source to create image
-        # files from the vulnerable
-        # if save_tex and point_type == "image":
-        #     for k, point in enumerate(indices):
-        #         x = target_info_source.get_signal(
-        #             signal=DatasetSample(),
-        #             model_to_split_mapping=target_model_to_train_split_mapping,
-        #             extra={"model_num": 0, "point_num": point},
-        #         )
-        #         Image.fromarray((x * 255).astype("uint8")).save(f"point{k:03d}.jpg")
 
         # If we are creating a LaTex
         if save_tex:
@@ -469,6 +457,7 @@ class VulnerablePointsReport(AuditReport):
         # If we required the values to be returned
         if return_raw_values:
             return indices, scores
+        return None
 
 
 ########################################################################################################################
@@ -477,23 +466,24 @@ class VulnerablePointsReport(AuditReport):
 
 
 class PDFReport(AuditReport):
-    """Inherits from the AuditReport class, an interface class to display and/or save some elements of a metric result
-    object. This particular class is used to generate a user-friendly report, with multiple plots and some explanations.
+    """An interface class to display and/or save some elements of a metric result object.
+
+    This particular class is used to generate a user-friendly report, with multiple plots and some explanations.
     """
 
     @staticmethod
-    def generate_report(
+    def generate_report(  # noqa: PLR0913, D417
         metric_results: Dict[
             str, Union[AttackResult, List[AttackResult], List[List[AttackResult]]]
         ],
         figures_dict: dict,
         system_name: str,
         call_pdflatex: bool = True,
-        show: bool = False,
-        save: bool = True,
+        show: bool = False,  # noqa: ARG004
+        save: bool = True,  # noqa: ARG004
         filename_no_extension: str = "report",
         point_type: str = "any",
-    ):
+    ) -> None:
         """Core function of the AuditReport class that actually generates the report.
 
         Args:
@@ -572,7 +562,7 @@ class PDFReport(AuditReport):
             image_folder=os.path.abspath("."),
             name=system_name,
             tool_version="1.0",
-            report_date=date.today().strftime("%b-%d-%Y"),
+            report_date=datetime.datetime.now().date().strftime("%b-%d-%Y"),  # noqa: DTZ005
             explanations=EXPLANATIONS,
             figures_dict=figures_dict,
             files_dict=files_dict,
@@ -582,40 +572,40 @@ class PDFReport(AuditReport):
         with open(f"{filename_no_extension}.tex", "w") as f:
             f.write(latex_content)
 
-        print(f'LaTex file created:\t{os.path.abspath(f"{filename_no_extension}.tex")}')
+        print(f'LaTex file created:\t{os.path.abspath(f"{filename_no_extension}.tex")}')  # noqa: T201
 
         if call_pdflatex:
             # Compile the .tex file to a .pdf file. Several rounds are required to get the references (to papers, to
             # page numbers, and to figure numbers)
 
             process = subprocess.Popen(
-                ["pdflatex", os.path.abspath(f"{filename_no_extension}.tex")],
+                ["pdflatex", os.path.abspath(f"{filename_no_extension}.tex")],  # noqa: S607, S603
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
             stdout, stderr = process.communicate()
 
             process = subprocess.Popen(
-                ["biber", os.path.abspath(f"{filename_no_extension}")],
+                ["biber", os.path.abspath(f"{filename_no_extension}")], # noqa: S607, S603
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
             stdout, stderr = process.communicate()
 
             process = subprocess.Popen(
-                ["pdflatex", os.path.abspath(f"{filename_no_extension}.tex")],
+                ["pdflatex", os.path.abspath(f"{filename_no_extension}.tex")], # noqa: S607, S603
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
             stdout, stderr = process.communicate()
 
             process = subprocess.Popen(
-                ["pdflatex", os.path.abspath(f"{filename_no_extension}.tex")],
+                ["pdflatex", os.path.abspath(f"{filename_no_extension}.tex")], # noqa: S607, S603
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
             stdout, stderr = process.communicate()
 
-            print(
+            print(  # noqa: T201
                 f'PDF file created:\t{os.path.abspath(f"{filename_no_extension}.pdf")}'
             )

@@ -1,3 +1,4 @@
+"""Utility functions for generating privacy risk report."""
 from typing import List
 
 from leakpro.reporting import audit_report
@@ -12,8 +13,8 @@ def prepare_priavcy_risk_report(
     audit_results: List,
     configs: dict,
     save_path: str = None,
-):
-    """Generate privacy risk report based on the auditing report
+) -> None:
+    """Generate privacy risk report based on the auditing report.
 
     Args:
     ----
@@ -48,13 +49,6 @@ def prepare_priavcy_risk_report(
                 save=True,
                 filename=f"{save_path}/Histogram.png",
             )
-            # VulnerablePointsReport.generate_report(
-            #     metric_results=audit_results[0],
-            #     inference_game_type=InferenceGame.PRIVACY_LOSS_MODEL,
-            #     target_info_source=target_info_source,
-            #     target_model_to_train_split_mapping=target_model_to_train_split_mapping,
-            #     filename = f"{save_path}/VulnerablePoints.png",
-            # )
         else:
             raise ValueError(
                 f"{len(audit_results)} results are not enough for {configs['privacy_game']})"

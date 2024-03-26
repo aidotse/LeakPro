@@ -19,7 +19,7 @@ class AttackScheduler:
         self.attacks = []
 
         attack_objects = AttackObjects(
-            population, train_test_dataset, target_model, configs
+            population, train_test_dataset, target_model, configs, logger
         )
         attack_utils = AttackUtils(attack_objects)
 

@@ -153,7 +153,7 @@ def train(  # noqa: PLR0913
             target = target.long()  # noqa: PLW2901
 
             # Move data to the device
-            data, target = data.to(device, non_blocking=True), target.to(device, non_blocking=True)
+            data, target = data.to(device, non_blocking=True), target.to(device, non_blocking=True)  # noqa: PLW2901
 
             # Set the gradients to zero
             optimizer.zero_grad()
