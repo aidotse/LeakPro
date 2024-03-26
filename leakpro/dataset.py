@@ -212,7 +212,7 @@ def get_dataset_subset(dataset: Dataset, indices: List[int]) -> Dataset:
     if max(indices) >= len(dataset) or min(indices) < 0:
         raise ValueError("Index out of range")
 
-    data = dataset.X
+    data = dataset.x
     targets = dataset.y
     transforms = dataset.transforms
     subset_data = [data[idx] for idx in indices]

@@ -71,19 +71,30 @@ class AttackRMIA(AttackAbstract):
 
         Signals are computed on the auxiliary model(s) and dataset.
         """
+        # sample dataset to compute histogram
+        all_index = np.arange(self.population_size)
+        attack_data_size = np.round(
+            self.f_attack_data_size * self.population_size
+        ).astype(int)
+
+        self.attack_data_index = np.random.choice(
+            all_index, attack_data_size, replace=False
+        )
+        attack_data = get_dataset_subset(self.population, self.attack_data_index)
+
         # compute the ratio of p(z|theta) (target model) to p(z)=sum_{theta'} p(z|theta') (shadow models)
         # for all points in the attack dataset output from signal: # models x # data points x # classes
 
         # get the true label indices
-        z_label_indices = np.array(self.attack_data.y)
+        z_label_indices = np.array(attack_data.y)
 
         # run points through real model to collect the logits
-        logits_theta = np.array(self.signal([self.target_model], self.attack_data))
+        logits_theta = np.array(self.signal([self.target_model], attack_data))
         # collect the softmax output of the correct class
         p_z_given_theta = self.softmax(logits_theta, z_label_indices)
 
         # run points through shadow models and collect the logits
-        logits_shadow_models = self.signal(self.shadow_models, self.attack_data)
+        logits_shadow_models = self.signal(self.shadow_models, attack_data)
         # collect the softmax output of the correct class for each shadow model
         p_z_given_shadow_models = [self.softmax(np.array(x).reshape(1,*x.shape), z_label_indices) for x in logits_shadow_models]
         # stack the softmax output of the correct class for each shadow model to dimension # models x # data points
