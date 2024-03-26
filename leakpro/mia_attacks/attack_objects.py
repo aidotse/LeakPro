@@ -80,8 +80,6 @@ class AttackObjects:
         # List all entries in the directory
         entries = os.listdir(path_shadow_models)
         number_of_files_to_reuse = len(entries)
-        number_of_files_to_reuse = 0
-
 
         # Train shadow models
         if self._num_shadow_models > 0:
@@ -105,7 +103,7 @@ class AttackObjects:
                     shadow_data_indices = self.create_shadow_dataset(f_shadow_data)
                     shadow_train_loader = DataLoader(Subset(population, shadow_data_indices),
                                                      batch_size=configs["train"]["batch_size"],
-                                                     huffle=True,)
+                                                     shuffle=True,)
                     self._shadow_train_indices.append(shadow_data_indices)
 
                     # Train the shadow model
