@@ -1,7 +1,12 @@
 """Signal class, which is an abstract class representing any type of signal that can be obtained."""
 
 from abc import ABC, abstractmethod
-from typing import List, Self, Tuple
+
+# typing package not available form < python-3.11, typing_extensions backports new and experimental type hinting features to older Python versions
+try:
+    from typing import List, Self, Tuple
+except ImportError:
+    from typing_extensions import List, Self, Tuple
 
 import numpy as np
 from torch.utils.data import DataLoader

@@ -52,8 +52,8 @@ def setup_log(name: str, save_file: bool) -> logging.Logger:
 if __name__ == "__main__":
 
     RETRAIN = True
-    #args = "./config/adult.yaml"  # noqa: ERA001
-    args = "./config/cifar10.yaml" # noqa: ERA001
+    args = "./config/adult.yaml"  # noqa: ERA001
+    #args = "./config/cifar10.yaml" # noqa: ERA001
     with open(args, "rb") as f:
         configs = yaml.safe_load(f)
 
@@ -146,5 +146,5 @@ if __name__ == "__main__":
             log_dir,
             [audit_results["rmia"]["result_object"]],
             configs["audit"],
-            save_path=f"{log_dir}/{configs['audit']['report_log']}/{configs['audit']['privacy_game']}/ns_{configs["audit"]["num_shadow_models"]}_fs_{configs["audit"]["f_attack_data_size"]}",
+            save_path=f"{log_dir}/{configs['audit']['report_log']}/{configs['audit']['privacy_game']}/ns_{configs['audit']['num_shadow_models']}_fs_{configs['audit']['f_attack_data_size']}",
         )

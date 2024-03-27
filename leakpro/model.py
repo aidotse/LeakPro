@@ -2,7 +2,12 @@
 
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from typing import Callable, List, Self
+
+# typing package not available form < python-3.11, typing_extensions backports new and experimental type hinting features to older Python versions
+try:
+    from typing import Callable, List, Self
+except ImportError:
+    from typing_extensions import Callable, List, Self
 
 import numpy as np
 import torch

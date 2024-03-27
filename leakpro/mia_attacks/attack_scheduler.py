@@ -1,6 +1,11 @@
 """Module that contains the AttackScheduler class, which is responsible for creating and executing attacks."""
 import logging
-from typing import Any, Dict, Self
+
+# typing package not available form < python-3.11, typing_extensions backports new and experimental type hinting features to older Python versions
+try:
+    from typing import Any, Dict, Self
+except ImportError:
+    from typing_extensions import Any, Dict, Self
 
 import numpy as np
 import torch
