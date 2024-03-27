@@ -3,6 +3,8 @@ from copy import deepcopy
 import numpy as np
 import torch
 
+from scipy.special import softmax
+
 ########################################################################################################################
 # MODEL CLASS
 ########################################################################################################################
@@ -90,7 +92,7 @@ class PytorchModel(Model):
     This particular class is to be used with pytorch models.
     """
 
-    def __init__(self, model_obj, loss_fn):
+    def __init__(self, model_obj, loss_fn):#, device="cpu", batch_size=25):
         """Constructor
 
         Args:
@@ -206,3 +208,64 @@ class PytorchModel(Model):
             self.intermediate_outputs[layer_name] = output
 
         return hook
+
+    def get_rescaled_logits(self, batch_samples, batch_labels, hingeloss=False):
+        
+        """Function to get the model rescaled logits on a given input and an expected output.
+        The rescaled logits is proposed in https://arxiv.org/abs/2112.03570.
+
+        Args:
+            batch_samples: Model input.
+            batch_labels: Model expected output.
+            hingeloss: True/False, implementing the hingeloss version, as per Carlini et.el. paper
+                    can be used if the final activation function is not used, i.e. if z(x) is available, where f(z(x))
+                    is the whole model and f() is the last activation
+            XXXX per_point: Boolean indicating if loss should be returned per point or reduced.
+
+        Returns:
+            The loss value, as defined by the loss_fn attribute.
+        """
+
+        hinge_loss = torch.nn.MultiMarginLoss(reduction='none')
+        
+        self.batch_size = 32
+            
+        if torch.cuda.is_available():
+            device = "cuda:0"
+        else:
+            device = "cpu"
+            
+        self.model_obj.to(device)
+        self.model_obj.eval()
+        
+        with torch.no_grad():
+            rescaled_list = []
+            batched_samples = torch.split(torch.tensor(np.array(batch_samples), dtype=torch.float32), self.batch_size)
+            batched_labels = torch.split(torch.tensor(np.array(batch_labels), dtype=torch.float32), self.batch_size)
+            
+            for x, y in zip(batched_samples, batched_labels):
+                COUNT = len(x)
+                x = x.to(device)
+                y = y.to(device)
+                pred = self.model_obj(x)
+
+                # Is this really unstble or is this the log sum_y'=/=y f(x)_y'
+                if not hingeloss:
+                    y = y.to("cpu").numpy().astype(int)
+                    confi = softmax(pred.detach().cpu(), axis=1)
+                    confi_corret = confi[np.arange(COUNT), y].astype(float)
+                    confi[np.arange(COUNT), y] = 0
+                    confi_wrong = np.sum(confi, axis=1)
+                    # print("-----\n", np.log(confi_corret + 1e-10), "asdsa")
+                    # print(np.log(confi_wrong + 1e-10), "asdsa")
+                    logit = np.log(confi_corret + 1e-16) - np.log(confi_wrong + 1e-16)
+                    # print(logit, "asdsa")
+                    # print(hinge_loss(pred.detach().to("cpu"), torch.from_numpy(y)), "\n")
+                else:
+                    logit = hinge_loss(pred.detach(), y).numpy()
+                
+                rescaled_list.append(logit)
+            all_rescaled_logits = np.concatenate(rescaled_list)
+        self.model_obj.to("cpu")
+        return all_rescaled_logits
+        

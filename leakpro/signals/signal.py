@@ -158,8 +158,8 @@ class ModelNegativeRescaledLogits(Signal):
         self,
         models: List[Model],
         datasets: List[Dataset],
-        model_to_split_mapping: List[Tuple[int, str, str, str]],
-        extra: dict,
+        #model_to_split_mapping: List[Tuple[int, str, str, str]],
+        #extra: dict,
     ):
         """Built-in call method.
 
@@ -180,23 +180,33 @@ class ModelNegativeRescaledLogits(Signal):
             The signal value.
         """
 
+        # results = []
+        # Compute the signal for each model
+        # for k, model in enumerate(models):
+        #     Extract the features to be used
+        #     (
+        #         dataset_index,
+        #         split_name,
+        #         input_feature,
+        #         output_feature,
+        #     ) = model_to_split_mapping[k]
+        #     x = datasets[dataset_index].get_feature(split_name, input_feature)
+        #     # Check if output feature has been provided, else pass None
+        #     if output_feature is not None:
+        #         y = datasets[dataset_index].get_feature(split_name, output_feature)
+        #     else:
+        #         y = None
+
+        #     results.append(-model.get_rescaled_logits(x, y))
+        # return results
+
         results = []
         # Compute the signal for each model
         for k, model in enumerate(models):
-            # Extract the features to be used
-            (
-                dataset_index,
-                split_name,
-                input_feature,
-                output_feature,
-            ) = model_to_split_mapping[k]
-            x = datasets[dataset_index].get_feature(split_name, input_feature)
-            # Check if output feature has been provided, else pass None
-            if output_feature is not None:
-                y = datasets[dataset_index].get_feature(split_name, output_feature)
-            else:
-                y = None
+            x = datasets[k].data_dict["X"]
+            y = datasets[k].data_dict["y"]
 
+            # Compute the signal for each sample
             results.append(-model.get_rescaled_logits(x, y))
         return results
 
