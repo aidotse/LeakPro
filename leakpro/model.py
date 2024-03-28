@@ -108,14 +108,8 @@ class PytorchModel(Model):
 
     This particular class is to be used with pytorch models.
     """
-
-<<<<<<< HEAD
-    def __init__(self, model_obj, loss_fn):#, device="cpu", batch_size=25):
-        """Constructor
-=======
     def __init__(self:Self, model_obj:torch.nn.Module, loss_fn:torch.nn.modules.loss._Loss)->None:
         """Initialize the PytorchModel.
->>>>>>> PR#1-henrik_
 
         Args:
         ----
