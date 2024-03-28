@@ -1,9 +1,5 @@
 """Implementation of the RMIA attack."""
-# typing package not available form < python-3.11, typing_extensions backports new and experimental type hinting features to older Python versions
-try:
-    from typing import Self
-except ImportError:
-    from typing_extensions import Self
+from typing import Self
 
 import numpy as np
 

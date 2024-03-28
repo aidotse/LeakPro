@@ -115,14 +115,9 @@ class ModelNegativeRescaledLogits(Signal):
         self:Self,
         models: List[Model],
         datasets: List[Dataset],
-<<<<<<< HEAD
         #model_to_split_mapping: List[Tuple[int, str, str, str]],
         #extra: dict,
     ):
-=======
-        model_to_split_mapping: List[Tuple[int, str, str, str]],
-    ) -> List[np.ndarray]:
->>>>>>> PR#1-henrik_
         """Built-in call method.
 
         Args:
@@ -142,8 +137,8 @@ class ModelNegativeRescaledLogits(Signal):
         Returns:
         -------
             The signal value.
+        """        
 
-<<<<<<< HEAD
         # results = []
         # Compute the signal for each model
         # for k, model in enumerate(models):
@@ -169,23 +164,7 @@ class ModelNegativeRescaledLogits(Signal):
         for k, model in enumerate(models):
             x = datasets[k].data_dict["X"]
             y = datasets[k].data_dict["y"]
-=======
-        """
-        results = []
-        # Compute the signal for each model
-        for k, model in enumerate(models):
-            # Extract the features to be used
-            (
-                dataset_index,
-                split_name,
-                input_feature,
-                output_feature,
-            ) = model_to_split_mapping[k]
-            x = datasets[dataset_index].get_feature(split_name, input_feature)
-            # Check if output feature has been provided, else pass None
-            y = datasets[dataset_index].get_feature(split_name, output_feature) if output_feature is not None else None
->>>>>>> PR#1-henrik_
-
+            
             # Compute the signal for each sample
             results.append(-model.get_rescaled_logits(x, y))
         return results
