@@ -112,12 +112,10 @@ class ModelNegativeRescaledLogits(Signal):
     """
 
     def __call__(
-        self:Self,
+        self: Self,
         models: List[Model],
-        datasets: List[Dataset],
-        #model_to_split_mapping: List[Tuple[int, str, str, str]],
-        #extra: dict,
-    ):
+        datasets: Dataset,
+    ) -> List[np.ndarray]:
         """Built-in call method.
 
         Args:
@@ -159,16 +157,33 @@ class ModelNegativeRescaledLogits(Signal):
         #     results.append(-model.get_rescaled_logits(x, y))
         # return results
 
-        results = []
-        # Compute the signal for each model
-        for k, model in enumerate(models):
-            x = datasets[k].data_dict["X"]
-            y = datasets[k].data_dict["y"]
+        # results = []
+        # # Compute the signal for each model
+        # for k, model in enumerate(models):
+        #     x = datasets[k].data_dict["X"]
+        #     y = datasets[k].data_dict["y"]
             
-            # Compute the signal for each sample
-            results.append(-model.get_rescaled_logits(x, y))
-        return results
+        #     # Compute the signal for each sample
+        #     results.append(-model.get_rescaled_logits(x, y))
+        # return results
+        
+        results = []
+        for model in models:
+            # Initialize a list to store the logits for the current model
+            model_logits = []
 
+            # Iterate over the dataset using the DataLoader (ensures we use transforms etc)
+            data_loader = DataLoader(datasets, batch_size=len(datasets), shuffle=False)
+            for data, _ in data_loader:
+                # Get logits for each data point
+                # logits = model.get_logits(data)
+                logits = -1*model.get_rescaled_logits(x, y)
+                model_logits.extend(logits)
+            model_logits = np.array(model_logits)
+            # Append the logits for the current model to the results
+            results.append(model_logits)
+
+        return results
 
 ########################################################################################################################
 # MODEL_INTERMEDIATE_OUTPUT CLASS

@@ -6,7 +6,7 @@ import pickle
 
 # typing package not available form < python-3.11, typing_extensions backports new and experimental type hinting features to older Python versions
 try:
-    from typing import List, Self
+    from typing import Self, List
 except ImportError:
     from typing_extensions import Self, List
 

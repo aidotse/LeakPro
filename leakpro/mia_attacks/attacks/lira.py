@@ -1,10 +1,11 @@
 import numpy as np
 
-from leakpro.mia_attacks.attacks.attack import AttackAbstract
-from leakpro.mia_attacks.attack_utils import AttackUtils
-from leakpro.signals.signal import ModelNegativeRescaledLogits
 from leakpro.dataset import get_dataset_subset
-from leakpro.metrics.attack_result import AttackResult, CombinedMetricResult
+from leakpro.metrics.attack_result import CombinedMetricResult
+from leakpro.mia_attacks.attack_utils import AttackUtils
+from leakpro.mia_attacks.attacks.attack import AttackAbstract
+from leakpro.signals.signal import ModelNegativeRescaledLogits, ModelLogits
+
 
 
 class AttackLiRA(AttackAbstract):
@@ -14,17 +15,17 @@ class AttackLiRA(AttackAbstract):
         # Initializes the parent metric
         super().__init__(attack_utils)
 
-        if "f_attack_data_size" in configs:
-            self.f_attack_data_size = configs["audit"]["f_attack_data_size"]
-        else:
-            self.f_attack_data_size = 0.1  # pick 10% of data to create histograms by default
+        self.f_attack_data_size = configs["audit"].get("f_attack_data_size", 0.3)
             
-        #self.signal = ModelNegativeRescaledLogits()
-        self.signal = ModelLogits()
+        self.signal = ModelNegativeRescaledLogits()
+        # self.signal = ModelLogits()
+        
         self.epsilon = 1e-6
         
         # self.hypothesis_test_func = attack_utils.logit_rescale_threshold_func
         self.hypothesis_test_func = attack_utils.gaussian_threshold_func
+
+        self.shadow_models = attack_utils.attack_objects.shadow_models
 
     def prepare_attack(self):
         """
@@ -40,25 +41,20 @@ class AttackLiRA(AttackAbstract):
         
         # Load signals if they have been computed already; otherwise, compute and save them
         # signals based on training dataset
-        self.attack_signal = self.signal([self.target_model], [attack_data])[0]
+        self.attack_signal = self.signal([self.target_model], [attack_data])
+        
         
 
-    def run_attack(self, fpr_tolerance_rate_list=None):
+    def run_attack(self):
         """
         Function to run the attack on the target model and dataset.
-
-        Args:
-            fpr_tolerance_rate_list (optional): List of FPR tolerance values that may be used by the threshold function
-                to compute the attack threshold for the metric.
 
         Returns:
             Result(s) of the metric.
         """
-        # map the threshold with the alpha
-        if fpr_tolerance_rate_list is not None:
-            self.quantiles = fpr_tolerance_rate_list
-        else:
-            self.quantiles = AttackUtils.default_quantile()
+        
+        self.quantiles = AttackUtils.default_quantile()
+        
         # obtain the threshold values based on the reference dataset
         thresholds = self.hypothesis_test_func(self.attack_signal, self.quantiles).reshape(-1, 1)
 
@@ -90,11 +86,9 @@ class AttackLiRA(AttackAbstract):
         # predictions_proba = np.hstack([member_signals, non_member_signals]) - thresholds
 
         # compute ROC, TP, TN etc
-        metric_result = CombinedMetricResult(
+        return CombinedMetricResult(
             predicted_labels=predictions,
             true_labels=true_labels,
             predictions_proba=None,
             signal_values=signal_values,
         )
-
-        return metric_result
