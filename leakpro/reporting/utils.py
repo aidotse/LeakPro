@@ -1,5 +1,11 @@
-import leakpro.reporting.audit_report as audit_report
-from audit_report import ROCCurveReport, SignalHistogramReport, VulnerablePointsReport
+"""Utility functions for generating privacy risk report."""
+from typing import List
+
+from leakpro.reporting import audit_report
+from leakpro.reporting.audit_report import (
+    ROCCurveReport,
+    SignalHistogramReport,
+)
 
 
 def prepare_priavcy_risk_report(
@@ -7,18 +13,18 @@ def prepare_priavcy_risk_report(
     audit_results: List,
     configs: dict,
     save_path: str = None,
-    target_info_source: InformationSource = None,
-    target_model_to_train_split_mapping: List[Tuple[int, str, str, str]] = None,
-):
-    """Generate privacy risk report based on the auditing report
+) -> None:
+    """Generate privacy risk report based on the auditing report.
 
     Args:
+    ----
         log_dir(str): Log directory that saved all the information, including the models.
         audit_results(List): Privacy meter results.
         configs (dict): Auditing configuration.
         save_path (str, optional): Report path. Defaults to None.
 
     Raises:
+    ------
         NotImplementedError: Check if the report for the privacy game is implemented.
 
     """
@@ -26,28 +32,23 @@ def prepare_priavcy_risk_report(
     if save_path is None:
         save_path = log_dir
 
-    if configs["privacy_game"] in ["privacy_loss_model", "avg_privacy_loss_training_algo"]:
+    if configs["privacy_game"] in [
+        "privacy_loss_model",
+        "avg_privacy_loss_training_algo",
+    ]:
         # Generate privacy risk report for auditing the model
         if len(audit_results) == 1 and configs["privacy_game"] == "privacy_loss_model":
             ROCCurveReport.generate_report(
                 metric_result=audit_results[0],
-                inference_game_type=InferenceGame.PRIVACY_LOSS_MODEL,
                 save=True,
                 filename=f"{save_path}/ROC.png",
+                configs=configs,
             )
             SignalHistogramReport.generate_report(
-                metric_result=audit_results[0][0],
-                inference_game_type=InferenceGame.PRIVACY_LOSS_MODEL,
+                metric_result=audit_results[0],
                 save=True,
                 filename=f"{save_path}/Histogram.png",
             )
-            # VulnerablePointsReport.generate_report(
-            #     metric_results=audit_results[0],
-            #     inference_game_type=InferenceGame.PRIVACY_LOSS_MODEL,
-            #     target_info_source=target_info_source,
-            #     target_model_to_train_split_mapping=target_model_to_train_split_mapping,
-            #     filename = f"{save_path}/VulnerablePoints.png",
-            # )
         else:
             raise ValueError(
                 f"{len(audit_results)} results are not enough for {configs['privacy_game']})"
