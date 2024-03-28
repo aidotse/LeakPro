@@ -1,6 +1,7 @@
 """Module for the AttackObjects class."""
 
 import logging
+import os
 import time
 from typing import List, Self
 
@@ -12,6 +13,7 @@ from torch.utils.data import DataLoader, Subset
 
 from leakpro.dataset import Dataset
 from leakpro.model import Model, PytorchModel
+from leakpro.models import NN, ConvNet, SmallerSingleLayerConvNet  # noqa: F401
 
 
 class AttackObjects:
@@ -66,6 +68,19 @@ class AttackObjects:
             ),
         }
 
+        self.log_dir = configs["run"]["log_dir"]
+
+        path_shadow_models = f"{self.log_dir}/shadow_models"
+
+        # Check if the folder does not exist
+        if not os.path.exists(path_shadow_models):
+            # Create the folder
+            os.makedirs(path_shadow_models)
+
+        # List all entries in the directory
+        entries = os.listdir(path_shadow_models)
+        number_of_files_to_reuse = len(entries)
+
         # Train shadow models
         if self._num_shadow_models > 0:
             self._shadow_models = []
@@ -73,22 +88,29 @@ class AttackObjects:
 
             f_shadow_data = configs["audit"]["f_attack_data_size"]
 
-            for _ in range(self._num_shadow_models):
-                # Create shadow datasets by sampling from the population
-                shadow_data_indices = self.create_shadow_dataset(f_shadow_data)
-                shadow_train_loader = DataLoader(Subset(population, shadow_data_indices),
-                                                 batch_size=configs["train"]["batch_size"],
-                                                 shuffle=True,)
-                self._shadow_train_indices.append(shadow_data_indices)
-
-                # Initialize a shadow model
+            for k in range(self._num_shadow_models):
                 if "adult" in configs["data"]["dataset"]:
                     shadow_model = target_model.__class__(configs["train"]["inputs"], configs["train"]["outputs"])
                 elif "cifar10" in configs["data"]["dataset"]:
                     shadow_model = target_model.__class__()
 
-                # Train the shadow model
-                shadow_model = self.train_shadow_model(shadow_model, shadow_train_loader, configs = configs)
+                if number_of_files_to_reuse > 0:
+                    shadow_model.load_state_dict(torch.load(f"{path_shadow_models}/model_{k}.pkl"))
+                    self._shadow_models.append(PytorchModel(shadow_model, CrossEntropyLoss()))
+                    number_of_files_to_reuse -= 1
+                else:
+                    # Create shadow datasets by sampling from the population
+                    shadow_data_indices = self.create_shadow_dataset(f_shadow_data)
+                    shadow_train_loader = DataLoader(Subset(population, shadow_data_indices),
+                                                     batch_size=configs["train"]["batch_size"],
+                                                     shuffle=True,)
+                    self._shadow_train_indices.append(shadow_data_indices)
+
+                    # Train the shadow model
+                    shadow_model = self.train_shadow_model(shadow_model, shadow_train_loader, configs = configs)
+
+                    #save the shadow model
+                    torch.save(shadow_model.state_dict(), f"{path_shadow_models}/model_{k}.pkl")
 
                 # TODO: come up with a way to use different loss functions
                 self._shadow_models.append(PytorchModel(shadow_model, CrossEntropyLoss()))
