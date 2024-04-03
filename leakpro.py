@@ -22,7 +22,7 @@ def setup_log(name: str, save_file: bool) -> logging.Logger:
     Args:
     ----
         name (str): Logging file name.
-        save_file (bool): Flag about whether to save to file.
+        save_file (bool): Flag this about whether to save to file.
 
     Returns:
     -------
