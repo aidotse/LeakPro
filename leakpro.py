@@ -17,7 +17,7 @@ from leakpro.reporting.utils import prepare_priavcy_risk_report
 
 
 def setup_log(name: str, save_file: bool) -> logging.Logger:
-    """Generate the logger for the current run.
+    """Generate the logger for the current run fun time.
 
     Args:
     ----
