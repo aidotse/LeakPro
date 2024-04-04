@@ -3,7 +3,6 @@
 import logging
 import os
 import pickle
-from typing import List, Self
 
 import joblib
 import numpy as np
@@ -14,6 +13,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
 from torch.utils.data import Dataset
 from torchvision import transforms
+
+from leakpro.import_helper import List, Self
 
 
 class GeneralDataset(Dataset):

@@ -1,6 +1,6 @@
 """Utility functions for generating privacy risk report."""
-from typing import List
 
+from leakpro.import_helper import List
 from leakpro.reporting import audit_report
 from leakpro.reporting.audit_report import (
     ROCCurveReport,
