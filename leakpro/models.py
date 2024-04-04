@@ -1,10 +1,10 @@
 """Models for the datasets."""
-from leakpro.import_helper import Self
-
 import torch
 import torch.nn.functional as F  # noqa: N812
 from torch import nn
 from torchvision import models
+
+from leakpro.import_helper import Self
 
 
 class NN(nn.Module):
