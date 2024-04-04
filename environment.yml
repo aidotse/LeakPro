@@ -1,22 +1,32 @@
-name: leakpro_test
+name: leakpro
 channels:
   - conda-forge
 dependencies:
-  - numpy
-  - pytorch
-  - torchvision
-  - dotmap
-  - loguru
-  - matplotlib
-  - jinja2
-  - pandas
-  - seaborn
-  - pillow
+  # Core Python
+  - python=3.9.0 
+
+  # Numerical and Data Analysis
+  - numpy  
+  - pandas  
   - scipy
   - scikit-learn
+
+  # Visualization
+  - matplotlib  
+  - seaborn
+  - pillow
+
+  # Deep Learning
+  - pytorch
+  - torchvision
+
+  # Utilities
+  - dotmap
+  - loguru
+  - jinja2
+  - pyyaml
+
+  # Development and Testing
   - pytest
-  - python>=3.9 
-  - black
-  - pip:
-    - pyyaml
+  
 

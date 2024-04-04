@@ -1,9 +1,9 @@
 """Models for the datasets."""
-from typing import Self
-
 import torch
 import torch.nn.functional as F  # noqa: N812
 from torch import nn
+
+from leakpro.import_helper import Self
 
 
 class NN(nn.Module):

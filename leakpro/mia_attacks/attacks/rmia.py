@@ -1,9 +1,8 @@
 """Implementation of the RMIA attack."""
-from typing import Self
-
 import numpy as np
 
 from leakpro.dataset import get_dataset_subset
+from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.mia_attacks.attack_utils import AttackUtils
 from leakpro.mia_attacks.attacks.attack import AttackAbstract

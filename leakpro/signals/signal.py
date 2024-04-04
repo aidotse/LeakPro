@@ -1,12 +1,12 @@
 """Signal class, which is an abstract class representing any type of signal that can be obtained."""
 
 from abc import ABC, abstractmethod
-from typing import List, Self, Tuple
 
 import numpy as np
 from torch.utils.data import DataLoader
 
 from leakpro.dataset import Dataset
+from leakpro.import_helper import List, Self, Tuple
 from leakpro.model import Model
 
 ########################################################################################################################

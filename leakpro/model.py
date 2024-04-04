@@ -2,10 +2,11 @@
 
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from typing import Callable, List, Self
 
 import numpy as np
 import torch
+
+from leakpro.import_helper import Callable, List, Self
 
 ########################################################################################################################
 # MODEL CLASS

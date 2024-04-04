@@ -3,7 +3,6 @@
 import logging
 import os
 import time
-from typing import List, Self
 
 import numpy as np
 import torch
@@ -12,6 +11,7 @@ from torch.optim import SGD, Adam, AdamW
 from torch.utils.data import DataLoader, Subset
 
 from leakpro.dataset import Dataset
+from leakpro.import_helper import List, Self
 from leakpro.model import Model, PytorchModel
 from leakpro.models import NN, ConvNet, SmallerSingleLayerConvNet  # noqa: F401
 
