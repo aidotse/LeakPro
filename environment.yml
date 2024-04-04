@@ -1,4 +1,4 @@
-name: leakpro_old_python
+name: leakpro
 channels:
   - conda-forge
 dependencies:
