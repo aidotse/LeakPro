@@ -24,7 +24,7 @@ dependencies:
   - dotmap
   - loguru
   - jinja2
-  tmux- pyyaml
+  - pyyaml
 
   # Development and Testing
   - pytest
