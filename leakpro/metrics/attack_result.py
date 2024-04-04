@@ -1,5 +1,4 @@
 """Contains the AttackResult class, which stores the results of an attack."""
-from typing import Any, List, Self
 
 import numpy as np
 from sklearn.metrics import (
@@ -9,6 +8,8 @@ from sklearn.metrics import (
     roc_auc_score,
     roc_curve,
 )
+
+from leakpro.import_helper import Any, List, Self
 
 ########################################################################################################################
 # METRIC_RESULT CLASS

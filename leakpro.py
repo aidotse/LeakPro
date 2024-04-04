@@ -155,6 +155,11 @@ if __name__ == "__main__":
     n_shadow_models = configs["audit"]["num_shadow_models"]
     n_attack_data_size = configs["audit"]["f_attack_data_size"]
 
+    report_log = configs["audit"]["report_log"]
+    privacy_game = configs["audit"]["privacy_game"]
+    n_shadow_models = configs["audit"]["num_shadow_models"]
+    n_attack_data_size = configs["audit"]["f_attack_data_size"]
+
     prepare_priavcy_risk_report(
             log_dir,
             [audit_results["loss_traj"]["result_object"]],

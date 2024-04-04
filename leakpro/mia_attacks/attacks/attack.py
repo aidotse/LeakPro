@@ -1,8 +1,8 @@
 """Module that contains the abstract class for constructing and performing a membership inference attack on a target."""
 
 from abc import ABC, abstractmethod
-from typing import List, Self, Union
 
+from leakpro.import_helper import List, Self, Union
 from leakpro.metrics.attack_result import AttackResult
 from leakpro.mia_attacks.attack_utils import AttackUtils
 
