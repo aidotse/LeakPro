@@ -161,3 +161,7 @@ cython_debug/
 
 # mac generated files
 .DS_Store
+
+test_adult/
+test_cifar10/
+data/
