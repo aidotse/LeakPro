@@ -9,7 +9,7 @@ audit: # Configurations for auditing
   report_log: test_cifar10 # String that indicates the folder where we save the and auditing report.
   device: cuda:0 # String for indicating on which device we conduct the membership inference attack and train reference models.
   audit_batch_size: 1000 # Integer number for indicating the batch size for computing signals in the Privacy Meter.
-  num_shadow_models: 1
+  num_shadow_models: 128
   f_attack_data_size: 0.3
 
 train: # Configuration for training

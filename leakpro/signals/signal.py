@@ -9,6 +9,7 @@ except ImportError:
     from typing_extensions import List, Self, Tuple
 
 import numpy as np
+from tqdm import tqdm
 from torch.utils.data import DataLoader
 
 from leakpro.dataset import Dataset
@@ -122,50 +123,56 @@ class ModelNegativeRescaledLogits(Signal):
         ----
             models: List of models that can be queried.
             datasets: List of datasets that can be queried.
-            model_to_split_mapping: List of tuples, indicating how each model should query the dataset.
-                More specifically, for model #i:
-                model_to_split_mapping[i][0] contains the index of the dataset in the list,
-                model_to_split_mapping[i][1] contains the name of the split,
-                model_to_split_mapping[i][2] contains the name of the input feature,
-                model_to_split_mapping[i][3] contains the name of the output feature.
-                This can also be provided once and for all at the instantiation of InformationSource, through the
-                default_model_to_split_mapping argument.
-            extra: Dictionary containing any additional parameter that should be passed to the signal object.
 
         Returns:
         -------
             The signal value.
-        """        
-
-        # results = []
-        # Compute the signal for each model
-        # for k, model in enumerate(models):
-        #     Extract the features to be used
-        #     (
-        #         dataset_index,
-        #         split_name,
-        #         input_feature,
-        #         output_feature,
-        #     ) = model_to_split_mapping[k]
-        #     x = datasets[dataset_index].get_feature(split_name, input_feature)
-        #     # Check if output feature has been provided, else pass None
-        #     if output_feature is not None:
-        #         y = datasets[dataset_index].get_feature(split_name, output_feature)
-        #     else:
-        #         y = None
-
-        #     results.append(-model.get_rescaled_logits(x, y))
-        # return results
-
-        # results = []
-        # # Compute the signal for each model
-        # for k, model in enumerate(models):
-        #     x = datasets[k].data_dict["X"]
-        #     y = datasets[k].data_dict["y"]
+        """
+        
+        data_loader = DataLoader(datasets, batch_size=len(datasets), shuffle=False)
+        
+        # Iterate over the dataset using the DataLoader (ensures we use transforms etc)
+        for data, labels in data_loader:
             
-        #     # Compute the signal for each sample
-        #     results.append(-model.get_rescaled_logits(x, y))
-        # return results
+            # Initialize a list to store the logits for the current model
+            model_logits = []
+            for model in tqdm(models):
+                
+                # Get neg. rescaled logits for each data point
+                logits = -model.get_rescaled_logits(data, labels)
+
+                # Append the logits for the current model to the results
+                model_logits.append(logits)
+                
+            model_logits = np.array(model_logits)
+        return model_logits
+
+########################################################################################################################
+# MODEL_RESCALEDLOGIT CLASS (NON-NEGATIVE)
+########################################################################################################################
+
+class ModelRescaledLogits(Signal):
+    """Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a Dataset.
+
+    This particular class is used to get the output of a model.
+    """
+
+    def __call__(
+        self: Self,
+        models: List[Model],
+        datasets: Dataset,
+    ) -> List[np.ndarray]:
+        """Built-in call method.
+
+        Args:
+        ----
+            models: List of models that can be queried.
+            datasets: List of datasets that can be queried.
+
+        Returns:
+        -------
+            The signal value.
+        """
         
         results = []
         for model in models:
@@ -174,10 +181,10 @@ class ModelNegativeRescaledLogits(Signal):
 
             # Iterate over the dataset using the DataLoader (ensures we use transforms etc)
             data_loader = DataLoader(datasets, batch_size=len(datasets), shuffle=False)
-            for data, _ in data_loader:
-                # Get logits for each data point
-                # logits = model.get_logits(data)
-                logits = -1*model.get_rescaled_logits(x, y)
+            for data, labels in data_loader:
+                
+                # Get rescaled logits for each data point
+                logits = model.get_rescaled_logits(data, labels)
                 model_logits.extend(logits)
             model_logits = np.array(model_logits)
             # Append the logits for the current model to the results
@@ -253,11 +260,10 @@ class ModelLoss(Signal):
 
     This particular class is used to get the loss of a model.
     """
-
     def __call__(
-        self:Self,
+        self: Self,
         models: List[Model],
-        datasets: List[Dataset],
+        datasets: Dataset, # List[Dataset 
     ) -> List[np.ndarray]:
         """Built-in call method.
 
@@ -265,31 +271,39 @@ class ModelLoss(Signal):
         ----
             models: List of models that can be queried.
             datasets: List of datasets that can be queried.
-            model_to_split_mapping: List of tuples, indicating how each model should query the dataset.
-                More specifically, for model #i:
-                model_to_split_mapping[i][0] contains the index of the dataset in the list,
-                model_to_split_mapping[i][1] contains the name of the split,
-                model_to_split_mapping[i][2] contains the name of the input feature,
-                model_to_split_mapping[i][3] contains the name of the output feature.
-                This can also be provided once and for all at the instantiation of InformationSource, through the
-                default_model_to_split_mapping argument.
             extra: Dictionary containing any additional parameter that should be passed to the signal object.
 
         Returns:
         -------
             The signal value.
 
-        """
+        """        # Compute the signal for each model
         results = []
-        # Compute the signal for each model
-        for k, model in enumerate(models):
-            x = datasets[k].X
-            y = datasets[k].y
+        for model in models:
+            # Initialize a list to store the logits for the current model
+            model_logits = []
 
-            # Compute the signal for each sample
-            results.append(model.get_loss(x, y))
-        return results
+            # Iterate over the dataset using the DataLoader (ensures we use transforms etc)
+            data_loader = DataLoader(datasets, batch_size=len(datasets), shuffle=False)
+            for data, _ in data_loader:
+                # Get logits for each data point
+                logits = model.get_loss(data)
+                model_logits.extend(logits)
+            model_logits = np.array(model_logits)
+            # Append the logits for the current model to the results
+            results.append(model_logits)
 
+        # return results
+        # results = []
+        # # Compute the signal for each model
+        # for k, model in enumerate(models):
+        #     x = datasets[k].X
+        #     y = datasets[k].y
+
+        #     # Compute the signal for each sample
+        #     results.append(model.get_loss(x, y))
+        # return results
+        
 
 ########################################################################################################################
 # MODEL_GRADIENT CLASS
@@ -341,7 +355,7 @@ class ModelGradient(Signal):
             y = datasets[dataset_index].get_feature(split_name, output_feature)
             results.append(model.get_grad(x, y))
         return results
-
+        
 
 ########################################################################################################################
 # Group Information

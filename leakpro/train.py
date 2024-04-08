@@ -23,10 +23,10 @@ def get_optimizer(model: torch.nn.Module, configs: dict, logger: logging.Logger 
         torch.optim.Optimizer: Optimizer for training the model.
 
     """
-    optimizer = configs.get("optimizer", "SGD")
-    learning_rate = configs.get("learning_rate", 0.01)
-    weight_decay = configs.get("weight_decay", 0)
-    momentum = configs.get("momentum", 0)
+    optimizer = configs['train'].get("optimizer", "SGD")
+    learning_rate = configs['train'].get("learning_rate", 0.01)
+    weight_decay = configs['train'].get("weight_decay", 0)
+    momentum = configs['train'].get("momentum", 0)
     logger.info(f"Load the optimizer {optimizer}")
     logger.info(f"Learning rate {learning_rate}")
     logger.info(f"Weight decay {weight_decay} ")

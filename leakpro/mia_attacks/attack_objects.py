@@ -63,8 +63,10 @@ class AttackObjects:
                     train_test_dataset["test_indices"],
                 )
             ),
+            
             # in_members will be an array from 0 to the number of training indices - 1
             "in_members": np.arange(len(train_test_dataset["train_indices"])),
+            
             # out_members will start after the last training index and go up to the number of test indices - 1
             "out_members": np.arange(
                 len(train_test_dataset["train_indices"]),
@@ -84,8 +86,14 @@ class AttackObjects:
 
         # List all entries in the directory
         entries = os.listdir(path_shadow_models)
-        number_of_files_to_reuse = len(entries)
+        
+        try:
+            entries.remove('.ipynb_checkpoints')
+        except:
+            pass
+        number_of_files_to_reuse = int(len(entries)/2)
 
+        self._shadow_models_metadata = []
         # Train shadow models
         if self._num_shadow_models > 0:
             self._shadow_models = []
@@ -94,31 +102,39 @@ class AttackObjects:
             f_shadow_data = configs["audit"]["f_attack_data_size"]
 
             for k in range(self._num_shadow_models):
+                shadow_model_metadata = {}
+                path = f"{path_shadow_models}/model_{k}"
+                
                 if "adult" in configs["data"]["dataset"]:
                     shadow_model = target_model.__class__(configs["train"]["inputs"], configs["train"]["outputs"])
                 elif "cifar10" in configs["data"]["dataset"]:
                     shadow_model = target_model.__class__()
 
                 if number_of_files_to_reuse > 0:
-                    shadow_model.load_state_dict(torch.load(f"{path_shadow_models}/model_{k}.pkl"))
-                    self._shadow_models.append(PytorchModel(shadow_model, CrossEntropyLoss()))
+                    shadow_model.load_state_dict(torch.load(f"{path}.pkl"))
+                    # self._shadow_models.append(PytorchModel(shadow_model, CrossEntropyLoss()))
+                    shadow_model_metadata = np.load(f"{path}_metadata.npy", allow_pickle='TRUE').item()
                     number_of_files_to_reuse -= 1
                 else:
                     # Create shadow datasets by sampling from the population
                     shadow_data_indices = self.create_shadow_dataset(f_shadow_data)
+                    shadow_model_metadata['train_idxs'] = shadow_data_indices
+                    
                     shadow_train_loader = DataLoader(Subset(population, shadow_data_indices),
                                                      batch_size=configs["train"]["batch_size"],
                                                      shuffle=True,)
                     self._shadow_train_indices.append(shadow_data_indices)
 
                     # Train the shadow model
-                    shadow_model = self.train_shadow_model(shadow_model, shadow_train_loader, configs = configs)
+                    shadow_model = self.train_shadow_model(shadow_model, shadow_train_loader, k, configs = configs)
 
-                    #save the shadow model
-                    torch.save(shadow_model.state_dict(), f"{path_shadow_models}/model_{k}.pkl")
+                    # Save the shadow model and metadata
+                    torch.save(shadow_model.state_dict(), f"{path}.pkl")
+                    np.save(f"{path}_metadata.npy", shadow_model_metadata)
 
                 # TODO: come up with a way to use different loss functions
                 self._shadow_models.append(PytorchModel(shadow_model, CrossEntropyLoss()))
+                self._shadow_models_metadata.append(shadow_model_metadata)
 
 
 
@@ -143,6 +159,17 @@ class AttackObjects:
 
         """
         return self._shadow_train_indices
+
+    @property
+    def shadow_models_metadata(self:Self) -> List[dict]:
+        """Return the metadata of the shadow models.
+
+        Returns
+        -------
+        List[dict]: The metadata of the shadow models.
+
+        """
+        return self._shadow_models_metadata
 
     @property
     def population(self:Self) -> Dataset:
@@ -239,10 +266,11 @@ class AttackObjects:
             Optimizer: The optimizer for training the model.
 
         """
-        optimizer = configs.get("optimizer", "SGD")
-        learning_rate = configs.get("learning_rate", 0.01)
-        weight_decay = configs.get("weight_decay", 0)
-        momentum = configs.get("momentum", 0)
+        optimizer = configs['train'].get("optimizer", "SGD")
+        learning_rate = configs['train'].get("learning_rate", 0.01)
+        weight_decay = configs['train'].get("weight_decay", 0)
+        momentum = configs['train'].get("momentum", 0)
+    
         self.logger.info(f"Load the optimizer {optimizer}")
         self.logger.info(f"Learning rate {learning_rate}")
         self.logger.info(f"Weight decay {weight_decay}")
@@ -263,7 +291,7 @@ class AttackObjects:
         )
 
 
-    def train_shadow_model(self:Self, shadow_model: Module, shadow_train_loader: DataLoader, configs: dict = None) -> Module:
+    def train_shadow_model(self:Self, shadow_model: Module, shadow_train_loader: DataLoader, idx: int, configs: dict = None) -> Module:
         """Train the model based on on the train loader.
 
         Args:
@@ -319,7 +347,7 @@ class AttackObjects:
                 # Add the loss to the total loss
                 train_loss += loss.item()
 
-            log_train_str = f"Epoch: {epoch_idx+1}/{epochs} | Train Loss: {train_loss/len(shadow_train_loader):.8f} | Train Acc: {float(train_acc)/len(shadow_train_loader.dataset):.8f} | One step uses {time.time() - start_time:.2f} seconds"  # noqa: E501
+            log_train_str = f"Shadow model {idx+1}/{self._num_shadow_models} | Epoch: {epoch_idx+1}/{epochs} | Train Loss: {train_loss/len(shadow_train_loader):.8f} | Train Acc: {float(train_acc)/len(shadow_train_loader.dataset):.8f} | One step uses {time.time() - start_time:.2f} seconds"  # noqa: E501
             self.logger.info(log_train_str)
 
         # Move the model back to the CPU

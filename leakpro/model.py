@@ -251,7 +251,7 @@ class PytorchModel(Model):
 
         return hook
 
-    def get_rescaled_logits(self, batch_samples, batch_labels, hingeloss=False):
+    def get_rescaled_logits(self, batch_samples, batch_labels):
         
         """Function to get the model rescaled logits on a given input and an expected output.
         The rescaled logits is proposed in https://arxiv.org/abs/2112.03570.
@@ -259,19 +259,13 @@ class PytorchModel(Model):
         Args:
             batch_samples: Model input.
             batch_labels: Model expected output.
-            hingeloss: True/False, implementing the hingeloss version, as per Carlini et.el. paper
-                    can be used if the final activation function is not used, i.e. if z(x) is available, where f(z(x))
-                    is the whole model and f() is the last activation
-            XXXX per_point: Boolean indicating if loss should be returned per point or reduced.
 
         Returns:
-            The loss value, as defined by the loss_fn attribute.
+            The rescaled logit value.
         """
-
-        hinge_loss = torch.nn.MultiMarginLoss(reduction='none')
         
         self.batch_size = 32
-            
+        
         if torch.cuda.is_available():
             device = "cuda:0"
         else:
@@ -289,24 +283,18 @@ class PytorchModel(Model):
                 COUNT = len(x)
                 x = x.to(device)
                 y = y.to(device)
-                pred = self.model_obj(x)
+                all_logits = self.model_obj(x)
 
-                # Is this really unstble or is this the log sum_y'=/=y f(x)_y'
-                if not hingeloss:
-                    y = y.to("cpu").numpy().astype(int)
-                    confi = softmax(pred.detach().cpu(), axis=1)
-                    confi_corret = confi[np.arange(COUNT), y].astype(float)
-                    confi[np.arange(COUNT), y] = 0
-                    confi_wrong = np.sum(confi, axis=1)
-                    # print("-----\n", np.log(confi_corret + 1e-10), "asdsa")
-                    # print(np.log(confi_wrong + 1e-10), "asdsa")
-                    logit = np.log(confi_corret + 1e-16) - np.log(confi_wrong + 1e-16)
-                    # print(logit, "asdsa")
-                    # print(hinge_loss(pred.detach().to("cpu"), torch.from_numpy(y)), "\n")
-                else:
-                    logit = hinge_loss(pred.detach(), y).numpy()
+                predictions = all_logits - torch.max(all_logits, dim=1, keepdim=True).values
+                predictions = torch.exp(predictions)
+                predictions = predictions/torch.sum(predictions,dim=1, keepdim=True)
+                COUNT = predictions.shape[0]
+                y_true = predictions[np.arange(COUNT), y.type(torch.IntTensor)]
+                predictions[np.arange(COUNT), y.type(torch.IntTensor)] = 0
+                y_wrong = torch.sum(predictions, dim=1)
+                output_signals = torch.flatten(torch.log(y_true+1e-45) - torch.log(y_wrong+1e-45)).cpu().numpy()            
                 
-                rescaled_list.append(logit)
+                rescaled_list.append(output_signals)
             all_rescaled_logits = np.concatenate(rescaled_list)
         self.model_obj.to("cpu")
         return all_rescaled_logits

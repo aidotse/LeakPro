@@ -51,9 +51,9 @@ def setup_log(name: str, save_file: bool) -> logging.Logger:
 
 if __name__ == "__main__":
 
-    RETRAIN = True
-    args = "./config/adult.yaml"  # noqa: ERA001
-    # args = "./config/cifar10.yaml" # noqa: ERA001
+    RETRAIN = False
+    # args = "./config/adult.yaml"  # noqa: ERA001
+    args = "./config/cifar10.yaml" # noqa: ERA001
     with open(args, "rb") as f:
         configs = yaml.safe_load(f)
 
@@ -140,11 +140,12 @@ if __name__ == "__main__":
     )  # TODO metadata includes indices for train and test data
     audit_results = attack_scheduler.run_attacks()
 
-    logger.info(str(audit_results["rmia"]["result_object"]))
+    attack_name = str(configs["audit"]["attack_list"][0])
+    logger.info(str(audit_results[attack_name]["result_object"]))
 
     prepare_priavcy_risk_report(
             log_dir,
-            [audit_results["rmia"]["result_object"]],
+            [audit_results[attack_name]["result_object"]],
             configs["audit"],
             save_path=f"{log_dir}/{configs['audit']['report_log']}/{configs['audit']['privacy_game']}/ns_{configs['audit']['num_shadow_models']}_fs_{configs['audit']['f_attack_data_size']}",
         )

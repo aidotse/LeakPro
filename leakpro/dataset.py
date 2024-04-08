@@ -195,6 +195,7 @@ def prepare_train_test_datasets(dataset_size: int, configs: dict) -> dict:
         dict: Data split information which saves the information of training points index and test points index.
 
     """
+    
     # The index_list will save all the information about the train, test and auit for each target model.
     all_index = np.arange(dataset_size)
     train_size = int(configs["f_train"] * dataset_size)

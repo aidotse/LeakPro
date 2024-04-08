@@ -53,7 +53,7 @@ class AttackP(AttackAbstract):
         attack_data = get_dataset_subset(self.population, self.attack_data_index)
         # Load signals if they have been computed already; otherwise, compute and save them
         # signals based on training dataset
-        self.attack_signal = self.signal([self.target_model], [attack_data])[0]
+        self.attack_signal = self.signal([self.target_model], attack_data)[0]
 
     def run_attack(self:Self) -> CombinedMetricResult:
         """Run the attack on the target model and dataset.
