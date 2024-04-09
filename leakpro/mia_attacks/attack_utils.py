@@ -1,13 +1,9 @@
 """Module that contains utility functions that are used in the attack classes."""
 
-# typing package not available form < python-3.11, typing_extensions backports new and experimental type hinting features to older Python versions
-try:
-    from typing import Any, Dict, List, Self
-except ImportError:
-    from typing_extensions import Any, Dict, List, Self
-
 import numpy as np
 from scipy.stats import norm
+
+from leakpro.import_helper import Any, Dict, List, Self
 
 from .attack_objects import AttackObjects
 

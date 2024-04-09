@@ -10,7 +10,7 @@ audit: # Configurations for auditing
   device: cuda:0 # String for indicating on which device we conduct the membership inference attack and train reference models.
   audit_batch_size: 1000 # Integer number for indicating the batch size for computing signals in the Privacy Meter.
   num_shadow_models: 128
-  f_attack_data_size: 0.3
+  f_attack_data_size: 0.25
 
 train: # Configuration for training
   type: pytorch # Training framework (we only support pytorch now).
@@ -30,8 +30,8 @@ train: # Configuration for training
 
 data: # Configuration for data
   dataset: cifar10 # String indicates the name of the dataset (i.e., cifar10, cifar100, purchase100, texas1000)
-  f_train: 0.3 # Float number from 0 to 1 indicating the fraction of the train dataset
-  f_test: 0.3 # Float number from 0 to 1 indicating the fraction of the test dataset
+  f_train: 0.25 # Float number from 0 to 1 indicating the fraction of the train dataset
+  f_test: 0.25 # Float number from 0 to 1 indicating the fraction of the test dataset
   split_method: no_overlapping # String for indicating the methods of splitting the dataset between train, test, and auditing.
   f_audit: 0.3 # Float from 0 to 1, indicating the fraction of the auditing dataset
   data_dir: ./data # String about where to save the data.

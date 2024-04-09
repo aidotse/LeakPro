@@ -1,13 +1,9 @@
 """Models for the datasets."""
-# typing package not available form < python-3.11, typing_extensions backports new and experimental type hinting features to older Python versions
-try:
-    from typing import Self
-except ImportError:
-    from typing_extensions import Self
-    
 import torch
 import torch.nn.functional as F  # noqa: N812
 from torch import nn
+
+from leakpro.import_helper import Self
 
 
 class NN(nn.Module):
@@ -64,7 +60,7 @@ class ConvNet(nn.Module):
         x = torch.flatten(x, 1) # flatten all dimensions except batch
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
-        return self.fc3(x)
+        return nn.functional.softmax(self.fc3(x), dim=1)
 
 
 class SmallerSingleLayerConvNet(nn.Module):

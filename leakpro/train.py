@@ -3,11 +3,11 @@
 import logging
 import pickle
 import time
-from typing import Tuple
 
 import torch
 from torch import nn
 
+from leakpro.import_helper import Tuple
 
 def get_optimizer(model: torch.nn.Module, configs: dict, logger: logging.Logger = None) -> torch.optim.Optimizer:
     """Get the optimizer for training the model.

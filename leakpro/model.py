@@ -3,16 +3,10 @@
 from abc import ABC, abstractmethod
 from copy import deepcopy
 
-# typing package not available form < python-3.11, typing_extensions backports new and experimental type hinting features to older Python versions
-try:
-    from typing import Callable, List, Self
-except ImportError:
-    from typing_extensions import Callable, List, Self
-
 import numpy as np
 import torch
 
-from scipy.special import softmax
+from leakpro.import_helper import Callable, List, Self
 
 ########################################################################################################################
 # MODEL CLASS
@@ -264,7 +258,11 @@ class PytorchModel(Model):
             The rescaled logit value.
         """
         
-        self.batch_size = 32
+        from scipy.special import softmax
+        from torch import nn
+        hinge = nn.MultiMarginLoss(reduction='none')
+
+        self.batch_size = 1024
         
         if torch.cuda.is_available():
             device = "cuda:0"
@@ -280,19 +278,38 @@ class PytorchModel(Model):
             batched_labels = torch.split(torch.tensor(np.array(batch_labels), dtype=torch.float32), self.batch_size)
             
             for x, y in zip(batched_samples, batched_labels):
-                COUNT = len(x)
                 x = x.to(device)
-                y = y.to(device)
+                y = y.type(torch.LongTensor).to(device)
                 all_logits = self.model_obj(x)
 
-                predictions = all_logits - torch.max(all_logits, dim=1, keepdim=True).values
-                predictions = torch.exp(predictions)
-                predictions = predictions/torch.sum(predictions,dim=1, keepdim=True)
+                # Option 1.
+                # predictions = torch.nn.functional.softmax(self.model_obj(x), dim=1)
+
+                # Option 2.
+                # predictions = all_logits - torch.max(all_logits, dim=1, keepdim=True).values
+                # predictions = torch.exp(predictions)
+                # predictions = predictions/torch.sum(predictions,dim=1, keepdim=True)
+
+                # With option 1 or 2
                 COUNT = predictions.shape[0]
                 y_true = predictions[np.arange(COUNT), y.type(torch.IntTensor)]
                 predictions[np.arange(COUNT), y.type(torch.IntTensor)] = 0
                 y_wrong = torch.sum(predictions, dim=1)
-                output_signals = torch.flatten(torch.log(y_true+1e-45) - torch.log(y_wrong+1e-45)).cpu().numpy()            
+                output_signals = torch.flatten(torch.log(y_true+1e-45) - torch.log(y_wrong+1e-45)).cpu().numpy()
+
+                # Option 3 (hinge loss)
+                # print(all_logits, y)
+                # signal = hinge(all_logits, y)
+                # output_signals = torch.flatten(signal).cpu().numpy()
+                
+                # Option 4 (alternative hinge loss)
+                # COUNT = all_logits.shape[0]
+                # z_y = all_logits[np.arange(COUNT), y.type(torch.IntTensor)]
+                # all_logits[np.arange(COUNT), y.type(torch.IntTensor)] = -30.
+                # z_y_prime = torch.exp(all_logits)
+                # z_y_prime = torch.sum(z_y_prime, dim=1)
+                # z_y_prime = torch.log(z_y_prime+1e-45)
+                # output_signals = torch.flatten(z_y - z_y_prime).cpu().numpy()
                 
                 rescaled_list.append(output_signals)
             all_rescaled_logits = np.concatenate(rescaled_list)

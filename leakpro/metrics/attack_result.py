@@ -1,11 +1,5 @@
 """Contains the AttackResult class, which stores the results of an attack."""
 
-# typing package not available form < python-3.11, typing_extensions backports new and experimental type hinting features to older Python versions
-try:
-    from typing import  Any, List, Self
-except ImportError:
-    from typing_extensions import  Any, List, Self
-
 import numpy as np
 from sklearn.metrics import (
     accuracy_score,
@@ -14,6 +8,8 @@ from sklearn.metrics import (
     roc_auc_score,
     roc_curve,
 )
+
+from leakpro.import_helper import Any, List, Self
 
 ########################################################################################################################
 # METRIC_RESULT CLASS

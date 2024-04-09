@@ -1,13 +1,9 @@
 """Implementation of the RMIA attack."""
-# typing package not available form < python-3.11, typing_extensions backports new and experimental type hinting features to older Python versions
-try:
-    from typing import Self
-except ImportError:
-    from typing_extensions import Self
     
 import numpy as np
 
 from leakpro.dataset import get_dataset_subset
+from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.mia_attacks.attack_utils import AttackUtils
 from leakpro.mia_attacks.attacks.attack import AttackAbstract

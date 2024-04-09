@@ -4,12 +4,6 @@ import logging
 import os
 import pickle
 
-# typing package not available form < python-3.11, typing_extensions backports new and experimental type hinting features to older Python versions
-try:
-    from typing import Self, List
-except ImportError:
-    from typing_extensions import Self, List
-
 import joblib
 import numpy as np
 import pandas as pd
@@ -19,6 +13,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
 from torch.utils.data import Dataset
 from torchvision import transforms
+
+from leakpro.import_helper import List, Self
 
 
 class GeneralDataset(Dataset):

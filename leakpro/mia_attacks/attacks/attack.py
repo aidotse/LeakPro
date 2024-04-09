@@ -2,12 +2,7 @@
 
 from abc import ABC, abstractmethod
 
-# typing package not available form < python-3.11, typing_extensions backports new and experimental type hinting features to older Python versions
-try:
-    from typing import List, Self, Union
-except ImportError:
-    from typing_extensions import List, Self, Union
-
+from leakpro.import_helper import List, Self, Union
 from leakpro.metrics.attack_result import AttackResult
 from leakpro.mia_attacks.attack_utils import AttackUtils
 

@@ -48,16 +48,20 @@ class AttackLiRA(AttackAbstract):
         Function to prepare data needed for running the metric on the target model and dataset, using signals computed
         on the auxiliary model(s) and dataset.
         """
+
+        # in_index = self.audit_dataset["data"][self.audit_dataset["in_members"]]
+        # out_index = self.get_out_members(in_index)
+        # print(out_index)
         
         audit_dataset = get_dataset_subset(self.population, self.audit_dataset["data"])
-
+        
+        print(f"Calculating the logits for all {self.num_shadow_models} shadow models")
         self.shadow_models_logits = np.array(self.signal(self.shadow_models, audit_dataset))
 
+        print(f"Calculating the logits for the target model")
         self.target_logits = np.array(self.signal([self.target_model], audit_dataset)).squeeze()
-        
-        self.thresholds = np.linspace(-25, np.log(1), 5000) # np.min
 
-        print(self.shadow_models_logits.shape, self.target_logits.shape)
+        # print(self.shadow_models_logits.shape, self.target_logits.shape)
         
 
     def run_attack(self):
@@ -69,40 +73,42 @@ class AttackLiRA(AttackAbstract):
         """
         
         score = []
-        out_of_sample_threshold = [0.5] #, 0.9, 0.8, 0.75, 0.5]
+        out_of_sample_threshold = [1.] #, 0.9, 0.8, 0.75, 0.5]
+        use_global_std = False
         
-        for sample_threshold in out_of_sample_threshold:
+        if use_global_std:
+            global_std = np.nanstd(self.shadow_models_logits.flatten())
+            print(global_std)
+            
+        # for sample_threshold in out_of_sample_threshold:
 
-            # in_ = 0
-            # out_ = 0
-    
             # Iterate over the dataset using the DataLoader (ensures we use transforms etc)
             for i, audit_idx in tqdm(enumerate(self.audit_dataset["data"])):
-                
-                count, sm_idxs = self.shadow_models_without_traning_sample(self.shadow_models_metadata, audit_idx)
-                
-                if count/self.num_shadow_models >= sample_threshold:
-                    # in_ += 1
+                # count, sm_idxs = self.shadow_models_without_traning_sample(self.shadow_models_metadata, audit_idx)
+                # if count/self.num_shadow_models >= sample_threshold:
     
-                    # Collect the shadow logits
-                    shadow_models_logits = [self.shadow_models_logits[j, i] for j in sm_idxs]
-
-                    mean, std = np.mean(shadow_models_logits), np.std(shadow_models_logits)
+                # Collect the shadow logits
+                shadow_models_logits = [self.shadow_models_logits[j, i] for j in sm_idxs]
+                mean = np.nanmean(shadow_models_logits)
+                std = np.nanstd(shadow_models_logits)
+                
+                # Collect the target logit
+                target_logit = self.target_logits[i]
+                
+                # pr_out = scipy.stats.norm.logpdf(target_logit, mean, global_std+1e-30)
+                pr_out = scipy.stats.norm.logpdf(target_logit, mean, std+1e-30)
                     
-                    # Collect the target logit
-                    target_logit = self.target_logits[i]
-                    pr_out = scipy.stats.norm.logpdf(target_logit, mean, std+1e-30)
-                    score.append(pr_out)
+                score.append(pr_out)
                         
-                else:
-                    # out_ += 1
-                    score.append(np.nan)
-    
-            # print(in_, out_)
+                # else:
+                #     score.append(np.nan)
                 
         score = np.asarray(score)
-        
 
+        print(np.nanmin(score),  np.nanmax(score))
+        import time 
+        time.sleep(5)
+        self.thresholds = np.linspace(np.nanmin(score)-1, np.nanmax(score)+1, 5000) # np.min
         # mean_lsm = np.mean(self.shadow_models_logits, axis=0)
         # std_lsm = np.std(self.shadow_models_logits, axis=0)
         # score = []
@@ -133,17 +139,20 @@ class AttackLiRA(AttackAbstract):
         # import time 
         # time.sleep(5)
         
+        # # pick out the in-members and out-members signals
+        # self.in_member_signals = score[self.in_members].reshape(-1,1)
+        # self.out_member_signals = score[self.out_members].reshape(-1,1)
         # pick out the in-members and out-members signals
         self.in_member_signals = score[self.audit_dataset["in_members"]].reshape(-1,1)
         self.out_member_signals = score[self.audit_dataset["out_members"]].reshape(-1,1)
         
         # compute the signals for the in-members and out-members
-        # member_preds = np.greater(self.in_member_signals, self.thresholds).T
-        # non_member_preds = np.greater(self.out_member_signals, self.thresholds).T
+        member_preds = np.greater(self.in_member_signals, self.thresholds).T
+        non_member_preds = np.greater(self.out_member_signals, self.thresholds).T
 
         # compute the signals for the in-members and out-members
-        member_preds = np.less(self.in_member_signals, self.thresholds).T
-        non_member_preds = np.less(self.out_member_signals, self.thresholds).T
+        # member_preds = np.less(self.in_member_signals, self.thresholds).T
+        # non_member_preds = np.less(self.out_member_signals, self.thresholds).T
         
         # compute the difference between the signals and the thresholds
         # predictions_proba = np.hstack([member_signals, non_member_signals]) - thresholds
@@ -195,3 +204,14 @@ class AttackLiRA(AttackAbstract):
                 
         # Return the count of sublists without the value and their indices
         return count, indices
+
+    def get_out_members(self:Self, in_index):
+        
+        all_index = np.arange(self.population_size)
+        available_index = np.setdiff1d(all_index, in_index, assume_unique=True)
+        
+        for model in self.shadow_models_metadata:
+            available_index = np.setdiff1d(available_index, model['train_idxs'], assume_unique=True)
+
+        return available_index
+        

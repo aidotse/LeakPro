@@ -4,12 +4,6 @@ import logging
 import os
 import time
 
-# typing package not available form < python-3.11, typing_extensions backports new and experimental type hinting features to older Python versions
-try:
-    from typing import List, Self
-except ImportError:
-    from typing_extensions import Self, List
-
 import numpy as np
 import torch
 from torch.nn import CrossEntropyLoss, Module
@@ -17,6 +11,7 @@ from torch.optim import SGD, Adam, AdamW
 from torch.utils.data import DataLoader, Subset
 
 from leakpro.dataset import Dataset
+from leakpro.import_helper import List, Self
 from leakpro.model import Model, PytorchModel
 from leakpro.models import NN, ConvNet, SmallerSingleLayerConvNet  # noqa: F401
 
@@ -243,7 +238,8 @@ class AttackObjects:
         all_index = np.arange(self.population_size)
 
         # Remove indices corresponding to training data
-        used_index = self.train_test_dataset["train_indices"] if include_in_members is False else []
+        used_index = np.concatenate((self.train_test_dataset["train_indices"],
+                                   self.train_test_dataset["test_indices"])) if include_in_members is False else []
 
         # pick allowed indices
         selected_index = np.setdiff1d(all_index, used_index, assume_unique=True)

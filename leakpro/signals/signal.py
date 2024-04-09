@@ -2,17 +2,12 @@
 
 from abc import ABC, abstractmethod
 
-# typing package not available form < python-3.11, typing_extensions backports new and experimental type hinting features to older Python versions
-try:
-    from typing import List, Self, Tuple
-except ImportError:
-    from typing_extensions import List, Self, Tuple
-
 import numpy as np
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 
 from leakpro.dataset import Dataset
+from leakpro.import_helper import List, Self, Tuple
 from leakpro.model import Model
 
 ########################################################################################################################
