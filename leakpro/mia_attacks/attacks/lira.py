@@ -74,7 +74,7 @@ class AttackLiRA(AttackAbstract):
         
         score = []
         out_of_sample_threshold = [1.] #, 0.9, 0.8, 0.75, 0.5]
-        use_global_std = False
+        use_global_std = True
         
         if use_global_std:
             global_std = np.nanstd(self.shadow_models_logits.flatten())
@@ -83,25 +83,29 @@ class AttackLiRA(AttackAbstract):
         # for sample_threshold in out_of_sample_threshold:
 
             # Iterate over the dataset using the DataLoader (ensures we use transforms etc)
-            for i, audit_idx in tqdm(enumerate(self.audit_dataset["data"])):
-                # count, sm_idxs = self.shadow_models_without_traning_sample(self.shadow_models_metadata, audit_idx)
-                # if count/self.num_shadow_models >= sample_threshold:
-    
-                # Collect the shadow logits
-                shadow_models_logits = [self.shadow_models_logits[j, i] for j in sm_idxs]
-                mean = np.nanmean(shadow_models_logits)
+        for i, audit_idx in tqdm(enumerate(self.audit_dataset["data"])):
+            # count, sm_idxs = self.shadow_models_without_traning_sample(self.shadow_models_metadata, audit_idx)
+            # if count/self.num_shadow_models >= sample_threshold:
+
+            # Collect the shadow logits
+            # shadow_models_logits = [self.shadow_models_logits[j, i] for j in sm_idxs]
+            shadow_models_logits = self.shadow_models_logits[:, i]
+            mean = np.nanmean(shadow_models_logits)
+            
+            # Collect the target logit
+            target_logit = self.target_logits[i]
+
+            if use_global_std:
+                # global_std = np.nanstd(self.shadow_models_logits.flatten())
+                pr_out = scipy.stats.norm.logpdf(target_logit, mean, global_std+1e-30)
+            else:
                 std = np.nanstd(shadow_models_logits)
-                
-                # Collect the target logit
-                target_logit = self.target_logits[i]
-                
-                # pr_out = scipy.stats.norm.logpdf(target_logit, mean, global_std+1e-30)
                 pr_out = scipy.stats.norm.logpdf(target_logit, mean, std+1e-30)
+                
+            score.append(pr_out)
                     
-                score.append(pr_out)
-                        
-                # else:
-                #     score.append(np.nan)
+            # else:
+            #     score.append(np.nan)
                 
         score = np.asarray(score)
 
@@ -109,35 +113,6 @@ class AttackLiRA(AttackAbstract):
         import time 
         time.sleep(5)
         self.thresholds = np.linspace(np.nanmin(score)-1, np.nanmax(score)+1, 5000) # np.min
-        # mean_lsm = np.mean(self.shadow_models_logits, axis=0)
-        # std_lsm = np.std(self.shadow_models_logits, axis=0)
-        # score = []
-        # print(target_logits.shape, mean_lsm.shape, std_lsm.shape)
-        # for logit, mean, std in zip(target_logits, mean_lsm, std_lsm):
-        #     pr_out = scipy.stats.norm.logpdf(logit, mean, std+1e-30)
-        #     score.append(pr_out)
-        # score = np.asarray(score)
-        
-        
-        # score = []
-        # print(target_logits.shape, self.mean_lsm.shape, self.std_lsm.shape)
-        # for logit in target_logits:
-        #     pr_out = scipy.stats.norm.logpdf(logit, self.mean_lsm, self.std_lsm+1e-30)
-        #     score.append(pr_out)
-        # score = np.asarray(score)
-        
-        # print(score.shape)
-        # print(self.audit_dataset["in_members"])
-        # print(score.shape, max(score), min(score))
-        # import time 
-        # time.sleep(10)
-        
-        # thresholds = self.thresholds
-
-        # print(logit.shape, mean.shape, std.shape)
-        # print(np.asarray(score).shape, np.asarray(sc).shape)
-        # import time 
-        # time.sleep(5)
         
         # # pick out the in-members and out-members signals
         # self.in_member_signals = score[self.in_members].reshape(-1,1)

@@ -282,8 +282,9 @@ class PytorchModel(Model):
                 y = y.type(torch.LongTensor).to(device)
                 all_logits = self.model_obj(x)
 
+                # predictions = all_logits
                 # Option 1.
-                # predictions = torch.nn.functional.softmax(self.model_obj(x), dim=1)
+                predictions = torch.nn.functional.softmax(self.model_obj(x), dim=1)
 
                 # Option 2.
                 # predictions = all_logits - torch.max(all_logits, dim=1, keepdim=True).values

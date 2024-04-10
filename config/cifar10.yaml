@@ -9,7 +9,7 @@ audit: # Configurations for auditing
   report_log: test_cifar10 # String that indicates the folder where we save the and auditing report.
   device: cuda:0 # String for indicating on which device we conduct the membership inference attack and train reference models.
   audit_batch_size: 1000 # Integer number for indicating the batch size for computing signals in the Privacy Meter.
-  num_shadow_models: 128
+  num_shadow_models: 8
   f_attack_data_size: 0.25
 
 train: # Configuration for training
@@ -17,10 +17,10 @@ train: # Configuration for training
   model_name: nn # String for indicating the model type. We support CNN, wrn28-1, wrn28-2, wrn28-10, vgg16, nn and speedyresnet (requires cuda). More model types can be added in model.py.
   num_target_model: 1 #Integer number for indicating how many target models we want to audit for the privacy game
   device: cuda:0 # String for indicating the device we want to use for training models, e.g., cpu or cuda.
-  epochs: 60 # Integer number for indicating the epochs for training target model. For speedyresnet, it uses its own number of epochs.
-  batch_size: 64 # Integer number for indicating batch size for training the target model. For speedyresnet, it uses its own batch size.
-  optimizer: Adam # String which indicates the optimizer. We support Adam and SGD. For speedyresnet, it uses its own optimizer.
-  learning_rate: 0.001 # Float number for indicating learning rate for training the target model. For speedyresnet, it uses its own learning_rate.
+  epochs: 50 # Integer number for indicating the epochs for training target model. For speedyresnet, it uses its own number of epochs.
+  batch_size: 32 # Integer number for indicating batch size for training the target model. For speedyresnet, it uses its own batch size.
+  optimizer: SGD # String which indicates the optimizer. We support Adam and SGD. For speedyresnet, it uses its own optimizer.
+  learning_rate: 0.01 # Float number for indicating learning rate for training the target model. For speedyresnet, it uses its own learning_rate.
   momentum: 0.9
   weight_decay: 0 # Float number for indicating weight decay for training the target model. For speedyresnet, it uses its own weight_decay.
   test_batch_size: 250 # Integer number for indicating batch size for evaluating the target model.

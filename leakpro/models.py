@@ -60,7 +60,8 @@ class ConvNet(nn.Module):
         x = torch.flatten(x, 1) # flatten all dimensions except batch
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
-        return nn.functional.softmax(self.fc3(x), dim=1)
+        # return nn.functional.softmax(self.fc3(x), dim=1)
+        return self.fc3(x)
 
 
 class SmallerSingleLayerConvNet(nn.Module):
