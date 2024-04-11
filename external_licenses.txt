@@ -14,3 +14,10 @@
 | jinja        | BSD 3-Clause        | [License](https://github.com/pallets/jinja/blob/main/LICENSE.rst)              |
 | pyyaml       | MIT                 | [License](https://github.com/yaml/pyyaml/blob/main/LICENSE)                    |
 | pytest       | MIT                 | [License](https://docs.pytest.org/en/stable/license.html)                      |
+
+
+Packages we partially use or draw inspiration from
+| Packages      | License             | License URL                                                                                         |
+|--------------|----------------------|-----------------------------------------------------------------------------------------------------|
+| privacy_meter        | MIT          | [License]((https://github.com/privacytrustlab/ml_privacy_meter/blob/master/LICENSE))                |
+ 
