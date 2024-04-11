@@ -1,16 +1,16 @@
 | Library      | License             | License URL                                                                    |
 |--------------|---------------------|--------------------------------------------------------------------------------|
 | numpy        | BSD license         | [License](https://github.com/numpy/numpy/blob/main/LICENSE.txt)                |
-| pandas       | BSD 3-Clause License| [License](https://github.com/pandas-dev/pandas/blob/main/LICENSE)              |
-| scipy        | BSD 3-Clause License| [License](https://github.com/scipy/scipy/blob/main/LICENSE.txt)                |
-| scikit-learn | BSD 3-Clause License| [License](https://github.com/scikit-learn/scikit-learn/blob/main/COPYING)      |
-| matplotlib   | PSF license         | [License](https://matplotlib.org/stable/users/project/license.html)            |
+| pandas       | BSD 3-Clause        | [License](https://github.com/pandas-dev/pandas/blob/main/LICENSE)              |
+| scipy        | BSD 3-Clause        | [License](https://github.com/scipy/scipy/blob/main/LICENSE.txt)                |
+| scikit-learn | BSD 3-Clause        | [License](https://github.com/scikit-learn/scikit-learn/blob/main/COPYING)      |
+| matplotlib   | PSF                 | [License](https://matplotlib.org/stable/users/project/license.html)            |
 | seaborn      | BSD 3-Clause        | [License](https://github.com/mwaskom/seaborn/blob/master/LICENSE.md)           |
-| pillow       | HPND License        | [License](https://github.com/python-pillow/Pillow/blob/main/LICENSE)           |
+| pillow       | HPND                | [License](https://github.com/python-pillow/Pillow/blob/main/LICENSE)           |
 | pytorch      | BSD 3-Clause        | [License](https://github.com/pytorch/examples/blob/main/LICENSE)               |
 | torchvision  | BSD 3-Clause        | [License](https://github.com/UiPath/torchvision/blob/master/LICENSE)           |
-| dotmap       | MIT License         | [License](https://github.com/drgrib/dotmap/blob/master/LICENSE.txt)            |
-| loguru       | MIT License         | [License](https://github.com/Delgan/loguru/blob/master/LICENSE)                |
+| dotmap       | MIT                 | [License](https://github.com/drgrib/dotmap/blob/master/LICENSE.txt)            |
+| loguru       | MIT                 | [License](https://github.com/Delgan/loguru/blob/master/LICENSE)                |
 | jinja        | BSD 3-Clause        | [License](https://github.com/pallets/jinja/blob/main/LICENSE.rst)              |
-| pyyaml       | MIT License         | [License](https://github.com/yaml/pyyaml/blob/main/LICENSE)                    |
-| pytest       | MIT License         | [License](https://docs.pytest.org/en/stable/license.html)                      |
+| pyyaml       | MIT                 | [License](https://github.com/yaml/pyyaml/blob/main/LICENSE)                    |
+| pytest       | MIT                 | [License](https://docs.pytest.org/en/stable/license.html)                      |
