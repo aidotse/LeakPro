@@ -5,12 +5,12 @@ run: # Configurations for a specific run
 
 audit: # Configurations for auditing
   privacy_game: privacy_loss_model # Indicate the privacy game from privacy_loss_model, avg_privacy_loss_training_algo, privacy_loss_sample
-  attack_list: [rmia] # String for indicating the membership inference attack. We currently support population, reference.
+  attack_list: [qmia] # String for indicating the membership inference attack. We currently support population, reference.
   report_log: test_cifar10 # String that indicates the folder where we save the and auditing report.
   device: cuda:0 # String for indicating on which device we conduct the membership inference attack and train reference models.
   audit_batch_size: 1000 # Integer number for indicating the batch size for computing signals in the Privacy Meter.
-  num_shadow_models: 3
-  f_attack_data_size: 0.3
+  num_shadow_models: 0
+  f_attack_data_size: 0.6
 
 train: # Configuration for training
   type: pytorch # Training framework (we only support pytorch now).
@@ -30,8 +30,8 @@ train: # Configuration for training
 
 data: # Configuration for data
   dataset: cifar10 # String indicates the name of the dataset (i.e., cifar10, cifar100, purchase100, texas1000)
-  f_train: 0.3 # Float number from 0 to 1 indicating the fraction of the train dataset
-  f_test: 0.3 # Float number from 0 to 1 indicating the fraction of the test dataset
+  f_train: 0.2 # Float number from 0 to 1 indicating the fraction of the train dataset
+  f_test: 0.2 # Float number from 0 to 1 indicating the fraction of the test dataset
   split_method: no_overlapping # String for indicating the methods of splitting the dataset between train, test, and auditing.
   f_audit: 0.3 # Float from 0 to 1, indicating the fraction of the auditing dataset
   data_dir: ./data # String about where to save the data.

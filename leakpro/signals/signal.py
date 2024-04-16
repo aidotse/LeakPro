@@ -98,19 +98,16 @@ class ModelLogits(Signal):
 ########################################################################################################################
 # MODEL_RESCALEDLOGIT CLASS
 ########################################################################################################################
-
-
-class ModelNegativeRescaledLogits(Signal):
+class ModelRescaledLogits(Signal):
     """Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a Dataset.
 
     This particular class is used to get the output of a model.
     """
 
     def __call__(
-        self:Self,
+        self: Self,
         models: List[Model],
-        datasets: List[Dataset],
-        model_to_split_mapping: List[Tuple[int, str, str, str]],
+        datasets: Dataset,
     ) -> List[np.ndarray]:
         """Built-in call method.
 
@@ -118,15 +115,6 @@ class ModelNegativeRescaledLogits(Signal):
         ----
             models: List of models that can be queried.
             datasets: List of datasets that can be queried.
-            model_to_split_mapping: List of tuples, indicating how each model should query the dataset.
-                More specifically, for model #i:
-                model_to_split_mapping[i][0] contains the index of the dataset in the list,
-                model_to_split_mapping[i][1] contains the name of the split,
-                model_to_split_mapping[i][2] contains the name of the input feature,
-                model_to_split_mapping[i][3] contains the name of the output feature.
-                This can also be provided once and for all at the instantiation of InformationSource, through the
-                default_model_to_split_mapping argument.
-            extra: Dictionary containing any additional parameter that should be passed to the signal object.
 
         Returns:
         -------
@@ -134,20 +122,21 @@ class ModelNegativeRescaledLogits(Signal):
 
         """
         results = []
-        # Compute the signal for each model
-        for k, model in enumerate(models):
-            # Extract the features to be used
-            (
-                dataset_index,
-                split_name,
-                input_feature,
-                output_feature,
-            ) = model_to_split_mapping[k]
-            x = datasets[dataset_index].get_feature(split_name, input_feature)
-            # Check if output feature has been provided, else pass None
-            y = datasets[dataset_index].get_feature(split_name, output_feature) if output_feature is not None else None
+        for model in models:
+            # Initialize a list to store the logits for the current model
+            model_logits = []
 
-            results.append(-model.get_rescaled_logits(x, y))
+            # Iterate over the dataset using the DataLoader (ensures we use transforms etc)
+            data_loader = DataLoader(datasets, batch_size=len(datasets), shuffle=False)
+            for data, labels in data_loader:
+
+                # Get rescaled logits for each data point
+                logits = model.get_rescaled_logits(data, labels)
+                model_logits.extend(logits)
+            model_logits = np.array(model_logits)
+            # Append the logits for the current model to the results
+            results.append(model_logits)
+
         return results
 
 
@@ -231,15 +220,6 @@ class ModelLoss(Signal):
         ----
             models: List of models that can be queried.
             datasets: List of datasets that can be queried.
-            model_to_split_mapping: List of tuples, indicating how each model should query the dataset.
-                More specifically, for model #i:
-                model_to_split_mapping[i][0] contains the index of the dataset in the list,
-                model_to_split_mapping[i][1] contains the name of the split,
-                model_to_split_mapping[i][2] contains the name of the input feature,
-                model_to_split_mapping[i][3] contains the name of the output feature.
-                This can also be provided once and for all at the instantiation of InformationSource, through the
-                default_model_to_split_mapping argument.
-            extra: Dictionary containing any additional parameter that should be passed to the signal object.
 
         Returns:
         -------
