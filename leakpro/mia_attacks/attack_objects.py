@@ -47,12 +47,7 @@ class AttackObjects:
         self._target_model = PytorchModel(target_model, CrossEntropyLoss())
         self._train_test_dataset = train_test_dataset
         self._num_shadow_models = configs["audit"]["num_shadow_models"]
-        self.num_distillation_models_target = configs["loss_traj"]["number_of_traj"]
-        self.num_distillation_models_shadow = configs["loss_traj"]["number_of_traj"]
-        self.configs = configs
-        self.logger = logger
-        self._distillation_models_shadow = []
-        self._distillation_models_target = []
+        self._logger = logger
 
         self._audit_dataset = {
             # Assuming train_indices and test_indices are arrays of indices, not the actual data
@@ -90,7 +85,6 @@ class AttackObjects:
         # Train shadow models
         shadow_train_data_indices, shadow_test_data_indices, distillation_train_data_indices,  distillation_test_data_indices = self.create_aux_dataset(include_in_members=False)  # noqa: E501
         if self._num_shadow_models > 0:
-            self._shadow_models = []
             self._shadow_train_indices = []
             self._shadow_test_indices = []
 
@@ -317,6 +311,17 @@ class AttackObjects:
 
         """
         return self._target_model
+
+    @property
+    def logger(self:Self) -> logging.Logger:
+        """Return the logger.
+
+        Returns
+        -------
+        Model: The logger object.
+
+        """
+        return self._logger
 
     @property
     def train_test_dataset(self:Self) -> dict:

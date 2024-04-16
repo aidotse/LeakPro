@@ -177,7 +177,6 @@ class PytorchModel(Model):
             torch.tensor(batch_labels_tensor),
         ).item()
 
-
     def get_grad(self:Self, batch_samples:np.ndarray, batch_labels:np.ndarray)->np.ndarray:
         """Get the gradient of the model loss with respect to the model parameters, given an input and expected output.
 
@@ -245,3 +244,45 @@ class PytorchModel(Model):
             self.intermediate_outputs[layer_name] = output
 
         return hook
+
+    def get_rescaled_logits(self:Self, batch_samples:np.ndarray, batch_labels:np.ndarray) -> np.ndarray:
+            """Get the rescaled logits of the model on a given input and expected output.
+
+            Args:
+            ----
+                batch_samples: Model input.
+                batch_labels: Model expected output.
+
+            Returns:
+            -------
+                The rescaled logit value.
+
+            """
+            self.batch_size = 1024
+
+            device = "cuda:0" if torch.cuda.is_available() else "cpu"
+            self.model_obj.to(device)
+            self.model_obj.eval()
+
+            with torch.no_grad():
+                rescaled_list = []
+                batched_samples = torch.split(torch.tensor(np.array(batch_samples), dtype=torch.float32), self.batch_size)
+                batched_labels = torch.split(torch.tensor(np.array(batch_labels), dtype=torch.float32), self.batch_size)
+
+                for data, target in zip(batched_samples, batched_labels):
+                    x = data.to(device)
+                    y = target.type(torch.LongTensor).to(device)
+
+                    predictions = torch.nn.functional.softmax(self.model_obj(x), dim=1)
+
+                    # With option 1 or 2
+                    COUNT = predictions.shape[0]  # noqa: N806
+                    y_true = predictions[np.arange(COUNT), y.type(torch.IntTensor)]
+                    predictions[np.arange(COUNT), y.type(torch.IntTensor)] = 0
+                    y_wrong = torch.sum(predictions, dim=1)
+                    output_signals = torch.flatten(torch.log(y_true+1e-45) - torch.log(y_wrong+1e-45)).cpu().numpy()
+
+                    rescaled_list.append(output_signals)
+                all_rescaled_logits = np.concatenate(rescaled_list)
+            self.model_obj.to("cpu")
+            return all_rescaled_logits

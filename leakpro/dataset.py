@@ -20,10 +20,17 @@ from leakpro.import_helper import List, Self
 class GeneralDataset(Dataset):
     """Dataset class for general data."""
 
-    def __init__(self:Self, data:np.ndarray, label:np.ndarray, transforms:torch.nn.Module=None) -> None:
+    def __init__(
+        self:Self,
+        data:np.ndarray,
+        label:np.ndarray,
+        transforms:torch.nn.Module=None,
+        task_type:str="classification"
+    ) -> None:
         """data_list: A list of GeneralData instances."""
         self.x = data # Convert to tensor and specify the data type
         self.y = label  # Assuming labels are for classification
+        self.task_type = task_type
         self.transforms = transforms
 
     def __len__(self:Self) -> int:
@@ -38,7 +45,11 @@ class GeneralDataset(Dataset):
         if not isinstance(x, torch.Tensor):
             x = torch.tensor(x, dtype=torch.float32)
 
-        y = torch.tensor(self.y[idx], dtype=torch.long)
+        if self.task_type == "classification":
+            y = torch.tensor(self.y[idx], dtype=torch.long)  # Use torch.long for classification labels
+        elif self.task_type == "regression":
+            y = torch.tensor(self.y[idx], dtype=torch.float32)  # Use torch.float32 for regression labels
+
         return x, y
 
 class InfiniteRepeatDataset(GeneralDataset):
