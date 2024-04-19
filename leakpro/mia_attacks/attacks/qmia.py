@@ -4,7 +4,6 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
-from leakpro.dataset import get_dataset_subset
 from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.mia_attacks.attack_utils import AttackUtils
@@ -132,7 +131,7 @@ class AttackQMIA(AbstractMIA):
         all_index = np.arange(self.population_size)
         attack_data_size = np.round(self.f_attack_data_size * self.population_size).astype(int)
         self.attack_data_index = np.random.choice(all_index, attack_data_size, replace=False)
-        attack_data = get_dataset_subset(self.population, self.attack_data_index)
+        attack_data = self.population.subset(self.attack_data_index)
 
         # create labels and change dataset to be used for regression
         regression_labels = np.array(self.signal([self.target_model], attack_data)).squeeze()
@@ -216,7 +215,7 @@ class AttackQMIA(AbstractMIA):
             Result(s) of the metric.
 
         """
-        audit_dataset = get_dataset_subset(self.population, self.audit_dataset["data"])
+        audit_dataset = self.population.subset(self.audit_dataset["data"])
         self.target_logits = np.array(self.signal([self.target_model], audit_dataset)).squeeze()
 
         audit_dataloader = DataLoader(audit_dataset, batch_size=64, shuffle=False)

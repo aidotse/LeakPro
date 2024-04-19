@@ -9,7 +9,7 @@ from leakpro.import_helper import Any, Dict, Self
 from leakpro.mia_attacks.attack_factory import AttackFactory
 from leakpro.mia_attacks.attack_objects import AttackObjects
 from leakpro.mia_attacks.attack_utils import AttackUtils
-from leakpro.mia_attacks.attacks.attack import AttackAbstract
+from leakpro.mia_attacks.attacks.attack import AbstractMIA
 
 
 class AttackScheduler:
@@ -43,7 +43,7 @@ class AttackScheduler:
         self.logs_dirname = logs_dirname
         self.logger = logger
 
-    def add_attack(self:Self, attack: AttackAbstract) -> None:
+    def add_attack(self:Self, attack: AbstractMIA) -> None:
         """Add an attack to the list of attacks."""
         self.attacks.append(attack)
 
