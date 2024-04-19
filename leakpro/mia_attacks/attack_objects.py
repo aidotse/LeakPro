@@ -48,7 +48,7 @@ class AttackObjects:
         self._target_model = PytorchModel(target_model, CrossEntropyLoss())
         self._train_test_dataset = train_test_dataset
         self._num_shadow_models = configs["audit"]["num_shadow_models"]
-        self.logger = logger
+        self._logger = logger
 
         self._audit_dataset = {
             # Assuming train_indices and test_indices are arrays of indices, not the actual data
@@ -82,8 +82,8 @@ class AttackObjects:
         number_of_files_to_reuse = len(entries)
 
         # Train shadow models
+        self._shadow_models = []
         if self._num_shadow_models > 0:
-            self._shadow_models = []
             self._shadow_train_indices = []
 
             f_shadow_data = configs["audit"]["f_attack_data_size"]
@@ -171,6 +171,17 @@ class AttackObjects:
 
         """
         return self._target_model
+
+    @property
+    def logger(self:Self) -> logging.Logger:
+        """Return the logger.
+
+        Returns
+        -------
+        Model: The logger object.
+
+        """
+        return self._logger
 
     @property
     def train_test_dataset(self:Self) -> dict:
