@@ -8,7 +8,7 @@ from leakpro.dataset import get_dataset_subset
 from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.mia_attacks.attack_utils import AttackUtils
-from leakpro.mia_attacks.attacks.attack import AttackAbstract
+from leakpro.mia_attacks.attacks.attack import AbstractMIA
 from leakpro.signals.signal import ModelRescaledLogits
 
 
@@ -86,7 +86,7 @@ class PinballLoss(torch.nn.Module):
         losses = torch.max((quantiles * errors), ((quantiles - 1) * errors))
         return torch.mean(torch.sum(losses, dim=1))
 
-class AttackQMIA(AttackAbstract):
+class AttackQMIA(AbstractMIA):
     """Implementation of the RMIA attack."""
 
     def __init__(self:Self, attack_utils: AttackUtils, configs: dict) -> None:
