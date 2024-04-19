@@ -2,15 +2,14 @@
 
 import numpy as np
 
-from leakpro.dataset import get_dataset_subset
 from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.mia_attacks.attack_utils import AttackUtils
-from leakpro.mia_attacks.attacks.attack import AttackAbstract
+from leakpro.mia_attacks.attacks.attack import AbstractMIA
 from leakpro.signals.signal import ModelLoss
 
 
-class AttackP(AttackAbstract):
+class AttackP(AbstractMIA):
     """Implementation of the P-attack."""
 
     def __init__(self:Self, attack_utils: AttackUtils, configs: dict) -> None:
@@ -68,7 +67,7 @@ class AttackP(AttackAbstract):
         self.attack_data_index = np.random.choice(
             all_index, attack_data_size, replace=False
         )
-        attack_data = get_dataset_subset(self.population, self.attack_data_index)
+        attack_data = self.population.subset(self.attack_data_index)
         # Load signals if they have been computed already; otherwise, compute and save them
         # signals based on training dataset
         self.attack_signal = self.signal([self.target_model], [attack_data])[0]
@@ -96,7 +95,7 @@ class AttackP(AttackAbstract):
         num_threshold = len(self.quantiles)
 
         # get the loss for the audit dataset
-        audit_data = get_dataset_subset(self.population, self.audit_dataset["data"])
+        audit_data = self.population.subset(self.audit_dataset["data"])
         audit_signal = self.signal([self.target_model], [audit_data])[0]
 
         # pick out the in-members and out-members

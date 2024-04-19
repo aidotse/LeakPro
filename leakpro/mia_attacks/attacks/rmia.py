@@ -1,7 +1,6 @@
 """Implementation of the RMIA attack."""
 import numpy as np
 
-from leakpro.dataset import get_dataset_subset
 from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.mia_attacks.attack_utils import AttackUtils
@@ -97,7 +96,7 @@ class AttackRMIA(AbstractMIA):
         self.attack_data_index = np.random.choice(
             all_index, attack_data_size, replace=False
         )
-        attack_data = get_dataset_subset(self.population, self.attack_data_index)
+        attack_data = self.population.subset(self.attack_data_index)
 
         # compute the ratio of p(z|theta) (target model) to p(z)=sum_{theta'} p(z|theta') (shadow models)
         # for all points in the attack dataset output from signal: # models x # data points x # classes
@@ -139,7 +138,7 @@ class AttackRMIA(AbstractMIA):
 
         """
         # get the logits for the audit dataset
-        audit_data = get_dataset_subset(self.population, self.audit_dataset["data"])
+        audit_data = self.population.subset(self.audit_dataset["data"])
         x_label_indices = np.array(audit_data.y)
 
         # run target points through real model to get logits

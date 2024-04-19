@@ -9,14 +9,37 @@ import joblib
 import numpy as np
 import torch
 import yaml
+from torch import nn
 
-import leakpro.train as util
-from leakpro import dataset, models
+import leakpro.dev_utils.train as utils
+from leakpro import model_blueprints
+from leakpro.dataset import get_dataloader
+from leakpro.dev_utils.data_preparation import get_adult_dataset, get_cifar10_dataset, prepare_train_test_datasets
 from leakpro.mia_attacks.attack_scheduler import AttackScheduler
 from leakpro.reporting.utils import prepare_priavcy_risk_report
 
 
-def setup_log(name: str, save_file: bool) -> logging.Logger:
+def create_model_instance(current_instance: nn.Module, new_class: nn.Module = None, *args, **kwargs) -> nn.Module:
+    # If no new class is provided, use the class of the current instance
+    if new_class is None:
+        new_class = type(current_instance)
+
+    # Check if the new_class is indeed a subclass of nn.Module
+    if not issubclass(new_class, nn.Module):
+        raise ValueError("Provided class must be a subclass of torch.nn.Module")
+
+    # Create a new instance of the provided or inferred class
+    return new_class(*args, **kwargs)
+
+def create_model_from_metadata(class_name, metadata):
+    params = metadata[class_name]['parameters']
+    # Extracting default values from the metadata
+    init_args = {param: details['default'] for param, details in params.items()}
+    # Instantiate the model with default parameters
+    model = SimpleNet(**init_args)
+    return model
+
+def setup_log(name: str, save_file: bool=True) -> logging.Logger:
     """Generate the logger for the current run.
 
     Args:
@@ -48,99 +71,99 @@ def setup_log(name: str, save_file: bool) -> logging.Logger:
 
     return my_logger
 
-
-if __name__ == "__main__":
-
-    RETRAIN = False
-    #args = "./config/adult.yaml"  # noqa: ERA001
-    args = "./config/cifar10.yaml" # noqa: ERA001
-    with open(args, "rb") as f:
-        configs = yaml.safe_load(f)
-
-    # Set the random seed, log_dir and inference_game
-    torch.manual_seed(configs["run"]["random_seed"])
-    np.random.seed(configs["run"]["random_seed"])
-    random.seed(configs["run"]["random_seed"])
-
-    # Setup logger
-    log_dir = configs["run"]["log_dir"]
-    logger = setup_log("time_analysis", configs["run"]["time_log"])
-
-    Path(log_dir).mkdir(parents=True, exist_ok=True)
-    report_dir = f"{log_dir}/{configs['audit']['report_log']}"
-    Path(report_dir).mkdir(parents=True, exist_ok=True)
-
-    start_time = time.time()
-
+def generate_user_input(configs: dict, logger: logging.Logger)->None:
+    """Generate user input for the target model."""
     # ------------------------------------------------
-    # Create the population dataset
-    population = dataset.get_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
-    N_population = len(population)
+
+    retrain = True
+    # Create the population dataset and target_model
+    if "adult" in configs["data"]["dataset"]:
+        population = get_adult_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
+        target_model = model_blueprints.NN(configs["train"]["inputs"], configs["train"]["outputs"])
+    elif "cifar10" in configs["data"]["dataset"]:
+        population = get_cifar10_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
+        target_model = model_blueprints.ConvNet()
+
+    n_population = len(population)
 
     # Create target training dataset and test dataset
     # NOTE: this should not be done as the model is provided by the user
-    train_test_dataset = dataset.prepare_train_test_datasets(N_population, configs["data"])
+    train_test_dataset = prepare_train_test_datasets(n_population, configs["data"])
 
-    train_loader = dataset.get_dataloader(
+    train_loader = get_dataloader(
         torch.utils.data.Subset(population, train_test_dataset["train_indices"]),
         batch_size=configs["train"]["batch_size"],
         shuffle=True,
     )
-    test_loader = dataset.get_dataloader(
+    test_loader = get_dataloader(
         torch.utils.data.Subset(population, train_test_dataset["test_indices"]),
         batch_size=configs["train"]["test_batch_size"],
     )
 
-    # Train the target model
-    if "adult" in configs["data"]["dataset"]:
-        model = models.NN(configs["train"]["inputs"], configs["train"]["outputs"])
-    elif "cifar10" in configs["data"]["dataset"]:
-        model = models.ConvNet()
-    if RETRAIN:
-        model = util.train(model, train_loader, configs, test_loader, train_test_dataset, logger)
+    if retrain:
+        target_model = utils.train(target_model, train_loader, configs, test_loader, train_test_dataset, logger)
 
 
+if __name__ == "__main__":
+
+    #args = "./config/adult.yaml"  # noqa: ERA001
+    user_args = "./config/dev_config/cifar10.yaml" # noqa: ERA001
+    with open(user_args, "rb") as f:
+        user_configs = yaml.safe_load(f)
+
+    # Setup logger
+    logger = setup_log("analysis")
+
+    # Generate user input
+    generate_user_input(user_configs, logger) # This is for developing purposes only
+
+    start_time = time.time()
     # ------------------------------------------------
     # LEAKPRO starts here
-    # Read in model, population, and metadata
-    data_dir = configs["data"]["data_dir"]
-    data_file = configs["data"]["dataset"]
-    dataset_path = f"{data_dir}/{data_file}.pkl"
-    with open(dataset_path, "rb") as file:
-        population = joblib.load(file)
+    args = "./config/audit.yaml" # noqa: ERA001
+    with open(args, "rb") as f:
+        configs = yaml.safe_load(f)
 
-    # Get the training and test data
-    train_test_data = train_test_dataset
+    # Set the random seed, log_dir and inference_game
+    torch.manual_seed(configs["audit"]["random_seed"])
+    np.random.seed(configs["audit"]["random_seed"])
+    random.seed(configs["audit"]["random_seed"])
+
+    # Create directory to store results
+    report_dir = f"{configs['audit']['report_log']}"
+    Path(report_dir).mkdir(parents=True, exist_ok=True)
 
     # Get the target model + metadata
+    log_dir = configs["run"]["log_dir"]
     target_model_metadata_path = f"{log_dir}/models_metadata.pkl"
     with open(target_model_metadata_path, "rb") as f:
         target_model_metadata = joblib.load(f)
     target_model_path = f"{log_dir}/model_0.pkl"
     with open(target_model_path, "rb") as f:
-        if "adult" in configs["data"]["dataset"]:
-            target_model = models.NN(
+        if "adult" in user_configs["data"]["dataset"]:
+            target_model = model_blueprints.NN(
                 configs["train"]["inputs"], configs["train"]["outputs"]
             )  # TODO: read metadata to get the model
-        elif "cifar10" in configs["data"]["dataset"]:
-            target_model = models.ConvNet()
+        elif "cifar10" in user_configs["data"]["dataset"]:
+            target_model = model_blueprints.ConvNet()
         target_model.load_state_dict(torch.load(f))
 
+    data_dir = configs["data"]["data_dir"]
+    data_file = configs["data"]["dataset"]
+    dataset_path = f"{data_dir}/{data_file}.pkl"
+    with open(dataset_path, "rb") as file:
+        population = joblib.load(file)
     # ------------------------------------------------
     # Now we have the target model, its metadata, and the train/test dataset
     # indices.
     attack_scheduler = AttackScheduler(
         population,
-        train_test_dataset,
         target_model,
         target_model_metadata,
         configs,
-        log_dir,
         logger,
-    )  # TODO metadata includes indices for train and test data
+    )
     audit_results = attack_scheduler.run_attacks()
-
-    logger.info(str(audit_results["qmia"]["result_object"]))
 
     report_log = configs["audit"]["report_log"]
     privacy_game = configs["audit"]["privacy_game"]

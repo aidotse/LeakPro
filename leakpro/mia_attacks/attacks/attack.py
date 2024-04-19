@@ -11,7 +11,7 @@ from leakpro.mia_attacks.attack_utils import AttackUtils
 ########################################################################################################################
 
 
-class AttackAbstract(ABC):
+class AbstractMIA(ABC):
     """Interface to construct and perform a membership inference attack on a target model and dataset.
 
     This serves as a guideline for implementing a metric to be used for measuring the privacy leakage of a target model.

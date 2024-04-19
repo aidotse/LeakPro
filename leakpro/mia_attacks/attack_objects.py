@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader, Subset
 from leakpro.dataset import Dataset
 from leakpro.import_helper import List, Self
 from leakpro.model import Model, PytorchModel
-from leakpro.models import NN, ConvNet, SmallerSingleLayerConvNet  # noqa: F401
+from leakpro.model_blueprints import NN, ConvNet, SmallerSingleLayerConvNet  # noqa: F401
 
 
 class AttackObjects:

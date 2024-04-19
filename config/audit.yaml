@@ -10,4 +10,20 @@ audit:  # Configurations for auditing
       data_fraction: 0.6  # Fraction of the dataset to use for this attack
       num_shadow_models: 1 # Number of shadow models to train
   report_log: "results"  # Folder to save the auditing report
+  target_model_folder: "target"
   split_method: "no_overlapping"  # Method of creating the attack dataset
+
+# Define models to choose among
+models:
+  NN:
+    parameters:
+      input_size: 
+        type: int
+        description: "Size of the input feature vector."
+        default: 10
+      output_size:
+        type: int
+        description: "Size of the output layer, i.e., number of classes."
+        default: 2
+  ConvNet:
+  SmallerSingleLayerConvNet:
