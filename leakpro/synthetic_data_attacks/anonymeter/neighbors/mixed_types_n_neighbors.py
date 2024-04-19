@@ -62,9 +62,7 @@ def gower_distance(
     """
     dist = 0.0
     for i in range(len(r0)):
-        if isnan(r0[i]) and not isnan(r1[i]):
-            dist += 1
-        elif not isnan(r0[i]) and isnan(r1[i]):
+        if (isnan(r0[i]) and not isnan(r1[i])) or (not isnan(r0[i]) and isnan(r1[i])):
             dist += 1
         elif isnan(r0[i]) and isnan(r1[i]):
             pass
