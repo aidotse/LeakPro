@@ -1,37 +1,34 @@
 """Module that contains the dataset class and functions for preparing the dataset for training the target models."""
 
-import logging
-import os
-import pickle
-
-import joblib
 import numpy as np
-import pandas as pd
 import torch
-import torchvision
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
 from torch.utils.data import Dataset
-from torchvision import transforms
 
 from leakpro.import_helper import List, Self
 
 
 class GeneralDataset(Dataset):
-    """Dataset class for general data."""
+    """Immutableataset class for general data."""
 
     def __init__(
         self:Self,
         data:np.ndarray,
-        label:np.ndarray,
+        labels:np.ndarray,
         transforms:torch.nn.Module=None,
         task_type:str="classification"
     ) -> None:
         """data_list: A list of GeneralData instances."""
-        self.x = data # Convert to tensor and specify the data type
-        self.y = label  # Assuming labels are for classification
-        self.task_type = task_type
-        self.transforms = transforms
+        assert isinstance(data, np.ndarray), "data must be a numpy array"
+        assert isinstance(labels, np.ndarray), "labels must be a numpy array"
+
+        # Make np arrays read-only
+        data.flags.writeable = False
+        labels.flags.writeable = False
+
+        self._data = data
+        self._labels = labels
+        self._task_type = task_type
+        self._transforms = transforms
 
     def __len__(self:Self) -> int:
         """Return the length of the dataset."""
@@ -52,102 +49,15 @@ class GeneralDataset(Dataset):
 
         return x, y
 
-class InfiniteRepeatDataset(GeneralDataset):
-    """Dataset class for infinite repeat data."""
+    def subset(self:Self, indices:np.ndarray) -> Self:
+        """Create a subset of the current dataset."""
+        # As the data is immutable, just pass the indices
+        if isinstance(indices, list):
+            indices = np.array(indices)
 
-    def __init__(self:Self, x:np.ndarray, y:np.ndarray, transform:torch.nn.Module=None) -> None:
-        """Initialize the InfiniteRepeatDataset class.
-
-        Args:
-        ----
-            x (np.ndarray): The input data.
-            y (np.ndarray): The target labels.
-            transform (torch.nn.Module, optional): The data transformation module. Defaults to None.
-
-        """
-        super().__init__(x, y, transform)
-
-    def __len__(self:Self) -> int:
-        """Return the length of the dataset."""
-        return len(self.dataset)
-
-    def __getitem__(self:Self, idx:int) -> List[torch.Tensor]:
-        """Return the data and label for a single instance indexed by idx."""
-        return self.x[idx % len(self.dataset)], self.y[idx % len(self.dataset)]
-
-
-
-def get_dataset(dataset_name: str, data_dir: str, logger:logging.Logger) -> GeneralDataset:
-    """Get the dataset."""
-    path = f"{data_dir}/{dataset_name}"
-
-    if os.path.exists(f"{path}.pkl"):
-        with open(f"{path}.pkl", "rb") as file:
-            all_data = joblib.load(file)
-        logger.info(f"Load data from {path}.pkl")
-    elif "adult" in dataset_name:
-        column_names = [
-            "age",
-            "workclass",
-            "fnlwgt",
-            "education",
-            "education-num",
-            "marital-status",
-            "occupation",
-            "relationship",
-            "race",
-            "sex",
-            "capital-gain",
-            "capital-loss",
-            "hours-per-week",
-            "native-country",
-            "income",
-        ]
-        df_train = pd.read_csv(f"{path}/{dataset_name}.data", names=column_names)
-        df_test = pd.read_csv(
-            f"{path}/{dataset_name}.test", names=column_names, header=0
-        )
-        df_test["income"] = df_test["income"].str.replace(".", "", regex=False)
-        df_concatenated = pd.concat([df_train, df_test], axis=0)
-        df_replaced = df_concatenated.replace(" ?", np.nan)
-        df_clean = df_replaced.dropna()
-        x, y = df_clean.iloc[:, :-1], df_clean.iloc[:, -1]
-
-        categorical_features = [col for col in x.columns if x[col].dtype == "object"]
-        numerical_features = [
-            col for col in x.columns if x[col].dtype in ["int64", "float64"]
-        ]
-
-        onehot_encoder = OneHotEncoder(sparse_output=False, handle_unknown="ignore")
-        x_categorical = onehot_encoder.fit_transform(x[categorical_features])
-
-        scaler = StandardScaler()
-        x_numerical = scaler.fit_transform(x[numerical_features])
-
-        x = np.hstack([x_numerical, x_categorical])
-
-        # label encode the target variable to have the classes 0 and 1
-        y = LabelEncoder().fit_transform(y)
-
-        all_data = GeneralDataset(x,y)
-        with open(f"{path}.pkl", "wb") as file:
-            pickle.dump(all_data, file)
-        logger.info(f"Save data to {path}.pkl")
-    elif "cifar10" in dataset_name:
-        transform = transforms.Compose([transforms.ToTensor(),transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-        trainset = torchvision.datasets.CIFAR10(root="./data/cifar10", train=True, download=True, transform=transform)
-        testset = torchvision.datasets.CIFAR10(root="./data/cifar10", train=False,download=True, transform=transform)
-        x = np.vstack([trainset.data, testset.data])
-        y = np.hstack([trainset.targets, testset.targets])
-
-        all_data = GeneralDataset(x, y, transform)
-
-        with open(f"{path}.pkl", "wb") as file:
-            pickle.dump(all_data, file)
-        logger.info(f"Save data to {path}.pkl")
-
-    return all_data
-
+        if np.max(indices) >= len(self._data) or np.min(indices) < 0:
+            raise ValueError("Index out of range")
+        return GeneralDataset(self._data[indices], self._labels[indices], self._transforms, self._task_type)
 
 def get_split(
     all_index: List[int], used_index: List[int], size: int, split_method: str
@@ -186,53 +96,6 @@ def get_split(
         )
 
     return selected_index
-
-
-def prepare_train_test_datasets(dataset_size: int, configs: dict) -> dict:
-    """Prepare the dataset for training the target models when the training data are sampled uniformly from the population.
-
-    Args:
-    ----
-        dataset_size (int): Size of the whole dataset
-        num_datasets (int): Number of datasets we should generate
-        configs (dict): Data split configuration
-
-    Returns:
-    -------
-        dict: Data split information which saves the information of training points index and test points index.
-
-    """
-    # The index_list will save all the information about the train, test and auit for each target model.
-    all_index = np.arange(dataset_size)
-    train_size = int(configs["f_train"] * dataset_size)
-    test_size = int(configs["f_test"] * dataset_size)
-
-    selected_index = np.random.choice(all_index, train_size + test_size, replace=False)
-    train_index, test_index = train_test_split(selected_index, test_size=test_size)
-    return {"train_indices": train_index, "test_indices": test_index}
-
-
-def get_dataset_subset(dataset: Dataset, indices: List[int]) -> Dataset:
-    """Get a subset of the dataset.
-
-    Args:
-    ----
-        dataset (torchvision.datasets): Whole dataset.
-        indices (list): List of indices.
-
-    """
-    if max(indices) >= len(dataset) or min(indices) < 0:
-        raise ValueError("Index out of range")
-
-    data = dataset.x
-    targets = dataset.y
-    transforms = dataset.transforms
-    subset_data = [data[idx] for idx in indices]
-    subset_targets = [targets[idx] for idx in indices]
-
-    return dataset.__class__(subset_data, subset_targets, transforms)
-
-
 
 def get_dataloader(
     dataset: GeneralDataset,

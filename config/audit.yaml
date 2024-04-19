@@ -1,0 +1,13 @@
+audit:  # Configurations for auditing
+  random_seed: 1234  # Integer specifying the random seed
+  attack_list:
+    qmia:
+      data_fraction: 0.6  # Fraction of the dataset to use for this attack
+      epochs: 10  # Number of training epochs for quantile regression
+    population:
+      data_fraction: 0.6  # Fraction of the dataset to use for this attack
+    rmia:
+      data_fraction: 0.6  # Fraction of the dataset to use for this attack
+      num_shadow_models: 1 # Number of shadow models to train
+  report_log: "results"  # Folder to save the auditing report
+  split_method: "no_overlapping"  # Method of creating the attack dataset
