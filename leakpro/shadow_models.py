@@ -19,6 +19,13 @@ class NN(nn.Module):
 
         """
         super().__init__()
+
+        # Store the initialization parameters to be saved in the metadata
+        self.init_params = {
+            "in_shape": in_shape,
+            "num_classes": num_classes
+        }
+
         self.fc1 = nn.Linear(in_shape, 100)
         self.fc2 = nn.Linear(100, 50)
         self.fc3 = nn.Linear(50, num_classes)
@@ -36,6 +43,7 @@ class ConvNet(nn.Module):
     def __init__(self:Self) -> None:
         """Initialize the ConvNet model."""
         super().__init__()
+
         self.conv1 = nn.Conv2d(3, 6, 5)
         self.pool = nn.MaxPool2d(2, 2)
         self.conv2 = nn.Conv2d(6, 16, 5)

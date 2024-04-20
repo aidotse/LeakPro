@@ -213,9 +213,7 @@ def save_model_and_metadata(  # noqa: PLR0913
 
     """
     # Save model and metadata
-    model_metadata_dict = {"model_metadata": {}, "current_idx": 0}
-    model_idx = model_metadata_dict["current_idx"]
-    model_metadata_dict["current_idx"] += 1
+    model_metadata_dict = {"model_metadata": {}}
 
     log_dir = configs["run"]["log_dir"]
     Path(log_dir).mkdir(parents=True, exist_ok=True)
@@ -224,6 +222,7 @@ def save_model_and_metadata(  # noqa: PLR0913
         torch.save(model.state_dict(), f)
     meta_data = {}
 
+    meta_data["init_params"] = model.init_params if hasattr(model, "init_params") else {}
     meta_data["train_split"] = data_split["train_indices"]
     meta_data["test_split"] = data_split["test_indices"]
     meta_data["num_train"] = len(data_split["train_indices"])
@@ -238,6 +237,6 @@ def save_model_and_metadata(  # noqa: PLR0913
     meta_data["test_loss"] = test_loss
     meta_data["dataset"] = configs["data"]["dataset"]
 
-    model_metadata_dict["model_metadata"][model_idx] = meta_data
+    model_metadata_dict["model_metadata"] = meta_data
     with open(f"{log_dir}/models_metadata.pkl", "wb") as f:
         pickle.dump(model_metadata_dict, f)
