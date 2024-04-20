@@ -12,32 +12,57 @@ import yaml
 from torch import nn
 
 import leakpro.dev_utils.train as utils
-from leakpro import model_blueprints
+from leakpro import shadow_models
 from leakpro.dataset import get_dataloader
 from leakpro.dev_utils.data_preparation import get_adult_dataset, get_cifar10_dataset, prepare_train_test_datasets
 from leakpro.mia_attacks.attack_scheduler import AttackScheduler
 from leakpro.reporting.utils import prepare_priavcy_risk_report
 
 
-def create_model_instance(current_instance: nn.Module, new_class: nn.Module = None, *args, **kwargs) -> nn.Module:
-    # If no new class is provided, use the class of the current instance
-    if new_class is None:
-        new_class = type(current_instance)
+def create_model(
+    current_instance: nn.Module = None,
+    new_class: type = None,
+    metadata: dict = None,
+    *args,
+    **kwargs
+) -> nn.Module:
+    """
+    Create a new model instance, either by copying the class from an existing instance
+    or by using a specified class. If metadata is provided, it can be used to extract
+    default initialization parameters.
 
-    # Check if the new_class is indeed a subclass of nn.Module
+    Args:
+        current_instance (nn.Module): An existing model instance to infer the class from.
+        new_class (type): A specific class to use for creating the new model.
+        metadata (dict): Metadata containing initialization parameters.
+        *args: Additional positional arguments for model initialization.
+        **kwargs: Additional keyword arguments for model initialization.
+
+    Returns:
+        nn.Module: A new instance of the specified or inferred model class.
+    """
+
+    # If new_class is not specified, infer it from the current_instance
+    if new_class is None:
+        if current_instance is not None:
+            new_class = type(current_instance)
+        else:
+            raise ValueError("Either new_class or current_instance must be provided.")
+
+    # Ensure the provided or inferred class is a subclass of nn.Module
     if not issubclass(new_class, nn.Module):
         raise ValueError("Provided class must be a subclass of torch.nn.Module")
 
-    # Create a new instance of the provided or inferred class
-    return new_class(*args, **kwargs)
+    # Use metadata to get default initialization parameters, if provided
+    if metadata is not None and new_class in metadata:
+        params = metadata[new_class]['parameters']
+        # Get default values for initialization
+        init_args = {param: details['default'] for param, details in params.items()}
+        # Merge init_args with additional arguments and keyword arguments
+        return new_class(*args, **{**init_args, **kwargs})
 
-def create_model_from_metadata(class_name, metadata):
-    params = metadata[class_name]['parameters']
-    # Extracting default values from the metadata
-    init_args = {param: details['default'] for param, details in params.items()}
-    # Instantiate the model with default parameters
-    model = SimpleNet(**init_args)
-    return model
+    # If no metadata, just create the model with given args and kwargs
+    return new_class(*args, **kwargs)
 
 def setup_log(name: str, save_file: bool=True) -> logging.Logger:
     """Generate the logger for the current run.
@@ -79,10 +104,10 @@ def generate_user_input(configs: dict, logger: logging.Logger)->None:
     # Create the population dataset and target_model
     if "adult" in configs["data"]["dataset"]:
         population = get_adult_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
-        target_model = model_blueprints.NN(configs["train"]["inputs"], configs["train"]["outputs"])
+        target_model = shadow_models.NN(configs["train"]["inputs"], configs["train"]["outputs"])
     elif "cifar10" in configs["data"]["dataset"]:
         population = get_cifar10_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
-        target_model = model_blueprints.ConvNet()
+        target_model = shadow_models.ConvNet()
 
     n_population = len(population)
 
@@ -133,21 +158,24 @@ if __name__ == "__main__":
     report_dir = f"{configs['audit']['report_log']}"
     Path(report_dir).mkdir(parents=True, exist_ok=True)
 
-    # Get the target model + metadata
+    # Get the target  metadata
     log_dir = configs["run"]["log_dir"]
     target_model_metadata_path = f"{log_dir}/models_metadata.pkl"
     with open(target_model_metadata_path, "rb") as f:
         target_model_metadata = joblib.load(f)
+
+    # Get the target model
     target_model_path = f"{log_dir}/model_0.pkl"
     with open(target_model_path, "rb") as f:
         if "adult" in user_configs["data"]["dataset"]:
-            target_model = model_blueprints.NN(
+            target_model = shadow_models.NN(
                 configs["train"]["inputs"], configs["train"]["outputs"]
             )  # TODO: read metadata to get the model
         elif "cifar10" in user_configs["data"]["dataset"]:
-            target_model = model_blueprints.ConvNet()
+            target_model = shadow_models.ConvNet()
         target_model.load_state_dict(torch.load(f))
 
+    # Get the population dataset
     data_dir = configs["data"]["data_dir"]
     data_file = configs["data"]["dataset"]
     dataset_path = f"{data_dir}/{data_file}.pkl"
