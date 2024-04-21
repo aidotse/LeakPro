@@ -1,0 +1,16 @@
+numpy
+torch
+torchvision
+dotmap
+loguru
+matplotlib
+jinja2
+pandas
+seaborn
+pillow
+scipy
+scikit-learn
+pytest
+black
+pyyaml
+
