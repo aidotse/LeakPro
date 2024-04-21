@@ -3,7 +3,6 @@ import torch
 import torch.nn.functional as F  # noqa: N812
 from torch import nn
 
-
 from leakpro.import_helper import Self
 
 
@@ -61,8 +60,8 @@ class ConvNet(nn.Module):
         x = torch.flatten(x, 1) # flatten all dimensions except batch
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
-        # return nn.functional.softmax(self.fc3(x), dim=1)
         return self.fc3(x)
+
 
 class SmallerSingleLayerConvNet(nn.Module):
     """Smaller Convolutional Neural Network model with only one convolutional layer."""
@@ -86,4 +85,4 @@ class SmallerSingleLayerConvNet(nn.Module):
         x = torch.flatten(x, 1)  # flatten all dimensions except the batch
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
-        return torch.tanh(self.fc3(x))
+        return self.fc3(x)

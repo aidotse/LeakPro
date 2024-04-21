@@ -245,26 +245,22 @@ class PytorchModel(Model):
 
         return hook
 
-    def get_rescaled_logits(self, batch_samples, batch_labels):
-        
-        """Function to get the model rescaled logits on a given input and an expected output.
-        The rescaled logits is proposed in https://arxiv.org/abs/2112.03570.
+    def get_rescaled_logits(self:Self, batch_samples:np.ndarray, batch_labels:np.ndarray) -> np.ndarray:
+        """Get the rescaled logits of the model on a given input and expected output.
 
         Args:
+        ----
             batch_samples: Model input.
             batch_labels: Model expected output.
 
         Returns:
+        -------
             The rescaled logit value.
-        """
 
+        """
         self.batch_size = 1024
-        
-        if torch.cuda.is_available():
-            device = "cuda:0"
-        else:
-            device = "cpu"
-            
+
+        device = "cuda:0" if torch.cuda.is_available() else "cpu"
         self.model_obj.to(device)
         self.model_obj.eval()
         

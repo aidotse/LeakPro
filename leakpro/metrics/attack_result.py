@@ -111,6 +111,12 @@ class CombinedMetricResult:
             predicted_labels[:, true_labels == 1], axis=1
         )
 
+        sorted_indices = np.argsort(self.fp)
+        self.fp = self.fp[sorted_indices]
+        self.tp = self.tp[sorted_indices]
+        self.tn = self.tn[sorted_indices]
+        self.fn = self.fn[sorted_indices]
+
         self.roc_auc = auc(
             self.fp / (np.sum(true_labels == 0)), self.tp / (np.sum(true_labels == 1))
         )

@@ -34,6 +34,29 @@ class AttackP(AttackAbstract):
         self.signal = ModelLoss()
         self.hypothesis_test_func = attack_utils.linear_itp_threshold_func
 
+    def description(self:Self) -> dict:
+        """Return a description of the attack."""
+        title_str = "Population attack (P-attack)"
+
+        reference_str = "Ye, Jiayuan, et al. Enhanced membership inference attacks against machine learning models. " \
+                        "Proceedings of the 2022 ACM SIGSAC Conference on Computer and Communications Security. 2022."
+
+        summary_str = "The Population attack (P-attack) is a membership inference attack based on the output loss of a black-box model."  # noqa: E501
+
+        detailed_str = "The attack is executed according to: \
+            1. A fraction of the population is sampled to create histograms of the output loss. \
+            2. The histograms are used to compute thresholds for the output loss based on a given FPR \
+            3. The thresholds are used to classify in-members and out-members. \
+            4. The attack is evaluated on an audit dataset to determine the attack performance."
+
+        return {
+            "title_str": title_str,
+            "reference": reference_str,
+            "summary": summary_str,
+            "detailed": detailed_str,
+        }
+
+
     def prepare_attack(self:Self) -> None:
         """Prepare data needed for running the metric on the target model and dataset."""
         # sample dataset to compute histogram
@@ -48,7 +71,7 @@ class AttackP(AttackAbstract):
         attack_data = get_dataset_subset(self.population, self.attack_data_index)
         # Load signals if they have been computed already; otherwise, compute and save them
         # signals based on training dataset
-        self.attack_signal = self.signal([self.target_model], attack_data)[0]
+        self.attack_signal = self.signal([self.target_model], [attack_data])[0]
 
     def run_attack(self:Self) -> CombinedMetricResult:
         """Run the attack on the target model and dataset.

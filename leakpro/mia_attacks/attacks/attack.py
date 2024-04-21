@@ -80,6 +80,17 @@ class AttackAbstract(ABC):
         return self.audit_dataset
 
     @abstractmethod
+    def description(self:Self) -> dict:
+        """Return a description of the attack.
+
+        Returns
+        -------
+        dict: A dictionary containing the reference, summary, and detailed description of the attack.
+
+        """
+        pass
+
+    @abstractmethod
     def prepare_attack(self:Self) -> None:
         """Prepare data needed for running the metric on the target model and dataset."""
         pass

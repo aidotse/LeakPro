@@ -147,10 +147,13 @@ if __name__ == "__main__":
 
     attack_name = str(configs["audit"]["attack_list"][0])
     logger.info(str(audit_results[attack_name]["result_object"]))
+    privacy_game = configs["audit"]["privacy_game"]
+    n_shadow_models = configs["audit"]["num_shadow_models"]
+    n_attack_data_size = configs["audit"]["f_attack_data_size"]
 
     prepare_priavcy_risk_report(
             log_dir,
             [audit_results[attack_name]["result_object"]],
             configs["audit"],
-            save_path=f"{log_dir}/{configs['audit']['report_log']}/{configs['audit']['privacy_game']}/ns_{configs['audit']['num_shadow_models']}_fs_{configs['audit']['f_attack_data_size']}",
+            save_path=f"{log_dir}/{report_log}/{privacy_game}/ns_{n_shadow_models}_fs_{n_attack_data_size}",
         )

@@ -1,5 +1,4 @@
 """Implementation of the RMIA attack."""
-    
 import numpy as np
 
 from leakpro.dataset import get_dataset_subset
@@ -35,6 +34,24 @@ class AttackRMIA(AttackAbstract):
 
         self.signal = ModelLogits()
         self.epsilon = 1e-6
+
+    def description(self:Self) -> dict:
+        """Return a description of the attack."""
+        title_str = "RMIA attack"
+        reference_str = "Zarifzadeh, Sajjad, Philippe Cheng-Jie Marc Liu, and Reza Shokri. \
+            Low-Cost High-Power Membership Inference by Boosting Relativity. (2023)."
+        summary_str = "The RMIA attack is a membership inference attack based on the output logits of a black-box model."
+        detailed_str = "The attack is executed according to: \
+            1. A fraction of the population is sampled to compute the likelihood LR_z of p(z|theta) to p(z) for the target model.\
+            2. The ratio is used to compute the likelihood ratio LR_x of p(x|theta) to p(x) for the target model. \
+            3. The ratio LL_x/LL_z is viewed as a random variable (z is random) and used to classify in-members and out-members. \
+            4. The attack is evaluated on an audit dataset to determine the attack performance."
+        return {
+            "title_str": title_str,
+            "reference": reference_str,
+            "summary": summary_str,
+            "detailed": detailed_str,
+        }
 
 
     def softmax(self:Self, all_logits:np.ndarray,

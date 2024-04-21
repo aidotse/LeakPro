@@ -37,6 +37,26 @@ class AttackLiRA(AttackAbstract):
         self.num_shadow_models = len(self.shadow_models)
         self.shadow_models_metadata = attack_utils.attack_objects.shadow_models_metadata
 
+    def description(self:Self) -> dict:
+        """Return a description of the attack."""
+        title_str = "Likelihood Ratio Attack"
+
+        reference_str = "Carlini N, et al. Membership Inference Attacks From First Principles"
+
+        summary_str = "The Likelihood Ratio Attack (LiRA) is a membership inference attack based on the rescaled logits of a black-box model"
+
+        detailed_str = "The attack is executed according to: \
+            1. A fraction of the target model dataset is sampled to be included (in-) or excluded (out-) from the shadow model training dataset. \
+            2. The rescaled logits are used to estimate Gaussian distributions for in and out members \
+            3. The thresholds are used to classify in-members and out-members. \
+            4. The attack is evaluated on an audit dataset to determine the attack performance."
+
+        return {
+            "title_str": title_str,
+            "reference": reference_str,
+            "summary": summary_str,
+            "detailed": detailed_str,
+        }
 
     def prepare_attack(self):
         """

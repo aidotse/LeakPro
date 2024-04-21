@@ -143,7 +143,7 @@ class ModelNegativeRescaledLogits(Signal):
         return model_logits
 
 ########################################################################################################################
-# MODEL_RESCALEDLOGIT CLASS (NON-NEGATIVE)
+# MODEL_RESCALEDLOGIT CLASS
 ########################################################################################################################
 
 class ModelRescaledLogits(Signal):
@@ -258,7 +258,7 @@ class ModelLoss(Signal):
     def __call__(
         self: Self,
         models: List[Model],
-        datasets: Dataset, # List[Dataset 
+        datasets: List[Dataset], 
     ) -> List[np.ndarray]:
         """Built-in call method.
 
@@ -266,40 +266,22 @@ class ModelLoss(Signal):
         ----
             models: List of models that can be queried.
             datasets: List of datasets that can be queried.
-            extra: Dictionary containing any additional parameter that should be passed to the signal object.
 
         Returns:
         -------
             The signal value.
 
-        """        # Compute the signal for each model
+        """
         results = []
-        for model in models:
-            # Initialize a list to store the logits for the current model
-            model_logits = []
+        # Compute the signal for each model
+        for k, model in enumerate(models):
+            x = datasets[k].X
+            y = datasets[k].y
 
-            # Iterate over the dataset using the DataLoader (ensures we use transforms etc)
-            data_loader = DataLoader(datasets, batch_size=len(datasets), shuffle=False)
-            for data, _ in data_loader:
-                # Get logits for each data point
-                logits = model.get_loss(data)
-                model_logits.extend(logits)
-            model_logits = np.array(model_logits)
-            # Append the logits for the current model to the results
-            results.append(model_logits)
-
-        # return results
-        # results = []
-        # # Compute the signal for each model
-        # for k, model in enumerate(models):
-        #     x = datasets[k].X
-        #     y = datasets[k].y
-
-        #     # Compute the signal for each sample
-        #     results.append(model.get_loss(x, y))
-        # return results
+            # Compute the signal for each sample
+            results.append(model.get_loss(x, y))
+        return results
         
-
 ########################################################################################################################
 # MODEL_GRADIENT CLASS
 ########################################################################################################################

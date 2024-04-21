@@ -49,7 +49,7 @@ class AttackObjects:
         self._target_model = PytorchModel(target_model, CrossEntropyLoss())
         self._train_test_dataset = train_test_dataset
         self._num_shadow_models = configs["audit"]["num_shadow_models"]
-        self.logger = logger
+        self._logger = logger
 
         self._audit_dataset = {
             # Assuming train_indices and test_indices are arrays of indices, not the actual data
@@ -82,7 +82,6 @@ class AttackObjects:
 
         # List all entries in the directory
         entries = os.listdir(path_shadow_models)
-        
         try:
             entries.remove('.ipynb_checkpoints')
         except:
@@ -120,8 +119,7 @@ class AttackObjects:
                     
                     shadow_train_loader = DataLoader(Subset(population, shadow_data_indices),
                                                      batch_size=configs["train"]["batch_size"],
-                                                     shuffle=True,
-                                                    num_workers=8,)
+                                                     shuffle=True,)
                     self._shadow_train_indices.append(shadow_data_indices)
 
                     # Train the shadow model
@@ -202,6 +200,17 @@ class AttackObjects:
 
         """
         return self._target_model
+    
+    @property
+    def logger(self:Self) -> logging.Logger:
+        """Return the logger.
+
+        Returns
+        -------
+        Model: The logger object.
+
+        """
+        return self._logger
 
     @property
     def train_test_dataset(self:Self) -> dict:
@@ -246,7 +255,7 @@ class AttackObjects:
                                    self.train_test_dataset["test_indices"])) if include_in_members is False else []
 
         # pick allowed indices
-        selected_index = np.setdiff1d(all_index, used_index)
+        selected_index = np.setdiff1d(all_index, used_index, assume_unique=True)
         if shadow_data_size <= len(selected_index):
             selected_index = np.random.choice(selected_index, shadow_data_size, replace=False)
         else:
