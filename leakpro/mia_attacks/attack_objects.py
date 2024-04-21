@@ -9,6 +9,7 @@ import torch
 from torch.nn import CrossEntropyLoss, Module
 from torch.optim import SGD, Adam, AdamW
 from torch.utils.data import DataLoader, Subset
+import torchvision.models as torchmodels
 
 from leakpro.dataset import Dataset
 from leakpro.import_helper import List, Self
@@ -103,7 +104,9 @@ class AttackObjects:
                 if "adult" in configs["data"]["dataset"]:
                     shadow_model = target_model.__class__(configs["train"]["inputs"], configs["train"]["outputs"])
                 elif "cifar10" in configs["data"]["dataset"]:
-                    shadow_model = target_model.__class__()
+                    # shadow_model = target_model.__class__()
+                    shadow_model = torchmodels.resnet18(pretrained=False)
+                    shadow_model.fc = torch.nn.Linear(shadow_model.fc.in_features, 10)
 
                 if number_of_files_to_reuse > 0:
                     shadow_model.load_state_dict(torch.load(f"{path}.pkl"))
@@ -117,7 +120,8 @@ class AttackObjects:
                     
                     shadow_train_loader = DataLoader(Subset(population, shadow_data_indices),
                                                      batch_size=configs["train"]["batch_size"],
-                                                     shuffle=True,)
+                                                     shuffle=True,
+                                                    num_workers=8,)
                     self._shadow_train_indices.append(shadow_data_indices)
 
                     # Train the shadow model
@@ -242,7 +246,7 @@ class AttackObjects:
                                    self.train_test_dataset["test_indices"])) if include_in_members is False else []
 
         # pick allowed indices
-        selected_index = np.setdiff1d(all_index, used_index, assume_unique=True)
+        selected_index = np.setdiff1d(all_index, used_index)
         if shadow_data_size <= len(selected_index):
             selected_index = np.random.choice(selected_index, shadow_data_size, replace=False)
         else:

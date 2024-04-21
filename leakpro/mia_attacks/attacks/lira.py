@@ -1,21 +1,16 @@
 """Implementation of the LiRA attack."""
 
-# typing package not available form < python-3.11, typing_extensions backports new and experimental type hinting features to older Python versions
-try:
-    from typing import Self
-except ImportError:
-    from typing_extensions import Self
-
 from tqdm import tqdm
 import numpy as np
 import scipy
 from torch.utils.data import DataLoader
 
 from leakpro.dataset import get_dataset_subset
+from leakpro.import_helper import List, Self
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.mia_attacks.attack_utils import AttackUtils
 from leakpro.mia_attacks.attacks.attack import AttackAbstract
-from leakpro.signals.signal import ModelNegativeRescaledLogits
+from leakpro.signals.signal import ModelNegativeRescaledLogits, ModelRescaledLogits
 
 
 
@@ -36,7 +31,7 @@ class AttackLiRA(AttackAbstract):
 
         self.f_attack_data_size = configs["audit"].get("f_attack_data_size", 0.3)
             
-        self.signal = ModelNegativeRescaledLogits()
+        self.signal = ModelRescaledLogits()
         
         self.shadow_models = attack_utils.attack_objects.shadow_models
         self.num_shadow_models = len(self.shadow_models)
@@ -45,113 +40,113 @@ class AttackLiRA(AttackAbstract):
 
     def prepare_attack(self):
         """
-        Function to prepare data needed for running the metric on the target model and dataset, using signals computed
-        on the auxiliary model(s) and dataset.
+        Prepares data needed for running the metric on the target model and dataset,
+        using signals computed on the auxiliary model(s) and dataset.
+    
+        It selects a balanced subset of data samples from in-group and out-group members
+        of the audit dataset, prepares the data for evaluation, and computes the logits
+        for both shadow models and the target model.
         """
-
-        # in_index = self.audit_dataset["data"][self.audit_dataset["in_members"]]
-        # out_index = self.get_out_members(in_index)
-        # print(out_index)
+    
+        # Determine the minimum sample size from in-group and out-group members
+        sample_size = min(len(self.audit_dataset["in_members"]), len(self.audit_dataset["out_members"]))
         
-        audit_dataset = get_dataset_subset(self.population, self.audit_dataset["data"])
+        # Select in-group samples without replacement from the latter part of 'data'
+        self.in_ = np.random.choice(self.audit_dataset["data"][len(self.audit_dataset["in_members"]):], sample_size, replace=False)
         
+        # Select out-group samples without replacement from the initial part of 'data'
+        self.out_ = np.random.choice(self.audit_dataset["data"][:len(self.audit_dataset["in_members"])], sample_size, replace=False)
+    
+        # Combine in-group and out-group samples into one dataset
+        self.audit_data = np.concatenate((self.in_, self.out_))
+        
+        # Extract a matching subset from the population dataset
+        audit_dataset = get_dataset_subset(self.population, self.audit_data)
+        
+        # Calculate logits for all shadow models
         print(f"Calculating the logits for all {self.num_shadow_models} shadow models")
         self.shadow_models_logits = np.array(self.signal(self.shadow_models, audit_dataset))
-
+    
+        # Calculate logits for the target model
         print(f"Calculating the logits for the target model")
         self.target_logits = np.array(self.signal([self.target_model], audit_dataset)).squeeze()
 
-        # print(self.shadow_models_logits.shape, self.target_logits.shape)
+
         
 
     def run_attack(self):
         """
-        Function to run the attack on the target model and dataset.
-
+        Runs the attack on the target model and dataset, computing and returning
+        the result(s) of the metric, which assess privacy risks or data leakage.
+    
+        This method evaluates how the target model's output (logits) for a specific dataset 
+        compares to the output of shadow models to determine if the dataset was part of the 
+        model's training data or not.
+    
         Returns:
-            Result(s) of the metric.
+            Result(s) of the metric. An object containing the metric results, including predictions,
+            true labels, and signal values.
         """
+    
+        score = []  # List to hold the computed probability scores for each sample
+        use_global_std = False  # Flag to control whether to use a global standard deviation
         
-        score = []
-        out_of_sample_threshold = [1.] #, 0.9, 0.8, 0.75, 0.5]
-        use_global_std = True
-        
+        # If global standard deviation is to be used, calculate it from all logits of shadow models
         if use_global_std:
             global_std = np.nanstd(self.shadow_models_logits.flatten())
-            print(global_std)
-            
-        # for sample_threshold in out_of_sample_threshold:
-
-            # Iterate over the dataset using the DataLoader (ensures we use transforms etc)
-        for i, audit_idx in tqdm(enumerate(self.audit_dataset["data"])):
-            # count, sm_idxs = self.shadow_models_without_traning_sample(self.shadow_models_metadata, audit_idx)
-            # if count/self.num_shadow_models >= sample_threshold:
-
-            # Collect the shadow logits
-            # shadow_models_logits = [self.shadow_models_logits[j, i] for j in sm_idxs]
+        
+        # Iterate over each sample in the audit dataset with a progress bar
+        for i, _ in tqdm(enumerate(self.audit_data)):
+            # Extract logits from shadow models for the current sample
             shadow_models_logits = self.shadow_models_logits[:, i]
-            mean = np.nanmean(shadow_models_logits)
+            mean = np.nanmean(shadow_models_logits)  # Calculate the mean of shadow model logits
             
-            # Collect the target logit
+            # Get the logit from the target model for the current sample
             target_logit = self.target_logits[i]
-
+    
+            # Calculate the log probability density function value
             if use_global_std:
-                # global_std = np.nanstd(self.shadow_models_logits.flatten())
-                pr_out = scipy.stats.norm.logpdf(target_logit, mean, global_std+1e-30)
+                # Use the global standard deviation if the flag is true
+                pr_out = scipy.stats.norm.logpdf(target_logit, mean, global_std + 1e-30)  # Adding a small value to prevent division by zero
             else:
+                # Calculate standard deviation locally from the current shadow model logits
                 std = np.nanstd(shadow_models_logits)
-                pr_out = scipy.stats.norm.logpdf(target_logit, mean, std+1e-30)
-                
-            score.append(pr_out)
-                    
-            # else:
-            #     score.append(np.nan)
-                
-        score = np.asarray(score)
-
-        print(np.nanmin(score),  np.nanmax(score))
-        import time 
-        time.sleep(5)
-        self.thresholds = np.linspace(np.nanmin(score)-1, np.nanmax(score)+1, 5000) # np.min
+                pr_out = scipy.stats.norm.logpdf(target_logit, mean, std + 1e-30)
+            
+            score.append(pr_out)  # Append the calculated probability density value to the score list
         
-        # # pick out the in-members and out-members signals
-        # self.in_member_signals = score[self.in_members].reshape(-1,1)
-        # self.out_member_signals = score[self.out_members].reshape(-1,1)
-        # pick out the in-members and out-members signals
-        self.in_member_signals = score[self.audit_dataset["in_members"]].reshape(-1,1)
-        self.out_member_signals = score[self.audit_dataset["out_members"]].reshape(-1,1)
+        score = np.asarray(score)  # Convert the list of scores to a numpy array
         
-        # compute the signals for the in-members and out-members
-        member_preds = np.greater(self.in_member_signals, self.thresholds).T
-        non_member_preds = np.greater(self.out_member_signals, self.thresholds).T
-
-        # compute the signals for the in-members and out-members
-        # member_preds = np.less(self.in_member_signals, self.thresholds).T
-        # non_member_preds = np.less(self.out_member_signals, self.thresholds).T
-        
-        # compute the difference between the signals and the thresholds
-        # predictions_proba = np.hstack([member_signals, non_member_signals]) - thresholds
-
-        # what does the attack predict on test and train dataset
+        # Generate thresholds based on the range of computed scores for decision boundaries
+        self.thresholds = np.linspace(np.nanmin(score), np.nanmax(score), 1000)
+    
+        # Split the score array into two parts based on membership: in (training) and out (non-training)
+        self.in_member_signals = score[len(self.in_):].reshape(-1,1)  # Scores for known training data members
+        self.out_member_signals = score[:len(self.in_)].reshape(-1,1)  # Scores for non-training data members
+    
+        # Create prediction matrices by comparing each score against all thresholds
+        member_preds = np.less(self.in_member_signals, self.thresholds).T  # Predictions for training data members
+        non_member_preds = np.less(self.out_member_signals, self.thresholds).T  # Predictions for non-members
+    
+        # Concatenate the prediction results for a full dataset prediction
         predictions = np.concatenate([member_preds, non_member_preds], axis=1)
-        # set true labels for being in the training dataset
+        
+        # Prepare true labels array, marking 1 for training data and 0 for non-training data
         true_labels = np.concatenate(
-            [
-                np.ones(len(self.in_member_signals)),
-                np.zeros(len(self.out_member_signals)),
-            ]
+            [np.ones(len(self.in_member_signals)), np.zeros(len(self.out_member_signals))]
         )
-        signal_values = np.concatenate(
-            [self.in_member_signals, self.out_member_signals]
-        )
-
-        # compute ROC, TP, TN etc
+        
+        # Combine all signal values for further analysis
+        signal_values = np.concatenate([self.in_member_signals, self.out_member_signals])
+    
+        # Return a result object containing predictions, true labels, and the signal values for further evaluation
         return CombinedMetricResult(
             predicted_labels=predictions,
             true_labels=true_labels,
-            predictions_proba=None,
+            predictions_proba=None,  # Note: Direct probability predictions are not computed here
             signal_values=signal_values,
         )
+
 
     def shadow_models_without_traning_sample(self, shadow_models, training_sample_idx):
         """

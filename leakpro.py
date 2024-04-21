@@ -9,6 +9,7 @@ import joblib
 import numpy as np
 import torch
 import yaml
+import torchvision.models as torchmodels
 
 import leakpro.train as util
 from leakpro import dataset, models
@@ -95,7 +96,9 @@ if __name__ == "__main__":
     if "adult" in configs["data"]["dataset"]:
         model = models.NN(configs["train"]["inputs"], configs["train"]["outputs"])
     elif "cifar10" in configs["data"]["dataset"]:
-        model = models.ConvNet()
+        # model = models.ConvNet()
+        model = torchmodels.resnet18(pretrained=False)
+        model.fc = torch.nn.Linear(model.fc.in_features, 10)
     if RETRAIN:
         model = util.train(model, train_loader, configs, test_loader, train_test_dataset, logger)
 
@@ -123,7 +126,9 @@ if __name__ == "__main__":
                 configs["train"]["inputs"], configs["train"]["outputs"]
             )  # TODO: read metadata to get the model
         elif "cifar10" in configs["data"]["dataset"]:
-            target_model = models.ConvNet()
+            # target_model = models.ConvNet()
+            target_model = torchmodels.resnet18(pretrained=False)
+            target_model.fc = torch.nn.Linear(target_model.fc.in_features, 10)
         target_model.load_state_dict(torch.load(f))
 
     # ------------------------------------------------

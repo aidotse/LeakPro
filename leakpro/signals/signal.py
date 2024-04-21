@@ -162,30 +162,30 @@ class ModelRescaledLogits(Signal):
         Args:
         ----
             models: List of models that can be queried.
-            datasets: List of datasets that can be queried.
+            datasets: datasets that can be queried.
 
         Returns:
         -------
             The signal value.
         """
         
-        results = []
-        for model in models:
+        data_loader = DataLoader(datasets, batch_size=len(datasets), shuffle=False)
+        
+        # Iterate over the dataset using the DataLoader (ensures we use transforms etc)
+        for data, labels in data_loader:
+            
             # Initialize a list to store the logits for the current model
             model_logits = []
-
-            # Iterate over the dataset using the DataLoader (ensures we use transforms etc)
-            data_loader = DataLoader(datasets, batch_size=len(datasets), shuffle=False)
-            for data, labels in data_loader:
+            for model in tqdm(models):
                 
-                # Get rescaled logits for each data point
+                # Get neg. rescaled logits for each data point
                 logits = model.get_rescaled_logits(data, labels)
-                model_logits.extend(logits)
-            model_logits = np.array(model_logits)
-            # Append the logits for the current model to the results
-            results.append(model_logits)
 
-        return results
+                # Append the logits for the current model to the results
+                model_logits.append(logits)
+                
+            model_logits = np.array(model_logits)
+        return model_logits
 
 ########################################################################################################################
 # MODEL_INTERMEDIATE_OUTPUT CLASS
