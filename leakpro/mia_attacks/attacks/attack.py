@@ -80,7 +80,7 @@ class AttackAbstract(ABC):
         return self.audit_dataset
 
     @abstractmethod
-    def desctiption(self:Self) -> dict:
+    def description(self:Self) -> dict:
         """Return a description of the attack.
 
         Returns

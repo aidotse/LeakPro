@@ -53,7 +53,8 @@ if __name__ == "__main__":
 
     RETRAIN = True
     #args = "./config/adult.yaml"  # noqa: ERA001
-    args = "./config/cifar10.yaml" # noqa: ERA001
+    # args = "./config/cifar10.yaml" # noqa: ERA001
+    args = "./config/cinic10.yaml" # noqa: ERA001
     with open(args, "rb") as f:
         configs = yaml.safe_load(f)
 
@@ -77,9 +78,10 @@ if __name__ == "__main__":
     population = dataset.get_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
     N_population = len(population)
 
+
     # Create target training dataset and test dataset
     # NOTE: this should not be done as the model is provided by the user
-    train_test_dataset = dataset.prepare_train_test_datasets(N_population, configs["data"])
+    train_test_dataset = dataset.prepare_train_test_datasets(N_population, configs)
 
     train_loader = dataset.get_dataloader(
         torch.utils.data.Subset(population, train_test_dataset["train_indices"]),
@@ -96,6 +98,8 @@ if __name__ == "__main__":
         model = models.NN(configs["train"]["inputs"], configs["train"]["outputs"])
     elif "cifar10" in configs["data"]["dataset"]:
         model = models.ConvNet()
+    elif "cinic10" in configs["data"]["dataset"]:
+        model = models.Resnet18(configs)
     if RETRAIN:
         model = util.train(model, train_loader, configs, test_loader, train_test_dataset, logger)
 
@@ -124,7 +128,10 @@ if __name__ == "__main__":
             )  # TODO: read metadata to get the model
         elif "cifar10" in configs["data"]["dataset"]:
             target_model = models.ConvNet()
+        elif "cinic10" in configs["data"]["dataset"]:
+            target_model = models.Resnet18(configs)
         target_model.load_state_dict(torch.load(f))
+
 
     # ------------------------------------------------
     # Now we have the target model, its metadata, and the train/test dataset
@@ -140,11 +147,17 @@ if __name__ == "__main__":
     )  # TODO metadata includes indices for train and test data
     audit_results = attack_scheduler.run_attacks()
 
-    logger.info(str(audit_results["rmia"]["result_object"]))
+
+    logger.info(str(audit_results["loss_traj"]["result_object"]))
+
+    report_log = configs["audit"]["report_log"]
+    privacy_game = configs["audit"]["privacy_game"]
+    n_shadow_models = configs["audit"]["num_shadow_models"]
+    n_attack_data_size = configs["audit"]["f_attack_data_size"]
 
     prepare_priavcy_risk_report(
             log_dir,
-            [audit_results["rmia"]["result_object"]],
+            [audit_results["loss_traj"]["result_object"]],
             configs["audit"],
-            save_path=f"{log_dir}/{configs['audit']['report_log']}/{configs['audit']['privacy_game']}/ns_{configs["audit"]["num_shadow_models"]}_fs_{configs["audit"]["f_attack_data_size"]}",
+            save_path=f"{log_dir}/{report_log}/{privacy_game}/ns_{n_shadow_models}_fs_{n_attack_data_size}",
         )
