@@ -147,7 +147,8 @@ if __name__ == "__main__":
     )  # TODO metadata includes indices for train and test data
     audit_results = attack_scheduler.run_attacks()
 
-    logger.info(str(audit_results["qmia"]["result_object"]))
+
+    logger.info(str(audit_results["loss_traj"]["result_object"]))
 
     report_log = configs["audit"]["report_log"]
     privacy_game = configs["audit"]["privacy_game"]

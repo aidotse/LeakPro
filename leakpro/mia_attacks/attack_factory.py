@@ -5,6 +5,7 @@ from leakpro.mia_attacks.attacks.attack import AttackAbstract
 from leakpro.mia_attacks.attacks.attack_p import AttackP
 from leakpro.mia_attacks.attacks.loss_trajectory import AttackLossTrajectory
 from leakpro.mia_attacks.attacks.qmia import AttackQMIA
+from leakpro.mia_attacks.attacks.loss_trajectory import AttackLossTrajectory
 from leakpro.mia_attacks.attacks.rmia import AttackRMIA
 
 
@@ -16,6 +17,7 @@ class AttackFactory:
         "rmia": AttackRMIA,
         "loss_traj": AttackLossTrajectory,
         "qmia": AttackQMIA,
+        "loss_traj": AttackLossTrajectory,
     }
 
     @classmethod

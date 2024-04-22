@@ -6,7 +6,7 @@ import time
 
 import numpy as np
 import torch
-from torch.nn import CrossEntropyLoss, KLDivLoss, Module, functional
+from torch.nn import CrossEntropyLoss, KLDivLoss, KLDivLoss, Module, functional
 from torch.optim import SGD, Adam, AdamW
 from torch.utils.data import DataLoader, Subset
 
@@ -47,7 +47,12 @@ class AttackObjects:
         self._target_model = PytorchModel(target_model, CrossEntropyLoss())
         self._train_test_dataset = train_test_dataset
         self._num_shadow_models = configs["audit"]["num_shadow_models"]
-        self._logger = logger
+        self.num_distillation_models_target = configs["loss_traj"]["number_of_traj"]
+        self.num_distillation_models_shadow = configs["loss_traj"]["number_of_traj"]
+        self.configs = configs
+        self.logger = logger
+        self._distillation_models_shadow = []
+        self._distillation_models_target = []
 
         self._audit_dataset = {
             # Assuming train_indices and test_indices are arrays of indices, not the actual data
@@ -83,7 +88,7 @@ class AttackObjects:
 
 
         # Train shadow models
-        shadow_train_data_indices, shadow_test_data_indices, distillation_train_data_indices,  distillation_test_data_indices = self.create_aux_dataset(include_in_members=False)  # noqa: E501
+        self._shadow_models = []
         if self._num_shadow_models > 0:
             self._shadow_train_indices = []
             self._shadow_test_indices = []
