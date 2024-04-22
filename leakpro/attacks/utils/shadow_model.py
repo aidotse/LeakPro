@@ -1,31 +1,52 @@
 """Module for handling shadow models."""
 
-import importlib.util
-import inspect
 import logging
 import os
 
-import torch
-from torch import nn
+import numpy as np
+from torch import load, save
+from torch.nn import Module
+from torch.optim import Optimizer
+from torch.utils.data import DataLoader, Dataset
 
-from leakpro.import_helper import Callable, ModuleType, Self
+from leakpro.import_helper import Self
+from leakpro.utils.input_handler import get_class_from_module, import_module_from_file
 
 
+def singleton(cls):  # noqa: ANN001, ANN201
+    """Decorator to create a singleton with initialization parameters."""
+    instances = {}
+    params = {}
+
+    def get_instance(*args, **kwargs):  # noqa: ANN003, ANN002, ANN202
+        if cls not in instances:
+            # Store the initialization parameters when the singleton is first created
+            params[cls] = (args, kwargs)
+            instances[cls] = cls(*args, **kwargs)  # Create the singleton instance
+        elif args or kwargs:
+            # Raise an error if trying to reinitialize with different parameters
+            raise ValueError("Singleton already created with specific parameters.")
+        return instances[cls]
+
+    return get_instance
+
+@singleton
 class ShadowModelHandler():
-    """Handles the creation, training, and loading of shadow models."""
+    """A class handling the creation, training, and loading of shadow models."""
 
-    def __init__(self:Self, target_model:nn.Module, target_config:dict, config:dict, logger:logging.Logger)->None:
+    def __init__(self:Self, target_model:Module, target_config:dict, config:dict, logger:logging.Logger)->None:
         """Initialize the ShadowModelHandler.
 
         Args:
         ----
-            target_model (nn.Module): The target model.
+            target_model (Module): The target model.
             target_config (dict): The configuration of the target model.
             config (dict): The configuration of the ShadowModelHandler.
+            logger (logging.Logger): The logger object for logging.
 
         """
-        module_path = config["shadow_model"]["module_path"]
-        model_class_path = config["shadow_model"]["model_class_path"]
+        module_path = config["module_path"]
+        model_class_path = config["model_class_path"]
 
         self.logger = logger
 
@@ -38,25 +59,38 @@ class ShadowModelHandler():
         else:
             self.module_path = module_path
             self.model_class_path = model_class_path
-            self.init_params = config["shadow_model"]["init_params"]
-            module = self.import_module_from_file(self.module_path)
-            self.shadow_model_blueprint = self.get_class_from_module(module, self.model_class_path)
+            self.init_params = config["init_params"]
+            module = import_module_from_file(self.module_path)
+            self.shadow_model_blueprint = get_class_from_module(module, self.model_class_path)
 
             self.logger.info(f"Shadow model blueprint: {self.model_class_path} from {self.module_path}")
 
-        self.storage_path = config["audit"]["attack_folder"]
+        self.storage_path = config["storage_path"]
         # Check if the folder does not exist
         if not os.path.exists(self.storage_path):
             # Create the folder
             os.makedirs(self.storage_path)
             self.logger.info(f"Created folder {self.storage_path}")
 
-    def create_shadow_models(self:Self, num_models:int) -> None:
-        """Create shadow models based on the blueprint.
+    def create_shadow_models(
+        self:Self,
+        num_models:int,
+        dataset:Dataset,
+        training_fraction:float,
+        optimizer:str,
+        criterion:str,
+        epochs:int
+    ) -> None:
+        """Create and train shadow models based on the blueprint.
 
         Args:
         ----
             num_models (int): The number of shadow models to create.
+            dataset (torch.utils.data.Dataset): The full dataset available for training the shadow models.
+            training_fraction (float): The fraction of the dataset to use for training.
+            optimizer (torch.optim.Optimizer): The optimizer to use for training.
+            criterion (Module): The loss function to use for training.
+            epochs (int): The number of epochs to train the shadow models.
 
         Returns:
         -------
@@ -70,27 +104,32 @@ class ShadowModelHandler():
         num_to_reuse = len(entries)
 
         for i in range(num_to_reuse, num_models):
+            self.logger.info(f"Training shadow model {i}")
+
             shadow_model = self.shadow_model_blueprint(**self.init_params)
+            self._train_shadow_model(shadow_model, dataloader, optimizer, criterion, epochs)
+
+            self.logger.info(f"Training shadow model {i} complete")
             with open(f"{self.storage_path}/shadow_model_{i}.pkl", "wb") as f:
-                torch.save(shadow_model.state_dict(), f)
+                save(shadow_model.state_dict(), f)
                 self.logger.info(f"Saved shadow model {i}")
 
     def _train_shadow_model(
         self:Self,
-        shadow_model:nn.Module,
-        train_loader:torch.utils.data.DataLoader,
-        optimizer:torch.optim.Optimizer,
-        criterion:nn.Module,
+        shadow_model:Module,
+        train_loader:DataLoader,
+        optimizer:Optimizer,
+        criterion:Module,
         epochs:int
     ) -> None:
         """Train a shadow model.
 
         Args:
         ----
-            shadow_model (nn.Module): The shadow model to train.
+            shadow_model (Module): The shadow model to train.
             train_loader (torch.utils.data.DataLoader): The training data loader.
             optimizer (torch.optim.Optimizer): The optimizer to use.
-            criterion (nn.Module): The loss function to use.
+            criterion (Module): The loss function to use.
             epochs (int): The number of epochs to train the model.
 
         Returns:
@@ -117,7 +156,7 @@ class ShadowModelHandler():
                 f"Train Acc: {float(train_acc)/len(train_loader.dataset):.8f}")
             self.logger.info(log_train_str)
 
-    def load_shadow_model(self:Self, index:int) -> nn.Module:
+    def load_shadow_model(self:Self, index:int) -> Module:
         """Load a shadow model from a saved state.
 
         Args:
@@ -126,7 +165,7 @@ class ShadowModelHandler():
 
         Returns:
         -------
-            nn.Module: The loaded shadow model.
+            Module: The loaded shadow model.
 
         """
         if index < 0:
@@ -134,87 +173,6 @@ class ShadowModelHandler():
         if index >= len(os.listdir(self.storage_path)):
             raise ValueError("Index out of range")
         shadow_model = self.shadow_model_blueprint(**self.init_params)
-        shadow_model.load_state_dict(torch.load(f"{self.storage_path}/shadow_model_{index}.pkl"))
+        shadow_model.load_state_dict(load(f"{self.storage_path}/shadow_model_{index}.pkl"))
         self.logger.info(f"Loaded shadow model {index}")
         return shadow_model
-
-    def train_shadow_models(
-        self:Self,
-        train_loader:torch.utils.data.DataLoader,
-        optimizer:torch.optim.Optimizer,
-        criterion:nn.Module,
-        epochs:int
-    ) -> None:
-        """Train all shadow models.
-
-        Args:
-        ----
-            train_loader (torch.utils.data.DataLoader): The training data loader.
-            optimizer (torch.optim.Optimizer): The optimizer to use.
-            criterion (nn.Module): The loss function to use.
-            epochs (int): The number of epochs to train the model.
-
-        Returns:
-        -------
-            None
-
-        """
-        for i in range(len(os.listdir(self.storage_path))):
-            shadow_model = self.load_shadow_model(i)
-            self._train_shadow_model(shadow_model, train_loader, optimizer, criterion, epochs)
-            with open(f"{self.storage_path}/shadow_model_{i}.pkl", "wb") as f:
-                torch.save(shadow_model.state_dict(), f)
-                self.logger.info(f"Saved shadow model {i}")
-                
-                
-    def save_model_and_metadata(  # noqa: PLR0913
-    model: torch.nn.Module,
-    data_split: dict,
-    configs: dict,
-    train_acc: float,
-    test_acc: float,
-    train_loss: float,
-    test_loss: float,
-) -> None:
-        """Save the model and metadata.
-
-        Args:
-        ----
-            model (torch.nn.Module): Trained model.
-            data_split (dict): Data split for training and testing.
-            configs (dict): Configurations for training.
-            train_acc (float): Training accuracy.
-            test_acc (float): Testing accuracy.
-            train_loss (float): Training loss.
-            test_loss (float): Testing loss.
-
-        """
-        # Save model and metadata
-        model_metadata_dict = {"model_metadata": {}}
-
-
-        log_dir = configs["run"]["log_dir"]
-        Path(log_dir).mkdir(parents=True, exist_ok=True)
-
-        with open(f"{log_dir}/target_model.pkl", "wb") as f:
-            torch.save(model.state_dict(), f)
-        meta_data = {}
-
-        meta_data["init_params"] = model.init_params if hasattr(model, "init_params") else {}
-        meta_data["train_split"] = data_split["train_indices"]
-        meta_data["test_split"] = data_split["test_indices"]
-        meta_data["num_train"] = len(data_split["train_indices"])
-        meta_data["optimizer"] = configs["train"]["optimizer"]
-        meta_data["batch_size"] = configs["train"]["batch_size"]
-        meta_data["epochs"] = configs["train"]["epochs"]
-        meta_data["learning_rate"] = configs["train"]["learning_rate"]
-        meta_data["weight_decay"] = configs["train"]["weight_decay"]
-        meta_data["train_acc"] = train_acc
-        meta_data["test_acc"] = test_acc
-        meta_data["train_loss"] = train_loss
-        meta_data["test_loss"] = test_loss
-        meta_data["dataset"] = configs["data"]["dataset"]
-
-        model_metadata_dict["model_metadata"] = meta_data
-        with open(f"{log_dir}/models_metadata.pkl", "wb") as f:
-            pickle.dump(model_metadata_dict, f)

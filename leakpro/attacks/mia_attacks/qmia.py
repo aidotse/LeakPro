@@ -3,6 +3,7 @@ from logging import Logger
 
 import numpy as np
 import torch
+import tqdm
 from torch import nn
 from torch.utils.data import DataLoader
 
