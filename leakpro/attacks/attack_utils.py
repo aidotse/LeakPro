@@ -1,7 +1,6 @@
 """Module that contains utility functions that are used in the attack classes."""
 
 import numpy as np
-from scipy.stats import norm
 
 from leakpro.import_helper import Any, Dict, List, Self
 

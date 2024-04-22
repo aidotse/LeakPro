@@ -4,8 +4,8 @@ from logging import Logger
 import numpy as np
 from torch import nn
 
-from leakpro.attacks.attack_utils import AttackUtils
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
+from leakpro.attacks.utils.attack_data import get_attack_data
 from leakpro.attacks.utils.threshold_computation import linear_itp_threshold_func
 from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
@@ -70,14 +70,16 @@ class AttackP(AbstractMIA):
     def prepare_attack(self:Self) -> None:
         """Prepare data needed for running the metric on the target model and dataset."""
         # sample dataset to compute histogram
-        all_index = np.arange(self.population_size)
-        attack_data_size = np.round(
-            self.f_attack_data_size * self.population_size
-        ).astype(int)
-
-        self.attack_data_index = np.random.choice(
-            all_index, attack_data_size, replace=False
+        self.logger.info("Preparing attack data for training the Population attack")
+        self.attack_data_index = get_attack_data(
+            self.population_size,
+            self.f_attack_data_size,
+            self.train_indices,
+            self.test_indices,
+            False,
+            self.logger
         )
+
         attack_data = self.population.subset(self.attack_data_index)
         # Load signals if they have been computed already; otherwise, compute and save them
         # signals based on training dataset
@@ -97,14 +99,13 @@ class AttackP(AbstractMIA):
 
         """
         # map the threshold with the alpha
-        self.quantiles = AttackUtils.default_quantile()
+        self.quantiles = np.logspace(-5, 0, 100)
         # obtain the threshold values based on the reference dataset
-        thresholds = self.hypothesis_test_func(
-            self.attack_signal, self.quantiles
-        ).reshape(-1, 1)
+        thresholds = self.hypothesis_test_func(self.attack_signal, self.quantiles).reshape(-1, 1)
 
         num_threshold = len(self.quantiles)
 
+        self.logger.info("Running the Population attack on the target model")
         # get the loss for the audit dataset
         audit_data = self.population.subset(self.audit_dataset["data"])
         audit_signal = self.signal([self.target_model], [audit_data])[0]
@@ -114,14 +115,12 @@ class AttackP(AbstractMIA):
         self.out_member_signals = audit_signal[self.audit_dataset["out_members"]]
 
         # compute the signals for the in-members and out-members
-        member_signals = (
-            self.in_member_signals.reshape(-1, 1).repeat(num_threshold, 1).T
-        )
-        non_member_signals = (
-            self.out_member_signals.reshape(-1, 1).repeat(num_threshold, 1).T
-        )
+        member_signals = (self.in_member_signals.reshape(-1, 1).repeat(num_threshold, 1).T)
+        non_member_signals = (self.out_member_signals.reshape(-1, 1).repeat(num_threshold, 1).T)
         member_preds = np.less(member_signals, thresholds)
         non_member_preds = np.less(non_member_signals, thresholds)
+
+        self.logger.info("Attack completed")
 
         # what does the attack predict on test and train dataset
         predictions = np.concatenate([member_preds, non_member_preds], axis=1)
