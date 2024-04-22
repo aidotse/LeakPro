@@ -13,7 +13,6 @@ from torch.utils.data import DataLoader, Subset
 from leakpro.dataset import Dataset
 from leakpro.import_helper import List, Self
 from leakpro.model import Model, PytorchModel
-from leakpro.model_blueprints import NN, ConvNet, SmallerSingleLayerConvNet  # noqa: F401
 
 
 class AttackObjects:
@@ -22,7 +21,7 @@ class AttackObjects:
     def __init__(  # noqa: PLR0913
         self:Self,
         population: Dataset,
-        train_test_dataset: dict,
+        target_metadata: dict,
         target_model: Model,
         configs: dict,
         logger: logging.Logger = None
@@ -33,8 +32,8 @@ class AttackObjects:
         ----------
         population : Dataset
             The population.
-        train_test_dataset : dict
-            The train test dataset.
+        target_metadata : dict
+            The metadata of the target model.
         target_model : Model
             The target model.
         configs : dict
@@ -45,32 +44,28 @@ class AttackObjects:
         """
         self._population = population
         self._population_size = len(population)
-        self._target_model = PytorchModel(target_model, CrossEntropyLoss())
-        self._train_test_dataset = train_test_dataset
-        self._num_shadow_models = configs["audit"]["num_shadow_models"]
+        self._target_model = PytorchModel(target_model, CrossEntropyLoss()) #TODO: allow for arbitrary loss function
         self._logger = logger
 
         self._audit_dataset = {
             # Assuming train_indices and test_indices are arrays of indices, not the actual data
             "data": np.concatenate(
                 (
-                    train_test_dataset["train_indices"],
-                    train_test_dataset["test_indices"],
+                    target_metadata["train_indices"],
+                    target_metadata["test_indices"],
                 )
             ),
             # in_members will be an array from 0 to the number of training indices - 1
-            "in_members": np.arange(len(train_test_dataset["train_indices"])),
+            "in_members": np.arange(len(target_metadata["train_indices"])),
             # out_members will start after the last training index and go up to the number of test indices - 1
             "out_members": np.arange(
-                len(train_test_dataset["train_indices"]),
-                len(train_test_dataset["train_indices"])
-                + len(train_test_dataset["test_indices"]),
+                len(target_metadata["train_indices"]),
+                len(target_metadata["train_indices"])
+                + len(target_metadata["test_indices"]),
             ),
         }
 
-        self.log_dir = configs["run"]["log_dir"]
-
-        path_shadow_models = f"{self.log_dir}/shadow_models"
+        path_shadow_models = configs["shadow_model"]["storage_path"]
 
         # Check if the folder does not exist
         if not os.path.exists(path_shadow_models):

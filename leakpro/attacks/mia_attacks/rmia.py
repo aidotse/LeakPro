@@ -1,35 +1,61 @@
 """Implementation of the RMIA attack."""
-import numpy as np
+from logging import Logger
 
+import numpy as np
+from torch import nn
+
+from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
-from leakpro.mia_attacks.attack_utils import AttackUtils
-from leakpro.mia_attacks.attacks.attack import AbstractMIA
 from leakpro.signals.signal import ModelLogits
 
 
 class AttackRMIA(AbstractMIA):
     """Implementation of the RMIA attack."""
 
-    def __init__(self:Self, attack_utils: AttackUtils, configs: dict) -> None:
+    def __init__(self:Self,
+                 population: np.ndarray,
+                 audit_dataset: dict,
+                 target_model: nn.Module,
+                 logger:Logger,
+                 configs: dict) -> None:
         """Initialize the RMIA attack.
 
         Args:
         ----
-            attack_utils (AttackUtils): Utility class for the attack.
+            population (np.ndarray): The population data.
+            audit_dataset (dict): The audit dataset.
+            target_model (nn.Module): The target model.
+            logger (Logger): The logger object.
             configs (dict): Configuration parameters for the attack.
 
         """
         # Initializes the parent metric
-        super().__init__(attack_utils)
+        super().__init__(population, audit_dataset, target_model, logger)
 
-        self.shadow_models = attack_utils.attack_objects.shadow_models
-        self.offline_a = 0.33 # parameter from which we compute p(x) from p_OUT(x) such that p_IN(x) = a p_OUT(x) + b.
-        self.offline_b: 0.66
-        self.gamma = 2.0 # threshold for the attack
-        self.temperature = 2.0 # temperature for the softmax
+        self.shadow_models = []
+        self.offline_a = configs.get("data_fraction", 0.33)  # p_IN(x) = a p_OUT(x) + b.
+        if self.offline_a < 0 or self.offline_a > 1:
+            raise ValueError("data_fraction must be between 0 and 1")
 
-        self.f_attack_data_size = configs["audit"].get("f_attack_data_size", 0.3)
+        self.offline_b = configs.get("offline_b", 0.66)
+        if self.offline_b < 0 or self.offline_b > 1:
+            raise ValueError("offline_b must be between 0 and 1")
+
+        if self.offline_a + self.offline_b > 1:
+            raise ValueError("offline_a + offline_b must be less than or equal to 1")
+
+        self.gamma = configs.get("gamma", 2.0) # threshold for the attack
+        if self.gamma < 0:
+            raise ValueError("gamma must be greater than 0")
+
+        self.temperature = configs.get("temperature", 2.0) # temperature for the softmax
+        if self.temperature < 0:
+            raise ValueError("temperature must be greater than 0")
+
+        self.f_attack_data_size = configs.get("data_fraction", 0.5)
+        if self.f_attack_data_size <= 0 or self.f_attack_data_size > 1:
+            raise ValueError("The data fraction must be between 0 and 1")
 
         self.signal = ModelLogits()
         self.epsilon = 1e-6

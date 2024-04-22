@@ -1,13 +1,14 @@
 """Implementation of the RMIA attack."""
+from logging import Logger
+
 import numpy as np
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
+from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
-from leakpro.mia_attacks.attack_utils import AttackUtils
-from leakpro.mia_attacks.attacks.attack import AbstractMIA
 from leakpro.signals.signal import ModelRescaledLogits
 
 
@@ -88,23 +89,42 @@ class PinballLoss(torch.nn.Module):
 class AttackQMIA(AbstractMIA):
     """Implementation of the RMIA attack."""
 
-    def __init__(self:Self, attack_utils: AttackUtils, configs: dict) -> None:
+    def __init__(
+        self:Self,
+        population: np.ndarray,
+        audit_dataset: dict,
+        target_model: nn.Module,
+        logger:Logger,
+        configs: dict
+    ) -> None:
         """Initialize the QMIA attack.
 
         Args:
         ----
-            attack_utils (AttackUtils): Utility class for the attack.
+            population (np.ndarray): The population data.
+            audit_dataset (dict): The audit dataset.
+            target_model (nn.Module): The target model.
+            logger (Logger): The logger object.
             configs (dict): Configuration parameters for the attack.
 
         """
         # Initializes the parent metric
-        super().__init__(attack_utils)
+        super().__init__(population, audit_dataset, target_model, logger)
 
-        self.f_attack_data_size = configs["audit"].get("f_attack_data_size", 0.3)
-        self.quantiles = [0, 0.5, 0.9, 0.95, 0.99, 0.995, 0.999, 0.9995, 0.9999, 0.99995, 0.99999]
+        self.f_attack_data_size = configs.get("data_fraction", 0.5)
+        if self.f_attack_data_size <= 0 or self.f_attack_data_size > 1:
+            raise ValueError("The data fraction must be between 0 and 1")
+
+        self.quantiles = configs.get("quantiles", [0, 0.5, 0.9, 0.95, 0.99, 0.995, 0.999, 0.9995, 0.9999, 0.99995, 0.99999])
+        if not all(0 <= q <= 1 for q in self.quantiles):
+            raise ValueError("Quantiles must be between 0 and 1")
+        if len(self.quantiles) < 1:
+            raise ValueError("At least one quantile are required")
+        if not isinstance(self.quantiles, list):
+            raise ValueError("Quantiles must be a list")
+
         self.signal = ModelRescaledLogits()
         self.quantile_regressor = QuantileRegressor(len(self.quantiles))
-        self.logger = attack_utils.attack_objects.logger
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
@@ -128,7 +148,7 @@ class AttackQMIA(AbstractMIA):
         Signals are computed on the auxiliary model(s) and dataset.
         """
         # sample dataset to train quantile regressor
-        all_index = np.arange(self.population_size)
+        all_index = np.arange(self.get .population_size)
         attack_data_size = np.round(self.f_attack_data_size * self.population_size).astype(int)
         self.attack_data_index = np.random.choice(all_index, attack_data_size, replace=False)
         attack_data = self.population.subset(self.attack_data_index)

@@ -8,7 +8,7 @@ from leakpro.import_helper import List, Self
 
 
 class GeneralDataset(Dataset):
-    """Immutableataset class for general data."""
+    """Immutable dataset class for general data."""
 
     def __init__(
         self:Self,
@@ -21,10 +21,6 @@ class GeneralDataset(Dataset):
         assert isinstance(data, np.ndarray), "data must be a numpy array"
         assert isinstance(labels, np.ndarray), "labels must be a numpy array"
 
-        # Make np arrays read-only
-        data.flags.writeable = False
-        labels.flags.writeable = False
-
         self._data = data
         self._labels = labels
         self._task_type = task_type
@@ -32,20 +28,20 @@ class GeneralDataset(Dataset):
 
     def __len__(self:Self) -> int:
         """Return the length of the dataset."""
-        return len(self.y)
+        return len(self._labels)
 
     def __getitem__(self:Self, idx:int) -> List[torch.Tensor]:
         """Return the data and label for a single instance indexed by idx."""
-        x = self.transforms(self.x[idx]) if self.transforms else self.x[idx]
+        x = self._transforms(self._data[idx]) if self._transforms else self._data[idx]
 
         # ensure that x is a tensor
         if not isinstance(x, torch.Tensor):
             x = torch.tensor(x, dtype=torch.float32)
 
-        if self.task_type == "classification":
-            y = torch.tensor(self.y[idx], dtype=torch.long)  # Use torch.long for classification labels
-        elif self.task_type == "regression":
-            y = torch.tensor(self.y[idx], dtype=torch.float32)  # Use torch.float32 for regression labels
+        if self._task_type == "classification":
+            y = torch.tensor(self._labels[idx], dtype=torch.long)  # Use torch.long for classification labels
+        elif self._task_type == "regression":
+            y = torch.tensor(self._labels[idx], dtype=torch.float32)  # Use torch.float32 for regression labels
 
         return x, y
 

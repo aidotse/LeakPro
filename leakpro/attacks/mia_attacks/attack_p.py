@@ -1,37 +1,48 @@
 """Module that contains the implementation of the attack P."""
+from logging import Logger
 
 import numpy as np
+from torch import nn
 
+from leakpro.attacks.attack_utils import AttackUtils
+from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
+from leakpro.attacks.utils.threshold_computation import linear_itp_threshold_func
 from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
-from leakpro.mia_attacks.attack_utils import AttackUtils
-from leakpro.mia_attacks.attacks.attack import AbstractMIA
 from leakpro.signals.signal import ModelLoss
 
 
 class AttackP(AbstractMIA):
     """Implementation of the P-attack."""
 
-    def __init__(self:Self, attack_utils: AttackUtils, configs: dict) -> None:
+    def __init__(
+        self:Self,
+        population: np.ndarray,
+        audit_dataset: dict,
+        target_model: nn.Module,
+        logger:Logger,
+        configs: dict
+    ) -> None:
         """Initialize the AttackP class.
 
         Args:
         ----
-            attack_utils (AttackUtils): An instance of the AttackUtils class.
+            population (np.ndarray): The population data used for the attack.
+            audit_dataset (dict): The audit dataset used for the attack.
+            target_model (nn.Module): The target model to be attacked.
+            logger (Logger): The logger object for logging.
             configs (dict): A dictionary containing the attack configurations.
 
         """
         # Initializes the parent metric
-        super().__init__(attack_utils)
+        super().__init__(population, audit_dataset, target_model, logger)
 
-        if "f_attack_data_size" in configs:
-            self.f_attack_data_size = configs["audit"]["f_attack_data_size"]
-        else:
-            self.f_attack_data_size = (
-                0.1  # pick 10% of data to create histograms by default
-            )
+        self.f_attack_data_size = configs.get("data_fraction", 0.3)
+        if self.f_attack_data_size < 0 or self.f_attack_data_size > 1:
+            raise ValueError("data_fraction must be between 0 and 1")
+
         self.signal = ModelLoss()
-        self.hypothesis_test_func = attack_utils.linear_itp_threshold_func
+        self.hypothesis_test_func = linear_itp_threshold_func
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
