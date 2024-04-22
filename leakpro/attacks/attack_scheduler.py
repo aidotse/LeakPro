@@ -52,7 +52,7 @@ class AttackScheduler:
         self.attacks = []
         for attack_name in self.attack_list:
             try:
-                attack = factory.create_attack(attack_name, configs["audit"]["attack_list"][attack_name])
+                attack = factory.create_attack(attack_name, configs)
                 self.add_attack(attack)
                 self.logger.info(f"Added attack: {attack_name}")
             except ValueError as e:

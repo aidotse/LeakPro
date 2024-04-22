@@ -6,6 +6,7 @@ from torch import nn
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.attack_data import get_attack_data
+from leakpro.attacks.utils.shadow_model import ShadowModelHandler
 from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.signals.signal import ModelLogits
@@ -19,7 +20,8 @@ class AttackRMIA(AbstractMIA):
                  audit_dataset: dict,
                  target_model: nn.Module,
                  logger:Logger,
-                 configs: dict) -> None:
+                 configs: dict
+                 ) -> None:
         """Initialize the RMIA attack.
 
         Args:
@@ -35,6 +37,10 @@ class AttackRMIA(AbstractMIA):
         super().__init__(population, audit_dataset, target_model, logger)
 
         self.shadow_models = []
+        self.num_shadow_models = configs.get("num_shadow_models", 4)
+        if self.num_shadow_models < 1:
+            raise ValueError("num_shadow_models must be greater than 0")
+
         self.offline_a = configs.get("data_fraction", 0.33)  # p_IN(x) = a p_OUT(x) + b.
         if self.offline_a < 0 or self.offline_a > 1:
             raise ValueError("data_fraction must be between 0 and 1")
@@ -111,6 +117,11 @@ class AttackRMIA(AbstractMIA):
 
         Signals are computed on the auxiliary model(s) and dataset.
         """
+        self.logger.info("Preparing shadow models for RMIA attack")
+        # Check number of shadow models that are available
+        
+        shadow_model_handler = ShadowModelHandler(self.target_model, self.target_config, self.configs, self.logger)
+        
         # sample dataset to compute histogram
         self.logger.info("Preparing attack data for training the RMIA attack")
         # Get all available indices to sample from for shadow models
@@ -123,6 +134,8 @@ class AttackRMIA(AbstractMIA):
             self.logger
         )
         attack_data = self.population.subset(self.attack_data_index)
+
+        ShadowModelHandler().create_shadow_models(self.num_shadow_models, attack_data, self.f_attack_data_size, self.target_model, self.target_config, self.configs, self.logger)
 
         # compute the ratio of p(z|theta) (target model) to p(z)=sum_{theta'} p(z|theta') (shadow models)
         # for all points in the attack dataset output from signal: # models x # data points x # classes

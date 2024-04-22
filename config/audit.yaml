@@ -37,5 +37,5 @@ shadow_model:
   # Name of the class to instantiate from the specified file
   model_class_path: "ConvNet"
   # Initialization parameters
-  parameters:
+  init_params:
 

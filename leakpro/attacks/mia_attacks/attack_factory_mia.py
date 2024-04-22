@@ -8,6 +8,7 @@ from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.mia_attacks.attack_p import AttackP
 from leakpro.attacks.mia_attacks.qmia import AttackQMIA
 from leakpro.attacks.mia_attacks.rmia import AttackRMIA
+from leakpro.attacks.utils.shadow_model import ShadowModelHandler
 from leakpro.model import PytorchModel
 
 
@@ -24,6 +25,7 @@ class AttackFactoryMIA:
     population = None
     audit_dataset = None
     target_model = None
+    target_metadata = None
     logger = None
 
     @staticmethod
@@ -31,6 +33,9 @@ class AttackFactoryMIA:
         """Initialize the population dataset."""
         if AttackFactoryMIA.population is None:
             AttackFactoryMIA.population = population
+
+        if AttackFactoryMIA.target_metadata is None:
+            AttackFactoryMIA.target_metadata = target_metadata
 
         if AttackFactoryMIA.audit_dataset is None:
            AttackFactoryMIA.audit_dataset = {
@@ -64,7 +69,7 @@ class AttackFactoryMIA:
             AttackFactoryMIA.logger = logger
 
     @classmethod
-    def create_attack(cls, name: str, configs: dict, ) -> AbstractMIA:  # noqa: ANN102
+    def create_attack(cls, name: str, configs: dict) -> AbstractMIA:  # noqa: ANN102
         """Create an attack object based on the given name, attack_utils, and configs.
 
         Args:
@@ -91,10 +96,19 @@ class AttackFactoryMIA:
         if AttackFactoryMIA.logger is None:
             raise ValueError("Logger has not been set")
 
+        ShadowModelHandler(
+            AttackFactoryMIA.target_model,
+            AttackFactoryMIA.target_metadata,
+            configs["shadow_model"],
+            AttackFactoryMIA.logger
+        )
+
         if name in cls.attack_classes:
-            return cls.attack_classes[name](AttackFactoryMIA.population,
-                                            AttackFactoryMIA.audit_dataset,
-                                            AttackFactoryMIA.target_model,
-                                            AttackFactoryMIA.logger,
-                                            configs)
+            return cls.attack_classes[name](
+                AttackFactoryMIA.population,
+                AttackFactoryMIA.audit_dataset,
+                AttackFactoryMIA.target_model,
+                AttackFactoryMIA.logger,
+                configs["audit"]["attack_list"][name]
+            )
         raise ValueError(f"Unknown attack type: {name}")
