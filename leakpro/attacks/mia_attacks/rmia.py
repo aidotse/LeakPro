@@ -5,6 +5,7 @@ import numpy as np
 from torch import nn
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
+from leakpro.attacks.utils.attack_data import get_attack_data
 from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.signals.signal import ModelLogits
@@ -41,9 +42,6 @@ class AttackRMIA(AbstractMIA):
         self.offline_b = configs.get("offline_b", 0.66)
         if self.offline_b < 0 or self.offline_b > 1:
             raise ValueError("offline_b must be between 0 and 1")
-
-        if self.offline_a + self.offline_b > 1:
-            raise ValueError("offline_a + offline_b must be less than or equal to 1")
 
         self.gamma = configs.get("gamma", 2.0) # threshold for the attack
         if self.gamma < 0:
@@ -114,13 +112,15 @@ class AttackRMIA(AbstractMIA):
         Signals are computed on the auxiliary model(s) and dataset.
         """
         # sample dataset to compute histogram
-        all_index = np.arange(self.population_size)
-        attack_data_size = np.round(
-            self.f_attack_data_size * self.population_size
-        ).astype(int)
-
-        self.attack_data_index = np.random.choice(
-            all_index, attack_data_size, replace=False
+        self.logger.info("Preparing attack data for training the RMIA attack")
+        # Get all available indices to sample from for shadow models
+        self.attack_data_index = get_attack_data(
+            self.population_size,
+            1.0,
+            self.train_indices,
+            self.test_indices,
+            False,
+            self.logger
         )
         attack_data = self.population.subset(self.attack_data_index)
 

@@ -88,6 +88,31 @@ class AbstractMIA(ABC):
         """
         return self._audit_dataset
 
+    @property
+    def train_indices(self:Self)-> np.ndarray:
+        """Get the training indices of the audit dataset.
+
+        Returns
+        -------
+        np.ndarray: The training indices of the audit dataset.
+
+        """
+        train_indices = self._audit_dataset["in_members"]
+        return self._audit_dataset["data"][train_indices]
+
+
+    @property
+    def test_indices(self:Self)-> np.ndarray:
+        """Get the test indices of the audit dataset.
+
+        Returns
+        -------
+        np.ndarray: The test indices of the audit dataset.
+
+        """
+        test_indices = self._audit_dataset["out_members"]
+        return self._audit_dataset["data"][test_indices]
+
     @abstractmethod
     def description(self:Self) -> dict:
         """Return a description of the attack.

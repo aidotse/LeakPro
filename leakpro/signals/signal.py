@@ -229,8 +229,8 @@ class ModelLoss(Signal):
         results = []
         # Compute the signal for each model
         for k, model in enumerate(models):
-            x = datasets[k].X
-            y = datasets[k].y
+            x = datasets[k]._data
+            y = datasets[k]._labels
 
             # Compute the signal for each sample
             results.append(model.get_loss(x, y))
