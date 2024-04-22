@@ -9,60 +9,15 @@ import joblib
 import numpy as np
 import torch
 import yaml
-from torch import nn
 
 import leakpro.dev_utils.train as utils
 from leakpro import shadow_models
+from leakpro.attacks.attack_scheduler import AttackScheduler
 from leakpro.dataset import get_dataloader
 from leakpro.dev_utils.data_preparation import get_adult_dataset, get_cifar10_dataset, prepare_train_test_datasets
-from leakpro.mia_attacks.attack_scheduler import AttackScheduler
 from leakpro.reporting.utils import prepare_priavcy_risk_report
+from leakpro.utils.input_handler import get_class_from_module, import_module_from_file
 
-
-def create_model(
-    current_instance: nn.Module = None,
-    new_class: type = None,
-    metadata: dict = None,
-    *args,
-    **kwargs
-) -> nn.Module:
-    """
-    Create a new model instance, either by copying the class from an existing instance
-    or by using a specified class. If metadata is provided, it can be used to extract
-    default initialization parameters.
-
-    Args:
-        current_instance (nn.Module): An existing model instance to infer the class from.
-        new_class (type): A specific class to use for creating the new model.
-        metadata (dict): Metadata containing initialization parameters.
-        *args: Additional positional arguments for model initialization.
-        **kwargs: Additional keyword arguments for model initialization.
-
-    Returns:
-        nn.Module: A new instance of the specified or inferred model class.
-    """
-
-    # If new_class is not specified, infer it from the current_instance
-    if new_class is None:
-        if current_instance is not None:
-            new_class = type(current_instance)
-        else:
-            raise ValueError("Either new_class or current_instance must be provided.")
-
-    # Ensure the provided or inferred class is a subclass of nn.Module
-    if not issubclass(new_class, nn.Module):
-        raise ValueError("Provided class must be a subclass of torch.nn.Module")
-
-    # Use metadata to get default initialization parameters, if provided
-    if metadata is not None and new_class in metadata:
-        params = metadata[new_class]['parameters']
-        # Get default values for initialization
-        init_args = {param: details['default'] for param, details in params.items()}
-        # Merge init_args with additional arguments and keyword arguments
-        return new_class(*args, **{**init_args, **kwargs})
-
-    # If no metadata, just create the model with given args and kwargs
-    return new_class(*args, **kwargs)
 
 def setup_log(name: str, save_file: bool=True) -> logging.Logger:
     """Generate the logger for the current run.
@@ -159,35 +114,31 @@ if __name__ == "__main__":
     Path(report_dir).mkdir(parents=True, exist_ok=True)
 
     # Get the target  metadata
-    log_dir = configs["run"]["log_dir"]
-    target_model_metadata_path = f"{log_dir}/models_metadata.pkl"
+    target_model_metadata_path = f"{configs["target"]["trained_model_metadata_path"]}"
     with open(target_model_metadata_path, "rb") as f:
         target_model_metadata = joblib.load(f)
 
-    # Get the target model
-    target_model_path = f"{log_dir}/model_0.pkl"
-    with open(target_model_path, "rb") as f:
-        if "adult" in user_configs["data"]["dataset"]:
-            target_model = shadow_models.NN(
-                configs["train"]["inputs"], configs["train"]["outputs"]
-            )  # TODO: read metadata to get the model
-        elif "cifar10" in user_configs["data"]["dataset"]:
-            target_model = shadow_models.ConvNet()
+    # Create a class instance of target model
+    target_module = import_module_from_file(configs["target"]["module_path"])
+    target_model_blueprint = get_class_from_module(target_module, configs["target"]["model_class"])
+    logger.info(f"Target model blueprint created from {configs['target']['model_class']} in {configs['target']['module_path']}")
+
+    # Load the target model parameters into the blueprint
+    with open(configs["target"]["trained_model_path"], "rb") as f:
+        target_model = target_model_blueprint(**target_model_metadata["model_metadata"]["init_params"])
         target_model.load_state_dict(torch.load(f))
+        logger.info(f"Loaded target model from {configs['target']['trained_model_path']}")
 
     # Get the population dataset
-    data_dir = configs["data"]["data_dir"]
-    data_file = configs["data"]["dataset"]
-    dataset_path = f"{data_dir}/{data_file}.pkl"
-    with open(dataset_path, "rb") as file:
+    with open(configs["target"]["data_path"], "rb") as file:
         population = joblib.load(file)
+        logger.info(f"Loaded population dataset from {configs['target']['data_path']}")
     # ------------------------------------------------
-    # Now we have the target model, its metadata, and the train/test dataset
-    # indices.
+    # Now we have the target model, its metadata, and the train/test dataset indices.
     attack_scheduler = AttackScheduler(
         population,
         target_model,
-        target_model_metadata,
+        target_model_metadata["model_metadata"],
         configs,
         logger,
     )
@@ -199,8 +150,8 @@ if __name__ == "__main__":
     n_attack_data_size = configs["audit"]["f_attack_data_size"]
 
     prepare_priavcy_risk_report(
-            log_dir,
+            report_dir,
             [audit_results["qmia"]["result_object"]],
             configs["audit"],
-            save_path=f"{log_dir}/{report_log}/{privacy_game}/ns_{n_shadow_models}_fs_{n_attack_data_size}",
+            save_path=f"{report_dir}/{report_log}/{privacy_game}/ns_{n_shadow_models}_fs_{n_attack_data_size}",
         )

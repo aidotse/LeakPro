@@ -2,24 +2,40 @@ audit:  # Configurations for auditing
   random_seed: 1234  # Integer specifying the random seed
   attack_list:
     qmia:
-      data_fraction: 0.6  # Fraction of the dataset to use for this attack
+      data_fraction: 1.0  # Fraction of the auxilary dataset (data without train and test indices) to use for this attack
       epochs: 10  # Number of training epochs for quantile regression
     population:
-      data_fraction: 0.6  # Fraction of the dataset to use for this attack
+      data_fraction: 0.6  # Fraction of the auxilary dataset to use for this attack
     rmia:
-      data_fraction: 0.6  # Fraction of the dataset to use for this attack
+      data_fraction: 0.6  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
       num_shadow_models: 1 # Number of shadow models to train
+      offline: True
+      online: False
+      temperature: 2
+      gamma: 2.0
+      offline_a: 0.33 # parameter from which we compute p(x) from p_OUT(x) such that p_IN(x) = a p_OUT(x) + b.
+      offline_b: 0.66
+
   report_log: "results"  # Folder to save the auditing report
-  target_model_folder: "target"
+  target_model_folder: "./target"
   attack_folder: "attack_objects"
+  attack_type: "mia"
   split_method: "no_overlapping"  # Method of creating the attack dataset
+
+target:
+  module_path: "./leakpro/shadow_models.py"
+  model_class: "ConvNet"
+  trained_model_path: "./target/target_model.pkl" 
+  trained_model_metadata_path: "./target/model_metadata.pkl"
+  data_path: "./target/data/cifar10.pkl"
 
 # [Optional] Define a shadow model (if none, shadow model will look like target model)
 shadow_model:
+  storage_path: "./attack_objects/shadow_models"
   # Path to a Python file with the shadow model architecture
-  model_path: "shadow_models.py"
+  module_path: "./leakpro/shadow_models.py"
   # Name of the class to instantiate from the specified file
-  model_class: "ConvNet"
+  model_class_path: "ConvNet"
   # Initialization parameters
   parameters:
 

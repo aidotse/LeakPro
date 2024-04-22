@@ -1,7 +1,9 @@
+"""Module for handling shadow models."""
+
 import importlib.util
 import inspect
-import os
 import logging
+import os
 
 import torch
 from torch import nn
@@ -22,25 +24,25 @@ class ShadowModelHandler():
             config (dict): The configuration of the ShadowModelHandler.
 
         """
-        model_path = config["shadow_model"]["model_path"]
-        model_class = config["shadow_model"]["model_class"]
+        module_path = config["shadow_model"]["module_path"]
+        model_class_path = config["shadow_model"]["model_class_path"]
 
         self.logger = logger
 
         # If no path to shadow model is provided, use the target model blueprint
-        if model_path is None or model_class is None:
+        if module_path is None or model_class_path is None:
             self.init_params = target_config["init_params"]
             self.shadow_model_blueprint = target_model.__class__
 
             self.logger.info("Shadow model blueprint: target model")
         else:
-            self.model_path = model_path
-            self.model_class = model_class
+            self.module_path = module_path
+            self.model_class_path = model_class_path
             self.init_params = config["shadow_model"]["init_params"]
-            module = self.import_module_from_file(self.model_path)
-            self.shadow_model_blueprint = self.get_class_from_module(module, self.model_class)
+            module = self.import_module_from_file(self.module_path)
+            self.shadow_model_blueprint = self.get_class_from_module(module, self.model_class_path)
 
-            self.logger.info(f"Shadow model blueprint: {self.model_class} from {self.model_path}")
+            self.logger.info(f"Shadow model blueprint: {self.model_class_path} from {self.module_path}")
 
         self.storage_path = config["audit"]["attack_folder"]
         # Check if the folder does not exist
@@ -48,23 +50,6 @@ class ShadowModelHandler():
             # Create the folder
             os.makedirs(self.storage_path)
             self.logger.info(f"Created folder {self.storage_path}")
-
-    def _import_module_from_file(self:Self, filepath:str) -> ModuleType:
-        # Import a module from a given file path
-        if not os.path.exists(filepath):
-            raise FileNotFoundError(f"File {filepath} not found")
-        module_name = filepath.split("/")[-1].split(".")[0]
-        spec = importlib.util.spec_from_file_location(module_name, filepath)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
-
-    def _get_class_from_module(self:Self, module:ModuleType, class_name:str) -> Callable:
-        # Get the specified class from a module
-        for name, obj in inspect.getmembers(module, inspect.isclass):
-            if name == class_name:
-                return obj
-        raise ValueError(f"Class {class_name} not found in module {module.__name__}")
 
     def create_shadow_models(self:Self, num_models:int) -> None:
         """Create shadow models based on the blueprint.
@@ -191,45 +176,45 @@ class ShadowModelHandler():
     train_loss: float,
     test_loss: float,
 ) -> None:
-    """Save the model and metadata.
+        """Save the model and metadata.
 
-    Args:
-    ----
-        model (torch.nn.Module): Trained model.
-        data_split (dict): Data split for training and testing.
-        configs (dict): Configurations for training.
-        train_acc (float): Training accuracy.
-        test_acc (float): Testing accuracy.
-        train_loss (float): Training loss.
-        test_loss (float): Testing loss.
+        Args:
+        ----
+            model (torch.nn.Module): Trained model.
+            data_split (dict): Data split for training and testing.
+            configs (dict): Configurations for training.
+            train_acc (float): Training accuracy.
+            test_acc (float): Testing accuracy.
+            train_loss (float): Training loss.
+            test_loss (float): Testing loss.
 
-    """
-    # Save model and metadata
-    model_metadata_dict = {"model_metadata": {}}
+        """
+        # Save model and metadata
+        model_metadata_dict = {"model_metadata": {}}
 
 
-    log_dir = configs["run"]["log_dir"]
-    Path(log_dir).mkdir(parents=True, exist_ok=True)
+        log_dir = configs["run"]["log_dir"]
+        Path(log_dir).mkdir(parents=True, exist_ok=True)
 
-    with open(f"{log_dir}/target_model.pkl", "wb") as f:
-        torch.save(model.state_dict(), f)
-    meta_data = {}
+        with open(f"{log_dir}/target_model.pkl", "wb") as f:
+            torch.save(model.state_dict(), f)
+        meta_data = {}
 
-    meta_data["init_params"] = model.init_params if hasattr(model, "init_params") else {}
-    meta_data["train_split"] = data_split["train_indices"]
-    meta_data["test_split"] = data_split["test_indices"]
-    meta_data["num_train"] = len(data_split["train_indices"])
-    meta_data["optimizer"] = configs["train"]["optimizer"]
-    meta_data["batch_size"] = configs["train"]["batch_size"]
-    meta_data["epochs"] = configs["train"]["epochs"]
-    meta_data["learning_rate"] = configs["train"]["learning_rate"]
-    meta_data["weight_decay"] = configs["train"]["weight_decay"]
-    meta_data["train_acc"] = train_acc
-    meta_data["test_acc"] = test_acc
-    meta_data["train_loss"] = train_loss
-    meta_data["test_loss"] = test_loss
-    meta_data["dataset"] = configs["data"]["dataset"]
+        meta_data["init_params"] = model.init_params if hasattr(model, "init_params") else {}
+        meta_data["train_split"] = data_split["train_indices"]
+        meta_data["test_split"] = data_split["test_indices"]
+        meta_data["num_train"] = len(data_split["train_indices"])
+        meta_data["optimizer"] = configs["train"]["optimizer"]
+        meta_data["batch_size"] = configs["train"]["batch_size"]
+        meta_data["epochs"] = configs["train"]["epochs"]
+        meta_data["learning_rate"] = configs["train"]["learning_rate"]
+        meta_data["weight_decay"] = configs["train"]["weight_decay"]
+        meta_data["train_acc"] = train_acc
+        meta_data["test_acc"] = test_acc
+        meta_data["train_loss"] = train_loss
+        meta_data["test_loss"] = test_loss
+        meta_data["dataset"] = configs["data"]["dataset"]
 
-    model_metadata_dict["model_metadata"] = meta_data
-    with open(f"{log_dir}/models_metadata.pkl", "wb") as f:
-        pickle.dump(model_metadata_dict, f)
+        model_metadata_dict["model_metadata"] = meta_data
+        with open(f"{log_dir}/models_metadata.pkl", "wb") as f:
+            pickle.dump(model_metadata_dict, f)

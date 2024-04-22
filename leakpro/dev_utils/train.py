@@ -223,8 +223,8 @@ def save_model_and_metadata(  # noqa: PLR0913
     meta_data = {}
 
     meta_data["init_params"] = model.init_params if hasattr(model, "init_params") else {}
-    meta_data["train_split"] = data_split["train_indices"]
-    meta_data["test_split"] = data_split["test_indices"]
+    meta_data["train_indices"] = data_split["train_indices"]
+    meta_data["test_indices"] = data_split["test_indices"]
     meta_data["num_train"] = len(data_split["train_indices"])
     meta_data["optimizer"] = configs["train"]["optimizer"]
     meta_data["batch_size"] = configs["train"]["batch_size"]
@@ -238,5 +238,5 @@ def save_model_and_metadata(  # noqa: PLR0913
     meta_data["dataset"] = configs["data"]["dataset"]
 
     model_metadata_dict["model_metadata"] = meta_data
-    with open(f"{log_dir}/models_metadata.pkl", "wb") as f:
+    with open(f"{log_dir}/model_metadata.pkl", "wb") as f:
         pickle.dump(model_metadata_dict, f)

@@ -3,6 +3,7 @@
 import logging
 import os
 import pickle
+from pathlib import Path
 
 import joblib
 import numpy as np
@@ -67,12 +68,13 @@ def get_adult_dataset(dataset_name: str, data_dir: str, logger:logging.Logger) -
         y = LabelEncoder().fit_transform(y)
 
         all_data = GeneralDataset(x,y)
-        save_dataset(all_data, path, logger)
+        Path(path).mkdir(parents=True, exist_ok=True)
+        save_dataset(all_data, f"path/{dataset_name}", logger)
     return all_data
 
 def get_cifar10_dataset(dataset_name: str, data_dir: str, logger:logging.Logger) -> GeneralDataset:
     """Get the dataset."""
-    path = f"{data_dir}/{dataset_name}"
+    path = f"{data_dir}"
 
     if os.path.exists(f"{path}.pkl"):
         with open(f"{path}.pkl", "rb") as file:
@@ -86,14 +88,15 @@ def get_cifar10_dataset(dataset_name: str, data_dir: str, logger:logging.Logger)
         y = np.hstack([trainset.targets, testset.targets])
 
         all_data = GeneralDataset(x, y, transform)
-        save_dataset(all_data, path, logger)
+        Path(path).mkdir(parents=True, exist_ok=True)
+        save_dataset(all_data, f"{path}/{dataset_name}", logger)
     return all_data
 
 def save_dataset(all_data: GeneralDataset, path: str, logger:logging.Logger) -> GeneralDataset:
     """Save the dataset."""
     with open(f"{path}.pkl", "wb") as file:
         pickle.dump(all_data, file)
-    logger.info(f"Save data to {path}.pkl")
+        logger.info(f"Save data to {path}.pkl")
 
 def prepare_train_test_datasets(dataset_size: int, configs: dict) -> dict:
     """Prepare the dataset for training the target models when the training data are sampled uniformly from the population.

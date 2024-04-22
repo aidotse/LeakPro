@@ -1,10 +1,13 @@
 """Module that contains the abstract class for constructing and performing a membership inference attack on a target."""
 
 from abc import ABC, abstractmethod
+from logging import Logger
+
+import numpy as np
+from torch import nn
 
 from leakpro.import_helper import List, Self, Union
 from leakpro.metrics.attack_result import AttackResult
-from leakpro.mia_attacks.attack_utils import AttackUtils
 
 ########################################################################################################################
 # METRIC CLASS
@@ -19,24 +22,30 @@ class AbstractMIA(ABC):
 
     def __init__(
         self:Self,
-        attack_utils: AttackUtils,
+        population: np.ndarray,
+        audit_dataset: dict,
+        target_model: nn.Module,
+        logger:Logger
     )->None:
         """Initialize the AttackAbstract class.
 
         Args:
         ----
-            attack_utils (AttackUtils): An instance of the AttackUtils class containing the attack objects.
+            population (np.ndarray): The population used for the attack.
+            audit_dataset (dict): The audit dataset used for the attack.
+            target_model (nn.Module): The target model used for the attack.
+            logger (Logger): The logger used for logging.
 
         """
-        self.population = attack_utils.attack_objects.population
-        self.population_size = attack_utils.attack_objects.population_size
-        self.target_model = attack_utils.attack_objects.target_model
-        self.audit_dataset = attack_utils.attack_objects.audit_dataset
+        self._population = population
+        self._population_size = len(population)
+        self._target_model = target_model
+        self._audit_dataset = audit_dataset
+        self.logger = logger
         self.signal_data = []
 
-
     @property
-    def get_population(self:Self)-> List:
+    def population(self:Self)-> List:
         """Get the population used for the attack.
 
         Returns
@@ -44,10 +53,10 @@ class AbstractMIA(ABC):
         List: The population used for the attack.
 
         """
-        return self.population
+        return self._population
 
     @property
-    def get_population_size(self:Self)-> int:
+    def population_size(self:Self)-> int:
         """Get the size of the population used for the attack.
 
         Returns
@@ -55,10 +64,10 @@ class AbstractMIA(ABC):
         int: The size of the population used for the attack.
 
         """
-        return self.population_size
+        return self._population_size
 
     @property
-    def get_target_model(self:Self)-> Union[Self, List[Self] ]:
+    def target_model(self:Self)-> Union[Self, List[Self] ]:
         """Get the target model used for the attack.
 
         Returns
@@ -66,10 +75,10 @@ class AbstractMIA(ABC):
         Union[Self, List[Self]]: The target model used for the attack.
 
         """
-        return self.target_model
+        return self._target_model
 
     @property
-    def get_audit_dataset(self:Self)-> Self:
+    def audit_dataset(self:Self)-> Self:
         """Get the audit dataset used for the attack.
 
         Returns
@@ -77,7 +86,7 @@ class AbstractMIA(ABC):
         Self: The audit dataset used for the attack.
 
         """
-        return self.audit_dataset
+        return self._audit_dataset
 
     @abstractmethod
     def description(self:Self) -> dict:

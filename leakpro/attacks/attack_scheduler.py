@@ -1,47 +1,62 @@
 """Module that contains the AttackScheduler class, which is responsible for creating and executing attacks."""
 import logging
 
-import numpy as np
-import torch
+from torch import nn
 
+from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
+from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
 from leakpro.dataset import GeneralDataset
 from leakpro.import_helper import Any, Dict, Self
-from leakpro.mia_attacks.attack_factory import AttackFactory
-from leakpro.mia_attacks.attack_objects import AttackObjects
-from leakpro.mia_attacks.attack_utils import AttackUtils
-from leakpro.mia_attacks.attacks.attack import AbstractMIA
 
 
 class AttackScheduler:
     """Class responsible for creating and executing attacks."""
 
-    def __init__(  # noqa: D107, PLR0913
+    attack_type_to_factory = {"mia": AttackFactoryMIA}
+
+    def __init__(
         self:Self,
         population:GeneralDataset,
-        train_test_dataset:np.ndarray,
-        target_model:torch.nn.Module,
-        target_model_metadata:Dict[str, Any],  # noqa: ARG002
+        target_model:nn.Module,
+        target_model_metadata:Dict[str, Any],
         configs:Dict[str, Any],
-        logs_dirname:str,
         logger:logging.Logger
     ) -> None:
-        self.attack_list = configs["audit"]["attack_list"]
+        """Initialize the AttackScheduler class.
+
+        Args:
+        ----
+            population (GeneralDataset): The population dataset.
+            target_model (torch.nn.Module): The target model.
+            target_model_metadata (Dict[str, Any]): The metadata of the target model.
+            configs (Dict[str, Any]): The configurations.
+            logger (logging.Logger): The logger object.
+
+        """
+        if configs["audit"]["attack_type"] not in list(self.attack_type_to_factory.keys()):
+            raise ValueError(
+                f"Unknown attack type: {configs['audit']['attack_type']}. "
+                f"Supported attack types: {self.attack_types}"
+            )
+
+        # Prepare factory with shared items
+        factory = self.attack_type_to_factory[configs["audit"]["attack_type"]]
+        factory.set_population_and_audit_data(population,target_model_metadata)
+        factory.set_target_model_and_loss(target_model, nn.CrossEntropyLoss()) #TODO: Enable arbitrary loss functions
+        factory.set_logger(logger)
+
+        self.logger = logger
+
+        # Create the attacks
+        self.attack_list = list(configs["audit"]["attack_list"].keys())
         self.attacks = []
-
-        attack_objects = AttackObjects(
-            population, train_test_dataset, target_model, configs, logger
-        )
-        attack_utils = AttackUtils(attack_objects)
-
         for attack_name in self.attack_list:
             try:
-                attack = AttackFactory.create_attack(attack_name, attack_utils, configs)
+                attack = factory.create_attack(attack_name, configs["audit"]["attack_list"][attack_name])
                 self.add_attack(attack)
+                self.logger.info(f"Added attack: {attack_name}")
             except ValueError as e:
                 logger.info(e)
-
-        self.logs_dirname = logs_dirname
-        self.logger = logger
 
     def add_attack(self:Self, attack: AbstractMIA) -> None:
         """Add an attack to the list of attacks."""
@@ -64,5 +79,5 @@ class AttackScheduler:
 
     def identify_attacks(self:Self) -> None:
         """Identify relevant attacks based on adversary setting."""
-        # Implementation goes here
+        # TODO: Implement this mapping and remove attack list from configs
         pass
