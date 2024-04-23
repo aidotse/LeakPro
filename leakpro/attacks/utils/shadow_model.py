@@ -2,14 +2,15 @@
 
 import logging
 import os
+import pickle
 
 import numpy as np
 from torch import load, save
 from torch.nn import Module
 from torch.optim import Optimizer
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, Subset
 
-from leakpro.import_helper import Self
+from leakpro.import_helper import Self, Tuple
 from leakpro.utils.input_handler import get_class_from_module, import_module_from_file
 
 
@@ -72,6 +73,26 @@ class ShadowModelHandler():
             os.makedirs(self.storage_path)
             self.logger.info(f"Created folder {self.storage_path}")
 
+        self.batch_size = config.get("batch_size", 64)
+        if self.batch_size < 0:
+            raise ValueError("Batch size cannot be negative")
+
+        self.epochs = config.get("epochs", 10)
+        if self.epochs < 0:
+            raise ValueError("Number of epochs cannot be negative")
+
+        self.lr = config.get("lr", 0.001)
+        if self.lr < 0:
+            raise ValueError("Learning rate cannot be negative")
+
+        self.weight_decay = config.get("weight_decay", 0)
+        if self.weight_decay < 0:
+            raise ValueError("Weight decay cannot be negative")
+
+        self.model_storage_name = "shadow_model"
+        self.metadata_storage_name = "metadata"
+
+
     def create_shadow_models(
         self:Self,
         num_models:int,
@@ -79,7 +100,6 @@ class ShadowModelHandler():
         training_fraction:float,
         optimizer:str,
         criterion:str,
-        epochs:int
     ) -> None:
         """Create and train shadow models based on the blueprint.
 
@@ -90,7 +110,6 @@ class ShadowModelHandler():
             training_fraction (float): The fraction of the dataset to use for training.
             optimizer (torch.optim.Optimizer): The optimizer to use for training.
             criterion (Module): The loss function to use for training.
-            epochs (int): The number of epochs to train the shadow models.
 
         Returns:
         -------
@@ -103,16 +122,44 @@ class ShadowModelHandler():
         entries = os.listdir(self.storage_path)
         num_to_reuse = len(entries)
 
+        # Get the size of the dataset
+        shadow_data_size = (len(dataset)*training_fraction).astype(int)
+        all_index = np.arange(shadow_data_size)
+
         for i in range(num_to_reuse, num_models):
             self.logger.info(f"Training shadow model {i}")
 
+            shadow_data_indices = np.random.choice(all_index, shadow_data_size, replace=False)
+            shadow_dataset = Subset(dataset, shadow_data_indices)
+            shadow_train_loader = DataLoader(shadow_dataset, batch_size=self.batch_size, shuffle=True)
+            self.logger.info(f"Created shadow dataset {i} with size {len(shadow_dataset)}")
+
             shadow_model = self.shadow_model_blueprint(**self.init_params)
-            self._train_shadow_model(shadow_model, dataloader, optimizer, criterion, epochs)
+            train_acc, train_loss = self._train_shadow_model(shadow_model, shadow_train_loader, optimizer, criterion, self.epochs)
 
             self.logger.info(f"Training shadow model {i} complete")
-            with open(f"{self.storage_path}/shadow_model_{i}.pkl", "wb") as f:
+            with open(f"{self.storage_path}/{self.model_storage_name}_{i}.pkl", "wb") as f:
                 save(shadow_model.state_dict(), f)
-                self.logger.info(f"Saved shadow model {i}")
+                self.logger.info(f"Saved shadow model {i} to {self.storage_path}")
+
+            self.logger.info(f"Storing metadata for shadow model {i}")
+            meta_data = {}
+            meta_data["init_params"] = self.init_params
+            meta_data["train_indices"] = shadow_data_indices
+            meta_data["num_train"] = shadow_data_size
+            meta_data["optimizer"] = type(optimizer)
+            meta_data["criterion"] = type(criterion)
+            meta_data["batch_size"] = self.batch_size
+            meta_data["epochs"] = self.epochs
+            meta_data["learning_rate"] = self.lr
+            meta_data["weight_decay"] = self.weight_decay
+            meta_data["train_acc"] = train_acc
+            meta_data["train_loss"] = train_loss
+
+            with open(f"{self.storage_path}/{self.metadata}_{i}.pkl", "wb") as f:
+                pickle.dump(meta_data, f)
+
+            self.logger.info(f"Metadata for shadow model {i} stored in {self.storage_path}")
 
     def _train_shadow_model(
         self:Self,
@@ -121,7 +168,7 @@ class ShadowModelHandler():
         optimizer:Optimizer,
         criterion:Module,
         epochs:int
-    ) -> None:
+    ) -> Tuple[np.ndarray, np.ndarray]:
         """Train a shadow model.
 
         Args:
@@ -155,6 +202,7 @@ class ShadowModelHandler():
                 f"Epoch: {epoch+1}/{epochs} | Train Loss: {train_loss/len(train_loader):.8f} | "
                 f"Train Acc: {float(train_acc)/len(train_loader.dataset):.8f}")
             self.logger.info(log_train_str)
+        return train_acc, train_loss
 
     def load_shadow_model(self:Self, index:int) -> Module:
         """Load a shadow model from a saved state.
