@@ -119,9 +119,7 @@ class AttackRMIA(AbstractMIA):
         """
         self.logger.info("Preparing shadow models for RMIA attack")
         # Check number of shadow models that are available
-        
-        shadow_model_handler = ShadowModelHandler(self.target_model, self.target_config, self.configs, self.logger)
-        
+
         # sample dataset to compute histogram
         self.logger.info("Preparing attack data for training the RMIA attack")
         # Get all available indices to sample from for shadow models
@@ -135,7 +133,14 @@ class AttackRMIA(AbstractMIA):
         )
         attack_data = self.population.subset(self.attack_data_index)
 
-        ShadowModelHandler().create_shadow_models(self.num_shadow_models, attack_data, self.f_attack_data_size, self.target_model, self.target_config, self.configs, self.logger)
+        ShadowModelHandler().create_shadow_models(
+            self.num_shadow_models,
+            attack_data,
+            self.f_attack_data_size,
+            optimizer,
+            criterion,
+            self.logger
+        )
 
         # compute the ratio of p(z|theta) (target model) to p(z)=sum_{theta'} p(z|theta') (shadow models)
         # for all points in the attack dataset output from signal: # models x # data points x # classes
