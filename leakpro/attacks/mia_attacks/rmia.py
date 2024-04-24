@@ -61,6 +61,8 @@ class AttackRMIA(AbstractMIA):
         if self.f_attack_data_size <= 0 or self.f_attack_data_size > 1:
             raise ValueError("The data fraction must be between 0 and 1")
 
+        self.online = configs.get("online", False)
+
         self.signal = ModelLogits()
         self.epsilon = 1e-6
 
@@ -137,16 +139,15 @@ class AttackRMIA(AbstractMIA):
             self.num_shadow_models,
             attack_data,
             self.f_attack_data_size,
-            optimizer,
-            criterion,
-            self.logger
         )
+
+        #TODO: load shadow models
 
         # compute the ratio of p(z|theta) (target model) to p(z)=sum_{theta'} p(z|theta') (shadow models)
         # for all points in the attack dataset output from signal: # models x # data points x # classes
 
         # get the true label indices
-        z_label_indices = np.array(attack_data.y)
+        z_label_indices = np.array(attack_data._labels)
 
         # run points through real model to collect the logits
         logits_theta = np.array(self.signal([self.target_model], attack_data))
@@ -183,7 +184,7 @@ class AttackRMIA(AbstractMIA):
         """
         # get the logits for the audit dataset
         audit_data = self.population.subset(self.audit_dataset["data"])
-        x_label_indices = np.array(audit_data.y)
+        x_label_indices = np.array(audit_data._labels)
 
         # run target points through real model to get logits
         logits_theta = np.array(self.signal([self.target_model], audit_data))

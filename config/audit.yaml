@@ -1,20 +1,19 @@
 audit:  # Configurations for auditing
   random_seed: 1234  # Integer specifying the random seed
   attack_list:
+    rmia:
+      data_fraction: 0.6  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
+      num_shadow_models: 1 # Number of shadow models to train
+      online: False # perform online or offline attack
+      temperature: 2
+      gamma: 2.0
+      offline_a: 0.33 # parameter from which we compute p(x) from p_OUT(x) such that p_IN(x) = a p_OUT(x) + b.
+      offline_b: 0.66
     qmia:
       data_fraction: 1.0  # Fraction of the auxilary dataset (data without train and test indices) to use for this attack
       epochs: 2  # Number of training epochs for quantile regression
     population:
       data_fraction: 0.6  # Fraction of the auxilary dataset to use for this attack
-    rmia:
-      data_fraction: 0.6  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
-      num_shadow_models: 1 # Number of shadow models to train
-      offline: True
-      online: False
-      temperature: 2
-      gamma: 2.0
-      offline_a: 0.33 # parameter from which we compute p(x) from p_OUT(x) such that p_IN(x) = a p_OUT(x) + b.
-      offline_b: 0.66
 
   report_log: "results"  # Folder to save the auditing report
   target_model_folder: "./target"
@@ -36,6 +35,11 @@ shadow_model:
   module_path: "./leakpro/shadow_models.py"
   # Name of the class to instantiate from the specified file
   model_class_path: "ConvNet"
+  optimizer: 
+    name: adam #adam, sgd, rmsprop
+    lr: 0.1
+  loss: 
+    name: crossentropyloss # crossentropyloss, nllloss, mseloss
   # Initialization parameters
-  init_params:
+  init_params: {}
 

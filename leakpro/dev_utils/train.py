@@ -183,7 +183,7 @@ def train(  # noqa: PLR0913
     model.to("cpu")
 
     save_model_and_metadata(
-        model, data_split, configs, train_acc, test_acc, train_loss, test_loss
+        model, data_split, configs, train_acc, test_acc, train_loss, test_loss, type(optimizer).__name__, type(criterion).__name__
     )
 
     # Return the model
@@ -198,6 +198,8 @@ def save_model_and_metadata(  # noqa: PLR0913
     test_acc: float,
     train_loss: float,
     test_loss: float,
+    optimizer: str,
+    loss: str
 ) -> None:
     """Save the model and metadata.
 
@@ -210,6 +212,8 @@ def save_model_and_metadata(  # noqa: PLR0913
         test_acc (float): Testing accuracy.
         train_loss (float): Training loss.
         test_loss (float): Testing loss.
+        optimizer (str): Optimizer used for training.
+        loss (str): Loss function used for training.
 
     """
     # Save model and metadata
@@ -226,7 +230,8 @@ def save_model_and_metadata(  # noqa: PLR0913
     meta_data["train_indices"] = data_split["train_indices"]
     meta_data["test_indices"] = data_split["test_indices"]
     meta_data["num_train"] = len(data_split["train_indices"])
-    meta_data["optimizer"] = configs["train"]["optimizer"]
+    meta_data["optimizer"] = optimizer.lower()
+    meta_data["loss"] = loss.lower()
     meta_data["batch_size"] = configs["train"]["batch_size"]
     meta_data["epochs"] = configs["train"]["epochs"]
     meta_data["learning_rate"] = configs["train"]["learning_rate"]
