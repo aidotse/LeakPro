@@ -3,11 +3,12 @@
 import logging
 import os
 import pickle
+import re
 
 import numpy as np
-from torch import load, save
-from torch.nn import Module
-from torch.optim import Optimizer
+from torch import cuda, device, load, save
+from torch.nn import CrossEntropyLoss, Module, MSELoss, NLLLoss
+from torch.optim import SGD, Adam, RMSprop, Optimizer
 from torch.utils.data import DataLoader, Dataset, Subset
 
 from leakpro.import_helper import Self, Tuple
@@ -35,6 +36,20 @@ def singleton(cls):  # noqa: ANN001, ANN201
 class ShadowModelHandler():
     """A class handling the creation, training, and loading of shadow models."""
 
+    optimizer_mapping = {
+        "sgd": SGD,
+        "adam": Adam,
+        "rmsprop": RMSprop,
+        # Add more optimizers as needed
+    }
+
+    loss_mapping = {
+        "mseloss": MSELoss,
+        "crossentropyloss": CrossEntropyLoss,
+        "nllloss": NLLLoss,
+        # Add more loss functions as needed
+    }
+
     def __init__(self:Self, target_model:Module, target_config:dict, config:dict, logger:logging.Logger)->None:
         """Initialize the ShadowModelHandler.
 
@@ -60,11 +75,11 @@ class ShadowModelHandler():
         else:
             self.module_path = module_path
             self.model_class_path = model_class_path
-            self.init_params = config["init_params"]
+            self.init_params = config.get("init_params", {})
             module = import_module_from_file(self.module_path)
             self.shadow_model_blueprint = get_class_from_module(module, self.model_class_path)
 
-            self.logger.info(f"Shadow model blueprint: {self.model_class_path} from {self.module_path}")
+            self.logger.info(f"Shadow model blueprint loaded from {self.model_class_path} from {self.module_path}")
 
         self.storage_path = config["storage_path"]
         # Check if the folder does not exist
@@ -73,21 +88,24 @@ class ShadowModelHandler():
             os.makedirs(self.storage_path)
             self.logger.info(f"Created folder {self.storage_path}")
 
-        self.batch_size = config.get("batch_size", 64)
+        self.batch_size = config.get("batch_size", target_config["batch_size"])
         if self.batch_size < 0:
             raise ValueError("Batch size cannot be negative")
 
-        self.epochs = config.get("epochs", 10)
+        self.epochs = config.get("epochs", target_config["epochs"])
         if self.epochs < 0:
             raise ValueError("Number of epochs cannot be negative")
 
-        self.lr = config.get("lr", 0.001)
-        if self.lr < 0:
-            raise ValueError("Learning rate cannot be negative")
+        self.optimizer_config = config.get("optimizer", target_config["optimizer"])
+        if self.optimizer_config is None:
+            raise ValueError("Optimizer configuration not provided")
 
-        self.weight_decay = config.get("weight_decay", 0)
-        if self.weight_decay < 0:
-            raise ValueError("Weight decay cannot be negative")
+        self.loss_config = config.get("loss", target_config["loss"])
+        if self.loss_config is None:
+            raise ValueError("Loss configuration not provided")
+
+        self.optimizer_class = self.optimizer_mapping[self.optimizer_config.pop("name")]
+        self.criterion_class = self.loss_mapping[self.loss_config.pop("name")]
 
         self.model_storage_name = "shadow_model"
         self.metadata_storage_name = "metadata"
@@ -97,9 +115,7 @@ class ShadowModelHandler():
         self:Self,
         num_models:int,
         dataset:Dataset,
-        training_fraction:float,
-        optimizer:str,
-        criterion:str,
+        training_fraction:float
     ) -> None:
         """Create and train shadow models based on the blueprint.
 
@@ -108,8 +124,6 @@ class ShadowModelHandler():
             num_models (int): The number of shadow models to create.
             dataset (torch.utils.data.Dataset): The full dataset available for training the shadow models.
             training_fraction (float): The fraction of the dataset to use for training.
-            optimizer (torch.optim.Optimizer): The optimizer to use for training.
-            criterion (Module): The loss function to use for training.
 
         Returns:
         -------
@@ -120,22 +134,27 @@ class ShadowModelHandler():
             raise ValueError("Number of models cannot be negative")
 
         entries = os.listdir(self.storage_path)
-        num_to_reuse = len(entries)
+        # Define a regex pattern to match files like model_{i}.pkl
+        pattern = re.compile(rf"^{self.model_storage_name}_\d+\.pkl$")
+        model_files = [f for f in entries if pattern.match(f)]
+        num_to_reuse = len(model_files)
 
         # Get the size of the dataset
-        shadow_data_size = (len(dataset)*training_fraction).astype(int)
-        all_index = np.arange(shadow_data_size)
+        shadow_data_size = int(len(dataset)*training_fraction)
+        all_index = np.arange(len(dataset))
 
         for i in range(num_to_reuse, num_models):
-            self.logger.info(f"Training shadow model {i}")
 
             shadow_data_indices = np.random.choice(all_index, shadow_data_size, replace=False)
-            shadow_dataset = Subset(dataset, shadow_data_indices)
+            shadow_dataset = dataset.subset(shadow_data_indices)
             shadow_train_loader = DataLoader(shadow_dataset, batch_size=self.batch_size, shuffle=True)
             self.logger.info(f"Created shadow dataset {i} with size {len(shadow_dataset)}")
 
+            self.logger.info(f"Training shadow model {i}")
             shadow_model = self.shadow_model_blueprint(**self.init_params)
-            train_acc, train_loss = self._train_shadow_model(shadow_model, shadow_train_loader, optimizer, criterion, self.epochs)
+            shadow_model, train_acc, train_loss = self._train_shadow_model(
+                shadow_model, shadow_train_loader, self.optimizer_config, self.loss_config, self.epochs
+            )
 
             self.logger.info(f"Training shadow model {i} complete")
             with open(f"{self.storage_path}/{self.model_storage_name}_{i}.pkl", "wb") as f:
@@ -147,16 +166,16 @@ class ShadowModelHandler():
             meta_data["init_params"] = self.init_params
             meta_data["train_indices"] = shadow_data_indices
             meta_data["num_train"] = shadow_data_size
-            meta_data["optimizer"] = type(optimizer)
-            meta_data["criterion"] = type(criterion)
+            meta_data["optimizer"] = self.optimizer_class.__name__
+            meta_data["criterion"] = self.criterion_class.__name__
             meta_data["batch_size"] = self.batch_size
             meta_data["epochs"] = self.epochs
-            meta_data["learning_rate"] = self.lr
-            meta_data["weight_decay"] = self.weight_decay
+            meta_data["learning_rate"] = self.optimizer_config["lr"]
+            meta_data["weight_decay"] = self.optimizer_config.get("weight_decay", 0.0)
             meta_data["train_acc"] = train_acc
             meta_data["train_loss"] = train_loss
 
-            with open(f"{self.storage_path}/{self.metadata}_{i}.pkl", "wb") as f:
+            with open(f"{self.storage_path}/{self.metadata_storage_name}_{i}.pkl", "wb") as f:
                 pickle.dump(meta_data, f)
 
             self.logger.info(f"Metadata for shadow model {i} stored in {self.storage_path}")
@@ -165,33 +184,50 @@ class ShadowModelHandler():
         self:Self,
         shadow_model:Module,
         train_loader:DataLoader,
-        optimizer:Optimizer,
-        criterion:Module,
+        optimizer_config:dict,
+        loss_config:dict,
         epochs:int
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> Tuple[Module, np.ndarray, np.ndarray]:
         """Train a shadow model.
 
         Args:
         ----
             shadow_model (Module): The shadow model to train.
             train_loader (torch.utils.data.DataLoader): The training data loader.
-            optimizer (torch.optim.Optimizer): The optimizer to use.
-            criterion (Module): The loss function to use.
+            optimizer_config (dict): The optimizer configuration to use.
+            loss_config (dict): The loss function configuration to use.
             epochs (int): The number of epochs to train the model.
 
         Returns:
         -------
-            None
+            Tuple[Module, np.ndarray, np.ndarray]: The trained shadow model, the training accuracy, and the training loss.
 
         """
+        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+
+        shadow_model.to(gpu_or_cpu)
+        shadow_model.train()
+
+        optimizer = self.optimizer_class(shadow_model.parameters(), **optimizer_config)
+        criterion = self.criterion_class(**loss_config)
+
         for epoch in range(epochs):
             train_loss, train_acc = 0, 0
+            shadow_model.train()
             for inputs, labels in train_loader:
+                labels = labels.long()  # noqa: PLW2901
+                inputs, labels = inputs.to(gpu_or_cpu, non_blocking=True), labels.to(gpu_or_cpu, non_blocking=True)  # noqa: PLW2901
                 optimizer.zero_grad()
                 outputs = shadow_model(inputs)
                 loss = criterion(outputs, labels)
                 pred = outputs.data.max(1, keepdim=True)[1]
                 loss.backward()
+
+                # Check if gradients are not zero
+                gradients = {name: param.grad for name, param in shadow_model.named_parameters()}
+                if any(gradients[name] is None for name in gradients):
+                    raise ValueError("Some gradients are None. Check backward pass.")
+
                 optimizer.step()
 
                 # Accumulate performance of shadow model
@@ -202,7 +238,8 @@ class ShadowModelHandler():
                 f"Epoch: {epoch+1}/{epochs} | Train Loss: {train_loss/len(train_loader):.8f} | "
                 f"Train Acc: {float(train_acc)/len(train_loader.dataset):.8f}")
             self.logger.info(log_train_str)
-        return train_acc, train_loss
+        shadow_model.to("cpu")
+        return shadow_model, train_acc, train_loss
 
     def load_shadow_model(self:Self, index:int) -> Module:
         """Load a shadow model from a saved state.

@@ -27,6 +27,7 @@ class AttackFactoryMIA:
     target_model = None
     target_metadata = None
     logger = None
+    shadow_model_handler = None
 
     @staticmethod
     def set_population_and_audit_data(population:np.ndarray, target_metadata:dict) -> None:
@@ -96,12 +97,14 @@ class AttackFactoryMIA:
         if AttackFactoryMIA.logger is None:
             raise ValueError("Logger has not been set")
 
-        ShadowModelHandler(
-            AttackFactoryMIA.target_model,
-            AttackFactoryMIA.target_metadata,
-            configs["shadow_model"],
-            AttackFactoryMIA.logger
-        )
+        if "shadow_model" in configs and AttackFactoryMIA.shadow_model_handler is None:
+            AttackFactoryMIA.logger.info("Creating shadow model handler singleton")
+            AttackFactoryMIA.shadow_model_handler = ShadowModelHandler(
+                                                        AttackFactoryMIA.target_model,
+                                                        AttackFactoryMIA.target_metadata,
+                                                        configs["shadow_model"],
+                                                        AttackFactoryMIA.logger
+                                                    )
 
         if name in cls.attack_classes:
             return cls.attack_classes[name](
