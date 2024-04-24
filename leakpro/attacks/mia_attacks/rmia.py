@@ -6,7 +6,7 @@ from torch import nn
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.attack_data import get_attack_data
-from leakpro.attacks.utils.shadow_model import ShadowModelHandler
+from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.signals.signal import ModelLogits
@@ -141,7 +141,7 @@ class AttackRMIA(AbstractMIA):
             self.f_attack_data_size,
         )
 
-        #TODO: load shadow models
+        self.shadow_models = ShadowModelHandler().get_shadow_models(self.num_shadow_models)
 
         # compute the ratio of p(z|theta) (target model) to p(z)=sum_{theta'} p(z|theta') (shadow models)
         # for all points in the attack dataset output from signal: # models x # data points x # classes

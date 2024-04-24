@@ -8,10 +8,11 @@ import re
 import numpy as np
 from torch import cuda, device, load, save
 from torch.nn import CrossEntropyLoss, Module, MSELoss, NLLLoss
-from torch.optim import SGD, Adam, RMSprop, Optimizer
-from torch.utils.data import DataLoader, Dataset, Subset
+from torch.optim import SGD, Adam, RMSprop
+from torch.utils.data import DataLoader, Dataset
 
 from leakpro.import_helper import Self, Tuple
+from leakpro.model import PytorchModel
 from leakpro.utils.input_handler import get_class_from_module, import_module_from_file
 
 
@@ -241,7 +242,7 @@ class ShadowModelHandler():
         shadow_model.to("cpu")
         return shadow_model, train_acc, train_loss
 
-    def load_shadow_model(self:Self, index:int) -> Module:
+    def _load_shadow_model(self:Self, index:int) -> Module:
         """Load a shadow model from a saved state.
 
         Args:
@@ -260,4 +261,13 @@ class ShadowModelHandler():
         shadow_model = self.shadow_model_blueprint(**self.init_params)
         shadow_model.load_state_dict(load(f"{self.storage_path}/shadow_model_{index}.pkl"))
         self.logger.info(f"Loaded shadow model {index}")
-        return shadow_model
+        return PytorchModel(shadow_model, self.criterion_class(**self.loss_config))
+
+    def get_shadow_models(self:Self, num_models:int) -> list:
+        """Load the the shadow models."""
+        shadow_models = []
+        for i in range(num_models):
+            self.logger.info(f"Loading shadow model {i}")
+            with open(f"{self.storage_path}/{self.model_storage_name}_{i}.pkl", "rb") as f:
+                shadow_models.append(self._load_shadow_model(i))
+        return shadow_models
