@@ -144,14 +144,11 @@ if __name__ == "__main__":
     )
     audit_results = attack_scheduler.run_attacks()
 
-    report_log = configs["audit"]["report_log"]
-    privacy_game = configs["audit"]["privacy_game"]
-    n_shadow_models = configs["audit"]["num_shadow_models"]
-    n_attack_data_size = configs["audit"]["f_attack_data_size"]
+    for attack_name in audit_results:
+        logger.info(f"Preparing results for attack: {attack_name}")
 
-    prepare_priavcy_risk_report(
-            report_dir,
-            [audit_results["qmia"]["result_object"]],
-            configs["audit"],
-            save_path=f"{report_dir}/{report_log}/{privacy_game}/ns_{n_shadow_models}_fs_{n_attack_data_size}",
-        )
+        prepare_priavcy_risk_report(
+                audit_results[attack_name]["result_object"],
+                configs["audit"],
+                save_path=f"{report_dir}/{attack_name}",
+            )

@@ -161,7 +161,7 @@ class PytorchModel(Model):
         batch_samples_tensor = torch.tensor(
             np.array(batch_samples), dtype=torch.float32
         )
-        batch_labels_tensor = torch.tensor(batch_labels, dtype=torch.long)
+        batch_labels_tensor = batch_labels.clone().detach().long()
 
         if per_point:
             return (

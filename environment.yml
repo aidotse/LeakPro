@@ -26,6 +26,7 @@ dependencies:
   - jinja2
   - tqdm
   - pyyaml
+  - tqdm
 
   # Development and Testing
   - pytest
