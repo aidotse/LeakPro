@@ -41,6 +41,8 @@ class AttackP(AbstractMIA):
         if self.f_attack_data_size < 0 or self.f_attack_data_size > 1:
             raise ValueError("data_fraction must be between 0 and 1")
 
+        self.include_test_data = configs.get("include_test_data", True)
+
         self.signal = ModelLoss()
         self.hypothesis_test_func = linear_itp_threshold_func
 
@@ -73,17 +75,16 @@ class AttackP(AbstractMIA):
         self.logger.info("Preparing attack data for training the Population attack")
         self.attack_data_index = get_attack_data(
             self.population_size,
-            self.f_attack_data_size,
             self.train_indices,
             self.test_indices,
-            False,
+            self.include_test_data,
             self.logger
         )
 
         attack_data = self.population.subset(self.attack_data_index)
         # Load signals if they have been computed already; otherwise, compute and save them
         # signals based on training dataset
-        self.attack_signal = self.signal([self.target_model], [attack_data])[0]
+        self.attack_signal = np.array(self.signal([self.target_model], attack_data))
 
     def run_attack(self:Self) -> CombinedMetricResult:
         """Run the attack on the target model and dataset.
@@ -108,10 +109,10 @@ class AttackP(AbstractMIA):
         self.logger.info("Running the Population attack on the target model")
         # get the loss for the audit dataset
         audit_data = self.population.subset(self.audit_dataset["data"])
-        audit_signal = self.signal([self.target_model], [audit_data])[0]
+        audit_signal = np.array(self.signal([self.target_model], audit_data)).squeeze()
 
         # pick out the in-members and out-members
-        self.in_member_signals = audit_signal[self.audit_dataset["in_members"]]
+        self.in_member_signals =  audit_signal[self.audit_dataset["in_members"]]
         self.out_member_signals = audit_signal[self.audit_dataset["out_members"]]
 
         # compute the signals for the in-members and out-members

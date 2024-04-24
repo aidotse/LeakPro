@@ -7,6 +7,7 @@ from pathlib import Path
 
 import torch
 from torch import nn
+from tqdm import tqdm
 
 from leakpro.import_helper import Tuple
 
@@ -147,28 +148,29 @@ def train(  # noqa: PLR0913
         train_loss, train_acc = 0, 0
         # Loop over the training set
         model.train()
-        for data, target in train_loader:
-            # Cast target to long tensor
-            target = target.long()  # noqa: PLW2901
+        with tqdm(train_loader, desc=f"Epoch {epoch_idx + 1}/{epochs}") as pbar:
+            for data, target in pbar:
+                # Cast target to long tensor
+                target = target.long()  # noqa: PLW2901
 
-            # Move data to the device
-            data, target = data.to(device, non_blocking=True), target.to(device, non_blocking=True)  # noqa: PLW2901
+                # Move data to the device
+                data, target = data.to(device, non_blocking=True), target.to(device, non_blocking=True)  # noqa: PLW2901
 
-            # Set the gradients to zero
-            optimizer.zero_grad()
+                # Set the gradients to zero
+                optimizer.zero_grad()
 
-            # Get the model output
-            output = model(data)
-            # Calculate the loss
-            loss = criterion(output, target)
-            pred = output.data.max(1, keepdim=True)[1]
-            train_acc += pred.eq(target.data.view_as(pred)).sum()
-            # Perform the backward pass
-            loss.backward()
-            # Take a step using optimizer
-            optimizer.step()
-            # Add the loss to the total loss
-            train_loss += loss.item()
+                # Get the model output
+                output = model(data)
+                # Calculate the loss
+                loss = criterion(output, target)
+                pred = output.data.max(1, keepdim=True)[1]
+                train_acc += pred.eq(target.data.view_as(pred)).sum()
+                # Perform the backward pass
+                loss.backward()
+                # Take a step using optimizer
+                optimizer.step()
+                # Add the loss to the total loss
+                train_loss += loss.item()
 
         # Log the training loss and accuracy
         log_train_str = f"Epoch: {epoch_idx+1}/{epochs} | Train Loss: {train_loss/len(train_loader):.8f} | Train Acc: {float(train_acc)/len(train_loader.dataset):.8f} | One step uses {time.time() - start_time:.2f} seconds"  # noqa: E501

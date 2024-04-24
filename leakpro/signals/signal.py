@@ -212,14 +212,14 @@ class ModelLoss(Signal):
     def __call__(
         self:Self,
         models: List[Model],
-        datasets: List[Dataset],
+        dataset: Dataset,
     ) -> List[np.ndarray]:
         """Built-in call method.
 
         Args:
         ----
             models: List of models that can be queried.
-            datasets: List of datasets that can be queried.
+            dataset: datasets to be queried.
 
         Returns:
         -------
@@ -228,12 +228,11 @@ class ModelLoss(Signal):
         """
         results = []
         # Compute the signal for each model
-        for k, model in enumerate(models):
-            x = datasets[k]._data
-            y = datasets[k]._labels
+        data_loader = DataLoader(dataset, batch_size=len(dataset), shuffle=False)
+        for model in models:
+            for data, labels in data_loader:
+                results.append(model.get_loss(data, labels))
 
-            # Compute the signal for each sample
-            results.append(model.get_loss(x, y))
         return results
 
 

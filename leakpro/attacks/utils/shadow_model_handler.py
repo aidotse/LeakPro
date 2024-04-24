@@ -10,6 +10,7 @@ from torch import cuda, device, load, save
 from torch.nn import CrossEntropyLoss, Module, MSELoss, NLLLoss
 from torch.optim import SGD, Adam, RMSprop
 from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
 
 from leakpro.import_helper import Self, Tuple
 from leakpro.model import PytorchModel
@@ -215,7 +216,7 @@ class ShadowModelHandler():
         for epoch in range(epochs):
             train_loss, train_acc = 0, 0
             shadow_model.train()
-            for inputs, labels in train_loader:
+            for inputs, labels in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
                 labels = labels.long()  # noqa: PLW2901
                 inputs, labels = inputs.to(gpu_or_cpu, non_blocking=True), labels.to(gpu_or_cpu, non_blocking=True)  # noqa: PLW2901
                 optimizer.zero_grad()
@@ -259,8 +260,9 @@ class ShadowModelHandler():
         if index >= len(os.listdir(self.storage_path)):
             raise ValueError("Index out of range")
         shadow_model = self.shadow_model_blueprint(**self.init_params)
-        shadow_model.load_state_dict(load(f"{self.storage_path}/shadow_model_{index}.pkl"))
-        self.logger.info(f"Loaded shadow model {index}")
+        with open(f"{self.storage_path}/{self.model_storage_name}_{index}.pkl", "rb") as f:
+            shadow_model.load_state_dict(load(f))
+            self.logger.info(f"Loaded shadow model {index}")
         return PytorchModel(shadow_model, self.criterion_class(**self.loss_config))
 
     def get_shadow_models(self:Self, num_models:int) -> list:
@@ -268,6 +270,5 @@ class ShadowModelHandler():
         shadow_models = []
         for i in range(num_models):
             self.logger.info(f"Loading shadow model {i}")
-            with open(f"{self.storage_path}/{self.model_storage_name}_{i}.pkl", "rb") as f:
-                shadow_models.append(self._load_shadow_model(i))
+            shadow_models.append(self._load_shadow_model(i))
         return shadow_models

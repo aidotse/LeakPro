@@ -62,6 +62,7 @@ class AttackRMIA(AbstractMIA):
             raise ValueError("The data fraction must be between 0 and 1")
 
         self.online = configs.get("online", False)
+        self.include_test_data = configs.get("include_test_data", True)
 
         self.signal = ModelLogits()
         self.epsilon = 1e-6
@@ -127,10 +128,9 @@ class AttackRMIA(AbstractMIA):
         # Get all available indices to sample from for shadow models
         self.attack_data_index = get_attack_data(
             self.population_size,
-            1.0,
             self.train_indices,
             self.test_indices,
-            False,
+            self.include_test_data,
             self.logger
         )
         attack_data = self.population.subset(self.attack_data_index)
