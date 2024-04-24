@@ -36,10 +36,13 @@ shadow_model:
   # Name of the class to instantiate from the specified file
   model_class_path: "ConvNet"
   optimizer: 
-    name: adam #adam, sgd, rmsprop
-    lr: 0.1
+    name: sgd #adam, sgd, rmsprop
+    lr: 0.01
+    momentum: 0.9
+    weight_decay: 0
   loss: 
     name: crossentropyloss # crossentropyloss, nllloss, mseloss
   # Initialization parameters
   init_params: {}
+
 

@@ -3,7 +3,6 @@ from logging import Logger
 
 import numpy as np
 import torch
-import tqdm
 from torch import nn
 from torch.utils.data import DataLoader
 
@@ -255,7 +254,7 @@ class AttackQMIA(AbstractMIA):
         audit_dataloader = DataLoader(audit_dataset, batch_size=64, shuffle=False)
         self.logger.info("Running the attack on the target model")
         score = []
-        for data, _ in tqdm(audit_dataloader, desc="Performing QMIA Attack", unit="batch"):
+        for data, _ in audit_dataloader:
             score.extend(self.quantile_regressor(data).detach().numpy())
         score = np.array(score).T
 
