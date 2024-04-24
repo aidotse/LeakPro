@@ -6,7 +6,7 @@ import time
 
 import numpy as np
 import torch
-from torch.nn import CrossEntropyLoss, KLDivLoss, KLDivLoss, Module, functional
+from torch.nn import CrossEntropyLoss, KLDivLoss, Module, functional
 from torch.optim import SGD, Adam, AdamW
 from torch.utils.data import DataLoader, Subset
 
@@ -89,6 +89,7 @@ class AttackObjects:
 
         # Train shadow models
         self._shadow_models = []
+        shadow_train_data_indices, shadow_test_data_indices, distillation_train_data_indices,  distillation_test_data_indices = self.create_aux_dataset(include_in_members=False)  # noqa: E501
         if self._num_shadow_models > 0:
             self._shadow_train_indices = []
             self._shadow_test_indices = []

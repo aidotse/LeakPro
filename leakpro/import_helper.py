@@ -9,4 +9,8 @@ else:
     Self = TypeVar("Self")
 =======
     Self = TypeVar("Self")
+<<<<<<< HEAD
 >>>>>>> 2db0b25 (forgot importhelper.py)
+=======
+>>>>>>> 4e41190 ( Adding Loss trajecotry attack, soft label mode)
+>>>>>>> 6a7715b
