@@ -12,7 +12,7 @@ import torchvision
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
 from torch.utils.data import Dataset
-from torchvision import transforms
+from torchvision import datasets, transforms
 
 from leakpro.import_helper import List, Self
 
@@ -77,7 +77,9 @@ class InfiniteRepeatDataset(GeneralDataset):
 
 
 
-def get_dataset(dataset_name: str, data_dir: str, logger:logging.Logger) -> GeneralDataset:
+def get_dataset(dataset_name: str,  # noqa: PLR0915
+                data_dir: str,
+                logger:logging.Logger) -> GeneralDataset:
     """Get the dataset."""
     path = f"{data_dir}/{dataset_name}"
 
@@ -145,7 +147,30 @@ def get_dataset(dataset_name: str, data_dir: str, logger:logging.Logger) -> Gene
         with open(f"{path}.pkl", "wb") as file:
             pickle.dump(all_data, file)
         logger.info(f"Save data to {path}.pkl")
+    elif "cinic10" in dataset_name:
+        transform = transforms.Compose([transforms.ToTensor(),
+                                         transforms.Normalize((0.5, 0.5, 0.5),
+                                                              (0.5, 0.5, 0.5))])
 
+        trainset =  datasets.ImageFolder(root="./data/cinic10/train", transform=transform)
+        testset =  datasets.ImageFolder(root="./data/cinic10/test", transform=transform)
+        validset =  datasets.ImageFolder(root="./data/cinic10/valid", transform=transform)
+
+
+        train_data, train_targets = zip(*[(image.numpy(), target) for image, target in trainset])
+        test_data, test_targets = zip(*[(image.numpy(), target) for image, target in testset])
+        valid_data, valid_targets = zip(*[(image.numpy(), target) for image, target in validset])
+
+        x = np.vstack([train_data, test_data, valid_data])
+        x = np.transpose(x, (0, 2, 3, 1))
+        y = np.hstack([train_targets, test_targets, valid_targets])
+
+
+        all_data = GeneralDataset(x, y, transform)
+
+        with open(f"{path}.pkl", "wb") as file:
+            pickle.dump(all_data, file)
+        logger.info(f"Save data to {path}.pkl")
     return all_data
 
 
@@ -203,9 +228,13 @@ def prepare_train_test_datasets(dataset_size: int, configs: dict) -> dict:
 
     """
     # The index_list will save all the information about the train, test and auit for each target model.
+    # TODO: fix this fixed thing : Size of datasets should be based on the attack and better with the size raher than the ratio
     all_index = np.arange(dataset_size)
-    train_size = int(configs["f_train"] * dataset_size)
-    test_size = int(configs["f_test"] * dataset_size)
+    train_size = configs["loss_traj"]["train_target_data_size"]
+    test_size = configs["loss_traj"]["test_target_data_size"]
+
+
+
 
     selected_index = np.random.choice(all_index, train_size + test_size, replace=False)
     train_index, test_index = train_test_split(selected_index, test_size=test_size)

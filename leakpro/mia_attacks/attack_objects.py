@@ -6,20 +6,19 @@ import time
 
 import numpy as np
 import torch
-from torch.nn import CrossEntropyLoss, Module
+from torch.nn import CrossEntropyLoss, KLDivLoss, Module, functional
 from torch.optim import SGD, Adam, AdamW
 from torch.utils.data import DataLoader, Subset
 
 from leakpro.dataset import Dataset
 from leakpro.import_helper import List, Self
 from leakpro.model import Model, PytorchModel
-from leakpro.models import NN, ConvNet, SmallerSingleLayerConvNet  # noqa: F401
 
 
 class AttackObjects:
     """Class representing the attack objects for the MIA attacks."""
 
-    def __init__(  # noqa: PLR0913
+    def __init__(   # noqa: PLR0915, PLR0912, PLR0913, C901
         self:Self,
         population: Dataset,
         train_test_dataset: dict,
@@ -48,7 +47,12 @@ class AttackObjects:
         self._target_model = PytorchModel(target_model, CrossEntropyLoss())
         self._train_test_dataset = train_test_dataset
         self._num_shadow_models = configs["audit"]["num_shadow_models"]
-        self._logger = logger
+        self.num_distillation_models_target = configs["loss_traj"]["number_of_traj"]
+        self.num_distillation_models_shadow = configs["loss_traj"]["number_of_traj"]
+        self.configs = configs
+        self.logger = logger
+        self._distillation_models_shadow = []
+        self._distillation_models_target = []
 
         self._audit_dataset = {
             # Assuming train_indices and test_indices are arrays of indices, not the actual data
@@ -72,6 +76,7 @@ class AttackObjects:
 
         path_shadow_models = f"{self.log_dir}/shadow_models"
 
+
         # Check if the folder does not exist
         if not os.path.exists(path_shadow_models):
             # Create the folder
@@ -81,39 +86,146 @@ class AttackObjects:
         entries = os.listdir(path_shadow_models)
         number_of_files_to_reuse = len(entries)
 
+
         # Train shadow models
         self._shadow_models = []
+        shadow_train_data_indices, shadow_test_data_indices, distillation_train_data_indices,  distillation_test_data_indices = self.create_aux_dataset(include_in_members=False)  # noqa: E501
         if self._num_shadow_models > 0:
             self._shadow_train_indices = []
-
-            f_shadow_data = configs["audit"]["f_attack_data_size"]
+            self._shadow_test_indices = []
 
             for k in range(self._num_shadow_models):
                 if "adult" in configs["data"]["dataset"]:
                     shadow_model = target_model.__class__(configs["train"]["inputs"], configs["train"]["outputs"])
                 elif "cifar10" in configs["data"]["dataset"]:
                     shadow_model = target_model.__class__()
+                elif "cinic10" in configs["data"]["dataset"]:
+                    shadow_model = target_model.__class__(configs)
 
                 if number_of_files_to_reuse > 0:
+                    self.logger.info("Loading trained shadow model")
                     shadow_model.load_state_dict(torch.load(f"{path_shadow_models}/model_{k}.pkl"))
                     self._shadow_models.append(PytorchModel(shadow_model, CrossEntropyLoss()))
+                    #TODO: load data indices
                     number_of_files_to_reuse -= 1
                 else:
-                    # Create shadow datasets by sampling from the population
-                    shadow_data_indices = self.create_shadow_dataset(f_shadow_data)
-                    shadow_train_loader = DataLoader(Subset(population, shadow_data_indices),
-                                                     batch_size=configs["train"]["batch_size"],
-                                                     shuffle=True,)
-                    self._shadow_train_indices.append(shadow_data_indices)
+                    # Create a dataloder for training the shadow model
+                    self._shadow_train_indices = shadow_train_data_indices
+                    shadow_train_loader = DataLoader(Subset(population, shadow_train_data_indices),
+                                                    batch_size=configs["train"]["batch_size"],
+                                                    shuffle=True,)
 
+                    # Create a dataloder for testing the shadow model
+                    self._shadow_test_indices = shadow_test_data_indices
+                    self._shadow_train_indices = shadow_train_data_indices
+                    shadow_test_loader = DataLoader(Subset(population, shadow_test_data_indices),
+                                                    batch_size=configs["train"]["batch_size"],
+                                                    shuffle=True,)
                     # Train the shadow model
-                    shadow_model = self.train_shadow_model(shadow_model, shadow_train_loader, configs = configs)
+                    shadow_model = self.train_test_shadow_model(shadow_model, shadow_train_loader,
+                                                                 shadow_test_loader,  configs = configs)
 
                     #save the shadow model
-                    torch.save(shadow_model.state_dict(), f"{path_shadow_models}/model_{k}.pkl")
+                    torch.save(shadow_model.state_dict(),
+                            f"{path_shadow_models}/model_{k}.pkl")
 
-                # TODO: come up with a way to use different loss functions
-                self._shadow_models.append(PytorchModel(shadow_model, CrossEntropyLoss()))
+                    # TODO: come up with a way to use different loss functions
+                    #TODO : save the meta data and indices
+                    self._shadow_models.append(PytorchModel(shadow_model, CrossEntropyLoss()))
+
+
+        # Train knowledge distillation models of the target model
+        self._distillation_train_indices = []
+        self._distillation_test_indices = []
+        if self.num_distillation_models_target > 0:
+            self._distillation_models_target = []
+
+            # Distillation models of target
+            path_distillation_models_target = f"{self.log_dir}/distillation_models_target"
+
+            # Check if the folder does notexist
+            if not os.path.exists(path_distillation_models_target):
+                #Create the folder
+                os.makedirs(path_distillation_models_target)
+            # List all entries in the directory
+            number_of_reuse_distillation_target_models = len(os.listdir(path_distillation_models_target))
+            if number_of_reuse_distillation_target_models > 0:
+                if number_of_reuse_distillation_target_models != self.num_distillation_models_target:
+                    # TODO: add how to handle this situation
+                    raise ValueError(
+                    f" number of reused distillation models ({number_of_reuse_distillation_target_models}) "
+                    f"and requested number of distillation model in config file "
+                    f"({self.num_distillation_models_target}) are not equal")
+
+                self.logger.info(f"Loading {number_of_reuse_distillation_target_models} trained distillated models of the target")
+                for k in range(number_of_reuse_distillation_target_models):
+                    if "adult" in configs["data"]["dataset"]:
+                        distillation_target_model = target_model.__class__(configs["train"]["inputs"],
+                                                                           configs["train"]["outputs"])
+                    elif "cifar10" in configs["data"]["dataset"]:
+                        distillation_target_model = target_model.__class__()
+                    elif "cinic10" in configs["data"]["dataset"]:
+                        distillation_target_model = target_model.__class__(configs)
+                    distillation_target_model.load_state_dict(torch.load(f"{path_distillation_models_target}/model_{k}.pkl"))
+                    # TODO: load data indices
+                    self._distillation_models_target.append(PytorchModel(distillation_target_model, CrossEntropyLoss()))
+            else:
+                self._distillation_train_indices = distillation_train_data_indices
+                distillation_train_loader = DataLoader(Subset(population, distillation_train_data_indices),
+                                                    batch_size=configs["train"]["batch_size"],
+                                                    shuffle=True,)
+
+                # Train the distillation model
+                self.train_distillation_models_target( target_model,
+                                                self.num_distillation_models_target,
+                                                distillation_train_loader , configs=configs)
+
+
+
+        # Train knowledge distillation models of the shadow model
+        #TODO : ATM the code is for one shadow model
+        if self.num_distillation_models_shadow > 0:
+
+            # Distillation models of shadow
+            self._distillation_models_shadow = []
+            path_distillation_models_shadow = f"{self.log_dir}/distillation_models_shadow"
+
+            # Check if the folder does notexist
+            if not os.path.exists(path_distillation_models_shadow):
+                #Create the folder
+                os.makedirs(path_distillation_models_shadow)
+            # List all entries in the directory
+            number_of_reuse_distillation_models_shadow = len(os.listdir(path_distillation_models_shadow))
+            if number_of_reuse_distillation_models_shadow > 0:
+                if number_of_reuse_distillation_models_shadow != self.num_distillation_models_shadow:
+                    raise ValueError(
+                    f" number of reused distillation models ({number_of_reuse_distillation_models_shadow}) "
+                    f"and requested number of distillation model in config file "
+                    f"({self.num_distillation_models_shadow}) are not equal")
+
+                self.logger.info(f"Loading {number_of_reuse_distillation_models_shadow} trained distillated models of the shadow")
+                for k in range(number_of_reuse_distillation_models_shadow):
+                    if "adult" in configs["data"]["dataset"]:
+                        distillation_shadow_model = target_model.__class__(configs["train"]["inputs"],
+                                                                           configs["train"]["outputs"])
+                    elif "cifar10" in configs["data"]["dataset"]:
+                        distillation_shadow_model = target_model.__class__()
+                    elif "cinic10" in configs["data"]["dataset"]:
+                        distillation_shadow_model = target_model.__class__(configs)
+
+                    distillation_shadow_model.load_state_dict(torch.load(f"{path_distillation_models_shadow}/model_{k}.pkl"))
+                    self._distillation_models_shadow.append(PytorchModel(distillation_shadow_model,
+                                                                         CrossEntropyLoss()))
+            else:
+                self._distillation_train_indices = distillation_train_data_indices
+                distillation_train_loader = DataLoader(Subset(population, distillation_train_data_indices),
+                                                    batch_size=configs["train"]["batch_size"],
+                                                    shuffle=True,)
+
+                # Train the distillation model
+                self.train_distillation_models_shadow( \
+                        target_model,self.num_distillation_models_shadow,
+                        distillation_train_loader, configs=configs)
 
 
 
@@ -129,15 +241,49 @@ class AttackObjects:
         return self._shadow_models
 
     @property
-    def shadow_train_indices(self:Self) -> List[int]:
-        """Return the indices of the shadow training data.
+    def distillation_models_target(self: Self) -> List[Model]:
+        """Return the distillation of the target model.
 
         Returns
         -------
-        List[int]: The indices of the shadow training data.
+        List[Model]: The disitllation of the target model.
 
         """
-        return self._shadow_train_indices
+        return self._distillation_models_target
+
+    @property
+    def distillation_models_shadow(self: Self) -> List[Model]:
+        """Return the distillation of the shadow model.
+
+        Returns
+        -------
+        List[Model]: The distillation of the shadow model.
+
+        """
+        return self._distillation_models_shadow
+
+    @property
+    def distillation_target_train_indices(self:Self) -> List[int]:
+        """Return the indices of the distillation training data.
+
+        Returns
+        -------
+        List[int]: The indices of the distillation training data.
+
+        """
+        return self._distillation_target_train_indices
+
+    @property
+    def distillation_shadow_train_indices(self:Self) -> List[int]:
+        """Return the indices of the distillation training data.
+
+        Returns
+        -------
+        List[int]: The indices of the distillation training data.
+
+        """
+        return self._distillation_shadow_train_indices
+
 
     @property
     def population(self:Self) -> Dataset:
@@ -232,6 +378,58 @@ class AttackObjects:
             raise ValueError("Not enough remaining data points.")
         return selected_index
 
+
+    def create_aux_dataset(self:Self, include_in_members:bool=False)-> tuple:
+        """Create a shadow dataset (train and test) by sampling from the population.
+
+        Args:
+        ----
+            f_shadow_data (float): Fraction of shadow data to be sampled.
+            include_in_members (bool, optional): Include in-members in the shadow dataset. Defaults to False.
+
+        Returns:
+        -------
+            np.ndarray: Array of indices representing the shadow dataset.
+
+        """
+        aux_data_s = self.configs["loss_traj"]["aux_data_size"]
+        shadow_train_s = int(self.configs["loss_traj"]["train_shadow_data_size"])
+        shadow_test_s = int(self.configs["loss_traj"]["test_shadow_data_size"])
+        distill_test_data_s = int(self.configs["loss_traj"]["train_distillation_data_size"]/2)
+        distill_train_data_s = int(self.configs["loss_traj"]["train_distillation_data_size"]/2)
+        assert aux_data_s == shadow_train_s + shadow_test_s + distill_test_data_s + distill_train_data_s  # noqa: S101
+
+        all_index = np.arange(self.population_size)
+
+        # Remove indices corresponding to training data of the target model
+        used_index_train_target = self.train_test_dataset["train_indices"] if include_in_members is False else []
+
+        # Remove indices corresponding to test data of the target model
+        used_index_test_target = self.train_test_dataset["test_indices"] if include_in_members is False else []
+
+        # Concatenate the arrays of indices to be removed
+        used_indices_target = np.concatenate((used_index_train_target, used_index_test_target))
+
+
+        # pick allowed indices
+        mask = np.isin(all_index, used_indices_target, invert=True)
+        unused_indices = all_index[mask]
+        if aux_data_s <= len(unused_indices):
+            np.random.shuffle(unused_indices)
+            shadow_train_indices = unused_indices[:shadow_train_s]
+            shadow_test_indices = unused_indices[shadow_train_s:
+                                                 shadow_train_s+ shadow_test_s]
+            distill_test_data_indices = unused_indices[shadow_train_s+ shadow_test_s:
+                                                       shadow_train_s+ shadow_test_s+ distill_test_data_s]
+            distill_train_data_indices = unused_indices[ shadow_train_s+ shadow_train_s+
+                                                        distill_test_data_s:]
+
+        else:
+            raise ValueError("Not enough remaining data points.")
+
+        return shadow_train_indices, shadow_test_indices, distill_test_data_indices,distill_train_data_indices
+
+
     def get_optimizer(self:Self, model: Module, configs: dict) -> torch.optim.Optimizer:
         """Get the optimizer for training the model.
 
@@ -269,13 +467,15 @@ class AttackObjects:
         )
 
 
-    def train_shadow_model(self:Self, shadow_model: Module, shadow_train_loader: DataLoader, configs: dict = None) -> Module:
-        """Train the model based on on the train loader.
+    def train_test_shadow_model(self:Self, shadow_model: Module, shadow_train_loader: DataLoader,
+                               shadow_test_loader: DataLoader, configs: dict = None) -> Module:
+        """Train the model based on on the train loader and test loader.
 
         Args:
         ----
             shadow_model(nn.Module): Model for evaluation.
             shadow_train_loader(torch.utils.data.DataLoader): Data loader for training.
+            shadow_test_loader(torch.utils.data.DataLoader): Data loader for testing.
             configs (dict): Configurations for training.
 
         Return:
@@ -283,53 +483,217 @@ class AttackObjects:
             nn.Module: Trained model.
 
         """
-        # Get the device for training
+        self.logger.info(" ************* Training the shado model ************")
         device = ("cuda" if torch.cuda.is_available() else "cpu")
 
         # Set the model to the device
         shadow_model.to(device)
-        shadow_model.train()
         # Set the loss function and optimizer
         criterion = CrossEntropyLoss()
         optimizer = self.get_optimizer(shadow_model, configs)
         # Get the number of epochs for training
         epochs = configs["train"]["epochs"]
 
+
         # Loop over each epoch
         for epoch_idx in range(epochs):
             start_time = time.time()
-            train_loss, train_acc = 0, 0
-            # Loop over the training set
+            train_loss, train_acc, test_loss, test_acc = 0, 0, 0, 0
+
+            # Training Phase
             shadow_model.train()
             for data, target in shadow_train_loader:
-                # Move data to the device
-                data, target = data.to(device, non_blocking=True), target.to(  # noqa: PLW2901
-                    device, non_blocking=True
-                )
-                # Cast target to long tensor
+                data, target = data.to(device), target.to(device)  # noqa: PLW2901
                 target = target.long()  # noqa: PLW2901
 
-                # Set the gradients to zero
-                optimizer.zero_grad(set_to_none=True)
-
-                # Get the model output
+                optimizer.zero_grad()
                 output = shadow_model(data)
-                # Calculate the loss
                 loss = criterion(output, target)
                 pred = output.data.max(1, keepdim=True)[1]
                 train_acc += pred.eq(target.data.view_as(pred)).sum()
-                # Perform the backward pass
                 loss.backward()
-                # Take a step using optimizer
                 optimizer.step()
-                # Add the loss to the total loss
                 train_loss += loss.item()
 
-            log_train_str = f"Epoch: {epoch_idx+1}/{epochs} | Train Loss: {train_loss/len(shadow_train_loader):.8f} | Train Acc: {float(train_acc)/len(shadow_train_loader.dataset):.8f} | One step uses {time.time() - start_time:.2f} seconds"  # noqa: E501
-            self.logger.info(log_train_str)
+            train_loss /= len(shadow_train_loader)
+            train_acc = float(train_acc) / len(shadow_train_loader.dataset)
+
+            # Testing Phase
+            shadow_model.eval()
+            with torch.no_grad():
+                for data, target in shadow_test_loader:
+                    data, target = data.to(device), target.to(device)  # noqa: PLW2901
+                    target = target.long()  # noqa: PLW2901
+
+                    output = shadow_model(data)
+                    loss = criterion(output, target)
+                    pred = output.data.max(1, keepdim=True)[1]
+                    test_acc += pred.eq(target.data.view_as(pred)).sum()
+                    test_loss += loss.item()
+
+            test_loss /= len(shadow_test_loader)
+            test_acc = float(test_acc) / len(shadow_test_loader.dataset)
+
+            # Logging for both train and test phases
+            log_str = f"Epoch: {epoch_idx+1}/{epochs} | " \
+                    f"Train Loss: {train_loss:.8f} | Train Acc: {train_acc:.8f} | " \
+                    f"Test Loss: {test_loss:.8f} | Test Acc: {test_acc:.8f} | " \
+                    f"Epoch Time: {time.time() - start_time:.2f} seconds"
+            self.logger.info(log_str)
 
         # Move the model back to the CPU
         shadow_model.to("cpu")
 
-        # Return the model
         return shadow_model
+
+
+    def train_distillation_models_target(self:Self, target_model: Module,
+                                         number_of_distillation_models: int,
+                                         distillation_train_loader: DataLoader,
+                                         configs: dict = None) -> Module:
+        """Train the model based on the train loader.
+
+        Args:
+        ----
+            target_model (nn.Module): The target model to be trained.
+            number_of_distillation_models (int): The number of distillation models to train.
+            distillation_train_loader (torch.utils.data.DataLoader): The data loader for training.
+            configs (dict, optional): Configurations for training.
+
+        Returns:
+        -------
+            nn.Module: The trained model.
+
+        """
+        path_distillation_models_target = f"{self.log_dir}/distillation_models_target"
+
+        # Get the device for training
+        device = ("cuda" if torch.cuda.is_available() else "cpu")
+        target_model.to(device)
+
+
+        # Distillation model
+        if "adult" in configs["data"]["dataset"]:
+            distillation_target_model = target_model.__class__(configs["train"]["inputs"], configs["train"]["outputs"])
+        elif "cifar10" in configs["data"]["dataset"]:
+            distillation_target_model = target_model.__class__()
+        elif "cinic10" in configs["data"]["dataset"]:
+            distillation_target_model = target_model.__class__(configs)
+
+        for d in range(number_of_distillation_models):
+            distillation_target_model.to(device)
+            target_model.to(device)
+
+            distillation_target_model.train()
+            target_model.eval()
+
+            optimizer = self.get_optimizer(distillation_target_model, configs)
+            train_loss = 0
+
+            # Loop over each epoch
+            self.logger.info(f" *** Training distillation model of target model, epoch: {d}")
+
+            # Loop over the training set
+            for data, target_labels in distillation_train_loader:
+                # Move data to the device
+                data, target_labels = data.to(device, non_blocking=True), target_labels.to(device, non_blocking=True)  # noqa: PLW2901
+                target_labels = target_labels.long()  # noqa: PLW2901
+
+                # Output of the distillation model
+                output = distillation_target_model(data)
+                output_teacher = target_model(data)
+
+                soft_target = torch.zeros_like(output)
+                soft_target[torch.arange(soft_target.shape[0]), target_labels] = 1
+
+                loss = KLDivLoss(reduction="batchmean")(functional.log_softmax(output, dim=1),
+                                                            functional.softmax(output_teacher,
+                                                            dim=1))
+                optimizer.zero_grad(set_to_none=True)
+                loss.backward()
+                optimizer.step()
+
+                train_loss += loss.item()
+
+            torch.save(distillation_target_model.state_dict(), f"{path_distillation_models_target}/epoch_{d}.pkl")
+
+        # Return the model
+        return
+
+
+    def train_distillation_models_shadow(self:Self, target_model: Module,
+                                         number_of_distillation_models:int,
+                                         distillation_train_loader: DataLoader,
+                                         configs: dict = None) -> Module:
+        """Train the model based on the train loader.
+
+        Args:
+        ----
+            target_model (nn.Module): The target model to be distilled.
+            number_of_distillation_models (int): The number of distillation models to train.
+            distillation_train_loader (torch.utils.data.DataLoader): The data loader for training.
+            configs (dict, optional): Configurations for training.
+
+        Returns:
+        -------
+            nn.Module: The trained distillation model.
+
+        """
+        path_distillation_models_shadow = f"{self.log_dir}/distillation_models_shadow"
+
+        # Get the device for training
+        device = ("cuda" if torch.cuda.is_available() else "cpu")
+        target_model.to(device)
+
+
+        # Distillation model
+        if "adult" in configs["data"]["dataset"]:
+            distillation_shadow_model = target_model.__class__(configs["train"]["inputs"], configs["train"]["outputs"])
+        elif "cifar10" in configs["data"]["dataset"]:
+            distillation_shadow_model = target_model.__class__()
+        elif "cinic10" in configs["data"]["dataset"]:
+            distillation_shadow_model = target_model.__class__(configs)
+
+        for d in range(number_of_distillation_models):
+
+            distillation_shadow_model.to(device)
+            target_model.to(device)
+
+            distillation_shadow_model.train()
+            target_model.eval()
+
+            optimizer = self.get_optimizer(distillation_shadow_model, configs)
+            train_loss = 0
+
+            # Loop over each epoch
+            self.logger.info(f" *** Training distillation model of shadow model, epoch: {d}")
+
+            # Loop over the training set
+            for data, target_labels in distillation_train_loader:
+
+                # Move data to the device
+                data, target_labels = data.to(device, non_blocking=True), target_labels.to(device, non_blocking=True)  # noqa: PLW2901
+                target_labels = target_labels.long()  # noqa: PLW2901
+
+                # Output of the distillation model
+                output = distillation_shadow_model(data)
+                output_teacher = target_model(data)
+
+                soft_target = torch.zeros_like(output)
+                soft_target[torch.arange(soft_target.shape[0]), target_labels] = 1
+
+                loss = KLDivLoss(reduction="batchmean")(functional.log_softmax(output, dim=1),
+                                                            functional.softmax(output_teacher.float(),
+                                                            dim=1))
+
+
+                optimizer.zero_grad(set_to_none=True)
+                loss.backward()
+                optimizer.step()
+
+                train_loss += loss.item()
+
+            torch.save(distillation_shadow_model.state_dict(), f"{path_distillation_models_shadow}/epoch_{d}.pkl")
+
+        # Return the model
+        return

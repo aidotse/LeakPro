@@ -3,7 +3,11 @@
 from leakpro.mia_attacks.attack_utils import AttackUtils
 from leakpro.mia_attacks.attacks.attack import AttackAbstract
 from leakpro.mia_attacks.attacks.attack_p import AttackP
+<<<<<<< HEAD
 from leakpro.mia_attacks.attacks.qmia import AttackQMIA
+=======
+from leakpro.mia_attacks.attacks.loss_trajectory import AttackLossTrajectory
+>>>>>>> 4e41190 ( Adding Loss trajecotry attack, soft label mode)
 from leakpro.mia_attacks.attacks.rmia import AttackRMIA
 
 
@@ -13,7 +17,11 @@ class AttackFactory:
     attack_classes = {
         "attack_p": AttackP,
         "rmia": AttackRMIA,
+<<<<<<< HEAD
         "qmia": AttackQMIA,
+=======
+        "loss_traj": AttackLossTrajectory,
+>>>>>>> 4e41190 ( Adding Loss trajecotry attack, soft label mode)
     }
 
     @classmethod
