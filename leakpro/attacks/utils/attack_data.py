@@ -8,7 +8,7 @@ def get_attack_data(
     population_size: int,
     train_indices: list,
     test_indices: list,
-    test_included_in_auxiliary_data: bool,
+    test_data_included_in_auxiliary_data: bool,
     logger:Logger
 ) -> np.ndarray:
     """Function to get attack data for the attack models.
@@ -35,7 +35,7 @@ def get_attack_data(
 
     all_index = np.arange(population_size)
     not_allowed_indices = (
-        train_indices if not test_included_in_auxiliary_data
+        train_indices if not test_data_included_in_auxiliary_data
         else np.concatenate((train_indices, test_indices), axis=0)
     )
     available_index = np.setdiff1d(all_index, not_allowed_indices, assume_unique=True)
