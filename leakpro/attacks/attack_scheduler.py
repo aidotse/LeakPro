@@ -36,7 +36,7 @@ class AttackScheduler:
         if configs["audit"]["attack_type"] not in list(self.attack_type_to_factory.keys()):
             raise ValueError(
                 f"Unknown attack type: {configs['audit']['attack_type']}. "
-                f"Supported attack types: {self.attack_types}"
+                f"Supported attack types: {self.attack_type_to_factory.keys()}"
             )
 
         # Prepare factory with shared items

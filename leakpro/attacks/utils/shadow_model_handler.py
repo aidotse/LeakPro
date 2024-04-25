@@ -225,11 +225,6 @@ class ShadowModelHandler():
                 pred = outputs.data.max(1, keepdim=True)[1]
                 loss.backward()
 
-                # Check if gradients are not zero
-                gradients = {name: param.grad for name, param in shadow_model.named_parameters()}
-                if any(gradients[name] is None for name in gradients):
-                    raise ValueError("Some gradients are None. Check backward pass.")
-
                 optimizer.step()
 
                 # Accumulate performance of shadow model
