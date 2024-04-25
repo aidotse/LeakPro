@@ -6,9 +6,8 @@ import pickle
 import re
 
 import numpy as np
-from torch import cuda, device, load, save
-from torch.nn import CrossEntropyLoss, Module, MSELoss, NLLLoss
-from torch.optim import SGD, Adam, RMSprop
+from torch import cuda, device, load, nn, optim, save
+from torch.nn import Module
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
@@ -38,19 +37,22 @@ def singleton(cls):  # noqa: ANN001, ANN201
 class ShadowModelHandler():
     """A class handling the creation, training, and loading of shadow models."""
 
+    # Create a dictionary mapping lowercase names to optimizer classes (Optimizer is the base class)
     optimizer_mapping = {
-        "sgd": SGD,
-        "adam": Adam,
-        "rmsprop": RMSprop,
-        # Add more optimizers as needed
+        attr.lower(): getattr(optim, attr)
+        for attr in dir(optim)
+        if isinstance(getattr(optim, attr), type) and issubclass(getattr(optim, attr), optim.Optimizer)
     }
 
-    loss_mapping = {
-        "mseloss": MSELoss,
-        "crossentropyloss": CrossEntropyLoss,
-        "nllloss": NLLLoss,
-        # Add more loss functions as needed
-    }
+    # Create a dictionary mapping lowercase names to loss classes (_Loss is the base class)
+    loss_mapping = {}
+
+    for attr in dir(nn):
+        # Get the attribute
+        attribute = getattr(nn, attr, None)
+        # Ensure it's a class and a subclass of _Loss
+        if isinstance(attribute, type) and issubclass(attribute, nn.modules.loss._Loss):
+            loss_mapping[attr.lower()] = attribute
 
     def __init__(self:Self, target_model:Module, target_config:dict, config:dict, logger:logging.Logger)->None:
         """Initialize the ShadowModelHandler.
