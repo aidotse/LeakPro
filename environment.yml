@@ -25,6 +25,7 @@ dependencies:
   - loguru
   - jinja2
   - pyyaml
+  - numba
 
   # Development and Testing
   - pytest
