@@ -50,9 +50,11 @@ class AttackObjects:
         self.num_distillation_models_target = configs["loss_traj"]["number_of_traj"]
         self.num_distillation_models_shadow = configs["loss_traj"]["number_of_traj"]
         self.configs = configs
-        self.logger = logger
+        self._logger = logger
         self._distillation_models_shadow = []
         self._distillation_models_target = []
+
+        self.attack_mode = configs["loss_traj"]["attack_mode"]
 
         self._audit_dataset = {
             # Assuming train_indices and test_indices are arrays of indices, not the actual data
@@ -606,8 +608,11 @@ class AttackObjects:
                 soft_target = torch.zeros_like(output)
                 soft_target[torch.arange(soft_target.shape[0]), target_labels] = 1
 
-                loss = KLDivLoss(reduction="batchmean")(functional.log_softmax(output, dim=1),
-                                                            functional.softmax(output_teacher,
+                if self.attack_mode == "label_only":
+                    loss = CrossEntropyLoss()(output, target_labels)
+                elif self.attack_mode == "soft_label":
+                    loss = KLDivLoss(reduction="batchmean")(functional.log_softmax(output, dim=1),
+                                                            functional.softmax(output_teacher.float(),
                                                             dim=1))
                 optimizer.zero_grad(set_to_none=True)
                 loss.backward()
@@ -645,7 +650,6 @@ class AttackObjects:
         device = ("cuda" if torch.cuda.is_available() else "cpu")
         target_model.to(device)
 
-
         # Distillation model
         if "adult" in configs["data"]["dataset"]:
             distillation_shadow_model = target_model.__class__(configs["train"]["inputs"], configs["train"]["outputs"])
@@ -682,7 +686,10 @@ class AttackObjects:
                 soft_target = torch.zeros_like(output)
                 soft_target[torch.arange(soft_target.shape[0]), target_labels] = 1
 
-                loss = KLDivLoss(reduction="batchmean")(functional.log_softmax(output, dim=1),
+                if self.attack_mode == "label_only":
+                    loss = CrossEntropyLoss()(output, target_labels)
+                elif self.attack_mode == "soft_label":
+                    loss = KLDivLoss(reduction="batchmean")(functional.log_softmax(output, dim=1),
                                                             functional.softmax(output_teacher.float(),
                                                             dim=1))
 

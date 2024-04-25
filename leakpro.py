@@ -51,7 +51,7 @@ def setup_log(name: str, save_file: bool) -> logging.Logger:
 
 if __name__ == "__main__":
 
-    RETRAIN = False
+    RETRAIN = True
     #args = "./config/adult.yaml"  # noqa: ERA001
     # args = "./config/cifar10.yaml" # noqa: ERA001
     args = "./config/cinic10.yaml" # noqa: ERA001
@@ -147,18 +147,9 @@ if __name__ == "__main__":
     )  # TODO metadata includes indices for train and test data
     audit_results = attack_scheduler.run_attacks()
 
-<<<<<<< HEAD
+
 
     logger.info(str(audit_results["loss_traj"]["result_object"]))
-=======
-<<<<<<< HEAD
-    logger.info(str(audit_results["qmia"]["result_object"]))
-=======
-
-    logger.info(str(audit_results["loss_traj"]["result_object"]))
->>>>>>> 4e41190 ( Adding Loss trajecotry attack, soft label mode)
->>>>>>> 6a7715b
-
     report_log = configs["audit"]["report_log"]
     privacy_game = configs["audit"]["privacy_game"]
     n_shadow_models = configs["audit"]["num_shadow_models"]
@@ -166,15 +157,7 @@ if __name__ == "__main__":
 
     prepare_priavcy_risk_report(
             log_dir,
-<<<<<<< HEAD
             [audit_results["loss_traj"]["result_object"]],
-=======
-<<<<<<< HEAD
-            [audit_results["qmia"]["result_object"]],
-=======
-            [audit_results["loss_traj"]["result_object"]],
->>>>>>> 4e41190 ( Adding Loss trajecotry attack, soft label mode)
->>>>>>> 6a7715b
             configs["audit"],
             save_path=f"{log_dir}/{report_log}/{privacy_game}/ns_{n_shadow_models}_fs_{n_attack_data_size}",
         )

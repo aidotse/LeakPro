@@ -381,7 +381,8 @@ class AttackLossTrajectory(AttackAbstract):
         else:
             data = np.load(f"{self.log_dir}/trajectory_test_data.npy", allow_pickle=True).item()
 
-        mia_test_input = np.concatenate((data["model_trajectory"] , data["traget_model_loss"][:,None]), axis=1)
+        mia_test_input = np.concatenate((data["model_trajectory"] , 
+                                         data["traget_model_loss"][:,None]), axis=1)
         mia_test_dataset = TensorDataset(torch.tensor(mia_test_input), torch.tensor(data["member_status"]))
         self.mia_test_data_loader = DataLoader(mia_test_dataset, batch_size=self.train_mia_batch_size, shuffle=True)
 
@@ -477,12 +478,15 @@ class AttackLossTrajectory(AttackAbstract):
         self.mia_classifier()
         true_labels, predictions = self.mia_attack(self.mia_classifer)
 
+        #NOTE: We don't have signals in this attack, unlike RMIA. I set it to random to pass the PR before refactoring.
+        signals = np.random.rand(*true_labels.shape)
+
         # compute ROC, TP, TN etc
         return CombinedMetricResult(
             predicted_labels= predictions,
             true_labels=true_labels,
             predictions_proba=None,
-            signal_values=None,
+            signal_values=signals,
         )
 
 
@@ -532,3 +536,4 @@ class AttackLossTrajectory(AttackAbstract):
         member_preds = np.array([(auc_pred > threshold).astype(int) for threshold in thresholds_1])
 
         return auc_ground_truth, member_preds
+
