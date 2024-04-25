@@ -18,7 +18,7 @@ def get_attack_data(
         population_size (int): The size of the population.
         train_indices (list): The indices of the training data.
         test_indices (list): The indices of the test data.
-        test_included_in_auxiliary_data (bool): Flag indicating whether to include test data.
+        test_data_included_in_auxiliary_data (bool): Flag indicating whether to include test data.
         logger (Logger): The logger object for logging.
 
     Returns:
