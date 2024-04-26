@@ -77,8 +77,9 @@ class AttackP(AbstractMIA):
             self.population_size,
             self.train_indices,
             self.test_indices,
-            self.include_test_data,
-            self.logger
+            train_data_included_in_auxiliary_data = False,
+            test_data_included_in_auxiliary_data = False,
+            logger = self.logger
         )
 
         attack_data = self.population.subset(self.attack_data_index)

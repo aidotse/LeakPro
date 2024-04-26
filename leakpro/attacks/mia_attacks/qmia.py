@@ -128,8 +128,6 @@ class AttackQMIA(AbstractMIA):
         if self.epochs < 1:
             raise ValueError("The number of epochs for the quantile regression must be greater than 0")
 
-        self.include_test_data = configs.get("include_test_data", True)
-
         self.signal = ModelRescaledLogits()
         self.quantile_regressor = QuantileRegressor(len(self.quantiles))
 
@@ -160,8 +158,9 @@ class AttackQMIA(AbstractMIA):
             self.population_size,
             self.train_indices,
             self.test_indices,
-            self.include_test_data,
-            self.logger
+            train_data_included_in_auxiliary_data = False,
+            test_data_included_in_auxiliary_data = False,
+            logger = self.logger
         )
         attack_data = self.population.subset(self.attack_data_index)
 

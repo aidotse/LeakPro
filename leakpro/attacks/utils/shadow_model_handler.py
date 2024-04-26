@@ -5,6 +5,7 @@ import os
 import pickle
 import re
 
+import joblib
 import numpy as np
 from torch import cuda, device, load, nn, optim, save
 from torch.nn import Module
@@ -114,6 +115,8 @@ class ShadowModelHandler():
         self.model_storage_name = "shadow_model"
         self.metadata_storage_name = "metadata"
 
+        self.include_target_training_data = config.get("include_target_training_data", False)
+        self.include_target_testing_data = config.get("include_target_testing_data", False)
 
     def create_shadow_models(
         self:Self,
@@ -265,7 +268,42 @@ class ShadowModelHandler():
     def get_shadow_models(self:Self, num_models:int) -> list:
         """Load the the shadow models."""
         shadow_models = []
+        shadow_model_indices = []
         for i in range(num_models):
             self.logger.info(f"Loading shadow model {i}")
             shadow_models.append(self._load_shadow_model(i))
-        return shadow_models
+            shadow_model_indices.append(i)
+        return shadow_models, shadow_model_indices
+
+    def identify_models_trained_on_samples(self:Self, shadow_model_indices: list[int], sample_indices:set[int]) -> list:
+        """Identify the shadow models trained on the provided samples.
+
+        Args:
+        ----
+            shadow_model_indices (list[int]): The indices of the shadow models.
+            sample_indices (set[int]): The indices of the samples.
+
+        Returns:
+        -------
+            list: The list of shadow models trained on the provided samples.
+
+        """
+        if shadow_model_indices is None:
+            raise ValueError("Shadow model indices must be provided")
+        if sample_indices is None:
+            raise ValueError("Sample indices must be provided")
+
+        if isinstance(sample_indices, list):
+            sample_indices = set(sample_indices)
+
+        self.logger.info("Identifying shadow models trained on provided samples")
+        shadow_model_trained_on_data_index = np.zeros((len(shadow_model_indices), len(sample_indices)), dtype=bool)
+        for i in shadow_model_indices:
+            with open(f"{self.storage_path}/{self.metadata_storage_name}_{i}.pkl", "rb") as f:
+                meta_data = joblib.load(f)
+                train_indices = set(meta_data["train_indices"])
+
+                for j in range(len(sample_indices)):
+                    shadow_model_trained_on_data_index[i, j] = sample_indices[j] in train_indices
+
+        return shadow_model_trained_on_data_index
