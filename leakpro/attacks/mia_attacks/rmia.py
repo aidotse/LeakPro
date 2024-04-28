@@ -210,7 +210,7 @@ class AttackRMIA(AbstractMIA):
         # run points through target model to get logits
         logits_theta = np.array(self.signal([self.target_model], audit_data))
         # collect the softmax output of the correct class
-        p_x_given_theta = self.softmax(logits_theta, ground_truth_indices)
+        p_x_given_target_model = self.softmax(logits_theta, ground_truth_indices)
 
         # run points through shadow models, colelct logits and compute p(x)
         logits_shadow_models = self.signal(self.shadow_models, audit_data)
@@ -219,7 +219,7 @@ class AttackRMIA(AbstractMIA):
         p_x_given_shadow_models = np.array(p_x_given_shadow_models).squeeze()
         p_x = np.mean(p_x_given_shadow_models, axis=0) if len(self.shadow_models) > 1 else p_x_given_shadow_models.squeeze()
         # compute the ratio of p(x|theta) to p(x)
-        ratio_x = p_x_given_theta / (p_x + self.epsilon)
+        ratio_x = p_x_given_target_model / (p_x + self.epsilon)
 
         # Make a "random sample" to compute p(z) for points in attack dataset on the OUT shadow models for each audit point
         self.attack_data_index = get_attack_data(
@@ -235,9 +235,9 @@ class AttackRMIA(AbstractMIA):
         # get the true label indices
         z_true_labels = np.array(attack_data._labels)
         # run points through real model to collect the logits
-        logits_theta = np.array(self.signal([self.target_model], attack_data))
+        logits_target_model = np.array(self.signal([self.target_model], attack_data))
         # collect the softmax output of the correct class
-        p_z_given_theta = self.softmax(logits_theta, z_true_labels)
+        p_z_given_target_model = self.softmax(logits_target_model, z_true_labels)
 
         # run points through shadow models and collect the logits
         logits_shadow_models = self.signal(self.shadow_models, attack_data)
@@ -251,7 +251,7 @@ class AttackRMIA(AbstractMIA):
         for i in range(len(audit_data)):
             model_mask = out_model_indices[:,i]
             p_z[i] = np.mean(p_z_given_shadow_models[model_mask, :], axis=0)
-        ratio_z = p_z_given_theta / (p_z + self.epsilon)
+        ratio_z = p_z_given_target_model / (p_z + self.epsilon)
 
         # for each x, compute the score
         likelihoods = ratio_x.T / ratio_z
@@ -270,7 +270,7 @@ class AttackRMIA(AbstractMIA):
         # run target points through real model to get logits
         logits_theta = np.array(self.signal([self.target_model], audit_data))
         # collect the softmax output of the correct class
-        p_x_given_theta = self.softmax(logits_theta, ground_truth_indices)
+        p_x_given_target_model = self.softmax(logits_theta, ground_truth_indices)
 
         # run points through shadow models and collect the logits
         logits_shadow_models = self.signal(self.shadow_models, audit_data)
@@ -289,7 +289,7 @@ class AttackRMIA(AbstractMIA):
         p_x = 0.5*((self.offline_a + 1) * p_x_out + (1-self.offline_a))
 
         # compute the ratio of p(x|theta) to p(x)
-        ratio_x = p_x_given_theta / (p_x + self.epsilon)
+        ratio_x = p_x_given_target_model / (p_x + self.epsilon)
 
         # for each x, compare it with the ratio of all z points
         likelihoods = ratio_x.T / self.ratio_z
