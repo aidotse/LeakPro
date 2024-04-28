@@ -97,12 +97,13 @@ class AttackFactoryMIA:
         if AttackFactoryMIA.logger is None:
             raise ValueError("Logger has not been set")
 
-        if "shadow_model" in configs and AttackFactoryMIA.shadow_model_handler is None:
+        if AttackFactoryMIA.shadow_model_handler is None:
             AttackFactoryMIA.logger.info("Creating shadow model handler singleton")
+            shadow_configs = configs.get("shadow_model", {})
             AttackFactoryMIA.shadow_model_handler = ShadowModelHandler(
                                                         AttackFactoryMIA.target_model,
                                                         AttackFactoryMIA.target_metadata,
-                                                        configs["shadow_model"],
+                                                        shadow_configs,
                                                         AttackFactoryMIA.logger
                                                     )
 

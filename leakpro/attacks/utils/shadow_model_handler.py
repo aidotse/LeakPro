@@ -66,15 +66,15 @@ class ShadowModelHandler():
             logger (logging.Logger): The logger object for logging.
 
         """
-        module_path = config["module_path"]
-        model_class_path = config["model_class_path"]
+        module_path = config.get("module_path")
+        model_class_path =  config.get("model_class_path")
 
         self.logger = logger
 
         # If no path to shadow model is provided, use the target model blueprint
         if module_path is None or model_class_path is None:
             self.init_params = target_config["init_params"]
-            self.shadow_model_blueprint = target_model.__class__
+            self.shadow_model_blueprint = target_model.model_obj.__class__
 
             self.logger.info("Shadow model blueprint: target model")
         else:
@@ -114,9 +114,6 @@ class ShadowModelHandler():
 
         self.model_storage_name = "shadow_model"
         self.metadata_storage_name = "metadata"
-
-        self.include_target_training_data = config.get("include_target_training_data", False)
-        self.include_target_testing_data = config.get("include_target_testing_data", False)
 
     def create_shadow_models(
         self:Self,
