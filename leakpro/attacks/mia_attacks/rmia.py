@@ -149,19 +149,12 @@ class AttackRMIA(AbstractMIA):
             include_target_testing_data,
             self.logger
         )
-        # subsample the attack data based on the fraction
-        self.logger.info(f"Subsampling attack data from {len(self.attack_data_index)} points")
-        self.attack_data_index = np.random.choice(
-            self.attack_data_index,
-            int(self.attack_data_fraction * len(self.attack_data_index)),
-            replace=False
-        )
-        self.logger.info(f"Number of attack data points after subsampling: {len(self.attack_data_index)}")
 
         # create attack dataset
         attack_data = self.population.subset(self.attack_data_index)
 
         # train shadow models
+        self.logger.info(f"Training shadow models on {len(attack_data)} points")
         ShadowModelHandler().create_shadow_models(
             self.num_shadow_models,
             attack_data,
@@ -175,6 +168,16 @@ class AttackRMIA(AbstractMIA):
         if self.online is False:
             # compute the ratio of p(z|theta) (target model) to p(z)=sum_{theta'} p(z|theta') (shadow models)
             # for all points in the attack dataset output from signal: # models x # data points x # classes
+
+            # subsample the attack data based on the fraction
+            self.logger.info(f"Subsampling attack data from {len(self.attack_data_index)} points")
+            self.attack_data_index = np.random.choice(
+                self.attack_data_index,
+                int(self.attack_data_fraction * len(self.attack_data_index)),
+                replace=False
+            )
+            self.logger.info(f"Number of attack data points after subsampling: {len(self.attack_data_index)}")
+
 
             # get the true label indices
             z_true_labels = np.array(attack_data._labels)
@@ -249,6 +252,15 @@ class AttackRMIA(AbstractMIA):
             False,
             self.logger
         )
+
+        # subsample the attack data based on the fraction
+        self.logger.info(f"Subsampling attack data from {len(self.attack_data_index)} points")
+        self.attack_data_index = np.random.choice(
+            self.attack_data_index,
+            int(self.attack_data_fraction * len(self.attack_data_index)),
+            replace=False
+        )
+        self.logger.info(f"Number of attack data points after subsampling: {len(self.attack_data_index)}")
 
         attack_data = self.population.subset(self.attack_data_index)
         # get the true label indices

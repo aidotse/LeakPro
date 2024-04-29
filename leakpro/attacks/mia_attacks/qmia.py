@@ -176,7 +176,7 @@ class AttackQMIA(AbstractMIA):
         self.logger.info(f"Subsampling attack data from {len(self.attack_data_index)} points")
         self.attack_data_index = np.random.choice(
             self.attack_data_index,
-            int(self.attack_data_fraction * len(self.attack_data_index)),
+            int(self.training_data_fraction * len(self.attack_data_index)),
             replace=False
         )
         self.logger.info(f"Number of attack data points after subsampling: {len(self.attack_data_index)}")

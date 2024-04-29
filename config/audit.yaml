@@ -11,7 +11,7 @@ audit:  # Configurations for auditing
       offline_a: 0.33 # parameter from which we compute p(x) from p_OUT(x) such that p_IN(x) = a p_OUT(x) + b.
       offline_b: 0.66
     qmia:
-      training_data_fraction: 0.1  # Fraction of the auxilary dataset (data without train and test indices) to use for this attack
+      training_data_fraction: 0.1  # Fraction of the auxilary dataset (data without train and test indices) to use for training the quantile regressor
       epochs: 10  # Number of training epochs for quantile regression
     population:
       attack_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack
