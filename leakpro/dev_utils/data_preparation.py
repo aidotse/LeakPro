@@ -92,6 +92,36 @@ def get_cifar10_dataset(dataset_name: str, data_dir: str, logger:logging.Logger)
         save_dataset(all_data, f"{path}/{dataset_name}", logger)
     return all_data
 
+def get_cinic10_dataset(dataset_name: str, data_dir: str, logger:logging.Logger) -> GeneralDataset:
+    """Get the dataset."""
+    path = f"{data_dir}"
+
+    if os.path.exists(f"{path}.pkl"):
+        with open(f"{path}.pkl", "rb") as file:
+            all_data = joblib.load(file)
+        logger.info(f"Load data from {path}.pkl")
+    else:
+        transform = transforms.Compose([transforms.ToTensor(),
+                                         transforms.Normalize((0.5, 0.5, 0.5),
+                                                              (0.5, 0.5, 0.5))])
+
+        trainset =  torchvision.datasets.ImageFolder(root="./data/cinic10/train", transform=transform)
+        testset =  torchvision.datasets.ImageFolder(root="./data/cinic10/test", transform=transform)
+        validset =  torchvision.datasets.ImageFolder(root="./data/cinic10/valid", transform=transform)
+
+        train_data, train_targets = zip(*[(image.numpy(), target) for image, target in trainset])
+        test_data, test_targets = zip(*[(image.numpy(), target) for image, target in testset])
+        valid_data, valid_targets = zip(*[(image.numpy(), target) for image, target in validset])
+
+        x = np.vstack([train_data, test_data, valid_data])
+        x = np.transpose(x, (0, 2, 3, 1))
+        y = np.hstack([train_targets, test_targets, valid_targets])
+
+        all_data = GeneralDataset(x, y, transform)
+        Path(path).mkdir(parents=True, exist_ok=True)
+        save_dataset(all_data, f"{path}/{dataset_name}", logger)
+    return all_data
+
 def save_dataset(all_data: GeneralDataset, path: str, logger:logging.Logger) -> GeneralDataset:
     """Save the dataset."""
     with open(f"{path}.pkl", "wb") as file:
