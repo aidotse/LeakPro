@@ -35,37 +35,45 @@ class AttackRMIA(AbstractMIA):
         """
         # Initializes the parent metric
         super().__init__(population, audit_dataset, target_model, logger)
-
         self.shadow_models = []
-        self.num_shadow_models = configs.get("num_shadow_models", 4)
-        if self.num_shadow_models < 1:
-            raise ValueError("num_shadow_models must be greater than 0")
-
-        self.offline_a = configs.get("data_fraction", 0.33)  # p_IN(x) = a p_OUT(x) + b.
-        if self.offline_a < 0 or self.offline_a > 1:
-            raise ValueError("data_fraction must be between 0 and 1")
-
-        self.offline_b = configs.get("offline_b", 0.66)
-        if self.offline_b < 0 or self.offline_b > 1:
-            raise ValueError("offline_b must be between 0 and 1")
-
-        self.gamma = configs.get("gamma", 2.0) # threshold for the attack
-        if self.gamma < 0:
-            raise ValueError("gamma must be greater than 0")
-
-        self.temperature = configs.get("temperature", 2.0) # temperature for the softmax
-        if self.temperature < 0:
-            raise ValueError("temperature must be greater than 0")
-
-        self.f_attack_data_size = configs.get("data_fraction", 0.5)
-        if self.f_attack_data_size <= 0 or self.f_attack_data_size > 1:
-            raise ValueError("The data fraction must be between 0 and 1")
-
-        self.online = configs.get("online", False)
-        self.include_test_data = configs.get("include_test_data", True)
-
         self.signal = ModelLogits()
         self.epsilon = 1e-6
+        self.shadow_models = None
+        self.shadow_model_indices = None
+
+        self.logger.info("Configuring RMIA attack")
+        self._configure_attack(configs)
+
+
+    def _configure_attack(self:Self, configs: dict) -> None:
+        """Configure the RMIA attack.
+
+        Args:
+        ----
+            configs (dict): Configuration parameters for the attack.
+
+        """
+        self.num_shadow_models = configs.get("num_shadow_models", 4)
+        self.offline_a = configs.get("data_fraction", 0.33)
+        self.offline_b = configs.get("offline_b", 0.66)
+        self.gamma = configs.get("gamma", 2.0)
+        self.temperature = configs.get("temperature", 2.0)
+        self.f_attack_data_size = configs.get("data_fraction", 0.5)
+        self.online = configs.get("online", False)
+
+        # Define the validation dictionary as: {parameter_name: (parameter, min_value, max_value)}
+        validation_dict = {
+            "num_shadow_models": (self.num_shadow_models, 1, None),
+            "offline_a": (self.offline_a, 0, 1),
+            "offline_b": (self.offline_b, 0, 1),
+            "gamma": (self.gamma, 0, None),
+            "temperature": (self.temperature, 0, None),
+            "f_attack_data_size": (self.f_attack_data_size, 0, 1)
+        }
+
+        # Validate parameters
+        for param_name, (param_value, min_val, max_val) in validation_dict.items():
+            self._validate_config(param_name, param_value, min_val, max_val)
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
@@ -126,75 +134,157 @@ class AttackRMIA(AbstractMIA):
         # sample dataset to compute histogram
         self.logger.info("Preparing attack data for training the RMIA attack")
         # Get all available indices to sample from for shadow models
+
+        include_target_training_data = self.online is True
+        include_target_testing_data = self.online is True
+
         self.attack_data_index = get_attack_data(
             self.population_size,
             self.train_indices,
             self.test_indices,
-            self.include_test_data,
+            include_target_training_data,
+            include_target_testing_data,
             self.logger
         )
         attack_data = self.population.subset(self.attack_data_index)
 
+        # train shadow models
         ShadowModelHandler().create_shadow_models(
             self.num_shadow_models,
             attack_data,
             self.f_attack_data_size,
         )
 
-        self.shadow_models = ShadowModelHandler().get_shadow_models(self.num_shadow_models)
+        # load shadow models
+        self.shadow_models, self.shadow_model_indices = ShadowModelHandler().get_shadow_models(self.num_shadow_models)
 
-        # compute the ratio of p(z|theta) (target model) to p(z)=sum_{theta'} p(z|theta') (shadow models)
-        # for all points in the attack dataset output from signal: # models x # data points x # classes
+        # compute quantities that are not touching the audit dataset
+        if self.online is False:
+            # compute the ratio of p(z|theta) (target model) to p(z)=sum_{theta'} p(z|theta') (shadow models)
+            # for all points in the attack dataset output from signal: # models x # data points x # classes
 
-        # get the true label indices
-        z_label_indices = np.array(attack_data._labels)
+            # get the true label indices
+            z_true_labels = np.array(attack_data._labels)
 
-        # run points through real model to collect the logits
-        logits_theta = np.array(self.signal([self.target_model], attack_data))
+            # run points through real model to collect the logits
+            logits_theta = np.array(self.signal([self.target_model], attack_data))
+            # collect the softmax output of the correct class
+            p_z_given_theta = self.softmax(logits_theta, z_true_labels)
+
+            # run points through shadow models and collect the logits
+            logits_shadow_models = self.signal(self.shadow_models, attack_data)
+            # collect the softmax output of the correct class for each shadow model
+            p_z_given_shadow_models = [self.softmax(np.array(x).reshape(1,*x.shape), z_true_labels) for x in logits_shadow_models]
+            # stack the softmax output of the correct class for each shadow model to dimension # models x # data points
+            p_z_given_shadow_models = np.array(p_z_given_shadow_models).squeeze()
+
+            # evaluate the marginal p(z)
+            p_z = np.mean(p_z_given_shadow_models, axis=0) if len(self.shadow_models) > 1 else p_z_given_shadow_models.squeeze()
+            p_z = 0.5*((self.offline_a + 1) * p_z + (1-self.offline_a))
+
+            #TODO: pick the maximum value of the softmax output in p(z)
+            self.ratio_z = p_z_given_theta / (p_z + self.epsilon)
+
+    def _online_attack(self:Self) -> None:
+        self.logger.info("Running RMIA online attack")
+
+        # get the logits for the audit dataset
+        audit_data = self.population.subset(self.audit_dataset["data"])
+        ground_truth_indices = np.array(audit_data._labels)
+
+        # find the shadow models that are trained on what points in the audit dataset
+        in_model_indices = ShadowModelHandler().identify_models_trained_on_samples(
+            self.shadow_model_indices,
+            self.audit_dataset["data"]
+        )
+
+        # filter out the points that no shadow model has seen and points that all shadow models have seen
+        num_shadow_models_seen_points = np.sum(in_model_indices, axis=0)
+        # make sure that the audit points are included in the shadow model training (but not all)
+        mask = (num_shadow_models_seen_points > 0) & (num_shadow_models_seen_points < self.num_shadow_models)
+        audit_data = audit_data.subset(mask)
+        # find out how many in-members survived the filtering
+        in_members = np.arange(np.sum(mask[self.audit_dataset["in_members"]]))
+        # find out how many out-members survived the filtering
+        num_out_members = np.sum(mask[self.audit_dataset["out_members"]])
+        out_members = np.arange(len(in_members), len(in_members) + num_out_members)
+        ground_truth_indices = np.array(audit_data._labels)
+        out_model_indices = ~in_model_indices[:,mask]
+
+        self.logger.info(f"Number of points in the audit dataset that are used for online attack: {len(audit_data)}")
+
+        # run points through target model to get logits
+        logits_theta = np.array(self.signal([self.target_model], audit_data))
         # collect the softmax output of the correct class
-        p_z_given_theta = self.softmax(logits_theta, z_label_indices)
+        p_x_given_target_model = self.softmax(logits_theta, ground_truth_indices)
+
+        # run points through shadow models, colelct logits and compute p(x)
+        logits_shadow_models = self.signal(self.shadow_models, audit_data)
+        p_x_given_shadow_models = [self.softmax(np.array(x).reshape(1,*x.shape), ground_truth_indices)
+                                    for x in logits_shadow_models]
+        p_x_given_shadow_models = np.array(p_x_given_shadow_models).squeeze()
+        p_x = np.mean(p_x_given_shadow_models, axis=0) if len(self.shadow_models) > 1 else p_x_given_shadow_models.squeeze()
+        # compute the ratio of p(x|theta) to p(x)
+        ratio_x = p_x_given_target_model / (p_x + self.epsilon)
+
+        # Make a "random sample" to compute p(z) for points in attack dataset on the OUT shadow models for each audit point
+        self.attack_data_index = get_attack_data(
+            self.population_size,
+            self.train_indices,
+            self.test_indices,
+            False,
+            False,
+            self.logger
+        )
+
+        attack_data = self.population.subset(self.attack_data_index)
+        # get the true label indices
+        z_true_labels = np.array(attack_data._labels)
+        # run points through real model to collect the logits
+        logits_target_model = np.array(self.signal([self.target_model], attack_data))
+        # collect the softmax output of the correct class
+        p_z_given_target_model = self.softmax(logits_target_model, z_true_labels)
 
         # run points through shadow models and collect the logits
         logits_shadow_models = self.signal(self.shadow_models, attack_data)
         # collect the softmax output of the correct class for each shadow model
-        p_z_given_shadow_models = [self.softmax(np.array(x).reshape(1,*x.shape), z_label_indices) for x in logits_shadow_models]
+        p_z_given_shadow_models = [self.softmax(np.array(x).reshape(1,*x.shape), z_true_labels) for x in logits_shadow_models]
         # stack the softmax output of the correct class for each shadow model to dimension # models x # data points
         p_z_given_shadow_models = np.array(p_z_given_shadow_models).squeeze()
 
-        # evaluate the marginal p(z)
-        p_z = np.mean(p_z_given_shadow_models, axis=0) if len(self.shadow_models) > 1 else p_z_given_shadow_models.squeeze()
-        p_z = 0.5*((self.offline_a + 1) * p_z + (1-self.offline_a))
+        # evaluate the marginal p(z) by averaging over the OUT models
+        p_z = np.zeros((len(audit_data), len(attack_data)))
+        for i in range(len(audit_data)):
+            model_mask = out_model_indices[:,i]
+            p_z[i] = np.mean(p_z_given_shadow_models[model_mask, :], axis=0)
+        ratio_z = p_z_given_target_model / (p_z + self.epsilon)
 
-        #TODO: pick the maximum value of the softmax output in p(z)
-        self.ratio_z = p_z_given_theta / (p_z + self.epsilon)
+        # for each x, compute the score
+        likelihoods = ratio_x.T / ratio_z
+        score = np.mean(likelihoods > self.gamma, axis=1)
 
+        # pick out the in-members and out-members signals
+        self.in_member_signals = score[in_members].reshape(-1,1)
+        self.out_member_signals = score[out_members].reshape(-1,1)
 
-    def run_attack(self:Self) -> CombinedMetricResult:
-        """Run the attack on the target model and dataset.
-
-        Args:
-        ----
-            fpr_tolerance_rate_list (optional): List of FPR tolerance values that may be used by the threshold function
-                to compute the attack threshold for the metric.
-
-        Returns:
-        -------
-            Result(s) of the metric.
-
-        """
+    def _offline_attack(self:Self) -> None:
+        self.logger.info("Running RMIA offline attack")
         # get the logits for the audit dataset
         audit_data = self.population.subset(self.audit_dataset["data"])
-        x_label_indices = np.array(audit_data._labels)
+        ground_truth_indices = np.array(audit_data._labels)
 
         # run target points through real model to get logits
         logits_theta = np.array(self.signal([self.target_model], audit_data))
         # collect the softmax output of the correct class
-        p_x_given_theta = self.softmax(logits_theta, x_label_indices)
+        p_x_given_target_model = self.softmax(logits_theta, ground_truth_indices)
 
         # run points through shadow models and collect the logits
         logits_shadow_models = self.signal(self.shadow_models, audit_data)
         # collect the softmax output of the correct class for each shadow model
-        p_x_given_shadow_models = [self.softmax(np.array(x).reshape(1,*x.shape), x_label_indices) for x in logits_shadow_models]
+        p_x_given_shadow_models = [
+            self.softmax(np.array(x).reshape(1,*x.shape), ground_truth_indices)
+            for x in logits_shadow_models
+        ]
         # stack the softmax output of the correct class for each shadow model
         # to dimension # models x # data points
         p_x_given_shadow_models = np.array(p_x_given_shadow_models).squeeze()
@@ -205,18 +295,38 @@ class AttackRMIA(AbstractMIA):
         p_x = 0.5*((self.offline_a + 1) * p_x_out + (1-self.offline_a))
 
         # compute the ratio of p(x|theta) to p(x)
-        ratio_x = p_x_given_theta / (p_x + self.epsilon)
+        ratio_x = p_x_given_target_model / (p_x + self.epsilon)
 
         # for each x, compare it with the ratio of all z points
         likelihoods = ratio_x.T / self.ratio_z
+
+        in_members = self.audit_dataset["in_members"]
+        out_members = self.audit_dataset["out_members"]
+
         score = np.mean(likelihoods > self.gamma, axis=1)
 
         # pick out the in-members and out-members signals
-        self.in_member_signals = score[self.audit_dataset["in_members"]].reshape(-1,1)
-        self.out_member_signals = score[self.audit_dataset["out_members"]].reshape(-1,1)
+        self.in_member_signals = score[in_members].reshape(-1,1)
+        self.out_member_signals = score[out_members].reshape(-1,1)
 
-        thresholds = np.linspace(1/likelihoods.shape[1], 1, 1000)
+    def run_attack(self:Self) -> CombinedMetricResult:
+        """Run the attack on the target model and dataset.
 
+        Returns
+        -------
+            Result(s) of the metric.
+
+        """
+        # perform the attack
+        if self.online is True:
+            self._online_attack()
+        else:
+            self._offline_attack()
+
+        # create thresholds
+        min_signal_val = np.min(np.concatenate([self.in_member_signals, self.out_member_signals]))
+        max_signal_val = np.max(np.concatenate([self.in_member_signals, self.out_member_signals]))
+        thresholds = np.linspace(min_signal_val, max_signal_val, 1000)
 
         member_preds = np.greater(self.in_member_signals, thresholds).T
         non_member_preds = np.greater(self.out_member_signals, thresholds).T
