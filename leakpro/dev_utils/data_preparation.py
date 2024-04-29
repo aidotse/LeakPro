@@ -3,7 +3,9 @@
 import logging
 import os
 import pickle
+import tarfile
 from pathlib import Path
+from urllib.request import urlretrieve
 
 import joblib
 import numpy as np
@@ -92,15 +94,35 @@ def get_cifar10_dataset(dataset_name: str, data_dir: str, logger:logging.Logger)
         save_dataset(all_data, f"{path}/{dataset_name}", logger)
     return all_data
 
+def download_file(url: str, download_path: str) -> None:
+    """Download a file from a given URL."""
+    try:
+        urlretrieve(url, download_path)  # noqa: S310
+    except Exception as e:
+        error_msg = f"Failed to download file from {url}: {e}"
+        raise RuntimeError(error_msg) from e
+
+def extract_tar(tar_path: str, extract_path: str) -> None:
+    """Extract a tar file to a given path."""
+    with tarfile.open(tar_path, "r:gz") as tar:
+        tar.extractall(extract_path)  # noqa: S202
+
 def get_cinic10_dataset(dataset_name: str, data_dir: str, logger:logging.Logger) -> GeneralDataset:
     """Get the dataset."""
     path = f"{data_dir}"
-
     if os.path.exists(f"{path}.pkl"):
         with open(f"{path}.pkl", "rb") as file:
             all_data = joblib.load(file)
         logger.info(f"Load data from {path}.pkl")
     else:
+        if not os.path.exists("./data/cinic10"):
+            os.makedirs("./data/cinic10")
+            url = "https://datashare.is.ed.ac.uk/bitstream/handle/10283/3192/CINIC-10.tar.gz"
+            download_path = "./data/CINIC-10.tar.gz"
+            download_file(url, download_path)
+            extract_tar(download_path, "./data/cinic10")
+            os.remove(download_path)
+
         transform = transforms.Compose([transforms.ToTensor(),
                                          transforms.Normalize((0.5, 0.5, 0.5),
                                                               (0.5, 0.5, 0.5))])
