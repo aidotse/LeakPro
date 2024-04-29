@@ -58,8 +58,9 @@ class AttackRMIA(AbstractMIA):
         self.offline_b = configs.get("offline_b", 0.66)
         self.gamma = configs.get("gamma", 2.0)
         self.temperature = configs.get("temperature", 2.0)
-        self.f_attack_data_size = configs.get("data_fraction", 0.5)
+        self.training_data_fraction = configs.get("training_data_fraction", 0.5)
         self.online = configs.get("online", False)
+        self.attack_data_fraction = configs.get("attack_data_fraction", 0.1)
 
         # Define the validation dictionary as: {parameter_name: (parameter, min_value, max_value)}
         validation_dict = {
@@ -68,7 +69,8 @@ class AttackRMIA(AbstractMIA):
             "offline_b": (self.offline_b, 0, 1),
             "gamma": (self.gamma, 0, None),
             "temperature": (self.temperature, 0, None),
-            "f_attack_data_size": (self.f_attack_data_size, 0, 1)
+            "training_data_fraction": (self.training_data_fraction, 0, 1),
+            "attack_data_fraction": (self.attack_data_fraction, 0, 1),
         }
 
         # Validate parameters
@@ -138,6 +140,7 @@ class AttackRMIA(AbstractMIA):
         include_target_training_data = self.online is True
         include_target_testing_data = self.online is True
 
+        # Get all available indices for attack dataset
         self.attack_data_index = get_attack_data(
             self.population_size,
             self.train_indices,
@@ -146,13 +149,23 @@ class AttackRMIA(AbstractMIA):
             include_target_testing_data,
             self.logger
         )
+        # subsample the attack data based on the fraction
+        self.logger.info(f"Subsampling attack data from {len(self.attack_data_index)} points")
+        self.attack_data_index = np.random.choice(
+            self.attack_data_index,
+            int(self.attack_data_fraction * len(self.attack_data_index)),
+            replace=False
+        )
+        self.logger.info(f"Number of attack data points after subsampling: {len(self.attack_data_index)}")
+
+        # create attack dataset
         attack_data = self.population.subset(self.attack_data_index)
 
         # train shadow models
         ShadowModelHandler().create_shadow_models(
             self.num_shadow_models,
             attack_data,
-            self.f_attack_data_size,
+            self.training_data_fraction,
         )
 
         # load shadow models

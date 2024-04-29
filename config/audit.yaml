@@ -2,7 +2,8 @@ audit:  # Configurations for auditing
   random_seed: 1234  # Integer specifying the random seed
   attack_list:
     rmia:
-      data_fraction: 0.3  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
+      training_data_fraction: 0.3  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
+      attack_data_fraction: 0.1 # Fraction of auxiliary dataset to sample from during attack
       num_shadow_models: 5 # Number of shadow models to train
       online: True # perform online or offline attack
       temperature: 2
@@ -10,10 +11,10 @@ audit:  # Configurations for auditing
       offline_a: 0.33 # parameter from which we compute p(x) from p_OUT(x) such that p_IN(x) = a p_OUT(x) + b.
       offline_b: 0.66
     qmia:
-      data_fraction: 0.4  # Fraction of the auxilary dataset (data without train and test indices) to use for this attack
+      training_data_fraction: 0.1  # Fraction of the auxilary dataset (data without train and test indices) to use for this attack
       epochs: 10  # Number of training epochs for quantile regression
     population:
-      data_fraction: 0.4  # Fraction of the auxilary dataset to use for this attack
+      attack_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack
 
   report_log: "./leakpro_output/results"  # Folder to save the auditing report
   target_model_folder: "./target"
@@ -26,7 +27,7 @@ target:
   model_class: "ConvNet"
   trained_model_path: "./target/target_model.pkl" 
   trained_model_metadata_path: "./target/model_metadata.pkl"
-  data_path: "./target/data/cifar10.pkl"
+  data_path: "./target/data/cinic10.pkl"
 
 
 shadow_model:

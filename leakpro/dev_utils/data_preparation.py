@@ -83,6 +83,7 @@ def get_cifar10_dataset(dataset_name: str, data_dir: str, logger:logging.Logger)
             all_data = joblib.load(file)
         logger.info(f"Load data from {path}.pkl")
     else:
+        logger.info("Downloading CIFAR-10 dataset")
         transform = transforms.Compose([transforms.ToTensor(),transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
         trainset = torchvision.datasets.CIFAR10(root="./data/cifar10", train=True, download=True, transform=transform)
         testset = torchvision.datasets.CIFAR10(root="./data/cifar10", train=False,download=True, transform=transform)
@@ -116,6 +117,7 @@ def get_cinic10_dataset(dataset_name: str, data_dir: str, logger:logging.Logger)
         logger.info(f"Load data from {path}.pkl")
     else:
         if not os.path.exists("./data/cinic10"):
+            logger.info("Downloading CINIC-10 dataset")
             os.makedirs("./data/cinic10")
             url = "https://datashare.is.ed.ac.uk/bitstream/handle/10283/3192/CINIC-10.tar.gz"
             download_path = "./data/CINIC-10.tar.gz"
