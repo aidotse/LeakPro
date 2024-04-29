@@ -3,7 +3,9 @@
 import logging
 import os
 import pickle
+import tarfile
 from pathlib import Path
+from urllib.request import urlretrieve
 
 import joblib
 import numpy as np
@@ -86,6 +88,56 @@ def get_cifar10_dataset(dataset_name: str, data_dir: str, logger:logging.Logger)
         testset = torchvision.datasets.CIFAR10(root="./data/cifar10", train=False,download=True, transform=transform)
         x = np.vstack([trainset.data, testset.data])
         y = np.hstack([trainset.targets, testset.targets])
+
+        all_data = GeneralDataset(x, y, transform)
+        Path(path).mkdir(parents=True, exist_ok=True)
+        save_dataset(all_data, f"{path}/{dataset_name}", logger)
+    return all_data
+
+def download_file(url: str, download_path: str) -> None:
+    """Download a file from a given URL."""
+    try:
+        urlretrieve(url, download_path)  # noqa: S310
+    except Exception as e:
+        error_msg = f"Failed to download file from {url}: {e}"
+        raise RuntimeError(error_msg) from e
+
+def extract_tar(tar_path: str, extract_path: str) -> None:
+    """Extract a tar file to a given path."""
+    with tarfile.open(tar_path, "r:gz") as tar:
+        tar.extractall(extract_path)  # noqa: S202
+
+def get_cinic10_dataset(dataset_name: str, data_dir: str, logger:logging.Logger) -> GeneralDataset:
+    """Get the dataset."""
+    path = f"{data_dir}"
+    if os.path.exists(f"{path}.pkl"):
+        with open(f"{path}.pkl", "rb") as file:
+            all_data = joblib.load(file)
+        logger.info(f"Load data from {path}.pkl")
+    else:
+        if not os.path.exists("./data/cinic10"):
+            os.makedirs("./data/cinic10")
+            url = "https://datashare.is.ed.ac.uk/bitstream/handle/10283/3192/CINIC-10.tar.gz"
+            download_path = "./data/CINIC-10.tar.gz"
+            download_file(url, download_path)
+            extract_tar(download_path, "./data/cinic10")
+            os.remove(download_path)
+
+        transform = transforms.Compose([transforms.ToTensor(),
+                                         transforms.Normalize((0.5, 0.5, 0.5),
+                                                              (0.5, 0.5, 0.5))])
+
+        trainset =  torchvision.datasets.ImageFolder(root="./data/cinic10/train", transform=transform)
+        testset =  torchvision.datasets.ImageFolder(root="./data/cinic10/test", transform=transform)
+        validset =  torchvision.datasets.ImageFolder(root="./data/cinic10/valid", transform=transform)
+
+        train_data, train_targets = zip(*[(image.numpy(), target) for image, target in trainset])
+        test_data, test_targets = zip(*[(image.numpy(), target) for image, target in testset])
+        valid_data, valid_targets = zip(*[(image.numpy(), target) for image, target in validset])
+
+        x = np.vstack([train_data, test_data, valid_data])
+        x = np.transpose(x, (0, 2, 3, 1))
+        y = np.hstack([train_targets, test_targets, valid_targets])
 
         all_data = GeneralDataset(x, y, transform)
         Path(path).mkdir(parents=True, exist_ok=True)

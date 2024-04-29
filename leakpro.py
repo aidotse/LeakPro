@@ -14,7 +14,12 @@ import leakpro.dev_utils.train as utils
 from leakpro import shadow_model_blueprints
 from leakpro.attacks.attack_scheduler import AttackScheduler
 from leakpro.dataset import get_dataloader
-from leakpro.dev_utils.data_preparation import get_adult_dataset, get_cifar10_dataset, prepare_train_test_datasets
+from leakpro.dev_utils.data_preparation import (
+    get_adult_dataset,
+    get_cifar10_dataset,
+    get_cinic10_dataset,
+    prepare_train_test_datasets,
+)
 from leakpro.reporting.utils import prepare_priavcy_risk_report
 from leakpro.utils.input_handler import get_class_from_module, import_module_from_file
 
@@ -63,6 +68,9 @@ def generate_user_input(configs: dict, logger: logging.Logger)->None:
     elif "cifar10" in configs["data"]["dataset"]:
         population = get_cifar10_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
         target_model = shadow_model_blueprints.ConvNet()
+    elif "cinic10" in configs["data"]["dataset"]:
+        population = get_cinic10_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
+        target_model = shadow_model_blueprints.ConvNet()
 
     n_population = len(population)
 
@@ -86,7 +94,11 @@ def generate_user_input(configs: dict, logger: logging.Logger)->None:
 
 if __name__ == "__main__":
 
-    user_args = "./config/dev_config/cifar10.yaml"
+
+    #args = "./config/adult.yaml"  # noqa: ERA001
+    # user_args = "./config/dev_config/cifar10.yaml" # noqa: ERA001
+    user_args = "./config/dev_config/cinic10.yaml" # noqa: ERA001
+
     with open(user_args, "rb") as f:
         user_configs = yaml.safe_load(f)
 
