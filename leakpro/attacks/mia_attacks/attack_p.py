@@ -37,14 +37,23 @@ class AttackP(AbstractMIA):
         # Initializes the parent metric
         super().__init__(population, audit_dataset, target_model, logger)
 
-        self.f_attack_data_size = configs.get("data_fraction", 0.3)
-        if self.f_attack_data_size < 0 or self.f_attack_data_size > 1:
-            raise ValueError("data_fraction must be between 0 and 1")
-
-        self.include_test_data = configs.get("include_test_data", True)
-
         self.signal = ModelLoss()
         self.hypothesis_test_func = linear_itp_threshold_func
+
+        self.logger.info("Configuring the Population attack")
+        self._configure_attack(configs)
+
+    def _configure_attack(self:Self, configs:dict) -> None:
+        self.f_attack_data_size = configs.get("data_fraction", 0.5)
+
+        # Define the validation dictionary as: {parameter_name: (parameter, min_value, max_value)}
+        validation_dict = {
+            "f_attack_data_size": (self.f_attack_data_size, 0.01, 1)
+        }
+
+        # Validate parameters
+        for param_name, (param_value, min_val, max_val) in validation_dict.items():
+            self._validate_config(param_name, param_value, min_val, max_val)
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
@@ -77,8 +86,9 @@ class AttackP(AbstractMIA):
             self.population_size,
             self.train_indices,
             self.test_indices,
-            self.include_test_data,
-            self.logger
+            train_data_included_in_auxiliary_data = False,
+            test_data_included_in_auxiliary_data = False,
+            logger = self.logger
         )
 
         attack_data = self.population.subset(self.attack_data_index)

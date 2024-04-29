@@ -114,6 +114,21 @@ class AbstractMIA(ABC):
         return self._audit_dataset["data"][test_indices]
 
     @abstractmethod
+    def _configure_attack(self:Self, configs:dict)->None:
+        """Configure the attack.
+
+        Args:
+        ----
+            configs (dict): The configurations for the attack.
+
+        """
+        pass
+
+    def _validate_config(self: Self, name: str, value: float, min_val: float, max_val: float) -> None:
+        if not (min_val <= value <= (max_val if max_val is not None else value)):
+            raise ValueError(f"{name} must be between {min_val} and {max_val}")
+
+    @abstractmethod
     def description(self:Self) -> dict:
         """Return a description of the attack.
 
@@ -126,12 +141,12 @@ class AbstractMIA(ABC):
 
     @abstractmethod
     def prepare_attack(self:Self) -> None:
-        """Prepare data needed for running the metric on the target model and dataset."""
+        """Method that handles all computation related to the attack dataset."""
         pass
 
     @abstractmethod
     def run_attack(self:Self) -> Union[AttackResult, List[AttackResult]]:
-        """Run the metric on the target model and dataset.
+        """Run the metric on the target model and dataset. This method handles all the computations related to the audit dataset.
 
         Args:
         ----

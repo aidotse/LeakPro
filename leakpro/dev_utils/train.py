@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 import torch
-from torch import nn
+from torch import nn, optim
 from tqdm import tqdm
 
 from leakpro.import_helper import Tuple
@@ -185,7 +185,7 @@ def train(  # noqa: PLR0913
     model.to("cpu")
 
     save_model_and_metadata(
-        model, data_split, configs, train_acc, test_acc, train_loss, test_loss, type(optimizer).__name__, type(criterion).__name__
+        model, data_split, configs, train_acc, test_acc, train_loss, test_loss, optimizer, criterion
     )
 
     # Return the model
@@ -200,8 +200,8 @@ def save_model_and_metadata(  # noqa: PLR0913
     test_acc: float,
     train_loss: float,
     test_loss: float,
-    optimizer: str,
-    loss: str
+    optimizer: optim.Optimizer,
+    loss: nn.Module,
 ) -> None:
     """Save the model and metadata.
 
@@ -232,8 +232,20 @@ def save_model_and_metadata(  # noqa: PLR0913
     meta_data["train_indices"] = data_split["train_indices"]
     meta_data["test_indices"] = data_split["test_indices"]
     meta_data["num_train"] = len(data_split["train_indices"])
-    meta_data["optimizer"] = optimizer.lower()
-    meta_data["loss"] = loss.lower()
+
+    # read out optimizer parameters
+    meta_data["optimizer"] = {}
+    meta_data["optimizer"]["name"] = optimizer.__class__.__name__.lower()
+    meta_data["optimizer"]["lr"] = optimizer.param_groups[0].get("lr", 0)
+    meta_data["optimizer"]["weight_decay"] = optimizer.param_groups[0].get("weight_decay", 0)
+    meta_data["optimizer"]["momentum"] = optimizer.param_groups[0].get("momentum", 0)
+    meta_data["optimizer"]["dampening"] = optimizer.param_groups[0].get("dampening", 0)
+    meta_data["optimizer"]["nesterov"] = optimizer.param_groups[0].get("nesterov", False)
+
+    # read out loss parameters
+    meta_data["loss"] = {}
+    meta_data["loss"]["name"] = loss.__class__.__name__.lower()
+
     meta_data["batch_size"] = configs["train"]["batch_size"]
     meta_data["epochs"] = configs["train"]["epochs"]
     meta_data["learning_rate"] = configs["train"]["learning_rate"]

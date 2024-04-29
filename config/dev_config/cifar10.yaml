@@ -5,7 +5,7 @@ run: # Configurations for a specific run
 train: # Configuration for training
   type: pytorch # Training framework (we only support pytorch now).
   num_target_model: 1 #Integer number for indicating how many target models we want to audit for the privacy game
-  epochs: 50 # Integer number for indicating the epochs for training target model. For speedyresnet, it uses its own number of epochs.
+  epochs: 5 # Integer number for indicating the epochs for training target model. For speedyresnet, it uses its own number of epochs.
   batch_size: 32 # Integer number for indicating batch size for training the target model. For speedyresnet, it uses its own batch size.
   optimizer: SGD # String which indicates the optimizer. We support Adam and SGD. For speedyresnet, it uses its own optimizer.
   learning_rate: 0.01 # Float number for indicating learning rate for training the target model. For speedyresnet, it uses its own learning_rate.
