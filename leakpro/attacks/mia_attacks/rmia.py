@@ -35,39 +35,45 @@ class AttackRMIA(AbstractMIA):
         """
         # Initializes the parent metric
         super().__init__(population, audit_dataset, target_model, logger)
-
         self.shadow_models = []
-        self.num_shadow_models = configs.get("num_shadow_models", 4)
-        if self.num_shadow_models < 1:
-            raise ValueError("num_shadow_models must be greater than 0")
-
-        self.offline_a = configs.get("data_fraction", 0.33)  # p_IN(x) = a p_OUT(x) + b.
-        if self.offline_a < 0 or self.offline_a > 1:
-            raise ValueError("data_fraction must be between 0 and 1")
-
-        self.offline_b = configs.get("offline_b", 0.66)
-        if self.offline_b < 0 or self.offline_b > 1:
-            raise ValueError("offline_b must be between 0 and 1")
-
-        self.gamma = configs.get("gamma", 2.0) # threshold for the attack
-        if self.gamma < 0:
-            raise ValueError("gamma must be greater than 0")
-
-        self.temperature = configs.get("temperature", 2.0) # temperature for the softmax
-        if self.temperature < 0:
-            raise ValueError("temperature must be greater than 0")
-
-        self.f_attack_data_size = configs.get("data_fraction", 0.5)
-        if self.f_attack_data_size <= 0 or self.f_attack_data_size > 1:
-            raise ValueError("The data fraction must be between 0 and 1")
-
-        self.online = configs.get("online", False)
-
         self.signal = ModelLogits()
         self.epsilon = 1e-6
-
         self.shadow_models = None
         self.shadow_model_indices = None
+
+        self.logger.info("Configuring RMIA attack")
+        self._configure_attack(configs)
+
+
+    def _configure_attack(self:Self, configs: dict) -> None:
+        """Configure the RMIA attack.
+
+        Args:
+        ----
+            configs (dict): Configuration parameters for the attack.
+
+        """
+        self.num_shadow_models = configs.get("num_shadow_models", 4)
+        self.offline_a = configs.get("data_fraction", 0.33)
+        self.offline_b = configs.get("offline_b", 0.66)
+        self.gamma = configs.get("gamma", 2.0)
+        self.temperature = configs.get("temperature", 2.0)
+        self.f_attack_data_size = configs.get("data_fraction", 0.5)
+        self.online = configs.get("online", False)
+
+        # Define the validation dictionary as: {parameter_name: (parameter, min_value, max_value)}
+        validation_dict = {
+            "num_shadow_models": (self.num_shadow_models, 1, None),
+            "offline_a": (self.offline_a, 0, 1),
+            "offline_b": (self.offline_b, 0, 1),
+            "gamma": (self.gamma, 0, None),
+            "temperature": (self.temperature, 0, None),
+            "f_attack_data_size": (self.f_attack_data_size, 0, 1)
+        }
+
+        # Validate parameters
+        for param_name, (param_value, min_val, max_val) in validation_dict.items():
+            self._validate_config(param_name, param_value, min_val, max_val)
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
