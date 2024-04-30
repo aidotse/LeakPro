@@ -44,11 +44,11 @@ class AttackP(AbstractMIA):
         self._configure_attack(configs)
 
     def _configure_attack(self:Self, configs:dict) -> None:
-        self.f_attack_data_size = configs.get("data_fraction", 0.5)
+        self.attack_data_fraction = configs.get("attack_data_fraction", 0.5)
 
         # Define the validation dictionary as: {parameter_name: (parameter, min_value, max_value)}
         validation_dict = {
-            "f_attack_data_size": (self.f_attack_data_size, 0.01, 1)
+            "attack_data_fraction": (self.attack_data_fraction, 0.01, 1)
         }
 
         # Validate parameters
@@ -90,6 +90,15 @@ class AttackP(AbstractMIA):
             test_data_included_in_auxiliary_data = False,
             logger = self.logger
         )
+
+        # subsample the attack data based on the fraction
+        self.logger.info(f"Subsampling attack data from {len(self.attack_data_index)} points")
+        self.attack_data_index = np.random.choice(
+            self.attack_data_index,
+            int(self.attack_data_fraction * len(self.attack_data_index)),
+            replace=False
+        )
+        self.logger.info(f"Number of attack data points after subsampling: {len(self.attack_data_index)}")
 
         attack_data = self.population.subset(self.attack_data_index)
         # Load signals if they have been computed already; otherwise, compute and save them
