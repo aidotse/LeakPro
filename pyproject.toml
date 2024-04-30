@@ -45,4 +45,5 @@ lint.ignore = [
   "S101", # Using assert
   "PLR2004", # magic-value-comparison
   "N802", # snake_case function naming convention
+  "D107", # Missing docstring in `__init__`
 ]

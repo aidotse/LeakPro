@@ -4,20 +4,23 @@
 """Functions for estimating rates and errors in privacy attacks."""
 import warnings
 from math import sqrt
-from typing import Union, Tuple, Optional
-from pydantic import BaseModel
+from typing import Optional, Self, Tuple, Union
 
+from pydantic import BaseModel
 from scipy.stats import norm
+
 
 def assert_x_in_bound(*,
     x: Union[float, int],
-    x_name: str = '',
+    x_name: str = "",
     low_bound: float = 0.0,
     high_bound: float = 1.0,
     inclusive_flag: bool = False
 ) -> Union[None, ValueError]:
     """Auxiliar function to assert x is between low_bound and high_bound.
+
     If x not between bounds, raises ValueError
+
     Parameters
     ----------
     x : float
@@ -30,22 +33,23 @@ def assert_x_in_bound(*,
         Higher bound.
     inclusive_flag : bool, default is False
         If True, x can be equal to low_bound/high_bound (ie interval is closed []).
+
     """
     if len(x_name)>0:
         x_name = f" `{x_name}`"
     if inclusive_flag:
         cond = x < low_bound or x > high_bound
-        extra = '='
+        extra = "="
     else:
         cond = x <= low_bound or x >= high_bound
-        extra = ''
+        extra = ""
     if cond:
         raise ValueError(f"Parameter{x_name} must be >{extra} {low_bound} and <{extra} {high_bound}. Got {x} instead.")
 
 def get_confidence_interval(*, rate: float, error: float) -> Tuple[float, float]:
-    """
-    Function will return lower and upper bound (confidence interval),
-    adjusted to be within [0,1] interval, for provided rate and error
+    """Function will return lower and upper bound (confidence interval) for provided rate and error.
+
+    Values are adjusted to be within [0,1] interval.
     """
     bound_lower = min(max(rate - error, 0.0), 1.0)
     bound_upper = min(max(rate + error, 0.0), 1.0)
@@ -63,15 +67,17 @@ class SuccessRate(BaseModel):
     ci : (float, float)
         Confidence interval of estimate.
         Interval will be constructed on initialization.
+
     """
+
     rate: float
     error: float
     ci: Optional[Tuple[float, float]] = None
 
-    def __init__(self, **kwargs):
+    def __init__(self: Self, **kwargs: Union[float, Optional[Tuple[float, float]]]) -> None:
         super().__init__(**kwargs)
         #Assert input values
-        assert_x_in_bound(x=self.rate, x_name='rate', inclusive_flag=True)
+        assert_x_in_bound(x=self.rate, x_name="rate", inclusive_flag=True)
         if self.error<=0.0:
             raise ValueError(f"Parameter `error` must be > 0.0. Got {self.error} instead.")
         # Get confidence interval and set parameter
@@ -110,6 +116,7 @@ def success_rate(*,
     Probable inference, the law of succession, and statistical inference
     Journal of the American Statistical Association 22, 209-212 (1927)
     DOI 10.1080/01621459.1927.10502953
+
     """
     #Assert input
     assert isinstance(n_total, int)
@@ -118,9 +125,9 @@ def success_rate(*,
     assert n_success >= 0
     assert isinstance(confidence_level, float)
     if n_success > n_total:
-            raise ValueError(f"Parameter n_sucess can not be larger than n_total.")
+            raise ValueError("Parameter n_sucess can not be larger than n_total.")
     assert isinstance(confidence_level, float)
-    assert_x_in_bound(x=confidence_level, x_name='confidence_level')
+    assert_x_in_bound(x=confidence_level, x_name="confidence_level")
     # Probit value for given confidence level
     z = norm.ppf(0.5 * (1.0 + confidence_level))
     # Calculations
@@ -157,6 +164,7 @@ def residual_rate(*,
         success rate.
         Note: if naive_rate.rate == 1, residual success rate cannot be determined
         and a SucessRate with rate=1.0 will be returned.q
+
     """
     # Check for naive_rate == 1
     if naive_rate.rate == 1:
@@ -193,6 +201,7 @@ class EvaluationResults(BaseModel):
         Desired confidence level for the different rates' confidence intervals.
 
     """
+
     n_total: int
     n_main: int
     n_naive: int
@@ -201,16 +210,16 @@ class EvaluationResults(BaseModel):
     naive_rate: Optional[SuccessRate] = None
     residual_rate: Optional[SuccessRate] = None
 
-    def __init__(self, **kwargs) -> Union[None, ValueError]:
+    def __init__(self: Self, **kwargs: Union[int, float, Optional[SuccessRate]]) -> Union[None, ValueError]:
         super().__init__(**kwargs)
         #Assert input values
         if self.n_total <= 0:
-            raise ValueError(f"n_total must be greater than 0.")
+            raise ValueError("n_total must be greater than 0.")
         if self.n_main < 0 or self.n_naive < 0:
-            raise ValueError(f"n_main and n_naive must be greater or equal to 0.")
+            raise ValueError("n_main and n_naive must be greater or equal to 0.")
         if max(self.n_total, self.n_main, self.n_naive) != self.n_total:
-            raise ValueError(f"n_total must be greater or equal than n_main and n_naive.")
-        assert_x_in_bound(x=self.confidence_level, x_name='confidence_level')
+            raise ValueError("n_total must be greater or equal than n_main and n_naive.")
+        assert_x_in_bound(x=self.confidence_level, x_name="confidence_level")
         #Rates calculations
         self.main_rate = success_rate(n_total=self.n_total, n_success=self.n_main, confidence_level=self.confidence_level)
         self.naive_rate = success_rate(n_total=self.n_total, n_success=self.n_naive, confidence_level=self.confidence_level)
