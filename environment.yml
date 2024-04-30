@@ -26,6 +26,7 @@ dependencies:
   - jinja2
   - pyyaml
   - numba
+  - pydantic
 
   # Development and Testing
   - pytest
