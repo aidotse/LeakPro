@@ -4,10 +4,12 @@
 """Functions for estimating rates and errors in privacy attacks."""
 import warnings
 from math import sqrt
-from typing import Optional, Self, Tuple, Union
+from typing import Optional, Tuple, Union
 
 from pydantic import BaseModel
 from scipy.stats import norm
+
+from leakpro.import_helper import Self
 
 
 def assert_x_in_bound(*,
