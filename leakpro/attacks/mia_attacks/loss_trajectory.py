@@ -2,24 +2,38 @@
 
 import os
 import pickle
-from typing import Self
+# from typing import Self
 
-import numpy as np
-import torch
-from torch import nn
-from torch.nn import functional
+# import numpy as np
+# import torch
+# from torch import nn
+# from torch.nn import functional
 from torch.utils.data import DataLoader, Subset, TensorDataset
 
+from torch import cuda, device, functional, load, nn, save, argmax, tensor, optim, no_grad
+
+from logging import Logger
+
+import numpy as np
+from torch import nn
+
+from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
+from leakpro.attacks.utils.attack_data import get_attack_data
+from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
+from leakpro.attacks.utils.distillation_model_handler import DistillationModelHandler
+from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
-from leakpro.mia_attacks.attack_utils import AttackUtils
-from leakpro.mia_attacks.attacks.attack import AttackAbstract
 from leakpro.signals.signal import ModelLogits
 
-class AttackLossTrajectory(AttackAbstract):
+
+class AttackLossTrajectory(AbstractMIA):
     """Implementation of the loss trajectory attack."""
 
     def __init__(self: Self,
-                 attack_utils: AttackUtils,
+                 population: np.ndarray,
+                 audit_dataset: dict,
+                 target_model: nn.Module,
+                 logger: Logger,
                  configs: dict
                 ) -> None:
         """Initialize the LossTrajectoryAttack class.
@@ -30,16 +44,25 @@ class AttackLossTrajectory(AttackAbstract):
             configs (dict): A dictionary containing the attack configurations.
 
         """
-        super().__init__(attack_utils)
+        super().__init__(population, audit_dataset, target_model, logger)
 
-        self.shadow_models = attack_utils.attack_objects.shadow_models
-        self.distillation_models_target = attack_utils.attack_objects.distillation_models_target
-        self.distillation_models_shadow = attack_utils.attack_objects.distillation_models_shadow
+        self.logger.info("Configuring RMIA attack")
+        self._configure_attack(configs)
 
-        self.target_train_indices = attack_utils.attack_objects.train_test_dataset["train_indices"]
-        self.target_test_indices = attack_utils.attack_objects.train_test_dataset["test_indices"]
-        self.shadow_train_indices = attack_utils.attack_objects._shadow_train_indices
-        self.shadow_test_indices = attack_utils.attack_objects._shadow_test_indices
+
+    def _configure_attack(self: Self, configs: dict) -> None:
+        self.num_shadow_models = 1
+        self.training_data_fraction = configs.get("training_data_fraction", 0.5)
+        self.attack_data_fraction = configs.get("attack_data_fraction", 0.1)
+
+        # self.shadow_models = attack_utils.attack_objects.shadow_models
+        # self.distillation_models_target = attack_utils.attack_objects.distillation_models_target
+        # self.distillation_models_shadow = attack_utils.attack_objects.distillation_models_shadow
+
+        # self.target_train_indices = attack_utils.attack_objects.train_test_dataset["train_indices"]
+        # self.target_test_indices = attack_utils.attack_objects.train_test_dataset["test_indices"]
+        # self.shadow_train_indices = attack_utils.attack_objects._shadow_train_indices
+        # self.shadow_test_indices = attack_utils.attack_objects._shadow_test_indices
 
         self.configs = configs
         self.log_dir = configs["run"]["log_dir"]
@@ -84,35 +107,6 @@ class AttackLossTrajectory(AttackAbstract):
             "detailed": detailed_str,
         }
 
-    def softmax(self:Self, all_logits:np.ndarray,
-                true_label_indices:np.ndarray,
-                return_full_distribution:bool=False) -> np.ndarray:
-        """Compute the softmax function.
-
-        Args:
-        ----
-            all_logits (np.ndarray): Logits for each class.
-            true_label_indices (np.ndarray): Indices of the true labels.
-            return_full_distribution (bool, optional): return the full distribution or just the true class probabilities.
-
-        Returns:
-        -------
-            np.ndarray: Softmax output.
-
-        """
-        logit_signals = all_logits / self.temperature
-        max_logit_signals = np.max(logit_signals,axis=2)
-        logit_signals = logit_signals - max_logit_signals.reshape(1,-1,1)
-        exp_logit_signals = np.exp(logit_signals)
-        exp_logit_sum = np.sum(exp_logit_signals, axis=2)
-
-        if return_full_distribution is False:
-            true_exp_logit =  exp_logit_signals[:, np.arange(exp_logit_signals.shape[1]), true_label_indices]
-            output_signal = true_exp_logit / exp_logit_sum
-        else:
-            output_signal = exp_logit_signals / exp_logit_sum[:,:,np.newaxis]
-        return output_signal
-
     def prepare_attack(self:Self) -> None:
         """Prepare the attack by loading the shadow model and target model.
 
@@ -125,37 +119,61 @@ class AttackLossTrajectory(AttackAbstract):
             None
 
         """
-        # Load the shadow model
-        if "adult" in self.configs["data"]["dataset"]:
-            shadow_model = self.target_model.model_obj.__class__(self.configs["train"]["inputs"],
-                                                                 self.configs["train"]["outputs"])
-        elif "cifar10" in self.configs["data"]["dataset"]:
-            shadow_model = self.target_model.model_obj.__class__()
-        elif "cinic10" in self.configs["data"]["dataset"]:
-            shadow_model = self.target_model.model_obj.__class__(self.configs)
-        shadow_model.load_state_dict(torch.load(f"{self.path_shadow_model}"), strict=False)
+        self.logger.info("Preparing the data for loss trajectory attack")
 
-        # Load the target model
-        if "adult" in self.configs["data"]["dataset"]:
-            trained_target_model = self.target_model.model_obj.__class__(self.configs["train"]["inputs"],
-                                                                          self.configs["train"]["outputs"])
-        elif "cifar10" in self.configs["data"]["dataset"]:
-            trained_target_model = self.target_model.model_obj.__class__()
-        elif "cinic10" in self.configs["data"]["dataset"]:
-            trained_target_model = self.target_model.model_obj.__class__(self.configs)
-        trained_target_model.load_state_dict(torch.load(f"{self.path_target_model}"), strict=False)
+        include_target_training_data = False
+        include_target_testing_data = False
+
+        # Get all available indices for attack dataset
+        self.attack_data_index = get_attack_data(
+            self.population_size,
+            self.train_indices,
+            self.test_indices,
+            include_target_training_data,
+            include_target_testing_data,
+            self.logger
+        )
+        # create attack dataset
+        attack_data = self.population.subset(self.attack_data_index)
+
+        # train shadow models
+        self.logger.info(f"Training shadow models on {len(attack_data)} points")
+        ShadowModelHandler().create_shadow_models(
+            self.num_shadow_models,
+            attack_data,
+            self.training_data_fraction,
+        )
+
+        # load shadow models
+        self.shadow_models, self.shadow_model_indices = ShadowModelHandler().get_shadow_models(self.num_shadow_models)
+
+        # # Load the shadow model
+        # if "adult" in self.configs["data"]["dataset"]:
+        #     shadow_model = self.target_model.model_obj.__class__(self.configs["train"]["inputs"],
+        #                                                          self.configs["train"]["outputs"])
+        # elif "cifar10" in self.configs["data"]["dataset"]:
+        #     shadow_model = self.target_model.model_obj.__class__()
+        # elif "cinic10" in self.configs["data"]["dataset"]:
+        #     shadow_model = self.target_model.model_obj.__class__(self.configs)
+        # shadow_model.load_state_dict(torch.load(f"{self.path_shadow_model}"), strict=False)
+
+        # # Load the target model
+        # if "adult" in self.configs["data"]["dataset"]:
+        #     trained_target_model = self.target_model.model_obj.__class__(self.configs["train"]["inputs"],
+        #                                                                   self.configs["train"]["outputs"])
+        # elif "cifar10" in self.configs["data"]["dataset"]:
+        #     trained_target_model = self.target_model.model_obj.__class__()
+        # elif "cinic10" in self.configs["data"]["dataset"]:
+        #     trained_target_model = self.target_model.model_obj.__class__(self.configs)
+        # trained_target_model.load_state_dict(torch.load(f"{self.path_target_model}"), strict=False)
 
         # shadow data (train and test) is used as training data for MIA_classifier
-        mia_train_data_indices = np.concatenate((self.shadow_test_indices, self.shadow_train_indices))
-        train_mask = np.isin(mia_train_data_indices, self.shadow_train_indices)
-        self.prepare_mia_trainingset(mia_train_data_indices , train_mask,
-                                     shadow_model )
+        self.prepare_mia_trainingset(self.shadow_model_indices,
+                                     self.shadow_model )
 
         # Data used in the target (train and test) is used as test data for MIA_classifier
-        mia_test_data_indices = np.concatenate((self.target_test_indices, self.target_train_indices))
-        test_mask = np.isin(mia_test_data_indices, self.target_train_indices)
-        self.prepare_attack_dataset( mia_test_data_indices , test_mask,
-                                trained_target_model)
+        mia_test_data_indices = np.isin( self.shadow_model_indices , self.attack_data_index)
+        self.prepare_attack_dataset( mia_test_data_indices ,trained_target_model)
 
     def prepare_mia_trainingset(self:Self, train_attack_data_indices:np.ndarray,  # noqa: PLR0915
                                 membership_status_shadow_train:np.ndarray,
@@ -174,7 +192,7 @@ class AttackLossTrajectory(AttackAbstract):
 
         """
         if not os.path.exists(f"{self.log_dir}/trajectory_train_data.npy"):
-            device = ("cuda" if torch.cuda.is_available() else "cpu")
+            gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
             data_attack = Subset(self.population, train_attack_data_indices)
             attack_data_loader = DataLoader(data_attack, batch_size=self.train_mia_batch_size, shuffle=False)
             path_distillation_models_shadow = self.path_distillation_models_shadow
@@ -186,8 +204,8 @@ class AttackLossTrajectory(AttackAbstract):
             predicted_status = np.array([])
 
             for loader_idx, (data, target) in enumerate(attack_data_loader):
-                data = data.to(device)  # noqa: PLW2901
-                target = target.to(device)  # noqa: PLW2901
+                data = data.to(gpu_or_cpu)  # noqa: PLW2901
+                target = target.to(gpu_or_cpu)  # noqa: PLW2901
 
                 traj_total_students = np.array([])
                 for s in range(self.num_students):
@@ -202,10 +220,19 @@ class AttackLossTrajectory(AttackAbstract):
                         elif "cinic10" in self.configs["data"]["dataset"]:
                             distillation_model_shadow = self.target_model.model_obj.__class__(self.configs)
 
+                        #TODO: remove this check
+                        loaded_object = load(f"{path_distillation_models_shadow}/epoch_{d}.pkl")
+                        if isinstance(loaded_object, nn.Module):
+                            print("The saved model contains the entire model object with architecture.")
+                        elif isinstance(loaded_object, dict):
+                            print("The saved model contains only the state_dict.")
+                        else:
+                            print("Unknown object type.")
+
                         # infer from the distillation model
                         distillation_model_shadow.load_state_dict(
-                            torch.load(f"{path_distillation_models_shadow}/epoch_{d}.pkl"), strict=False)
-                        distillation_model_shadow.to(device)
+                            load(f"{path_distillation_models_shadow}/epoch_{d}.pkl"), strict=False)
+                        distillation_model_shadow.to(gpu_or_cpu)
 
                         # infer from the shadow model
                         distill_model_soft_output = distillation_model_shadow(data)
@@ -219,7 +246,7 @@ class AttackLossTrajectory(AttackAbstract):
 
                     traj_total_students = trajectory_current if s == 0 else traj_total_students + trajectory_current
 
-                shadow_model.to(device)
+                shadow_model.to(gpu_or_cpu)
                 batch_logit_target = shadow_model(data)
 
                 _, batch_predict_label = batch_logit_target.max(1)
@@ -229,7 +256,7 @@ class AttackLossTrajectory(AttackAbstract):
                                       (batch_logit_target_i, target_i) in zip(batch_logit_target, target)]
                 batch_loss_target = np.array([batch_loss_target_i.cpu().detach().numpy() for batch_loss_target_i in
                                               batch_loss_target])
-                batch_predicted_status = (torch.argmax(batch_logit_target, dim=1) == target).float().cpu().detach().numpy()
+                batch_predicted_status = (argmax(batch_logit_target, dim=1) == target).float().cpu().detach().numpy()
                 batch_predicted_status = np.expand_dims(batch_predicted_status, axis=1)
 
                 if loader_idx == 0:
@@ -265,7 +292,7 @@ class AttackLossTrajectory(AttackAbstract):
         # Create the training dataset for the MIA classifier.
         mia_train_input = np.concatenate((data["model_trajectory"],
                                           data["traget_model_loss"][:, None]), axis=1)
-        mia_train_dataset = TensorDataset(torch.tensor(mia_train_input), torch.tensor(data["member_status"]))
+        mia_train_dataset = TensorDataset(tensor(mia_train_input), tensor(data["member_status"]))
         self.mia_train_data_loader = DataLoader(mia_train_dataset, batch_size=self.train_mia_batch_size, shuffle=True)
 
 
@@ -289,7 +316,7 @@ class AttackLossTrajectory(AttackAbstract):
 
         """
         if not os.path.exists(f"{self.log_dir}/trajectory_test_data.npy"):
-            device = ("cuda" if torch.cuda.is_available() else "cpu")
+            gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
             data_attack = Subset(self.population, test_attack_data_indices)
             attack_data_loader = DataLoader(data_attack, batch_size=self.train_mia_batch_size, shuffle=False)
             path_distillation_models_target = self.path_distillation_models_target
@@ -300,8 +327,8 @@ class AttackLossTrajectory(AttackAbstract):
             predicted_labels = np.array([])
             predicted_status = np.array([])
             for loader_idx, (data, target) in enumerate(attack_data_loader):
-                data = data.to(device) # noqa: PLW2901
-                target = target.to(device) # noqa: PLW2901
+                data = data.to(gpu_or_cpu) # noqa: PLW2901
+                target = target.to(gpu_or_cpu) # noqa: PLW2901
 
                 traj_total_students = np.array([])
                 for s in range(self.num_students):
@@ -317,7 +344,7 @@ class AttackLossTrajectory(AttackAbstract):
                             distillation_model_target = self.target_model.model_obj.__class__(self.configs)
 
                         # infer from the distillation model of the target model
-                        distillation_model_target.load_state_dict(torch.load(f"{path_distillation_models_target}/epoch_{d}.pkl"),
+                        distillation_model_target.load_state_dict(load(f"{path_distillation_models_target}/epoch_{d}.pkl"),
                                                                   strict=False)
                         distillation_model_target.to(device)
 
@@ -342,7 +369,7 @@ class AttackLossTrajectory(AttackAbstract):
                                       (batch_logit_target_i, target_i) in zip(batch_logit_target, target)]
                 batch_loss_target = np.array([batch_loss_target_i.cpu().detach().numpy() for batch_loss_target_i in
                                               batch_loss_target])
-                batch_predicted_status = (torch.argmax(batch_logit_target, dim=1) == target).float().cpu().detach().numpy()
+                batch_predicted_status = (argmax(batch_logit_target, dim=1) == target).float().cpu().detach().numpy()
                 batch_predicted_status = np.expand_dims(batch_predicted_status, axis=1)
 
                 if loader_idx == 0:
@@ -376,11 +403,11 @@ class AttackLossTrajectory(AttackAbstract):
 
         mia_test_input = np.concatenate((data["model_trajectory"] , 
                                          data["traget_model_loss"][:,None]), axis=1)
-        mia_test_dataset = TensorDataset(torch.tensor(mia_test_input), torch.tensor(data["member_status"]))
+        mia_test_dataset = TensorDataset(tensor(mia_test_input), tensor(data["member_status"]))
         self.mia_test_data_loader = DataLoader(mia_test_dataset, batch_size=self.train_mia_batch_size, shuffle=True)
 
 
-    def mia_classifier(self:Self)-> torch.nn.Module:
+    def mia_classifier(self:Self)-> nn.Module:
         """Trains and returns the MIA (Membership Inference Attack) classifier.
 
         Returns
@@ -388,22 +415,22 @@ class AttackLossTrajectory(AttackAbstract):
             attack_model (torch.nn.Module): The trained MIA classifier model.
 
         """
-        device = ("cuda" if torch.cuda.is_available() else "cpu")
+        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
         attack_model = self.mia_classifer
-        attack_optimizer = torch.optim.SGD(attack_model.parameters(),
+        attack_optimizer = optim.SGD(attack_model.parameters(),
                                            lr=0.01, momentum=0.9, weight_decay=0.0001)
-        attack_model = attack_model.to(device)
+        attack_model = attack_model.to(gpu_or_cpu)
         loss_fn = nn.CrossEntropyLoss()
         train_loss =[]
         train_prec1 = []
 
         for _epoch in range(100):
             loss, prec = self.train_mia_step(attack_model, attack_optimizer,
-                                                         loss_fn, device)
+                                                         loss_fn)
             train_loss.append(loss)
             train_prec1.append(prec)
 
-        torch.save(attack_model.state_dict(), self.log_dir + "/trajectory_mia_model.pkl")
+        save(attack_model.state_dict(), self.log_dir + "/trajectory_mia_model.pkl")
 
         train_info = [train_loss, train_prec1]
         with open(f"{self.log_dir}/mia_model_losses.pkl", "wb") as file:
@@ -412,8 +439,8 @@ class AttackLossTrajectory(AttackAbstract):
         return attack_model
 
     def train_mia_step(self:Self, model:nn.Module,
-                        attack_optimizer:torch.optim.Optimizer,
-                        loss_fn:nn.functional, device:torch.device) -> tuple:
+                        attack_optimizer:optim.Optimizer,
+                        loss_fn:nn.functional) -> tuple:
         """Trains the model using the MIA (Membership Inference Attack) method for one step.
 
         Args:
@@ -421,7 +448,6 @@ class AttackLossTrajectory(AttackAbstract):
             model (torch.nn.Module): The model to be trained.
             attack_optimizer (torch.optim.Optimizer): The optimizer for the attack.
             loss_fn (torch.nn.Module): The loss function to calculate the loss.
-            device (torch.device): The device to perform the training on.
 
         Returns:
         -------
@@ -432,10 +458,11 @@ class AttackLossTrajectory(AttackAbstract):
         train_loss = 0
         num_correct = 0
         mia_train_loader = self.mia_train_data_loader
+        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
 
         for _batch_idx, (data, label) in enumerate(mia_train_loader):
-            data = data.to(device) # noqa: PLW2901
-            label = label.to(device) # noqa: PLW2901
+            data = data.to(gpu_or_cpu) # noqa: PLW2901
+            label = label.to(gpu_or_cpu) # noqa: PLW2901
             label = label.long() # noqa: PLW2901
 
             pred = model(data)
@@ -491,17 +518,17 @@ class AttackLossTrajectory(AttackAbstract):
             - member_preds: The predicted membership probabilities for each data point.
 
         """
-        device = ("cuda" if torch.cuda.is_available() else "cpu")
+        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
         attack_model.eval()
         test_loss = 0
         correct = 0
         auc_ground_truth = None
         auc_pred = None
 
-        with torch.no_grad():
+        with no_grad():
             for batch_idx, (data, target) in enumerate(self.mia_test_data_loader):
-                data = data.to(device) # noqa: PLW2901
-                target = target.to(device) # noqa: PLW2901
+                data = data.to(gpu_or_cpu) # noqa: PLW2901
+                target = target.to(gpu_or_cpu) # noqa: PLW2901
                 target = target.long() # noqa: PLW2901
                 pred = attack_model(data)
 

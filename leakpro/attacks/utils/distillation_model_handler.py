@@ -5,12 +5,10 @@ import os
 import pickle
 import re
 
-import joblib
 import numpy as np
-from torch import cuda, device, load, nn, optim, save, functional
-from torch.nn import Module
+from torch import cuda, device, functional, load, nn, optim, save
+from torch.nn import CrossEntropyLoss, KLDivLoss, Module
 from torch.utils.data import DataLoader, Dataset
-from tqdm import tqdm
 
 from leakpro.import_helper import Self, Tuple
 from leakpro.model import PytorchModel
@@ -70,11 +68,12 @@ class DistillationModelHandler():
         model_class_path =  config.get("model_class_path")
 
         self.logger = logger
+        self.teacher_model = target_model
 
         # If no path to distillation model is provided, use the target model blueprint
         if module_path is None or model_class_path is None:
             self.init_params = target_config["init_params"]
-            self.distillation_model_blueprint = target_model.model_obj.__class__
+            self.distillation_model_blueprint = self.teacher_model.model_obj.__class__
 
             self.logger.info("Distillation model blueprint: target model")
         else:
@@ -96,7 +95,7 @@ class DistillationModelHandler():
         self.batch_size = config.get("batch_size", target_config["batch_size"])
         if self.batch_size < 0:
             raise ValueError("Batch size cannot be negative")
-
+        #TODO: epoch here?
         self.epochs = config.get("epochs", target_config["epochs"])
         if self.epochs < 0:
             raise ValueError("Number of epochs cannot be negative")
@@ -112,7 +111,7 @@ class DistillationModelHandler():
         self.optimizer_class = self.optimizer_mapping[self.optimizer_config.pop("name")]
         self.criterion_class = self.loss_mapping[self.loss_config.pop("name")]
 
-        self.model_storage_name = "distillation_epoch"
+        self.model_storage_name = "distillation_epochs"
         self.metadata_storage_name = "metadata"
 
     def create_distillation_models(
@@ -126,7 +125,8 @@ class DistillationModelHandler():
 
         Args:
         ----
-            num_models (int): The number of shadow models to create.
+            num_students (int): The number of student models to create.
+            num_trajectory_epochs (int): The number of trajectory epochs for training.
             dataset (torch.utils.data.Dataset): The full dataset available for training the shadow models.
             training_fraction (float): The fraction of the dataset to use for training.
 
@@ -150,80 +150,63 @@ class DistillationModelHandler():
         distillation_data_size = int(len(dataset)*training_fraction)
         all_index = np.arange(len(dataset))
 
-        if num_trajectory_epochs > num_to_reuse:
-            self.logger.info(f"Distillation training for more {num_trajectory_epochs -num_to_reuse} epochs")
+        if num_trajectory_epochs - num_to_reuse > 0:
+            self.logger.info(f"Distillation training for more {num_trajectory_epochs - num_to_reuse} epochs")
 
             distillation_data_indices = np.random.choice(all_index, distillation_data_size, replace=False)
             distillation_dataset = dataset.subset(distillation_data_indices)
             distillation_train_loader = DataLoader(distillation_dataset, batch_size=self.batch_size, shuffle=True)
-            self.logger.info(f"Created distillation dataset {i} with size {len(distillation_dataset)}")
+            self.logger.info(f"Created distillation dataset with size {len(distillation_dataset)}")
 
+            distillation_model = self._intilizing_ditillation_model(num_trajectory_epochs, num_to_reuse)
 
-            if num_to_reuse == 0:
-                # shadow_model = self.distillation_model_blueprint(**self.init_params)
-                distillation_model = self.intilizing_model()
-            else :
-                # TODO: loading last model and training on it
-                shadow_model = self._load_shadow_model(num_to_reuse - 1)
-
-        for i in range(num_to_reuse, num_trajectory_epochs):
-            self.logger.info(f"Training trajectory epoch {i}")
-            #TODO: loading last model and training on it
-            # shadow_model = self.distillation_model_blueprint(**self.init_params)
-            shadow_model, train_acc, train_loss = self._train_distillation_model(
-                shadow_model, distillation_train_loader, self.optimizer_config, self.loss_config, self.epochs
+            self._train_distillation_model(self.teacher_model, distillation_model,
+                                           distillation_train_loader, self.optimizer_config,
+                                           self.loss_config, num_trajectory_epochs, num_to_reuse
             )
 
-            self.logger.info(f"Training distillation model epoch {i} complete")
-            with open(f"{self.storage_path}/{self.model_storage_name}_{i}.pkl", "wb") as f:
-                save(shadow_model.state_dict(), f)
-                self.logger.info(f"Saved shadow model {i} to {self.storage_path}")
 
-            self.logger.info(f"Storing metadata for shadow model {i}")
+            self.logger.info("Storing metadata for distillation model")
             meta_data = {}
             meta_data["init_params"] = self.init_params
-            meta_data["train_indices"] = shadow_data_indices
-            meta_data["num_train"] = shadow_data_size
+            meta_data["train_indices"] = distillation_data_indices
+            meta_data["num_train"] = distillation_data_size
             meta_data["optimizer"] = self.optimizer_class.__name__
             meta_data["criterion"] = self.criterion_class.__name__
             meta_data["batch_size"] = self.batch_size
+            #TODO: epoch here?
             meta_data["epochs"] = self.epochs
             meta_data["learning_rate"] = self.optimizer_config["lr"]
             meta_data["weight_decay"] = self.optimizer_config.get("weight_decay", 0.0)
-            meta_data["train_acc"] = train_acc
-            meta_data["train_loss"] = train_loss
-
-            with open(f"{self.storage_path}/{self.metadata_storage_name}_{i}.pkl", "wb") as f:
+            with open(f"{self.storage_path}/{self.metadata_storage_name}_all_epochs.pkl", "wb") as f:
                 pickle.dump(meta_data, f)
 
-            self.logger.info(f"Metadata for shadow model {i} stored in {self.storage_path}")
+            self.logger.info(f"Metadata for distillation model stored in {self.storage_path}")
+
+
 
     def _train_sitillation_model(
             self:Self,
-            target_model:Module,
-            distillation_shadow_model:Module,
+            teacher_mdoel:Module,
+            distillation_model:Module,
             distillation_train_loader:DataLoader,
             optimizer_config:dict,
             loss_config:dict,
-            epochs:int
+            num_trajectory_epochs:int,
+            num_to_reuse:int
     ) -> Tuple[Module, np.ndarray, np.ndarray]:
 
-        path_distillation_models_shadow = f"{self.log_dir}/distillation_models_shadow"
         # Get the device for training
         gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        distillation_model.to(gpu_or_cpu)
+        teacher_mdoel.to(gpu_or_cpu)
 
-        target_model.to(gpu_or_cpu)
+        optimizer = self.optimizer_class(distillation_model.parameters(), **optimizer_config)
 
-        optimizer = self.optimizer_class(shadow_model.parameters(), **optimizer_config)
-        criterion = self.criterion_class(**loss_config)
+        for d in range(num_to_reuse, num_trajectory_epochs):
 
-        distillation_shadow_model.to(gpu_or_cpu)
-        target_model.to(gpu_or_cpu)
-
-        for d in range(epochs):
-
-            distillation_shadow_model.train()
-            target_model.eval()
+            distillation_model.train()
+            teacher_mdoel.eval()
 
             epoch_loss = 0
 
@@ -238,11 +221,9 @@ class DistillationModelHandler():
                 target_labels = target_labels.long()  # noqa: PLW2901
 
                 # Output of the distillation model
-                output = distillation_shadow_model(data)
-                output_teacher = target_model(data)
+                output = distillation_model(data)
+                output_teacher = teacher_mdoel(data)
 
-                soft_target = torch.zeros_like(output)
-                soft_target[torch.arange(soft_target.shape[0]), target_labels] = 1
 
                 if self.attack_mode == "label_only":
                     loss = CrossEntropyLoss()(output, target_labels)
@@ -251,134 +232,52 @@ class DistillationModelHandler():
                                                             functional.softmax(output_teacher.float(),
                                                             dim=1))
 
-
                 optimizer.zero_grad(set_to_none=True)
                 loss.backward()
                 optimizer.step()
-
-                train_loss += loss.item()
-
-            torch.save(distillation_shadow_model.state_dict(), f"{path_distillation_models_shadow}/epoch_{d}.pkl")
+                epoch_loss += loss.item()
 
 
+            self.logger.info(f"Training distillation model epoch {d} completed")
+            with open(f"{self.storage_path}/{self.model_storage_name}_{d}.pkl", "wb") as f:
+                save(distillation_model.state_dict(), f)
+                self.logger.info(f"Saved distillation model epoch {d} to {self.storage_path}")
 
-    def _train_shadow_model(
-        self:Self,
-        shadow_model:Module,
-        train_loader:DataLoader,
-        optimizer_config:dict,
-        loss_config:dict,
-        epochs:int
-    ) -> Tuple[Module, np.ndarray, np.ndarray]:
-        """Train a shadow model.
+        return distillation_model, epoch_loss
+
+    def _intilizing_ditillation_model(self:Self, num_to_reuse:int) -> Module:
+        """Initialize a distillation model.
+
+        Returns
+        -------
+            Module: The initialized shadow model.
+
+        """
+        if num_to_reuse > 0:
+            self.logger.info(f"Loading trained distillation model epoch {num_to_reuse - 1}")
+            distillation_model = self._load_disitlation_model(num_to_reuse - 1)
+            return distillation_model.model_obj
+        distillation_model = self.distillation_model_blueprint(**self.init_params)
+        return PytorchModel(distillation_model, self.criterion_class(**self.loss_config))
+
+    def _load_disitlation_model(self:Self, epoch:int) -> Module:
+        """Load a distillation model from a saved state.
 
         Args:
         ----
-            shadow_model (Module): The shadow model to train.
-            train_loader (torch.utils.data.DataLoader): The training data loader.
-            optimizer_config (dict): The optimizer configuration to use.
-            loss_config (dict): The loss function configuration to use.
-            epochs (int): The number of epochs to train the model.
+            epoch (int): The index of the distillation model to load.
 
         Returns:
         -------
-            Tuple[Module, np.ndarray, np.ndarray]: The trained shadow model, the training accuracy, and the training loss.
+            Module: The loaded distillation model.
 
         """
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
-
-        shadow_model.to(gpu_or_cpu)
-        shadow_model.train()
-
-        optimizer = self.optimizer_class(shadow_model.parameters(), **optimizer_config)
-        criterion = self.criterion_class(**loss_config)
-
-        for epoch in range(epochs):
-            train_loss, train_acc = 0, 0
-            shadow_model.train()
-            for inputs, labels in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
-                labels = labels.long()  # noqa: PLW2901
-                inputs, labels = inputs.to(gpu_or_cpu, non_blocking=True), labels.to(gpu_or_cpu, non_blocking=True)  # noqa: PLW2901
-                optimizer.zero_grad()
-                outputs = shadow_model(inputs)
-                loss = criterion(outputs, labels)
-                pred = outputs.data.max(1, keepdim=True)[1]
-                loss.backward()
-
-                optimizer.step()
-
-                # Accumulate performance of shadow model
-                train_acc += pred.eq(labels.data.view_as(pred)).sum()
-                train_loss += loss.item()
-
-            log_train_str = (
-                f"Epoch: {epoch+1}/{epochs} | Train Loss: {train_loss/len(train_loader):.8f} | "
-                f"Train Acc: {float(train_acc)/len(train_loader.dataset):.8f}")
-            self.logger.info(log_train_str)
-        shadow_model.to("cpu")
-        return shadow_model, train_acc, train_loss
-
-    def _load_shadow_model(self:Self, index:int) -> Module:
-        """Load a shadow model from a saved state.
-
-        Args:
-        ----
-            index (int): The index of the shadow model to load.
-
-        Returns:
-        -------
-            Module: The loaded shadow model.
-
-        """
-        if index < 0:
-            raise ValueError("Index cannot be negative")
-        if index >= len(os.listdir(self.storage_path)):
+        if epoch < 0:
+            raise ValueError("Epoch cannot be negative")
+        if epoch >= len(os.listdir(self.storage_path)):
             raise ValueError("Index out of range")
-        shadow_model = self.distillation_model_blueprint(**self.init_params)
-        with open(f"{self.storage_path}/{self.model_storage_name}_{index}.pkl", "rb") as f:
-            shadow_model.load_state_dict(load(f))
-            self.logger.info(f"Loaded shadow model {index}")
-        return PytorchModel(shadow_model, self.criterion_class(**self.loss_config))
-
-    def get_shadow_models(self:Self, num_models:int) -> list:
-        """Load the the shadow models."""
-        shadow_models = []
-        shadow_model_indices = []
-        for i in range(num_models):
-            self.logger.info(f"Loading shadow model {i}")
-            shadow_models.append(self._load_shadow_model(i))
-            shadow_model_indices.append(i)
-        return shadow_models, shadow_model_indices
-
-    def identify_models_trained_on_samples(self:Self, shadow_model_indices: list[int], sample_indices:set[int]) -> list:
-        """Identify the shadow models trained on the provided samples.
-
-        Args:
-        ----
-            shadow_model_indices (list[int]): The indices of the shadow models.
-            sample_indices (set[int]): The indices of the samples.
-
-        Returns:
-        -------
-            list: The list of shadow models trained on the provided samples.
-
-        """
-        if shadow_model_indices is None:
-            raise ValueError("Shadow model indices must be provided")
-        if sample_indices is None:
-            raise ValueError("Sample indices must be provided")
-
-        if isinstance(sample_indices, list):
-            sample_indices = set(sample_indices)
-
-        self.logger.info("Identifying shadow models trained on provided samples")
-        shadow_model_trained_on_data_index = np.zeros((len(shadow_model_indices), len(sample_indices)), dtype=bool)
-        for i in shadow_model_indices:
-            with open(f"{self.storage_path}/{self.metadata_storage_name}_{i}.pkl", "rb") as f:
-                meta_data = joblib.load(f)
-                train_indices = set(meta_data["train_indices"])
-
-                for j in range(len(sample_indices)):
-                    shadow_model_trained_on_data_index[i, j] = sample_indices[j] in train_indices
-
-        return shadow_model_trained_on_data_index
+        distillation_model = self.distillation_model_blueprint(**self.init_params)
+        with open(f"{self.storage_path}/{self.model_storage_name}_{epoch}.pkl", "rb") as f:
+            distillation_model.load_state_dict(load(f))
+            self.logger.info(f"Loaded distillation model {epoch}")
+        return PytorchModel(distillation_model, self.criterion_class(**self.loss_config))

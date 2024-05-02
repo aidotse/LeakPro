@@ -2,6 +2,7 @@
 import torch
 import torch.nn.functional as F  # noqa: N812
 from torch import nn
+from torchvision.models import resnet18
 
 from leakpro.import_helper import Self
 
@@ -94,3 +95,16 @@ class SmallerSingleLayerConvNet(nn.Module):
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         return self.fc3(x)
+
+class ResNet18(nn.Module):
+    """Pre-trained ResNet18 model with pretrained=False."""
+
+    def __init__(self:Self, num_classes:int=10) -> None:
+        """Initialize the model."""
+        super().__init__()
+        self.init_params = {"num_classes": num_classes}
+        self.model = resnet18(pretrained=False)
+
+    def forward(self:Self, x:torch.Tensor) -> torch.Tensor:
+        """Forward pass of the model."""
+        return self.model(x)
