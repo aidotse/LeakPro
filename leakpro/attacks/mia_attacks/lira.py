@@ -48,14 +48,16 @@ class AttackLiRA(AbstractMIA):
             configs (dict): Configuration parameters for the attack.
 
         """
-        self.training_data_fraction = configs.get("data_fraction", 0.5)
+        self.training_data_fraction = configs.get("training_data_fraction", 0.5)
 
         self.shadow_models = []
         self.num_shadow_models = configs.get("num_shadow_models", 64)
 
         self.online = configs.get("online", False)
         self.fixed_variance = configs.get("fixed_variance", False)
-        self.include_test_data = configs.get("include_test_data", True)
+
+        self.include_train_data = configs.get("include_train_data", self.online)
+        self.include_test_data = configs.get("include_test_data", self.online)
         
         # Define the validation dictionary as: {parameter_name: (parameter, min_value, max_value)}
         validation_dict = {
@@ -102,9 +104,11 @@ class AttackLiRA(AbstractMIA):
             self.population_size,
             self.train_indices,
             self.test_indices,
-            self.include_test_data,
-            self.logger
+            train_data_included_in_auxiliary_data=self.include_train_data,
+            test_data_included_in_auxiliary_data=self.include_test_data,
+            logger = self.logger
         )
+        
         attack_data = self.population.subset(self.attack_data_index)
 
         ShadowModelHandler().create_shadow_models(
@@ -130,15 +134,6 @@ class AttackLiRA(AbstractMIA):
         print(f"Calculating the logits for the target model")
         self.target_logits = np.array(self.signal([self.target_model], self.audit_data)).squeeze()     
 
-        # print(self.shadow_models_logits[:,self.audit_dataset["in_members"]].shape)
-        # print(self.in_indices_mask[self.audit_dataset["in_members"]].shape)
-
-        # in_members = self.shadow_models_logits[self.audit_dataset["in_members"]]
-        # [:,~self.in_indices_mask[self.audit_dataset["in_members"]]])
-        
-        # out_members = self.shadow_models_logits[self.audit_dataset["out_members"]]
-        # [:,~self.in_indices_mask[self.audit_dataset["out_members"]]])
-
     def run_attack(self):
         """
         Runs the attack on the target model and dataset, computing and returning
@@ -161,8 +156,12 @@ class AttackLiRA(AbstractMIA):
             out_std = np.nanstd(self.shadow_models_logits[~self.in_indices_mask].flatten())
             
         # Iterate over each sample in the audit dataset with a progress bar
-        print(self.in_indices_mask.shape)
         for i, mask in tqdm(enumerate(self.in_indices_mask)):
+
+            if np.count_nonzero(mask) > 1:
+                score.append(0)
+                continue
+                
             # Extract logits from shadow models for the current sample
             shadow_models_logits = self.shadow_models_logits[i, :]
             out_mean = np.nanmean(shadow_models_logits[~mask])  # Calculate the mean of shadow model logits
@@ -189,7 +188,7 @@ class AttackLiRA(AbstractMIA):
         score = np.asarray(score)  # Convert the list of scores to a numpy array
         
         # Generate thresholds based on the range of computed scores for decision boundaries
-        self.thresholds = np.linspace(np.nanmin(score)-0.5, np.nanmax(score), 3000)
+        self.thresholds = np.linspace(np.nanmin(score), np.nanmax(score), 2000)
     
         # Split the score array into two parts based on membership: in (training) and out (non-training)
         self.in_member_signals = score[self.audit_dataset["in_members"]].reshape(-1,1)  # Scores for known training data members

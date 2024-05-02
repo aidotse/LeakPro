@@ -5,6 +5,7 @@ import os
 import pickle
 import re
 
+from numba import njit
 import joblib
 import numpy as np
 from torch import cuda, device, load, nn, optim, save
@@ -339,10 +340,17 @@ class ShadowModelHandler():
         models_in_indicies = []
         for data in metadata:
             models_in_indicies.append(data["train_indices"])
-        
+
+        models_in_indicies = np.asarray(models_in_indicies)
         indicie_masks = []
-        for audit_indicie in dataset["data"]:
-            mask = [audit_indicie in in_indicies for in_indicies in models_in_indicies]
+        for audit_indicie in tqdm(dataset["data"]):
+            # mask = [audit_indicie in in_indicies for in_indicies in models_in_indicies]
+            mask = indicie_in_shadowmodel_training_set(audit_indicie, models_in_indicies)
             indicie_masks.append(mask)
             
         return np.array(indicie_masks, dtype=bool)
+
+@njit
+def indicie_in_shadowmodel_training_set(audit_indicie:int, models_in_indicies:list) -> list:
+    mask = [audit_indicie in in_indicies for in_indicies in models_in_indicies]
+    return mask

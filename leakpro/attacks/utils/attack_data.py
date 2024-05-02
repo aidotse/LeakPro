@@ -36,14 +36,15 @@ def get_attack_data(
         raise ValueError("Test indices must be provided.")
 
     all_index = np.arange(population_size)
-    if train_data_included_in_auxiliary_data:
-        not_allowed_indices = []
-    else:
-        not_allowed_indices = (
-            train_indices if not test_data_included_in_auxiliary_data
-            else np.concatenate((train_indices, test_indices), axis=0)
-        )
-    available_index = np.setdiff1d(all_index, not_allowed_indices, assume_unique=True)
+
+    not_allowed_indices = np.array([])
+    if not train_data_included_in_auxiliary_data:
+        not_allowed_indices = np.hstack([not_allowed_indices, train_indices])
+
+    if not test_data_included_in_auxiliary_data:
+        not_allowed_indices = np.hstack([not_allowed_indices, test_indices])
+    
+    available_index = np.setdiff1d(all_index, not_allowed_indices)
     attack_data_size = len(available_index)
 
     logger.info(f"Selecting {attack_data_size} attack data points out of {len(available_index)} available data points.")
