@@ -13,7 +13,26 @@ audit:  # Configurations for auditing
       offline_b: 0.66
     qmia:
       data_fraction: 0.4  # Fraction of the auxilary dataset (data without train and test indices) to use for this attack
-      epochs: 200  # Number of training epochs for quantile regression
+      epochs: 10  # Number of training epochs for quantile regression
+    population:
+      data_fraction: 0.4  # Fraction of the auxilary dataset to use for this attack
+    loss_traj:
+      num_shadow_models: 1
+      f_attack_data_size: 0.3
+      number_of_traj: 100 # Number of epochs (number of points in the loss trajectory)
+      distillation_target_data_size: 0.3
+      f_distillation_target_date: 0.3
+      distill_epochs: 50 # Number of epochs to train the distillation model
+      num_students: 1 # Number of students in the distillation
+      num_classes: 10 # Number of classes in the dataset
+      train_target_data_size: 10000
+      test_target_data_size: 10000
+      train_shadow_data_size: 10000
+      test_shadow_data_size: 10000
+      train_distillation_data_size: 220000
+      aux_data_size: 240000 # all data except the training and test data for the target model
+      attack_mode: soft_label # label_only, soft_label
+
 
   report_log: "results"  # Folder to save the auditing report
   target_model_folder: "./target"
@@ -44,5 +63,22 @@ shadow_model:
     name: crossentropyloss # crossentropyloss, nllloss, mseloss
   # Initialization parameters
   init_params: {}
+
+distillation_model:
+  storage_path: "./leakpro_output/attack_objects/distillation_models"
+  module_path: "./leakpro/distillation_model_blueprints.py"
+  # model_class: "ConvNet"
+  optimizer: 
+    name: sgd #adam, sgd, rmsprop
+    lr: 0.01
+    momentum: 0.9
+    weight_decay: 0
+  loss: 
+    name: crossentropyloss # crossentropyloss, nllloss, mseloss
+  # Initialization parameters
+  init_params: {}
+  trained_model_path: "./leakpro_output/attack_objects/distillation_models/distillation_model.pkl"
+  trained_model_metadata_path: "./leakpro_output/attack_objects/distillation_models/model_metadata.pkl"
+  data_path: "./leakpro_output/attack_objects/distillation_models/cifar10.pkl"
 
 
