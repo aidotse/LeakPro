@@ -27,6 +27,7 @@ dependencies:
   - tqdm
   - pyyaml
   - numba
+  - pydantic
 
   # Development and Testing
   - pytest
