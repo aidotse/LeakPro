@@ -11,10 +11,15 @@ import torch
 import yaml
 
 import leakpro.dev_utils.train as utils
-from leakpro import shadow_models
+from leakpro import shadow_model_blueprints
 from leakpro.attacks.attack_scheduler import AttackScheduler
 from leakpro.dataset import get_dataloader
-from leakpro.dev_utils.data_preparation import get_adult_dataset, get_cifar10_dataset, prepare_train_test_datasets
+from leakpro.dev_utils.data_preparation import (
+    get_adult_dataset,
+    get_cifar10_dataset,
+    get_cinic10_dataset,
+    prepare_train_test_datasets,
+)
 from leakpro.reporting.utils import prepare_priavcy_risk_report
 from leakpro.utils.input_handler import get_class_from_module, import_module_from_file
 
@@ -59,10 +64,13 @@ def generate_user_input(configs: dict, logger: logging.Logger)->None:
     # Create the population dataset and target_model
     if "adult" in configs["data"]["dataset"]:
         population = get_adult_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
-        target_model = shadow_models.NN(configs["train"]["inputs"], configs["train"]["outputs"])
+        target_model = shadow_model_blueprints.NN(configs["train"]["inputs"], configs["train"]["outputs"])
     elif "cifar10" in configs["data"]["dataset"]:
         population = get_cifar10_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
-        target_model = shadow_models.ConvNet()
+        target_model = shadow_model_blueprints.ConvNet()
+    elif "cinic10" in configs["data"]["dataset"]:
+        population = get_cinic10_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
+        target_model = shadow_model_blueprints.ConvNet()
 
     n_population = len(population)
 
@@ -86,8 +94,11 @@ def generate_user_input(configs: dict, logger: logging.Logger)->None:
 
 if __name__ == "__main__":
 
+
     #args = "./config/adult.yaml"  # noqa: ERA001
-    user_args = "./config/dev_config/cifar10.yaml" # noqa: ERA001
+    # user_args = "./config/dev_config/cifar10.yaml" # noqa: ERA001
+    user_args = "./config/dev_config/cinic10.yaml" # noqa: ERA001
+
     with open(user_args, "rb") as f:
         user_configs = yaml.safe_load(f)
 
@@ -115,8 +126,11 @@ if __name__ == "__main__":
 
     # Get the target  metadata
     target_model_metadata_path = f"{configs["target"]["trained_model_metadata_path"]}"
-    with open(target_model_metadata_path, "rb") as f:
-        target_model_metadata = joblib.load(f)
+    try:
+        with open(target_model_metadata_path, "rb") as f:
+            target_model_metadata = joblib.load(f)
+    except FileNotFoundError:
+        logger.error(f"Could not find the target model metadata at {target_model_metadata_path}")
 
     # Create a class instance of target model
     target_module = import_module_from_file(configs["target"]["module_path"])
@@ -130,9 +144,12 @@ if __name__ == "__main__":
         logger.info(f"Loaded target model from {configs['target']['trained_model_path']}")
 
     # Get the population dataset
-    with open(configs["target"]["data_path"], "rb") as file:
-        population = joblib.load(file)
-        logger.info(f"Loaded population dataset from {configs['target']['data_path']}")
+    try:
+        with open(configs["target"]["data_path"], "rb") as file:
+            population = joblib.load(file)
+            logger.info(f"Loaded population dataset from {configs['target']['data_path']}")
+    except FileNotFoundError:
+        logger.error(f"Could not find the population dataset at {configs['target']['data_path']}")
     # ------------------------------------------------
     # Now we have the target model, its metadata, and the train/test dataset indices.
     attack_scheduler = AttackScheduler(

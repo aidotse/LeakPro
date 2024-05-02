@@ -112,26 +112,33 @@ class AttackQMIA(AbstractMIA):
         # Initializes the parent metric
         super().__init__(population, audit_dataset, target_model, logger)
 
-        self.f_attack_data_size = configs.get("data_fraction", 0.5)
-        if self.f_attack_data_size <= 0 or self.f_attack_data_size > 1:
-            raise ValueError("The data fraction must be between 0 and 1")
-
-        self.quantiles = configs.get("quantiles", [0, 0.5, 0.9, 0.95, 0.99, 0.995, 0.999, 0.9995, 0.9999, 0.99995, 0.99999])
-        if not all(0 <= q <= 1 for q in self.quantiles):
-            raise ValueError("Quantiles must be between 0 and 1")
-        if len(self.quantiles) < 1:
-            raise ValueError("At least one quantile are required")
-        if not isinstance(self.quantiles, list):
-            raise ValueError("Quantiles must be a list")
-
-        self.epochs = configs.get("epochs", 200)
-        if self.epochs < 1:
-            raise ValueError("The number of epochs for the quantile regression must be greater than 0")
-
-        self.include_test_data = configs.get("include_test_data", True)
+        self.logger.info("Configuring the QMIA attack")
+        self._configure_attack(configs)
 
         self.signal = ModelRescaledLogits()
         self.quantile_regressor = QuantileRegressor(len(self.quantiles))
+
+    def _configure_attack(self:Self, configs:dict) -> None:
+        self.training_data_fraction = configs.get("training_data_fraction", 0.5)
+        self.quantiles = configs.get("quantiles", [0, 0.5, 0.9, 0.95, 0.99, 0.995, 0.999, 0.9995, 0.9999, 0.99995, 0.99999])
+        self.epochs = configs.get("epochs", 100)
+
+        # Define the validation dictionary as: {parameter_name: (parameter, min_value, max_value)}
+        validation_dict = {
+            "min_quantile": (min(self.quantiles), 0.0, max(self.quantiles)),
+            "max_quantile": (max(self.quantiles), min(self.quantiles), 1.0),
+            "num_quantiles": (len(self.quantiles), 1, None),
+            "epochs": (self.epochs, 0, None),
+            "training_data_fraction": (self.training_data_fraction, 0, 1)
+        }
+
+        # Validate parameters
+        for param_name, (param_value, min_val, max_val) in validation_dict.items():
+            self._validate_config(param_name, param_value, min_val, max_val)
+
+    def _validate_config(self: Self, name: str, value: float, min_val: float, max_val: float) -> None:
+        if not (min_val <= value <= (max_val if max_val is not None else value)):
+            raise ValueError(f"{name} must be between {min_val} and {max_val}")
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
@@ -160,9 +167,21 @@ class AttackQMIA(AbstractMIA):
             self.population_size,
             self.train_indices,
             self.test_indices,
-            self.include_test_data,
-            self.logger
+            train_data_included_in_auxiliary_data = False,
+            test_data_included_in_auxiliary_data = False,
+            logger = self.logger
         )
+
+        # subsample the attack data based on the fraction
+        self.logger.info(f"Subsampling attack data from {len(self.attack_data_index)} points")
+        self.attack_data_index = np.random.choice(
+            self.attack_data_index,
+            int(self.training_data_fraction * len(self.attack_data_index)),
+            replace=False
+        )
+        self.logger.info(f"Number of attack data points after subsampling: {len(self.attack_data_index)}")
+
+        # create attack dataset
         attack_data = self.population.subset(self.attack_data_index)
 
         # create labels and change dataset to be used for regression
