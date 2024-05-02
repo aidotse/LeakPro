@@ -60,7 +60,7 @@ def test_get_confidence_interval(rate: float, error: float, e_lower_b: float, e_
     assert round(lower_b, 3) == e_lower_b
     assert round(upper_b, 3) == e_upper_b
 
-def test_SuccessRate_init() -> None:
+def test_SuccessRate_init() -> None: # noqa: N802
     """Assert results of SuccessRate init method on different input."""
     #Case not correct type input
     with pytest.raises(ValidationError) as e:
@@ -123,7 +123,7 @@ def test_success_rate(
     assert np.round(sr.ci[0], decimals=3) == e_low_bound
     assert np.round(sr.ci[1], decimals=3) == e_high_bound
 
-def assert_equal_SuccessRates(x: SuccessRate, y: SuccessRate) -> Union[None, AssertionError]:
+def assert_equal_SuccessRates(x: SuccessRate, y: SuccessRate) -> Union[None, AssertionError]: # noqa: N802
     """Assert provided SuccessRates instances are equal up to certain rounding."""
     assert isinstance(x, SuccessRate)
     assert isinstance(y, SuccessRate)
@@ -161,7 +161,7 @@ def test_residual_rate_naive_rate_1() -> None:
     e_rate = SuccessRate(rate=1.0, error=0.01)
     assert_equal_SuccessRates(residual, e_rate)
 
-def test_EvaluationResults_init_error() -> None:
+def test_EvaluationResults_init_error() -> None: # noqa: N802
     """Assert EvaluationResults.init method for different errors raised on different input values."""
     #Case n_total <= 0
     e_msg = "n_total must be greater than 0."
@@ -212,7 +212,7 @@ def test_EvaluationResults_init_error() -> None:
             n_total=1,
             n_main=0,
             n_naive=0,
-            confidence_level=0,
+            confidence_level=0
         )
     assert e.type == ValueError
     #Case no error on input
@@ -235,7 +235,7 @@ def test_EvaluationResults_init_error() -> None:
         (100, 0, 100, 0.8),
     ],
 )
-def test_EvaluationResults(n_total: int, n_main: int, n_naive: int, conf_level: float) -> None:
+def test_EvaluationResults(n_total: int, n_main: int, n_naive: int, conf_level: float) -> None: # noqa: N802
     """Assert EvaluationResults.init results for different input values."""
     e_main = success_rate(n_total=n_total, n_success=n_main, confidence_level=conf_level)
     e_naive = success_rate(n_total=n_total, n_success=n_naive, confidence_level=conf_level)
