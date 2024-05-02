@@ -8,6 +8,7 @@ from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.mia_attacks.attack_p import AttackP
 from leakpro.attacks.mia_attacks.qmia import AttackQMIA
 from leakpro.attacks.mia_attacks.rmia import AttackRMIA
+from leakpro.attacks.mia_attacks.lira import AttackLiRA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.model import PytorchModel
 
@@ -19,6 +20,7 @@ class AttackFactoryMIA:
         "population": AttackP,
         "rmia": AttackRMIA,
         "qmia": AttackQMIA,
+        "lira": AttackLiRA
     }
 
     # Shared variables for all attacks

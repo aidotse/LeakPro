@@ -15,6 +15,11 @@ audit:  # Configurations for auditing
       epochs: 10  # Number of training epochs for quantile regression
     population:
       attack_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack
+    lira:
+      training_data_fraction: 0.3  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
+      num_shadow_models: 32 # Number of shadow models to train
+      online: False # perform online or offline attack
+      fixed_variance: False # Use a fixed variance for the whole audit
 
   report_log: "./leakpro_output/results"  # Folder to save the auditing report
   target_model_folder: "./target"
@@ -24,10 +29,10 @@ audit:  # Configurations for auditing
 
 target:
   module_path: "./leakpro/shadow_model_blueprints.py"
-  model_class: "ConvNet"
+  model_class: "ResNet18"
   trained_model_path: "./target/target_model.pkl" 
   trained_model_metadata_path: "./target/model_metadata.pkl"
-  data_path: "./target/data/cinic10.pkl"
+  data_path: "./target/data/cifar10.pkl"
 
 
 shadow_model:
@@ -37,17 +42,15 @@ shadow_model:
   #
   # [Optional] Define a shadow model (if none, shadow model will follow the target model)
   # Name of the class to instantiate from the specified file
-  # model_class_path: "ConvNet"
-  # include_target_training_data: True
-  # include_target_testing_data: True
-  # optimizer: 
-  #   name: sgd #adam, sgd, rmsprop
-  #   lr: 0.01
-  #   momentum: 0.9
-  #   weight_decay: 0
-  # loss: 
-  #   name: crossentropyloss # crossentropyloss, nllloss, mseloss
-  # # Initialization parameters
-  # init_params: {}
+  model_class_path: "ResNet18" #"ConvNet"
+  optimizer: 
+    name: sgd #adam, sgd, rmsprop
+    lr: 0.01
+    momentum: 0.9
+    weight_decay: 0.01
+  loss: 
+    name: crossentropyloss # crossentropyloss, nllloss, mseloss
+  # Initialization parameters
+  init_params: {}
 
 

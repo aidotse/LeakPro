@@ -269,14 +269,16 @@ class PytorchModel(Model):
                 batched_samples = torch.split(torch.tensor(np.array(batch_samples), dtype=torch.float32), self.batch_size)
                 batched_labels = torch.split(torch.tensor(np.array(batch_labels), dtype=torch.float32), self.batch_size)
 
-                for data, target in zip(batched_samples, batched_labels):
-                    x = data.to(device)
-                    y = target.type(torch.LongTensor).to(device)
-
-                    predictions = torch.nn.functional.softmax(self.model_obj(x), dim=1)
-
-                    # With option 1 or 2
-                    COUNT = predictions.shape[0]  # noqa: N806
+                for x, y in zip(batched_samples, batched_labels):
+                    x = x.to(device)
+                    y = y.to(device)
+                    all_logits = self.model_obj(x)
+    
+                    predictions = all_logits - torch.max(all_logits, dim=1, keepdim=True).values
+                    predictions = torch.exp(predictions)
+                    predictions = predictions/torch.sum(predictions,dim=1, keepdim=True)
+    
+                    COUNT = predictions.shape[0]
                     y_true = predictions[np.arange(COUNT), y.type(torch.IntTensor)]
                     predictions[np.arange(COUNT), y.type(torch.IntTensor)] = 0
                     y_wrong = torch.sum(predictions, dim=1)

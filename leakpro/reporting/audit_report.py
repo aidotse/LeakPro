@@ -5,6 +5,7 @@ import subprocess
 from abc import ABC, abstractmethod
 
 import jinja2
+import json
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -181,6 +182,8 @@ class ROCCurveReport(AuditReport):
             tpr = mr.tp / (mr.tp + mr.fn)
             roc_auc = np.trapz(x=fpr, y=tpr)
 
+        process_and_save_results(fpr, tpr, configs)
+        
         # save the data to a csv file
         directory = os.path.dirname(filename)
 
@@ -609,3 +612,49 @@ class PDFReport(AuditReport):
             print(  # noqa: T201
                 f'PDF file created:\t{os.path.abspath(f"{filename_no_extension}.pdf")}'
             )
+
+def read_and_parse_data(filename):
+    data = {}
+    try:
+        with open(filename, "r") as file:
+            content = file.read().strip().split('\n\n')  # Split by empty row
+            for block in content:
+                if block.strip():
+                    lines = block.split('\n')
+                    config = lines[0]
+                    fpr_tpr = lines[1]
+                    data[config] = fpr_tpr
+    except FileNotFoundError:
+        print(f"No existing file named '{filename}'. A new file will be created.")
+    return data
+
+# Function to save data
+def save_data(data, filename):
+    with open(filename, "w") as file:
+        for config, results in data.items():
+            file.write(f"{config}\n{results}\n\n")
+
+# Main logic to process and save results
+def process_and_save_results(fpr, tpr, configs):
+    filename = "results/lira/results.txt"
+    
+    # Serialize configuration
+    attack_name = list(configs['attack_list'].keys())[0]
+    attack_configs = configs['attack_list'][attack_name]
+    config_key = json.dumps(attack_configs, sort_keys=True)
+
+    # Compute TPR values at various FPR thresholds
+    results = f"TPR@1.0%FPR: {tpr[np.where(fpr < 0.01)[0][-1]] * 100:.4f}%, " \
+              f"TPR@0.1%FPR: {tpr[np.where(fpr < 0.001)[0][-1]] * 100:.4f}%, " \
+              f"TPR@0.01%FPR: {tpr[np.where(fpr < 0.0001)[0][-1]] * 100:.4f}%, " \
+              f"TPR@0.0%FPR: {tpr[np.where(fpr < 0.000001)[0][-1]] * 100:.4f}%"
+
+    # Load existing data
+    data = read_and_parse_data(filename)
+
+    # Update or append data
+    data[config_key] = results
+
+    # Save updated data
+    save_data(data, filename)
+    

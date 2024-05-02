@@ -304,3 +304,45 @@ class ShadowModelHandler():
                     shadow_model_trained_on_data_index[i, j] = sample_indices[j] in train_indices
 
         return shadow_model_trained_on_data_index
+
+    def _load_metadata(self:Self, index:int) -> Module:
+        """Load a shadow model from a saved state.
+
+        Args:
+        ----
+            index (int): The index of the shadow model to load.
+
+        Returns:
+        -------
+            Module: The loaded shadow model.
+
+        """
+        if index < 0:
+            raise ValueError("Index cannot be negative")
+        if index >= len(os.listdir(self.storage_path)):
+            raise ValueError("Index out of range")
+        meta_data = {}
+        with open(f"{self.storage_path}/{self.metadata_storage_name}_{index}.pkl", "rb") as f:
+            meta_data = pickle.load(f)
+        return meta_data
+        
+    def get_shadow_model_metadata(self:Self, num_models:int) -> list:
+        """Load the the shadow model metadata."""
+        metadata = []
+        for i in range(num_models):
+            self.logger.info(f"Loading metadata {i}")
+            metadata.append(self._load_metadata(i))
+        return metadata
+
+    def get_in_indices_mask(self:Self, num_models:int, dataset:dict) -> np.ndarray:
+        metadata = self.get_shadow_model_metadata(num_models)
+        models_in_indicies = []
+        for data in metadata:
+            models_in_indicies.append(data["train_indices"])
+        
+        indicie_masks = []
+        for audit_indicie in dataset["data"]:
+            mask = [audit_indicie in in_indicies for in_indicies in models_in_indicies]
+            indicie_masks.append(mask)
+            
+        return np.array(indicie_masks, dtype=bool)

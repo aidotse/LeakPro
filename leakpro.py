@@ -60,14 +60,14 @@ def generate_user_input(configs: dict, logger: logging.Logger)->None:
     """Generate user input for the target model."""
     # ------------------------------------------------
 
-    retrain = True
+    retrain = False
     # Create the population dataset and target_model
     if "adult" in configs["data"]["dataset"]:
         population = get_adult_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
         target_model = shadow_model_blueprints.NN(configs["train"]["inputs"], configs["train"]["outputs"])
     elif "cifar10" in configs["data"]["dataset"]:
         population = get_cifar10_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
-        target_model = shadow_model_blueprints.ConvNet()
+        target_model = shadow_model_blueprints.ResNet18()
     elif "cinic10" in configs["data"]["dataset"]:
         population = get_cinic10_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
         target_model = shadow_model_blueprints.ConvNet()
@@ -96,8 +96,8 @@ if __name__ == "__main__":
 
 
     #args = "./config/adult.yaml"  # noqa: ERA001
-    # user_args = "./config/dev_config/cifar10.yaml" # noqa: ERA001
-    user_args = "./config/dev_config/cinic10.yaml" # noqa: ERA001
+    user_args = "./config/dev_config/cifar10.yaml" # noqa: ERA001
+    # user_args = "./config/dev_config/cinic10.yaml" # noqa: ERA001
 
     with open(user_args, "rb") as f:
         user_configs = yaml.safe_load(f)
@@ -125,7 +125,7 @@ if __name__ == "__main__":
     Path(report_dir).mkdir(parents=True, exist_ok=True)
 
     # Get the target  metadata
-    target_model_metadata_path = f"{configs["target"]["trained_model_metadata_path"]}"
+    target_model_metadata_path = f'{configs["target"]["trained_model_metadata_path"]}'
     try:
         with open(target_model_metadata_path, "rb") as f:
             target_model_metadata = joblib.load(f)
