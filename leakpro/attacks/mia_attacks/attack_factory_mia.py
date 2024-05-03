@@ -10,6 +10,7 @@ from leakpro.attacks.mia_attacks.qmia import AttackQMIA
 from leakpro.attacks.mia_attacks.rmia import AttackRMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.model import PytorchModel
+from leakpro.user_code.parent_template import CodeHandler
 
 
 class AttackFactoryMIA:
@@ -29,39 +30,40 @@ class AttackFactoryMIA:
     logger = None
     shadow_model_handler = None
 
+
     @staticmethod
-    def set_population_and_audit_data(population:np.ndarray, target_metadata:dict) -> None:
+    def set_population_and_audit_data(handler: CodeHandler) -> None:
         """Initialize the population dataset."""
         if AttackFactoryMIA.population is None:
-            AttackFactoryMIA.population = population
+            AttackFactoryMIA.population = handler.population
 
         if AttackFactoryMIA.target_metadata is None:
-            AttackFactoryMIA.target_metadata = target_metadata
+            AttackFactoryMIA.target_metadata = handler.target_metadata
 
         if AttackFactoryMIA.audit_dataset is None:
            AttackFactoryMIA.audit_dataset = {
             # Assuming train_indices and test_indices are arrays of indices, not the actual data
             "data": np.concatenate(
                 (
-                    target_metadata["train_indices"],
-                    target_metadata["test_indices"],
+                    handler.target_metadata["train_indices"],
+                    handler.target_metadata["test_indices"],
                 )
             ),
             # in_members will be an array from 0 to the number of training indices - 1
-            "in_members": np.arange(len(target_metadata["train_indices"])),
+            "in_members": np.arange(len(handler.target_metadata["train_indices"])),
             # out_members will start after the last training index and go up to the number of test indices - 1
             "out_members": np.arange(
-                len(target_metadata["train_indices"]),
-                len(target_metadata["train_indices"])
-                + len(target_metadata["test_indices"]),
+                len(handler.target_metadata["train_indices"]),
+                len(handler.target_metadata["train_indices"])
+                + len(handler.target_metadata["test_indices"]),
             ),
         }
-
+           
     @staticmethod
-    def set_target_model_and_loss(target_model:nn.Module, criterion:nn.Module) -> None:
+    def set_target_model_and_loss(handler: CodeHandler) -> None:
         """Set the target model."""
         if AttackFactoryMIA.target_model is None:
-            AttackFactoryMIA.target_model = PytorchModel(target_model, criterion)
+            AttackFactoryMIA.target_model = PytorchModel(handler.target_model, handler.loss)
 
     @staticmethod
     def set_logger(logger:Logger) -> None:

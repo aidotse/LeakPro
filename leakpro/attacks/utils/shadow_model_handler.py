@@ -15,6 +15,7 @@ from tqdm import tqdm
 from leakpro.import_helper import Self, Tuple
 from leakpro.model import PytorchModel
 from leakpro.utils.input_handler import get_class_from_module, import_module_from_file
+from leakpro.user_code.parent_template import CodeHandler
 
 
 def singleton(cls):  # noqa: ANN001, ANN201
@@ -55,7 +56,7 @@ class ShadowModelHandler():
         if isinstance(attribute, type) and issubclass(attribute, nn.modules.loss._Loss):
             loss_mapping[attr.lower()] = attribute
 
-    def __init__(self:Self, target_model:Module, target_config:dict, config:dict, logger:logging.Logger)->None:
+    def __init__(self:Self, handler: CodeHandler, target_config:dict, config:dict, logger:logging.Logger) -> None:
         """Initialize the ShadowModelHandler.
 
         Args:
@@ -66,25 +67,11 @@ class ShadowModelHandler():
             logger (logging.Logger): The logger object for logging.
 
         """
-        module_path = config.get("module_path")
-        model_class_path =  config.get("model_class_path")
 
         self.logger = logger
 
-        # If no path to shadow model is provided, use the target model blueprint
-        if module_path is None or model_class_path is None:
-            self.init_params = target_config["init_params"]
-            self.shadow_model_blueprint = target_model.model_obj.__class__
-
-            self.logger.info("Shadow model blueprint: target model")
-        else:
-            self.module_path = module_path
-            self.model_class_path = model_class_path
-            self.init_params = config.get("init_params", {})
-            module = import_module_from_file(self.module_path)
-            self.shadow_model_blueprint = get_class_from_module(module, self.model_class_path)
-
-            self.logger.info(f"Shadow model blueprint loaded from {self.model_class_path} from {self.module_path}")
+        self.shadow_model_blueprint = handler.get_shadow_model_class()
+        self.init_params = handler.get_shadow_model_init_params()
 
         self.storage_path = config["storage_path"]
         # Check if the folder does not exist

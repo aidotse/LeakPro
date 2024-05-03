@@ -6,6 +6,7 @@ from torch import nn
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
 from leakpro.dataset import GeneralDataset
+from leakpro.user_code.parent_template import CodeHandler
 from leakpro.import_helper import Any, Dict, Self
 
 
@@ -16,9 +17,10 @@ class AttackScheduler:
 
     def __init__(
         self:Self,
-        population:GeneralDataset,
-        target_model:nn.Module,
-        target_model_metadata:Dict[str, Any],
+        # population:GeneralDataset,
+        # target_model:nn.Module,
+        # target_model_metadata:Dict[str, Any],
+        handler: CodeHandler,
         configs:Dict[str, Any],
         logger:logging.Logger
     ) -> None:
