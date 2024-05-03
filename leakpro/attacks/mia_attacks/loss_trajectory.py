@@ -41,12 +41,12 @@ class AttackLossTrajectory(AbstractMIA):
         Args:
         ----
             attack_utils (AttackUtils): An instance of the AttackUtils class.
-            configs (dict): A dictionary containing the attack configurations.
+            configs (dict): A dictionary containing the attack loss_traj configurations.
 
         """
         super().__init__(population, audit_dataset, target_model, logger)
 
-        self.logger.info("Configuring RMIA attack")
+        self.logger.info("Configuring Loss trajecatory attack")
         self._configure_attack(configs)
 
 
@@ -55,27 +55,27 @@ class AttackLossTrajectory(AbstractMIA):
         self.training_data_fraction = configs.get("training_data_fraction", 0.5)
         self.attack_data_fraction = configs.get("attack_data_fraction", 0.1)
 
-        # self.shadow_models = attack_utils.attack_objects.shadow_models
-        # self.distillation_models_target = attack_utils.attack_objects.distillation_models_target
-        # self.distillation_models_shadow = attack_utils.attack_objects.distillation_models_shadow
 
-        # self.target_train_indices = attack_utils.attack_objects.train_test_dataset["train_indices"]
-        # self.target_test_indices = attack_utils.attack_objects.train_test_dataset["test_indices"]
-        # self.shadow_train_indices = attack_utils.attack_objects._shadow_train_indices
-        # self.shadow_test_indices = attack_utils.attack_objects._shadow_test_indices
 
         self.configs = configs
-        self.log_dir = configs["run"]["log_dir"]
-        self.f_attack_data_size = configs["audit"]["f_distillation_target_data"]
-        self.train_mia_batch_size = configs["audit"]["audit_batch_size"]
-        self.num_students = configs["loss_traj"]["num_students"]
-        self.number_of_traj =configs["loss_traj"]["number_of_traj"]
-        self.num_classes = configs["loss_traj"]["num_classes"]
+        self.f_attack_data_size = configs.get("f_distillation_target_data", 0.3)
+        self.train_mia_batch_size = configs.get("mia_batch_size", 64)
+        self.num_students = configs.get("num_students", 1)
+        self.number_of_traj = configs.get("number_of_traj", 10)
+        self.num_classes = configs.get("num_classes", 10)
+        self.attack_data_dir = configs.get("attack_data_dir")
+        self.attack_mode = configs.get("attack_mode", "soft_label")
 
-        self.path_distillation_models_target = f"{self.log_dir}/distillation_models_target"
-        self.path_distillation_models_shadow = f"{self.log_dir}/distillation_models_shadow"
-        self.path_shadow_model = f"{self.log_dir}/shadow_models/model_0.pkl"
-        self.path_target_model = f"{self.log_dir}/model_0.pkl"
+        # f_attack_data_size: 0.3
+        # distillation_target_data_size: 0.3
+        # train_target_data_size: 10000
+        # test_target_data_size: 10000
+        # train_shadow_data_size: 10000
+        # test_shadow_data_size: 10000
+        # train_distillation_data_size: 220000
+        # aux_data_size: 240000 # all data except the training and test data for the target model
+
+
 
         self.read_from_file = False
         self.temperature = 2.0 # temperature for the softmax
@@ -147,33 +147,23 @@ class AttackLossTrajectory(AbstractMIA):
         # load shadow models
         self.shadow_models, self.shadow_model_indices = ShadowModelHandler().get_shadow_models(self.num_shadow_models)
 
-        # # Load the shadow model
-        # if "adult" in self.configs["data"]["dataset"]:
-        #     shadow_model = self.target_model.model_obj.__class__(self.configs["train"]["inputs"],
-        #                                                          self.configs["train"]["outputs"])
-        # elif "cifar10" in self.configs["data"]["dataset"]:
-        #     shadow_model = self.target_model.model_obj.__class__()
-        # elif "cinic10" in self.configs["data"]["dataset"]:
-        #     shadow_model = self.target_model.model_obj.__class__(self.configs)
-        # shadow_model.load_state_dict(torch.load(f"{self.path_shadow_model}"), strict=False)
 
-        # # Load the target model
-        # if "adult" in self.configs["data"]["dataset"]:
-        #     trained_target_model = self.target_model.model_obj.__class__(self.configs["train"]["inputs"],
-        #                                                                   self.configs["train"]["outputs"])
-        # elif "cifar10" in self.configs["data"]["dataset"]:
-        #     trained_target_model = self.target_model.model_obj.__class__()
-        # elif "cinic10" in self.configs["data"]["dataset"]:
-        #     trained_target_model = self.target_model.model_obj.__class__(self.configs)
-        # trained_target_model.load_state_dict(torch.load(f"{self.path_target_model}"), strict=False)
+        # train distillation model of the only trained shadow model
+        self.logger.info(f"Training distillation of the shadow model on {len(attack_data)} points")
+        self.distill_shadow_models, self.distill_shadow_model_indices = DistillationModelHandler().create_distillation_models(
+            self.num_students,
+            self.number_of_traj,
+            attack_data,
+            self.training_data_fraction,
+        )
 
         # shadow data (train and test) is used as training data for MIA_classifier
         self.prepare_mia_trainingset(self.shadow_model_indices,
-                                     self.shadow_model )
+                                     self.shadow_models, self.distill_shadow_models )
 
         # Data used in the target (train and test) is used as test data for MIA_classifier
         mia_test_data_indices = np.isin( self.shadow_model_indices , self.attack_data_index)
-        self.prepare_attack_dataset( mia_test_data_indices ,trained_target_model)
+        self.prepare_attack_dataset( mia_test_data_indices ,self.target_model)
 
     def prepare_mia_trainingset(self:Self, train_attack_data_indices:np.ndarray,  # noqa: PLR0915
                                 membership_status_shadow_train:np.ndarray,
@@ -191,7 +181,7 @@ class AttackLossTrajectory(AbstractMIA):
             None
 
         """
-        if not os.path.exists(f"{self.log_dir}/trajectory_train_data.npy"):
+        if not os.path.exists(f"{self.attack_data_dir}/trajectory_train_data.npy"):
             gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
             data_attack = Subset(self.population, train_attack_data_indices)
             attack_data_loader = DataLoader(data_attack, batch_size=self.train_mia_batch_size, shuffle=False)

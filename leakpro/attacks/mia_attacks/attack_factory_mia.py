@@ -10,6 +10,7 @@ from leakpro.attacks.mia_attacks.qmia import AttackQMIA
 from leakpro.attacks.mia_attacks.rmia import AttackRMIA
 from leakpro.attacks.mia_attacks.loss_trajectory import AttackLossTrajectory
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
+from leakpro.attacks.utils.distillation_model_handler import DistillationModelHandler
 from leakpro.model import PytorchModel
 
 
@@ -30,6 +31,7 @@ class AttackFactoryMIA:
     target_metadata = None
     logger = None
     shadow_model_handler = None
+    DistillationModelHandler = None
 
     @staticmethod
     def set_population_and_audit_data(population:np.ndarray, target_metadata:dict) -> None:
@@ -106,6 +108,15 @@ class AttackFactoryMIA:
                                                         AttackFactoryMIA.target_model,
                                                         AttackFactoryMIA.target_metadata,
                                                         shadow_configs,
+                                                        AttackFactoryMIA.logger
+                                                    )
+        if AttackFactoryMIA.DistillationModelHandler is None:
+            AttackFactoryMIA.logger.info("Creating distillation model handler singleton")
+            distillation_configs = configs.get("distillation_model", {})
+            AttackFactoryMIA.DistillationModelHandler = DistillationModelHandler(
+                                                        AttackFactoryMIA.target_model,
+                                                        AttackFactoryMIA.target_metadata,
+                                                        distillation_configs,
                                                         AttackFactoryMIA.logger
                                                     )
 

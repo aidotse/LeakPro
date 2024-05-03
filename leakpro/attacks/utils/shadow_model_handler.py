@@ -109,6 +109,12 @@ class ShadowModelHandler():
         if self.loss_config is None:
             raise ValueError("Loss configuration not provided")
 
+        # opt_name = self.optimizer_config.get("name")
+        # loss_name = self.loss_config.get("name")
+        # self.optimizer_class = self.optimizer_mapping[opt_name]
+        # self.criterion_class = self.loss_mapping[loss_name]
+        # self.optimizer_class = self.optimizer_mapping.get('sgd')
+        # self.criterion_class = self.loss_mapping.get('crossentropyloss')
         self.optimizer_class = self.optimizer_mapping[self.optimizer_config.pop("name")]
         self.criterion_class = self.loss_mapping[self.loss_config.pop("name")]
 

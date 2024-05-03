@@ -110,7 +110,7 @@ def extract_tar(tar_path: str, extract_path: str) -> None:
 
 def get_cinic10_dataset(dataset_name: str, data_dir: str, logger:logging.Logger) -> GeneralDataset:
     """Get the dataset."""
-    path = f"{data_dir}"
+    path = f"{data_dir}/{dataset_name}"
     if os.path.exists(f"{path}.pkl"):
         with open(f"{path}.pkl", "rb") as file:
             all_data = joblib.load(file)

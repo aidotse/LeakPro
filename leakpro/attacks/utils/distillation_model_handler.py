@@ -108,8 +108,13 @@ class DistillationModelHandler():
         if self.loss_config is None:
             raise ValueError("Loss configuration not provided")
 
+        # opt_name = self.optimizer_config.get("name")
+        # loss_name = self.loss_config.get("name")
+        # self.optimizer_class = self.optimizer_mapping.get('sgd')
+        # self.criterion_class = self.loss_mapping.get('crossentropyloss')
         self.optimizer_class = self.optimizer_mapping[self.optimizer_config.pop("name")]
         self.criterion_class = self.loss_mapping[self.loss_config.pop("name")]
+
 
         self.model_storage_name = "distillation_epochs"
         self.metadata_storage_name = "metadata"
@@ -182,6 +187,13 @@ class DistillationModelHandler():
                 pickle.dump(meta_data, f)
 
             self.logger.info(f"Metadata for distillation model stored in {self.storage_path}")
+            return distillation_model, distillation_data_indices
+        else:
+            self.logger.info("No more distillation training needed")
+            #TODO: Load distillation model here
+            return distillation_model, distillation_data_indices
+
+
 
 
 
