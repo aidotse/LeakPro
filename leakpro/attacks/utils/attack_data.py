@@ -43,7 +43,7 @@ def get_attack_data(
 
     if not test_data_included_in_auxiliary_data:
         not_allowed_indices = np.hstack([not_allowed_indices, test_indices])
-    
+
     available_index = np.setdiff1d(all_index, not_allowed_indices)
     attack_data_size = len(available_index)
 

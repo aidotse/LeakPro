@@ -108,23 +108,29 @@ class AttackLiRA(AbstractMIA):
             test_data_included_in_auxiliary_data=self.include_test_data,
             logger = self.logger
         )
-        
-        attack_data = self.population.subset(self.attack_data_index)
 
         ShadowModelHandler().create_shadow_models(
             self.num_shadow_models,
-            attack_data,
+            self.population,
+            self.attack_data_index,
             self.training_data_fraction,
         )
         
         self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.num_shadow_models)
         
-        self.in_indices_mask = ShadowModelHandler().get_in_indices_mask(self.num_shadow_models, self.audit_dataset)
+        # mask = ShadowModelHandler().get_in_indices_mask(self.num_shadow_models, self.audit_dataset["data"][self.audit_dataset["out_members"]])
+        # print(np.count_nonzero(mask))
+        # print(np.count_nonzero(~mask))
+
+        # mask = ShadowModelHandler().get_in_indices_mask(self.num_shadow_models, self.audit_dataset["data"][self.audit_dataset["in_members"]])
+        # print(np.count_nonzero(mask))
+        # print(np.count_nonzero(~mask))
+        
+        self.in_indices_mask = ShadowModelHandler().get_in_indices_mask(self.num_shadow_models, self.audit_dataset["data"])
         
         self.audit_data = self.population.subset(self.audit_dataset["data"])
         
         # # Extract a matching subset from the population dataset
-        # audit_dataset = self.population.subset(self.audit_data)
         
         # Calculate logits for all shadow models
         print(f"Calculating the logits for all {self.num_shadow_models} shadow models")
@@ -152,15 +158,11 @@ class AttackLiRA(AbstractMIA):
         
         # If global standard deviation is to be used, calculate it from all logits of shadow models
         if self.fixed_variance:
-            in_std = np.nanstd(self.shadow_models_logits[self.in_indices_mask].flatten())
+            # in_std = np.nanstd(self.shadow_models_logits[self.in_indices_mask].flatten())
             out_std = np.nanstd(self.shadow_models_logits[~self.in_indices_mask].flatten())
             
         # Iterate over each sample in the audit dataset with a progress bar
         for i, mask in tqdm(enumerate(self.in_indices_mask)):
-
-            if np.count_nonzero(mask) > 1:
-                score.append(0)
-                continue
                 
             # Extract logits from shadow models for the current sample
             shadow_models_logits = self.shadow_models_logits[i, :]
@@ -172,18 +174,19 @@ class AttackLiRA(AbstractMIA):
             # Calculate the log probability density function value
             if not self.fixed_variance:
                 out_std = np.nanstd(shadow_models_logits[~mask])
-                in_std = np.nanstd(shadow_models_logits[mask])
+                # in_std = np.nanstd(shadow_models_logits[mask])
             
-            if self.online:
-                in_mean = np.nanmean(shadow_models_logits[mask])
-                pr_in = -norm.logpdf(target_logit, in_mean, in_std + 1e-30)
+            # if self.online:
+                # in_mean = np.nanmean(shadow_models_logits[mask])
+                # pr_in = -norm.logpdf(target_logit, in_mean, in_std + 1e-30)
                 
-            else:
-                pr_in = 0
+            # else:
+            #     pr_in = 0
             
-            pr_out = -norm.logpdf(target_logit, out_mean, out_std + 1e-30)
+            pr_out = norm.logpdf(target_logit, out_mean, out_std + 1e-30)
             
-            score.append(pr_in - pr_out)  # Append the calculated probability density value to the score list
+            # score.append(pr_in - pr_out)  # Append the calculated probability density value to the score list
+            score.append(pr_out)
         
         score = np.asarray(score)  # Convert the list of scores to a numpy array
         
@@ -197,8 +200,6 @@ class AttackLiRA(AbstractMIA):
         # Create prediction matrices by comparing each score against all thresholds
         member_preds = np.less(self.in_member_signals, self.thresholds).T  # Predictions for training data members
         non_member_preds = np.less(self.out_member_signals, self.thresholds).T  # Predictions for non-members
-        # member_preds = np.greater(self.in_member_signals, self.thresholds).T
-        # non_member_preds = np.greater(self.out_member_signals, self.thresholds).T
     
         # Concatenate the prediction results for a full dataset prediction
         predictions = np.concatenate([member_preds, non_member_preds], axis=1)
@@ -218,42 +219,4 @@ class AttackLiRA(AbstractMIA):
             predictions_proba=None,  # Note: Direct probability predictions are not computed here
             signal_values=signal_values,
         )
-
-
-    def shadow_models_without_traning_sample(self, shadow_models, training_sample_idx):
-        """
-        Counts how many shadow models do not contain the specified training sample and returns the count and indices.
-        
-        Args:
-            ----
-            shadow_models: List of shadow models to be searched
-            training_sample_idx: Training sample to search for
-        
-        Returns:
-            The count of shadow models that does not contain the training sample
-            List of indices of the shadow model that was not trained of the training sample
-        """
-        # Initialize counter for sublists without the value and a list to store indices
-        count = 0
-        indices = []
-        
-        # Iterate through each sublist in the list of lists
-        for index, shadow_model in enumerate(shadow_models):
-            # If the value is not in the current sublist, increment the count and record the index
-            if training_sample_idx not in shadow_model['train_idxs']:
-                count += 1
-                indices.append(index)
-                
-        # Return the count of sublists without the value and their indices
-        return count, indices
-
-    def get_out_members(self:Self, in_index):
-        
-        all_index = np.arange(self.population_size)
-        available_index = np.setdiff1d(all_index, in_index, assume_unique=True)
-        
-        for model in self.shadow_models_metadata:
-            available_index = np.setdiff1d(available_index, model['train_idxs'], assume_unique=True)
-
-        return available_index
         

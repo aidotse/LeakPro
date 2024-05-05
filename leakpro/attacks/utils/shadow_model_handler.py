@@ -120,6 +120,7 @@ class ShadowModelHandler():
         self:Self,
         num_models:int,
         dataset:Dataset,
+        indicies:list,
         training_fraction:float
     ) -> None:
         """Create and train shadow models based on the blueprint.
@@ -145,12 +146,11 @@ class ShadowModelHandler():
         num_to_reuse = len(model_files)
 
         # Get the size of the dataset
-        shadow_data_size = int(len(dataset)*training_fraction)
-        all_index = np.arange(len(dataset))
+        shadow_data_size = int(len(indicies)*training_fraction)
 
         for i in range(num_to_reuse, num_models):
 
-            shadow_data_indices = np.random.choice(all_index, shadow_data_size, replace=False)
+            shadow_data_indices = np.random.choice(indicies, shadow_data_size, replace=False)
             shadow_dataset = dataset.subset(shadow_data_indices)
             shadow_train_loader = DataLoader(shadow_dataset, batch_size=self.batch_size, shuffle=True)
             self.logger.info(f"Created shadow dataset {i} with size {len(shadow_dataset)}")
@@ -335,7 +335,7 @@ class ShadowModelHandler():
             metadata.append(self._load_metadata(i))
         return metadata
 
-    def get_in_indices_mask(self:Self, num_models:int, dataset:dict) -> np.ndarray:
+    def get_in_indices_mask(self:Self, num_models:int, dataset:np.ndarray) -> np.ndarray:
         metadata = self.get_shadow_model_metadata(num_models)
         models_in_indicies = []
         for data in metadata:
@@ -343,8 +343,7 @@ class ShadowModelHandler():
 
         models_in_indicies = np.asarray(models_in_indicies)
         indicie_masks = []
-        for audit_indicie in tqdm(dataset["data"]):
-            # mask = [audit_indicie in in_indicies for in_indicies in models_in_indicies]
+        for audit_indicie in tqdm(dataset):
             mask = indicie_in_shadowmodel_training_set(audit_indicie, models_in_indicies)
             indicie_masks.append(mask)
             
