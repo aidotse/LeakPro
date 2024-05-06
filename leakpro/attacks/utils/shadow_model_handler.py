@@ -269,7 +269,7 @@ class ShadowModelHandler():
             self.logger.error(f"Could not find the shadow model {index}")
             return None
 
-    def get_shadow_models(self:Self, num_models:int) -> list:
+    def get_shadow_models(self:Self, num_models:int) -> Tuple[list, list]:
         """Load the the shadow models."""
         shadow_models = []
         shadow_model_indices = []

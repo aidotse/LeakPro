@@ -1,7 +1,6 @@
 """Module containing classes to generate reports from metric results."""
 import datetime
 import json
-import logging
 import os
 import subprocess
 from abc import ABC, abstractmethod
@@ -146,7 +145,7 @@ class ROCCurveReport(AuditReport):
         show: bool = False,
         save: bool = True,
         filename: str = "roc_curve.jpg",
-        configs: dict = None,  # noqa: ARG004
+        configs: dict = None,  # noqa: ARG004,
     ) -> None:
         """Core function of the AuditReport class that actually generates the report.
 
@@ -317,19 +316,22 @@ class SignalHistogramReport(AuditReport):
         labels = np.array(metric_result.true_labels).ravel()
         threshold = metric_result.threshold
 
-        histogram = sn.histplot(
-            data=pd.DataFrame(
+        data = pd.DataFrame(
                 {
                     "Signal": values,
-                    "Membership": [
-                        "Member" if y == 1 else "Non-member" for y in labels
-                    ],
+                    "Membership": ["Member" if y == 1 else "Non-member" for y in labels],
                 }
-            ),
+            )
+
+        bin_edges = np.histogram_bin_edges(values, bins=1000)
+
+        histogram = sn.histplot(
+            data=data,
             x="Signal",
             hue="Membership",
             element="step",
             kde=True,
+            bins = bin_edges
         )
 
         if threshold is not None and isinstance(threshold, float):
@@ -615,7 +617,7 @@ class PDFReport(AuditReport):
                 f'PDF file created:\t{os.path.abspath(f"{filename_no_extension}.pdf")}'
             )
 
-def read_and_parse_data(filename:str, logger:logging.Logger) -> dict:
+def read_and_parse_data(filename:str) -> dict:
     """Read and parse data from a file.
 
     Args:
@@ -639,7 +641,7 @@ def read_and_parse_data(filename:str, logger:logging.Logger) -> dict:
                     fpr_tpr = lines[1]
                     data[config] = fpr_tpr
     except FileNotFoundError:
-        logger.info(f"No existing file named '{filename}'. A new file will be created.")
+        print(f"No existing file named '{filename}'. A new file will be created.")  # noqa: T201
     return data
 
 # Main logic to process and save results
@@ -652,6 +654,7 @@ def fixed_fpr_results(fpr:np.ndarray, tpr:np.ndarray, configs:dict, filename:str
         tpr (np.ndarray): Array of true positive rates.
         configs (dict): Dictionary of attack configurations.
         filename (str): Name of the file to save the results.
+        logger (logging.Logger): The logger object for logging messages.
 
     Returns:
     -------

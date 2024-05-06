@@ -148,7 +148,11 @@ class AttackLiRA(AbstractMIA):
             out_std = np.nanstd(self.shadow_models_logits[~self.in_indices_mask].flatten())
 
         # Iterate over each sample in the audit dataset with a progress bar
+        indices_to_remove = np.zeros(len(self.in_indices_mask), dtype=bool)
         for i, mask in tqdm(enumerate(self.in_indices_mask)):
+            # Check if there are no out models
+            if np.sum(mask) == len(mask):
+                indices_to_remove[i] = True
 
             # Extract logits from shadow models for the current sample
             shadow_models_logits = self.shadow_models_logits[i, :]
@@ -167,7 +171,7 @@ class AttackLiRA(AbstractMIA):
         score = np.asarray(score)  # Convert the list of scores to a numpy array
 
         # Generate thresholds based on the range of computed scores for decision boundaries
-        self.thresholds = np.linspace(np.nanmin(score), np.nanmax(score), 2000)
+        self.thresholds = np.linspace(np.nanmin(score), np.nanmax(score), 1000)
 
         # Split the score array into two parts based on membership: in (training) and out (non-training)
         self.in_member_signals = score[self.audit_dataset["in_members"]].reshape(-1,1)  # Scores for known training data members
@@ -190,8 +194,8 @@ class AttackLiRA(AbstractMIA):
 
         # Return a result object containing predictions, true labels, and the signal values for further evaluation
         return CombinedMetricResult(
-            predicted_labels=predictions,
-            true_labels=true_labels,
+            predicted_labels=predictions[:, ~indices_to_remove],
+            true_labels=true_labels[~indices_to_remove],
             predictions_proba=None,  # Note: Direct probability predictions are not computed here
-            signal_values=signal_values,
+            signal_values=signal_values[~indices_to_remove],
         )
