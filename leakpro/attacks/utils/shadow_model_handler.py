@@ -5,9 +5,9 @@ import os
 import pickle
 import re
 
-from numba import njit
 import joblib
 import numpy as np
+from numba import njit
 from torch import cuda, device, load, nn, optim, save
 from torch.nn import Module
 from torch.utils.data import DataLoader, Dataset
@@ -129,6 +129,7 @@ class ShadowModelHandler():
         ----
             num_models (int): The number of shadow models to create.
             dataset (torch.utils.data.Dataset): The full dataset available for training the shadow models.
+            indicies (list): The indices to use from the dataset for training the shadow models.
             training_fraction (float): The fraction of the dataset to use for training.
 
         Returns:
@@ -258,10 +259,15 @@ class ShadowModelHandler():
         if index >= len(os.listdir(self.storage_path)):
             raise ValueError("Index out of range")
         shadow_model = self.shadow_model_blueprint(**self.init_params)
-        with open(f"{self.storage_path}/{self.model_storage_name}_{index}.pkl", "rb") as f:
-            shadow_model.load_state_dict(load(f))
-            self.logger.info(f"Loaded shadow model {index}")
-        return PytorchModel(shadow_model, self.criterion_class(**self.loss_config))
+
+        try:
+            with open(f"{self.storage_path}/{self.model_storage_name}_{index}.pkl", "rb") as f:
+                shadow_model.load_state_dict(load(f))
+                self.logger.info(f"Loaded shadow model {index}")
+            return PytorchModel(shadow_model, self.criterion_class(**self.loss_config))
+        except FileNotFoundError:
+            self.logger.error(f"Could not find the shadow model {index}")
+            return None
 
     def get_shadow_models(self:Self, num_models:int) -> list:
         """Load the the shadow models."""
@@ -306,27 +312,30 @@ class ShadowModelHandler():
 
         return shadow_model_trained_on_data_index
 
-    def _load_metadata(self:Self, index:int) -> Module:
+    def _load_metadata(self:Self, index:int) -> dict:
         """Load a shadow model from a saved state.
 
         Args:
         ----
-            index (int): The index of the shadow model to load.
+            index (int): The index of the shadow model to load metadata for.
 
         Returns:
         -------
-            Module: The loaded shadow model.
+            Module: The loaded metadata.
 
         """
         if index < 0:
             raise ValueError("Index cannot be negative")
         if index >= len(os.listdir(self.storage_path)):
             raise ValueError("Index out of range")
-        meta_data = {}
-        with open(f"{self.storage_path}/{self.metadata_storage_name}_{index}.pkl", "rb") as f:
-            meta_data = pickle.load(f)
-        return meta_data
-        
+
+        try:
+            with open(f"{self.storage_path}/{self.metadata_storage_name}_{index}.pkl", "rb") as f:
+                return joblib.load(f)
+        except FileNotFoundError:
+            self.logger.error(f"Could not find the metadata for shadow model {index}")
+            return None
+
     def get_shadow_model_metadata(self:Self, num_models:int) -> list:
         """Load the the shadow model metadata."""
         metadata = []
@@ -336,6 +345,18 @@ class ShadowModelHandler():
         return metadata
 
     def get_in_indices_mask(self:Self, num_models:int, dataset:np.ndarray) -> np.ndarray:
+        """Get the mask indicating which indices in the dataset are present in the shadow model training set.
+
+        Args:
+        ----
+            num_models (int): The number of shadow models.
+            dataset (np.ndarray): The dataset.
+
+        Returns:
+        -------
+            np.ndarray: The mask indicating which indices are present in the shadow model training set.
+
+        """
         metadata = self.get_shadow_model_metadata(num_models)
         models_in_indicies = []
         for data in metadata:
@@ -344,12 +365,23 @@ class ShadowModelHandler():
         models_in_indicies = np.asarray(models_in_indicies)
         indicie_masks = []
         for audit_indicie in tqdm(dataset):
-            mask = indicie_in_shadowmodel_training_set(audit_indicie, models_in_indicies)
+            mask = indice_in_shadowmodel_training_set(audit_indicie, models_in_indicies)
             indicie_masks.append(mask)
-            
+
         return np.array(indicie_masks, dtype=bool)
 
 @njit
-def indicie_in_shadowmodel_training_set(audit_indicie:int, models_in_indicies:list) -> list:
-    mask = [audit_indicie in in_indicies for in_indicies in models_in_indicies]
-    return mask
+def indice_in_shadowmodel_training_set(audit_indicie:int, models_in_indicies:list) -> list:
+    """Check if an audit indice is present in the shadow model training set.
+
+    Args:
+    ----
+        audit_indicie (int): The audit indice to check.
+        models_in_indicies (list): The list of indices in the shadow model training set.
+
+    Returns:
+    -------
+        list: The mask indicating if the audit indice is present in each shadow model training set.
+
+    """
+    return [audit_indicie in in_indicies for in_indicies in models_in_indicies]

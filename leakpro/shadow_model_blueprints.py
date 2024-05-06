@@ -101,9 +101,11 @@ class ResNet18(nn.Module):
 
     def __init__(self:Self, num_classes:int = 10) -> None:  # noqa: D417
         """Initialize the ResNet-18 model.
+
         Args:
         ----
             num_classes (int, optional): The number of classes. Defaults to 1000.
+
         """
         super().__init__()
         self.init_params = {
@@ -113,11 +115,14 @@ class ResNet18(nn.Module):
 
     def forward(self:Self, x:torch.Tensor) -> torch.Tensor:
         """Forward pass of the model.
+
         Args:
         ----
             x (torch.Tensor): The input tensor.
+
         Returns:
         -------
             torch.Tensor: The output tensor.
+
         """
         return self.model(x)

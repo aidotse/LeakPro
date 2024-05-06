@@ -1,11 +1,12 @@
 """Module containing classes to generate reports from metric results."""
 import datetime
+import json
+import logging
 import os
 import subprocess
 from abc import ABC, abstractmethod
 
 import jinja2
-import json
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -181,7 +182,7 @@ class ROCCurveReport(AuditReport):
             fpr = mr.fp / (mr.fp + mr.tn)
             tpr = mr.tp / (mr.tp + mr.fn)
             roc_auc = np.trapz(x=fpr, y=tpr)
-        
+
         # save the data to a csv file
         directory = os.path.dirname(filename)
 
@@ -195,9 +196,9 @@ class ROCCurveReport(AuditReport):
             for i in range(len(fpr)):
                 f.write(f"{fpr[i]},{tpr[i]}\n")
 
-        
+
         fixed_fpr_results(fpr, tpr, configs, filename)
-        
+
         # Gets metric ID
         # TODO: add metric ID to the CombinedMetricResult class
         metric_id = "population_metric"
@@ -614,36 +615,61 @@ class PDFReport(AuditReport):
                 f'PDF file created:\t{os.path.abspath(f"{filename_no_extension}.pdf")}'
             )
 
-def read_and_parse_data(filename):
+def read_and_parse_data(filename:str, logger:logging.Logger) -> dict:
+    """Read and parse data from a file.
+
+    Args:
+    ----
+        filename (str): The name of the file to read.
+        logger (logging.Logger): The logger object for logging messages.
+
+    Returns:
+    -------
+        dict: A dictionary containing the parsed data.
+
+    """
     data = {}
     try:
         with open(filename, "r") as file:
-            content = file.read().strip().split('\n\n')  # Split by empty row
+            content = file.read().strip().split("\n\n")  # Split by empty row
             for block in content:
                 if block.strip():
-                    lines = block.split('\n')
+                    lines = block.split("\n")
                     config = lines[0]
                     fpr_tpr = lines[1]
                     data[config] = fpr_tpr
     except FileNotFoundError:
-        print(f"No existing file named '{filename}'. A new file will be created.")
+        logger.info(f"No existing file named '{filename}'. A new file will be created.")
     return data
-    
+
 # Main logic to process and save results
-def fixed_fpr_results(fpr, tpr, configs, filename):
-    
+def fixed_fpr_results(fpr:np.ndarray, tpr:np.ndarray, configs:dict, filename:str) -> None:
+    """Compute and save fixed FPR results.
+
+    Args:
+    ----
+        fpr (np.ndarray): Array of false positive rates.
+        tpr (np.ndarray): Array of true positive rates.
+        configs (dict): Dictionary of attack configurations.
+        filename (str): Name of the file to save the results.
+
+    Returns:
+    -------
+        None
+
+    """
     # Split the path into components
-    path_components = filename.split('/')
-    
+    path_components = filename.split("/")
+
     # Make the path for "results.txt"
     path_components[-1] = "results.txt"
-    
+
     # Join the components back into a full path
-    filename = '/'.join(path_components)
-    
+    filename = "/".join(path_components)
+
     # Serialize configuration
-    attack_name = list(configs['attack_list'].keys())[0]
-    attack_configs = configs['attack_list'][attack_name]
+    attack_name = list(configs["attack_list"].keys())[0]
+    attack_configs = configs["attack_list"][attack_name]
     config_key = json.dumps(attack_configs, sort_keys=True)
 
     # Compute TPR values at various FPR thresholds
@@ -662,4 +688,3 @@ def fixed_fpr_results(fpr, tpr, configs, filename):
     with open(filename, "w") as file:
         for config, results in data.items():
             file.write(f"{config}\n{results}\n\n")
-    

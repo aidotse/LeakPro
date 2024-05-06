@@ -270,17 +270,17 @@ class PytorchModel(Model):
                 batched_labels = torch.split(torch.tensor(np.array(batch_labels), dtype=torch.float32), self.batch_size)
 
                 for x, y in zip(batched_samples, batched_labels):
-                    x = x.to(device)
-                    y = y.to(device)
+                    x = x.to(device)  # noqa: PLW2901
+                    y = y.to(device)  # noqa: PLW2901
                     all_logits = self.model_obj(x)
-    
+
                     predictions = all_logits - torch.max(all_logits, dim=1, keepdim=True).values
                     predictions = torch.exp(predictions)
                     predictions = predictions/torch.sum(predictions,dim=1, keepdim=True)
-    
-                    COUNT = predictions.shape[0]
-                    y_true = predictions[np.arange(COUNT), y.type(torch.IntTensor)]
-                    predictions[np.arange(COUNT), y.type(torch.IntTensor)] = 0
+
+                    count = predictions.shape[0]
+                    y_true = predictions[np.arange(count), y.type(torch.IntTensor)]
+                    predictions[np.arange(count), y.type(torch.IntTensor)] = 0
                     y_wrong = torch.sum(predictions, dim=1)
                     output_signals = torch.flatten(torch.log(y_true+1e-45) - torch.log(y_wrong+1e-45)).cpu().numpy()
 

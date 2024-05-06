@@ -121,23 +121,23 @@ class ModelNegativeRescaledLogits(Signal):
         Returns:
         -------
             The signal value.
+
         """
-        
         data_loader = DataLoader(datasets, batch_size=len(datasets), shuffle=False)
-        
+
         # Iterate over the dataset using the DataLoader (ensures we use transforms etc)
         for data, labels in data_loader:
-            
+
             # Initialize a list to store the logits for the current model
             model_logits = []
             for model in tqdm(models):
-                
+
                 # Get neg. rescaled logits for each data point
                 logits = -model.get_rescaled_logits(data, labels)
 
                 # Append the logits for the current model to the results
                 model_logits.append(logits)
-                
+
             model_logits = np.array(model_logits)
         return model_logits
 
@@ -166,23 +166,23 @@ class ModelRescaledLogits(Signal):
         Returns:
         -------
             The signal value.
+
         """
-        
         data_loader = DataLoader(datasets, batch_size=len(datasets), shuffle=False)
-        
+
         # Iterate over the dataset using the DataLoader (ensures we use transforms etc)
         for data, labels in data_loader:
-            
+
             # Initialize a list to store the logits for the current model
             model_logits = []
             for model in tqdm(models):
-                
+
                 # Get neg. rescaled logits for each data point
                 logits = model.get_rescaled_logits(data, labels)
 
                 # Append the logits for the current model to the results
                 model_logits.append(logits)
-                
+
             model_logits = np.array(model_logits)
         return model_logits
 
