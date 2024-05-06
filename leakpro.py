@@ -7,8 +7,9 @@ from pathlib import Path
 
 import joblib
 import numpy as np
-import torch
 import yaml
+from torch import load, manual_seed
+from torch.utils.data import Subset
 
 import leakpro.dev_utils.train as utils
 from leakpro import shadow_model_blueprints
@@ -79,12 +80,12 @@ def generate_user_input(configs: dict, logger: logging.Logger)->None:
     train_test_dataset = prepare_train_test_datasets(n_population, configs["data"])
 
     train_loader = get_dataloader(
-        torch.utils.data.Subset(population, train_test_dataset["train_indices"]),
+        Subset(population, train_test_dataset["train_indices"]),
         batch_size=configs["train"]["batch_size"],
         shuffle=True,
     )
     test_loader = get_dataloader(
-        torch.utils.data.Subset(population, train_test_dataset["test_indices"]),
+        Subset(population, train_test_dataset["test_indices"]),
         batch_size=configs["train"]["test_batch_size"],
     )
 
@@ -96,8 +97,8 @@ if __name__ == "__main__":
 
 
     #args = "./config/adult.yaml"  # noqa: ERA001
-    # user_args = "./config/dev_config/cifar10.yaml" # noqa: ERA001
-    user_args = "./config/dev_config/cinic10.yaml" # noqa: ERA001
+    user_args = "./config/dev_config/cifar10.yaml" # noqa: ERA001
+    #user_args = "./config/dev_config/cinic10.yaml" # noqa: ERA001
 
     with open(user_args, "rb") as f:
         user_configs = yaml.safe_load(f)
@@ -116,7 +117,7 @@ if __name__ == "__main__":
         configs = yaml.safe_load(f)
 
     # Set the random seed, log_dir and inference_game
-    torch.manual_seed(configs["audit"]["random_seed"])
+    manual_seed(configs["audit"]["random_seed"])
     np.random.seed(configs["audit"]["random_seed"])
     random.seed(configs["audit"]["random_seed"])
 
@@ -140,7 +141,7 @@ if __name__ == "__main__":
     # Load the target model parameters into the blueprint
     with open(configs["target"]["trained_model_path"], "rb") as f:
         target_model = target_model_blueprint(**target_model_metadata["model_metadata"]["init_params"])
-        target_model.load_state_dict(torch.load(f))
+        target_model.load_state_dict(load(f))
         logger.info(f"Loaded target model from {configs['target']['trained_model_path']}")
 
     # Get the population dataset
