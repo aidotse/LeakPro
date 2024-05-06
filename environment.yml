@@ -28,6 +28,7 @@ dependencies:
   - pyyaml
   - numba
   - pydantic
+  - joblib
 
   # Development and Testing
   - pytest
