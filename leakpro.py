@@ -97,8 +97,8 @@ if __name__ == "__main__":
 
 
     #args = "./config/adult.yaml"  # noqa: ERA001
-    user_args = "./config/dev_config/cifar10.yaml" # noqa: ERA001
-    #user_args = "./config/dev_config/cinic10.yaml" # noqa: ERA001
+    # user_args = "./config/dev_config/cifar10.yaml" # noqa: ERA001
+    user_args = "./config/dev_config/cinic10.yaml" # noqa: ERA001
 
     with open(user_args, "rb") as f:
         user_configs = yaml.safe_load(f)

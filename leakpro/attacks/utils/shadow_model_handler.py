@@ -121,7 +121,7 @@ class ShadowModelHandler():
         num_models:int,
         shadow_dataset:Dataset,
         shadow_data_indices: np.ndarray,
-        retrain:bool,
+        retrain:bool = False,
     ) -> None:
         """Create and train shadow models based on the blueprint.
 
@@ -261,22 +261,18 @@ class ShadowModelHandler():
         with open(f"{self.storage_path}/{self.model_storage_name}_{index}.pkl", "rb") as f:
             shadow_model.load_state_dict(load(f))
             self.logger.info(f"Loaded shadow model {index}")
-        with open(f"{self.storage_path}/{self.metadata_storage_name}_{index}.pkl", "rb") as f:
-            shadow_metadata = pickle.load(f)# noqa: S301
-        return PytorchModel(shadow_model, self.criterion_class(**self.loss_config)), shadow_metadata
+        return PytorchModel(shadow_model, self.criterion_class(**self.loss_config))
 
     def get_shadow_models(self:Self, num_models:int) -> list:
         """Load the the shadow models."""
         shadow_models = []
         shadow_model_indices = []
-        shadow_metadata = []
         for i in range(num_models):
             self.logger.info(f"Loading shadow model {i}")
-            model, metadata = self._load_shadow_model(i)
+            model = self._load_shadow_model(i)
             shadow_models.append(model)
-            shadow_metadata.append(metadata)
             shadow_model_indices.append(i)
-        return shadow_models, shadow_model_indices, shadow_metadata
+        return shadow_models, shadow_model_indices
 
     def identify_models_trained_on_samples(self:Self, shadow_model_indices: list[int], sample_indices:set[int]) -> list:
         """Identify the shadow models trained on the provided samples.
@@ -310,3 +306,36 @@ class ShadowModelHandler():
                     shadow_model_trained_on_data_index[i, j] = sample_indices[j] in train_indices
 
         return shadow_model_trained_on_data_index
+
+
+    def _load_metadata(self:Self, index:int) -> dict:
+        """Load a shadow model from a saved state.
+
+        Args:
+        ----
+            index (int): The index of the shadow model to load metadata for.
+
+        Returns:
+        -------
+            Module: The loaded metadata.
+
+        """
+        if index < 0:
+            raise ValueError("Index cannot be negative")
+        if index >= len(os.listdir(self.storage_path)):
+            raise ValueError("Index out of range")
+
+        try:
+            with open(f"{self.storage_path}/{self.metadata_storage_name}_{index}.pkl", "rb") as f:
+                return joblib.load(f)
+        except FileNotFoundError:
+            self.logger.error(f"Could not find the metadata for shadow model {index}")
+            return None
+
+    def get_shadow_model_metadata(self:Self, num_models:int) -> list:
+        """Load the the shadow model metadata."""
+        metadata = []
+        for i in range(num_models):
+            self.logger.info(f"Loading metadata {i}")
+            metadata.append(self._load_metadata(i))
+        return metadata

@@ -137,12 +137,13 @@ class AttackLossTrajectory(AbstractMIA):
             self.num_shadow_models,
             shadow_dataset,
             shadow_training_indices,
-            retrain= True,
+            retrain= False,
         )
 
         # load shadow models
-        self.shadow_models, self.shadow_model_indices, self.shadow_metadata = \
+        self.shadow_models, self.shadow_model_indices = \
             ShadowModelHandler().get_shadow_models(self.num_shadow_models)
+        self.shadow_metadata = ShadowModelHandler().get_shadow_model_metadata(1)
 
         # train the distillation model using the one and only trained shadow model
         self.logger.info(f"Training distillation of the shadow model on {len(distill_dataset)} points")
@@ -214,7 +215,7 @@ class AttackLossTrajectory(AbstractMIA):
 
             # Create the training dataset for the MIA classifier.
             mia_train_input = np.concatenate((data["model_trajectory"],
-                                            data["taeget_model_loss"][:, None]), axis=1)
+                                            data["teacher_model_loss"][:, None]), axis=1)
             mia_train_dataset = TensorDataset(tensor(mia_train_input), tensor(data["member_status"]))
             self.mia_train_data_loader = DataLoader(mia_train_dataset, batch_size=self.train_mia_batch_size, shuffle=True)
 
@@ -232,7 +233,7 @@ class AttackLossTrajectory(AbstractMIA):
                                               dataset_name)
             # Create the training dataset for the MIA classifier.
             mia_test_input = np.concatenate((data["model_trajectory"] ,
-                                            data["target_model_loss"][:,None]), axis=1)
+                                            data["teacher_model_loss"][:,None]), axis=1)
             mia_test_dataset = TensorDataset(tensor(mia_test_input), tensor(data["member_status"]))
             self.mia_test_data_loader = DataLoader(mia_test_dataset, batch_size=self.train_mia_batch_size, shuffle=True)
 
@@ -296,6 +297,7 @@ class AttackLossTrajectory(AbstractMIA):
                 predicted_labels = batch_predicted_label
                 predicted_status = batch_predicted_status
             else:
+                teacher_model_loss = np.concatenate((teacher_model_loss, batch_loss_teacher), axis=0)
                 model_trajectory = np.concatenate((model_trajectory, trajectory_current), axis=0)
                 original_labels = np.concatenate((original_labels, batch_original_label), axis=0)
                 predicted_labels = np.concatenate((predicted_labels, batch_predicted_label), axis=0)
