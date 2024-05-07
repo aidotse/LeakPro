@@ -18,9 +18,9 @@ class AttackFactoryMIA:
     """Class responsible for creating the attack objects."""
 
     attack_classes = {
-        # "population": AttackP,
-        # "rmia": AttackRMIA,
-        # "qmia": AttackQMIA,
+        "population": AttackP,
+        "rmia": AttackRMIA,
+        "qmia": AttackQMIA,
         "loss_traj":AttackLossTrajectory,
     }
 
