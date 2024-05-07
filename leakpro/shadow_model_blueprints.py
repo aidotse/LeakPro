@@ -102,8 +102,11 @@ class ResNet18(nn.Module):
     def __init__(self:Self, num_classes:int=10) -> None:
         """Initialize the model."""
         super().__init__()
-        self.init_params = {"num_classes": num_classes}
         self.model = resnet18(pretrained=False)
+
+        # Modify the last fully connected layer to have 'num_classes' output features
+        num_features = self.model.fc.in_features
+        self.model.fc = nn.Linear(num_features, num_classes)
 
     def forward(self:Self, x:torch.Tensor) -> torch.Tensor:
         """Forward pass of the model."""

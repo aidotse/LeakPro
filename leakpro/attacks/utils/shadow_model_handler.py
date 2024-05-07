@@ -109,12 +109,6 @@ class ShadowModelHandler():
         if self.loss_config is None:
             raise ValueError("Loss configuration not provided")
 
-        # opt_name = self.optimizer_config.get("name")
-        # loss_name = self.loss_config.get("name")
-        # self.optimizer_class = self.optimizer_mapping[opt_name]
-        # self.criterion_class = self.loss_mapping[loss_name]
-        # self.optimizer_class = self.optimizer_mapping.get('sgd')
-        # self.criterion_class = self.loss_mapping.get('crossentropyloss')
         self.optimizer_class = self.optimizer_mapping[self.optimizer_config.pop("name")]
         self.criterion_class = self.loss_mapping[self.loss_config.pop("name")]
 
@@ -124,16 +118,18 @@ class ShadowModelHandler():
     def create_shadow_models(
         self:Self,
         num_models:int,
-        dataset:Dataset,
-        training_fraction:float
+        shadow_dataset:Dataset,
+        shadow_data_indices: np.ndarray,
+        retrain:bool,
     ) -> None:
         """Create and train shadow models based on the blueprint.
 
         Args:
         ----
             num_models (int): The number of shadow models to create.
-            dataset (torch.utils.data.Dataset): The full dataset available for training the shadow models.
-            training_fraction (float): The fraction of the dataset to use for training.
+            shadow_dataset (torch.utils.data.Dataset): The full dataset available for training the shadow models.
+            shadow_data_indices (np.ndarray): The indices of the data points to be used for training the shadow models.
+            retrain (bool): Whether to retrain the shadow models or not.
 
         Returns:
         -------
@@ -143,20 +139,18 @@ class ShadowModelHandler():
         if num_models < 0:
             raise ValueError("Number of models cannot be negative")
 
-        entries = os.listdir(self.storage_path)
-        # Define a regex pattern to match files like model_{i}.pkl
-        pattern = re.compile(rf"^{self.model_storage_name}_\d+\.pkl$")
-        model_files = [f for f in entries if pattern.match(f)]
-        num_to_reuse = len(model_files)
-
-        # Get the size of the dataset
-        shadow_data_size = int(len(dataset)*training_fraction)
-        all_index = np.arange(len(dataset))
+        if retrain:
+            self.logger.info("Retraining shadow models")
+            num_to_reuse = 0
+        else:
+            entries = os.listdir(self.storage_path)
+            # Define a regex pattern to match files like model_{i}.pkl
+            pattern = re.compile(rf"^{self.model_storage_name}_\d+\.pkl$")
+            model_files = [f for f in entries if pattern.match(f)]
+            num_to_reuse = len(model_files)
 
         for i in range(num_to_reuse, num_models):
 
-            shadow_data_indices = np.random.choice(all_index, shadow_data_size, replace=False)
-            shadow_dataset = dataset.subset(shadow_data_indices)
             shadow_train_loader = DataLoader(shadow_dataset, batch_size=self.batch_size, shuffle=True)
             self.logger.info(f"Created shadow dataset {i} with size {len(shadow_dataset)}")
 
@@ -175,7 +169,7 @@ class ShadowModelHandler():
             meta_data = {}
             meta_data["init_params"] = self.init_params
             meta_data["train_indices"] = shadow_data_indices
-            meta_data["num_train"] = shadow_data_size
+            meta_data["num_train"] = len(shadow_data_indices)
             meta_data["optimizer"] = self.optimizer_class.__name__
             meta_data["criterion"] = self.criterion_class.__name__
             meta_data["batch_size"] = self.batch_size
@@ -266,17 +260,22 @@ class ShadowModelHandler():
         with open(f"{self.storage_path}/{self.model_storage_name}_{index}.pkl", "rb") as f:
             shadow_model.load_state_dict(load(f))
             self.logger.info(f"Loaded shadow model {index}")
-        return PytorchModel(shadow_model, self.criterion_class(**self.loss_config))
+        with open(f"{self.storage_path}/{self.metadata_storage_name}_{index}.pkl", "rb") as f:
+            shadow_metadata = pickle.load(f)# noqa: S301
+        return PytorchModel(shadow_model, self.criterion_class(**self.loss_config)), shadow_metadata
 
     def get_shadow_models(self:Self, num_models:int) -> list:
         """Load the the shadow models."""
         shadow_models = []
         shadow_model_indices = []
+        shadow_metadata = []
         for i in range(num_models):
             self.logger.info(f"Loading shadow model {i}")
-            shadow_models.append(self._load_shadow_model(i))
+            model, metadata = self._load_shadow_model(i)
+            shadow_models.append(model)
+            shadow_metadata.append(metadata)
             shadow_model_indices.append(i)
-        return shadow_models, shadow_model_indices
+        return shadow_models, shadow_model_indices, shadow_metadata
 
     def identify_models_trained_on_samples(self:Self, shadow_model_indices: list[int], sample_indices:set[int]) -> list:
         """Identify the shadow models trained on the provided samples.

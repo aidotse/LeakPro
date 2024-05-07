@@ -2,25 +2,17 @@
 
 import os
 import pickle
-# from typing import Self
-
-# import numpy as np
-# import torch
-# from torch import nn
-# from torch.nn import functional
-from torch.utils.data import DataLoader, Subset, TensorDataset
-
-from torch import cuda, device, functional, load, nn, save, argmax, tensor, optim, no_grad
-
 from logging import Logger
 
 import numpy as np
-from torch import nn
+import torch.nn.functional as F  # noqa: N812
+from torch import argmax, cuda, device, load, nn, no_grad, optim, save, tensor
+from torch.utils.data import DataLoader, Subset, TensorDataset
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.attack_data import get_attack_data
+from leakpro.attacks.utils.distillation_model_handler import DistillationShadowModelHandler, DistillationTargetModelHandler
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
-from leakpro.attacks.utils.distillation_model_handler import DistillationModelHandler
 from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.signals.signal import ModelLogits
@@ -40,7 +32,10 @@ class AttackLossTrajectory(AbstractMIA):
 
         Args:
         ----
-            attack_utils (AttackUtils): An instance of the AttackUtils class.
+            population (np.ndarray): The population data.
+            audit_dataset (dict): The audit dataset.
+            target_model (nn.Module): The target model.
+            logger (Logger): The logger instance.
             configs (dict): A dictionary containing the attack loss_traj configurations.
 
         """
@@ -52,29 +47,17 @@ class AttackLossTrajectory(AbstractMIA):
 
     def _configure_attack(self: Self, configs: dict) -> None:
         self.num_shadow_models = 1
-        self.training_data_fraction = configs.get("training_data_fraction", 0.5)
-        self.attack_data_fraction = configs.get("attack_data_fraction", 0.1)
-
-
+        self.distillation_data_fraction = configs.get("training_distill_data_fraction", 0.5)
+        self.shadow_data_fraction = 1 - self.distillation_data_fraction
 
         self.configs = configs
-        self.f_attack_data_size = configs.get("f_distillation_target_data", 0.3)
         self.train_mia_batch_size = configs.get("mia_batch_size", 64)
         self.num_students = configs.get("num_students", 1)
         self.number_of_traj = configs.get("number_of_traj", 10)
         self.num_classes = configs.get("num_classes", 10)
         self.attack_data_dir = configs.get("attack_data_dir")
+        self.mia_classifier_epoch = configs.get("mia_classifier_epoch", 100)
         self.attack_mode = configs.get("attack_mode", "soft_label")
-
-        # f_attack_data_size: 0.3
-        # distillation_target_data_size: 0.3
-        # train_target_data_size: 10000
-        # test_target_data_size: 10000
-        # train_shadow_data_size: 10000
-        # test_shadow_data_size: 10000
-        # train_distillation_data_size: 220000
-        # aux_data_size: 240000 # all data except the training and test data for the target model
-
 
 
         self.read_from_file = False
@@ -122,10 +105,11 @@ class AttackLossTrajectory(AbstractMIA):
         self.logger.info("Preparing the data for loss trajectory attack")
 
         include_target_training_data = False
-        include_target_testing_data = False
+        #TODO: This should be changed!
+        include_target_testing_data = True
 
-        # Get all available indices for attack dataset
-        self.attack_data_index = get_attack_data(
+        # Get all available indices for auxiliary dataset
+        aux_data_index = get_attack_data(
             self.population_size,
             self.train_indices,
             self.test_indices,
@@ -133,268 +117,204 @@ class AttackLossTrajectory(AbstractMIA):
             include_target_testing_data,
             self.logger
         )
-        # create attack dataset
-        attack_data = self.population.subset(self.attack_data_index)
+        # create auxiliary dataset
+        aux_data_size = len(aux_data_index)
+        shadow_data_size = int(aux_data_size * self.shadow_data_fraction)
+        shadow_data_indices = np.random.choice(aux_data_size, shadow_data_size, replace=False)
+        # Split the shadow data into two equal parts
+        split_index = len(shadow_data_indices) // 2
+        shadow_training_indices = shadow_data_indices[:split_index]
+        shadow_not_used_indices = shadow_data_indices[split_index:]
+        # Distillation on target and shadow model happen on the same dataset
+        distill_data_indices = np.setdiff1d(aux_data_index, shadow_data_indices)
+
+        shadow_dataset = self.population.subset(shadow_training_indices)
+        distill_dataset = self.population.subset(distill_data_indices)
 
         # train shadow models
-        self.logger.info(f"Training shadow models on {len(attack_data)} points")
+        self.logger.info(f"Training shadow models on {len(shadow_dataset)} points")
         ShadowModelHandler().create_shadow_models(
             self.num_shadow_models,
-            attack_data,
-            self.training_data_fraction,
+            shadow_dataset,
+            shadow_training_indices,
+            retrain= True,
         )
 
         # load shadow models
-        self.shadow_models, self.shadow_model_indices = ShadowModelHandler().get_shadow_models(self.num_shadow_models)
+        self.shadow_models, self.shadow_model_indices, self.shadow_metadata = \
+            ShadowModelHandler().get_shadow_models(self.num_shadow_models)
 
-
-        # train distillation model of the only trained shadow model
-        self.logger.info(f"Training distillation of the shadow model on {len(attack_data)} points")
-        self.distill_shadow_models, self.distill_shadow_model_indices = DistillationModelHandler().create_distillation_models(
+        # train the distillation model using the one and only trained shadow model
+        self.logger.info(f"Training distillation of the shadow model on {len(distill_dataset)} points")
+        DistillationShadowModelHandler().initializng_shadow_teacher(self.shadow_models[0], self.shadow_metadata[0])
+        self.distill_shadow_models = DistillationShadowModelHandler().create_distillation_models(
             self.num_students,
             self.number_of_traj,
-            attack_data,
-            self.training_data_fraction,
+            distill_dataset,
+            distill_data_indices,
+            self.attack_mode,
         )
 
-        # shadow data (train and test) is used as training data for MIA_classifier
-        self.prepare_mia_trainingset(self.shadow_model_indices,
-                                     self.shadow_models, self.distill_shadow_models )
+        # train distillation model of the target model
+        self.logger.info(f"Training distillation of the target model on {len(distill_dataset)} points")
+        self.distill_target_models = DistillationTargetModelHandler().create_distillation_models(
+            self.num_students,
+            self.number_of_traj,
+            distill_dataset,
+            distill_data_indices,
+            self.attack_mode,
+        )
+
+        # shadow data (train and test) is used as training data for MIA_classifier in the paper
+        train_mask = np.isin(shadow_data_indices,shadow_not_used_indices )
+        self.prepare_mia_data(shadow_data_indices, train_mask,
+                              self.distill_shadow_models, self.shadow_models[0].model_obj, "train")
 
         # Data used in the target (train and test) is used as test data for MIA_classifier
-        mia_test_data_indices = np.isin( self.shadow_model_indices , self.attack_data_index)
-        self.prepare_attack_dataset( mia_test_data_indices ,self.target_model)
+        mia_test_data_indices = np.concatenate( (self.train_indices , self.test_indices))
+        test_mask = np.isin(mia_test_data_indices, self.train_indices)
+        self.prepare_mia_data(mia_test_data_indices, test_mask,
+                              self.distill_target_models, self.target_model.model_obj, "test")
 
-    def prepare_mia_trainingset(self:Self, train_attack_data_indices:np.ndarray,  # noqa: PLR0915
-                                membership_status_shadow_train:np.ndarray,
-                                shadow_model:nn.Module) -> None:
-        """Prepare the training set for the Membership Inference Attack (MIA) classifier.
+
+    def prepare_mia_data(self:Self,
+                        data_indices: np.ndarray,
+                        membership_status_shadow_train: np.ndarray,
+                        distill_model: nn.Module,
+                        teacher_model: nn.Module,
+                        mode: str,
+                        ) -> None:
+        """Prepare the data for MIA attack.
 
         Args:
         ----
-            train_attack_data_indices (np.ndarray): Indices of the training attack data.
+            data_indices (np.ndarray): Indices of the data.
             membership_status_shadow_train (np.ndarray): Membership status of the shadow training data.
-            shadow_model (nn.Module): The shadow model.
+            distill_model (nn.Module): Distillation model.
+            teacher_model (nn.Module): Teacher model.
+            mode (str): Mode of the attack (train or test).
 
         Returns:
         -------
             None
 
         """
-        if not os.path.exists(f"{self.attack_data_dir}/trajectory_train_data.npy"):
-            gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
-            data_attack = Subset(self.population, train_attack_data_indices)
-            attack_data_loader = DataLoader(data_attack, batch_size=self.train_mia_batch_size, shuffle=False)
-            path_distillation_models_shadow = self.path_distillation_models_shadow
+        if mode == "train":
+            dataset_name = "trajectory_train_data.pkl"
+            if os.path.exists(f"{self.attack_data_dir}/{dataset_name}"):
+                self.logger.info(f"Loading MIA {dataset_name}: {len(data_indices)} points")
+                with open(f"{self.attack_data_dir}/{dataset_name}", "rb") as file:
+                    data = pickle.load(file)  # noqa: S301
+            else:
+                data = self._prepare_mia_data(data_indices,
+                                              membership_status_shadow_train,
+                                              distill_model,
+                                              teacher_model,
+                                              dataset_name)
 
-            traget_model_loss = np.array([])
-            model_trajectory = np.array([])
-            original_labels = np.array([])
-            predicted_labels = np.array([])
-            predicted_status = np.array([])
+            # Create the training dataset for the MIA classifier.
+            mia_train_input = np.concatenate((data["model_trajectory"],
+                                            data["taeget_model_loss"][:, None]), axis=1)
+            mia_train_dataset = TensorDataset(tensor(mia_train_input), tensor(data["member_status"]))
+            self.mia_train_data_loader = DataLoader(mia_train_dataset, batch_size=self.train_mia_batch_size, shuffle=True)
 
-            for loader_idx, (data, target) in enumerate(attack_data_loader):
-                data = data.to(gpu_or_cpu)  # noqa: PLW2901
-                target = target.to(gpu_or_cpu)  # noqa: PLW2901
+        elif mode == "test":
+            dataset_name = "trajectory_test_data.pkl"
+            if os.path.exists(f"{self.attack_data_dir}/{dataset_name}"):
+                self.logger.info(f"Loading MIA {dataset_name}: {len(data_indices)} points")
+                with open(f"{self.attack_data_dir}/{dataset_name}", "rb") as file:
+                    data = pickle.load(file)  # noqa: S301
+            else:
+                data = self._prepare_mia_data(data_indices,
+                                              membership_status_shadow_train,
+                                              distill_model,
+                                              teacher_model,
+                                              dataset_name)
+            # Create the training dataset for the MIA classifier.
+            mia_test_input = np.concatenate((data["model_trajectory"] ,
+                                            data["target_model_loss"][:,None]), axis=1)
+            mia_test_dataset = TensorDataset(tensor(mia_test_input), tensor(data["member_status"]))
+            self.mia_test_data_loader = DataLoader(mia_test_dataset, batch_size=self.train_mia_batch_size, shuffle=True)
 
-                traj_total_students = np.array([])
-                for s in range(self.num_students):
+    def _prepare_mia_data(self:Self,
+                        data_indices: np.ndarray,
+                        membership_status_shadow_train: np.ndarray,
+                        distill_model: nn.Module,
+                        teacher_model: nn.Module,
+                        dataset_name: str,
+                        ) -> dict:
+        self.logger.info(f"Preparing MIA {dataset_name}: {len(data_indices)} points")
+        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        data_attack = Subset(self.population, data_indices)
+        data_loader = DataLoader(data_attack, batch_size=self.train_mia_batch_size, shuffle=False)
 
-                    trajectory_current = np.array([])
-                    for d in range(self.number_of_traj):
-                        if "adult" in self.configs["data"]["dataset"]:
-                            distillation_model_shadow = self.target_model.model_obj.__class__(self.configs["train"]["inputs"],
-                                                                                             self.configs["train"]["outputs"])
-                        elif "cifar10" in self.configs["data"]["dataset"]:
-                            distillation_model_shadow = self.target_model.model_obj.__class__()
-                        elif "cinic10" in self.configs["data"]["dataset"]:
-                            distillation_model_shadow = self.target_model.model_obj.__class__(self.configs)
+        teacher_model_loss = np.array([])
+        model_trajectory = np.array([])
+        original_labels = np.array([])
+        predicted_labels = np.array([])
+        predicted_status = np.array([])
 
-                        #TODO: remove this check
-                        loaded_object = load(f"{path_distillation_models_shadow}/epoch_{d}.pkl")
-                        if isinstance(loaded_object, nn.Module):
-                            print("The saved model contains the entire model object with architecture.")
-                        elif isinstance(loaded_object, dict):
-                            print("The saved model contains only the state_dict.")
-                        else:
-                            print("Unknown object type.")
+        for loader_idx, (data, target) in enumerate(data_loader):
+            data = data.to(gpu_or_cpu)  # noqa: PLW2901
+            target = target.to(gpu_or_cpu)  # noqa: PLW2901
 
-                        # infer from the distillation model
-                        distillation_model_shadow.load_state_dict(
-                            load(f"{path_distillation_models_shadow}/epoch_{d}.pkl"), strict=False)
-                        distillation_model_shadow.to(gpu_or_cpu)
+            trajectory_current = np.array([])
+            for d in range(self.number_of_traj):
+                distill_model[d].to(gpu_or_cpu)
+                distill_model[d].eval()
 
-                        # infer from the shadow model
-                        distill_model_soft_output = distillation_model_shadow(data)
+                # infer from the shadow model
+                distill_model_soft_output = distill_model[d](data)
 
-                        # Calculate the loss
-                        loss = [functional.cross_entropy(logit_target_i.unsqueeze(0),
-                                                target_i.unsqueeze(0)) for (logit_target_i, target_i) in
-                                                 zip(distill_model_soft_output, target)]
-                        loss = np.array([loss_i.detach().cpu().numpy() for loss_i in loss]).reshape(-1, 1)
-                        trajectory_current = loss if d == 0 else np.concatenate((trajectory_current, loss), 1)
+                # Calculate the loss
+                loss = []
+                for logit_target_i, target_i in zip(distill_model_soft_output, target):
+                    loss_i = F.cross_entropy(logit_target_i.unsqueeze(0), target_i.unsqueeze(0))
+                    loss.append(loss_i)
+                loss = np.array([loss_i.detach().cpu().numpy() for loss_i in loss]).reshape(-1, 1)
+                trajectory_current = loss if d == 0 else np.concatenate((trajectory_current, loss), 1)
 
-                    traj_total_students = trajectory_current if s == 0 else traj_total_students + trajectory_current
+            teacher_model.to(gpu_or_cpu)
+            batch_logit_target = teacher_model(data)
 
-                shadow_model.to(gpu_or_cpu)
-                batch_logit_target = shadow_model(data)
+            _, batch_predict_label = batch_logit_target.max(1)
+            batch_predicted_label = batch_predict_label.long().cpu().detach().numpy()
+            batch_original_label = target.long().cpu().detach().numpy()
+            batch_loss_teacher = []
+            for (batch_logit_target_i, target_i) in zip(batch_logit_target, target):
+                batch_loss_teacher.append(F.cross_entropy(batch_logit_target_i.unsqueeze(0),
+                                                        target_i.unsqueeze(0)))
+            batch_loss_teacher = np.array([batch_loss_teacher_i.cpu().detach().numpy() for batch_loss_teacher_i in
+                                            batch_loss_teacher])
+            batch_predicted_status = (argmax(batch_logit_target, dim=1) == target).float().cpu().detach().numpy()
+            batch_predicted_status = np.expand_dims(batch_predicted_status, axis=1)
 
-                _, batch_predict_label = batch_logit_target.max(1)
-                batch_predicted_label = batch_predict_label.long().cpu().detach().numpy()
-                batch_original_label = target.long().cpu().detach().numpy()
-                batch_loss_target = [functional.cross_entropy(batch_logit_target_i.unsqueeze(0), target_i.unsqueeze(0)) for
-                                      (batch_logit_target_i, target_i) in zip(batch_logit_target, target)]
-                batch_loss_target = np.array([batch_loss_target_i.cpu().detach().numpy() for batch_loss_target_i in
-                                              batch_loss_target])
-                batch_predicted_status = (argmax(batch_logit_target, dim=1) == target).float().cpu().detach().numpy()
-                batch_predicted_status = np.expand_dims(batch_predicted_status, axis=1)
-
-                if loader_idx == 0:
-                    traget_model_loss = batch_loss_target
-                    model_trajectory = traj_total_students
-                    original_labels = batch_original_label
-                    predicted_labels = batch_predicted_label
-                    predicted_status = batch_predicted_status
-                else:
-                    traget_model_loss = np.concatenate((traget_model_loss, batch_loss_target), axis=0)
-                    model_trajectory = np.concatenate((model_trajectory, traj_total_students), axis=0)
-                    original_labels = np.concatenate((original_labels, batch_original_label), axis=0)
-                    predicted_labels = np.concatenate((predicted_labels, batch_predicted_label), axis=0)
-                    predicted_status = np.concatenate((predicted_status, batch_predicted_status), axis=0)
-
-
-            data = {
-                "traget_model_loss":traget_model_loss,
-                "model_trajectory":model_trajectory,
-                "original_labels":original_labels,
-                "predicted_labels":predicted_labels,
-                "predicted_status":predicted_status,
-                "member_status":membership_status_shadow_train,
-                "nb_classes":self.num_classes
-            }
-
-            with open(f"{self.log_dir}/trajectory_train_data.pkl", "wb") as pickle_file:
-                pickle.dump(data, pickle_file)
-
-        else:
-            data = np.load(f"{self.log_dir}/trajectory_train_data.npy", allow_pickle=True).item()
-
-        # Create the training dataset for the MIA classifier.
-        mia_train_input = np.concatenate((data["model_trajectory"],
-                                          data["traget_model_loss"][:, None]), axis=1)
-        mia_train_dataset = TensorDataset(tensor(mia_train_input), tensor(data["member_status"]))
-        self.mia_train_data_loader = DataLoader(mia_train_dataset, batch_size=self.train_mia_batch_size, shuffle=True)
+            if loader_idx == 0:
+                teacher_model_loss = batch_loss_teacher
+                model_trajectory = trajectory_current
+                original_labels = batch_original_label
+                predicted_labels = batch_predicted_label
+                predicted_status = batch_predicted_status
+            else:
+                model_trajectory = np.concatenate((model_trajectory, trajectory_current), axis=0)
+                original_labels = np.concatenate((original_labels, batch_original_label), axis=0)
+                predicted_labels = np.concatenate((predicted_labels, batch_predicted_label), axis=0)
+                predicted_status = np.concatenate((predicted_status, batch_predicted_status), axis=0)
 
 
-
-    def prepare_attack_dataset(self: Self, test_attack_data_indices:list,  # noqa: PLR0915
-                            membership_status_shadow_train:np.ndarray,
-                            trained_target_model:nn.Module) -> None:
-        """Prepare the test set for the Membership Inference Attack (MIA) classifer.
-
-        The training set contais concatinated losses of distillation modesl on shadow and the shadow model itslef.
-
-        Args:
-        ----
-            test_attack_data_indices (list): The indices of the test attack data.
-            membership_status_shadow_train (ndarray): The membership status of the shadow training data.
-            trained_target_model (Model): The trained target model.
-
-        Returns:
-        -------
-            None
-
-        """
-        if not os.path.exists(f"{self.log_dir}/trajectory_test_data.npy"):
-            gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
-            data_attack = Subset(self.population, test_attack_data_indices)
-            attack_data_loader = DataLoader(data_attack, batch_size=self.train_mia_batch_size, shuffle=False)
-            path_distillation_models_target = self.path_distillation_models_target
-
-            traget_model_loss = np.array([])
-            model_trajectory = np.array([])
-            original_labels = np.array([])
-            predicted_labels = np.array([])
-            predicted_status = np.array([])
-            for loader_idx, (data, target) in enumerate(attack_data_loader):
-                data = data.to(gpu_or_cpu) # noqa: PLW2901
-                target = target.to(gpu_or_cpu) # noqa: PLW2901
-
-                traj_total_students = np.array([])
-                for s in range(self.num_students):
-
-                    trajectory_current = np.array([])
-                    for d in range(self.number_of_traj):
-                        if "adult" in self.configs["data"]["dataset"]:
-                            distillation_model_target = self.target_model.model_obj.__class__(self.configs["train"]["inputs"],
-                                                                                              self.configs["train"]["outputs"])
-                        elif "cifar10" in self.configs["data"]["dataset"]:
-                            distillation_model_target = self.target_model.model_obj.__class__()
-                        elif "cinic10" in self.configs["data"]["dataset"]:
-                            distillation_model_target = self.target_model.model_obj.__class__(self.configs)
-
-                        # infer from the distillation model of the target model
-                        distillation_model_target.load_state_dict(load(f"{path_distillation_models_target}/epoch_{d}.pkl"),
-                                                                  strict=False)
-                        distillation_model_target.to(device)
-
-                        #infer from the target model
-                        distill_model_soft_output = distillation_model_target(data)
-
-                        # Calculate the loss
-                        loss = [functional.cross_entropy(logit_target_i.unsqueeze(0), target_i.unsqueeze(0)) for (logit_target_i,
-                                                                     target_i) in zip(distill_model_soft_output, target)]
-                        loss = np.array([loss_i.detach().cpu().numpy() for loss_i in loss]).reshape(-1, 1)
-                        trajectory_current = loss if d == 0 else np.concatenate((trajectory_current, loss), 1)
-
-                    traj_total_students = trajectory_current if s == 0 else traj_total_students + trajectory_current
-
-                trained_target_model.to(device)
-                batch_logit_target = trained_target_model(data)
-
-                _, batch_predict_label = batch_logit_target.max(1)
-                batch_predicted_label = batch_predict_label.long().cpu().detach().numpy()
-                batch_original_label = target.long().cpu().detach().numpy()
-                batch_loss_target = [functional.cross_entropy(batch_logit_target_i.unsqueeze(0), target_i.unsqueeze(0)) for
-                                      (batch_logit_target_i, target_i) in zip(batch_logit_target, target)]
-                batch_loss_target = np.array([batch_loss_target_i.cpu().detach().numpy() for batch_loss_target_i in
-                                              batch_loss_target])
-                batch_predicted_status = (argmax(batch_logit_target, dim=1) == target).float().cpu().detach().numpy()
-                batch_predicted_status = np.expand_dims(batch_predicted_status, axis=1)
-
-                if loader_idx == 0:
-                    traget_model_loss = batch_loss_target
-                    model_trajectory = traj_total_students
-                    original_labels = batch_original_label
-                    predicted_labels = batch_predicted_label
-                    predicted_status = batch_predicted_status
-                else:
-                    traget_model_loss = np.concatenate((traget_model_loss, batch_loss_target), axis=0)
-                    model_trajectory = np.concatenate((model_trajectory, traj_total_students), axis=0)
-                    original_labels = np.concatenate((original_labels, batch_original_label), axis=0)
-                    predicted_labels = np.concatenate((predicted_labels, batch_predicted_label), axis=0)
-                    predicted_status = np.concatenate((predicted_status, batch_predicted_status), axis=0)
-
-            data = {
-                "traget_model_loss":traget_model_loss,
-                "model_trajectory":model_trajectory,
-                "original_labels":original_labels,
-                "predicted_labels":predicted_labels,
-                "predicted_status":predicted_status,
-                "member_status":membership_status_shadow_train,
-                "nb_classes":self.num_classes
-            }
-
-            with open(f"{self.log_dir}/trajectory_test_data.pkl", "wb") as pickle_file:
-                pickle.dump(data, pickle_file)
-
-        else:
-            data = np.load(f"{self.log_dir}/trajectory_test_data.npy", allow_pickle=True).item()
-
-        mia_test_input = np.concatenate((data["model_trajectory"] , 
-                                         data["traget_model_loss"][:,None]), axis=1)
-        mia_test_dataset = TensorDataset(tensor(mia_test_input), tensor(data["member_status"]))
-        self.mia_test_data_loader = DataLoader(mia_test_dataset, batch_size=self.train_mia_batch_size, shuffle=True)
+        data = {
+            "teacher_model_loss":teacher_model_loss,
+            "model_trajectory":model_trajectory,
+            "original_labels":original_labels,
+            "predicted_labels":predicted_labels,
+            "predicted_status":predicted_status,
+            "member_status":membership_status_shadow_train,
+            "nb_classes":self.num_classes
+        }
+        os.makedirs(self.attack_data_dir, exist_ok=True)
+        with open(f"{self.attack_data_dir}/{dataset_name}", "wb") as file:
+            pickle.dump(data, file)
+        return data
 
 
     def mia_classifier(self:Self)-> nn.Module:
@@ -405,26 +325,31 @@ class AttackLossTrajectory(AbstractMIA):
             attack_model (torch.nn.Module): The trained MIA classifier model.
 
         """
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
         attack_model = self.mia_classifer
-        attack_optimizer = optim.SGD(attack_model.parameters(),
-                                           lr=0.01, momentum=0.9, weight_decay=0.0001)
-        attack_model = attack_model.to(gpu_or_cpu)
-        loss_fn = nn.CrossEntropyLoss()
-        train_loss =[]
-        train_prec1 = []
+        if not os.path.exists(f"{self.attack_data_dir}/trajectory_mia_model.pkl"):
+            gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+            attack_optimizer = optim.SGD(attack_model.parameters(),
+                                            lr=0.01, momentum=0.9, weight_decay=0.0001)
+            attack_model = attack_model.to(gpu_or_cpu)
+            loss_fn = nn.CrossEntropyLoss()
+            train_loss =[]
+            train_prec1 = []
 
-        for _epoch in range(100):
-            loss, prec = self.train_mia_step(attack_model, attack_optimizer,
-                                                         loss_fn)
-            train_loss.append(loss)
-            train_prec1.append(prec)
+            for _ in range(self.mia_classifier_epoch):
+                loss, prec = self.train_mia_step(attack_model, attack_optimizer,
+                                                            loss_fn)
+                train_loss.append(loss)
+                train_prec1.append(prec)
 
-        save(attack_model.state_dict(), self.log_dir + "/trajectory_mia_model.pkl")
+            save(attack_model.state_dict(), self.attack_data_dir + "/trajectory_mia_model.pkl")
 
-        train_info = [train_loss, train_prec1]
-        with open(f"{self.log_dir}/mia_model_losses.pkl", "wb") as file:
-            pickle.dump(train_info, file)
+            train_info = [train_loss, train_prec1]
+            with open(f"{self.attack_data_dir}/mia_model_losses.pkl", "wb") as file:
+                pickle.dump(train_info, file)
+        else:
+            with open(f"{self.attack_data_dir}/trajectory_mia_model.pkl", "rb") as model:
+                attack_model.load_state_dict(load(model))
+            self.logger.info("Loading Loss Trajectory classifier")
 
         return attack_model
 
@@ -509,6 +434,7 @@ class AttackLossTrajectory(AbstractMIA):
 
         """
         gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        attack_model.to(gpu_or_cpu)
         attack_model.eval()
         test_loss = 0
         correct = 0
@@ -522,7 +448,7 @@ class AttackLossTrajectory(AbstractMIA):
                 target = target.long() # noqa: PLW2901
                 pred = attack_model(data)
 
-                test_loss += functional.cross_entropy(pred, target).item()
+                test_loss += F.cross_entropy(pred, target).item()
                 pred0, pred1 = pred.max(1, keepdim=True)
                 correct += pred1.eq(target).sum().item()
                 auc_pred_current = pred[:, -1]
@@ -537,8 +463,9 @@ class AttackLossTrajectory(AbstractMIA):
         accuracy = 100. * correct / len(self.mia_test_data_loader.dataset)  # noqa: F841
 
         thresholds_1 = np.linspace(0, 1, 1000)
-        member_preds = np.array([(auc_pred > threshold).astype(int) for threshold in thresholds_1])
+        member_preds = np.array([(auc_pred < threshold).astype(int) for threshold in thresholds_1])
 
         return auc_ground_truth, member_preds
+
 
 

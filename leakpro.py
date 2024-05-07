@@ -60,7 +60,7 @@ def generate_user_input(configs: dict, logger: logging.Logger)->None:
     """Generate user input for the target model."""
     # ------------------------------------------------
 
-    retrain = True
+    retrain = False
     # Create the population dataset and target_model
     if "adult" in configs["data"]["dataset"]:
         population = get_adult_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
@@ -70,7 +70,7 @@ def generate_user_input(configs: dict, logger: logging.Logger)->None:
         target_model = shadow_model_blueprints.ConvNet()
     elif "cinic10" in configs["data"]["dataset"]:
         population = get_cinic10_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
-        target_model = shadow_model_blueprints.ResNet18()
+        target_model = shadow_model_blueprints.ResNet18(configs["train"]["num_classes"])
 
     n_population = len(population)
 
