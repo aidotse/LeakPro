@@ -118,6 +118,7 @@ class AttackLiRA(AbstractMIA):
 
         self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.num_shadow_models)
 
+        self.logger.info("Create masks for all IN samples")
         self.in_indices_mask = ShadowModelHandler().get_in_indices_mask(self.num_shadow_models, self.audit_dataset["data"])
 
         self.audit_data = self.population.subset(self.audit_dataset["data"])
