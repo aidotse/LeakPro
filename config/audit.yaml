@@ -18,7 +18,7 @@ audit:  # Configurations for auditing
     loss_traj:
       training_shadow_data_fraction: 0.15 # Fraction of the auxilary dataset to use for training the shadow models
       training_distill_data_fraction : 0.85 # Fraction of the auxilary dataset to use for training the distillation models
-      num_shadow_models: 1
+      num_shadow_models: 1 # One shadow model for this attack in the paper
       # f_attack_data_size: 0.3
       number_of_traj: 5 # Number of epochs (number of points in the loss trajectory)
       # distillation_target_data_size: 0.3
