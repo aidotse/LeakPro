@@ -51,6 +51,7 @@ class ShadowModelHandler():
             logger (logging.Logger): The logger object for logging.
 
         """
+        config = config or {}
         self.handler = handler
 
         self.logger = logger

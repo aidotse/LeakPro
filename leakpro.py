@@ -7,8 +7,9 @@ from pathlib import Path
 
 import joblib
 import numpy as np
-import torch
 import yaml
+from torch import load, manual_seed
+from torch.utils.data import Subset
 
 import leakpro.dev_utils.train as utils
 from leakpro import shadow_model_blueprints
@@ -79,12 +80,12 @@ def generate_user_input(configs: dict, logger: logging.Logger)->None:
     train_test_dataset = prepare_train_test_datasets(n_population, configs["data"])
 
     train_loader = get_dataloader(
-        torch.utils.data.Subset(population, train_test_dataset["train_indices"]),
+        Subset(population, train_test_dataset["train_indices"]),
         batch_size=configs["train"]["batch_size"],
         shuffle=True,
     )
     test_loader = get_dataloader(
-        torch.utils.data.Subset(population, train_test_dataset["test_indices"]),
+        Subset(population, train_test_dataset["test_indices"]),
         batch_size=configs["train"]["test_batch_size"],
     )
 
@@ -116,7 +117,7 @@ if __name__ == "__main__":
         configs = yaml.safe_load(f)
 
     # Set the random seed, log_dir and inference_game
-    torch.manual_seed(configs["audit"]["random_seed"])
+    manual_seed(configs["audit"]["random_seed"])
     np.random.seed(configs["audit"]["random_seed"])
     random.seed(configs["audit"]["random_seed"])
 
