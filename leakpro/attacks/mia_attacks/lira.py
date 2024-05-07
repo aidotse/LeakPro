@@ -139,7 +139,7 @@ class AttackLiRA(AbstractMIA):
                 elif np.count_nonzero(mask) == 0:
                     no_in += 1
                     self.skip_indices[i] = True
-                    
+
             if no_out > 0 or no_in > 0:
                 self.logger.info(f"There are {no_out} audit examples with 0 OUT sample(s) and {no_in} 0 IN sample(s)\n \
                 When using few shadow models in online attacks, some audit sample(s) might have a few or even 0 IN or OUT logits\n \
@@ -165,6 +165,7 @@ class AttackLiRA(AbstractMIA):
         -------
         Result(s) of the metric. An object containing the metric results, including predictions,
         true labels, and signal values.
+
         """
         score = []  # List to hold the computed probability scores for each sample
 
@@ -178,20 +179,20 @@ class AttackLiRA(AbstractMIA):
         for i, (shadow_models_logits, mask) in tqdm(enumerate(zip(self.shadow_models_logits, self.in_indices_mask))):
 
             # Calculate the mean for OUT shadow model logits
-            out_mean = np.mean(shadow_models_logits[~mask])  
+            out_mean = np.mean(shadow_models_logits[~mask])
 
             # Get the logit from the target model for the current sample
             target_logit = self.target_logits[i]
 
             # Calculate the log probability density function value
             pr_out = -norm.logpdf(target_logit, out_mean, out_std + 1e-30)
-            
+
             if self.online:
                 in_mean = np.mean(shadow_models_logits[mask])
                 if not self.fixed_variance:
                     out_std = np.std(shadow_models_logits[~mask])
                     in_std = np.std(shadow_models_logits[mask])
-                    
+
                 pr_in = -norm.logpdf(target_logit, in_mean, in_std + 1e-30)
             else:
                 pr_in = 0
@@ -199,7 +200,7 @@ class AttackLiRA(AbstractMIA):
                     out_std = np.std(shadow_models_logits[~mask])
 
             score.append(pr_in - pr_out)  # Append the calculated probability density value to the score list
-            
+
         score = np.asarray(score)  # Convert the list of scores to a numpy array
 
         # Generate thresholds based on the range of computed scores for decision boundaries

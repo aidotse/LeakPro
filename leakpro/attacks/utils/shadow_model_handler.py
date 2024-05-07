@@ -6,10 +6,9 @@ import pickle
 import re
 import time
 
-from numba import njit, prange
 import joblib
 import numpy as np
-from numba import njit
+from numba import njit, prange
 from torch import cuda, device, load, nn, optim, save
 from torch.nn import Module
 from torch.utils.data import DataLoader, Dataset
@@ -362,27 +361,27 @@ class ShadowModelHandler():
         """
         # Retrieve metadata for shadow models
         metadata = self.get_shadow_model_metadata(num_models)
-        
+
         # Extract training indices for each shadow model
         models_in_indices = [data["train_indices"] for data in metadata]
-        
+
         # Convert to numpy array for easier manipulation
         models_in_indices = np.asarray(models_in_indices)
-        
+
         # Initialize list to store masks for audit dataset indices
         start = time.time()
-        
+
         indice_masks = []
         # Iterate over each index in the audit dataset
         for audit_index in tqdm(dataset):
             # Check if the index is present in any of the shadow models training sets
             mask = indice_in_shadowmodel_training_set(audit_index, models_in_indices)
             indice_masks.append(mask)
-            
-        return np.asarray(indice_masks)
-        
 
-    
+        return np.asarray(indice_masks)
+
+
+
 @njit
 def indice_in_shadowmodel_training_set(audit_indicie:int, models_in_indicies:np.ndarray) -> np.ndarray:
     """Check if an audit indice is present in the shadow model training set.

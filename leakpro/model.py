@@ -281,7 +281,7 @@ class PytorchModel(Model):
                     count = predictions.shape[0]
                     y_true = predictions[np.arange(count), y.type(torch.IntTensor)]
                     predictions[np.arange(count), y.type(torch.IntTensor)] = 0
-                    
+
                     y_wrong = torch.sum(predictions, dim=1)
                     output_signals = torch.flatten(torch.log(y_true+1e-45) - torch.log(y_wrong+1e-45)).cpu().numpy()
 
