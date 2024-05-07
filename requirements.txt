@@ -15,3 +15,4 @@ black
 pyyaml
 joblib
 numba
+ruff

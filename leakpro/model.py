@@ -273,11 +273,11 @@ class PytorchModel(Model):
                     x = x.to(device)
                     y = y.to(device)
                     all_logits = self.model_obj(x)
-    
+
                     predictions = all_logits - torch.max(all_logits, dim=1, keepdim=True).values
                     predictions = torch.exp(predictions)
                     predictions = predictions/torch.sum(predictions,dim=1, keepdim=True)
-    
+
                     COUNT = predictions.shape[0]
                     y_true = predictions[np.arange(COUNT), y.type(torch.IntTensor)]
                     predictions[np.arange(COUNT), y.type(torch.IntTensor)] = 0

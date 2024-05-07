@@ -4,8 +4,9 @@ import logging
 import os
 import pickle
 import re
+import time
 
-from numba import njit
+from numba import njit, prange
 import joblib
 import numpy as np
 from torch import cuda, device, load, nn, optim, save
@@ -336,20 +337,35 @@ class ShadowModelHandler():
         return metadata
 
     def get_in_indices_mask(self:Self, num_models:int, dataset:np.ndarray) -> np.ndarray:
+        # Retrieve metadata for shadow models
         metadata = self.get_shadow_model_metadata(num_models)
-        models_in_indicies = []
-        for data in metadata:
-            models_in_indicies.append(data["train_indices"])
-
-        models_in_indicies = np.asarray(models_in_indicies)
-        indicie_masks = []
-        for audit_indicie in tqdm(dataset):
-            mask = indicie_in_shadowmodel_training_set(audit_indicie, models_in_indicies)
-            indicie_masks.append(mask)
+        
+        # Extract training indices for each shadow model
+        models_in_indices = [data["train_indices"] for data in metadata]
+        
+        # Convert to numpy array for easier manipulation
+        models_in_indices = np.asarray(models_in_indices)
+        
+        # Initialize list to store masks for audit dataset indices
+        start = time.time()
+        
+        indice_masks = []
+        # Iterate over each index in the audit dataset
+        for audit_index in tqdm(dataset):
+            # Check if the index is present in any of the shadow models training sets
+            mask = indice_in_shadowmodel_training_set(audit_index, models_in_indices)
+            indice_masks.append(mask)
             
-        return np.array(indicie_masks, dtype=bool)
+        return np.asarray(indice_masks)
 
+    
 @njit
-def indicie_in_shadowmodel_training_set(audit_indicie:int, models_in_indicies:list) -> list:
-    mask = [audit_indicie in in_indicies for in_indicies in models_in_indicies]
+def indice_in_shadowmodel_training_set(audit_indicie:int, models_in_indicies:np.ndarray) -> np.ndarray:
+    num_models = len(models_in_indicies)
+    mask = np.zeros(num_models, dtype=np.bool_)
+    for i in prange(num_models):
+        for j in range(models_in_indicies.shape[1]):
+            if models_in_indicies[i, j] == audit_indicie:
+                mask[i] = True
+                break
     return mask
