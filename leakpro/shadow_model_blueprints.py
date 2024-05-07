@@ -108,6 +108,6 @@ class ResNet18(nn.Module):
         num_features = self.model.fc.in_features
         self.model.fc = nn.Linear(num_features, num_classes)
 
-    def forward(self:Self, x:torch.Tensor) -> torch.Tensor:
+    def forward(self:Self, x:Tensor) -> Tensor:
         """Forward pass of the model."""
         return self.model(x)

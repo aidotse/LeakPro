@@ -141,8 +141,9 @@ class AttackLossTrajectory(AbstractMIA):
         )
 
         # load shadow models
-        self.shadow_models, self.shadow_model_indices, self.shadow_metadata = \
+        self.shadow_models, self.shadow_model_indices = \
             ShadowModelHandler().get_shadow_models(self.num_shadow_models)
+        self.shadow_metadata = ShadowModelHandler().get_shadow_metadata(1)
 
         # train the distillation model using the one and only trained shadow model
         self.logger.info(f"Training distillation of the shadow model on {len(distill_dataset)} points")
