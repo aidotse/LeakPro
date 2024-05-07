@@ -29,7 +29,10 @@ class AttackLiRA(AbstractMIA):
 
         Args:
         ----
-            attack_utils (AttackUtils): Utility class for the attack.
+            population (np.ndarray): The population data used for the attack.
+            audit_dataset (dict): The audit dataset used for the attack.
+            target_model (nn.Module): The target model to be attacked.
+            logger (Logger): The logger object for logging.
             configs (dict): Configuration parameters for the attack.
 
         """
@@ -74,10 +77,11 @@ class AttackLiRA(AbstractMIA):
 
         reference_str = "Carlini N, et al. Membership Inference Attacks From First Principles"
 
-        summary_str = "The Likelihood Ratio Attack (LiRA) is a membership inference attack based on the rescaled logits of a black-box model"
+        summary_str = "LiRA is a membership inference attack based on rescaled logits of a black-box model"
 
         detailed_str = "The attack is executed according to: \
-            1. A fraction of the target model dataset is sampled to be included (in-) or excluded (out-) from the shadow model training dataset. \
+            1. A fraction of the target model dataset is sampled to be included (in-) or excluded (out-) \
+            from the shadow model training dataset. \
             2. The rescaled logits are used to estimate Gaussian distributions for in and out members \
             3. The thresholds are used to classify in-members and out-members. \
             4. The attack is evaluated on an audit dataset to determine the attack performance."
@@ -89,10 +93,9 @@ class AttackLiRA(AbstractMIA):
             "detailed": detailed_str,
         }
 
-    def prepare_attack(self):
-        """Prepares data needed for running the metric on the target model and dataset,
-        using signals computed on the auxiliary model(s) and dataset.
-    
+    def prepare_attack(self:Self)->None:
+        """Prepares data to obtain metric on the target model and dataset, using signals computed on the auxiliary model/dataset.
+        
         It selects a balanced subset of data samples from in-group and out-group members
         of the audit dataset, prepares the data for evaluation, and computes the logits
         for both shadow models and the target model.
@@ -124,18 +127,23 @@ class AttackLiRA(AbstractMIA):
             count_in_samples = np.count_nonzero(self.in_indices_mask)
             if count_in_samples > 0:
                 raise ValueError("Some shadow model(s) contains IN samples, this is not an offline attack!")
-                       
+
+        self.skip_indices = np.zeros(len(self.in_indices_mask), dtype=bool)
         if self.online:
             no_in = 0
             no_out = 0
-            for mask in self.in_indices_mask():
-                if len(mask) == np.count_nonzero(mask):
+            for i, mask in enumerate(self.in_indices_mask()):
+                if np.count_nonzero(mask) == len(mask):
                     no_out += 1
-                else:
+                    self.skip_indices[i] = True
+                elif np.count_nonzero(mask) == 0:
                     no_in += 1
+                    self.skip_indices[i] = True
+                    
             if no_out > 0 or no_in > 0:
                 self.logger.info(f"There are {no_out} audit examples with 0 OUT sample(s) and {no_in} 0 IN sample(s)\n \
-                When using few shadow models in online attacks, some audit sample(s) might have no IN or OUT logits")
+                When using few shadow models in online attacks, some audit sample(s) might have a few or even 0 IN or OUT logits\n \
+                In total {np.count_nonzero(self.skip_indices)} indices will be skipped!")
 
         # Calculate logits for all shadow models
         self.logger.info(f"Calculating the logits for all {self.num_shadow_models} shadow models")
@@ -145,7 +153,7 @@ class AttackLiRA(AbstractMIA):
         self.logger.info("Calculating the logits for the target model")
         self.target_logits = np.array(self.signal([self.target_model], self.audit_data)).squeeze()
 
-    def run_attack(self):
+    def run_attack(self:Self) -> CombinedMetricResult:
         """Runs the attack on the target model and dataset, computing and returning
         the result(s) of the metric, which assess privacy risks or data leakage.
     
@@ -155,9 +163,8 @@ class AttackLiRA(AbstractMIA):
     
         Returns
         -------
-            Result(s) of the metric. An object containing the metric results, including predictions,
-            true labels, and signal values.
-
+        Result(s) of the metric. An object containing the metric results, including predictions,
+        true labels, and signal values.
         """
         score = []  # List to hold the computed probability scores for each sample
 
@@ -219,9 +226,8 @@ class AttackLiRA(AbstractMIA):
 
         # Return a result object containing predictions, true labels, and the signal values for further evaluation
         return CombinedMetricResult(
-            predicted_labels=predictions,
-            true_labels=true_labels,
+            predicted_labels=predictions[:, ~self.skip_indices],
+            true_labels=true_labels[~self.skip_indices],
             predictions_proba=None,  # Note: Direct probability predictions are not computed here
-            signal_values=signal_values,
+            signal_values=signal_values[~self.skip_indices],
         )
-        

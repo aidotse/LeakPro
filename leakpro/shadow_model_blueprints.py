@@ -113,7 +113,7 @@ class ResNet18(nn.Module):
         }
         self.model = models.resnet18(pretrained=False, num_classes=num_classes)
 
-    def forward(self:Self, x:torch.Tensor) -> torch.Tensor:
+    def forward(self:Self, x:Tensor) -> Tensor:
         """Forward pass of the model.
 
         Args:
