@@ -23,7 +23,7 @@ class AttackFactoryMIA:
     }
 
     # Shared variables for all attacks
-    population = None
+    # population = None
     audit_dataset = None
     target_model = None
     target_metadata = None
@@ -34,8 +34,8 @@ class AttackFactoryMIA:
     @staticmethod
     def set_population_and_audit_data(handler: CodeHandler) -> None:
         """Initialize the population dataset."""
-        if AttackFactoryMIA.population is None:
-            AttackFactoryMIA.population = handler.population
+        # if AttackFactoryMIA.population is None:
+        #     AttackFactoryMIA.population = handler.population
 
         if AttackFactoryMIA.target_metadata is None:
             AttackFactoryMIA.target_metadata = handler.target_metadata
@@ -62,6 +62,7 @@ class AttackFactoryMIA:
     @staticmethod
     def set_target_model_and_loss(handler: CodeHandler) -> None:
         """Set the target model."""
+        # TODO: Make handler return the PytorchModel directly
         if AttackFactoryMIA.target_model is None:
             AttackFactoryMIA.target_model = PytorchModel(handler.target_model, handler.loss)
 
@@ -72,7 +73,7 @@ class AttackFactoryMIA:
             AttackFactoryMIA.logger = logger
 
     @classmethod
-    def create_attack(cls, name: str, configs: dict) -> AbstractMIA:  # noqa: ANN102
+    def create_attack(cls, name: str, configs: dict, handler: CodeHandler) -> AbstractMIA:  # noqa: ANN102
         """Create an attack object based on the given name, attack_utils, and configs.
 
         Args:
@@ -90,8 +91,8 @@ class AttackFactoryMIA:
             ValueError: If the attack type is unknown.
 
         """
-        if AttackFactoryMIA.population is None:
-            raise ValueError("Population data has not been set")
+        # if AttackFactoryMIA.population is None:
+        #     raise ValueError("Population data has not been set")
         if AttackFactoryMIA.audit_dataset is None:
             raise ValueError("Audit data has not been set")
         if AttackFactoryMIA.target_model is None:
@@ -103,10 +104,9 @@ class AttackFactoryMIA:
             AttackFactoryMIA.logger.info("Creating shadow model handler singleton")
             shadow_configs = configs.get("shadow_model", {})
             AttackFactoryMIA.shadow_model_handler = ShadowModelHandler(
-                                                        AttackFactoryMIA.target_model,
-                                                        AttackFactoryMIA.target_metadata,
-                                                        shadow_configs,
-                                                        AttackFactoryMIA.logger
+                                                        handler=handler,
+                                                        config = shadow_configs,
+                                                        logger = AttackFactoryMIA.logger
                                                     )
 
         if name in cls.attack_classes:
