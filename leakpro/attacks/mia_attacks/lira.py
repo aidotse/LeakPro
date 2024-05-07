@@ -95,7 +95,7 @@ class AttackLiRA(AbstractMIA):
 
     def prepare_attack(self:Self)->None:
         """Prepares data to obtain metric on the target model and dataset, using signals computed on the auxiliary model/dataset.
-        
+
         It selects a balanced subset of data samples from in-group and out-group members
         of the audit dataset, prepares the data for evaluation, and computes the logits
         for both shadow models and the target model.
@@ -141,9 +141,10 @@ class AttackLiRA(AbstractMIA):
                     self.skip_indices[i] = True
 
             if no_out > 0 or no_in > 0:
-                self.logger.info(f"There are {no_out} audit examples with 0 OUT sample(s) and {no_in} 0 IN sample(s)\n \
-                When using few shadow models in online attacks, some audit sample(s) might have a few or even 0 IN or OUT logits\n \
-                In total {np.count_nonzero(self.skip_indices)} indices will be skipped!")
+                self.logger.info(f"There are {no_out} audit examples with 0 OUT sample(s) and {no_in} 0 IN sample(s)")
+                self.logger.info("When using few shadow models in online attacks, some audit sample(s) might\
+                 have a few or even 0 IN or OUT logits")
+                self.logger.info(f"In total {np.count_nonzero(self.skip_indices)} indices will be skipped!")
 
         # Calculate logits for all shadow models
         self.logger.info(f"Calculating the logits for all {self.num_shadow_models} shadow models")
@@ -154,13 +155,12 @@ class AttackLiRA(AbstractMIA):
         self.target_logits = np.array(self.signal([self.target_model], self.audit_data)).squeeze()
 
     def run_attack(self:Self) -> CombinedMetricResult:
-        """Runs the attack on the target model and dataset, computing and returning
-        the result(s) of the metric, which assess privacy risks or data leakage.
-    
-        This method evaluates how the target model's output (logits) for a specific dataset 
-        compares to the output of shadow models to determine if the dataset was part of the 
+        """Runs the attack on the target model and dataset and assess privacy risks or data leakage.
+
+        This method evaluates how the target model's output (logits) for a specific dataset
+        compares to the output of shadow models to determine if the dataset was part of the
         model's training data or not.
-    
+
         Returns
         -------
         Result(s) of the metric. An object containing the metric results, including predictions,

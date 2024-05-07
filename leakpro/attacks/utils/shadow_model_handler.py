@@ -4,7 +4,6 @@ import logging
 import os
 import pickle
 import re
-import time
 
 import joblib
 import numpy as np
@@ -369,8 +368,6 @@ class ShadowModelHandler():
         models_in_indices = np.asarray(models_in_indices)
 
         # Initialize list to store masks for audit dataset indices
-        start = time.time()
-
         indice_masks = []
         # Iterate over each index in the audit dataset
         for audit_index in tqdm(dataset):
@@ -389,11 +386,11 @@ def indice_in_shadowmodel_training_set(audit_indicie:int, models_in_indicies:np.
     Args:
     ----
         audit_indicie (int): The audit indice to check.
-        models_in_indicies (list): The list of indices in the shadow model training set.
+        models_in_indicies (np.ndarray): The list of indices in the shadow model training set.
 
     Returns:
     -------
-        list: The mask indicating if the audit indice is present in each shadow model training set.
+        mask (np.ndarray): The mask indicating if the audit indice is present in each shadow model training set.
 
     """
     num_models = len(models_in_indicies)
