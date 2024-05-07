@@ -17,9 +17,6 @@ class AttackScheduler:
 
     def __init__(
         self:Self,
-        # population:GeneralDataset,
-        # target_model:nn.Module,
-        # target_model_metadata:Dict[str, Any],
         handler: CodeHandler,
         configs:Dict[str, Any],
         logger:logging.Logger
@@ -42,9 +39,10 @@ class AttackScheduler:
             )
 
         # Prepare factory with shared items
+        # TODO: change names and revise code changes.
         factory = self.attack_type_to_factory[configs["audit"]["attack_type"]]
-        factory.set_population_and_audit_data(population,target_model_metadata)
-        factory.set_target_model_and_loss(target_model, nn.CrossEntropyLoss()) #TODO: Enable arbitrary loss functions
+        factory.set_population_and_audit_data(handler)
+        factory.set_target_model_and_loss(handler) #TODO: Enable arbitrary loss functions
         factory.set_logger(logger)
 
         self.logger = logger
