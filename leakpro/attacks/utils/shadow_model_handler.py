@@ -68,6 +68,7 @@ class ShadowModelHandler():
             logger (logging.Logger): The logger object for logging.
 
         """
+        config = config or {}
         module_path = config.get("module_path")
         model_class_path =  config.get("model_class_path")
 
