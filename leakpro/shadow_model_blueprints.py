@@ -1,13 +1,13 @@
 """Models for the datasets."""
-import torch
-import torch.nn.functional as F  # noqa: N812
-from torch import nn
+
+from torch import Tensor, flatten, nn
+from torch.nn import Module, functional
 from torchvision.models import resnet18
 
 from leakpro.import_helper import Self
 
 
-class NN(nn.Module):
+class NN(Module):
     """NN for Adult dataset."""
 
     def __init__(self:Self, in_shape:int, num_classes:int=10) -> None:
@@ -31,14 +31,14 @@ class NN(nn.Module):
         self.fc2 = nn.Linear(100, 50)
         self.fc3 = nn.Linear(50, num_classes)
 
-    def forward(self:Self, inputs:torch.Tensor) -> torch.Tensor:
+    def forward(self:Self, inputs:Tensor) -> Tensor:
         """Forward pass of the model."""
         inputs = inputs.flatten(1)
-        outputs = F.relu(self.fc1(inputs))
-        outputs = F.relu(self.fc2(outputs))
-        return F.relu(self.fc3(outputs))
+        outputs = functional.relu(self.fc1(inputs))
+        outputs = functional.relu(self.fc2(outputs))
+        return functional.relu(self.fc3(outputs))
 
-class ConvNet(nn.Module):
+class ConvNet(Module):
     """Convolutional Neural Network model."""
 
     def __init__(self:Self) -> None:
@@ -52,7 +52,7 @@ class ConvNet(nn.Module):
         self.fc2 = nn.Linear(120, 84)
         self.fc3 = nn.Linear(84, 10)
 
-    def forward(self:Self, x:torch.Tensor) -> torch.Tensor:
+    def forward(self:Self, x:Tensor) -> Tensor:
         """Forward pass of the model.
 
         Args:
@@ -64,11 +64,11 @@ class ConvNet(nn.Module):
             torch.Tensor: The output tensor.
 
         """
-        x = self.pool(F.relu(self.conv1(x)))
-        x = self.pool(F.relu(self.conv2(x)))
-        x = torch.flatten(x, 1) # flatten all dimensions except batch
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
+        x = self.pool(functional.relu(self.conv1(x)))
+        x = self.pool(functional.relu(self.conv2(x)))
+        x = flatten(x, 1) # flatten all dimensions except batch
+        x = functional.relu(self.fc1(x))
+        x = functional.relu(self.fc2(x))
         return self.fc3(x)
 
 
@@ -88,12 +88,12 @@ class SmallerSingleLayerConvNet(nn.Module):
         self.fc2 = nn.Linear(120, 84)
         self.fc3 = nn.Linear(84, 10)
 
-    def forward(self:Self, x:torch.Tensor) -> torch.Tensor:
+    def forward(self:Self, x:Tensor) -> Tensor:
         """Forward pass of the model."""
-        x = self.pool(F.relu(self.conv1(x)))
-        x = torch.flatten(x, 1)  # flatten all dimensions except the batch
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
+        x = self.pool(functional.relu(self.conv1(x)))
+        x = flatten(x, 1)  # flatten all dimensions except the batch
+        x = functional.relu(self.fc1(x))
+        x = functional.relu(self.fc2(x))
         return self.fc3(x)
 
 class ResNet18(nn.Module):
