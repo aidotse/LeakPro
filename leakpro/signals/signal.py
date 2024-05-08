@@ -177,7 +177,7 @@ class ModelRescaledLogits(Signal):
             model_logits = []
             for model in tqdm(models):
 
-                # Get neg. rescaled logits for each data point
+                # Get rescaled logits for each data point
                 logits = model.get_rescaled_logits(data, labels)
 
                 # Append the logits for the current model to the results

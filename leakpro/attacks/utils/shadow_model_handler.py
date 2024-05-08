@@ -373,16 +373,16 @@ class ShadowModelHandler():
         indice_masks_tensor = torch.zeros((len(dataset), len(models_in_indices)), dtype=torch.bool, device=_device)
 
         return torch_indice_in_shadowmodel_training_set(indice_masks_tensor,\
-                                                                model_indices_tensor, dataset_tensor).cpu().numpy()
+                                                                dataset_tensor, model_indices_tensor).cpu().numpy()
 
 @jit.script
-def torch_indice_in_shadowmodel_training_set(in_tensor:Tensor, tensor_dataset:Tensor, model_indices:Tensor) -> Tensor:
+def torch_indice_in_shadowmodel_training_set(in_tensor:Tensor, dataset_tensor:Tensor, model_indices:Tensor) -> Tensor:
     """Check if an audit indice is present in the shadow model training set.
 
     Args:
     ----
         in_tensor (Tensor): Tensor to store the mask(s)
-        tensor_dataset (Tensor): The tensor containing all audit indices to check.
+        dataset_tensor (Tensor): The tensor containing all audit indices to check.
         model_indices (Tensor): The tensor of indices for the shadow model training set.
 
     Returns:
@@ -391,5 +391,5 @@ def torch_indice_in_shadowmodel_training_set(in_tensor:Tensor, tensor_dataset:Te
 
     """
     for i in range(len(in_tensor.shape[1])):
-        in_tensor[:, i] = isin(tensor_dataset, model_indices[:, i])
+        in_tensor[:, i] = isin(dataset_tensor, model_indices[:, i])
     return in_tensor
