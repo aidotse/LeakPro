@@ -127,13 +127,13 @@ class AttackLiRA(AbstractMIA):
         if not self.online:
             count_in_samples = np.count_nonzero(self.in_indices_mask)
             if count_in_samples > 0:
-                raise ValueError("Some shadow model(s) contains IN samples, this is not an offline attack!")
-
+                self.logger.info(f"Some shadow model(s) contains {count_in_samples} IN samples in total for the model(s), this is not an offline attack!")
         self.skip_indices = np.zeros(len(self.in_indices_mask), dtype=bool)
+
         if self.online:
             no_in = 0
             no_out = 0
-            for i, mask in enumerate(self.in_indices_mask()):
+            for i, mask in enumerate(self.in_indices_mask):
                 if np.count_nonzero(mask) == len(mask):
                     no_out += 1
                     self.skip_indices[i] = True
@@ -143,8 +143,8 @@ class AttackLiRA(AbstractMIA):
 
             if no_out > 0 or no_in > 0:
                 self.logger.info(f"There are {no_out} audit examples with 0 OUT sample(s) and {no_in} 0 IN sample(s)")
-                self.logger.info("When using few shadow models in online attacks, some audit sample(s) might\
-                 have a few or even 0 IN or OUT logits")
+                self.logger.info("When using few shadow models in online attacks")
+                self.logger.info("some audit sample(s) mighthave a few or even 0 IN or OUT logits")
                 self.logger.info(f"In total {np.count_nonzero(self.skip_indices)} indices will be skipped!")
 
         # Calculate logits for all shadow models
@@ -181,6 +181,8 @@ class AttackLiRA(AbstractMIA):
 
             # Calculate the mean for OUT shadow model logits
             out_mean = np.mean(shadow_models_logits[~mask])
+            if not self.fixed_variance:
+                    out_std = np.std(shadow_models_logits[~mask])
 
             # Get the logit from the target model for the current sample
             target_logit = self.target_logits[i]
@@ -191,14 +193,11 @@ class AttackLiRA(AbstractMIA):
             if self.online:
                 in_mean = np.mean(shadow_models_logits[mask])
                 if not self.fixed_variance:
-                    out_std = np.std(shadow_models_logits[~mask])
                     in_std = np.std(shadow_models_logits[mask])
 
                 pr_in = -norm.logpdf(target_logit, in_mean, in_std + 1e-30)
             else:
                 pr_in = 0
-                if not self.fixed_variance:
-                    out_std = np.std(shadow_models_logits[~mask])
 
             score.append(pr_in - pr_out)  # Append the calculated probability density value to the score list
 

@@ -17,8 +17,8 @@ audit:  # Configurations for auditing
     #   attack_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack
     lira:
       training_data_fraction: 0.5  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
-      num_shadow_models: 5 # Number of shadow models to train
-      online: False # perform online or offline attack
+      num_shadow_models: 8 # Number of shadow models to train
+      online: True # perform online or offline attack
       fixed_variance: True # Use a fixed variance for the whole audit
 
   report_log: "./leakpro_output/results"  # Folder to save the auditing report
