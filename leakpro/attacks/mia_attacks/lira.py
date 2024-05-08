@@ -127,7 +127,8 @@ class AttackLiRA(AbstractMIA):
         if not self.online:
             count_in_samples = np.count_nonzero(self.in_indices_mask)
             if count_in_samples > 0:
-                self.logger.info(f"Some shadow model(s) contains {count_in_samples} IN samples in total for the model(s), this is not an offline attack!")
+                self.logger.info(f"Some shadow model(s) contains {count_in_samples} IN samples in total for the model(s)")
+                self.logger.info("This is not an offline attack!")
         self.skip_indices = np.zeros(len(self.in_indices_mask), dtype=bool)
 
         if self.online:
