@@ -7,8 +7,8 @@ import re
 
 import joblib
 import numpy as np
-from numba import njit, prange
-from torch import cuda, device, load, nn, optim, save
+import torch
+from torch import Tensor, cuda, device, isin, jit, load, nn, optim, save
 from torch.nn import Module
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
@@ -367,37 +367,29 @@ class ShadowModelHandler():
         # Convert to numpy array for easier manipulation
         models_in_indices = np.asarray(models_in_indices)
 
-        # Initialize list to store masks for audit dataset indices
-        indice_masks = []
-        # Iterate over each index in the audit dataset
-        for audit_index in tqdm(dataset):
-            # Check if the index is present in any of the shadow models training sets
-            mask = indice_in_shadowmodel_training_set(audit_index, models_in_indices)
-            indice_masks.append(mask)
+        _device = device("cuda" if torch.cuda.is_available() else "cpu")
+        model_indices_tensor = torch.from_numpy(models_in_indices).to(device=_device)
+        dataset_tensor = torch.from_numpy(dataset).to(device=_device)
+        indice_masks_tensor = torch.zeros((len(dataset), len(models_in_indices)), dtype=torch.bool, device=_device)
 
-        return np.asarray(indice_masks)
+        return torch_indice_in_shadowmodel_training_set(indice_masks_tensor,\
+                                                                model_indices_tensor, dataset_tensor).cpu().numpy()
 
-
-
-@njit
-def indice_in_shadowmodel_training_set(audit_indicie:int, models_in_indicies:np.ndarray) -> np.ndarray:
+@jit.script
+def torch_indice_in_shadowmodel_training_set(in_tensor:Tensor, tensor_dataset:Tensor, model_indices:Tensor) -> Tensor:
     """Check if an audit indice is present in the shadow model training set.
 
     Args:
     ----
-        audit_indicie (int): The audit indice to check.
-        models_in_indicies (np.ndarray): The list of indices in the shadow model training set.
+        in_tensor (Tensor): Tensor to store the mask(s)
+        tensor_dataset (Tensor): The tensor containing all audit indices to check.
+        model_indices (Tensor): The tensor of indices for the shadow model training set.
 
     Returns:
     -------
-        mask (np.ndarray): The mask indicating if the audit indice is present in each shadow model training set.
+        in_tensor (Tensor): The mask(s) indicating if the audit indices is present in each shadow model training set.
 
     """
-    num_models = len(models_in_indicies)
-    mask = np.zeros(num_models, dtype=np.bool_)
-    for i in prange(num_models):
-        for j in range(models_in_indicies.shape[1]):
-            if models_in_indicies[i, j] == audit_indicie:
-                mask[i] = True
-                break
-    return mask
+    for i in range(len(in_tensor.shape[1])):
+        in_tensor[:, i] = isin(tensor_dataset, model_indices[:, i])
+    return in_tensor
