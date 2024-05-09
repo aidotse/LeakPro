@@ -4,7 +4,7 @@ audit:  # Configurations for auditing
     rmia:
       training_data_fraction: 0.03  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
       attack_data_fraction: 0.01 # Fraction of auxiliary dataset to sample from during attack
-      num_shadow_models: 2 # Number of shadow models to train
+      num_shadow_models: 8 # Number of shadow models to train
       online: False # perform online or offline attack
       temperature: 2
       gamma: 2.0

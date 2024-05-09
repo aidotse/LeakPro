@@ -6,11 +6,8 @@ from torch import nn
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.mia_attacks.attack_p import AttackP
-<<<<<<< HEAD
-from leakpro.attacks.mia_attacks.loss_trajectory import AttackLossTrajectory
-=======
 from leakpro.attacks.mia_attacks.lira import AttackLiRA
->>>>>>> main
+from leakpro.attacks.mia_attacks.loss_trajectory import AttackLossTrajectory
 from leakpro.attacks.mia_attacks.qmia import AttackQMIA
 from leakpro.attacks.mia_attacks.rmia import AttackRMIA
 from leakpro.attacks.utils.distillation_model_handler import DistillationShadowModelHandler, DistillationTargetModelHandler
@@ -25,11 +22,8 @@ class AttackFactoryMIA:
         "population": AttackP,
         "rmia": AttackRMIA,
         "qmia": AttackQMIA,
-<<<<<<< HEAD
         "loss_traj":AttackLossTrajectory,
-=======
         "lira": AttackLiRA
->>>>>>> main
     }
 
     # Shared variables for all attacks
