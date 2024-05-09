@@ -30,6 +30,11 @@ audit:  # Configurations for auditing
       attack_mode: "soft_label" # label_only, soft_label
       attack_data_dir: "./leakpro_output/attack_objects/loss_traj"
       mia_classifier_epochs: 10
+    lira:
+      training_data_fraction: 0.5  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
+      num_shadow_models: 8 # Number of shadow models to train
+      online: True # perform online or offline attack
+      fixed_variance: True # Use a fixed variance for the whole audit
 
 
   report_log: "./leakpro_output/results"  # Folder to save the auditing report
@@ -43,7 +48,7 @@ target:
   model_class: "ResNet18"
   trained_model_path: "./target/target_model.pkl" 
   trained_model_metadata_path: "./target/model_metadata.pkl"
-  data_path: "./target/data/cinic10.pkl"
+  data_path: "./target/data/cifar10.pkl"
 
 
 shadow_model:
@@ -53,18 +58,16 @@ shadow_model:
   #
   # [Optional] Define a shadow model (if none, shadow model will follow the target model)
   # Name of the class to instantiate from the specified file
-  # model_class_path: "ConvNet"
-  # include_target_training_data: True
-  # include_target_testing_data: True
-  # optimizer: 
-  #   name: sgd #adam, sgd, rmsprop
-  #   lr: 0.01
-  #   momentum: 0.9
-  #   weight_decay: 0
-  # loss: 
-  #   name: crossentropyloss # crossentropyloss, nllloss, mseloss
-  # # Initialization parameters
-  # init_params: {}
+  model_class_path: "ResNet18" #"ConvNet"
+  optimizer: 
+    name: sgd #adam, sgd, rmsprop
+    lr: 0.01
+    momentum: 0.9
+    weight_decay: 0.0
+  loss: 
+    name: crossentropyloss # crossentropyloss, nllloss, mseloss
+  # Initialization parameters
+  init_params: {}
 
 distillation_target_model:
   storage_path: "./leakpro_output/attack_objects/distillation_target_models"

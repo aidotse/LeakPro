@@ -97,17 +97,32 @@ class SmallerSingleLayerConvNet(nn.Module):
         return self.fc3(x)
 
 class ResNet18(nn.Module):
-    """Pre-trained ResNet18 model with pretrained=False."""
+    """ResNet-18 model from torchvision."""
 
-    def __init__(self:Self, num_classes:int=10) -> None:
-        """Initialize the model."""
+    def __init__(self:Self, num_classes:int = 10) -> None:  # noqa: D417
+        """Initialize the ResNet-18 model.
+
+        Args:
+        ----
+            num_classes (int, optional): The number of classes. Defaults to 1000.
+
+        """
         super().__init__()
-        self.model = resnet18(pretrained=False)
-
-        # Modify the last fully connected layer to have 'num_classes' output features
-        num_features = self.model.fc.in_features
-        self.model.fc = nn.Linear(num_features, num_classes)
+        self.init_params = {
+            "num_classes": num_classes
+        }
+        self.model = resnet18(pretrained=False, num_classes=num_classes)
 
     def forward(self:Self, x:Tensor) -> Tensor:
-        """Forward pass of the model."""
+        """Forward pass of the model.
+
+        Args:
+        ----
+            x (torch.Tensor): The input tensor.
+
+        Returns:
+        -------
+            torch.Tensor: The output tensor.
+
+        """
         return self.model(x)

@@ -68,7 +68,7 @@ def generate_user_input(configs: dict, logger: logging.Logger)->None:
         target_model = shadow_model_blueprints.NN(configs["train"]["inputs"], configs["train"]["outputs"])
     elif "cifar10" in configs["data"]["dataset"]:
         population = get_cifar10_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
-        target_model = shadow_model_blueprints.ConvNet()
+        target_model = shadow_model_blueprints.ResNet18()
     elif "cinic10" in configs["data"]["dataset"]:
         population = get_cinic10_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
         target_model = shadow_model_blueprints.ResNet18(configs["train"]["num_classes"])
@@ -126,7 +126,7 @@ if __name__ == "__main__":
     Path(report_dir).mkdir(parents=True, exist_ok=True)
 
     # Get the target  metadata
-    target_model_metadata_path = f"{configs["target"]["trained_model_metadata_path"]}"
+    target_model_metadata_path = f'{configs["target"]["trained_model_metadata_path"]}'
     try:
         with open(target_model_metadata_path, "rb") as f:
             target_model_metadata = joblib.load(f)
