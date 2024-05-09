@@ -137,6 +137,7 @@ class AttackLossTrajectory(AbstractMIA):
             self.num_shadow_models,
             shadow_dataset,
             shadow_training_indices,
+            training_fraction = 1.0,
             retrain= False,
         )
 
