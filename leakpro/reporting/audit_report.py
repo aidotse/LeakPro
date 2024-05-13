@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 from abc import ABC, abstractmethod
+from typing import Optional
 
 import jinja2
 import matplotlib.pyplot as plt
@@ -14,7 +15,6 @@ from scipy import interpolate
 
 from leakpro.import_helper import Dict, List, Tuple, Union
 from leakpro.metrics.attack_result import AttackResult, CombinedMetricResult
-from typing import Optional
 
 ########################################################################################################################
 # GLOBAL SETTINGS
