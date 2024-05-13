@@ -8,6 +8,7 @@ import numpy as np
 import torch.nn.functional as F  # noqa: N812
 from torch import argmax, cuda, device, load, nn, no_grad, optim, save, tensor
 from torch.utils.data import DataLoader, Subset, TensorDataset
+from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.attack_data import get_attack_data
@@ -52,11 +53,10 @@ class AttackLossTrajectory(AbstractMIA):
 
         self.configs = configs
         self.train_mia_batch_size = configs.get("mia_batch_size", 64)
-        self.num_students = configs.get("num_students", 1)
+        self.num_students = 1
         self.number_of_traj = configs.get("number_of_traj", 10)
-        self.num_classes = configs.get("num_classes", 10)
         self.attack_data_dir = configs.get("attack_data_dir")
-        self.mia_classifier_epoch = configs.get("mia_classifier_epoch", 100)
+        self.mia_classifier_epoch = configs.get("mia_classifier_epochs", 100)
         self.attack_mode = configs.get("attack_mode", "soft_label")
 
 
@@ -312,7 +312,6 @@ class AttackLossTrajectory(AbstractMIA):
             "predicted_labels":predicted_labels,
             "predicted_status":predicted_status,
             "member_status":membership_status_shadow_train,
-            "nb_classes":self.num_classes
         }
         os.makedirs(self.attack_data_dir, exist_ok=True)
         with open(f"{self.attack_data_dir}/{dataset_name}", "wb") as file:
@@ -335,18 +334,12 @@ class AttackLossTrajectory(AbstractMIA):
                                             lr=0.01, momentum=0.9, weight_decay=0.0001)
             attack_model = attack_model.to(gpu_or_cpu)
             loss_fn = nn.CrossEntropyLoss()
-            train_loss =[]
-            train_prec1 = []
 
-            for _ in range(self.mia_classifier_epoch):
-                loss, prec = self.train_mia_step(attack_model, attack_optimizer,
-                                                            loss_fn)
-                train_loss.append(loss)
-                train_prec1.append(prec)
+            train_loss, train_prec1 = self.train_mia_classifier(attack_model, attack_optimizer, loss_fn)
+            train_info = [train_loss, train_prec1]
 
             save(attack_model.state_dict(), self.attack_data_dir + "/trajectory_mia_model.pkl")
 
-            train_info = [train_loss, train_prec1]
             with open(f"{self.attack_data_dir}/mia_model_losses.pkl", "wb") as file:
                 pickle.dump(train_info, file)
         else:
@@ -356,7 +349,7 @@ class AttackLossTrajectory(AbstractMIA):
 
         return attack_model
 
-    def train_mia_step(self:Self, model:nn.Module,
+    def train_mia_classifier(self:Self, model:nn.Module,
                         attack_optimizer:optim.Optimizer,
                         loss_fn:nn.functional) -> tuple:
         """Trains the model using the MIA (Membership Inference Attack) method for one step.
@@ -372,32 +365,40 @@ class AttackLossTrajectory(AbstractMIA):
             tuple: A tuple containing the train loss and accuracy.
 
         """
+        self.logger.info("Training the MIA classifier")
+
+        train_loss_list =[]
+        train_prec_list = []
+
         model.train()
         train_loss = 0
         num_correct = 0
         mia_train_loader = self.mia_train_data_loader
         gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        for _ in  tqdm(range(self.mia_classifier_epoch)):
+            for _batch_idx, (data, label) in enumerate(mia_train_loader):
+                data = data.to(gpu_or_cpu) # noqa: PLW2901
+                label = label.to(gpu_or_cpu) # noqa: PLW2901
+                label = label.long() # noqa: PLW2901
 
-        for _batch_idx, (data, label) in enumerate(mia_train_loader):
-            data = data.to(gpu_or_cpu) # noqa: PLW2901
-            label = label.to(gpu_or_cpu) # noqa: PLW2901
-            label = label.long() # noqa: PLW2901
+                pred = model(data)
+                loss = loss_fn(pred, label)
 
-            pred = model(data)
-            loss = loss_fn(pred, label)
+                attack_optimizer.zero_grad()
+                loss.backward()
 
-            attack_optimizer.zero_grad()
-            loss.backward()
+                attack_optimizer.step()
+                train_loss += loss.item()
+                pred_label = pred.max(1, keepdim=True)[1]
+                num_correct += pred_label.eq(label).sum().item()
 
-            attack_optimizer.step()
-            train_loss += loss.item()
-            pred_label = pred.max(1, keepdim=True)[1]
-            num_correct += pred_label.eq(label).sum().item()
+            train_loss /= len(mia_train_loader.dataset)
+            accuracy =  num_correct / len(mia_train_loader.dataset)
 
-        train_loss /= len(mia_train_loader.dataset)
-        accuracy = 100. * num_correct / len(mia_train_loader.dataset)
+            train_loss_list.append(loss)
+            train_prec_list.append(accuracy)
 
-        return train_loss, accuracy/100.
+        return train_loss_list, train_prec_list
 
     def run_attack(self:Self) -> CombinedMetricResult:
         """Run the attack and return the combined metric result.
@@ -436,6 +437,7 @@ class AttackLossTrajectory(AbstractMIA):
             - member_preds: The predicted membership probabilities for each data point.
 
         """
+        self.logger.info("Running the MIA attack")
         gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
         attack_model.to(gpu_or_cpu)
         attack_model.eval()
@@ -445,7 +447,7 @@ class AttackLossTrajectory(AbstractMIA):
         auc_pred = None
 
         with no_grad():
-            for batch_idx, (data, target) in enumerate(self.mia_test_data_loader):
+            for batch_idx, (data, target) in tqdm(enumerate(self.mia_test_data_loader)):
                 data = data.to(gpu_or_cpu) # noqa: PLW2901
                 target = target.to(gpu_or_cpu) # noqa: PLW2901
                 target = target.long() # noqa: PLW2901

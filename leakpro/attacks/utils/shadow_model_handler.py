@@ -122,7 +122,7 @@ class ShadowModelHandler():
         num_models:int,
         dataset:Dataset,
         indicies: np.ndarray,
-        training_fraction:float=1.0,
+        training_fraction:float=0.1,
         retrain:bool = False
     ) -> None:
         """Create and train shadow models based on the blueprint.

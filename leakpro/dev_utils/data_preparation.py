@@ -71,12 +71,12 @@ def get_adult_dataset(dataset_name: str, data_dir: str, logger:logging.Logger) -
 
         all_data = GeneralDataset(x,y)
         Path(path).mkdir(parents=True, exist_ok=True)
-        save_dataset(all_data, f"path/{dataset_name}", logger)
+        save_dataset(all_data, path, logger)
     return all_data
 
 def get_cifar10_dataset(dataset_name: str, data_dir: str, logger:logging.Logger) -> GeneralDataset:
     """Get the dataset."""
-    path = f"{data_dir}"
+    path = f"{data_dir}/{dataset_name}"
 
     if os.path.exists(f"{path}.pkl"):
         with open(f"{path}.pkl", "rb") as file:
@@ -92,7 +92,7 @@ def get_cifar10_dataset(dataset_name: str, data_dir: str, logger:logging.Logger)
 
         all_data = GeneralDataset(x, y, transform)
         Path(path).mkdir(parents=True, exist_ok=True)
-        save_dataset(all_data, f"{path}/{dataset_name}", logger)
+        save_dataset(all_data, path, logger)
     return all_data
 
 def download_file(url: str, download_path: str) -> None:
@@ -143,7 +143,7 @@ def get_cinic10_dataset(dataset_name: str, data_dir: str, logger:logging.Logger)
 
         all_data = GeneralDataset(x, y, transform)
         Path(path).mkdir(parents=True, exist_ok=True)
-        save_dataset(all_data, f"{path}/{dataset_name}", logger)
+        save_dataset(all_data, path, logger)
     return all_data
 
 def save_dataset(all_data: GeneralDataset, path: str, logger:logging.Logger) -> GeneralDataset:

@@ -148,6 +148,9 @@ class AttackLiRA(AbstractMIA):
                 self.logger.info("some audit sample(s) mighthave a few or even 0 IN or OUT logits")
                 self.logger.info(f"In total {np.count_nonzero(self.skip_indices)} indices will be skipped!")
 
+            if len(self.audit_data) == len(self.skip_indices):
+                raise ValueError("All audit samples are skipped. Please adjust the number of shadow models or the audit dataset.")
+
         # Calculate logits for all shadow models
         self.logger.info(f"Calculating the logits for all {self.num_shadow_models} shadow models")
         self.shadow_models_logits = np.swapaxes(np.array(self.signal(self.shadow_models, self.audit_data)), 0, 1)

@@ -14,6 +14,7 @@ from scipy import interpolate
 
 from leakpro.import_helper import Dict, List, Tuple, Union
 from leakpro.metrics.attack_result import AttackResult, CombinedMetricResult
+from typing import Optional
 
 ########################################################################################################################
 # GLOBAL SETTINGS
@@ -675,11 +676,21 @@ def fixed_fpr_results(fpr:np.ndarray, tpr:np.ndarray, configs:dict, filename:str
     attack_configs = configs["attack_list"][attack_name]
     config_key = json.dumps(attack_configs, sort_keys=True)
 
+    # Function to find TPR at given FPR thresholds
+    def find_tpr_at_fpr(fpr_array:np.ndarray, tpr_array:np.ndarray, threshold:float) -> Optional[str]:
+        try:
+            # Find the last index where FPR is less than the threshold
+            valid_index = np.where(fpr_array < threshold)[0][-1]
+            return f"{tpr_array[valid_index] * 100:.4f}%"
+        except IndexError:
+            # Return None or some default value if no valid index found
+            return "N/A"
+
     # Compute TPR values at various FPR thresholds
-    results = f"TPR@1.0%FPR: {tpr[np.where(fpr < 0.01)[0][-1]] * 100:.4f}%, " \
-              f"TPR@0.1%FPR: {tpr[np.where(fpr < 0.001)[0][-1]] * 100:.4f}%, " \
-              f"TPR@0.01%FPR: {tpr[np.where(fpr < 0.0001)[0][-1]] * 100:.4f}%, " \
-              f"TPR@0.0%FPR: {tpr[np.where(fpr < 0.000001)[0][-1]] * 100:.4f}%"
+    results = f"TPR@1.0%FPR: {find_tpr_at_fpr(fpr, tpr, 0.01)}%, " \
+              f"TPR@0.1%FPR: {find_tpr_at_fpr(fpr, tpr, 0.001)}%, " \
+              f"TPR@0.01%FPR: {find_tpr_at_fpr(fpr, tpr, 0.0001)}%, " \
+              f"TPR@0.0%FPR: {find_tpr_at_fpr(fpr, tpr, 0.00001)}%"
 
     # Load existing data
     data = read_and_parse_data(filename)
