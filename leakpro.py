@@ -71,7 +71,7 @@ def generate_user_input(configs: dict, logger: logging.Logger)->None:
         target_model = shadow_model_blueprints.ResNet18()
     elif "cinic10" in configs["data"]["dataset"]:
         population = get_cinic10_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
-        target_model = shadow_model_blueprints.ConvNet()
+        target_model = shadow_model_blueprints.ResNet18(configs["train"]["num_classes"])
 
     n_population = len(population)
 
@@ -97,8 +97,8 @@ if __name__ == "__main__":
 
 
     #args = "./config/adult.yaml"  # noqa: ERA001
-    user_args = "./config/dev_config/cifar10.yaml" # noqa: ERA001
-    # user_args = "./config/dev_config/cinic10.yaml" # noqa: ERA001
+    # user_args = "./config/dev_config/cifar10.yaml" # noqa: ERA001
+    user_args = "./config/dev_config/cinic10.yaml" # noqa: ERA001
 
     with open(user_args, "rb") as f:
         user_configs = yaml.safe_load(f)

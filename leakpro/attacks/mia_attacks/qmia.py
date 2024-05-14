@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.attack_data import get_attack_data
@@ -223,7 +224,7 @@ class AttackQMIA(AbstractMIA):
         self.quantile_regressor.train()
 
         # Loop over each epoch
-        for epoch_idx in range(epochs):
+        for epoch_idx in tqdm(range(epochs)):
             train_loss = 0.0
             # Loop over the training set
             self.quantile_regressor.train()

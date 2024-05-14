@@ -2,7 +2,7 @@
 
 from torch import Tensor, flatten, nn
 from torch.nn import Module, functional
-from torchvision import models
+from torchvision.models import resnet18
 
 from leakpro.import_helper import Self
 
@@ -111,7 +111,7 @@ class ResNet18(nn.Module):
         self.init_params = {
             "num_classes": num_classes
         }
-        self.model = models.resnet18(pretrained=False, num_classes=num_classes)
+        self.model = resnet18(pretrained=False, num_classes=num_classes)
 
     def forward(self:Self, x:Tensor) -> Tensor:
         """Forward pass of the model.

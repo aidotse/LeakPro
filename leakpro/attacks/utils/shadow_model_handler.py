@@ -121,8 +121,9 @@ class ShadowModelHandler():
         self:Self,
         num_models:int,
         dataset:Dataset,
-        indicies:list,
-        training_fraction:float
+        indicies: np.ndarray,
+        training_fraction:float=0.1,
+        retrain:bool = False
     ) -> None:
         """Create and train shadow models based on the blueprint.
 
@@ -132,6 +133,7 @@ class ShadowModelHandler():
             dataset (torch.utils.data.Dataset): The full dataset available for training the shadow models.
             indicies (list): The indices to use from the dataset for training the shadow models.
             training_fraction (float): The fraction of the dataset to use for training.
+            retrain (bool): Whether to retrain the shadow models or not.
 
         Returns:
         -------
@@ -141,11 +143,15 @@ class ShadowModelHandler():
         if num_models < 0:
             raise ValueError("Number of models cannot be negative")
 
-        entries = os.listdir(self.storage_path)
-        # Define a regex pattern to match files like model_{i}.pkl
-        pattern = re.compile(rf"^{self.model_storage_name}_\d+\.pkl$")
-        model_files = [f for f in entries if pattern.match(f)]
-        num_to_reuse = len(model_files)
+        if retrain:
+            self.logger.info("Retraining shadow models")
+            num_to_reuse = 0
+        else:
+            entries = os.listdir(self.storage_path)
+            # Define a regex pattern to match files like model_{i}.pkl
+            pattern = re.compile(rf"^{self.model_storage_name}_\d+\.pkl$")
+            model_files = [f for f in entries if pattern.match(f)]
+            num_to_reuse = len(model_files)
 
         # Get the size of the dataset
         shadow_data_size = int(len(indicies)*training_fraction)
@@ -172,7 +178,7 @@ class ShadowModelHandler():
             meta_data = {}
             meta_data["init_params"] = self.init_params
             meta_data["train_indices"] = shadow_data_indices
-            meta_data["num_train"] = shadow_data_size
+            meta_data["num_train"] = len(shadow_data_indices)
             meta_data["optimizer"] = self.optimizer_class.__name__
             meta_data["criterion"] = self.criterion_class.__name__
             meta_data["batch_size"] = self.batch_size
@@ -276,7 +282,8 @@ class ShadowModelHandler():
         shadow_model_indices = []
         for i in range(num_models):
             self.logger.info(f"Loading shadow model {i}")
-            shadow_models.append(self._load_shadow_model(i))
+            model = self._load_shadow_model(i)
+            shadow_models.append(model)
             shadow_model_indices.append(i)
         return shadow_models, shadow_model_indices
 
