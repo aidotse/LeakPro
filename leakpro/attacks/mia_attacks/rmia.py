@@ -150,14 +150,12 @@ class AttackRMIA(AbstractMIA):
             self.logger
         )
 
-        # create attack dataset
-        attack_data = self.population.subset(self.attack_data_index)
-
         # train shadow models
-        self.logger.info(f"Training shadow models on {len(attack_data)} points")
+        self.logger.info(f"Check for {self.num_shadow_models} shadow models (dataset: {len(self.attack_data_index)} points)")
         ShadowModelHandler().create_shadow_models(
             self.num_shadow_models,
-            attack_data,
+            self.population,
+            self.attack_data_index,
             self.training_data_fraction,
         )
 
@@ -176,8 +174,9 @@ class AttackRMIA(AbstractMIA):
                 int(self.attack_data_fraction * len(self.attack_data_index)),
                 replace=False
             )
-            self.logger.info(f"Number of attack data points after subsampling: {len(self.attack_data_index)}")
-
+            # create attack dataset
+            attack_data = self.population.subset(self.attack_data_index)
+            self.logger.info(f"Number of attack data points after subsampling: {len(attack_data)}")
 
             # get the true label indices
             z_true_labels = np.array(attack_data._labels)

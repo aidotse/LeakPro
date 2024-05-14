@@ -110,16 +110,14 @@ class CombinedMetricResult:
         self.fn = np.sum(true_labels == 1) - np.sum(
             predicted_labels[:, true_labels == 1], axis=1
         )
+        self.fpr = self.fp / (np.sum(true_labels == 0))
+        self.tpr = self.tp / (np.sum(true_labels == 1))
+        # In case the fpr are not sorted in ascending order.
+        sorted_indices = np.argsort(self.fpr)
+        self.fpr = self.fpr[sorted_indices]
+        self.tpr = self.tpr[sorted_indices]
 
-        sorted_indices = np.argsort(self.fp)
-        self.fp = self.fp[sorted_indices]
-        self.tp = self.tp[sorted_indices]
-        self.tn = self.tn[sorted_indices]
-        self.fn = self.fn[sorted_indices]
-
-        self.roc_auc = auc(
-            self.fp / (np.sum(true_labels == 0)), self.tp / (np.sum(true_labels == 1))
-        )
+        self.roc_auc = auc(self.fpr, self.tpr)
 
     def __str__(self:Self) -> str:
         """Return a string describing the metric result."""

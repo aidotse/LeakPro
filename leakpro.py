@@ -7,8 +7,9 @@ from pathlib import Path
 
 import joblib
 import numpy as np
-import torch
 import yaml
+from torch import load, manual_seed
+from torch.utils.data import Subset
 
 import leakpro.dev_utils.train as utils
 from leakpro import shadow_model_blueprints
@@ -60,17 +61,17 @@ def generate_user_input(configs: dict, logger: logging.Logger)->None:
     """Generate user input for the target model."""
     # ------------------------------------------------
 
-    retrain = True
+    retrain = False
     # Create the population dataset and target_model
     if "adult" in configs["data"]["dataset"]:
         population = get_adult_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
         target_model = shadow_model_blueprints.NN(configs["train"]["inputs"], configs["train"]["outputs"])
     elif "cifar10" in configs["data"]["dataset"]:
         population = get_cifar10_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
-        target_model = shadow_model_blueprints.ConvNet()
+        target_model = shadow_model_blueprints.ResNet18()
     elif "cinic10" in configs["data"]["dataset"]:
         population = get_cinic10_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
-        target_model = shadow_model_blueprints.ConvNet()
+        target_model = shadow_model_blueprints.ResNet18(configs["train"]["num_classes"])
 
     n_population = len(population)
 
@@ -79,12 +80,12 @@ def generate_user_input(configs: dict, logger: logging.Logger)->None:
     train_test_dataset = prepare_train_test_datasets(n_population, configs["data"])
 
     train_loader = get_dataloader(
-        torch.utils.data.Subset(population, train_test_dataset["train_indices"]),
+        Subset(population, train_test_dataset["train_indices"]),
         batch_size=configs["train"]["batch_size"],
         shuffle=True,
     )
     test_loader = get_dataloader(
-        torch.utils.data.Subset(population, train_test_dataset["test_indices"]),
+        Subset(population, train_test_dataset["test_indices"]),
         batch_size=configs["train"]["test_batch_size"],
     )
 
@@ -116,7 +117,7 @@ if __name__ == "__main__":
         configs = yaml.safe_load(f)
 
     # Set the random seed, log_dir and inference_game
-    torch.manual_seed(configs["audit"]["random_seed"])
+    manual_seed(configs["audit"]["random_seed"])
     np.random.seed(configs["audit"]["random_seed"])
     random.seed(configs["audit"]["random_seed"])
 
@@ -125,7 +126,7 @@ if __name__ == "__main__":
     Path(report_dir).mkdir(parents=True, exist_ok=True)
 
     # Get the target  metadata
-    target_model_metadata_path = f"{configs["target"]["trained_model_metadata_path"]}"
+    target_model_metadata_path = f'{configs["target"]["trained_model_metadata_path"]}'
     try:
         with open(target_model_metadata_path, "rb") as f:
             target_model_metadata = joblib.load(f)
@@ -140,7 +141,7 @@ if __name__ == "__main__":
     # Load the target model parameters into the blueprint
     with open(configs["target"]["trained_model_path"], "rb") as f:
         target_model = target_model_blueprint(**target_model_metadata["model_metadata"]["init_params"])
-        target_model.load_state_dict(torch.load(f))
+        target_model.load_state_dict(load(f))
         logger.info(f"Loaded target model from {configs['target']['trained_model_path']}")
 
     # Get the population dataset
