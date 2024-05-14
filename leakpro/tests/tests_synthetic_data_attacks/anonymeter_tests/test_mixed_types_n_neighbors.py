@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 
 from leakpro.synthetic_data_attacks.anonymeter.neighbors.mixed_types_n_neighbors import gower_distance, mixed_type_n_neighbors
-from leakpro.tests.anonymeter_tests.fixtures import get_adult
+from leakpro.tests.tests_synthetic_data_attacks.anonymeter_tests.fixtures import get_adult
 
 rng = np.random.default_rng()
 
@@ -51,7 +51,7 @@ def test_gower_distance(r0: list, r1: list, expected: int) -> None:
 
 def test_mixed_type_n_neighbors() -> None:
     """Assert result of test_mixed_type_n_neighbors function on adults first 10 rows."""
-    df = get_adult("ori", n_samples=10)
+    df = get_adult(return_ori=True, n_samples=10)
     shuffled_idx = rng.integers(10, size=10)
     ids, dist = mixed_type_n_neighbors(
         queries = df.iloc[shuffled_idx],
@@ -91,7 +91,7 @@ def test_mixed_type_n_neighbors_numerical() -> None:
 @pytest.mark.parametrize(("n_neighbors", "n_queries"), [(1, 10), (3, 5)])
 def test_mixed_type_n_neighbors_shape(n_neighbors: int, n_queries: int) -> None:
     """Assert result of returned ids.shape from test_mixed_type_n_neighbors function."""
-    df = get_adult("ori", n_samples=10)
+    df = get_adult(return_ori=True, n_samples=10)
     ids = mixed_type_n_neighbors(
         queries = df.head(n_queries),
         candidates = df,

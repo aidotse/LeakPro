@@ -88,11 +88,11 @@ def main_linkability_attack(
     """Main linkability attack function.
 
     Function returns a LinkabilityIndexes object, with indexes being
-    closest n_neighbors between synthetic data and first/second original dataset.
+    closest n_neighbors between first/second original dataset and synthetic data.
     """
     targets = ori.sample(n_attacks, replace=False)
-    idx_0 = mixed_type_n_neighbors(queries=syn[aux_cols[0]], candidates=targets[aux_cols[0]], n_neighbors=n_neighbors, n_jobs=n_jobs) # noqa: E501
-    idx_1 = mixed_type_n_neighbors(queries=syn[aux_cols[1]], candidates=targets[aux_cols[1]], n_neighbors=n_neighbors, n_jobs=n_jobs) # noqa: E501
+    idx_0 = mixed_type_n_neighbors(queries=targets[aux_cols[0]], candidates=syn[aux_cols[0]], n_neighbors=n_neighbors, n_jobs=n_jobs) # noqa: E501
+    idx_1 = mixed_type_n_neighbors(queries=targets[aux_cols[1]], candidates=syn[aux_cols[1]], n_neighbors=n_neighbors, n_jobs=n_jobs) # noqa: E501
     return LinkabilityIndexes(idx_0=idx_0, idx_1=idx_1).find_links()
 
 def random_links(*, n_synthetic: int, n_attacks: int, n_neighbors: int) -> npt.NDArray:
