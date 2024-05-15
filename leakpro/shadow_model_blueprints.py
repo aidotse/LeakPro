@@ -2,6 +2,7 @@
 
 from torch import Tensor, flatten, nn
 from torch.nn import Module, functional
+from torchvision.models import resnet18
 
 from leakpro.import_helper import Self
 
@@ -94,3 +95,34 @@ class SmallerSingleLayerConvNet(nn.Module):
         x = functional.relu(self.fc1(x))
         x = functional.relu(self.fc2(x))
         return self.fc3(x)
+
+class ResNet18(nn.Module):
+    """ResNet-18 model from torchvision."""
+
+    def __init__(self:Self, num_classes:int = 10) -> None:  # noqa: D417
+        """Initialize the ResNet-18 model.
+
+        Args:
+        ----
+            num_classes (int, optional): The number of classes. Defaults to 1000.
+
+        """
+        super().__init__()
+        self.init_params = {
+            "num_classes": num_classes
+        }
+        self.model = resnet18(pretrained=False, num_classes=num_classes)
+
+    def forward(self:Self, x:Tensor) -> Tensor:
+        """Forward pass of the model.
+
+        Args:
+        ----
+            x (torch.Tensor): The input tensor.
+
+        Returns:
+        -------
+            torch.Tensor: The output tensor.
+
+        """
+        return self.model(x)

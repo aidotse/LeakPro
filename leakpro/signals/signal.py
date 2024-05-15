@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from leakpro.dataset import Dataset
 from leakpro.import_helper import List, Self, Tuple
@@ -94,11 +95,12 @@ class ModelLogits(Signal):
 
         return results
 
+########################################################################################################################
+# MODEL_NEGATIVERESCALEDLOGIT CLASS
+########################################################################################################################
 
-########################################################################################################################
-# MODEL_RESCALEDLOGIT CLASS
-########################################################################################################################
-class ModelRescaledLogits(Signal):
+
+class ModelNegativeRescaledLogits(Signal):
     """Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a Dataset.
 
     This particular class is used to get the output of a model.
@@ -121,23 +123,68 @@ class ModelRescaledLogits(Signal):
             The signal value.
 
         """
-        results = []
-        for model in models:
+        data_loader = DataLoader(datasets, batch_size=len(datasets), shuffle=False)
+
+        # Iterate over the dataset using the DataLoader (ensures we use transforms etc)
+        for data, labels in data_loader:
+
             # Initialize a list to store the logits for the current model
             model_logits = []
+            for model in tqdm(models):
 
-            # Iterate over the dataset using the DataLoader (ensures we use transforms etc)
-            data_loader = DataLoader(datasets, batch_size=len(datasets), shuffle=False)
-            for data, labels in data_loader:
+                # Get neg. rescaled logits for each data point
+                logits = -model.get_rescaled_logits(data, labels)
+
+                # Append the logits for the current model to the results
+                model_logits.append(logits)
+
+            model_logits = np.array(model_logits)
+        return model_logits
+
+########################################################################################################################
+# MODEL_RESCALEDLOGIT CLASS
+########################################################################################################################
+
+class ModelRescaledLogits(Signal):
+    """Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a Dataset.
+
+    This particular class is used to get the output of a model.
+    """
+
+    def __call__(
+        self: Self,
+        models: List[Model],
+        datasets: Dataset,
+    ) -> List[np.ndarray]:
+        """Built-in call method.
+
+        Args:
+        ----
+            models: List of models that can be queried.
+            datasets: datasets that can be queried.
+
+        Returns:
+        -------
+            The signal value.
+
+        """
+        data_loader = DataLoader(datasets, batch_size=len(datasets), shuffle=False)
+
+        # Iterate over the dataset using the DataLoader (ensures we use transforms etc)
+        for data, labels in data_loader:
+
+            # Initialize a list to store the logits for the current model
+            model_logits = []
+            for model in tqdm(models):
 
                 # Get rescaled logits for each data point
                 logits = model.get_rescaled_logits(data, labels)
-                model_logits.extend(logits)
-            model_logits = np.array(model_logits)
-            # Append the logits for the current model to the results
-            results.append(model_logits)
 
-        return results
+                # Append the logits for the current model to the results
+                model_logits.append(logits)
+
+            model_logits = np.array(model_logits)
+        return model_logits
 
 
 ########################################################################################################################
