@@ -1,6 +1,7 @@
 """Main script to run LEAKPRO on a target model."""
 
 import logging
+import os
 import random
 import time
 from pathlib import Path
@@ -61,7 +62,7 @@ def generate_user_input(configs: dict, logger: logging.Logger)->None:
     """Generate user input for the target model."""
     # ------------------------------------------------
 
-    retrain = False
+    retrain = True
     # Create the population dataset and target_model
     if "adult" in configs["data"]["dataset"]:
         population = get_adult_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
@@ -170,3 +171,11 @@ if __name__ == "__main__":
                 configs["audit"],
                 save_path=f"{report_dir}/{attack_name}",
             )
+    # ------------------------------------------------
+    # Save the configs and user_configs
+    config_log_path = configs["audit"]["config_log"]
+    os.makedirs(config_log_path, exist_ok=True)
+    with open(f"{config_log_path}/audit.yaml", "w") as f:
+        yaml.safe_dump(configs, f)
+    with open(f"{config_log_path}/user_config.yaml", "w") as f:
+        yaml.safe_dump(user_configs, f)

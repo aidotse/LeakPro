@@ -4,6 +4,7 @@ import os
 import pickle
 from logging import Logger
 
+import matplotlib.pyplot as plt
 import numpy as np
 import torch.nn.functional as F  # noqa: N812
 from torch import argmax, cuda, device, load, nn, no_grad, optim, save, tensor
@@ -106,7 +107,7 @@ class AttackLossTrajectory(AbstractMIA):
 
         include_target_training_data = False
         #TODO: This should be changed!
-        include_target_testing_data = True
+        include_target_testing_data = False
 
         # Get all available indices for auxiliary dataset
         aux_data_index = get_attack_data(
@@ -138,7 +139,7 @@ class AttackLossTrajectory(AbstractMIA):
             shadow_dataset,
             shadow_training_indices,
             training_fraction = 1.0,
-            retrain= False,
+            retrain= True,
         )
 
         # load shadow models
@@ -149,23 +150,25 @@ class AttackLossTrajectory(AbstractMIA):
         # train the distillation model using the one and only trained shadow model
         self.logger.info(f"Training distillation of the shadow model on {len(distill_dataset)} points")
         DistillationShadowModelHandler().initializng_shadow_teacher(self.shadow_models[0], self.shadow_metadata[0])
-        self.distill_shadow_models = DistillationShadowModelHandler().create_distillation_models(
+        DistillationShadowModelHandler().create_distillation_models(
             self.num_students,
             self.number_of_traj,
             distill_dataset,
             distill_data_indices,
             self.attack_mode,
         )
+        self.distill_shadow_models = DistillationShadowModelHandler().get_distillation_epochs(self.number_of_traj)
 
         # train distillation model of the target model
         self.logger.info(f"Training distillation of the target model on {len(distill_dataset)} points")
-        self.distill_target_models = DistillationTargetModelHandler().create_distillation_models(
+        DistillationTargetModelHandler().create_distillation_models(
             self.num_students,
             self.number_of_traj,
             distill_dataset,
             distill_data_indices,
             self.attack_mode,
         )
+        self.distill_target_models = DistillationTargetModelHandler().get_distillation_epochs(self.number_of_traj)
 
         # shadow data (train and test) is used as training data for MIA_classifier in the paper
         train_mask = np.isin(shadow_data_indices,shadow_not_used_indices )
@@ -415,6 +418,8 @@ class AttackLossTrajectory(AbstractMIA):
         #NOTE: We don't have signals in this attack, unlike RMIA. I set it to random to pass the PR before refactoring.
         signals = np.random.rand(*true_labels.shape)
 
+        self.plot_trajectories("trajectory_train_data.pkl")
+        self.plot_trajectories("trajectory_test_data.pkl")
         # compute ROC, TP, TN etc
         return CombinedMetricResult(
             predicted_labels= predictions,
@@ -473,4 +478,40 @@ class AttackLossTrajectory(AbstractMIA):
         return auc_ground_truth, member_preds
 
 
+    def plot_trajectories(self: Self,
+                          dataset_name: str) -> None:
+        """Plot the trajectories of members and non-members.
 
+        Parameters
+        ----------
+        dataset_name : str
+            The name of the dataset.
+
+        Returns
+        -------
+        None
+
+        """
+        with open(f"{self.attack_data_dir}/{dataset_name}", "rb") as f:
+             data = pickle.load(f)  # noqa: S301
+
+
+        x_members = data["model_trajectory"][:len(self.train_indices), :]
+        x_non_members =data["model_trajectory"][len(self.train_indices):, :]
+
+        ave_members = np.mean(x_members, axis=0)
+        ave_non_members = np.mean(x_non_members, axis=0)
+
+        if dataset_name == "trajectory_train_data.pkl":
+            image_name = "train.png"
+        elif dataset_name == "trajectory_test_data.pkl":
+            image_name = "test.png"
+        plt.errorbar(range(self.number_of_traj), ave_members,  label="Member", fmt="-o")
+        plt.errorbar(range(self.number_of_traj), ave_non_members, label="Non-Member", fmt="-o")
+        plt.xlabel("Epochs")
+        plt.ylabel("Loss")
+        plt.title("Comparison of Means of members and non members")
+        plt.legend()
+        plt.savefig(f"{self.attack_data_dir}/{image_name}")
+        plt.clf()
+        plt.close()

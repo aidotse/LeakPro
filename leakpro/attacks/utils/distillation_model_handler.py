@@ -3,7 +3,6 @@
 import logging
 import os
 import pickle
-import re
 
 import numpy as np
 import torch.nn.functional as F  # noqa: N812
@@ -11,7 +10,7 @@ from torch import cuda, device, load, nn, optim, save
 from torch.nn import CrossEntropyLoss, KLDivLoss, Module
 from torch.utils.data import DataLoader, Dataset
 
-from leakpro.import_helper import Self, Tuple
+from leakpro.import_helper import Self
 from leakpro.utils.input_handler import get_class_from_module, import_module_from_file
 
 
@@ -142,42 +141,18 @@ class DistillationTargetModelHandler():
         if num_trajectory_epochs < 0:
             raise ValueError("Number of trajectory epochs cannot be negative")
 
-        entries = os.listdir(self.storage_path)
-        # Define a regex pattern to match files like epoch_{i}.pkl
-        pattern = re.compile(rf"^{self.model_storage_name}_\d+\.pkl$")
-        model_files = [f for f in entries if pattern.match(f)]
-        num_to_reuse = len(model_files)
-
-        # Get the size of the dataset
-        loaded_distillation_epochs = []
-        trained_distillation_epochs = []
-
-        if num_to_reuse > 0:
-            #load the all epochs
-            self.logger.info(f"Loading trained distillation model epoch {num_to_reuse - 1}")
-            loaded_distillation_epochs  = self.get_distillation_epochs(num_to_reuse)
-            distillation_model = loaded_distillation_epochs[-1]
-        else:
-            #Intiate the distillation model
-            distillation_model = self.distillation_model_blueprint(**self.init_params)
+        #Intiate the distillation model
+        distillation_model = self.distillation_model_blueprint(**self.init_params)
 
 
-        if num_trajectory_epochs - num_to_reuse > 0:
-            self.logger.info(f"Distillation training for more {num_trajectory_epochs - num_to_reuse} epochs")
+        self.logger.info(f"Distillation training for  {num_trajectory_epochs } epochs")
 
-
-            loss, trained_distillation_epochs = self._train_distillation_model(distillation_model,
-                                                                               dataset,
-                                                                               distillation_data_indices,
-                                                                               num_trajectory_epochs,
-                                                                               num_to_reuse,
-                                                                               attack_mode,
+        self._train_distillation_model(distillation_model,
+                                        dataset,
+                                        distillation_data_indices,
+                                        num_trajectory_epochs,
+                                        attack_mode,
             )
-        else:
-            self.logger.info("No more distillation training  of target model is needed")
-            trained_distillation_epochs = []
-
-        return loaded_distillation_epochs + trained_distillation_epochs
 
 
     def _train_distillation_model(
@@ -186,9 +161,8 @@ class DistillationTargetModelHandler():
             distillation_dataset:Dataset,
             distillation_data_indices:np.ndarray,
             num_trajectory_epochs:int,
-            num_to_reuse:int,
             attack_mode:str
-    ) -> Tuple[Module, np.ndarray, np.ndarray]:
+    ) -> None:
 
         # Get the device for training
         gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
@@ -201,9 +175,8 @@ class DistillationTargetModelHandler():
         self.logger.info(f"Created distillation dataset with size {len(distillation_dataset)}")
 
         optimizer = self.optimizer_class(distillation_model.parameters(), **self.optimizer_config)
-        trained_distillation_epochs = []
 
-        for d in range(num_to_reuse, num_trajectory_epochs):
+        for d in range( num_trajectory_epochs):
 
             distillation_model.train()
             teacher_model.eval()
@@ -239,10 +212,10 @@ class DistillationTargetModelHandler():
 
 
             self.logger.info(f"Training distillation model epoch {d} completed")
+            self.logger.info(f"loss: {epoch_loss}")
             with open(f"{self.storage_path}/{self.model_storage_name}_{d}.pkl", "wb") as f:
-                save(distillation_model.state_dict(), f)
-                self.logger.info(f"Saved distillation model epoch {d} to {self.storage_path}")
-            trained_distillation_epochs.append(distillation_model)
+                save(distillation_model.state_dict().copy(), f)
+            self.logger.info(f"Saved distillation model epoch {d} to {self.storage_path}")
 
             self.logger.info("Storing metadata for distillation model")
             meta_data = {}
@@ -262,9 +235,6 @@ class DistillationTargetModelHandler():
 
             self.logger.info(f"Metadata for distillation model stored in {self.storage_path}")
 
-        return  epoch_loss, trained_distillation_epochs
-
-
 
     def _load_distillation_epoch(self:Self, index:int) -> Module:
         if index < 0:
@@ -275,10 +245,8 @@ class DistillationTargetModelHandler():
         with open(f"{self.storage_path}/{self.model_storage_name}_{index}.pkl", "rb") as f:
             distillation_epoch.load_state_dict(load(f))
             self.logger.info(f"Loaded distillaion epoch  {index}")
-        with open(f"{self.storage_path}/{self.metadata_storage_name}_{index}.pkl", "rb") as f:
-            epoch_metadata = pickle.load(f)  # noqa: S301
-            self.logger.info(f"Loaded metadata of epoch model {index}")
-        return distillation_epoch, epoch_metadata["train_indices"]
+        return distillation_epoch
+
 
     def get_distillation_epochs(self:Self, num_epochs:int) -> list:
         """Retrieves the distillation epochs.
@@ -293,10 +261,9 @@ class DistillationTargetModelHandler():
 
         """
         distillation_epochs = []
-        #TODO: chechking if the traning data is the same for loaded model
         for i in range(num_epochs):
             self.logger.info(f"Loading distillation epoch {i}")
-            epoch, data_indices = self._load_distillation_epoch(i)
+            epoch = self._load_distillation_epoch(i)
             distillation_epochs.append(epoch)
 
         return distillation_epochs
@@ -418,40 +385,15 @@ class DistillationShadowModelHandler():
         if num_trajectory_epochs < 0:
             raise ValueError("Number of trajectory epochs cannot be negative")
 
-        entries = os.listdir(self.storage_path)
-        # Define a regex pattern to match files like epoch_{i}.pkl
-        pattern = re.compile(rf"^{self.model_storage_name}_\d+\.pkl$")
-        model_files = [f for f in entries if pattern.match(f)]
-        num_to_reuse = len(model_files)
+        #Intiate the distillation model
+        distillation_model = self.distillation_model_blueprint(**self.init_params)
 
-        loaded_distillation_epochs = []
-        trained_distillation_epochs = []
-
-        if num_to_reuse > 0:
-            #load the all epochs
-            self.logger.info(f"Loading trained distillation model epoch {num_to_reuse - 1}")
-            loaded_distillation_epochs  = self.get_distillation_epochs(num_to_reuse)
-            distillation_model = loaded_distillation_epochs[-1]
-
-        else:
-            #Intiate the distillation model
-            distillation_model = self.distillation_model_blueprint(**self.init_params)
-
-        if num_trajectory_epochs - num_to_reuse > 0:
-            self.logger.info(f"Distillation training for more {num_trajectory_epochs - num_to_reuse} epochs")
-
-            loss, trained_distillation_epochs = self._train_distillation_model(distillation_model,
-                                                                               dataset,
-                                                                               distillation_data_indices,
-                                                                               num_trajectory_epochs,
-                                                                               num_to_reuse,
-                                                                               attack_mode,
+        self._train_distillation_model(distillation_model,
+                                        dataset,
+                                        distillation_data_indices,
+                                        num_trajectory_epochs,
+                                        attack_mode,
             )
-        else:
-            self.logger.info("No more distillation training  of shadow model is needed")
-            trained_distillation_epochs = []
-
-        return loaded_distillation_epochs + trained_distillation_epochs
 
 
     def _train_distillation_model(
@@ -460,9 +402,8 @@ class DistillationShadowModelHandler():
             distillation_dataset:Dataset,
             distillation_data_indices: np.ndarray,
             num_trajectory_epochs:int,
-            num_to_reuse:int,
             attack_mode:str
-    ) -> Tuple[Module, np.ndarray, np.ndarray]:
+    ) -> None:
 
         # Get the device for training
         gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
@@ -474,9 +415,8 @@ class DistillationShadowModelHandler():
         self.logger.info(f"Created distillation dataset with size {len(distillation_dataset)}")
 
         optimizer = self.optimizer_class(distillation_model.parameters(), **self.optimizer_config)
-        trained_distillation_epochs = []
 
-        for d in range(num_to_reuse, num_trajectory_epochs):
+        for d in range(num_trajectory_epochs):
 
             distillation_model.train()
             teacher_model.eval()
@@ -512,10 +452,11 @@ class DistillationShadowModelHandler():
 
 
             self.logger.info(f"Training distillation of shadow model epoch {d} completed")
+            self.logger.info(f"loss: {epoch_loss}")
             with open(f"{self.storage_path}/{self.model_storage_name}_{d}.pkl", "wb") as f:
-                save(distillation_model.state_dict(), f)
+                save(distillation_model.state_dict().copy(), f)
                 self.logger.info(f"Saved distillation of shadow model epoch {d} to {self.storage_path}")
-            trained_distillation_epochs.append(distillation_model)
+
 
             self.logger.info("Storing metadata for distillation of shadow model")
             meta_data = {}
@@ -535,8 +476,6 @@ class DistillationShadowModelHandler():
 
             self.logger.info(f"Metadata for distillation of shadow model stored in {self.storage_path}")
 
-        return  epoch_loss, trained_distillation_epochs
-
 
     def _load_distillation_epoch(self:Self, index:int) -> Module:
         if index < 0:
@@ -547,10 +486,7 @@ class DistillationShadowModelHandler():
         with open(f"{self.storage_path}/{self.model_storage_name}_{index}.pkl", "rb") as f:
             distillation_epoch.load_state_dict(load(f))
             self.logger.info(f"Loaded distillaion of shadow model, epoch {index}")
-        with open(f"{self.storage_path}/{self.metadata_storage_name}_{index}.pkl", "rb") as f:
-            epoch_metadata = pickle.load(f)# noqa: S301
-            self.logger.info(f"Loaded metadata of epoch  {index}")
-        return distillation_epoch, epoch_metadata["train_indices"]
+        return distillation_epoch
 
     def get_distillation_epochs(self:Self, num_epochs:int) -> list:
         """Retrieves the distillation epochs.
@@ -565,9 +501,8 @@ class DistillationShadowModelHandler():
 
         """
         distillation_epochs = []
-       #TODO check training data of loaded epochs and currrent run
         for i in range(num_epochs):
             self.logger.info(f"Loading distillation epoch {i}")
-            epoch, data_indices = self._load_distillation_epoch(i)
+            epoch = self._load_distillation_epoch(i)
             distillation_epochs.append(epoch)
         return distillation_epochs
