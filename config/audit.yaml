@@ -17,10 +17,10 @@ audit:  # Configurations for auditing
       attack_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack
     loss_traj:
       training_distill_data_fraction : 0.2 # Fraction of the auxilary dataset to use for training the distillation models D_s = (1-D_KD)/2
-      number_of_traj: 5 # Number of epochs (number of points in the loss trajectory)
+      number_of_traj: 20 # Number of epochs (number of points in the loss trajectory)
       attack_mode: "soft_label" # label_only, soft_label
       attack_data_dir: "./leakpro_output/attack_objects/loss_traj"
-      mia_classifier_epochs: 10
+      mia_classifier_epochs: 100
     lira:
       training_data_fraction: 0.4  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
       num_shadow_models: 8 # Number of shadow models to train
@@ -29,6 +29,7 @@ audit:  # Configurations for auditing
 
 
   report_log: "./leakpro_output/results"  # Folder to save the auditing report
+  config_log: "./leakpro_output/config"  # Folder to save the configuration files
   target_model_folder: "./target"
   attack_folder: "attack_objects"
   attack_type: "mia"
@@ -68,7 +69,7 @@ distillation_target_model:
     name: sgd #adam, sgd, rmsprop
     lr: 0.01
     momentum: 0.9
-    weight_decay: 0
+    weight_decay: 0.001
   loss: 
     name: crossentropyloss # crossentropyloss, nllloss, mseloss
   # Initialization parameters
@@ -83,9 +84,9 @@ distillation_shadow_model:
   # model_class: "ConvNet"
   optimizer: 
     name: sgd #adam, sgd, rmsprop
-    lr: 0.01
+    lr: 0.001
     momentum: 0.9
-    weight_decay: 0
+    weight_decay: 0.001
   loss: 
     name: crossentropyloss # crossentropyloss, nllloss, mseloss
   # Initialization parameters
