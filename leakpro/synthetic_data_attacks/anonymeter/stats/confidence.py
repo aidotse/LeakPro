@@ -4,7 +4,7 @@
 """Functions for estimating rates and errors in privacy attacks."""
 import warnings
 from math import sqrt
-from typing import Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 from pydantic import BaseModel
 from scipy.stats import norm
@@ -176,6 +176,8 @@ class EvaluationResults(BaseModel):
     main_rate: Optional[SuccessRate] = None
     naive_rate: Optional[SuccessRate] = None
     residual_rate: Optional[SuccessRate] = None
+    #Result columns
+    res_cols: List[str] = ["n_total", "n_main", "n_naive", "confidence_level", "main_rate", "naive_rate", "residual_rate"]
 
     def __init__(self: Self, **kwargs: Union[int, float, Optional[SuccessRate]]) -> Union[None, ValueError]:
         super().__init__(**kwargs)
@@ -191,3 +193,24 @@ class EvaluationResults(BaseModel):
         self.main_rate = success_rate(n_total=self.n_total, n_success=self.n_main, confidence_level=self.confidence_level)
         self.naive_rate = success_rate(n_total=self.n_total, n_success=self.n_naive, confidence_level=self.confidence_level)
         self.residual_rate = residual_rate(main_rate=self.main_rate, naive_rate=self.naive_rate)
+
+    def pack_results(self: Self) -> List[Union[int,float]]:
+        """Returns a list with results."""
+        #Note: if return object is changed, change corresponding res_cols attribute!
+        return [
+            self.n_total,
+            self.n_main,
+            self.n_naive,
+            self.confidence_level,
+            self.main_rate.rate,
+            self.naive_rate.rate,
+            self.residual_rate.rate
+        ]
+
+    def print_results(self: Self) -> None:
+        """Prints results."""
+        def pprint(rate:float) -> str:
+            return f"{(rate*100):.2f}%"
+        print(f"Success rate of main attack (and nr and total): {pprint(self.main_rate.rate)}, {self.n_main}, {self.n_total}") # noqa: T201
+        print(f"Success rate of naive attack (and nr and total): {pprint(self.naive_rate.rate)}, {self.n_naive}, {self.n_total}") # noqa: T201
+        print(f"Residual rate: {pprint(self.residual_rate.rate)}") # noqa: T201
