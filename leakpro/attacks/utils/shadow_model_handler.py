@@ -122,7 +122,7 @@ class ShadowModelHandler():
         num_models:int,
         dataset:Dataset,
         indicies: np.ndarray,
-        training_fraction:float=0.1,
+        training_fraction:float=1.0,
         retrain:bool = False
     ) -> None:
         """Create and train shadow models based on the blueprint.
@@ -158,8 +158,12 @@ class ShadowModelHandler():
 
         for i in range(num_to_reuse, num_models):
 
-            shadow_data_indices = np.random.choice(indicies, shadow_data_size, replace=False)
-            shadow_dataset = dataset.subset(shadow_data_indices)
+            if training_fraction < 1.0:
+                shadow_data_indices = np.random.choice(indicies, shadow_data_size, replace=False)
+                shadow_dataset = dataset.subset(shadow_data_indices)
+            else:
+                shadow_dataset = dataset
+                shadow_data_indices = indicies
             shadow_train_loader = DataLoader(shadow_dataset, batch_size=self.batch_size, shuffle=True)
             self.logger.info(f"Created shadow dataset {i} with size {len(shadow_dataset)}")
 
