@@ -9,7 +9,7 @@ import pandas as pd
 
 TEST_DIR_PATH = os.path.dirname(os.path.realpath(__file__))
 
-def get_adult(return_ori: bool, n_samples: Optional[int] = None) -> pd.DataFrame:
+def get_adult(*, return_ori: bool, n_samples: Optional[int] = None) -> pd.DataFrame:
     """Fixture for the adult dataset.
 
     For details see:

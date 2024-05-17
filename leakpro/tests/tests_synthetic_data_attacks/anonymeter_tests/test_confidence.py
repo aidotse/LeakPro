@@ -236,7 +236,10 @@ def test_EvaluationResults_init_error() -> None: # noqa: N802
     ],
 )
 def test_EvaluationResults(n_total: int, n_main: int, n_naive: int, conf_level: float) -> None: # noqa: N802
-    """Assert EvaluationResults.init results for different input values."""
+    """Assert EvaluationResults.init results for different input values.
+
+    Test additionally tests pack_results method.
+    """
     e_main = success_rate(n_total=n_total, n_success=n_main, confidence_level=conf_level)
     e_naive = success_rate(n_total=n_total, n_success=n_naive, confidence_level=conf_level)
     e_residual = residual_rate(main_rate=e_main, naive_rate=e_naive)
@@ -246,6 +249,20 @@ def test_EvaluationResults(n_total: int, n_main: int, n_naive: int, conf_level: 
         n_naive=n_naive,
         confidence_level=conf_level
     )
+    e_res_cols = ["n_total", "n_main", "n_naive", "confidence_level", "main_rate", "naive_rate", "residual_rate"]
+    assert res.res_cols == e_res_cols
     assert_equal_SuccessRates(res.main_rate, e_main)
     assert_equal_SuccessRates(res.naive_rate, e_naive)
     assert_equal_SuccessRates(res.residual_rate, e_residual)
+    #Test pack_results method
+    packed_res = res.pack_results()
+    assert len(packed_res) == len(e_res_cols)
+    assert packed_res == [
+        res.n_total,
+        res.n_main,
+        res.n_naive,
+        res.confidence_level,
+        res.main_rate.rate,
+        res.naive_rate.rate,
+        res.residual_rate.rate
+    ]
