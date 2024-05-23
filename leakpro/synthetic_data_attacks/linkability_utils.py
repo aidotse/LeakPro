@@ -1,13 +1,11 @@
 """Linkability risk util functions."""
 import itertools
 import math
-from typing import List, Tuple, Union
+from typing import List, Union
 
-import matplotlib.patches as mpatches
-import matplotlib.pyplot as plt
 import numpy as np
 from pandas import DataFrame
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from leakpro.synthetic_data_attacks.anonymeter.evaluators.linkability_evaluator import LinkabilityEvaluator
 from leakpro.synthetic_data_attacks.utils import load_res_json_file, save_res_json_file
@@ -191,7 +189,6 @@ class LinkabilityFullResults(BaseModel):
 
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed = True)
     res_cols: List[str]
     res: List[List[Union[int,float]]]
     aux_cols: List[List[List[str]]]
@@ -204,7 +201,7 @@ def linkability_risk_evaluation(
     verbose: bool = False,
     save_results_json: bool = False,
     **kwargs: dict
-) -> Union[None, Tuple[List[Union[int, float]], List[str]]]:
+) -> LinkabilityFullResults:
     """Perform a full linkability risk evaluation.
 
     For full evaluation, n_samples of combinations will be used as auxiliary columns
@@ -252,12 +249,18 @@ def linkability_risk_evaluation(
             **kwargs
         )
         evaluator.evaluate()
+        ##Take away
+        #try:
+        #    print("Evaluator queries:", evaluator.queries()[:3])
+        #except:
+        #    pass
         #Pack results and append
         res_ = evaluator.results.pack_results()
         res_.append(len(comb[0]+comb[1])) #Adding len of aux_cols
         res.append(res_)
-    #Get results columns names
-    res_cols = evaluator.results.res_cols
+    #Set results column names
+    res_cols = evaluator.results.res_cols.copy()
+    res_cols.append("nr_aux_cols")
     #Instantiate LinkabilityFullResults
     link_full_res = LinkabilityFullResults(
         res_cols = res_cols,
@@ -276,45 +279,3 @@ def linkability_risk_evaluation(
 def load_linkability_results(*, dataset: str) -> LinkabilityFullResults:
     """Function to load and return linkability results from given dataset."""
     return LinkabilityFullResults(**load_res_json_file(prefix="linkability", dataset=dataset))
-
-def plot_linkability(*, full_link_res: LinkabilityFullResults) -> None:
-    """Function to plot linkability results from given res.
-
-    Note: function is not tested and is used in examples.
-    """
-    #Set plot properties
-    colors = ["b", "g", "orange"]
-    alpha = 1
-    bar_width = 1/3 * 0.95
-    bar_width2 = 0.03
-    #Get res and aux_cols_nr
-    res = np.array(full_link_res.res)
-    aux_cols_nr = np.unique(res[:, -1])
-    # Set up the figure and axes
-    plt.figure(figsize=(11, 5))
-    # Plotting the bar charts
-    for n_col in aux_cols_nr:
-        idx = np.where(res[:,-1]==n_col)[0]
-        res_ = res[idx, :]
-        if res_.shape[0]>0:
-            for i in range(3):
-                data = res_[:, i+4]
-                median = np.median(data)
-                up = np.quantile(data, 0.975)
-                down = np.quantile(data, 0.025)
-                plt.bar(n_col+i*bar_width, median, alpha=alpha, width=bar_width, color=colors[i], align="center")
-                plt.bar(n_col+i*bar_width, up-down, alpha=alpha, width=bar_width2, color="black", align="center", bottom=down)
-    # Adding labels and title
-    plt.xlabel("Nr. aux cols", fontsize=9)
-    plt.ylabel("Risk", fontsize=9)
-    plt.title(f"Full linkability risk 0.95 confidence, total attacks: {int(res[:,0].sum())}", fontsize=10)
-    # Adding ticks
-    xticks = [int(i) for i in aux_cols_nr]
-    plt.yticks(fontsize=7)
-    plt.xticks(xticks, xticks, rotation=45, ha="right", fontsize=7)
-    # Adding legend
-    legend_labels = ["Main attack", "Naive attack", "Residual risk"]
-    legend_handles = [mpatches.Patch(color=c, label=ll) for c, ll in zip(colors, legend_labels)]
-    plt.legend(handles=legend_handles, fontsize=10)
-    # Show plot
-    plt.show()
