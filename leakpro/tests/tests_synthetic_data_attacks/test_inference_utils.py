@@ -1,6 +1,7 @@
 """Tests for inference_utils module."""
-import numpy as np
 import os
+
+import numpy as np
 
 import leakpro.synthetic_data_attacks.inference_utils as iu
 from leakpro.synthetic_data_attacks.utils import aux_file_path

@@ -249,11 +249,6 @@ def linkability_risk_evaluation(
             **kwargs
         )
         evaluator.evaluate()
-        ##Take away
-        #try:
-        #    print("Evaluator queries:", evaluator.queries()[:3])
-        #except:
-        #    pass
         #Pack results and append
         res_ = evaluator.results.pack_results()
         res_.append(len(comb[0]+comb[1])) #Adding len of aux_cols
