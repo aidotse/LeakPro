@@ -6,7 +6,7 @@ from torch import nn
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
 from leakpro.dataset import GeneralDataset
-from leakpro.user_code.parent_template import CodeHandler
+from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 from leakpro.import_helper import Any, Dict, Self
 
 
@@ -17,8 +17,7 @@ class AttackScheduler:
 
     def __init__(
         self:Self,
-        handler: CodeHandler,
-        configs:Dict[str, Any],
+        handler: AbstractInputHandler,
         logger:logging.Logger
     ) -> None:
         """Initialize the AttackScheduler class.
@@ -32,18 +31,16 @@ class AttackScheduler:
             logger (logging.Logger): The logger object.
 
         """
+        configs = handler.configs
         if configs["audit"]["attack_type"] not in list(self.attack_type_to_factory.keys()):
             raise ValueError(
                 f"Unknown attack type: {configs['audit']['attack_type']}. "
                 f"Supported attack types: {self.attack_type_to_factory.keys()}"
             )
 
-        # Prepare factory with shared items
-        # TODO: change names and revise code changes.
+        # Prepare factory
         factory = self.attack_type_to_factory[configs["audit"]["attack_type"]]
-        factory.set_population_and_audit_data(handler)
-        factory.set_target_model_and_loss(handler) #TODO: Enable arbitrary loss functions
-        factory.set_logger(logger)
+        factory.setup(handler)
 
         self.logger = logger
 

@@ -15,8 +15,8 @@ from tqdm import tqdm
 
 from leakpro.import_helper import Self, Tuple
 from leakpro.model import PytorchModel
+from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 from leakpro.utils.input_handler import get_class_from_module, import_module_from_file
-from leakpro.user_code.parent_template import CodeHandler
 
 
 def singleton(cls):  # noqa: ANN001, ANN201
@@ -41,7 +41,7 @@ class ShadowModelHandler():
     """A class handling the creation, training, and loading of shadow models."""
 
 
-    def __init__(self:Self, handler: CodeHandler, config:dict, logger:logging.Logger) -> None:
+    def __init__(self:Self, handler: AbstractInputHandler) -> None:
         """Initialize the ShadowModelHandler.
 
         Args:
@@ -52,10 +52,9 @@ class ShadowModelHandler():
             logger (logging.Logger): The logger object for logging.
 
         """
-        config = config or {}
+        config = handler.configs["shadow_model"]
+        self.logger = handler.logger
         self.handler = handler
-
-        self.logger = logger
 
         self.storage_path = config["storage_path"]
         # Check if the folder does not exist
@@ -70,8 +69,6 @@ class ShadowModelHandler():
     def create_shadow_models(
         self:Self,
         num_models:int,
-        # dataset_indices: np.ndarray,
-        # training_fraction:float
         dataset:Dataset,
         indicies: np.ndarray,
         training_fraction:float=0.1,
@@ -107,13 +104,6 @@ class ShadowModelHandler():
             model_files = [f for f in entries if pattern.match(f)]
             num_to_reuse = len(model_files)
 
-        # shadow_data_size = int(len(dataset_indices)*training_fraction)
-
-        # for i in range(num_to_reuse, num_models):
-
-        #     shadow_data_indices = np.random.choice(dataset_indices, shadow_data_size, replace=False)
-
-        #     self.logger.info(f"Created shadow dataset {i} with size {len(shadow_data_indices)}")
         # Get the size of the dataset
         shadow_data_size = int(len(indicies)*training_fraction)
 
@@ -146,8 +136,6 @@ class ShadowModelHandler():
             meta_data["epochs"] = self.epochs
             meta_data["learning_rate"] = self.optimizer_config["lr"]
             meta_data["weight_decay"] = self.optimizer_config.get("weight_decay", 0.0)
-            meta_data["train_acc"] = train_acc
-            meta_data["train_loss"] = train_loss
 
             with open(f"{self.storage_path}/{self.metadata_storage_name}_{i}.pkl", "wb") as f:
                 pickle.dump(meta_data, f)
@@ -170,13 +158,7 @@ class ShadowModelHandler():
             raise ValueError("Index cannot be negative")
         if index >= len(os.listdir(self.storage_path)):
             raise ValueError("Index out of range")
-        # shadow_model = self.handler.get_shadow_model_class()(**self.handler.get_shadow_model_init_params())
-        # with open(f"{self.storage_path}/{self.model_storage_name}_{index}.pkl", "rb") as f:
-        #     shadow_model.load_state_dict(load(f))
-        #     self.logger.info(f"Loaded shadow model {index}")
-        
-        # # TODO put this into the handler. Maybe just make the handler return the Pytorch model and save the PytorchModel directly to disc
-        # return PytorchModel(shadow_model, self.handler.loss)
+
         shadow_model = self.shadow_model_blueprint(**self.init_params)
 
         try:

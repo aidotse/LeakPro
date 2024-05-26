@@ -8,6 +8,8 @@ from torch import nn
 
 from leakpro.import_helper import List, Self, Union
 from leakpro.metrics.attack_result import AttackResult
+from leakpro.model import PytorchModel
+from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 
 ########################################################################################################################
 # METRIC CLASS
@@ -22,26 +24,27 @@ class AbstractMIA(ABC):
 
     def __init__(
         self:Self,
-        population: np.ndarray,
-        audit_dataset: dict,
-        target_model: nn.Module,
-        logger:Logger
+        handler: AbstractInputHandler,
     )->None:
         """Initialize the AttackAbstract class.
 
         Args:
         ----
-            population (np.ndarray): The population used for the attack.
-            audit_dataset (dict): The audit dataset used for the attack.
-            target_model (nn.Module): The target model used for the attack.
-            logger (Logger): The logger used for logging.
+            handler (AbstractInputHandler): The input handler object.
 
         """
-        self._population = population
-        self._population_size = len(population)
-        self._target_model = target_model
-        self._audit_dataset = audit_dataset
-        self.logger = logger
+        self._population = handler.population
+        self._population_size = handler.population_size
+        self._target_model = PytorchModel(handler.target_model, handler.criterion)
+        self._audit_dataset = {
+            # Assuming train_indices and test_indices are arrays of indices, not the actual data
+            "data": np.concatenate((handler.train_indices, handler.test_indices)),
+            # in_members will be an array from 0 to the number of training indices - 1
+            "in_members": np.arange(len(handler.train_indices)),
+            # out_members will start after the last training index and go up to the number of test indices - 1
+            "out_members": np.arange(len(handler.train_indices),len(handler.train_indices)+len(handler.test_indices)),
+        }
+        self.logger = handler.logger
         self.signal_data = []
 
     @property

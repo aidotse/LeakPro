@@ -10,32 +10,26 @@ from leakpro.attacks.utils.threshold_computation import linear_itp_threshold_fun
 from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.signals.signal import ModelLoss
-
+from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 
 class AttackP(AbstractMIA):
     """Implementation of the P-attack."""
 
     def __init__(
         self:Self,
-        population: np.ndarray,
-        audit_dataset: dict,
-        target_model: nn.Module,
-        logger:Logger,
+        handler: AbstractInputHandler,
         configs: dict
     ) -> None:
         """Initialize the AttackP class.
 
         Args:
         ----
-            population (np.ndarray): The population data used for the attack.
-            audit_dataset (dict): The audit dataset used for the attack.
-            target_model (nn.Module): The target model to be attacked.
-            logger (Logger): The logger object for logging.
+            handler (AbstractInputHandler): The input handler object.
             configs (dict): A dictionary containing the attack configurations.
 
         """
         # Initializes the parent metric
-        super().__init__(population, audit_dataset, target_model, logger)
+        super().__init__(handler)
 
         self.signal = ModelLoss()
         self.hypothesis_test_func = linear_itp_threshold_func
@@ -47,9 +41,7 @@ class AttackP(AbstractMIA):
         self.attack_data_fraction = configs.get("attack_data_fraction", 0.5)
 
         # Define the validation dictionary as: {parameter_name: (parameter, min_value, max_value)}
-        validation_dict = {
-            "attack_data_fraction": (self.attack_data_fraction, 0.01, 1)
-        }
+        validation_dict = {"attack_data_fraction": (self.attack_data_fraction, 0.01, 1)}
 
         # Validate parameters
         for param_name, (param_value, min_val, max_val) in validation_dict.items():

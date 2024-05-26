@@ -221,8 +221,6 @@ def save_model_and_metadata(  # noqa: PLR0913
 
     """
     # Save model and metadata
-    model_metadata_dict = {"model_metadata": {}}
-
     log_dir = configs["run"]["log_dir"]
     Path(log_dir).mkdir(parents=True, exist_ok=True)
 
@@ -258,6 +256,5 @@ def save_model_and_metadata(  # noqa: PLR0913
     meta_data["test_loss"] = test_loss
     meta_data["dataset"] = configs["data"]["dataset"]
 
-    model_metadata_dict["model_metadata"] = meta_data
     with open(f"{log_dir}/model_metadata.pkl", "wb") as f:
-        pickle.dump(model_metadata_dict, f)
+        pickle.dump(meta_data, f)

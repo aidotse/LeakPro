@@ -35,12 +35,13 @@ audit:  # Configurations for auditing
   split_method: "no_overlapping"  # Method of creating the attack dataset
 
 target:
+  # Target model path
   module_path: "./leakpro/shadow_model_blueprints.py"
   model_class: "ResNet18"
+  # Data paths
   trained_model_path: "./target/target_model.pkl" 
   trained_model_metadata_path: "./target/model_metadata.pkl"
   data_path: "./target/data/cinic10.pkl"
-
 
 shadow_model:
   storage_path: "./leakpro_output/attack_objects/shadow_models"

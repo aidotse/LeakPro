@@ -2,7 +2,6 @@
 from logging import Logger
 
 import numpy as np
-from torch import nn
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.mia_attacks.attack_p import AttackP
@@ -12,8 +11,7 @@ from leakpro.attacks.mia_attacks.qmia import AttackQMIA
 from leakpro.attacks.mia_attacks.rmia import AttackRMIA
 from leakpro.attacks.utils.distillation_model_handler import DistillationShadowModelHandler, DistillationTargetModelHandler
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
-from leakpro.model import PytorchModel
-from leakpro.user_code.parent_template import CodeHandler
+from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 
 
 class AttackFactoryMIA:
@@ -28,59 +26,15 @@ class AttackFactoryMIA:
     }
 
     # Shared variables for all attacks
-    # population = None
     audit_dataset = None
     target_model = None
-    target_metadata = None
     logger = None
     shadow_model_handler = None
     distillation_target_model_handler = None
     distillation_shadow_model_handler = None
 
-
-    @staticmethod
-    def set_population_and_audit_data(handler: CodeHandler) -> None:
-        """Initialize the population dataset."""
-        # if AttackFactoryMIA.population is None:
-        #     AttackFactoryMIA.population = handler.population
-
-        if AttackFactoryMIA.target_metadata is None:
-            AttackFactoryMIA.target_metadata = handler.target_metadata
-
-        if AttackFactoryMIA.audit_dataset is None:
-           AttackFactoryMIA.audit_dataset = {
-            # Assuming train_indices and test_indices are arrays of indices, not the actual data
-            "data": np.concatenate(
-                (
-                    handler.target_metadata["train_indices"],
-                    handler.target_metadata["test_indices"],
-                )
-            ),
-            # in_members will be an array from 0 to the number of training indices - 1
-            "in_members": np.arange(len(handler.target_metadata["train_indices"])),
-            # out_members will start after the last training index and go up to the number of test indices - 1
-            "out_members": np.arange(
-                len(handler.target_metadata["train_indices"]),
-                len(handler.target_metadata["train_indices"])
-                + len(handler.target_metadata["test_indices"]),
-            ),
-        }
-           
-    @staticmethod
-    def set_target_model_and_loss(handler: CodeHandler) -> None:
-        """Set the target model."""
-        # TODO: Make handler return the PytorchModel directly
-        if AttackFactoryMIA.target_model is None:
-            AttackFactoryMIA.target_model = PytorchModel(handler.target_model, handler.loss)
-
-    @staticmethod
-    def set_logger(logger:Logger) -> None:
-        """Set the logger for the AttackFactoryMIA class."""
-        if AttackFactoryMIA.logger is None:
-            AttackFactoryMIA.logger = logger
-
     @classmethod
-    def create_attack(cls, name: str, configs: dict, handler: CodeHandler) -> AbstractMIA:  # noqa: ANN102
+    def create_attack(cls, name: str, configs: dict, handler: AbstractInputHandler) -> AbstractMIA:  # noqa: ANN102
         """Create an attack object based on the given name, attack_utils, and configs.
 
         Args:
@@ -98,46 +52,28 @@ class AttackFactoryMIA:
             ValueError: If the attack type is unknown.
 
         """
-        # if AttackFactoryMIA.population is None:
-        #     raise ValueError("Population data has not been set")
-        if AttackFactoryMIA.audit_dataset is None:
-            raise ValueError("Audit data has not been set")
-        if AttackFactoryMIA.target_model is None:
-            raise ValueError("Target model has not been set")
-        if AttackFactoryMIA.logger is None:
-            raise ValueError("Logger has not been set")
 
         if AttackFactoryMIA.shadow_model_handler is None:
             AttackFactoryMIA.logger.info("Creating shadow model handler singleton")
-            shadow_configs = configs.get("shadow_model", {})
-            AttackFactoryMIA.shadow_model_handler = ShadowModelHandler(
-                                                        handler=handler,
-                                                        config = shadow_configs,
-                                                        logger = AttackFactoryMIA.logger
-                                                    )
-        if AttackFactoryMIA.distillation_target_model_handler is None:
-            AttackFactoryMIA.logger.info("Creating distillation model handler singleton for the target model")
-            distillation_configs = configs.get("distillation_target_model", {})
-            AttackFactoryMIA.distillation_target_model_handler = DistillationTargetModelHandler(
-                                                        AttackFactoryMIA.target_model,
-                                                        AttackFactoryMIA.target_metadata,
-                                                        distillation_configs,
-                                                        AttackFactoryMIA.logger
-                                                    )
-        if AttackFactoryMIA.distillation_shadow_model_handler is None:
-            AttackFactoryMIA.logger.info("Creating distillation model handler singleton for the shadow model")
-            distillation_configs = configs.get("distillation_shadow_model", {})
-            AttackFactoryMIA.distillation_shadow_model_handler = DistillationShadowModelHandler(
-                                                    distillation_configs,
-                                                    AttackFactoryMIA.logger
-                                                )
+            AttackFactoryMIA.shadow_model_handler = ShadowModelHandler(handler)
+
+        # if AttackFactoryMIA.distillation_target_model_handler is None:
+        #     AttackFactoryMIA.logger.info("Creating distillation model handler singleton for the target model")
+        #     distillation_configs = configs.get("distillation_target_model", {})
+        #     AttackFactoryMIA.distillation_target_model_handler = DistillationTargetModelHandler(
+        #                                                 AttackFactoryMIA.target_model,
+        #                                                 AttackFactoryMIA.target_metadata,
+        #                                                 distillation_configs,
+        #                                                 AttackFactoryMIA.logger
+        #                                             )
+        # if AttackFactoryMIA.distillation_shadow_model_handler is None:
+        #     AttackFactoryMIA.logger.info("Creating distillation model handler singleton for the shadow model")
+        #     distillation_configs = configs.get("distillation_shadow_model", {})
+        #     AttackFactoryMIA.distillation_shadow_model_handler = DistillationShadowModelHandler(
+        #                                             distillation_configs,
+        #                                             AttackFactoryMIA.logger
+        #                                         )
 
         if name in cls.attack_classes:
-            return cls.attack_classes[name](
-                AttackFactoryMIA.population,
-                AttackFactoryMIA.audit_dataset,
-                AttackFactoryMIA.target_model,
-                AttackFactoryMIA.logger,
-                configs["audit"]["attack_list"][name]
-            )
+            return cls.attack_classes[name](handler, configs["audit"]["attack_list"][name])
         raise ValueError(f"Unknown attack type: {name}")
