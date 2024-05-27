@@ -139,7 +139,7 @@ def test_linkability_risk_evaluation() -> None:
         n_samples = n_samples,
         n_attacks = 5
     )
-    assert isinstance(full_link_res, lu.LinkabilityFullResults)
+    assert isinstance(full_link_res, lu.LinkabilityResults)
     #Calculate number of total attacks
     counter = len(list(range(2, adults_nr_cols+1)))
     nr_total_attacks = n_samples * counter
@@ -166,7 +166,7 @@ def test_linkability_risk_evaluation() -> None:
         n_attacks = 5,
         save_results_json = True
     )
-    assert isinstance(full_link_res, lu.LinkabilityFullResults)
+    assert isinstance(full_link_res, lu.LinkabilityResults)
     assert os.path.exists(file_path)
     #Remove results file
     os.remove(file_path)
@@ -175,4 +175,4 @@ def test_linkability_risk_evaluation() -> None:
 def test_load_linkability_results() -> None:
     """Assert results for load_linkability_results function for dataset used in examples."""
     full_link_res = lu.load_linkability_results(dataset="adults")
-    assert isinstance(full_link_res, lu.LinkabilityFullResults)
+    assert isinstance(full_link_res, lu.LinkabilityResults)

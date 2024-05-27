@@ -4,102 +4,170 @@ from typing import List
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.axes import Axes
 
 from leakpro.synthetic_data_attacks.inference_utils import InferenceResults
-from leakpro.synthetic_data_attacks.linkability_utils import LinkabilityFullResults
+from leakpro.synthetic_data_attacks.linkability_utils import LinkabilityResults
 
 # Set global plot properties
 colors = ["b", "g", "orange"]
 alpha = 1
 bar_width = 1/3 * 0.95
-bar_width2 = 0.03
+conf_bar_width = 0.03
+# Set confidence level for plots
+conf_level = 0.95
+tail_conf_level = (1-conf_level)/2
 
-def set_figure() -> None:
-    """Function to set plot figure."""
-    plt.figure(figsize=(11, 5))
+def plot_save_high_res() -> None:
+    """Function to set plot (and save) figure dpi."""
+    plt.rcParams["figure.dpi"] = 300
+    plt.rcParams["savefig.dpi"] = 300
 
-def set_labels_and_title(*, xlabel: str, ylabel: str, title: str) -> None:
-    """Function to set plot labels and title."""
-    plt.xlabel(xlabel, fontsize=9)
-    plt.ylabel(ylabel, fontsize=9)
-    plt.title(title, fontsize=10)
+def get_figure_axes(*, two_axes_flag: bool = False, fig_title: str = "") -> Axes:
+    """Function to get plot figure axes."""
+    # Set extra
+    extra = int(two_axes_flag)
+    # Get fig, axs
+    fig, axs = plt.subplots(1+extra, 1, figsize=(11, 4+extra*3))
+    # Set fig title
+    if fig_title:
+        fig.suptitle(fig_title, fontsize=11)
+    return axs
 
-def set_ticks(xticks: List[int], xlabels: List[str] = None) -> None:
-    """Function to set plot ticks."""
-    plt.yticks(fontsize=7)
-    if xlabels is None:
-        xlabels = xticks
-    plt.xticks(xticks, xlabels, rotation=45, ha="right", fontsize=7)
+def set_labels_and_title(*, ax: Axes, xlabel: str, ylabel: str, title: str) -> None:
+    """Function to set axes labels and title."""
+    ax.set_xlabel(xlabel, fontsize=9)
+    ax.set_ylabel(ylabel, fontsize=9)
+    ax.set_title(title, fontsize=10)
 
-def set_legend() -> None:
-    """Function to set plot legend."""
+def set_ticks(*, ax: Axes, xlabels: List[str] = None) -> None:
+    """Function to set axes ticks."""
+    ax.tick_params(axis="y", labelsize=7)
+    ax.set_xticks(list(range(len(xlabels))))
+    ax.set_xticklabels(xlabels, rotation=45, ha="right", fontsize=7)
+
+def set_legend(*, ax: Axes) -> None:
+    """Function to set axes legend."""
     legend_labels = ["Main attack", "Naive attack", "Residual risk"]
     legend_handles = [mpatches.Patch(color=c, label=ll) for c, ll in zip(colors, legend_labels)]
-    plt.legend(handles=legend_handles, fontsize=10)
+    ax.legend(handles=legend_handles, fontsize=10)
 
-def plot_linkability(*, full_link_res: LinkabilityFullResults) -> None:
+def iterate_values_plot_bar_charts(*, ax: Axes, res: np.array, set_values: set, values: List) -> None:
+    """Function to iterate through set_values and plot them in bar charts."""
+    # Iterate through set of values
+    for x_idx, value in enumerate(set_values):
+        # Get idx of data
+        idx = np.where(values==value)[0]
+        # Set data
+        data = res[idx, 4:7]
+        if data.shape[0]>0:
+            # Iterate through risks
+            for r in range(3):
+                data_r = data[:, r]
+                median = np.median(data_r)
+                up = np.quantile(data_r, 1-tail_conf_level)
+                down = np.quantile(data_r, tail_conf_level)
+                # Plot bar charts
+                ax.bar(x_idx+r*bar_width, median, alpha=alpha, width=bar_width, color=colors[r], align="center")
+                ax.bar(x_idx+r*bar_width, up-down, alpha=alpha, width=conf_bar_width, color="black", align="center", bottom=down)
+
+def plot_linkability(*, link_res: LinkabilityResults, high_res_flag: bool = True) -> None:
     """Function to plot linkability results from given res.
 
     Note: function is not tested and is used in examples.
     """
     # Get res and aux_cols_nr
-    res = np.array(full_link_res.res)
-    aux_cols_nr = np.unique(res[:, -1])
-    # Set confidence level
-    conf_level = 0.95
-    tail_conf_level = (1-conf_level)/2
-    # Set up the figure and axes
-    set_figure()
-    # Plotting the bar charts
-    for n_col in aux_cols_nr:
-        idx = np.where(res[:,-1]==n_col)[0]
-        res_ = res[idx, :]
-        if res_.shape[0]>0:
-            for i in range(3):
-                data = res_[:, i+4]
-                median = np.median(data)
-                up = np.quantile(data, 1-tail_conf_level)
-                down = np.quantile(data, tail_conf_level)
-                plt.bar(n_col+i*bar_width, median, alpha=alpha, width=bar_width, color=colors[i], align="center")
-                plt.bar(n_col+i*bar_width, up-down, alpha=alpha, width=bar_width2, color="black", align="center", bottom=down)
+    res = np.array(link_res.res)
+    set_nr_aux_cols = np.unique(res[:,-1].astype(int))
+    # High res flag
+    if high_res_flag:
+        plot_save_high_res()
+    # Set up the figure and get axes
+    ax = get_figure_axes()
+    # Iterate through nr of columns and plot bar charts
+    iterate_values_plot_bar_charts(ax=ax, res=res, set_values=set_nr_aux_cols, values=res[:, -1])
     # Adding labels and title
     set_labels_and_title(
+        ax = ax,
         xlabel = "Nr. aux cols",
         ylabel = "Risk",
-        title = f"Full linkability risk {conf_level} confidence, total attacks: {int(res[:,0].sum())}"
+        title = f"Linkability risk {conf_level} confidence, total attacks: {int(res[:,0].sum())}"
     )
     # Adding ticks
-    xticks = [int(i) for i in aux_cols_nr]
-    set_ticks(xticks=xticks)
+    set_ticks(ax=ax, xlabels=set_nr_aux_cols)
     # Adding legend
-    set_legend()
+    set_legend(ax=ax)
     # Show plot
     plt.show()
 
-def plot_ir_each_against_rest_columns(*, inf_res: InferenceResults) -> None:
-    """Function to plot inference results each column against rest of columns.
+def plot_ir_worst_case(*, inf_res: InferenceResults, high_res_flag: bool = True) -> None:
+    """Function to plot inference results worst case given results.
 
     Note: function is not tested and is used in examples.
     """
-    #Get res
+    #Set res, secrets and set_secrets
     res = np.array(inf_res.res)
-    # Set up the figure and axes
-    set_figure()
-    # Plotting the bar charts
-    for i in range(3):
-        for j in range(res.shape[0]):
-            plt.bar(j+i*bar_width, res[j, i+4], width=bar_width, color=colors[i], align="center")
+    secrets = np.array(inf_res.secrets)
+    set_secrets = sorted(set(secrets))
+    # High res flag
+    if high_res_flag:
+        plot_save_high_res()
+    # Set up the figure and get axes
+    ax = get_figure_axes()
+    # Iterate through secrets and plot bar charts
+    iterate_values_plot_bar_charts(ax=ax, res=res, set_values=set_secrets, values=secrets)
     # Adding labels and title
     set_labels_and_title(
+        ax = ax,
         xlabel = "Secret col",
         ylabel = "Risk",
-        title = f"Inference risk, each column against rest of columns, total attacks: {int(res[:,0].sum())}"
+        title = f"Inference risk, worst case scenario, total attacks: {int(res[:,0].sum())}"
     )
     # Adding ticks
-    xticks = list(range(res.shape[0]))
-    xlabels = [inf_res.secrets[i] for i in xticks]
-    set_ticks(xticks=xticks, xlabels=xlabels)
+    set_ticks(ax=ax, xlabels=set_secrets)
     # Adding legend
-    set_legend()
+    set_legend(ax=ax)
     # Show plot
+    plt.show()
+
+def plot_ir_base_case(*, inf_res: InferenceResults, high_res_flag: bool = True) -> None:
+    """Function to plot inference results base case given results.
+
+    Note: function is not tested and is used in examples.
+    """
+    #Set res, secrets, set_secrets and set_nr_aux_cols
+    res = np.array(inf_res.res)
+    secrets = np.array(inf_res.secrets)
+    set_secrets = sorted(set(secrets))
+    set_nr_aux_cols = np.unique(res[:,-1].astype(int))
+    # High res flag
+    if high_res_flag:
+        plot_save_high_res()
+    # Set up the figure and get axes
+    fig_title = f"Inference risk, base case scenario, {conf_level} confidence, total attacks: {int(res[:,0].sum())}"
+    axs = get_figure_axes(two_axes_flag=True, fig_title=fig_title)
+    # Set plot variables
+    titles = ["Risk per column", "Risk per Nr Aux info"]
+    xlabels = ["Column", "Nr Aux Info"]
+    sets_values = [set_secrets, set_nr_aux_cols]
+    valueses = [secrets, res[:,-1]]
+    assert len(axs) == len(titles)
+    assert len(axs) == len(xlabels)
+    assert len(axs) == len(sets_values)
+    assert len(axs) == len(valueses)
+    #Plotting
+    for ax, title, xlabel, set_values, values in zip(axs, titles, xlabels, sets_values, valueses):
+        set_labels_and_title(
+            ax = ax,
+            xlabel = xlabel,
+            ylabel = "Risk",
+            title = title
+        )
+        # Iterate through values and plot bar charts
+        iterate_values_plot_bar_charts(ax=ax, res=res, set_values=set_values, values=values)
+        # Adding ticks
+        set_ticks(ax=ax, xlabels=set_values)
+        # Adding legend
+        set_legend(ax=ax)
+    plt.tight_layout()
     plt.show()

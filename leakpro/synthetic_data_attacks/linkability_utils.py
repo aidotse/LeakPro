@@ -175,7 +175,7 @@ def linkability_combinations_samples(*, cols: List[str], n_samples: int = 300) -
                 )
     return combs
 
-class LinkabilityFullResults(BaseModel):
+class LinkabilityResults(BaseModel):
     """Class that holds results of linkability_risk_evaluation.
 
     Parameters
@@ -201,7 +201,7 @@ def linkability_risk_evaluation(
     verbose: bool = False,
     save_results_json: bool = False,
     **kwargs: dict
-) -> LinkabilityFullResults:
+) -> LinkabilityResults:
     """Perform a full linkability risk evaluation.
 
     For full evaluation, n_samples of combinations will be used as auxiliary columns
@@ -227,8 +227,8 @@ def linkability_risk_evaluation(
 
     Returns
     -------
-    LinkabilityFullResults
-        LinkabilityFullResults with results.
+    LinkabilityResults
+        LinkabilityResults with results.
 
     """
     if verbose:
@@ -256,8 +256,8 @@ def linkability_risk_evaluation(
     #Set results column names
     res_cols = evaluator.results.res_cols.copy()
     res_cols.append("nr_aux_cols")
-    #Instantiate LinkabilityFullResults
-    link_full_res = LinkabilityFullResults(
+    #Instantiate LinkabilityResults
+    link_full_res = LinkabilityResults(
         res_cols = res_cols,
         res = res,
         aux_cols = combs
@@ -271,6 +271,6 @@ def linkability_risk_evaluation(
         )
     return link_full_res
 
-def load_linkability_results(*, dataset: str) -> LinkabilityFullResults:
+def load_linkability_results(*, dataset: str) -> LinkabilityResults:
     """Function to load and return linkability results from given dataset."""
-    return LinkabilityFullResults(**load_res_json_file(prefix="linkability", dataset=dataset))
+    return LinkabilityResults(**load_res_json_file(prefix="linkability", dataset=dataset))
