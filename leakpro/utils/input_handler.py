@@ -35,7 +35,7 @@ def get_optimizer_mapping() -> dict:
         }
     return optimizer_mapping  # noqa: RET504
 
-def get_loss_mapping() -> dict:
+def get_criterion_mapping() -> dict:
     """Return a dictionary mapping loss names to loss classes."""
     loss_mapping = {}
 

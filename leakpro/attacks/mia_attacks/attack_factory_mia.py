@@ -26,22 +26,19 @@ class AttackFactoryMIA:
     }
 
     # Shared variables for all attacks
-    audit_dataset = None
-    target_model = None
     logger = None
     shadow_model_handler = None
     distillation_target_model_handler = None
     distillation_shadow_model_handler = None
 
     @classmethod
-    def create_attack(cls, name: str, configs: dict, handler: AbstractInputHandler) -> AbstractMIA:  # noqa: ANN102
-        """Create an attack object based on the given name, attack_utils, and configs.
+    def create_attack(cls, name: str, handler: AbstractInputHandler) -> AbstractMIA:  # noqa: ANN102
+        """Create the attack object.
 
         Args:
         ----
             name (str): The name of the attack.
-            attack_utils (AttackUtils): An instance of AttackUtils.
-            configs (dict): The attack configurations.
+            handler (AbstractInputHandler): The input handler object.
 
         Returns:
         -------
@@ -54,7 +51,7 @@ class AttackFactoryMIA:
         """
 
         if AttackFactoryMIA.shadow_model_handler is None:
-            AttackFactoryMIA.logger.info("Creating shadow model handler singleton")
+            handler.logger.info("Creating shadow model handler singleton")
             AttackFactoryMIA.shadow_model_handler = ShadowModelHandler(handler)
 
         # if AttackFactoryMIA.distillation_target_model_handler is None:
@@ -75,5 +72,5 @@ class AttackFactoryMIA:
         #                                         )
 
         if name in cls.attack_classes:
-            return cls.attack_classes[name](handler, configs["audit"]["attack_list"][name])
+            return cls.attack_classes[name](handler, handler.configs["audit"]["attack_list"][name])
         raise ValueError(f"Unknown attack type: {name}")

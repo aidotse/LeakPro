@@ -2,9 +2,9 @@ audit:  # Configurations for auditing
   random_seed: 1234  # Integer specifying the random seed
   attack_list:
     rmia:
-      training_data_fraction: 0.4  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
+      training_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
       attack_data_fraction: 0.1 # Fraction of auxiliary dataset to sample from during attack
-      num_shadow_models: 8 # Number of shadow models to train
+      num_shadow_models: 2 # Number of shadow models to train
       online: False # perform online or offline attack
       temperature: 2
       gamma: 2.0
@@ -45,12 +45,11 @@ target:
 
 shadow_model:
   storage_path: "./leakpro_output/attack_objects/shadow_models"
+  # [Optional] Define a shadow model (if none, shadow model will follow the target model)
   # Path to a Python file with the shadow model architecture
   module_path: "./leakpro/shadow_model_blueprints.py"
-  #
-  # [Optional] Define a shadow model (if none, shadow model will follow the target model)
   # Name of the class to instantiate from the specified file
-  model_class_path: "ResNet18" #"ConvNet"
+  model_class: "ResNet18" #"ConvNet"
   optimizer: 
     name: sgd #adam, sgd, rmsprop
     lr: 0.01

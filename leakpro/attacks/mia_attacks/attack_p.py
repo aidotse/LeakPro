@@ -5,12 +5,12 @@ import numpy as np
 from torch import nn
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
-from leakpro.attacks.utils.attack_data import get_attack_data
 from leakpro.attacks.utils.threshold_computation import linear_itp_threshold_func
 from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.signals.signal import ModelLoss
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
+
 
 class AttackP(AbstractMIA):
     """Implementation of the P-attack."""
@@ -74,20 +74,12 @@ class AttackP(AbstractMIA):
         """Prepare data needed for running the metric on the target model and dataset."""
         # sample dataset to compute histogram
         self.logger.info("Preparing attack data for training the Population attack")
-        self.attack_data_index = get_attack_data(
-            self.population_size,
-            self.train_indices,
-            self.test_indices,
-            train_data_included_in_auxiliary_data = False,
-            test_data_included_in_auxiliary_data = False,
-            logger = self.logger
-        )
+        self.attack_data_indices = self.get_data(include_train_indices = False, include_test_indices = False)
 
         # subsample the attack data based on the fraction
         self.logger.info(f"Subsampling attack data from {len(self.attack_data_index)} points")
-        self.attack_data_index = np.random.choice(
-            self.attack_data_index,
-            int(self.attack_data_fraction * len(self.attack_data_index)),
+        self.attack_data_index = np.random.choice(self.attack_data_indices,
+            int(self.attack_data_fraction * len(self.attack_data_indices)),
             replace=False
         )
         self.logger.info(f"Number of attack data points after subsampling: {len(self.attack_data_index)}")

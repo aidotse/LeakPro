@@ -11,22 +11,19 @@ from torch.utils.data import DataLoader, Subset, TensorDataset
 from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
-from leakpro.attacks.utils.attack_data import get_attack_data
 from leakpro.attacks.utils.distillation_model_handler import DistillationShadowModelHandler, DistillationTargetModelHandler
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.signals.signal import ModelLogits
+from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 
 
 class AttackLossTrajectory(AbstractMIA):
     """Implementation of the loss trajectory attack."""
 
     def __init__(self: Self,
-                 population: np.ndarray,
-                 audit_dataset: dict,
-                 target_model: nn.Module,
-                 logger: Logger,
+                 handler: AbstractInputHandler,
                  configs: dict
                 ) -> None:
         """Initialize the LossTrajectoryAttack class.
@@ -40,7 +37,7 @@ class AttackLossTrajectory(AbstractMIA):
             configs (dict): A dictionary containing the attack loss_traj configurations.
 
         """
-        super().__init__(population, audit_dataset, target_model, logger)
+        super().__init__(handler)
 
         self.logger.info("Configuring Loss trajecatory attack")
         self._configure_attack(configs)
@@ -104,19 +101,9 @@ class AttackLossTrajectory(AbstractMIA):
         """
         self.logger.info("Preparing the data for loss trajectory attack")
 
-        include_target_training_data = False
-        #TODO: This should be changed!
-        include_target_testing_data = True
-
         # Get all available indices for auxiliary dataset
-        aux_data_index = get_attack_data(
-            self.population_size,
-            self.train_indices,
-            self.test_indices,
-            include_target_training_data,
-            include_target_testing_data,
-            self.logger
-        )
+        aux_data_index = self.get_data(include_train_indices = False, include_test_indices = False)
+
         # create auxiliary dataset
         aux_data_size = len(aux_data_index)
         shadow_data_size = int(aux_data_size * self.shadow_data_fraction)

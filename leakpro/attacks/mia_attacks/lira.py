@@ -8,21 +8,18 @@ from torch import nn
 from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
-from leakpro.attacks.utils.attack_data import get_attack_data
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.signals.signal import ModelRescaledLogits
+from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 
 
 class AttackLiRA(AbstractMIA):
     """Implementation of the LiRA attack."""
 
     def __init__(self:Self,
-                 population: np.ndarray,
-                 audit_dataset: dict,
-                 target_model: nn.Module,
-                 logger:Logger,
+                 handler: AbstractInputHandler,
                  configs: dict
                  ) -> None:
         """Initialize the LiRA attack.
@@ -37,7 +34,7 @@ class AttackLiRA(AbstractMIA):
 
         """
         # Initializes the parent metric
-        super().__init__(population, audit_dataset, target_model, logger)
+        super().__init__(handler)
 
         self.signal = ModelRescaledLogits()
         self._configure_attack(configs)
@@ -100,19 +97,13 @@ class AttackLiRA(AbstractMIA):
         of the audit dataset, prepares the data for evaluation, and computes the logits
         for both shadow models and the target model.
         """
-        self.attack_data_index = get_attack_data(
-            self.population_size,
-            self.train_indices,
-            self.test_indices,
-            train_data_included_in_auxiliary_data=self.include_train_data,
-            test_data_included_in_auxiliary_data=self.include_test_data,
-            logger = self.logger
-        )
+        self.attack_data_indices = self.get_data(include_train_indices = self.online, include_test_indices = self.online)
+
 
         ShadowModelHandler().create_shadow_models(
             self.num_shadow_models,
             self.population,
-            self.attack_data_index,
+            self.attack_data_indices,
             self.training_data_fraction,
         )
 

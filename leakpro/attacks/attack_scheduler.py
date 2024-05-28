@@ -1,13 +1,9 @@
 """Module that contains the AttackScheduler class, which is responsible for creating and executing attacks."""
-import logging
-
-from torch import nn
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
-from leakpro.dataset import GeneralDataset
-from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 from leakpro.import_helper import Any, Dict, Self
+from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 
 
 class AttackScheduler:
@@ -18,17 +14,12 @@ class AttackScheduler:
     def __init__(
         self:Self,
         handler: AbstractInputHandler,
-        logger:logging.Logger
     ) -> None:
         """Initialize the AttackScheduler class.
 
         Args:
         ----
-            population (GeneralDataset): The population dataset.
-            target_model (torch.nn.Module): The target model.
-            target_model_metadata (Dict[str, Any]): The metadata of the target model.
-            configs (Dict[str, Any]): The configurations.
-            logger (logging.Logger): The logger object.
+            handler (AbstractInputHandler): The handler object that contains the user inputs.
 
         """
         configs = handler.configs
@@ -40,20 +31,20 @@ class AttackScheduler:
 
         # Prepare factory
         factory = self.attack_type_to_factory[configs["audit"]["attack_type"]]
-        factory.setup(handler)
 
-        self.logger = logger
+        self.logger = handler.logger
 
         # Create the attacks
         self.attack_list = list(configs["audit"]["attack_list"].keys())
         self.attacks = []
         for attack_name in self.attack_list:
             try:
-                attack = factory.create_attack(attack_name, configs)
+                attack = factory.create_attack(attack_name, handler)
                 self.add_attack(attack)
                 self.logger.info(f"Added attack: {attack_name}")
             except ValueError as e:
-                logger.info(e)
+                self.logger.info(e)
+                self.logger.info(f"Failed to create attack: {attack_name}, supported attacks: {factory.attack_classes.keys()}")
 
     def add_attack(self:Self, attack: AbstractMIA) -> None:
         """Add an attack to the list of attacks."""
@@ -74,7 +65,7 @@ class AttackScheduler:
             self.logger.info(f"Finished attack: {attack_type}")
         return results
 
-    def identify_attacks(self:Self) -> None:
+    def map_setting_to_attacks(self:Self) -> None:
         """Identify relevant attacks based on adversary setting."""
         # TODO: Implement this mapping and remove attack list from configs
         pass

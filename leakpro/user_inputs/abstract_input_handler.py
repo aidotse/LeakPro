@@ -132,22 +132,18 @@ class AbstractInputHandler(ABC):
 
     def get_dataset(self:Self, dataset_indices: np.ndarray) -> np.ndarray:
         """Get the dataset from the population."""
-        self.validate_indices(dataset_indices)
+        self._validate_indices(dataset_indices)
         return self.population.subset(dataset_indices)
 
-    def get_dataloader(self: Self, dataset_indices: np.ndarray) -> DataLoader:
+    def get_dataloader(self: Self, dataset_indices: np.ndarray, batch_size: int = 32) -> DataLoader:
         """Default implementation of the dataloader."""
-        self.validate_indices(dataset_indices)
         dataset = self.get_dataset(dataset_indices)
-        batch_size = self.configs["target_metadata"].get(["batch_size"], None)
-        if batch_size is None:
-            raise ValueError("Batch size not found in configs.")
         return DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True)
 
     #------------------------------------------------
     # Methods related to target model
     #------------------------------------------------
-    def _get_target_replica(self:Self) -> Tuple[torch.nn.Module, nn.modules.loss._Loss, torch.optim.Optimizer]:
+    def get_target_replica(self:Self) -> Tuple[torch.nn.Module, nn.modules.loss._Loss, torch.optim.Optimizer]:
         """Get an instance of a model created from the target model."""
         init_params = self.target_model_metadata["model_metadata"].get("init_params", {})
         try:
@@ -169,10 +165,10 @@ class AbstractInputHandler(ABC):
     @abstractmethod
     def train(
         self: Self,
-        dataset_indices: np.ndarray,
-        model: torch.nn.Module = None,
-        criterion: torch.nn.modules.loss._Loss = None,
-        optimizer: torch.optim.Optimizer = None
+        dataloader: DataLoader,
+        model: torch.nn.Module,
+        criterion: torch.nn.modules.loss._Loss,
+        optimizer: torch.optim.Optimizer
     ) -> nn.Module:
         """Procedure to train the shadow models on data from the population."""
         pass

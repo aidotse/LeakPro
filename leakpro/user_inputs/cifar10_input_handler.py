@@ -35,11 +35,11 @@ class Cifar10InputHandler(AbstractInputHandler):
         model: torch.nn.Module = None,
         criterion: torch.nn.Module = None,
         optimizer: optim.Optimizer = None,
+        epochs: int = None,
     ) -> dict:
         """Model training procedure."""
 
         # read hyperparams for training (the parameters for the dataloader are defined in get_dataloader):
-        epochs = self.configs.get(["shadow_model"]["epochs"], None)
         if epochs is None:
             raise ValueError("epochs not found in configs")
 

@@ -126,7 +126,7 @@ if __name__ == "__main__":
     # Create user input handler
     handler = Cifar10InputHandler(configs=configs, logger=logger)
 
-    attack_scheduler = AttackScheduler(handler,logger)
+    attack_scheduler = AttackScheduler(handler)
     audit_results = attack_scheduler.run_attacks()
 
     for attack_name in audit_results:
