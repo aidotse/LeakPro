@@ -89,7 +89,7 @@ def plot_linkability(*, link_res: LinkabilityResults, high_res_flag: bool = True
     # Adding labels and title
     set_labels_and_title(
         ax = ax,
-        xlabel = "Nr. aux cols",
+        xlabel = "Nr aux cols",
         ylabel = "Risk",
         title = f"Linkability risk {conf_level} confidence, total attacks: {int(res[:,0].sum())}"
     )
@@ -147,8 +147,8 @@ def plot_ir_base_case(*, inf_res: InferenceResults, high_res_flag: bool = True) 
     fig_title = f"Inference risk, base case scenario, {conf_level} confidence, total attacks: {int(res[:,0].sum())}"
     axs = get_figure_axes(two_axes_flag=True, fig_title=fig_title)
     # Set plot variables
-    titles = ["Risk per column", "Risk per Nr Aux info"]
-    xlabels = ["Column", "Nr Aux Info"]
+    titles = ["Risk per column", "Risk per Nr aux cols"]
+    xlabels = ["Secret col", "Nr aux cols"]
     sets_values = [set_secrets, set_nr_aux_cols]
     valueses = [secrets, res[:,-1]]
     assert len(axs) == len(titles)
