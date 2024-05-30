@@ -1,10 +1,7 @@
 """Implementation of the LiRA attack."""
 
-from logging import Logger
-
 import numpy as np
 from scipy.stats import norm
-from torch import nn
 from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
@@ -26,10 +23,7 @@ class AttackLiRA(AbstractMIA):
 
         Args:
         ----
-            population (np.ndarray): The population data used for the attack.
-            audit_dataset (dict): The audit dataset used for the attack.
-            target_model (nn.Module): The target model to be attacked.
-            logger (Logger): The logger object for logging.
+            handler (AbstractInputHandler): The input handler object.
             configs (dict): Configuration parameters for the attack.
 
         """
@@ -97,14 +91,15 @@ class AttackLiRA(AbstractMIA):
         of the audit dataset, prepares the data for evaluation, and computes the logits
         for both shadow models and the target model.
         """
-        self.attack_data_indices = self.get_data(include_train_indices = self.online, include_test_indices = self.online)
+        self.attack_data_indices = self.sample_indices_from_population(include_train_indices = self.online,
+                                                                       include_test_indices = self.online)
 
 
         ShadowModelHandler().create_shadow_models(
-            self.num_shadow_models,
-            self.population,
-            self.attack_data_indices,
-            self.training_data_fraction,
+            num_models = self.num_shadow_models,
+            shadow_population =  self.attack_data_indices,
+            training_fraction = self.training_data_fraction,
+            retrain = False
         )
 
         self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.num_shadow_models)
@@ -112,7 +107,7 @@ class AttackLiRA(AbstractMIA):
         self.logger.info("Create masks for all IN samples")
         self.in_indices_mask = ShadowModelHandler().get_in_indices_mask(self.num_shadow_models, self.audit_dataset["data"])
 
-        self.audit_data = self.population.subset(self.audit_dataset["data"])
+        self.audit_data = self.get_dataloader(self.audit_dataset["data"]).dataset
 
         # Check offline attack for possible IN- sample(s)
         if not self.online:
@@ -120,8 +115,8 @@ class AttackLiRA(AbstractMIA):
             if count_in_samples > 0:
                 self.logger.info(f"Some shadow model(s) contains {count_in_samples} IN samples in total for the model(s)")
                 self.logger.info("This is not an offline attack!")
-        self.skip_indices = np.zeros(len(self.in_indices_mask), dtype=bool)
 
+        self.skip_indices = np.zeros(len(self.in_indices_mask), dtype=bool)
         if self.online:
             no_in = 0
             no_out = 0

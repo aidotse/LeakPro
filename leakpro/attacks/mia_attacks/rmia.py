@@ -87,7 +87,6 @@ class AttackRMIA(AbstractMIA):
             "detailed": detailed_str,
         }
 
-
     def softmax(self:Self, all_logits:np.ndarray,
                 true_label_indices:np.ndarray,
                 return_full_distribution:bool=False) -> np.ndarray:
@@ -129,7 +128,8 @@ class AttackRMIA(AbstractMIA):
         self.logger.info("Preparing attack data for training the RMIA attack")
 
         # Get all available indices for attack dataset, if self.online = True, include training and test data
-        self.attack_data_indices = self.sample_indices_from_population(include_train_indices = self.online, include_test_indices = self.online)
+        self.attack_data_indices = self.sample_indices_from_population(include_train_indices = self.online,
+                                                                       include_test_indices = self.online)
 
         # train shadow models
         self.logger.info(f"Check for {self.num_shadow_models} shadow models (dataset: {len(self.attack_data_indices)} points)")

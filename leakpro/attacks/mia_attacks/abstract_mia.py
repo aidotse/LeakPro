@@ -26,6 +26,7 @@ class AbstractMIA(ABC):
     population_size = None
     target_model = None
     audit_dataset = None
+    handler=None
     _initialized = False
 
     def __init__(
@@ -52,7 +53,7 @@ class AbstractMIA(ABC):
                 # out_members will start after the last training index and go up to the number of test indices - 1
                 "out_members": np.arange(len(handler.train_indices),len(handler.train_indices)+len(handler.test_indices)),
             }
-            self.handler = handler
+            AbstractMIA.handler = handler
             self._validate_shared_quantities()
             AbstractMIA._initialized = True
 
@@ -78,7 +79,7 @@ class AbstractMIA(ABC):
             raise ValueError("Audit dataset not found.")
 
     def sample_indices_from_population(self:Self, *, include_train_indices: bool = False, include_test_indices: bool = False) -> np.ndarray:
-        """Function to get attack data for the attack models.
+        """Function to get attack data indices from the population.
 
         Args:
         ----
@@ -103,6 +104,21 @@ class AbstractMIA(ABC):
         data_size = len(available_index)
         return np.random.choice(available_index, data_size, replace=False)
 
+
+    def get_dataloader(self:Self, data:np.ndarray)->DataLoader:
+        """Function to get a dataloader from the dataset.
+
+        Args:
+        ----
+            data (np.ndarray): The dataset indices to sample from.
+
+        Returns:
+        -------
+            Dataloader: The sampled data.
+
+        """
+        return self.handler.get_dataloader(data)
+
     def sample_data_from_dataset(self:Self, data:np.ndarray, size:int)->DataLoader:
         """Function to sample from the dataset.
 
@@ -118,21 +134,8 @@ class AbstractMIA(ABC):
         """
         if size > len(data):
             raise ValueError("Size of the sample is greater than the size of the data.")
-        return self.handler.get_dataloader(np.random.choice(data, size, replace=False))
+        return self.get_dataloader(np.random.choice(data, size, replace=False))
 
-    def get_dataloader(self:Self, data:np.ndarray)->DataLoader:
-        """Function to get a dataloader from the dataset.
-
-        Args:
-        ----
-            data (np.ndarray): The dataset indices to sample from.
-
-        Returns:
-        -------
-            Dataloader: The sampled data.
-
-        """
-        return self.handler.get_dataloader(data)
 
     @property
     def population(self:Self)-> List:

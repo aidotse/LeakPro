@@ -158,7 +158,8 @@ class AttackQMIA(AbstractMIA):
         """
         # sample dataset to train quantile regressor
         self.logger.info("Preparing attack data for training the quantile regressor")
-        self.attack_data_indices = self.sample_indices_from_population(include_train_indices = False, include_test_indices = False)
+        self.attack_data_indices = self.sample_indices_from_population(include_train_indices = False,
+                                                                       include_test_indices = False)
 
         # subsample the attack data based on the fraction
         self.logger.info(f"Subsampling attack data from {len(self.attack_data_indices)} points")
@@ -253,7 +254,7 @@ class AttackQMIA(AbstractMIA):
             Result(s) of the metric.
 
         """
-        audit_dataset = self.population.subset(self.audit_dataset["data"])
+        audit_dataset = self.get_dataloader(self.audit_dataset["data"]).dataset
         self.target_logits = np.array(self.signal([self.target_model], audit_dataset)).squeeze()
 
         audit_dataloader = DataLoader(audit_dataset, batch_size=64, shuffle=False)

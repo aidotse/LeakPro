@@ -74,18 +74,15 @@ class AttackP(AbstractMIA):
         """Prepare data needed for running the metric on the target model and dataset."""
         # sample dataset to compute histogram
         self.logger.info("Preparing attack data for training the Population attack")
-        self.attack_data_indices = self.get_data(include_train_indices = False, include_test_indices = False)
+        self.attack_data_indices = self.sample_indices_from_population(include_train_indices = False,
+                                                                include_test_indices = False)
 
         # subsample the attack data based on the fraction
-        self.logger.info(f"Subsampling attack data from {len(self.attack_data_index)} points")
-        self.attack_data_index = np.random.choice(self.attack_data_indices,
-            int(self.attack_data_fraction * len(self.attack_data_indices)),
-            replace=False
-        )
-        self.logger.info(f"Number of attack data points after subsampling: {len(self.attack_data_index)}")
+        self.logger.info(f"Subsampling attack data from {len(self.attack_data_indices)} points")
+        n_points = int(self.attack_data_fraction * len(self.attack_data_indices))
+        attack_data = self.sample_data_from_dataset(self.attack_data_indices, n_points).dataset
+        self.logger.info(f"Number of attack data points after subsampling: {len(attack_data)}")
 
-        attack_data = self.population.subset(self.attack_data_index)
-        # Load signals if they have been computed already; otherwise, compute and save them
         # signals based on training dataset
         self.attack_signal = np.array(self.signal([self.target_model], attack_data))
 
@@ -111,7 +108,7 @@ class AttackP(AbstractMIA):
 
         self.logger.info("Running the Population attack on the target model")
         # get the loss for the audit dataset
-        audit_data = self.population.subset(self.audit_dataset["data"])
+        audit_data = self.get_dataloader(self.audit_dataset["data"]).dataset
         audit_signal = np.array(self.signal([self.target_model], audit_data)).squeeze()
 
         # pick out the in-members and out-members

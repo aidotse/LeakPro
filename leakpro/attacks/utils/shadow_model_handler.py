@@ -1,6 +1,7 @@
 """Module for handling shadow models."""
 
 import os
+import pickle
 import re
 
 import joblib
@@ -8,12 +9,16 @@ import numpy as np
 import torch
 from torch import Tensor, jit, load, save
 from torch.nn import Module
-from tqdm import tqdm
 
 from leakpro.import_helper import Self, Tuple
 from leakpro.model import PytorchModel
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
-from leakpro.utils.input_handler import get_class_from_module, import_module_from_file, get_optimizer_mapping, get_criterion_mapping
+from leakpro.utils.input_handler import (
+    get_class_from_module,
+    get_criterion_mapping,
+    get_optimizer_mapping,
+    import_module_from_file,
+)
 
 
 def singleton(cls):  # noqa: ANN001, ANN201
@@ -37,7 +42,7 @@ def singleton(cls):  # noqa: ANN001, ANN201
 class ShadowModelHandler():
     """A class handling the creation, training, and loading of shadow models."""
 
-    def __init__(self:Self, handler: AbstractInputHandler) -> None:
+    def __init__(self:Self, handler: AbstractInputHandler) -> None:  # noqa: PLR0912
         """Initialize the ShadowModelHandler.
 
         Args:
@@ -84,7 +89,7 @@ class ShadowModelHandler():
         else:
             self.loss_config = None
 
-        self.batches = self.configs.get("batches", 32)
+        self.batch_size = self.configs.get("batch_size", 32)
         self.epochs = self.configs.get("epochs", 10)
 
         # Create the shadow model storage folder
@@ -153,7 +158,7 @@ class ShadowModelHandler():
         for i in range(num_to_reuse, num_models):
             # Get dataloader
             data_indices = np.random.choice(shadow_population, data_size, replace=False)
-            data_loader = self.handler.get_dataloader(data_indices, self.batches)
+            data_loader = self.handler.get_dataloader(data_indices, self.batch_size)
 
             # Get shadow model blueprint
             model, criterion, optimizer = self.get_model_criterion_optimizer()
@@ -163,11 +168,30 @@ class ShadowModelHandler():
             training_results = self.handler.train(data_loader, model, criterion, optimizer, self.epochs)
 
             shadow_model = training_results["model"]
+            train_acc = training_results["metrics"]["accuracy"]
+            train_loss = training_results["metrics"]["loss"]
 
             self.logger.info(f"Training shadow model {i} complete")
             with open(f"{self.storage_path}/{self.model_storage_name}_{i}.pkl", "wb") as f:
                 save(shadow_model.state_dict(), f)
                 self.logger.info(f"Saved shadow model {i} to {self.storage_path}")
+
+            self.logger.info(f"Storing metadata for shadow model {i}")
+            meta_data = {}
+            meta_data["init_params"] = self.init_params
+            meta_data["train_indices"] = data_indices
+            meta_data["num_train"] = len(data_indices)
+            meta_data["optimizer"] = optimizer.__class__.__name__
+            meta_data["criterion"] = criterion.__class__.__name__
+            meta_data["batch_size"] = self.batch_size
+            meta_data["epochs"] = self.epochs
+            meta_data["train_acc"] = train_acc
+            meta_data["train_loss"] = train_loss
+
+            with open(f"{self.storage_path}/{self.metadata_storage_name}_{i}.pkl", "wb") as f:
+                pickle.dump(meta_data, f)
+
+            self.logger.info(f"Metadata for shadow model {i} stored in {self.storage_path}")
 
     def _load_shadow_model(self:Self, index:int) -> Module:
         """Load a shadow model from a saved state.

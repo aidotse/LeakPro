@@ -2,7 +2,6 @@
 
 import os
 import pickle
-from logging import Logger
 
 import numpy as np
 import torch.nn.functional as F  # noqa: N812
@@ -30,10 +29,7 @@ class AttackLossTrajectory(AbstractMIA):
 
         Args:
         ----
-            population (np.ndarray): The population data.
-            audit_dataset (dict): The audit dataset.
-            target_model (nn.Module): The target model.
-            logger (Logger): The logger instance.
+            handler (AbstractInputHandler): The input handler object.
             configs (dict): A dictionary containing the attack loss_traj configurations.
 
         """
@@ -115,8 +111,8 @@ class AttackLossTrajectory(AbstractMIA):
         # Distillation on target and shadow model happen on the same dataset
         distill_data_indices = np.setdiff1d(aux_data_index, shadow_data_indices)
 
-        shadow_dataset = self.population.subset(shadow_training_indices)
-        distill_dataset = self.population.subset(distill_data_indices)
+        shadow_dataset = self.get_dataloader(shadow_training_indices).dataset
+        distill_dataset = self.get_dataloader(distill_data_indices).dataset
 
         # train shadow models
         self.logger.info(f"Training shadow models on {len(shadow_dataset)} points")
