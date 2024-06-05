@@ -4,21 +4,15 @@ import os
 import pickle
 import re
 
-import joblib
 import numpy as np
 import torch
-from torch import Tensor, jit, load, save
+from torch import Tensor, jit, save
 from torch.nn import Module
 
+from leakpro.attacks.utils.model_handler import ModelHandler
 from leakpro.import_helper import Self, Tuple
 from leakpro.model import PytorchModel
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
-from leakpro.utils.input_handler import (
-    get_class_from_module,
-    get_criterion_mapping,
-    get_optimizer_mapping,
-    import_module_from_file,
-)
 
 
 def singleton(cls):  # noqa: ANN001, ANN201
@@ -39,7 +33,7 @@ def singleton(cls):  # noqa: ANN001, ANN201
     return get_instance
 
 @singleton
-class ShadowModelHandler():
+class ShadowModelHandler(ModelHandler):
     """A class handling the creation, training, and loading of shadow models."""
 
     def __init__(self:Self, handler: AbstractInputHandler) -> None:  # noqa: PLR0912
@@ -50,50 +44,41 @@ class ShadowModelHandler():
             handler (AbstractInputHandler): The input handler object.
 
         """
+        super().__init__(handler)
         self.configs = handler.configs["shadow_model"]
-        self.logger = handler.logger
-        self.handler = handler
 
-        # Read the blueprint for shadow models if it has been provided
+        # Read from the config file
         module_path = self.configs.get("module_path", None)
         model_class = self.configs.get("model_class", None)
-        if module_path is not None and model_class is not None:
-            try:
-                module = import_module_from_file(module_path)
-                self.model_blueprint = get_class_from_module(module, model_class)
-                self.init_params = self.configs.get("init_params", {})
-            except Exception as e:
-                raise ValueError(f"Failed to create model blueprint from {model_class} in {module_path}") from e
-        else:
-            self.model_blueprint = None
-
-        # Read the optimizer for shadow models if it has been provided
-        self.optimizer_config = self.configs["optimizer"]
-        if self.optimizer_config is not None:
-            try:
-                self.optimizer_class = get_optimizer_mapping()[self.optimizer_config["name"]]
-                self.optimizer_config.pop("name")
-            except Exception as e:
-                raise ValueError(f"Failed to create optimizer from {self.optimizer_config['name']}") from e
-        else:
-            raise ValueError("Optimizer configuration not found in configs.")
-
-        # Read the loss function for shadow models if it has been provided
-        self.loss_config = self.configs["loss"]
-        if self.loss_config is not None:
-            try:
-                self.criterion_class = get_criterion_mapping()[self.loss_config["name"]]
-                self.loss_config.pop("name")
-            except Exception as e:
-                raise ValueError(f"Failed to create criterion from {self.loss_config['name']}") from e
-        else:
-            self.loss_config = None
-
+        self.optimizer_config = self.configs.get("optimizer", None)
+        self.loss_config = self.configs.get("loss", None)
         self.batch_size = self.configs.get("batch_size", 32)
         self.epochs = self.configs.get("epochs", 10)
+        self.storage_path = self.configs.get("storage_path")
+
+        if module_path is None or model_class is None:
+            self.model_blueprint = None
+            self.criterion_class = None
+            self.optimizer_class = None
+        else:
+            self.init_params = self.configs.get("init_params", {})
+            self._import_model_from_path(module_path, model_class)
+
+            # Read the optimizer for shadow models if it has been provided
+            if self.optimizer_config is None:
+                raise ValueError("Optimizer configuration not found in configs.")
+            optimizer_name = self.optimizer_config.pop("name") # pop to only have input parameters left
+            self._get_optimizer_class(optimizer_name)
+
+            # Read the loss function for shadow models if it has been provided
+            if self.loss_config is None:
+                raise ValueError("Loss configuration not found in configs.")
+            criterion_class = self.loss_config.pop("name") # pop to only have input parameters left
+            self._get_criterion_class(criterion_class)
 
         # Create the shadow model storage folder
-        self.storage_path = self.configs["storage_path"]
+        if self.storage_path is None:
+            raise ValueError("Storage path for shadow models not provided")
         # Check if the folder does not exist
         if not os.path.exists(self.storage_path):
             # Create the folder
@@ -104,27 +89,28 @@ class ShadowModelHandler():
         self.model_storage_name = "shadow_model"
         self.metadata_storage_name = "metadata"
 
-    def get_model_criterion_optimizer(self:Self) -> Tuple[Module, Module, Module]:
-        """Get the model, criterion, and optimizer from the handler or config."""
-
-        # Set up shadow model from config file
-        if self.model_blueprint is not None:
-            shadow_model = self.model_blueprint(**self.init_params)
-            optimizer = self.optimizer_class(shadow_model.parameters(), **self.optimizer_config)
-            criterion = self.criterion_class(**self.loss_config)
-        else:
-            # Set up shadow model from handler
-            shadow_model, criterion, optimizer = self.handler.get_target_replica()
-
-        return shadow_model, criterion, optimizer
+    def _filter(self:Self, data_size:int, online:bool)->list[int]:
+        # Get the metadata for the shadow models
+        entries = os.listdir(self.storage_path)
+        pattern = re.compile(rf"^{self.metadata_storage_name}_\d+\.pkl$")
+        files = [f for f in entries if pattern.match(f)]
+        # Extract the index of the metadata
+        all_indices = [int(re.search(r"\d+", f).group()) for f in files]
+        # Filter out indices to only keep the ones with the same data size
+        filtered_indices = []
+        for i in all_indices:
+            metadata = self._load_shadow_metadata(i)
+            if metadata["num_train"] == data_size and metadata["online"] == online:
+                filtered_indices.append(i)
+        return all_indices, filtered_indices
 
     def create_shadow_models(
         self:Self,
         num_models:int,
         shadow_population: np.ndarray,
         training_fraction:float=0.1,
-        retrain:bool = False
-    ) -> None:
+        online:bool=False
+    ) -> list[int]:
         """Create and train shadow models based on the blueprint.
 
         Args:
@@ -132,7 +118,7 @@ class ShadowModelHandler():
             num_models (int): The number of shadow models to create.
             shadow_population (list): The indices in population eligible for training the shadow models.
             training_fraction (float): The fraction of the shadow population to use for training of a shadow model.
-            retrain (bool): Whether to retrain the shadow models or not.
+            online (bool): Whether the shadow models are created using an online or offline dataset.
 
         Returns:
         -------
@@ -142,31 +128,35 @@ class ShadowModelHandler():
         if num_models < 0:
             raise ValueError("Number of models cannot be negative")
 
-        if retrain:
-            self.logger.info("Retraining shadow models")
-            num_to_reuse = 0
-        else:
-            entries = os.listdir(self.storage_path)
-            # Define a regex pattern to match files like model_{i}.pkl
-            pattern = re.compile(rf"^{self.model_storage_name}_\d+\.pkl$")
-            model_files = [f for f in entries if pattern.match(f)]
-            num_to_reuse = len(model_files)
-
         # Get the size of the dataset
         data_size = int(len(shadow_population)*training_fraction)
+        all_indices, filtered_indices = self._filter(data_size, online)
 
-        for i in range(num_to_reuse, num_models):
+        # Create a list of indices to use for the new shadow models
+        n_existing_models = len(filtered_indices)
+
+        if n_existing_models >= num_models:
+            self.logger.info("Number of existing models exceeds or equals the number of models to create")
+            return filtered_indices[:num_models]
+
+        indices_to_use = []
+        next_index = max(all_indices) + 1 if all_indices else 0
+        while len(indices_to_use) < (num_models-n_existing_models):
+            indices_to_use.append(next_index)
+            next_index += 1
+
+        for i in indices_to_use:
             # Get dataloader
             data_indices = np.random.choice(shadow_population, data_size, replace=False)
             data_loader = self.handler.get_dataloader(data_indices, self.batch_size)
 
             # Get shadow model blueprint
-            model, criterion, optimizer = self.get_model_criterion_optimizer()
+            model, criterion, optimizer = self._get_model_criterion_optimizer()
 
             # Train shadow model
-            self.logger.info(f"Training shadow dataset {i} on {len(data_loader)} points")
+            self.logger.info(f"Training shadow model {i} on {len(data_loader)} points")
             training_results = self.handler.train(data_loader, model, criterion, optimizer, self.epochs)
-
+            # Read out results
             shadow_model = training_results["model"]
             train_acc = training_results["metrics"]["accuracy"]
             train_loss = training_results["metrics"]["loss"]
@@ -187,11 +177,13 @@ class ShadowModelHandler():
             meta_data["epochs"] = self.epochs
             meta_data["train_acc"] = train_acc
             meta_data["train_loss"] = train_loss
+            meta_data["online"] = online
 
             with open(f"{self.storage_path}/{self.metadata_storage_name}_{i}.pkl", "wb") as f:
                 pickle.dump(meta_data, f)
 
             self.logger.info(f"Metadata for shadow model {i} stored in {self.storage_path}")
+        return filtered_indices + indices_to_use
 
     def _load_shadow_model(self:Self, index:int) -> Module:
         """Load a shadow model from a saved state.
@@ -210,65 +202,22 @@ class ShadowModelHandler():
         if index >= len(os.listdir(self.storage_path)):
             raise ValueError("Index out of range")
 
-        try:
-            shadow_model = self.model_blueprint(**self.init_params)
-        except Exception as e:
-            raise ValueError("Failed to create model from blueprint") from e
+        model_path = f"{self.storage_path}/{self.model_storage_name}_{index}.pkl"
+        shadow_model, criterion = self._load_model(model_path)
+        return PytorchModel(shadow_model, criterion)
 
-        try:
-            with open(f"{self.storage_path}/{self.model_storage_name}_{index}.pkl", "rb") as f:
-                shadow_model.load_state_dict(load(f))
-                self.logger.info(f"Loaded shadow model {index}")
-            return PytorchModel(shadow_model, self.criterion_class(**self.loss_config))
-        except FileNotFoundError:
-            self.logger.error(f"Could not find the shadow model {index}")
-            return None
-
-    def get_shadow_models(self:Self, num_models:int) -> Tuple[list, list]:
+    def get_shadow_models(self:Self, num_models:list[int]) -> Tuple[list, list]:
         """Load the the shadow models."""
         shadow_models = []
         shadow_model_indices = []
-        for i in range(num_models):
+        for i in num_models:
             self.logger.info(f"Loading shadow model {i}")
             model = self._load_shadow_model(i)
             shadow_models.append(model)
             shadow_model_indices.append(i)
         return shadow_models, shadow_model_indices
 
-    def identify_models_trained_on_samples(self:Self, shadow_model_indices: list[int], sample_indices:set[int]) -> list:
-        """Identify the shadow models trained on the provided samples.
-
-        Args:
-        ----
-            shadow_model_indices (list[int]): The indices of the shadow models.
-            sample_indices (set[int]): The indices of the samples.
-
-        Returns:
-        -------
-            list: The list of shadow models trained on the provided samples.
-
-        """
-        if shadow_model_indices is None:
-            raise ValueError("Shadow model indices must be provided")
-        if sample_indices is None:
-            raise ValueError("Sample indices must be provided")
-
-        if isinstance(sample_indices, list):
-            sample_indices = set(sample_indices)
-
-        self.logger.info("Identifying shadow models trained on provided samples")
-        shadow_model_trained_on_data_index = np.zeros((len(shadow_model_indices), len(sample_indices)), dtype=bool)
-        for i in shadow_model_indices:
-            with open(f"{self.storage_path}/{self.metadata_storage_name}_{i}.pkl", "rb") as f:
-                meta_data = joblib.load(f)
-                train_indices = set(meta_data["configuration"]["train_indices"].tolist())
-
-                for j in range(len(sample_indices)):
-                    shadow_model_trained_on_data_index[i, j] = sample_indices[j] in train_indices
-
-        return shadow_model_trained_on_data_index
-
-    def _load_metadata(self:Self, index:int) -> dict:
+    def _load_shadow_metadata(self:Self, index:int) -> dict:
         """Load a shadow model from a saved state.
 
         Args:
@@ -284,28 +233,25 @@ class ShadowModelHandler():
             raise ValueError("Index cannot be negative")
         if index >= len(os.listdir(self.storage_path)):
             raise ValueError("Index out of range")
+        metadata_path = f"{self.storage_path}/{self.metadata_storage_name}_{index}.pkl"
+        return self._load_metadata(metadata_path)
 
-        try:
-            with open(f"{self.storage_path}/{self.metadata_storage_name}_{index}.pkl", "rb") as f:
-                return joblib.load(f)
-        except FileNotFoundError:
-            self.logger.error(f"Could not find the metadata for shadow model {index}")
-            return None
-
-    def get_shadow_model_metadata(self:Self, num_models:int) -> list:
+    def get_shadow_model_metadata(self:Self, model_indices:list[int]) -> list:
         """Load the the shadow model metadata."""
         metadata = []
-        for i in range(num_models):
+        if model_indices is int:
+            model_indices = range(model_indices)
+        for i in model_indices:
             self.logger.info(f"Loading metadata {i}")
-            metadata.append(self._load_metadata(i))
+            metadata.append(self._load_shadow_metadata(i))
         return metadata
 
-    def get_in_indices_mask(self:Self, num_models:int, dataset:np.ndarray) -> np.ndarray:
+    def get_in_indices_mask(self:Self, shadow_model_indices:list[int], dataset:np.ndarray) -> np.ndarray:
         """Get the mask indicating which indices in the dataset are present in the shadow model training set.
 
         Args:
         ----
-            num_models (int): The number of shadow models.
+            shadow_model_indices (list[int]): The number of shadow models.
             dataset (np.ndarray): The dataset.
 
         Returns:
@@ -314,7 +260,7 @@ class ShadowModelHandler():
 
         """
         # Retrieve metadata for shadow models
-        metadata = self.get_shadow_model_metadata(num_models)
+        metadata = self.get_shadow_model_metadata(shadow_model_indices)
 
         # Extract training indices for each shadow model
         models_in_indices = [data["train_indices"] for data in metadata]

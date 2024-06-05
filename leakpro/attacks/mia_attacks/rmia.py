@@ -133,14 +133,13 @@ class AttackRMIA(AbstractMIA):
 
         # train shadow models
         self.logger.info(f"Check for {self.num_shadow_models} shadow models (dataset: {len(self.attack_data_indices)} points)")
-        ShadowModelHandler().create_shadow_models(
+        self.shadow_model_indices = ShadowModelHandler().create_shadow_models(
             num_models = self.num_shadow_models,
             shadow_population = self.attack_data_indices,
             training_fraction = self.training_data_fraction,
-            retrain = False
-        )
+            online = self.online)
         # load shadow models
-        self.shadow_models, self.shadow_model_indices = ShadowModelHandler().get_shadow_models(self.num_shadow_models)
+        self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)
 
         # compute quantities that are not touching the audit dataset
         if self.online is False:
@@ -182,23 +181,23 @@ class AttackRMIA(AbstractMIA):
         ground_truth_indices = np.array(audit_data._labels)
 
         # find the shadow models that are trained on what points in the audit dataset
-        in_model_indices = ShadowModelHandler().identify_models_trained_on_samples(
-            self.shadow_model_indices,
-            self.audit_dataset["data"]
-        )
+        in_indices_mask = ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"]).T
 
         # filter out the points that no shadow model has seen and points that all shadow models have seen
-        num_shadow_models_seen_points = np.sum(in_model_indices, axis=0)
+        num_shadow_models_seen_points = np.sum(in_indices_mask, axis=0)
         # make sure that the audit points are included in the shadow model training (but not all)
         mask = (num_shadow_models_seen_points > 0) & (num_shadow_models_seen_points < self.num_shadow_models)
         audit_data = audit_data.subset(mask)
+        if len(audit_data) == 0:
+            raise ValueError("No points in the audit dataset are used for the shadow models")
+
         # find out how many in-members survived the filtering
         in_members = np.arange(np.sum(mask[self.audit_dataset["in_members"]]))
         # find out how many out-members survived the filtering
         num_out_members = np.sum(mask[self.audit_dataset["out_members"]])
         out_members = np.arange(len(in_members), len(in_members) + num_out_members)
         ground_truth_indices = np.array(audit_data._labels)
-        out_model_indices = ~in_model_indices[:,mask]
+        out_model_indices = ~in_indices_mask[:,mask]
 
         self.logger.info(f"Number of points in the audit dataset that are used for online attack: {len(audit_data)}")
 
@@ -217,7 +216,7 @@ class AttackRMIA(AbstractMIA):
         ratio_x = p_x_given_target_model / (p_x + self.epsilon)
 
         # Make a "random sample" to compute p(z) for points in attack dataset on the OUT shadow models for each audit point
-        self.attack_data_index = self.get_data(include_train_indices = False, include_test_indices = False)
+        self.attack_data_index = self.sample_indices_from_population(include_train_indices = False, include_test_indices = False)
 
         # subsample the attack data based on the fraction
         self.logger.info(f"Subsampling attack data from {len(self.attack_data_index)} points")

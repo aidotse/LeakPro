@@ -5,10 +5,9 @@ import random
 import time
 from pathlib import Path
 
-import joblib
 import numpy as np
 import yaml
-from torch import load, manual_seed
+from torch import manual_seed
 from torch.utils.data import Subset
 
 import leakpro.dev_utils.train as utils
@@ -23,7 +22,6 @@ from leakpro.dev_utils.data_preparation import (
 )
 from leakpro.reporting.utils import prepare_priavcy_risk_report
 from leakpro.user_inputs.cifar10_input_handler import Cifar10InputHandler
-from leakpro.utils.input_handler import get_class_from_module, import_module_from_file
 
 
 def setup_log(name: str, save_file: bool=True) -> logging.Logger:

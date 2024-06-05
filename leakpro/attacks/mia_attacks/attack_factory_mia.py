@@ -1,7 +1,4 @@
 """Module that contains the AttackFactory class which is responsible for creating the attack objects."""
-from logging import Logger
-
-import numpy as np
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.mia_attacks.attack_p import AttackP
@@ -9,7 +6,7 @@ from leakpro.attacks.mia_attacks.lira import AttackLiRA
 from leakpro.attacks.mia_attacks.loss_trajectory import AttackLossTrajectory
 from leakpro.attacks.mia_attacks.qmia import AttackQMIA
 from leakpro.attacks.mia_attacks.rmia import AttackRMIA
-from leakpro.attacks.utils.distillation_model_handler import DistillationShadowModelHandler, DistillationTargetModelHandler
+from leakpro.attacks.utils.distillation_model_handler import DistillationModelHandler
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 
@@ -26,10 +23,8 @@ class AttackFactoryMIA:
     }
 
     # Shared variables for all attacks
-    logger = None
     shadow_model_handler = None
-    distillation_target_model_handler = None
-    distillation_shadow_model_handler = None
+    distillation_model_handler = None
 
     @classmethod
     def create_attack(cls, name: str, handler: AbstractInputHandler) -> AbstractMIA:  # noqa: ANN102
@@ -54,22 +49,9 @@ class AttackFactoryMIA:
             handler.logger.info("Creating shadow model handler singleton")
             AttackFactoryMIA.shadow_model_handler = ShadowModelHandler(handler)
 
-        # if AttackFactoryMIA.distillation_target_model_handler is None:
-        #     AttackFactoryMIA.logger.info("Creating distillation model handler singleton for the target model")
-        #     distillation_configs = configs.get("distillation_target_model", {})
-        #     AttackFactoryMIA.distillation_target_model_handler = DistillationTargetModelHandler(
-        #                                                 AttackFactoryMIA.target_model,
-        #                                                 AttackFactoryMIA.target_metadata,
-        #                                                 distillation_configs,
-        #                                                 AttackFactoryMIA.logger
-        #                                             )
-        # if AttackFactoryMIA.distillation_shadow_model_handler is None:
-        #     AttackFactoryMIA.logger.info("Creating distillation model handler singleton for the shadow model")
-        #     distillation_configs = configs.get("distillation_shadow_model", {})
-        #     AttackFactoryMIA.distillation_shadow_model_handler = DistillationShadowModelHandler(
-        #                                             distillation_configs,
-        #                                             AttackFactoryMIA.logger
-        #                                         )
+        if AttackFactoryMIA.distillation_model_handler is None:
+            handler.logger.info("Creating distillation model handler singleton")
+            AttackFactoryMIA.distillation_model_handler = DistillationModelHandler(handler)
 
         if name in cls.attack_classes:
             return cls.attack_classes[name](handler, handler.configs["audit"]["attack_list"][name])

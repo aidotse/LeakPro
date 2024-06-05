@@ -1,5 +1,4 @@
 """Implementation of the RMIA attack."""
-from logging import Logger
 
 import numpy as np
 import torch

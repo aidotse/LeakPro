@@ -44,7 +44,7 @@ class AbstractMIA(ABC):
         if not AbstractMIA._initialized:
             AbstractMIA.population = handler.population
             AbstractMIA.population_size = handler.population_size
-            AbstractMIA.target_model = PytorchModel(handler.target_model, handler.criterion)
+            AbstractMIA.target_model = PytorchModel(handler.target_model, handler.get_criterion())
             AbstractMIA.audit_dataset = {
                 # Assuming train_indices and test_indices are arrays of indices, not the actual data
                 "data": np.concatenate((handler.train_indices, handler.test_indices)),
@@ -78,7 +78,12 @@ class AbstractMIA(ABC):
         if AbstractMIA.audit_dataset is None:
             raise ValueError("Audit dataset not found.")
 
-    def sample_indices_from_population(self:Self, *, include_train_indices: bool = False, include_test_indices: bool = False) -> np.ndarray:
+    def sample_indices_from_population(
+        self:Self,
+        *,
+        include_train_indices: bool = False,
+        include_test_indices: bool = False
+    ) -> np.ndarray:
         """Function to get attack data indices from the population.
 
         Args:
@@ -105,19 +110,20 @@ class AbstractMIA(ABC):
         return np.random.choice(available_index, data_size, replace=False)
 
 
-    def get_dataloader(self:Self, data:np.ndarray)->DataLoader:
+    def get_dataloader(self:Self, data:np.ndarray, batch_size:int=None)->DataLoader:
         """Function to get a dataloader from the dataset.
 
         Args:
         ----
             data (np.ndarray): The dataset indices to sample from.
+            batch_size (int): batch size.
 
         Returns:
         -------
             Dataloader: The sampled data.
 
         """
-        return self.handler.get_dataloader(data)
+        return self.handler.get_dataloader(data) if batch_size is None else self.handler.get_dataloader(data, batch_size)
 
     def sample_data_from_dataset(self:Self, data:np.ndarray, size:int)->DataLoader:
         """Function to sample from the dataset.
@@ -146,7 +152,7 @@ class AbstractMIA(ABC):
         List: The population used for the attack.
 
         """
-        return self._population
+        return AbstractMIA.population
 
     @property
     def population_size(self:Self)-> int:
@@ -157,7 +163,7 @@ class AbstractMIA(ABC):
         int: The size of the population used for the attack.
 
         """
-        return self._population_size
+        return AbstractMIA.population_size
 
     @property
     def target_model(self:Self)-> Union[Self, List[Self] ]:
@@ -168,7 +174,7 @@ class AbstractMIA(ABC):
         Union[Self, List[Self]]: The target model used for the attack.
 
         """
-        return self._target_model
+        return AbstractMIA.target_model
 
     @property
     def audit_dataset(self:Self)-> Self:
@@ -179,7 +185,7 @@ class AbstractMIA(ABC):
         Self: The audit dataset used for the attack.
 
         """
-        return self._audit_dataset
+        return AbstractMIA.audit_dataset
 
     @property
     def train_indices(self:Self)-> np.ndarray:
@@ -190,8 +196,7 @@ class AbstractMIA(ABC):
         np.ndarray: The training indices of the audit dataset.
 
         """
-        train_indices = self._audit_dataset["in_members"]
-        return self._audit_dataset["data"][train_indices]
+        return AbstractMIA.audit_dataset["in_members"]
 
 
     @property
@@ -203,8 +208,7 @@ class AbstractMIA(ABC):
         np.ndarray: The test indices of the audit dataset.
 
         """
-        test_indices = self._audit_dataset["out_members"]
-        return self._audit_dataset["data"][test_indices]
+        return AbstractMIA.audit_dataset["out_members"]
 
     @abstractmethod
     def _configure_attack(self:Self, configs:dict)->None:

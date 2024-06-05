@@ -145,21 +145,21 @@ class AbstractInputHandler(ABC):
     #------------------------------------------------
     def get_target_replica(self:Self) -> Tuple[torch.nn.Module, nn.modules.loss._Loss, torch.optim.Optimizer]:
         """Get an instance of a model created from the target model."""
-        init_params = self.target_model_metadata["model_metadata"].get("init_params", {})
+        init_params = self.target_model_metadata.get("init_params", {})
         try:
             model_replica = self.target_model_blueprint(**init_params)
-            return model_replica, self.criterion, self.set_optimizer(model_replica)
+            return model_replica, self.get_criterion(), self.get_optimizer(model_replica)
         except Exception as e:
             raise ValueError("Failed to create an instance of the shadow model.") from e
 
     @abstractmethod
-    def set_criterion(self:Self, criterion: torch.nn.modules.loss._Loss) -> None:
-        """Define the loss function for the target model to be used in shadow model training."""
+    def get_criterion(self:Self, criterion: torch.nn.modules.loss._Loss) -> None:
+        """Get the loss function for the target model to be used in shadow model training."""
         pass
 
     @abstractmethod
-    def set_optimizer(self:Self, model:torch.nn.Module) -> torch.optim.Optimizer:
-        """Define the optimizer used for the target model to be used in shadow model training."""
+    def get_optimizer(self:Self, model:torch.nn.Module) -> torch.optim.Optimizer:
+        """Get the optimizer used for the target model to be used in shadow model training."""
         pass
 
     @abstractmethod
@@ -192,9 +192,9 @@ class AbstractInputHandler(ABC):
         return self._target_model
 
     @target_model.setter
-    def target_model(self:Self, value:torch.nn.Module) -> None:
+    def target_model(self:Self, model:torch.nn.Module) -> None:
         """Set the trained target model."""
-        self._target_model = value
+        self._target_model = model
 
     @property
     def target_model_metadata(self:Self) -> dict:
@@ -202,9 +202,9 @@ class AbstractInputHandler(ABC):
         return self._target_model_metadata
 
     @target_model_metadata.setter
-    def target_model_metadata(self:Self, value:dict) -> None:
+    def target_model_metadata(self:Self, metadata:dict) -> None:
         """Set the metadata of the target model."""
-        self._target_model_metadata = value
+        self._target_model_metadata = metadata
 
     @property
     def population_size(self:Self) -> int:

@@ -95,17 +95,15 @@ class AttackLiRA(AbstractMIA):
                                                                        include_test_indices = self.online)
 
 
-        ShadowModelHandler().create_shadow_models(
-            num_models = self.num_shadow_models,
-            shadow_population =  self.attack_data_indices,
-            training_fraction = self.training_data_fraction,
-            retrain = False
-        )
+        self.shadow_model_indices = ShadowModelHandler().create_shadow_models(num_models = self.num_shadow_models,
+                                                                              shadow_population =  self.attack_data_indices,
+                                                                              training_fraction = self.training_data_fraction,
+                                                                              online = self.online)
 
-        self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.num_shadow_models)
+        self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)
 
         self.logger.info("Create masks for all IN samples")
-        self.in_indices_mask = ShadowModelHandler().get_in_indices_mask(self.num_shadow_models, self.audit_dataset["data"])
+        self.in_indices_mask = ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"])
 
         self.audit_data = self.get_dataloader(self.audit_dataset["data"]).dataset
 
@@ -134,7 +132,7 @@ class AttackLiRA(AbstractMIA):
                 self.logger.info("some audit sample(s) mighthave a few or even 0 IN or OUT logits")
                 self.logger.info(f"In total {np.count_nonzero(self.skip_indices)} indices will be skipped!")
 
-            if len(self.audit_data) == len(self.skip_indices):
+            if len(self.audit_data) == np.sum(self.skip_indices):
                 raise ValueError("All audit samples are skipped. Please adjust the number of shadow models or the audit dataset.")
 
         # Calculate logits for all shadow models
@@ -167,7 +165,9 @@ class AttackLiRA(AbstractMIA):
                 in_std = np.nanstd(self.shadow_models_logits[self.in_indices_mask].flatten())
 
         # Iterate and extract logits from shadow models for each sample in the audit dataset
-        for i, (shadow_models_logits, mask) in tqdm(enumerate(zip(self.shadow_models_logits, self.in_indices_mask))):
+        for i, (shadow_models_logits, mask) in tqdm(enumerate(zip(self.shadow_models_logits, self.in_indices_mask)),
+                                                    total=len(self.shadow_models_logits),
+                                                    desc="Processing samples"):
 
             # Calculate the mean for OUT shadow model logits
             out_mean = np.mean(shadow_models_logits[~mask])

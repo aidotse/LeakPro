@@ -17,17 +17,16 @@ class Cifar10InputHandler(AbstractInputHandler):
     def __init__(self:Self, configs: dict, logger:logging.Logger) -> None:
         super().__init__(configs = configs, logger = logger)
 
-        self.set_criterion()
 
-    def set_criterion(self:Self)->None:
+    def get_criterion(self:Self)->None:
         """Set the CrossEntropyLoss for the model."""
-        self.criterion = torch.nn.CrossEntropyLoss()
+        return torch.nn.CrossEntropyLoss()
 
-    def set_optimizer(self: Self, model:torch.nn.Module) -> None:
+    def get_optimizer(self: Self, model:torch.nn.Module) -> None:
         """Set the optimizer for the model."""
         learning_rate = 0.1
         momentum = 0.8
-        self.optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
+        return optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
 
     def train(
         self: Self,
