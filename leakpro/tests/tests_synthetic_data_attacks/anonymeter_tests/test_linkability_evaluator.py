@@ -84,7 +84,6 @@ def test_LinkabilityEvaluator_init() -> None: # noqa: N802
         LinkabilityEvaluator(ori=df_ex, syn=pd.DataFrame([1]), aux_cols=([],[]))
     assert e.type == ValueError
     #Case aux_cols contains no elements
-    df_ex = pd.DataFrame([1], columns=["a"])
     e_msg = "aux_cols tuple must contain 2 list with at least 1 element."
     with pytest.raises(ValueError, match=e_msg) as e:
         LinkabilityEvaluator(ori=df_ex, syn=df_ex, aux_cols=([],["a"]))
@@ -162,7 +161,7 @@ def test_linkability_main_attack(
 
 @pytest.mark.parametrize(
     ("n_neighbors", "e_naive_rate"),
-    [(1, 0.25), (2, 0.25)]
+    [(1, 0.5), (2, 0.5)]
 )
 def test_linkability_naive_attack(n_neighbors: int, e_naive_rate: float) -> None:
     """Test linkability naive attack results.
@@ -172,13 +171,14 @@ def test_linkability_naive_attack(n_neighbors: int, e_naive_rate: float) -> None
     rng = np.random.default_rng(seed=42)
     # Note that for the naive attack, it does not really matter
     # what's inside the synthetic or the original dataframe.
-    ori = pd.DataFrame(rng.choice(["a", "b"], size=(400, 2)), columns=["c0", "c1"])
-    syn = pd.DataFrame([["a", "a"], ["b", "b"], ["a", "a"], ["a", "a"]], columns=["c0", "c1"])
+    ori = pd.DataFrame(rng.choice(["a", "b"], size=(1000, 2)), columns=["c0", "c1"])
+    syn = pd.DataFrame([["a", "a"], ["b", "b"]], columns=["c0", "c1"])
     evaluator = LinkabilityEvaluator(
         ori = ori,
         syn = syn,
         aux_cols = (["c0"],["c1"]),
-        n_neighbors=n_neighbors,
+        confidence_level = 0.99,
+        n_neighbors = n_neighbors,
         n_jobs = 1
     )
     results = evaluator.evaluate()

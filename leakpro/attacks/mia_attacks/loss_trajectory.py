@@ -3,6 +3,7 @@
 import os
 import pickle
 
+import matplotlib.pyplot as plt
 import numpy as np
 import torch.nn.functional as F  # noqa: N812
 from torch import argmax, cuda, device, load, nn, no_grad, optim, save, tensor
@@ -441,3 +442,40 @@ class AttackLossTrajectory(AbstractMIA):
             signal_values=signals,
         )
 
+    def plot_trajectories(self: Self,
+                          dataset_name: str) -> None:
+        """Plot the trajectories of members and non-members.
+
+        Parameters
+        ----------
+        dataset_name : str
+            The name of the dataset.
+
+        Returns
+        -------
+        None
+
+        """
+        with open(f"{self.attack_data_dir}/{dataset_name}", "rb") as f:
+             data = pickle.load(f)  # noqa: S301
+
+
+        x_members = data["model_trajectory"][:len(self.train_indices), :]
+        x_non_members =data["model_trajectory"][len(self.train_indices):, :]
+
+        ave_members = np.mean(x_members, axis=0)
+        ave_non_members = np.mean(x_non_members, axis=0)
+
+        if dataset_name == "trajectory_train_data.pkl":
+            image_name = "train.png"
+        elif dataset_name == "trajectory_test_data.pkl":
+            image_name = "test.png"
+        plt.errorbar(range(self.number_of_traj), ave_members,  label="Member", fmt="-o")
+        plt.errorbar(range(self.number_of_traj), ave_non_members, label="Non-Member", fmt="-o")
+        plt.xlabel("Epochs")
+        plt.ylabel("Loss")
+        plt.title("Comparison of Means of members and non members")
+        plt.legend()
+        plt.savefig(f"{self.attack_data_dir}/{image_name}")
+        plt.clf()
+        plt.close()
