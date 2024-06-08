@@ -10,20 +10,22 @@ from leakpro.attacks.mia_attacks.lira import AttackLiRA
 from leakpro.attacks.mia_attacks.loss_trajectory import AttackLossTrajectory
 from leakpro.attacks.mia_attacks.qmia import AttackQMIA
 from leakpro.attacks.mia_attacks.rmia import AttackRMIA
+from leakpro.attacks.mia_attacks.HSJ import AttackHopSkipJump 
 from leakpro.attacks.utils.distillation_model_handler import DistillationShadowModelHandler, DistillationTargetModelHandler
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
-from leakpro.model import PytorchModel
+from leakpro.signal_extractor import PytorchModel
 
 
 class AttackFactoryMIA:
     """Class responsible for creating the attack objects."""
 
     attack_classes = {
-        "population": AttackP,
-        "rmia": AttackRMIA,
-        "qmia": AttackQMIA,
-        "loss_traj":AttackLossTrajectory,
-        "lira": AttackLiRA
+        # "population": AttackP,
+        # "rmia": AttackRMIA,
+        # "qmia": AttackQMIA,
+        # "loss_traj":AttackLossTrajectory,
+        # "lira": AttackLiRA,
+        "HSJ" : AttackHopSkipJump
     }
 
     # Shared variables for all attacks

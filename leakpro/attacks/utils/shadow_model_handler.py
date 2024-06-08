@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from leakpro.import_helper import Self, Tuple
-from leakpro.model import PytorchModel
+from leakpro.signal_extractor import PytorchModel
 from leakpro.utils.input_handler import get_class_from_module, import_module_from_file
 
 

@@ -106,7 +106,6 @@ class AttackLossTrajectory(AbstractMIA):
         self.logger.info("Preparing the data for loss trajectory attack")
 
         include_target_training_data = False
-        #TODO: This should be changed!
         include_target_testing_data = False
 
         # Get all available indices for auxiliary dataset

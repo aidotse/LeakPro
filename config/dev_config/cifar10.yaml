@@ -12,6 +12,7 @@ train: # Configuration for training
   momentum: 0.9
   weight_decay: 0.0 # Float number for indicating weight decay for training the target model. For speedyresnet, it uses its own weight_decay.
   test_batch_size: 256
+  num_classes: 10 # Integer number for indicating the number of classes in the dataset
 
 data: # Configuration for data
   dataset: cifar10 # String indicates the name of the dataset

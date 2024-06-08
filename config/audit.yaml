@@ -1,31 +1,48 @@
 audit:  # Configurations for auditing
   random_seed: 1234  # Integer specifying the random seed
   attack_list:
-    rmia:
-      training_data_fraction: 0.4  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
-      attack_data_fraction: 0.1 # Fraction of auxiliary dataset to sample from during attack
-      num_shadow_models: 8 # Number of shadow models to train
-      online: False # perform online or offline attack
-      temperature: 2
-      gamma: 2.0
-      offline_a: 0.33 # parameter from which we compute p(x) from p_OUT(x) such that p_IN(x) = a p_OUT(x) + b.
-      offline_b: 0.66
-    qmia:
-      training_data_fraction: 0.5  # Fraction of the auxilary dataset (data without train and test indices) to use for training the quantile regressor
-      epochs: 5  # Number of training epochs for quantile regression
-    population:
-      attack_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack
-    loss_traj:
-      training_distill_data_fraction : 0.2 # Fraction of the auxilary dataset to use for training the distillation models D_s = (1-D_KD)/2
-      number_of_traj: 20 # Number of epochs (number of points in the loss trajectory)
-      attack_mode: "soft_label" # label_only, soft_label
-      attack_data_dir: "./leakpro_output/attack_objects/loss_traj"
-      mia_classifier_epochs: 100
-    lira:
-      training_data_fraction: 0.4  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
-      num_shadow_models: 8 # Number of shadow models to train
-      online: false # perform online or offline attack
-      fixed_variance: True # Use a fixed variance for the whole audit
+    # rmia:
+    #   training_data_fraction: 0.4  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
+    #   attack_data_fraction: 0.1 # Fraction of auxiliary dataset to sample from during attack
+    #   num_shadow_models: 8 # Number of shadow models to train
+    #   online: False # perform online or offline attack
+    #   temperature: 2
+    #   gamma: 2.0
+    #   offline_a: 0.33 # parameter from which we compute p(x) from p_OUT(x) such that p_IN(x) = a p_OUT(x) + b.
+    #   offline_b: 0.66
+    # qmia:
+    #   training_data_fraction: 0.5  # Fraction of the auxilary dataset (data without train and test indices) to use for training the quantile regressor
+    #   epochs: 5  # Number of training epochs for quantile regression
+    # population:
+    #   attack_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack
+    # loss_traj:
+    #   training_distill_data_fraction : 0.2 # Fraction of the auxilary dataset to use for training the distillation models D_s = (1-D_KD)/2
+    #   number_of_traj: 20 # Number of epochs (number of points in the loss trajectory)
+    #   attack_mode: "soft_label" # label_only, soft_label
+    #   attack_data_dir: "./leakpro_output/attack_objects/loss_traj"
+    #   mia_classifier_epochs: 100
+    # lira:
+    #   training_data_fraction: 0.4  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
+    #   num_shadow_models: 2 # Number of shadow models to train
+    #   online: false # perform online or offline attack
+    #   fixed_variance: True # Use a fixed variance for the whole audit
+    HSJ:
+      attack_data_fraction: 0.4  # Fraction of the auxilary dataset to use for this attack
+      num_shadow_models: 1 # Number of shadow models to train
+      target_metadata_path: "./target/model_metadata.pkl"
+      norm: 2  # The distance to optimize. Possible values: 2 or np.inf             
+      y_target: null # A tensor of shape (n, nb_classes) for target labels. Required for targeted attack.
+      image_target: null # A tensor of shape (n, **image shape) for initial target images. Required for targeted attack.
+      initial_num_evals: 100 # initial number of evaluations for gradient estimation.
+      max_num_evals: 10000 # maximum number of evaluations for gradient estimation.
+      stepsize_search: "geometric_progression" # How to search for stepsize; choices are 'geometric_progression', 'grid_search'.
+      num_iterations: 100 # The number of iterations.
+      gamma: 1.0 # The binary search threshold theta is gamma / d^{3/2} for l2 attack and gamma / d^2 for linf attack.
+      constraint: 2 # The distance to optimize. Possible values: 2 or np.inf.
+      batch_size: 128 # batch_size for model prediction.
+      verbose: True # (boolean) Whether distance at each step is printed.
+      clip_min: -1 # (optional float) Minimum input component value
+      clip_max: 1 # (optional float) Maximum input component value
 
 
   report_log: "./leakpro_output/results"  # Folder to save the auditing report
@@ -37,10 +54,10 @@ audit:  # Configurations for auditing
 
 target:
   module_path: "./leakpro/shadow_model_blueprints.py"
-  model_class: "ResNet18"
+  model_class: "ConvNet"
   trained_model_path: "./target/target_model.pkl" 
   trained_model_metadata_path: "./target/model_metadata.pkl"
-  data_path: "./target/data/cinic10.pkl"
+  data_path: "./target/data/cifar100.pkl"
 
 
 shadow_model:
@@ -50,7 +67,7 @@ shadow_model:
   #
   # [Optional] Define a shadow model (if none, shadow model will follow the target model)
   # Name of the class to instantiate from the specified file
-  model_class_path: "ResNet18" #"ConvNet"
+  model_class_path: "ConvNet" #"ConvNet"
   optimizer: 
     name: sgd #adam, sgd, rmsprop
     lr: 0.01
@@ -59,7 +76,8 @@ shadow_model:
   loss: 
     name: crossentropyloss # crossentropyloss, nllloss, mseloss
   # Initialization parameters
-  init_params: {}
+  init_params: 
+    num_classes: 100
 
 distillation_target_model:
   storage_path: "./leakpro_output/attack_objects/distillation_target_models"
@@ -76,7 +94,7 @@ distillation_target_model:
   init_params: {}
   trained_model_path: "./leakpro_output/attack_objects/distillation_target_models/distillation_model.pkl"
   trained_model_metadata_path: "./leakpro_output/attack_objects/distillation_target_models/model_metadata.pkl"
-  data_path: "./leakpro_output/attack_objects/distillation_target_models/cinic10.pkl"
+  data_path: "./leakpro_output/attack_objects/distillation_target_models/cifar100.pkl"
 
 distillation_shadow_model:
   storage_path: "./leakpro_output/attack_objects/distillation_shadow_models"
@@ -93,6 +111,6 @@ distillation_shadow_model:
   init_params: {}
   trained_model_path: "./leakpro_output/attack_objects/distillation_shadow_models/distillation_model.pkl"
   trained_model_metadata_path: "./leakpro_output/attack_objects/distillation_shadow_models/model_metadata.pkl"
-  data_path: "./leakpro_output/attack_objects/distillation_shadow_models/cinic10.pkl"
+  data_path: "./leakpro_output/attack_objects/distillation_shadow_models/cifar100.pkl"
 
 
