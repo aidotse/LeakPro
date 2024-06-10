@@ -1,43 +1,34 @@
 """Implementation of the LiRA attack."""
 
-from logging import Logger
-
 import numpy as np
 from scipy.stats import norm
-from torch import nn
 from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
-from leakpro.attacks.utils.attack_data import get_attack_data
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.signals.signal import ModelRescaledLogits
+from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 
 
 class AttackLiRA(AbstractMIA):
     """Implementation of the LiRA attack."""
 
     def __init__(self:Self,
-                 population: np.ndarray,
-                 audit_dataset: dict,
-                 target_model: nn.Module,
-                 logger:Logger,
+                 handler: AbstractInputHandler,
                  configs: dict
                  ) -> None:
         """Initialize the LiRA attack.
 
         Args:
         ----
-            population (np.ndarray): The population data used for the attack.
-            audit_dataset (dict): The audit dataset used for the attack.
-            target_model (nn.Module): The target model to be attacked.
-            logger (Logger): The logger object for logging.
+            handler (AbstractInputHandler): The input handler object.
             configs (dict): Configuration parameters for the attack.
 
         """
         # Initializes the parent metric
-        super().__init__(population, audit_dataset, target_model, logger)
+        super().__init__(handler)
 
         self.signal = ModelRescaledLogits()
         self._configure_attack(configs)
@@ -100,28 +91,21 @@ class AttackLiRA(AbstractMIA):
         of the audit dataset, prepares the data for evaluation, and computes the logits
         for both shadow models and the target model.
         """
-        self.attack_data_index = get_attack_data(
-            self.population_size,
-            self.train_indices,
-            self.test_indices,
-            train_data_included_in_auxiliary_data=self.include_train_data,
-            test_data_included_in_auxiliary_data=self.include_test_data,
-            logger = self.logger
-        )
+        self.attack_data_indices = self.sample_indices_from_population(include_train_indices = self.online,
+                                                                       include_test_indices = self.online)
 
-        ShadowModelHandler().create_shadow_models(
-            self.num_shadow_models,
-            self.population,
-            self.attack_data_index,
-            self.training_data_fraction,
-        )
 
-        self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.num_shadow_models)
+        self.shadow_model_indices = ShadowModelHandler().create_shadow_models(num_models = self.num_shadow_models,
+                                                                              shadow_population =  self.attack_data_indices,
+                                                                              training_fraction = self.training_data_fraction,
+                                                                              online = self.online)
+
+        self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)
 
         self.logger.info("Create masks for all IN samples")
-        self.in_indices_mask = ShadowModelHandler().get_in_indices_mask(self.num_shadow_models, self.audit_dataset["data"])
+        self.in_indices_mask = ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"])
 
-        self.audit_data = self.population.subset(self.audit_dataset["data"])
+        self.audit_data = self.get_dataloader(self.audit_dataset["data"]).dataset
 
         # Check offline attack for possible IN- sample(s)
         if not self.online:
@@ -129,8 +113,8 @@ class AttackLiRA(AbstractMIA):
             if count_in_samples > 0:
                 self.logger.info(f"Some shadow model(s) contains {count_in_samples} IN samples in total for the model(s)")
                 self.logger.info("This is not an offline attack!")
-        self.skip_indices = np.zeros(len(self.in_indices_mask), dtype=bool)
 
+        self.skip_indices = np.zeros(len(self.in_indices_mask), dtype=bool)
         if self.online:
             no_in = 0
             no_out = 0
@@ -148,7 +132,7 @@ class AttackLiRA(AbstractMIA):
                 self.logger.info("some audit sample(s) mighthave a few or even 0 IN or OUT logits")
                 self.logger.info(f"In total {np.count_nonzero(self.skip_indices)} indices will be skipped!")
 
-            if len(self.audit_data) == len(self.skip_indices):
+            if len(self.audit_data) == np.sum(self.skip_indices):
                 raise ValueError("All audit samples are skipped. Please adjust the number of shadow models or the audit dataset.")
 
         # Calculate logits for all shadow models
@@ -181,7 +165,9 @@ class AttackLiRA(AbstractMIA):
                 in_std = np.nanstd(self.shadow_models_logits[self.in_indices_mask].flatten())
 
         # Iterate and extract logits from shadow models for each sample in the audit dataset
-        for i, (shadow_models_logits, mask) in tqdm(enumerate(zip(self.shadow_models_logits, self.in_indices_mask))):
+        for i, (shadow_models_logits, mask) in tqdm(enumerate(zip(self.shadow_models_logits, self.in_indices_mask)),
+                                                    total=len(self.shadow_models_logits),
+                                                    desc="Processing samples"):
 
             # Calculate the mean for OUT shadow model logits
             out_mean = np.mean(shadow_models_logits[~mask])

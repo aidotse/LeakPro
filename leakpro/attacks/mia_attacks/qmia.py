@@ -1,5 +1,4 @@
 """Implementation of the RMIA attack."""
-from logging import Logger
 
 import numpy as np
 import torch
@@ -8,10 +7,10 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
-from leakpro.attacks.utils.attack_data import get_attack_data
 from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.signals.signal import ModelRescaledLogits
+from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 
 
 class QuantileRegressor(nn.Module):
@@ -93,25 +92,19 @@ class AttackQMIA(AbstractMIA):
 
     def __init__(
         self:Self,
-        population: np.ndarray,
-        audit_dataset: dict,
-        target_model: nn.Module,
-        logger:Logger,
+        handler: AbstractInputHandler,
         configs: dict
     ) -> None:
         """Initialize the QMIA attack.
 
         Args:
         ----
-            population (np.ndarray): The population data.
-            audit_dataset (dict): The audit dataset.
-            target_model (nn.Module): The target model.
-            logger (Logger): The logger object.
+            handler (AbstractInputHandler): The input handler object.
             configs (dict): Configuration parameters for the attack.
 
         """
         # Initializes the parent metric
-        super().__init__(population, audit_dataset, target_model, logger)
+        super().__init__(handler)
 
         self.logger.info("Configuring the QMIA attack")
         self._configure_attack(configs)
@@ -164,26 +157,17 @@ class AttackQMIA(AbstractMIA):
         """
         # sample dataset to train quantile regressor
         self.logger.info("Preparing attack data for training the quantile regressor")
-        self.attack_data_index = get_attack_data(
-            self.population_size,
-            self.train_indices,
-            self.test_indices,
-            train_data_included_in_auxiliary_data = False,
-            test_data_included_in_auxiliary_data = False,
-            logger = self.logger
-        )
+        self.attack_data_indices = self.sample_indices_from_population(include_train_indices = False,
+                                                                       include_test_indices = False)
 
         # subsample the attack data based on the fraction
-        self.logger.info(f"Subsampling attack data from {len(self.attack_data_index)} points")
-        self.attack_data_index = np.random.choice(
-            self.attack_data_index,
-            int(self.training_data_fraction * len(self.attack_data_index)),
-            replace=False
-        )
-        self.logger.info(f"Number of attack data points after subsampling: {len(self.attack_data_index)}")
+        self.logger.info(f"Subsampling attack data from {len(self.attack_data_indices)} points")
+        n_points = int(self.training_data_fraction * len(self.attack_data_indices))
+        attack_data = self.sample_data_from_dataset(self.attack_data_indices, n_points).dataset
+        self.logger.info(f"Number of attack data points after subsampling: {len(self.attack_data_indices)}")
 
         # create attack dataset
-        attack_data = self.population.subset(self.attack_data_index)
+        attack_data = self.population.subset(self.attack_data_indices)
 
         # create labels and change dataset to be used for regression
         regression_labels = np.array(self.signal([self.target_model], attack_data)).squeeze()
@@ -269,7 +253,7 @@ class AttackQMIA(AbstractMIA):
             Result(s) of the metric.
 
         """
-        audit_dataset = self.population.subset(self.audit_dataset["data"])
+        audit_dataset = self.get_dataloader(self.audit_dataset["data"]).dataset
         self.target_logits = np.array(self.signal([self.target_model], audit_dataset)).squeeze()
 
         audit_dataloader = DataLoader(audit_dataset, batch_size=64, shuffle=False)
