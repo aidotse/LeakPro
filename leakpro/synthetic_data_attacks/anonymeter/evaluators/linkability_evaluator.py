@@ -2,7 +2,7 @@
 # Copyright (c) 2022 Anonos IP LLC.
 # See https://github.com/statice/anonymeter/blob/main/LICENSE.md for details.
 """Privacy evaluator that measures the linkability risk."""
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import numpy.typing as npt
@@ -39,7 +39,7 @@ class LinkabilityIndexes(BaseModel):
     links: Optional[Dict[int, npt.NDArray]] = None
     count: Optional[int] = None
 
-    def __init__(self: Self, **kwargs: npt.NDArray) -> None:
+    def __init__(self: Self, **kwargs: Any) -> None: # noqa: ANN401
         super().__init__(**kwargs)
         #Assert input values
         assert len(self.idx_0.shape) > 1
@@ -183,7 +183,7 @@ class LinkabilityEvaluator(BaseModel):
     naive_links: Optional[LinkabilityIndexes] = None
     results: Optional[EvaluationResults] = None
 
-    def __init__(self: Self, **kwargs: pd.DataFrame) -> None:
+    def __init__(self: Self, **kwargs: Any) -> None: # noqa: ANN401
         super().__init__(**kwargs)
         #Assert input values
         if self.ori.shape[0]==0 or self.syn.shape[0]==0:

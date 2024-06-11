@@ -2,7 +2,7 @@
 # Copyright (c) 2022 Anonos IP LLC.
 # See https://github.com/statice/anonymeter/blob/main/LICENSE.md for details.
 """Privacy evaluator that measures the inference risk."""
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import numpy as np
 import numpy.typing as npt
@@ -42,7 +42,7 @@ class InferenceGuesses(BaseModel):
     matches: Optional[npt.NDArray] = None
     count: Optional[int] = None
 
-    def __init__(self: Self, **kwargs: npt.NDArray) -> None:
+    def __init__(self: Self, **kwargs: Any) -> None: # noqa: ANN401
         super().__init__(**kwargs)
         #Assert input values
         assert len(self.guesses.shape) == 1
@@ -153,7 +153,7 @@ class InferenceEvaluator(BaseModel):
     naive_guesses: Optional[InferenceGuesses] = None
     results: Optional[EvaluationResults] = None
 
-    def __init__(self: Self, **kwargs: pd.DataFrame) -> None:
+    def __init__(self: Self, **kwargs: Any) -> None: # noqa: ANN401
         super().__init__(**kwargs)
         #Assert input values
         if self.ori.shape[0]==0 or self.syn.shape[0]==0:
