@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from leakpro.dataset import Dataset
-from leakpro.import_helper import List, Self, Tuple, Optional
+from leakpro.import_helper import List, Optional, Self, Tuple
 from leakpro.signal_extractor import Model
 
 ########################################################################################################################
@@ -346,30 +346,40 @@ class HopSkipJumpDistance(Signal):
 
     def __call__(
         self:Self,
-        models: List[Model],
+        model: Model,
         data_loader: DataLoader,
         norm: int = 2,
-        y_target: Optional[int] = None, 
-        image_target: Optional[int] = None, 
-        initial_num_evals: int = 100, 
-        max_num_evals: int = 10000, 
-        stepsize_search: str = "geometric_progression", 
-        num_iterations: int = 100, 
-        gamma: float = 1.0, 
-        constraint: int = 2, 
-        batch_size: int = 128, 
-        verbose: bool = True, 
-        clip_min: float = -1, 
+        y_target: Optional[int] = None,
+        image_target: Optional[int] = None,
+        initial_num_evals: int = 100,
+        max_num_evals: int = 10000,
+        stepsize_search: str = "geometric_progression",
+        num_iterations: int = 100,
+        gamma: float = 1.0,
+        constraint: int = 2,
+        batch_size: int = 128,
+        verbose: bool = True,
+        clip_min: float = -1,
         clip_max: float = 1,
-    ) -> List[np.ndarray]:
+    ) -> Tuple[np.ndarray, np.ndarray]:
 
-        results_perturbed_imagaes = []
-        results_perturbed_distance = []
+
         # Compute the signal for each model
-        for k, model in enumerate(models):
+        perturbed_imgs, perturbed_distance = model.get_hop_skip_jump_distance(
+                                                    data_loader,
+                                                    norm,
+                                                    y_target,
+                                                    image_target,
+                                                    initial_num_evals,
+                                                    max_num_evals,
+                                                    stepsize_search,
+                                                    num_iterations,
+                                                    gamma,
+                                                    constraint,
+                                                    batch_size,
+                                                    verbose,
+                                                    clip_min,
+                                                    clip_max
+                                                    )
 
-            perturbed_image, perturbed_distance = model.get_hop_skip_jump_distance(model,
-                                                data_loader)
-            results_perturbed_imagaes.append(perturbed_image)
-            results_perturbed_distance.append(perturbed_distance)
-        return results_perturbed_imagaes, results_perturbed_distance
+        return perturbed_imgs, perturbed_distance

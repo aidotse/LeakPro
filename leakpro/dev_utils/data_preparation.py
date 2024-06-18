@@ -84,14 +84,14 @@ def get_cifar10_dataset(dataset_name: str, data_dir: str, logger:logging.Logger)
         logger.info(f"Load data from {path}.pkl")
     else:
         logger.info("Downloading CIFAR-10 dataset")
-        transformN = transforms.Compose([transforms.ToTensor(),transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-        trainset = torchvision.datasets.CIFAR10(root="./data/cifar10", train=True, download=True, transform=transformN)
-        testset = torchvision.datasets.CIFAR10(root="./data/cifar10", train=False,download=True, transform=transformN)
-        
+        transform = transforms.Compose([transforms.ToTensor(),transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+        trainset = torchvision.datasets.CIFAR10(root="./data/cifar10", train=True, download=True, transform=transform)
+        testset = torchvision.datasets.CIFAR10(root="./data/cifar10", train=False,download=True, transform=transform)
+
         x = np.vstack([trainset.data, testset.data])
         y = np.hstack([trainset.targets, testset.targets])
 
-        all_data = GeneralDataset(x, y, transformN)
+        all_data = GeneralDataset(x, y, transform)
         Path(path).mkdir(parents=True, exist_ok=True)
         save_dataset(all_data, path, logger)
     return all_data
@@ -109,11 +109,8 @@ def get_cifar100_dataset(dataset_name: str, data_dir: str, logger:logging.Logger
         transform = transforms.Compose([transforms.ToTensor(),transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
         trainset = torchvision.datasets.CIFAR100(root="./data/cifar100", train=True, download=True, transform=transform)
         testset = torchvision.datasets.CIFAR100(root="./data/cifar100", train=False,download=True, transform=transform)
-        
-        x = np.vstack([trainset.data, testset.data])
-        # x = x / 255.0
-        # x_normalized = (x-0.5)/0.5
 
+        x = np.vstack([trainset.data, testset.data])
         y = np.hstack([trainset.targets, testset.targets])
 
         all_data = GeneralDataset(x, y, transform)

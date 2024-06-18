@@ -27,7 +27,7 @@ audit:  # Configurations for auditing
     #   online: false # perform online or offline attack
     #   fixed_variance: True # Use a fixed variance for the whole audit
     HSJ:
-      attack_data_fraction: 0.4  # Fraction of the auxilary dataset to use for this attack
+      attack_data_fraction: 0.5  # Fraction of the auxilary dataset to use for this attack
       num_shadow_models: 1 # Number of shadow models to train
       target_metadata_path: "./target/model_metadata.pkl"
       norm: 2  # The distance to optimize. Possible values: 2 or np.inf             
@@ -54,7 +54,7 @@ audit:  # Configurations for auditing
 
 target:
   module_path: "./leakpro/shadow_model_blueprints.py"
-  model_class: "ConvNet"
+  model_class: "ConvNet" #"ConvNet"
   trained_model_path: "./target/target_model.pkl" 
   trained_model_metadata_path: "./target/model_metadata.pkl"
   data_path: "./target/data/cifar100.pkl"

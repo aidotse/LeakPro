@@ -1,18 +1,50 @@
-# This file is part of celevrhans and is released under MIT License.
+# This file is part of celevrhans and is released under MIT License.  # noqa: D100
 # Copyright (c) 2019 Google Inc., OpenAI and Pennsylvania State University
 # See https://github.com/cleverhans-lab/cleverhans?tab=MIT-1-ov-file#readme for details.
-import numpy as np
-from torch import cuda, device, max, min, clamp, ones, zeros, stack, where, randn, rand, sign, no_grad, cat, from_numpy, norm, mean 
-from torch import sum as torch_sum, sqrt as torch_sqrt
 import builtins
+import logging
 
-from matplotlib import pyplot as plt
+import numpy as np
+from torch import (
+    Tensor,
+    amax,
+    cat,
+    clamp,
+    cuda,
+    device,
+    float32,
+    from_numpy,
+    full,
+    long,
+    max,
+    mean,
+    min,
+    no_grad,
+    norm,
+    ones,
+    rand,
+    rand_like,
+    randn,
+    sign,
+    stack,
+    tensor,
+    where,
+    zeros,
+)
+from torch import any as torch_any
+from torch import isnan as torch_isnan
+from torch import sqrt as torch_sqrt
+from torch import sum as torch_sum
+from torch.nn import Module
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from leakpro.import_helper import List, Self, Tuple
+
+
 class HopSkipJumpDistance:
-    """
-    PyTorch implementation of HopSkipJumpAttack.
+    """PyTorch implementation of HopSkipJumpAttack.
+
     HopSkipJumpAttack was originally proposed by Chen, Jordan and Wainwright.
     It is a decision-based attack that requires access to output
     labels of a model alone.
@@ -22,7 +54,7 @@ class HopSkipJumpDistance:
     stepsize search. HopSkipJumpAttack requires fewer model queries than
     Boundary Attack which was based on rejective sampling.
 
-    :param model_fn: a callable that takes an input tensor and returns the model logits.
+    :param model: a callable that takes an input tensor and returns the model logits.
     :param x: input tensor with n samples.
     :param norm: The distance to optimize. Possible values: 2 or np.inf.
     :param y_target:  A tensor of shape (n, nb_classes) for target labels.
@@ -48,25 +80,29 @@ class HopSkipJumpDistance:
     :param clip_min: (optional float) Minimum input component value
     :param clip_max: (optional float) Maximum input component value
     """
-    def __init__(self, 
-                 model, 
-                 data_loader, 
-                 norm, 
-                 y_target=None, 
-                 image_target=None, 
-                 initial_num_evals=100, 
-                 max_num_evals=10000, 
-                 stepsize_search="geometric_progression", 
-                 num_iterations=100, 
-                 gamma=1.0, 
-                 constraint=2, 
-                 batch_size=128, 
-                 verbose=True, 
-                 clip_min=-1, 
-                 clip_max=1):
-        
+
+    def __init__(self: Self,
+                 model: Module,
+                 data_loader: DataLoader,
+                 logger:logging.Logger,
+                 norm: int =2,
+                 y_target: np.ndarray =None,
+                 image_target: np.ndarray =None,
+                 initial_num_evals: int=100,
+                 max_num_evals: int=100,
+                 stepsize_search: str="geometric_progression",
+                 num_iterations: int= 10,
+                 gamma: float = .0,
+                 constraint: int =2,
+                 batch_size: int =128,
+                 verbose: bool =True,
+                 clip_min: int = -1,
+                 clip_max: int =1,
+                 ) -> None:
+
         self.model = model
         self.data_loader = data_loader
+        self.logger = logger
         self.norm = norm
         self.y_target = y_target
         self.image_target = image_target
@@ -80,316 +116,580 @@ class HopSkipJumpDistance:
         self.verbose = verbose
         self.clip_min = clip_min
         self.clip_max = clip_max
+        self.device = device("cuda" if cuda.is_available() else "cpu")
 
         # TODO: Chnage this
-        shape = (1, 3, 32, 32)
-        d = int(np.prod(shape))
+        # TODO: amke sure shape and batch_shape are not used instead of each other
+        self.batch_shape = (self.batch_size, 3, 32, 32)
+        self.shape = self.batch_shape[1:]
+        d = int(np.prod(self.shape))
 
         if self.constraint == 2:
-            self.theta = self.gamma / (np.sqrt(d) * d)
+            # In the original code self.gamma / (np.sqrt(d) * d)
+            self.theta = self.gamma /  d
         else:
             self.theta = self.gamma / (d * d)
 
-        self.HopSkipJump()
 
-    def HopSkipJump(self):
 
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+    def hop_skip_jump(self: Self) -> Tuple[np.ndarray, np.ndarray]:
+        """Compute the HopSkipJump attack.
 
+        Returns
+        -------
+            Tuple of numpy arrays representing perturbed images and perturbation distances.
+
+        """
+        # If the attack is targeted towards a specific class, then image_target must be provided.
         if self.y_target is not None:
             assert self.image_target is not None, "Require a target image for targeted attack."
-        if self.clip_min is not None and self.clip_max is not None:
-            if self.clip_min > self.clip_max:
-                raise ValueError(
-                    "clip_min must be less than or equal to clip_max, got clip_min={} and clip_max={}".format(
-                        self.clip_min, self.clip_max
-                    )
+        if self.clip_min is not None and self.clip_max is not None and self.clip_min > self.clip_max:
+            raise ValueError(
+                "clip_min must be less than or equal to clip_max, got clip_min={} and clip_max={}".format(
+                    self.clip_min, self.clip_max
                 )
-
-        # Compute the distance on one instance at a time
-        adv_x = []
-        perturbation_distances = []
-        for i, (batch_data, batch_label) in enumerate(tqdm(self.dataloader, desc=f"Epoch")):
-            if i> 10000:
-                break
-            else:
-                print(f"Processing {i} data points")
-                if self.verbose:
-                    print(f"Traget image and its label: {batch_label}")
-                    plt.figure(figsize=(5, 3)) 
-                    plt.imshow(((batch_data+1)/2).squeeze().permute(1, 2, 0).cpu().numpy())
-                    plt.show()
-
-                if self.y_target is not None:
-                    # targeted attack that requires target label and image.
-                    pert, perturbation_distance = self.hsja(batch_data,
-                                                            self.y_target[i],
-                                                            self.image_target[i],
-                                                            gpu_or_cpu)
-                else:
-                    if self.image_target is not None:
-                        pert, perturbation_distance = self.hsja(batch_data,
-                                                                None,
-                                                                self.image_target[i],
-                                                                gpu_or_cpu)
-                    else:
-                        # untargeted attack without an initialized image.
-                        pert, perturbation_distance = self.hsja(batch_data,
-                                                                 None,
-                                                                 None,
-                                                                 gpu_or_cpu)
-                adv_x.append(pert)
-                perturbation_distances.append(perturbation_distance)
-        return cat(adv_x, 0), perturbation_distances
-
-
-
-
-
-    def decision_function(self, images ):
-                """
-                Decision function output 1 on the desired side of the boundary,
-                0 otherwise.
-                """
-                # model_fn.to(device)
-                # images_permuted = images.permute(0, 3, 1, 2)
-                gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
-                images = clamp(images, self.clip_min, self.clip_max)
-                prob = []
-                for i in range(0, len(images), self.batch_size):
-                    batch = images[i : i + self.batch_size]
-                    batch = batch.to(gpu_or_cpu)
-                    with no_grad():
-                        prob_i = self.model_fn(batch)
-                    prob.append(prob_i)
-                prob = cat(prob, dim=0)
-                perturbed_label = max(prob, dim=1)[1]
-                if self.target_label is None:
-                    return max(prob, dim=1)[1] != self.original_label, perturbed_label
-                else:
-                    return max(prob, dim=1)[1] == self.target_label, perturbed_label
-
-    def hsja(self, sample, target_label, target_image, gpu_or_cpu):
-            
-            
-            self.model_fn.eval()
-            
-            if target_label is None:
-                with no_grad():
-                    # sample_permuted = sample.permute(0, 3, 1, 2)
-                    y_sample = self.model_fn(sample.to(gpu_or_cpu))
-                    # print(y_sample)
-                    _, original_label = max(y_sample, 1)
-
-            
-
-            # Initialize.
-            if target_image is None:
-                perturbed = self.initialize(self.decision_function,self.model_fn, 
-                                            sample, self.shape, self.clip_min, self.clip_max)
-            else:
-                perturbed = target_image.to(gpu_or_cpu)
-
-            # Project the initialization to the boundary.
-            perturbed, dist_post_update, perturbed_label = self.binary_search_batch(
-                sample, perturbed, self.decision_function, self.shape, self.constraint, self.theta
             )
-            dist = self.compute_distance(perturbed, sample, self.constraint)
 
-            perturbation_distance = 0
-            for j in np.arange(self.num_iterations):
-                current_iteration = j + 1
+        # Set the model to evaluation mode
+        self.model.eval()
+        self.model.to(self.device)
+        self.model.requires_grad_(False)
 
-                # Choose delta.
-                delta = self.select_delta(
-                    dist_post_update,
-                    current_iteration,
-                    self.clip_max,
-                    self.clip_min,
-                    self.d,
-                    self.theta,
-                    self.constraint,
+        # Getting labels from the classifier
+        if self.y_target is None:
+            self.model_output_labels = self.get_classifier_labels(self.data_loader)
+            self.model_output_labels = self.model_output_labels.to(self.device)
+
+        # untargeted attack without an initialized image.
+        pert_imgs, perturbation_distances = self.hsja(self.data_loader,
+                                                      None
+                                                      )
+
+        pert_imgs = cat(pert_imgs, 0).cpu().numpy()
+        perturbation_distances = cat(perturbation_distances, 0).cpu().numpy()
+        return pert_imgs, perturbation_distances
+
+
+    def get_classifier_labels(self: Self, dataloader: DataLoader) -> np.ndarray:
+        """Get the labels from the classifier for the given data loader."""
+        labels = []
+        self.model.eval()
+        for _, (batch_data, _) in enumerate(tqdm(dataloader, desc="Epoch")):
+            batch_data = batch_data.to(self.device)  # noqa: PLW2901
+
+            with no_grad():
+                y_sample = self.model(batch_data)
+                _, labels_i = max(y_sample, 1)
+            labels.append(labels_i)
+
+        return cat(labels, 0)
+
+
+    def hsja(self: Self, samples:DataLoader,
+             batch_target_image: np.ndarray) -> Tuple[List, List]:
+        """Compute the HopSkipJump attack for a batch of samples.
+
+        Parameters
+        ----------
+        samples : iterable
+            The input samples.
+        batch_y_target : Any
+            The target labels for the attack.
+        batch_target_image : Any
+            The target images for the attack.
+
+        Returns
+        -------
+        Tuple of lists representing perturbed images and perturbation distances.
+
+        """
+        self.model.eval()
+        # Initialize.
+        if batch_target_image is None:
+            perturbed, perturbed_indices = self.initialize()
+        else:
+            perturbed = batch_target_image
+
+
+        #TODO: check if the indices are correct ( should not be sequential)
+        # Ordering the perturbed images same as the samples by perturbed_indices
+        perturbed_indices_tensor = tensor(perturbed_indices, dtype=long)
+        ordered_perturbed = perturbed[perturbed_indices_tensor].to(self.device)
+
+        perturbation_distances = []
+        perturbed_images = []
+        for i, (batch_sample, _) in enumerate(tqdm(samples, desc="Epoch")):
+            active_indices = list(range(i*self.batch_size,
+                                        builtins.min((i +1) * self.batch_size,  len(ordered_perturbed))))
+            batch_perturbed = stack([ordered_perturbed[j] for j in active_indices])
+
+            batch_sample = batch_sample.to(self.device)  # noqa: PLW2901
+            batch_perturbed = batch_perturbed.to(self.device)
+
+            perturbed, perturbation_distance = self.distance_batch(
+                batch_sample, batch_perturbed, active_indices,i)
+
+            perturbation_distances.append(perturbation_distance)
+            perturbed_images.append(perturbed)
+            if self.verbose:
+                self.logger(f"Batch {i} ")
+        return perturbed_images, perturbation_distances
+
+
+    def distance_batch(self: Self,
+                       batch_sample: Tensor,
+                       batch_perturbed: Tensor,
+                       active_indices: np.ndarray,
+                        b_i: int) -> Tuple[Tensor, Tensor]:
+        """Compute the distance between a batch of perturbed images and the original batch of samples.
+
+        Parameters
+        ----------
+        batch_sample : Tensor
+            The original batch of samples.
+        batch_perturbed : Tensor
+            The batch of perturbed images.
+        active_indices : List[int]
+            The indices of the active samples.
+        b_i : int
+            The batch index.
+
+        Returns
+        -------
+        Tuple of the perturbed images and the perturbation distance.
+
+        """
+        # Project the initialization to the boundary.
+        perturbed, dist_post_update, perturbed_label = self.binary_search_batch(
+            batch_sample, batch_perturbed, active_indices)
+
+        dist = self.compute_distance(perturbed, batch_sample)
+        sum_intial_distance = torch_sum(dist, dim=0)
+        if self.verbose:
+            self.log(f"Batch {b_i} Initial distance: {sum_intial_distance}")
+
+        perturbation_distance = 0
+        j = 0
+        for j in np.arange(self.num_iterations):
+
+            current_iteration = j + 1
+
+            # Choose delta.
+            delta = self.select_delta(
+                dist_post_update,
+                current_iteration
+            )
+
+            # approximate gradient.
+            gradf = self.approximate_gradient(
+                perturbed,
+                j,
+                delta,
+                active_indices
+            )
+            update = sign(gradf) if self.constraint == np.inf else gradf
+
+            # search step size.
+            if self.stepsize_search == "geometric_progression":
+                # find step size.
+                epsilon = self.geometric_progression_for_stepsize(
+                    perturbed, update, dist, current_iteration, active_indices, b_i
                 )
 
-                # Choose number of evaluations.
-                num_evals = int(builtins.min(self.initial_num_evals * np.sqrt(j + 1), self.max_num_evals))
-
-                # approximate gradient.
-                gradf = self.approximate_gradient(
-                    self.decision_function,
-                    perturbed,
-                    num_evals,
-                    delta,
-                    self.constraint,
-                    self.shape[1:],
-                    self.clip_min,
-                    self.clip_max,
+                # Update the sample.
+                perturbed = clamp(
+                    perturbed + epsilon.view(len(epsilon),1,1,1) * update, self.clip_min, self.clip_max
                 )
-                if self.constraint == np.inf:
-                    update = sign(gradf)
-                else:
-                    update = gradf
 
-                # search step size.
-                if self.stepsize_search == "geometric_progression":
-                    # find step size.
-                    epsilon = self.geometric_progression_for_stepsize(
-                        perturbed, update, dist, self.decision_function, current_iteration
+                # Binary search to return to the boundary.
+                perturbed, dist_post_update , perturbed_label= self.binary_search_batch(
+                    batch_sample, perturbed, active_indices )
+
+            elif self.stepsize_search == "grid_search":
+                # Grid search for stepsize.
+                epsilons = (
+                    from_numpy(np.logspace(-4, 0, num=20, endpoint=True))
+                    .to(self.device)
+                    .float()
+                    * dist
+                )
+                perturbeds = (
+                    perturbed + epsilons.view((20,) + (1,) * (len(self.shape) - 1)) * update
+                )
+                perturbeds = clamp(perturbeds, self.clip_min, self.clip_max)
+                idx_perturbed,perturbed_label = self.decision_function(perturbeds, active_indices)
+
+                if torch_sum(idx_perturbed) > 0:
+                    # Select the perturbation that yields the minimum distance # after binary search.
+                    perturbed, dist_post_update, perturbed_label = self.binary_search_batch(
+                        batch_sample,
+                        perturbeds[idx_perturbed],
                     )
 
-                    # Update the sample.
-                    perturbed = clamp(
-                        perturbed + epsilon * update, self.clip_min, self.clip_max
-                    )
+            # compute new distance.
+            perturbation_distance = self.compute_distance(perturbed, batch_sample)
 
-                    # Binary search to return to the boundary.
-                    perturbed, dist_post_update , perturbed_label= self.binary_search_batch(
-                        sample, perturbed, self.decision_function, self.shape, self.constraint, self.theta
-                    )
+            if j % 2 == 0 and self.verbose:
+                self.logger(f"iteration: {j + 1}, distance {perturbation_distance}")
 
-                elif self.stepsize_search == "grid_search":
-                    # Grid search for stepsize.
-                    epsilons = (
-                        from_numpy(np.logspace(-4, 0, num=20, endpoint=True))
-                        .to(gpu_or_cpu)
-                        .float()
-                        * dist
-                    )
-                    perturbeds = (
-                        perturbed + epsilons.view((20,) + (1,) * (len(self.shape) - 1)) * update
-                    )
-                    perturbeds = clamp(perturbeds, self.clip_min, self.clip_max)
-                    idx_perturbed,perturbed_label = self.decision_function(perturbeds)
-
-                    if torch_sum(idx_perturbed) > 0:
-                        # Select the perturbation that yields the minimum distance # after binary search.
-                        perturbed, dist_post_update, perturbed_label = self.binary_search_batch(
-                            sample,
-                            perturbeds[idx_perturbed],
-                            self.decision_function,
-                            self.shape,
-                            self.constraint,
-                            self.theta,
-                        )
-
-                # compute new distance.
-                dist = self.compute_distance(perturbed, sample, self.constraint)
-                if j == self.num_iterations - 1:
-                    perturbation_distance = dist
-                
-                if j % 20 == 0 and self.verbose:
-                    print(f"Perturbed image in iter: {j} and distance: {dist} , label: {perturbed_label}")
-                    plt.figure(figsize=(4, 3)) 
-                    plt.imshow(((perturbed+1)/2).squeeze().permute(1, 2, 0).cpu().numpy())
-                    plt.show()
-                    print( "iteration: {:d}, {:s} distance {:.4E}".format(
-                            j + 1, str(self.constraint), dist
-                        ))
-
-                # if verbose:
-                #     print(
-                #         "iteration: {:d}, {:s} distance {:.4E}".format(
-                #             j + 1, str(constraint), dist
-                #         )
-                #     )
-
-            return perturbed, perturbation_distance
+        return perturbed, perturbation_distance
 
 
-    def compute_distance(self, x_ori, x_pert, constraint=2):
-        """ Compute the distance between two images. """
+    def decision_function(self: Self,
+                          images: Tensor,
+                          active_indices: np.ndarray = None ) -> Tuple[Tensor, Tensor]:
+        """Compute the decision function for the given images.
 
-        x_ori = x_ori.to("cpu")
-        x_pert = x_pert.to("cpu")
-        if constraint == 2:
-            dist = norm(x_ori - x_pert, p=2)
-        elif constraint == np.inf:
-            dist = max(abs(x_ori - x_pert))
+        Args:
+        ----
+            images (Tensor): The input images.
+            active_indices (np.ndarray, optional): The indices of the active images. Defaults to None.
+
+        Returns:
+        -------
+            Tuple[Tensor, Tensor]: A tuple containing the decision function results and the predicted labels.
+
+        """
+        # Check if active_indices is None and set it to all indices if so
+        if active_indices is None:
+            active_indices = np.arange(images.size(0))
+
+        images = clamp(images, self.clip_min, self.clip_max)
+        images = images.to(float32)
+
+        with no_grad():
+            prob = self.model(images)
+        perturbed_label = max(prob, dim=1)[1]
+        model_output_labels_tensor = self.model_output_labels[active_indices].clone().detach()
+
+
+        decitions = perturbed_label != model_output_labels_tensor if self.y_target is None else perturbed_label == self.y_target
+        return decitions, perturbed_label
+
+
+    def get_random_noise(self: Self) -> Tuple[np.ndarray, List[int]]:
+        """Generate random noise for each data point in the dataset.
+
+        Returns
+        -------
+            Tuple[np.ndarray, List[int]]: A tuple containing the generated random noises and the ordered indices.
+
+        """
+        success = np.zeros(len(self.data_loader.dataset), dtype=bool)
+        passed_random_noises = zeros((len(self.data_loader.dataset), 3, 32, 32))
+        active_indices = np.arange(self.batch_size)
+        passed_ordered_indices = []
+        num_evals = 0
+
+        # Find a misclassified random noise.
+        while not success.all():
+            active_data = []
+            for idx in active_indices:
+                active_data.append(self.data_loader.dataset[idx])
+            # Flatten the list of tuples into a list of tensors
+            all_tensors = [unpack_tuple[0] for unpack_tuple in active_data]
+
+            # Stack all tensors into a single tensor
+            active_data = stack(all_tensors)
+
+            random_noise = self.clip_min + rand_like(active_data) * (
+                self.clip_max - self.clip_min
+            )
+            random_noise = random_noise.to(self.device)
+            decision, _ = self.decision_function(random_noise, active_indices)
+
+            for i, idx in enumerate(active_indices):
+                if decision[i]:
+                    success[idx] = True
+                    passed_random_noises[idx] = random_noise[i]
+                    passed_ordered_indices.append(idx)
+
+            # Update active_indices with new data points
+            active_indices = np.where(~success)[0][:self.batch_size]
+
+            num_evals += 1
+            if len(active_indices) == 0:
+                self.logger(f"All data points have been successfully perturbed after {num_evals} evaluations.")
+                break
+
+        return passed_random_noises, passed_ordered_indices
+
+    def initialize(self: Self) -> Tuple[np.ndarray, List[int]]:
+        """Efficient Implementation of BlendedUniformNoiseAttack in Foolbox."""
+        passed_random_noises, _ = self.get_random_noise()
+        passed_random_noises = passed_random_noises.to(self.device)
+        opt_intialization, opt_ordered_indices = self.binary_search_init(
+                                                          passed_random_noises)
+
+        return opt_intialization, opt_ordered_indices
+
+    def binary_search_init(self: Self,
+                           passed_random_noises: Tensor) -> Tuple[np.ndarray, List[int]]:
+        """Perform binary search initialization for generating optimal noises.
+
+        Args:
+        ----
+            passed_random_noises (np.ndarray): The random noises.
+
+        Returns:
+        -------
+            Tuple[np.ndarray, List[int]]: A tuple containing the generated optimal noises and the ordered indices.
+
+        """
+        low  = zeros(len(self.data_loader.dataset), dtype=float).to(self.device)
+        high = ones(len(self.data_loader.dataset), dtype=float).to(self.device)
+        mid = zeros(len(self.data_loader.dataset), dtype=float).to(self.device)
+        success = np.zeros(len(self.data_loader.dataset), dtype=bool)
+        active_indices = np.arange(self.batch_size)
+        passed_opt_noises = zeros((len(self.data_loader.dataset), 3, 32, 32))
+        passed_opt_ordered_indices = []
+        num_evals = 0
+
+
+        while not success.all():
+
+            active_data = []
+            for idx in active_indices:
+                active_data.append(self.data_loader.dataset[idx])
+            all_tensors = [unpack_tuple[0] for unpack_tuple in active_data]
+            active_data = stack(all_tensors).to(self.device)
+
+            active_noise = passed_random_noises[active_indices]
+
+            mid_batch = mid[active_indices]
+            low_batch = low[active_indices]
+            high_batch = high[active_indices]
+
+            mid_batch = (high_batch + low_batch) / 2.0
+            blended = (1 -  mid_batch.view(-1, 1, 1, 1) ) * active_noise +  mid_batch.view(-1, 1, 1, 1) * active_noise
+
+
+            blended = blended.to(self.device)
+            decisions, _  = self.decision_function(blended, active_indices)
+            # Update high where decisions is True
+            high_batch[decisions] = mid_batch[decisions].clone().detach()
+
+            # Update low where decisions is False
+            low_batch[~decisions] = mid_batch[~decisions].clone().detach()
+
+            for i, idx in enumerate(active_indices):
+                if high_batch[i] - low_batch[i] > 0.00001 : #< 1.5:
+                    success[idx] = True
+                    opt_noise = (1 - high_batch[i]) * active_data[i] + high_batch[i] * passed_random_noises[i]
+                    passed_opt_noises[idx] = opt_noise.clone().detach()
+                    passed_opt_ordered_indices.append(idx)
+
+
+            # Update active_indices with new data points
+            active_indices = np.where(~success)[0][:self.batch_size]
+
+            if num_evals % 20 == 0 and self.verbose:
+                # Print progress
+                ratio_success = sum(success).item() / len(self.data_loader.dataset)
+                self.logger(f"Iteration {num_evals}: {ratio_success*100:.4f}% success")
+
+            num_evals += 1
+            if len(active_indices) == 0:
+                self.logger(f"All data points have been successfully perturbed after {num_evals} evaluations.")
+                break
+
+        return passed_opt_noises, passed_opt_ordered_indices
+
+
+
+    def compute_distance(self: Self,
+                         batch_ori: Tensor,
+                         batch_pert: Tensor) -> Tensor:
+        """Compute the distance between the original batch and the perturbed batch.
+
+        Args:
+        ----
+            batch_ori (Tensor): The original batch.
+            batch_pert (Tensor): The perturbed batch.
+
+        Returns:
+        -------
+            Tensor: The computed distance between the original batch and the perturbed batch.
+
+        """
+        if torch_any(torch_isnan(batch_ori)):
+            raise AssertionError("NaN values found in batch_ori")
+        assert not torch_any(torch_isnan(batch_pert)), "NaN values found in batch_ori"
+
+        if self.constraint == 2:
+            dist = norm(batch_ori - batch_pert, p=2,  dim=(1, 2, 3))
+        elif self.constraint == np.inf:
+            dist= amax(abs(batch_ori - batch_pert),  dim=(1, 2, 3))
         return dist
 
 
-    def project(self, original_image, perturbed_images, alphas, shape, constraint):
-        """ Projection onto given l2 / linf balls in a batch. """
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
-        alphas = alphas.to(gpu_or_cpu)
-        original_image = original_image.to(gpu_or_cpu)
-        perturbed_images = perturbed_images.to(gpu_or_cpu)
-        alphas = alphas.view((alphas.shape[0],) + (1,) * (len(shape) - 1))
-        if constraint == 2:
-            projected = (1 - alphas) * original_image + alphas * perturbed_images
-        elif constraint == np.inf:
+    def project(self: Self,
+                original_image_batch: Tensor,
+                perturbed_images_batch: Tensor,
+                alphas: Tensor) -> Tensor:
+        """Projects the perturbed images onto the epsilon ball around the original images.
+
+        Args:
+        ----
+            original_image_batch (Tensor): The batch of original images.
+            perturbed_images_batch (Tensor): The batch of perturbed images.
+            alphas (Tensor): The scaling factor for the perturbation.
+
+        Returns:
+        -------
+            Tensor: The projected images.
+
+        Raises:
+        ------
+            None
+
+        """
+        alphas = alphas.to(self.device)
+        alphas = alphas.view((len(original_image_batch), 1, 1, 1))
+        if self.constraint == 2:
+            projected = (1 - alphas) * original_image_batch + alphas * perturbed_images_batch
+        elif self.constraint == np.inf:
             projected = clamp(
-                perturbed_images, original_image - alphas, original_image + alphas
+                perturbed_images_batch, original_image_batch - alphas, original_image_batch + alphas
             )
         return projected
 
 
-    def geometric_progression_for_stepsize(self, 
-        x, update, dist, decision_function, current_iteration
-    ):
-        """Geometric progression to search for stepsize.
-        Keep decreasing stepsize by half until reaching
-        the desired side of the boundary.
-        """
-        epsilon = dist / np.sqrt(current_iteration)
-        while True:
-            updated = x + epsilon * update
-            success = decision_function(updated)[0]
-            if success:
-                break
-            else:
-                epsilon = epsilon / 2.0
+    def geometric_progression_for_stepsize(self: Self,
+                                           samples: Tensor,
+                                           updates: Tensor,
+                                           dist: Tensor,
+                                           current_iteration: int,
+                                           active_indices: np.ndarray, b_i:int) -> Tensor:
+        """Calculates the step size for geometric progression in the HopSkipJumpDistance algorithm.
 
-        return epsilon
+        Args:
+        ----
+            samples (Tensor): The input samples.
+            updates (Tensor): The updates to be applied to the samples.
+            dist (Tensor): The distance value.
+            current_iteration (int): The current iteration of the algorithm.
+            active_indices (np.ndarray): The active indices.
+            b_i (int): The value of b_i.
+
+        Returns:
+        -------
+            Tensor: The calculated step size for geometric progression.
+
+        """
+        batch_epsilon = dist / np.sqrt(current_iteration)
+        active_indices = np.array(active_indices)
+
+        success = np.zeros(len(samples), dtype=bool)
+        batch_active_indices = np.arange(len(samples))
+        num_evals = 0
+
+        while not success.all() and num_evals <= 10:
+
+            active_samples = samples[batch_active_indices]
+            active_updates = updates[batch_active_indices]
+            active_epsilon = batch_epsilon[batch_active_indices].view(len(batch_active_indices), 1, 1, 1)
+
+            active_updateed_samples = active_samples + active_epsilon * active_updates
+            decisions, _  = self.decision_function(active_updateed_samples,
+                                                   active_indices[batch_active_indices])
+            passed_index= []
+            for i, idx in enumerate(batch_active_indices):
+                if decisions[i]:
+                    success[idx] = True
+                    passed_index.append(idx)
+                else:
+                    batch_epsilon[idx] =  batch_epsilon[idx] / 2.0
+            if passed_index:
+                # Find the positions in batch_active_indices corresponding to the values in passed_index
+                positions_to_delete = [i for i, val in enumerate(batch_active_indices) if val in passed_index]
+
+                batch_active_indices = np.delete(batch_active_indices, positions_to_delete)
+            num_evals += 1
+            if self.verbose:
+                self.logger(f"Stepsize search: {num_evals} evaluations, and failed data {len(batch_active_indices)} in {b_i}.")
+        return batch_epsilon
 
 
-    def select_delta( slef,
-        dist_post_update, current_iteration, clip_max, clip_min, d, theta, constraint
-    ):
+    def select_delta(self: Self, dist_post_update: Tensor, current_iteration: int) -> Tensor:
+        """Selects the delta value based on the given distance post update and current iteration.
+
+        Args:
+        ----
+            dist_post_update (Tensor): The distance post update.
+            current_iteration (int): The current iteration.
+
+        Returns:
+        -------
+            Tensor: The selected delta value.
+
+        Raises:
+        ------
+            None
+
         """
-        Choose the delta at the scale of distance
-        between x and perturbed sample.
-        """
+        d = int(np.prod(self.shape))
         if current_iteration == 1:
-            delta = 0.1 * (clip_max - clip_min)
-        else:
-            if constraint == 2:
-                delta = np.sqrt(d) * theta * dist_post_update
-            elif constraint == np.inf:
-                delta = d * theta * dist_post_update
+            delta = 0.1 * (self.clip_max - self.clip_min)
+            delta_batch = full((len(dist_post_update),), delta)
+        elif self.constraint == 2:
+            delta_batch = np.sqrt(d) * self.theta * dist_post_update
+        elif self.constraint == np.inf:
+            delta_batch = d * self.theta * dist_post_update
 
-        return delta
+        return delta_batch.to(self.device)
 
 
     def approximate_gradient(
-            self,
-            decision_function,
-            sample,
-            num_evals,
-            delta,
-            constraint,
-            shape,
-            clip_min,
-            clip_max
-             ):
-            """ Gradient direction estimation """
-            # Generate random vectors.
-            gpu_or_cpu =device("cuda" if cuda.is_available() else "cpu")
-            noise_shape = [num_evals] + list(shape)
-            if constraint == 2:
+        self: Self,
+        samples: Tensor,
+        iteration: int,
+        delta: Tensor,
+        active_indices: np.ndarray,
+            ) -> Tensor:
+        """Approximates the gradient of a function using random vectors.
+
+        Args:
+        ----
+            samples (Tensor): The input samples.
+            iteration (int): The current iteration number.
+            delta (Tensor): The delta values for perturbation.
+            active_indices (np.ndarray): The active indices for each sample.
+
+        Returns:
+        -------
+            Tensor: The approximate gradient.
+
+        Raises:
+        ------
+            None
+
+        """
+        # Generate random vectors.
+        # Choose number of evaluations.
+        num_evals = int(builtins.min(self.initial_num_evals * np.sqrt(iteration + 1),
+                                        self.max_num_evals))
+        approx_grad = zeros((len(samples),) + self.shape).to(self.device)
+
+        for i, sample in enumerate(samples):
+            noise_shape = [num_evals] + list(self.shape)
+            if self.constraint == 2:
                 rv = randn(noise_shape)
-            elif constraint == np.inf:
+            elif self.constraint == np.inf:
                 rv = -1 + rand(noise_shape) * 2
 
-            axis = tuple(range(1, 1 + len(shape)))
+            axis = tuple(range(1, 1 + len(self.shape)))
             rv = rv / torch_sqrt(torch_sum(rv ** 2, dim=axis, keepdim=True))
-            perturbed = sample + delta * rv.to(gpu_or_cpu)
-            perturbed = clamp(perturbed, clip_min, clip_max)
-            rv = (perturbed - sample) / delta
+            rv = rv.to(self.device)
+            perturbed = sample + delta[i] * rv
+            perturbed = clamp(perturbed, self.clip_min, self.clip_max)
+            rv = (perturbed - sample) / delta[i]
 
             # query the model.
-            decisions, _ = decision_function(perturbed)
-            fval = 2.0 * decisions.view((decisions.shape[0],) + (1,) * len(shape)) - 1.0
+            sample_index = np.full(num_evals, active_indices[i])
+            decisions, _ = self.decision_function(perturbed, sample_index)
+            fval = 2.0 * decisions.view((decisions.shape[0],) +
+                                        (1,) * len(self.shape)) - 1.0
 
             # Baseline subtraction (when fval differs)
             fval_mean = mean(fval)
@@ -402,107 +702,85 @@ class HopSkipJumpDistance:
                 gradf = mean(fval * rv, dim=0)
 
             # Get the gradient direction.
-            gradf = gradf / norm(gradf, p=2)
+            approx_grad[i] = gradf / norm(gradf, p=2)
 
-            return gradf
+        return approx_grad
 
 
 
-    def binary_search_batch(self, 
-        original_image, perturbed_images, decision_function, shape, constraint, theta
-    ):
-        """ Binary search to approach the boundary. """
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
-        # Compute distance between each of perturbed image and original image.
-        dists_post_update = stack(
-            [
-                self.compute_distance(original_image, perturbed_image, constraint)
-                for perturbed_image in perturbed_images
-            ]
-        )
+    def binary_search_batch(self: Self,
+                            original_image_batch: Tensor, perturbed_images_batch: Tensor,
+                            active_indices: np.ndarray) -> Tuple[Tensor, Tensor, Tensor]:
+        """Perform binary search to find the optimal perturbation for a batch of images.
 
-        # Choose upper thresholds in binary searchs based on constraint.
-        if constraint == np.inf:
+        Args:
+        ----
+            original_image_batch (Tensor): The original batch of images.
+            perturbed_images_batch (Tensor): The batch of perturbed images.
+            active_indices (np.ndarray): The indices of the active images.
+
+        Returns:
+        -------
+            Tuple[Tensor, Tensor, Tensor]: A tuple containing the output images, the distances
+            after the update, and the perturbed labels.
+
+        Raises:
+        ------
+            None
+
+        """
+        # I think this should be included when stepsize_search is grid_search.
+        if self.stepsize_search == "grid_search":
+            dists_post_update = stack(
+                [
+                    self.compute_distance(original_image_batch, perturbed_image)
+                    for perturbed_image in perturbed_images_batch
+                ]
+            )
+        else:
+            dists_post_update = self.compute_distance(original_image_batch, perturbed_images_batch)
+
+        # Choose upper thresholds in binary searches based on constraint.
+        if self.constraint == np.inf:
             highs = dists_post_update
             # Stopping criteria.
-            thresholds = min(dists_post_update * theta, theta)
+            thresholds = min(dists_post_update * self.theta, self.theta)
         else:
-            highs = ones(len(perturbed_images)).to(gpu_or_cpu)
-            thresholds = theta
+            highs = ones(len(perturbed_images_batch)).to(self.device)
+            thresholds = self.theta
 
-        lows = zeros(len(perturbed_images)).to(gpu_or_cpu)
+        lows = zeros(len(perturbed_images_batch)).to(self.device)
 
         while max((highs - lows) / thresholds) > 1:
             # projection to mids.
             mids = (highs + lows) / 2.0
-            mid_images = self.project(original_image, perturbed_images, mids, shape, constraint)
+            mid_images = self.project(original_image_batch, perturbed_images_batch, mids)
 
             # Update highs and lows based on model decisions.
-            decisions, perturbed_label = decision_function(mid_images)
+            decisions, perturbed_label = self.decision_function(mid_images, active_indices)
             lows = where(decisions == 0, mids, lows)
             highs = where(decisions == 1, mids, highs)
 
-        out_images = self.project(original_image, perturbed_images, highs, shape, constraint)
+        out_images = self.project(original_image_batch, perturbed_images_batch, highs)
 
         # Compute distance of the output image to select the best choice.
-        # (only used when stepsize_search is grid_search.)
-        dists = stack(
-            [
-                self.compute_distance(original_image, out_image, constraint)
-                for out_image in out_images
-            ]
-        )
-        _, idx = min(dists, 0)
-
-        dist = dists_post_update[idx]
-        out_image = out_images[idx].unsqueeze(0)
-        return out_image, dist, perturbed_label
-
-
-    def initialize(self, decision_function, model_fn, sample, shape, clip_min, clip_max):
-        """
-        Efficient Implementation of BlendedUniformNoiseAttack in Foolbox.
-        """
-        success = 0
-        num_evals = 0
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
-        sample = sample.to(gpu_or_cpu)
-        model_fn.eval()
-
-
-        # Find a misclassified random noise.
-        while True:
-            random_noise = clip_min + rand(shape).to(gpu_or_cpu) * (
-                clip_max - clip_min
+        if self.stepsize_search == "grid_search":
+            dists = stack(
+                [
+                    self.compute_distance(original_image_batch, out_image)
+                    for out_image in out_images
+                ]
             )
-            # random_noise_permuted = random_noise.permute(0, 3, 1, 2)
-            success= decision_function(random_noise)[0]
-            if success:
-                print(f"success in finding a misclassified random noise.{num_evals}")
-                break
-            num_evals += 1
-            # if(num_evals%1000==0):
-            #     print(f"try {num_evals} times to find a misclassified random noise.")
-            message = (
-                "Initialization failed! Try to use a misclassified image as `target_image`"
-            )
-            assert num_evals < 1e6, message
+            _, idx = min(dists, 0)
 
-        # Binary search to minimize l2 distance to original image.
-        low = 0.0
-        high = 1.0
-        while high - low > 0.001:
-            mid = (high + low) / 2.0
-            blended = (1 - mid) * sample + mid * random_noise
-            # blended_permuted = blended.permute(0, 3, 1, 2)
-            success = decision_function(blended)[0]
-            if success:
-                high = mid
-            else:
-                low = mid
+            dist = dists_post_update[idx]
+            out_image = out_images[idx].unsqueeze(0)
+            return out_image, dist, perturbed_label
 
-        initialization = (1 - high) * sample + high * random_noise
-        return initialization
+        return out_images, dists_post_update, perturbed_label
+
+
+
 
 
 

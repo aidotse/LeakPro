@@ -65,16 +65,16 @@ def generate_user_input(configs: dict, logger: logging.Logger)->None:
 
     retrain = False
     # Create the population dataset and target_model
-    if "adult" in configs["data"]["dataset"]:
+    if configs["data"]["dataset"] == "adult":
         population = get_adult_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
         target_model = shadow_model_blueprints.NN(configs["train"]["inputs"], configs["train"]["outputs"])
-    # elif "cifar10" in configs["data"]["dataset"]:
-    #     population = get_cifar10_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
-    #     target_model = shadow_model_blueprints.ResNet18()
-    elif "cifar100" in configs["data"]["dataset"]:
+    elif configs["data"]["dataset"] == "cifar10":
+        population = get_cifar10_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
+        target_model = shadow_model_blueprints.ResNet18()
+    elif configs["data"]["dataset"] == "cifar100":
         population = get_cifar100_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
         target_model = shadow_model_blueprints.ConvNet(configs["train"]["num_classes"])
-    elif "cinic10" in configs["data"]["dataset"]:
+    elif configs["data"]["dataset"] == "cinic10":
         population = get_cinic10_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
         target_model = shadow_model_blueprints.ResNet18(configs["train"]["num_classes"])
 
