@@ -16,7 +16,7 @@ from leakpro.synthetic_data_attacks.anonymeter.utils import assert_x_in_bound
 
 
 class LinkabilityIndexes(BaseModel):
-    """Utility class to store indexes from linkability attack.
+    """Utility class to store indexes, links and counts from linkability attack.
 
     Parameters
     ----------

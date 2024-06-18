@@ -139,15 +139,20 @@ def test_linkability_risk_evaluation() -> None:
         n_samples = n_samples,
         n_attacks = 5
     )
-    assert isinstance(full_link_res, lu.LinkabilityFullResults)
+    assert isinstance(full_link_res, lu.LinkabilityResults)
     #Calculate number of total attacks
     counter = len(list(range(2, adults_nr_cols+1)))
     nr_total_attacks = n_samples * counter
     #Output nr columns from pack_results
     pack_results_nr_cols = 7
-    assert np.array(full_link_res.res).shape == (nr_total_attacks, pack_results_nr_cols+1)
+    #Assert results
+    res = np.array(full_link_res.res)
+    assert res.shape == (nr_total_attacks, pack_results_nr_cols+1)
     assert len(full_link_res.aux_cols) == nr_total_attacks
-    e_res_cols = ["n_total", "n_main", "n_naive", "confidence_level", "main_rate", "naive_rate", "residual_rate"]
+    for nr_aux_cols, aux_cols in zip(res[:,-1], full_link_res.aux_cols):
+        assert nr_aux_cols == len(aux_cols[0]) + len(aux_cols[1])
+    assert len(full_link_res.res_cols) == pack_results_nr_cols+1
+    e_res_cols = ["n_total", "n_main", "n_naive", "confidence_level", "main_rate", "naive_rate", "residual_rate", "nr_aux_cols"]
     assert full_link_res.res_cols == e_res_cols
     #Case save_results_json = True
     dataset = "test_linkability_risk_evaluation_adults"
@@ -161,7 +166,7 @@ def test_linkability_risk_evaluation() -> None:
         n_attacks = 5,
         save_results_json = True
     )
-    assert isinstance(full_link_res, lu.LinkabilityFullResults)
+    assert isinstance(full_link_res, lu.LinkabilityResults)
     assert os.path.exists(file_path)
     #Remove results file
     os.remove(file_path)
@@ -170,4 +175,4 @@ def test_linkability_risk_evaluation() -> None:
 def test_load_linkability_results() -> None:
     """Assert results for load_linkability_results function for dataset used in examples."""
     full_link_res = lu.load_linkability_results(dataset="adults")
-    assert isinstance(full_link_res, lu.LinkabilityFullResults)
+    assert isinstance(full_link_res, lu.LinkabilityResults)

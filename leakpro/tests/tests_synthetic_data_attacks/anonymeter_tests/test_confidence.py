@@ -138,27 +138,17 @@ def assert_equal_SuccessRates(x: SuccessRate, y: SuccessRate) -> Union[None, Ass
 @pytest.mark.parametrize(
     ("main_rate", "naive_rate", "e_rate"),
     [
-        (SuccessRate(rate=0.05, error=0.05), SuccessRate(rate=0.06, error=0.1), SuccessRate(rate=0.0, error=0.119953)),
-        (SuccessRate(rate=0.8, error=0.1), SuccessRate(rate=0.9, error=0.1), SuccessRate(rate=0.0, error=2.236068)),
-        (SuccessRate(rate=0.9, error=0.1), SuccessRate(rate=0.8, error=0.1), SuccessRate(rate=0.5, error=0.559017)),
-        (SuccessRate(rate=0.9, error=0.02), SuccessRate(rate=0.85, error=0.02), SuccessRate(rate=0.333333, error=0.160247)),
-        (SuccessRate(rate=0.05, error=0.05), SuccessRate(rate=0.03, error=0.04), SuccessRate(rate=0.020619, error=0.065484))
+        (SuccessRate(rate=0.05, error=0.01), SuccessRate(rate=0.1, error=0.01), SuccessRate(rate=0.0, error=0.000001)),
+        (SuccessRate(rate=0.05, error=0.05), SuccessRate(rate=0.06, error=0.1), SuccessRate(rate=0.0, error=0.101803)),
+        (SuccessRate(rate=0.8, error=0.1), SuccessRate(rate=0.9, error=0.1), SuccessRate(rate=0.0, error=0.041421)),
+        (SuccessRate(rate=0.9, error=0.1), SuccessRate(rate=0.8, error=0.1), SuccessRate(rate=0.1, error=0.141421)),
+        (SuccessRate(rate=0.9, error=0.02), SuccessRate(rate=0.85, error=0.02), SuccessRate(rate=0.05, error=0.028284)),
+        (SuccessRate(rate=0.05, error=0.05), SuccessRate(rate=0.03, error=0.04), SuccessRate(rate=0.02, error=0.064031))
     ],
 )
 def test_residual_rate(main_rate: SuccessRate, naive_rate: SuccessRate, e_rate: SuccessRate) -> None:
     """Assert results of residual_rate function on different input values."""
     residual = residual_rate(main_rate=main_rate, naive_rate=naive_rate)
-    assert_equal_SuccessRates(residual, e_rate)
-
-def test_residual_rate_naive_rate_1() -> None:
-    """Assert residual_rate function results when naive_rate.rate == 1."""
-    e_warning = "Success of naive attack is 100%. Cannot measure residual success rate."
-    with pytest.warns(UserWarning, match=e_warning):
-        residual = residual_rate(
-            main_rate = SuccessRate(rate=0.9, error=0.02),
-            naive_rate = SuccessRate(rate=1, error=0.05)
-        )
-    e_rate = SuccessRate(rate=1.0, error=0.01)
     assert_equal_SuccessRates(residual, e_rate)
 
 def test_EvaluationResults_init_error() -> None: # noqa: N802

@@ -6,10 +6,9 @@ import random
 import time
 from pathlib import Path
 
-import joblib
 import numpy as np
 import yaml
-from torch import load, manual_seed
+from torch import manual_seed
 from torch.utils.data import Subset
 
 import leakpro.dev_utils.train as utils
@@ -24,7 +23,7 @@ from leakpro.dev_utils.data_preparation import (
     prepare_train_test_datasets,
 )
 from leakpro.reporting.utils import prepare_priavcy_risk_report
-from leakpro.utils.input_handler import get_class_from_module, import_module_from_file
+from leakpro.user_inputs.cifar10_input_handler import Cifar10InputHandler
 
 
 def setup_log(name: str, save_file: bool=True) -> logging.Logger:
@@ -100,17 +99,13 @@ def generate_user_input(configs: dict, logger: logging.Logger)->None:
 
 if __name__ == "__main__":
 
-
-    #args = "./config/adult.yaml"  # noqa: ERA001
-    # user_args = "./config/dev_config/cifar10.yaml" # noqa: ERA001
-    # user_args = "./config/dev_config/cinic10.yaml" # noqa: ERA001
-    user_args = "./config/dev_config/cifar100.yaml" # noqa: ERA001
+    user_args = "./config/dev_config/cinic10.yaml" # noqa: ERA001
 
     with open(user_args, "rb") as f:
         user_configs = yaml.safe_load(f)
 
     # Setup logger
-    logger = setup_log("analysis")
+    logger = setup_log("LeakPro", save_file=True)
 
     # Generate user input
     generate_user_input(user_configs, logger) # This is for developing purposes only
@@ -131,41 +126,10 @@ if __name__ == "__main__":
     report_dir = f"{configs['audit']['report_log']}"
     Path(report_dir).mkdir(parents=True, exist_ok=True)
 
-    # Get the target  metadata
-    target_model_metadata_path = f'{configs["target"]["trained_model_metadata_path"]}'
-    try:
-        with open(target_model_metadata_path, "rb") as f:
-            target_model_metadata = joblib.load(f)
-    except FileNotFoundError:
-        logger.error(f"Could not find the target model metadata at {target_model_metadata_path}")
+    # Create user input handler
+    handler = Cifar10InputHandler(configs=configs, logger=logger)
 
-    # Create a class instance of target model
-    target_module = import_module_from_file(configs["target"]["module_path"])
-    target_model_blueprint = get_class_from_module(target_module, configs["target"]["model_class"])
-    logger.info(f"Target model blueprint created from {configs['target']['model_class']} in {configs['target']['module_path']}")
-
-    # Load the target model parameters into the blueprint
-    with open(configs["target"]["trained_model_path"], "rb") as f:
-        target_model = target_model_blueprint(**target_model_metadata["model_metadata"]["init_params"])
-        target_model.load_state_dict(load(f))
-        logger.info(f"Loaded target model from {configs['target']['trained_model_path']}")
-
-    # Get the population dataset
-    try:
-        with open(configs["target"]["data_path"], "rb") as file:
-            population = joblib.load(file)
-            logger.info(f"Loaded population dataset from {configs['target']['data_path']}")
-    except FileNotFoundError:
-        logger.error(f"Could not find the population dataset at {configs['target']['data_path']}")
-    # ------------------------------------------------
-    # Now we have the target model, its metadata, and the train/test dataset indices.
-    attack_scheduler = AttackScheduler(
-        population,
-        target_model,
-        target_model_metadata["model_metadata"],
-        configs,
-        logger,
-    )
+    attack_scheduler = AttackScheduler(handler)
     audit_results = attack_scheduler.run_attacks()
 
     for attack_name in audit_results:
