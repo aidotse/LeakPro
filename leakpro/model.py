@@ -156,7 +156,7 @@ class PytorchModel(Model):
             all_logits = np.concatenate(logits_list)
         self.model_obj.to("cpu")
         return all_logits
-            
+
         batch_samples_tensor = torch.tensor(
             np.array(batch_samples), dtype=torch.float32
         )

@@ -45,10 +45,10 @@ class AttackLiRA(AbstractMIA):
 
         self.shadow_models = []
         self.num_shadow_models = configs.get("num_shadow_models", 64)
-        self.exclude_logit_threshold = configs.get("exclude_logit_threshold", 0)
+        self.exclude_logit_threshold = configs.get("exclude_logit_threshold", 1)
 
         self.online = configs.get("online", False)
-        
+
         self.memorization = configs.get("memorization", False)
         self.memorization_threshold = configs.get("memorization_threshold", 0.5)
         self.privacy_score_threshold = configs.get("privacy_score_threshold", 1)
@@ -91,8 +91,9 @@ class AttackLiRA(AbstractMIA):
             "detailed": detailed_str,
         }
 
-    def check_logits(self:Self):
-        # Check how many indices is to be skipped
+    def check_logits(self:Self) -> None:
+        """Check which indices to skip based on IN-/OUT models per sample."""
+
         if self.online:
             no_in = 0
             no_out = 0
@@ -102,9 +103,8 @@ class AttackLiRA(AbstractMIA):
                 elif np.count_nonzero(mask) == 0:
                     no_in += 1
 
-                if np.count_nonzero(mask) > len(mask)-self.exclude_logit_threshold:
-                    self.skip_indices[i] = True
-                elif np.count_nonzero(mask) < self.exclude_logit_threshold:
+                if np.count_nonzero(mask) > len(mask)-self.exclude_logit_threshold or\
+                        np.count_nonzero(mask) < self.exclude_logit_threshold:
                     self.skip_indices[i] = True
 
             self.no_in_or_out = no_in + no_out
@@ -112,7 +112,7 @@ class AttackLiRA(AbstractMIA):
                 self.logger.info(f"There are {no_out} audit examples with 0 OUT sample(s) and {no_in} with 0 IN sample(s)")
                 self.logger.info("When using few shadow models in online attacks")
                 self.logger.info("some audit sample(s) mighthave a few or even 0 IN or OUT logits")
-                
+
             if np.count_nonzero(self.skip_indices) > 0:
                 self.logger.info(f"In total {np.count_nonzero(self.skip_indices)} indices will be skipped!")
 
@@ -205,7 +205,7 @@ class AttackLiRA(AbstractMIA):
                     in_std = np.std(shadow_models_logits[mask])
 
                 pr_in = -norm.logpdf(target_logit, in_mean, in_std + 1e-30)
-                
+
             else:
                 pr_in = 0
 

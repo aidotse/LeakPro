@@ -4,8 +4,8 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 import torch
-from tqdm import tqdm
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from leakpro.import_helper import List, Self, Union
 from leakpro.metrics.attack_result import AttackResult
@@ -262,7 +262,7 @@ class AbstractMIA(ABC):
         """
         pass
 
-    def _memorization(self:Self):
+    def _memorization(self:Self) -> None:
         """Run memorization score enhancement.
 
         Memorization enhances the attack performance by only inlucing vulnerable data points
@@ -294,7 +294,7 @@ class AbstractMIA(ABC):
                 self.memorization_score[i] = np.mean(target_logit[label]) - np.mean(logit[~mask, label])
 
         self.privacy_score = self._privacy_score()
-        
+
         mem_mask, privacy_mask = self.adjust_memorization_mask()
 
         self.skip_indices = (self.skip_indices | mem_mask) | privacy_mask
@@ -320,9 +320,9 @@ class AbstractMIA(ABC):
         if len(self.shadow_models) < 64:
             in_std, out_std = np.std(logits[self.in_indices_mask].flatten()), np.std(logits[~self.in_indices_mask].flatten())
 
-        for i, (logit, target_logit, mask) in tqdm(enumerate(zip(logits, target_logits, self.in_indices_mask))):
+        for (logit, target_logit, mask) in tqdm(zip(logits, target_logits, self.in_indices_mask)):
             in_mean, out_mean = np.mean(logit[mask]), np.mean(logit[~mask])
-            
+
             if len(self.shadow_models) >= 64:
                 in_std, out_std = np.std(logit[mask]), np.std(logit[mask])
 
@@ -347,10 +347,9 @@ class AbstractMIA(ABC):
         logits = logits/torch.sum(logits, dim=-1, keepdim=True)
         return logits.numpy()
 
-    def adjust_memorization_mask(self:Self):
-        """Adjust thesholds to achieve the desired percentile most vulnerable dataponts
+    def adjust_memorization_mask(self:Self) -> None:
+        """Adjust thesholds to achieve the desired percentile most vulnerable datapoints."""
 
-        """
         audit_dataset_len = len(self.target_logits)
         if audit_dataset_len*(1-self.memorization_threshold) < 30:
             self.logger.info("Trying to audit <30 datapoints, adjusting to 30 datapoints")
@@ -359,14 +358,16 @@ class AbstractMIA(ABC):
         # Set initial thresholds
         mem_thrshld = 0.8
         priv_thrshld = 2.0
-        
+
         # Adjust initial thresholds if they are set too high
-        while np.count_nonzero((self.memorization_score < mem_thrshld) | (self.privacy_score < priv_thrshld) | self.skip_indices)/audit_dataset_len > self.memorization_threshold:
+        while np.count_nonzero((self.memorization_score < mem_thrshld) | (self.privacy_score < priv_thrshld) |\
+                               self.skip_indices)/audit_dataset_len > self.memorization_threshold:
             mem_thrshld = mem_thrshld/2
             priv_thrshld = priv_thrshld/2
 
         # Find the thresholds corresponding to the percentile set in config
-        while np.count_nonzero((self.memorization_score < mem_thrshld) | (self.privacy_score < priv_thrshld) | self.skip_indices)/audit_dataset_len < self.memorization_threshold:
+        while np.count_nonzero((self.memorization_score < mem_thrshld) | (self.privacy_score < priv_thrshld) |\
+                               self.skip_indices)/audit_dataset_len < self.memorization_threshold:
             mem_thrshld = 1 - (1 - mem_thrshld)/(1.001)
             priv_thrshld = priv_thrshld*1.001
 
