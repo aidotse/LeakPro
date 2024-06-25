@@ -4,7 +4,7 @@ from logging import Logger
 
 import numpy as np
 from scipy.stats import norm
-from torch import nn
+from torch import nn, jit
 from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
@@ -12,7 +12,7 @@ from leakpro.attacks.utils.attack_data import get_attack_data
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
-from leakpro.signals.signal import ModelRescaledLogits
+from leakpro.signals.signal import ModelRescaledLogits, ModelLogits
 
 
 class AttackLiRA(AbstractMIA):
@@ -54,9 +54,13 @@ class AttackLiRA(AbstractMIA):
 
         self.shadow_models = []
         self.num_shadow_models = configs.get("num_shadow_models", 64)
+        self.exclude_logit_threshold = configs.get("exclude_logit_threshold", 0)
 
         self.online = configs.get("online", False)
-        self.fixed_variance = configs.get("fixed_variance", False)
+        
+        self.memorization = configs.get("memorization", False)
+        self.memorization_threshold = configs.get("memorization_threshold", 0.5)
+        self.privacy_score_threshold = configs.get("privacy_score_threshold", 1)
 
         self.include_train_data = configs.get("include_train_data", self.online)
         self.include_test_data = configs.get("include_test_data", self.online)
@@ -64,7 +68,10 @@ class AttackLiRA(AbstractMIA):
         # Define the validation dictionary as: {parameter_name: (parameter, min_value, max_value)}
         validation_dict = {
             "num_shadow_models": (self.num_shadow_models, 1, None),
+            "exclude_logit_threshold": (self.exclude_logit_threshold, 0, int(self.num_shadow_models/2)),
             "training_data_fraction": (self.training_data_fraction, 0, 1),
+            "memorization_threshold": (self.memorization_threshold, 0, 1),
+            "privacy_score_threshold": (self.privacy_score_threshold, 0, 100),
         }
 
         # Validate parameters
@@ -128,34 +135,44 @@ class AttackLiRA(AbstractMIA):
             count_in_samples = np.count_nonzero(self.in_indices_mask)
             if count_in_samples > 0:
                 self.logger.info(f"Some shadow model(s) contains {count_in_samples} IN samples in total for the model(s)")
-                self.logger.info("This is not an offline attack!")
-        self.skip_indices = np.zeros(len(self.in_indices_mask), dtype=bool)
+                self.logger.info("This is not an true offline attack!")
 
+        # Calculate logits for all shadow models
+        self.logger.info(f"Calculating the logits for all {self.num_shadow_models} shadow models")
+        self.shadow_models_logits = np.array(self.signal(self.shadow_models, self.audit_data))
+
+        # Calculate logits for the target model
+        self.logger.info("Calculating the logits for the target model")
+        self.target_logits = np.array(self.signal([self.target_model], self.audit_data)).squeeze()
+
+        if self.memorization:
+            self._memorization()
+
+    def check_logits(self:Self):
+        # Check how many indices is to be skipped
         if self.online:
             no_in = 0
             no_out = 0
             for i, mask in enumerate(self.in_indices_mask):
                 if np.count_nonzero(mask) == len(mask):
                     no_out += 1
-                    self.skip_indices[i] = True
                 elif np.count_nonzero(mask) == 0:
                     no_in += 1
+
+                if np.count_nonzero(mask) >= len(mask)-self.exclude_logit_threshold:
+                    self.skip_indices[i] = True
+                elif np.count_nonzero(mask) <= self.exclude_logit_threshold:
                     self.skip_indices[i] = True
 
+            self.no_in_or_out = no_in + no_out
             if no_out > 0 or no_in > 0:
-                self.logger.info(f"There are {no_out} audit examples with 0 OUT sample(s) and {no_in} 0 IN sample(s)")
+                self.logger.info(f"There are {no_out} audit examples with 0 OUT sample(s) and {no_in} with 0 IN sample(s)")
                 self.logger.info("When using few shadow models in online attacks")
                 self.logger.info("some audit sample(s) mighthave a few or even 0 IN or OUT logits")
+                
+            if np.count_nonzero(self.skip_indices) > 0:
                 self.logger.info(f"In total {np.count_nonzero(self.skip_indices)} indices will be skipped!")
-
-        # Calculate logits for all shadow models
-        self.logger.info(f"Calculating the logits for all {self.num_shadow_models} shadow models")
-        self.shadow_models_logits = np.swapaxes(np.array(self.signal(self.shadow_models, self.audit_data)), 0, 1)
-
-        # Calculate logits for the target model
-        self.logger.info("Calculating the logits for the target model")
-        self.target_logits = np.array(self.signal([self.target_model], self.audit_data)).squeeze()
-
+        
     def run_attack(self:Self) -> CombinedMetricResult:
         """Runs the attack on the target model and dataset and assess privacy risks or data leakage.
 
@@ -172,7 +189,7 @@ class AttackLiRA(AbstractMIA):
         score = []  # List to hold the computed probability scores for each sample
 
         # If fixed_variance is to be used, calculate it from all logits of shadow models
-        if self.fixed_variance:
+        if len(self.shadow_models) < 64:
             out_std = np.std(self.shadow_models_logits[~self.in_indices_mask].flatten())
             if self.online:
                 in_std = np.nanstd(self.shadow_models_logits[self.in_indices_mask].flatten())
@@ -182,8 +199,8 @@ class AttackLiRA(AbstractMIA):
 
             # Calculate the mean for OUT shadow model logits
             out_mean = np.mean(shadow_models_logits[~mask])
-            if not self.fixed_variance:
-                    out_std = np.std(shadow_models_logits[~mask])
+            if len(self.shadow_models) >= 64:
+                out_std = np.std(shadow_models_logits[~mask])
 
             # Get the logit from the target model for the current sample
             target_logit = self.target_logits[i]
@@ -193,10 +210,11 @@ class AttackLiRA(AbstractMIA):
 
             if self.online:
                 in_mean = np.mean(shadow_models_logits[mask])
-                if not self.fixed_variance:
+                if len(self.shadow_models) >= 64:
                     in_std = np.std(shadow_models_logits[mask])
 
                 pr_in = -norm.logpdf(target_logit, in_mean, in_std + 1e-30)
+                
             else:
                 pr_in = 0
 
@@ -205,7 +223,7 @@ class AttackLiRA(AbstractMIA):
         score = np.asarray(score)  # Convert the list of scores to a numpy array
 
         # Generate thresholds based on the range of computed scores for decision boundaries
-        self.thresholds = np.linspace(np.min(score), np.max(score), 1000)
+        self.thresholds = np.linspace(np.nanmin(score), np.nanmax(score), 2000)
 
         # Split the score array into two parts based on membership: in (training) and out (non-training)
         self.in_member_signals = score[self.audit_dataset["in_members"]].reshape(-1,1)  # Scores for known training data members

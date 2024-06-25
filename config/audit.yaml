@@ -6,7 +6,7 @@ audit:  # Configurations for auditing
     #   attack_data_fraction: 0.1 # Fraction of auxiliary dataset to sample from during attack
     #   num_shadow_models: 5 # Number of shadow models to train
     #   online: True # perform online or offline attack
-    #   temperature: 2
+    #   temperature: 2 
     #   gamma: 2.0
     #   offline_a: 0.33 # parameter from which we compute p(x) from p_OUT(x) such that p_IN(x) = a p_OUT(x) + b.
     #   offline_b: 0.66
@@ -18,8 +18,10 @@ audit:  # Configurations for auditing
     lira:
       training_data_fraction: 0.5  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
       num_shadow_models: 8 # Number of shadow models to train
+      exclude_logit_threshold: 1 # Set a threshold for when to skip a logit based (Useful for unbalance in IN vs OUT samples)
       online: True # perform online or offline attack
-      fixed_variance: True # Use a fixed variance for the whole audit
+      memorization: True # Use memorization score to boost performance
+      memorization_threshold: 0.990001 # The most vulnerable percentile
 
   report_log: "./leakpro_output/results"  # Folder to save the auditing report
   target_model_folder: "./target"

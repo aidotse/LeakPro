@@ -71,29 +71,27 @@ class ModelLogits(Signal):
         ----
             models: List of models that can be queried.
             datasets: List of datasets that can be queried.
-            extra: Dictionary containing any additional parameter that should be passed to the signal object.
 
         Returns:
         -------
             The signal value.
 
-        """        # Compute the signal for each model
-        results = []
-        for model in models:
+        """
+
+        data_loader = DataLoader(datasets, batch_size=len(datasets), shuffle=False)
+        for data, _ in data_loader:
+
             # Initialize a list to store the logits for the current model
             model_logits = []
 
-            # Iterate over the dataset using the DataLoader (ensures we use transforms etc)
-            data_loader = DataLoader(datasets, batch_size=len(datasets), shuffle=False)
-            for data, _ in data_loader:
+            # Compute the signals for each model
+            for model in tqdm(models):
+
                 # Get logits for each data point
                 logits = model.get_logits(data)
-                model_logits.extend(logits)
-            model_logits = np.array(model_logits)
-            # Append the logits for the current model to the results
-            results.append(model_logits)
+                model_logits.append(logits)
 
-        return results
+        return np.asarray(model_logits)
 
 ########################################################################################################################
 # MODEL_NEGATIVERESCALEDLOGIT CLASS
@@ -139,7 +137,7 @@ class ModelNegativeRescaledLogits(Signal):
                 model_logits.append(logits)
 
             model_logits = np.array(model_logits)
-        return model_logits
+        return np.swapaxes(model_logits, 0, 1)
 
 ########################################################################################################################
 # MODEL_RESCALEDLOGIT CLASS
@@ -184,7 +182,7 @@ class ModelRescaledLogits(Signal):
                 model_logits.append(logits)
 
             model_logits = np.array(model_logits)
-        return model_logits
+        return np.swapaxes(model_logits, 0, 1)
 
 
 ########################################################################################################################
