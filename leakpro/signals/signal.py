@@ -182,7 +182,7 @@ class ModelRescaledLogits(Signal):
                 model_logits.append(logits)
 
             model_logits = np.array(model_logits)
-        return np.swapaxes(model_logits, 0, 1)
+        return model_logits
 
 
 ########################################################################################################################

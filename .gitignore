@@ -163,9 +163,6 @@ cython_debug/
 .DS_Store
 
 # Ignore data and model folders
-test_*
-results
 data/cifar*
 data/CINIC*
 attack_objects/
-

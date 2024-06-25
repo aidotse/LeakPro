@@ -2,51 +2,15 @@
 # Copyright (c) 2022 Anonos IP LLC.
 # See https://github.com/statice/anonymeter/blob/main/LICENSE.md for details.
 """Functions for estimating rates and errors in privacy attacks."""
-import warnings
 from math import sqrt
-from typing import Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 from pydantic import BaseModel
 from scipy.stats import norm
 
 from leakpro.import_helper import Self
+from leakpro.synthetic_data_attacks.anonymeter.utils import assert_x_in_bound
 
-
-def assert_x_in_bound(*,
-    x: Union[float, int],
-    x_name: str = "",
-    low_bound: float = 0.0,
-    high_bound: float = 1.0,
-    inclusive_flag: bool = False
-) -> Union[None, ValueError]:
-    """Auxiliar function to assert x is between low_bound and high_bound.
-
-    If x not between bounds, raises ValueError
-
-    Parameters
-    ----------
-    x : float
-        Value to check if between bounds.
-    x_name : str, default is ''
-        Name of parameter for ValueError message
-    low_bound : float, default is 0.0
-        Lower bound.
-    high_bound : float, default is 1.0
-        Higher bound.
-    inclusive_flag : bool, default is False
-        If True, x can be equal to low_bound/high_bound (ie interval is closed []).
-
-    """
-    if len(x_name)>0:
-        x_name = f" `{x_name}`"
-    if inclusive_flag:
-        cond = x < low_bound or x > high_bound
-        extra = "="
-    else:
-        cond = x <= low_bound or x >= high_bound
-        extra = ""
-    if cond:
-        raise ValueError(f"Parameter{x_name} must be >{extra} {low_bound} and <{extra} {high_bound}. Got {x} instead.")
 
 def get_confidence_interval(*, rate: float, error: float) -> Tuple[float, float]:
     """Function will return lower and upper bound (confidence interval) for provided rate and error.
@@ -147,8 +111,7 @@ def residual_rate(*,
     """Compute residual success rate in a privacy attack.
 
     Residual success is defined as the excess of main attack
-    success over naive attack success, normalized w.r.t.
-    the margin of improvement (unsuccessful guesses rate of naive attack).
+    success over naive attack success.
 
     Parameters
     ----------
@@ -164,24 +127,17 @@ def residual_rate(*,
         in which case the estimate is 0.
         The error estimate is the propagated error bound of the residual
         success rate.
-        Note: if naive_rate.rate == 1, residual success rate cannot be determined
-        and a SucessRate with rate=1.0 will be returned.q
 
     """
-    # Check for naive_rate == 1
-    if naive_rate.rate == 1:
-        warnings.warn("Success of naive attack is 100%. Cannot measure residual success rate.", stacklevel=2)
-        return SuccessRate(rate=1.0, error=0.01)
-    # The calculations below (both expectation and error propagation) are incorrect
-    # Calculate margin of improvement
-    margin_improvement = 1 / (1.0 - naive_rate.rate)
     # Calculate residual rate
-    rate = max((main_rate.rate - naive_rate.rate), 0.0) * margin_improvement
+    rate = main_rate.rate - naive_rate.rate
     # Propagate the error using
     # dF = sqrt[ (dF/dx)^2 dx^2 + (dF/dy)^2 dy^2 + ... ]
-    der_wrt_main = margin_improvement
-    der_wrt_naive = (main_rate.rate - 1) * margin_improvement**2
-    error = sqrt((main_rate.error * der_wrt_main)**2 + (naive_rate.error * der_wrt_naive)**2)
+    error = sqrt(main_rate.error**2 + naive_rate.error**2)
+    # Adjust for 0 as lower bound
+    if rate<0:
+        error = max(error + rate, 0.000001)
+        rate = 0.0
     return SuccessRate(rate=rate, error=error)
 
 class EvaluationResults(BaseModel):
@@ -211,6 +167,8 @@ class EvaluationResults(BaseModel):
     main_rate: Optional[SuccessRate] = None
     naive_rate: Optional[SuccessRate] = None
     residual_rate: Optional[SuccessRate] = None
+    #Result columns
+    res_cols: List[str] = ["n_total", "n_main", "n_naive", "confidence_level", "main_rate", "naive_rate", "residual_rate"]
 
     def __init__(self: Self, **kwargs: Union[int, float, Optional[SuccessRate]]) -> Union[None, ValueError]:
         super().__init__(**kwargs)
@@ -226,3 +184,24 @@ class EvaluationResults(BaseModel):
         self.main_rate = success_rate(n_total=self.n_total, n_success=self.n_main, confidence_level=self.confidence_level)
         self.naive_rate = success_rate(n_total=self.n_total, n_success=self.n_naive, confidence_level=self.confidence_level)
         self.residual_rate = residual_rate(main_rate=self.main_rate, naive_rate=self.naive_rate)
+
+    def pack_results(self: Self) -> List[Union[int,float]]:
+        """Returns a list with results."""
+        #Note: if return object is changed, change corresponding res_cols attribute!
+        return [
+            self.n_total,
+            self.n_main,
+            self.n_naive,
+            self.confidence_level,
+            self.main_rate.rate,
+            self.naive_rate.rate,
+            self.residual_rate.rate
+        ]
+
+    def print_results(self: Self) -> None:
+        """Prints results."""
+        def pprint(rate:float) -> str:
+            return f"{(rate*100):.2f}%"
+        print(f"Success rate of main attack (and nr and total): {pprint(self.main_rate.rate)}, {self.n_main}, {self.n_total}") # noqa: T201
+        print(f"Success rate of naive attack (and nr and total): {pprint(self.naive_rate.rate)}, {self.n_naive}, {self.n_total}") # noqa: T201
+        print(f"Residual rate: {pprint(self.residual_rate.rate)}") # noqa: T201

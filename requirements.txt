@@ -16,4 +16,5 @@ pyyaml
 joblib
 numba
 ruff
+pydantic
 tqdm
