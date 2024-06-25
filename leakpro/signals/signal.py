@@ -80,19 +80,16 @@ class ModelLogits(Signal):
         assert self._is_shuffling(data_loader) is False, "DataLoader must not shuffle data to maintain order of indices"
 
         results = []
-        for m, model in enumerate(models):
+        for data, _ in data_loader:
             # Initialize a list to store the logits sfor the current model
             model_logits = []
 
-            for data, _ in tqdm(data_loader, desc=f"Getting logits for model {m+1}/ {len(models)}"):
+            for model in tqdm(models, total=len(models), desc="Getting logits for models", leave=False):
                 # Get logits for each data point
                 logits = model.get_logits(data)
-                model_logits.extend(logits)
-            model_logits = np.array(model_logits)
-            # Append the logits for the current model to the results
-            results.append(model_logits)
+                model_logits.append(logits)
 
-        return results
+        return np.swapaxes(np.asarray(model_logits), 0, 1)
 
 class ModelRescaledLogits(Signal):
     """Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a Dataset.
@@ -123,11 +120,11 @@ class ModelRescaledLogits(Signal):
         assert self._is_shuffling(data_loader) is False, "DataLoader must not shuffle data to maintain order of indices"
 
         results = []
-        for m, model in enumerate(models):
-            # Initialize a list to store the logits for the current model
+        for data, labels in data_loader:
+            # Initialize a list to store the logits sfor the current model
             model_logits = []
-
-            for data, labels in tqdm(data_loader, desc=f"Getting rescaled logits for model {m+1}/ {len(models)}"):
+            
+            for model in tqdm(models, total=len(models), desc="Getting logits for models", leave=False):
                 # Get logits for each data point
                 logits = model.get_rescaled_logits(data,labels)
                 model_logits.extend(logits)

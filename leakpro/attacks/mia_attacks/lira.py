@@ -45,9 +45,13 @@ class AttackLiRA(AbstractMIA):
 
         self.shadow_models = []
         self.num_shadow_models = configs.get("num_shadow_models", 64)
+        self.exclude_logit_threshold = configs.get("exclude_logit_threshold", 0)
 
         self.online = configs.get("online", False)
-        self.fixed_variance = configs.get("fixed_variance", False)
+        
+        self.memorization = configs.get("memorization", False)
+        self.memorization_threshold = configs.get("memorization_threshold", 0.5)
+        self.privacy_score_threshold = configs.get("privacy_score_threshold", 1)
 
         self.include_train_data = configs.get("include_train_data", self.online)
         self.include_test_data = configs.get("include_test_data", self.online)
@@ -55,7 +59,10 @@ class AttackLiRA(AbstractMIA):
         # Define the validation dictionary as: {parameter_name: (parameter, min_value, max_value)}
         validation_dict = {
             "num_shadow_models": (self.num_shadow_models, 1, None),
+            "exclude_logit_threshold": (self.exclude_logit_threshold, 0, int(self.num_shadow_models/2)),
             "training_data_fraction": (self.training_data_fraction, 0, 1),
+            "memorization_threshold": (self.memorization_threshold, 0, 1),
+            "privacy_score_threshold": (self.privacy_score_threshold, 0, 100),
         }
 
         # Validate parameters
@@ -161,7 +168,7 @@ class AttackLiRA(AbstractMIA):
         score = np.zeros(n_audit_samples)  # List to hold the computed probability scores for each sample
 
         # If fixed_variance is to be used, calculate it from all logits of shadow models
-        if self.fixed_variance:
+        if len(self.shadow_models) < 64:
             out_std = np.std(self.shadow_models_logits[~self.in_indices_mask].flatten())
             if self.online:
                 in_std = np.nanstd(self.shadow_models_logits[self.in_indices_mask].flatten())
@@ -173,8 +180,8 @@ class AttackLiRA(AbstractMIA):
 
             # Calculate the mean for OUT shadow model logits
             out_mean = np.mean(shadow_models_logits[~mask])
-            if not self.fixed_variance:
-                    out_std = np.std(shadow_models_logits[~mask])
+            if len(self.shadow_models) >= 64:
+                out_std = np.std(shadow_models_logits[~mask])
 
             # Get the logit from the target model for the current sample
             target_logit = self.target_logits[i]
@@ -184,17 +191,18 @@ class AttackLiRA(AbstractMIA):
 
             if self.online:
                 in_mean = np.mean(shadow_models_logits[mask])
-                if not self.fixed_variance:
+                if len(self.shadow_models) >= 64:
                     in_std = np.std(shadow_models_logits[mask])
 
                 pr_in = -norm.logpdf(target_logit, in_mean, in_std + 1e-30)
+                
             else:
                 pr_in = 0
 
             score[i] = (pr_in - pr_out)  # Append the calculated probability density value to the score list
 
         # Generate thresholds based on the range of computed scores for decision boundaries
-        self.thresholds = np.linspace(np.min(score), np.max(score), 1000)
+        self.thresholds = np.linspace(np.nanmin(score), np.nanmax(score), 2000)
 
         # Split the score array into two parts based on membership: in (training) and out (non-training)
         self.in_member_signals = score[self.in_members].reshape(-1,1)  # Scores for known training data members
