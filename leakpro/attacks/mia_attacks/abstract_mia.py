@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from leakpro.import_helper import List, Self, Union
 from leakpro.metrics.attack_result import AttackResult

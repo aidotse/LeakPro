@@ -45,10 +45,10 @@ class AttackLiRA(AbstractMIA):
 
         self.shadow_models = []
         self.num_shadow_models = configs.get("num_shadow_models", 64)
-        self.exclude_logit_threshold = configs.get("exclude_logit_threshold", 0)
+        self.exclude_logit_threshold = configs.get("exclude_logit_threshold", 1)
 
         self.online = configs.get("online", False)
-        
+
         self.memorization = configs.get("memorization", False)
         self.memorization_threshold = configs.get("memorization_threshold", 0.5)
         self.privacy_score_threshold = configs.get("privacy_score_threshold", 1)
@@ -195,7 +195,7 @@ class AttackLiRA(AbstractMIA):
                     in_std = np.std(shadow_models_logits[mask])
 
                 pr_in = -norm.logpdf(target_logit, in_mean, in_std + 1e-30)
-                
+
             else:
                 pr_in = 0
 
