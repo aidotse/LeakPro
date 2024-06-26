@@ -157,11 +157,6 @@ class PytorchModel(Model):
         self.model_obj.to("cpu")
         return all_logits
 
-        batch_samples_tensor = torch.tensor(
-            np.array(batch_samples), dtype=torch.float32
-        )
-        return self.model_obj(batch_samples_tensor).detach().numpy()
-
     def get_loss(self:Self, batch_samples:np.ndarray, batch_labels:np.ndarray, per_point:bool=True)->np.ndarray:
         """Get the model loss on a given input and an expected output.
 
