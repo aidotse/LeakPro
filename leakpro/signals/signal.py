@@ -136,8 +136,7 @@ class ModelNegativeRescaledLogits(Signal):
                 # Append the logits for the current model to the results
                 model_logits.append(logits)
 
-            model_logits = np.array(model_logits)
-        return np.swapaxes(model_logits, 0, 1)
+        return np.array(model_logits)
 
 ########################################################################################################################
 # MODEL_RESCALEDLOGIT CLASS
@@ -181,8 +180,7 @@ class ModelRescaledLogits(Signal):
                 # Append the logits for the current model to the results
                 model_logits.append(logits)
 
-            model_logits = np.array(model_logits)
-        return model_logits
+        return np.array(model_logits)
 
 
 ########################################################################################################################
