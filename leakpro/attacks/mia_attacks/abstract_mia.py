@@ -355,20 +355,23 @@ class AbstractMIA(ABC):
             self.logger.info("Trying to audit <30 datapoints, adjusting to 30 datapoints")
             self.memorization_threshold = (1-30/audit_dataset_len)
 
-        # Set initial thresholds
+        # Set initial thresholds as given from literature ("why train more...")
         mem_thrshld = 0.8
         priv_thrshld = 2.0
 
-        # Adjust initial thresholds if they are set too high
-        while np.count_nonzero((self.memorization_score < mem_thrshld) | (self.privacy_score < priv_thrshld) |\
-                               self.skip_indices)/audit_dataset_len > self.memorization_threshold:
-            mem_thrshld = mem_thrshld/2
-            priv_thrshld = priv_thrshld/2
+        # If the memorization threshold is set to 0.0, use the initial thresholds
+        if self.memorization_threshold != 0.0:
 
-        # Find the thresholds corresponding to the percentile set in config
-        while np.count_nonzero((self.memorization_score < mem_thrshld) | (self.privacy_score < priv_thrshld) |\
-                               self.skip_indices)/audit_dataset_len < self.memorization_threshold:
-            mem_thrshld = 1 - (1 - mem_thrshld)/(1.001)
-            priv_thrshld = priv_thrshld*1.001
+            # Adjust initial thresholds if they are set too high
+            while (np.count_nonzero((self.memorization_score < mem_thrshld)\
+                    | (self.privacy_score < priv_thrshld) | self.skip_indices)/audit_dataset_len > self.memorization_threshold):
+                mem_thrshld = mem_thrshld/2
+                priv_thrshld = priv_thrshld/2
+    
+            # Find the thresholds corresponding to the percentile set in config
+            while (np.count_nonzero((self.memorization_score < mem_thrshld)\
+                    | (self.privacy_score < priv_thrshld) | self.skip_indices)/audit_dataset_len < self.memorization_threshold):
+                mem_thrshld = 1 - (1 - mem_thrshld)/(1.001)
+                priv_thrshld = priv_thrshld*1.001
 
         return self.memorization_score < mem_thrshld, self.privacy_score < priv_thrshld

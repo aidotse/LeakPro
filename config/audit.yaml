@@ -17,7 +17,7 @@ audit:  # Configurations for auditing
       exclude_logit_threshold: 1 # Set a threshold for when to skip a logit based (Useful for unbalance in IN vs OUT samples)
       online: True # perform online or offline attack
       memorization: True # Use memorization score to boost performance
-      memorization_threshold: 0.998 # The most vulnerable percentile
+      memorization_threshold: 0.99 # The most vulnerable percentile ( 0.0 for original threshold )
     loss_traj:
       training_distill_data_fraction : 0.2 # Fraction of the auxilary dataset to use for training the distillation models D_s = (1-D_KD)/2
       number_of_traj: 1 # Number of epochs (number of points in the loss trajectory)
