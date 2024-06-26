@@ -47,11 +47,13 @@ shadow_model:
   storage_path: "./leakpro_output/attack_objects/shadow_models"
   # [Optional] Define a shadow model (if none, shadow model will follow the target model)
   # Path to a Python file with the shadow model architecture
-  #module_path: "./leakpro/shadow_model_blueprints.py"
+  module_path: "./leakpro/shadow_model_blueprints.py"
   # Name of the class to instantiate from the specified file
   model_class: "ResNet18" #"ConvNet"
+  batch_size: 256
+  epochs: 30
   optimizer: 
-    name: sgd #adam, sgd, rmsprop
+    name: SDG #adam, sgd, rmsprop
     lr: 0.01
     momentum: 0.9
     weight_decay: 0.0
