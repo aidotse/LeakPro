@@ -367,7 +367,7 @@ class AbstractMIA(ABC):
                     | (self.privacy_score < priv_thrshld) | self.skip_indices)/audit_dataset_len > self.memorization_threshold):
                 mem_thrshld = mem_thrshld/2
                 priv_thrshld = priv_thrshld/2
-    
+
             # Find the thresholds corresponding to the percentile set in config
             while (np.count_nonzero((self.memorization_score < mem_thrshld)\
                     | (self.privacy_score < priv_thrshld) | self.skip_indices)/audit_dataset_len < self.memorization_threshold):
