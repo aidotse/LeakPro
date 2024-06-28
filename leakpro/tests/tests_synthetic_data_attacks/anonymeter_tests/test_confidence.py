@@ -23,13 +23,13 @@ def test_assert_x_in_bound() -> None:
     #Case not correct type input
     with pytest.raises(TypeError) as e:
         assert_x_in_bound(x="not_float_or_int")
-    assert e.type == TypeError
+    assert e.type is TypeError
     assert str(e.value) == "'<=' not supported between instances of 'str' and 'float'"
     #Case ValueError when x not in bounds
     e_msg = "Parameter `param1` must be > 0.0 and < 10. Got 11 instead."
     with pytest.raises(ValueError, match=e_msg) as e:
         assert_x_in_bound(x=11, x_name="param1", high_bound=10)
-    assert e.type == ValueError
+    assert e.type is ValueError
     #Case x in bounds
     assert_x_in_bound(x=0.5)
     assert_x_in_bound(x=9, high_bound=10)
@@ -40,11 +40,11 @@ def test_assert_x_in_bound() -> None:
     e_msg = "Parameter must be > 0.0 and < 1.0. Got 0 instead."
     with pytest.raises(ValueError, match=e_msg) as e:
         assert_x_in_bound(x=0, inclusive_flag=False)
-    assert e.type == ValueError
+    assert e.type is ValueError
     e_msg = "Parameter must be > 0.0 and < 1.0. Got 1 instead."
     with pytest.raises(ValueError, match=e_msg) as e:
         assert_x_in_bound(x=1, inclusive_flag=False)
-    assert e.type == ValueError
+    assert e.type is ValueError
 
 @pytest.mark.parametrize(
     ("rate", "error", "e_lower_b", "e_upper_b"),
@@ -72,7 +72,7 @@ def test_SuccessRate_init() -> None: # noqa: N802
     e_msg = "Parameter `error` must be > 0.0. Got 0.0 instead."
     with pytest.raises(ValueError, match=e_msg) as e:
         SuccessRate(rate=0.0, error=0.0)
-    assert e.type == ValueError
+    assert e.type is ValueError
     #Case normal input
     sr = SuccessRate(rate=0.05, error=0.1)
     assert sr.rate == 0.05
@@ -85,21 +85,21 @@ def test_success_rate_input_errors() -> None:
     #Case n_total <= 0
     with pytest.raises(AssertionError) as e:
         success_rate(n_total=0, n_success=0, confidence_level=0.95)
-    assert e.type == AssertionError
+    assert e.type is AssertionError
     #Case n_success < 0
     with pytest.raises(AssertionError) as e:
         success_rate(n_total=1, n_success=-1, confidence_level=0.95)
-    assert e.type == AssertionError
+    assert e.type is AssertionError
     #Case n_success > n_total
     e_msg = "Parameter n_sucess can not be larger than n_total."
     with pytest.raises(ValueError, match=e_msg) as e:
         success_rate(n_total=1, n_success=2, confidence_level=0.95)
-    assert e.type == ValueError
+    assert e.type is ValueError
     #Case confidence_level not in (0,1)
     e_msg = "Parameter `confidence_level` must be > 0.0 and < 1.0. Got 1.0 instead."
     with pytest.raises(ValueError, match=e_msg) as e:
         success_rate(n_total=1, n_success=0, confidence_level=1.0)
-    assert e.type == ValueError
+    assert e.type is ValueError
 
 @pytest.mark.parametrize(
     ("n_success", "e_risk", "e_error", "e_low_bound", "e_high_bound"),
@@ -162,7 +162,7 @@ def test_EvaluationResults_init_error() -> None: # noqa: N802
             n_naive=0,
             confidence_level=0,
         )
-    assert e.type == ValueError
+    assert e.type is ValueError
     #Case n_naive or n_naive < 0
     e_msg = "n_main and n_naive must be greater or equal to 0."
     with pytest.raises(ValueError, match=e_msg) as e:
@@ -171,14 +171,14 @@ def test_EvaluationResults_init_error() -> None: # noqa: N802
             n_main=-1,
             n_naive=0
         )
-    assert e.type == ValueError
+    assert e.type is ValueError
     with pytest.raises(ValueError, match=e_msg) as e:
         EvaluationResults(
             n_total=1,
             n_main=0,
             n_naive=-1
         )
-    assert e.type == ValueError
+    assert e.type is ValueError
     #Case n_total not max of n_main and n_naive
     e_msg = "n_total must be greater or equal than n_main and n_naive."
     with pytest.raises(ValueError, match=e_msg) as e:
@@ -187,14 +187,14 @@ def test_EvaluationResults_init_error() -> None: # noqa: N802
             n_main=2,
             n_naive=1
         )
-    assert e.type == ValueError
+    assert e.type is ValueError
     with pytest.raises(ValueError, match=e_msg) as e:
         EvaluationResults(
             n_total=1,
             n_main=1,
             n_naive=2
         )
-    assert e.type == ValueError
+    assert e.type is ValueError
     #Case confidence_level not in (0,1) interval
     e_msg = "Parameter `confidence_level` must be > 0.0 and < 1.0. Got 0.0 instead."
     with pytest.raises(ValueError, match=e_msg) as e:
@@ -204,7 +204,7 @@ def test_EvaluationResults_init_error() -> None: # noqa: N802
             n_naive=0,
             confidence_level=0
         )
-    assert e.type == ValueError
+    assert e.type is ValueError
     #Case no error on input
     EvaluationResults(
         n_total=1,
