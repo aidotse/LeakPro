@@ -17,16 +17,16 @@ def test_LinkabilityIndexes_init() -> None: # noqa: N802
     #Case len(idx_0.shape)==1
     with pytest.raises(AssertionError) as e:
         LinkabilityIndexes(idx_0=np.array([]), idx_1=np.array([]))
-    assert e.type == AssertionError
+    assert e.type is AssertionError
     #Case len(idx_0.shape)>1 but idx_0.shape[1]==0
     with pytest.raises(AssertionError) as e:
         LinkabilityIndexes(idx_0=np.array([[]]), idx_1=np.array([[]]))
-    assert e.type == AssertionError
+    assert e.type is AssertionError
     #Case len(idx_0.shape)>1, idx_0.shape[1]>0 and idx_0.shape!=idx_1.shape
     np_ex = np.array([[1]])
     with pytest.raises(AssertionError) as e:
         LinkabilityIndexes(idx_0=np_ex, idx_1=np.array([[1,2]]))
-    assert e.type == AssertionError
+    assert e.type is AssertionError
     #Case no errors on init
     li = LinkabilityIndexes(idx_0=np_ex, idx_1=np_ex)
     assert li.idx_0 == np_ex
@@ -41,11 +41,11 @@ def test_LinkabilityIndexes_find_links_errors() -> None: # noqa: N802
     e_msg = "Parameter `n_neighbors` must be >= 1 and <= 1. Got 0 instead."
     with pytest.raises(ValueError, match=e_msg) as e:
         LinkabilityIndexes(idx_0=np_ex, idx_1=np_ex).find_links(n_neighbors=0)
-    assert e.type == ValueError
+    assert e.type is ValueError
     e_msg = "Parameter `n_neighbors` must be >= 1 and <= 1. Got 2 instead."
     with pytest.raises(ValueError, match=e_msg) as e:
         LinkabilityIndexes(idx_0=np_ex, idx_1=np_ex).find_links(n_neighbors=2)
-    assert e.type == ValueError
+    assert e.type is ValueError
 
 @pytest.mark.parametrize(
     ("n_neighbors", "idx_0", "idx_1", "e_links", "e_count"),
@@ -73,30 +73,30 @@ def test_LinkabilityEvaluator_init() -> None: # noqa: N802
     e_msg = "ori and syn must contain rows."
     with pytest.raises(ValueError, match=e_msg) as e:
         LinkabilityEvaluator(ori=pd.DataFrame(), syn=pd.DataFrame([1]), aux_cols=([],[]))
-    assert e.type == ValueError
+    assert e.type is ValueError
     with pytest.raises(ValueError, match=e_msg) as e:
         LinkabilityEvaluator(ori=pd.DataFrame([1]), syn=pd.DataFrame(), aux_cols=([],[]))
-    assert e.type == ValueError
+    assert e.type is ValueError
     #Case ori and syn columns differ
     df_ex = pd.DataFrame([1], columns=["a"])
     e_msg = "ori and syn columns must be equal."
     with pytest.raises(ValueError, match=e_msg) as e:
         LinkabilityEvaluator(ori=df_ex, syn=pd.DataFrame([1]), aux_cols=([],[]))
-    assert e.type == ValueError
+    assert e.type is ValueError
     #Case aux_cols contains no elements
     e_msg = "aux_cols tuple must contain 2 list with at least 1 element."
     with pytest.raises(ValueError, match=e_msg) as e:
         LinkabilityEvaluator(ori=df_ex, syn=df_ex, aux_cols=([],["a"]))
-    assert e.type == ValueError
+    assert e.type is ValueError
     with pytest.raises(ValueError, match=e_msg) as e:
         LinkabilityEvaluator(ori=df_ex, syn=df_ex, aux_cols=(["a"],[]))
-    assert e.type == ValueError
+    assert e.type is ValueError
     #Case confidence_level not in bound
     aux_cols = (["a"],["a"])
     e_msg = "Parameter `confidence_level` must be > 0.0 and < 1.0. Got 0.0 instead."
     with pytest.raises(ValueError, match=e_msg) as e:
         LinkabilityEvaluator(ori=df_ex, syn=df_ex, aux_cols=aux_cols, confidence_level=0.0)
-    assert e.type == ValueError
+    assert e.type is ValueError
     #Case no error raised
     le = LinkabilityEvaluator(ori=df_ex, syn=df_ex, aux_cols=aux_cols)
     assert le.ori.equals(df_ex)
