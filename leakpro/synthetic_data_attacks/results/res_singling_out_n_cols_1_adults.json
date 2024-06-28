@@ -1,0 +1,24 @@
+{
+    "res_cols": [
+        "n_total",
+        "n_main",
+        "n_naive",
+        "confidence_level",
+        "main_rate",
+        "naive_rate",
+        "residual_rate",
+        "n_cols"
+    ],
+    "res": [
+        [
+            100,
+            17,
+            5,
+            0.95,
+            0.18220785440830528,
+            0.06664707419314356,
+            0.11556078021516172,
+            1
+        ]
+    ]
+}
