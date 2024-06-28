@@ -18,21 +18,21 @@ def test_InferenceGuesses_init() -> None: # noqa: N802
     #Case len(guesses.shape)<1
     with pytest.raises(AssertionError) as e:
         InferenceGuesses(guesses=np.array([[]]), secrets=np.array([]), regression=False)
-    assert e.type == AssertionError
+    assert e.type is AssertionError
     #Case guesses.shape[0]==0
     with pytest.raises(AssertionError) as e:
         InferenceGuesses(guesses=np.array([]), secrets=np.array([]), regression=False)
-    assert e.type == AssertionError
+    assert e.type is AssertionError
     #Case guesses.shape!=secrets.shape
     input_array = np.array([0])
     with pytest.raises(AssertionError) as e:
         InferenceGuesses(guesses=input_array, secrets=np.array([]), regression=False)
-    assert e.type == AssertionError
+    assert e.type is AssertionError
     #Case tolerance not in range
     e_msg = "Parameter `tolerance` must be >= 0.0 and <= 1.0. Got -0.1 instead."
     with pytest.raises(ValueError, match=e_msg) as e:
         InferenceGuesses(guesses=input_array, secrets=input_array, regression=False, tolerance=-0.1)
-    assert e.type == ValueError
+    assert e.type is ValueError
     #Case no errors on init
     ig = InferenceGuesses(guesses=input_array, secrets=input_array, regression=False)
     assert ig.guesses == input_array
@@ -119,46 +119,46 @@ def test_InferenceEvaluator_init() -> None: # noqa: N802, PLR0915
     e_msg = "ori and syn must contain rows."
     with pytest.raises(ValueError, match=e_msg) as e:
         InferenceEvaluator(ori=pd.DataFrame(), syn=pd.DataFrame([1]), aux_cols=[], secret="")
-    assert e.type == ValueError
+    assert e.type is ValueError
     with pytest.raises(ValueError, match=e_msg) as e:
         InferenceEvaluator(ori=pd.DataFrame([1]), syn=pd.DataFrame(), aux_cols=[], secret="")
-    assert e.type == ValueError
+    assert e.type is ValueError
     #Case ori contains only 1 column
     e_msg = "ori must contain at least 2 columns."
     with pytest.raises(ValueError, match=e_msg) as e:
         InferenceEvaluator(ori=pd.DataFrame([1]), syn=pd.DataFrame([1]), aux_cols=[], secret="")
-    assert e.type == ValueError
+    assert e.type is ValueError
     #Case ori and syn columns differ
     df_ex = pd.DataFrame([[1,1]], columns=["a", "b"])
     e_msg = "ori and syn columns must be equal."
     with pytest.raises(ValueError, match=e_msg) as e:
         InferenceEvaluator(ori=df_ex, syn=pd.DataFrame([1]), aux_cols=[], secret="")
-    assert e.type == ValueError
+    assert e.type is ValueError
     #Case aux_cols contains no elements
     e_msg = "aux_cols must contain at least 1 element."
     with pytest.raises(ValueError, match=e_msg) as e:
         InferenceEvaluator(ori=df_ex, syn=df_ex, aux_cols=[], secret="")
-    assert e.type == ValueError
+    assert e.type is ValueError
     #Case aux_cols not subset of ori.columns
     e_msg = "aux_cols not subset of ori.columns."
     with pytest.raises(ValueError, match=e_msg) as e:
         InferenceEvaluator(ori=df_ex, syn=df_ex, aux_cols=[""], secret="")
-    assert e.type == ValueError
+    assert e.type is ValueError
     #Case secret not in ori.columns
     e_msg = "secret not in ori.columns."
     with pytest.raises(ValueError, match=e_msg) as e:
         InferenceEvaluator(ori=df_ex, syn=df_ex, aux_cols=["a"], secret="")
-    assert e.type == ValueError
+    assert e.type is ValueError
     #Case secret included in aux_columns
     e_msg = "secret can't be included in aux_columns."
     with pytest.raises(ValueError, match=e_msg) as e:
         InferenceEvaluator(ori=df_ex, syn=df_ex, aux_cols=["a"], secret="a") # noqa: S106
-    assert e.type == ValueError
+    assert e.type is ValueError
     #Case confidence_level not in bound
     e_msg = "Parameter `confidence_level` must be > 0.0 and < 1.0. Got 0.0 instead."
     with pytest.raises(ValueError, match=e_msg) as e:
         InferenceEvaluator(ori=df_ex, syn=df_ex, aux_cols=["a"], secret="b", confidence_level=0.0) # noqa: S106
-    assert e.type == ValueError
+    assert e.type is ValueError
     #Case no error raised
     ie = InferenceEvaluator(ori=df_ex, syn=df_ex, aux_cols=["a"], secret="b") # noqa: S106
     assert ie.ori.equals(df_ex)

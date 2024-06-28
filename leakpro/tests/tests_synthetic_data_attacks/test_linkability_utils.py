@@ -27,7 +27,7 @@ def test_aux_assert_input_values_get_combs_2_buckets(cols: List[str], buck1_nr: 
     if raises_error:
         with pytest.raises(AssertionError) as e:
             lu.aux_assert_input_values_get_combs_2_buckets(cols=cols, buck1_nr=buck1_nr, buck2_nr=buck2_nr)
-        assert e.type == AssertionError
+        assert e.type is AssertionError
     else:
         lu.aux_assert_input_values_get_combs_2_buckets(cols=cols, buck1_nr=buck1_nr, buck2_nr=buck2_nr)
 
@@ -77,19 +77,19 @@ def test_get_n_sample_combinations() -> None:
     buck2_nr_arr = np.array([])
     with pytest.raises(AssertionError) as e:
         lu.get_n_sample_combinations(cols=cols, buck1_nr_arr=buck1_nr_arr, buck2_nr_arr=buck2_nr_arr)
-    assert e.type == AssertionError
+    assert e.type is AssertionError
     #Case buck1_nr_arr.shape[0]==0
     buck1_nr_arr = np.array([])
     buck2_nr_arr = np.array([])
     with pytest.raises(AssertionError) as e:
         lu.get_n_sample_combinations(cols=cols, buck1_nr_arr=buck1_nr_arr, buck2_nr_arr=buck2_nr_arr)
-    assert e.type == AssertionError
+    assert e.type is AssertionError
     #Case buck1_nr_arr.shape!=buck2_nr_arr.shape
     buck1_nr_arr = np.array([1])
     buck2_nr_arr = np.array([])
     with pytest.raises(AssertionError) as e:
         lu.get_n_sample_combinations(cols=cols, buck1_nr_arr=buck1_nr_arr, buck2_nr_arr=buck2_nr_arr)
-    assert e.type == AssertionError
+    assert e.type is AssertionError
     ##Case normal input results
     #Simple test
     buck1_nr_arr = np.array([1])
