@@ -139,10 +139,23 @@ class PytorchModel(Model):
             Model output.
 
         """
-        batch_samples_tensor = torch.tensor(
-            np.array(batch_samples), dtype=torch.float32
-        )
-        return self.model_obj(batch_samples_tensor).detach().numpy()
+        self.batch_size = 1024
+
+        device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        self.model_obj.to(device)
+        self.model_obj.eval()
+
+        with torch.no_grad():
+            logits_list = []
+            batched_samples = torch.split(torch.tensor(np.array(batch_samples), dtype=torch.float32), self.batch_size)
+
+            for x in batched_samples:
+                logits = self.model_obj(x.to(device))
+                logits_list.append(logits.cpu().numpy())
+
+            all_logits = np.concatenate(logits_list)
+        self.model_obj.to("cpu")
+        return all_logits
 
     def get_loss(self:Self, batch_samples:np.ndarray, batch_labels:np.ndarray, per_point:bool=True)->np.ndarray:
         """Get the model loss on a given input and an expected output.
@@ -263,15 +276,14 @@ class PytorchModel(Model):
             device = "cuda:0" if torch.cuda.is_available() else "cpu"
             self.model_obj.to(device)
             self.model_obj.eval()
-
             with torch.no_grad():
                 rescaled_list = []
                 batched_samples = torch.split(torch.tensor(np.array(batch_samples), dtype=torch.float32), self.batch_size)
                 batched_labels = torch.split(torch.tensor(np.array(batch_labels), dtype=torch.float32), self.batch_size)
 
                 for x, y in zip(batched_samples, batched_labels):
-                    x = x.to(device)  # noqa: PLW2901
-                    y = y.to(device)  # noqa: PLW2901
+                    x = x.to(device)
+                    y = y.to(device)
                     all_logits = self.model_obj(x)
 
                     predictions = all_logits - torch.max(all_logits, dim=1, keepdim=True).values

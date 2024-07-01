@@ -3,11 +3,14 @@
 from abc import ABC, abstractmethod
 
 import numpy as np
+import torch
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from leakpro.import_helper import List, Self, Union
 from leakpro.metrics.attack_result import AttackResult
 from leakpro.model import PytorchModel
+from leakpro.signals.signal import ModelLogits, ModelRescaledLogits
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 
 ########################################################################################################################
@@ -40,6 +43,7 @@ class AbstractMIA(ABC):
             handler (AbstractInputHandler): The input handler object.
 
         """
+
         # These objects are shared and should be initialized only once
         if not AbstractMIA._initialized:
             AbstractMIA.population = handler.population
@@ -53,6 +57,7 @@ class AbstractMIA(ABC):
                 # out_members will start after the last training index and go up to the number of test indices - 1
                 "out_members": np.arange(len(handler.train_indices),len(handler.train_indices)+len(handler.test_indices)),
             }
+            AbstractMIA.skip_indices = np.zeros(len(AbstractMIA.audit_dataset["data"]), dtype=bool)
             AbstractMIA.handler = handler
             self._validate_shared_quantities()
             AbstractMIA._initialized = True
@@ -256,3 +261,117 @@ class AbstractMIA(ABC):
 
         """
         pass
+
+    def _memorization(self:Self) -> None:
+        """Run memorization score enhancement.
+
+        Memorization enhances the attack performance by only inlucing vulnerable data points
+
+        """
+
+        self.logger.info("Preparing memorization")
+        if not self.online:
+            self.logger.info("Using the offline version of the attack we make some assumptions in the absence of IN-models")
+
+        if self.signal.__class__.__name__ == "ModelLogits":
+            logits = self.shadow_models_logits
+            target_logits = self.target_logits
+        else:
+            logits_function = ModelLogits()
+            logits = np.swapaxes(logits_function(self.shadow_models, self.audit_data), 0, 1)
+            target_logits = np.swapaxes(logits_function([self.target_model], self.audit_data), 0, 1)
+
+        self.logger.info("Calculating memorization")
+
+        # Initialize memorization score
+        self.memorization_score = np.zeros(len(logits), dtype=float)
+        logits = self.softmax_logits(logits)
+        if self.online:
+            for i, (logit, mask, label) in tqdm(enumerate(zip(logits, self.in_indices_mask, self.audit_data._labels))):
+                self.memorization_score[i] = np.mean(logit[mask, label]) - np.mean(logit[~mask, label])
+        else:
+            for i, (logit, target_logit, label) in tqdm(enumerate(zip(logits, target_logits, self.audit_data._labels))):
+                self.memorization_score[i] = np.mean(target_logit[label]) - np.mean(logit[~mask, label])
+
+        self.privacy_score = self._privacy_score()
+
+        mem_mask, privacy_mask = self.adjust_memorization_mask()
+
+        self.skip_indices = (self.skip_indices | mem_mask) | privacy_mask
+
+    def _privacy_score(self:Self) -> np.ndarray:
+        """Run memorization score enhancement.
+
+        Privacy score enhances the attack performance by only inlucing vulnerable data points
+
+        """
+        self.logger.info("Preparing privacy score")
+        if self.signal.__class__.__name__ == "ModelRescaledLogits":
+            logits = self.shadow_models_logits
+            target_logits = self.target_logits
+        else:
+            logits_function = ModelRescaledLogits()
+            logits = np.swapaxes(logits_function(self.shadow_models, self.audit_data), 0, 1)
+            target_logits = np.swapaxes(logits_function([self.target_model], self.audit_data), 0, 1).squeeze()
+
+        self.logger.info("Calculating privacy score")
+        privacy_score = []
+
+        if len(self.shadow_models) < 64:
+            in_std, out_std = np.std(logits[self.in_indices_mask].flatten()), np.std(logits[~self.in_indices_mask].flatten())
+
+        for (logit, target_logit, mask) in tqdm(zip(logits, target_logits, self.in_indices_mask)):
+            in_mean, out_mean = np.mean(logit[mask]), np.mean(logit[~mask])
+
+            if len(self.shadow_models) >= 64:
+                in_std, out_std = np.std(logit[mask]), np.std(logit[mask])
+
+            if self.online:
+                privacy_score.append(np.abs(in_mean-out_mean)/(in_std+out_std+1e-30))
+            else:
+                privacy_score.append(np.abs(target_logit-out_mean)/(2*out_std+1e-30))
+
+        return np.asarray(privacy_score)
+
+    def softmax_logits(self:Self, logits: np.ndarray) -> np.ndarray:
+        """Rescale logits to (0, 1).
+
+        Args:
+        ----
+            logits ( len(dataset) x ... x nb_classes ): Logits to be rescaled.
+
+        """
+        logits = torch.from_numpy(logits)
+        logits = logits - torch.max(logits, dim=-1, keepdim=True).values
+        logits = torch.exp(logits)
+        logits = logits/torch.sum(logits, dim=-1, keepdim=True)
+        return logits.numpy()
+
+    def adjust_memorization_mask(self:Self) -> None:
+        """Adjust thesholds to achieve the desired percentile most vulnerable datapoints."""
+
+        audit_dataset_len = len(self.target_logits)
+        if audit_dataset_len*(1-self.memorization_threshold) < 30:
+            self.logger.info("Trying to audit <30 datapoints, adjusting to 30 datapoints")
+            self.memorization_threshold = (1-30/audit_dataset_len)
+
+        # Set initial thresholds as given from literature ("why train more...")
+        mem_thrshld = 0.8
+        priv_thrshld = 2.0
+
+        # If the memorization threshold is set to 0.0, use the initial thresholds
+        if self.memorization_threshold != 0.0:
+
+            # Adjust initial thresholds if they are set too high
+            while (np.count_nonzero((self.memorization_score < mem_thrshld)\
+                    | (self.privacy_score < priv_thrshld) | self.skip_indices)/audit_dataset_len > self.memorization_threshold):
+                mem_thrshld = mem_thrshld/2
+                priv_thrshld = priv_thrshld/2
+
+            # Find the thresholds corresponding to the percentile set in config
+            while (np.count_nonzero((self.memorization_score < mem_thrshld)\
+                    | (self.privacy_score < priv_thrshld) | self.skip_indices)/audit_dataset_len < self.memorization_threshold):
+                mem_thrshld = 1 - (1 - mem_thrshld)/(1.001)
+                priv_thrshld = priv_thrshld*1.001
+
+        return self.memorization_score < mem_thrshld, self.privacy_score < priv_thrshld
