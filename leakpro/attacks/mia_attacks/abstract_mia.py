@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 
 from leakpro.import_helper import List, Self, Union
 from leakpro.metrics.attack_result import AttackResult
-from leakpro.model import PytorchModel
+from leakpro.signal_extractor import PytorchModel
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 
 ########################################################################################################################
