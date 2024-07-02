@@ -209,8 +209,6 @@ class HopSkipJumpDistance:
         else:
             perturbed = batch_target_image
 
-
-        #TODO: check if the indices are correct ( should not be sequential)
         # Ordering the perturbed images same as the samples by perturbed_indices
         perturbed_indices_tensor = tensor(perturbed_indices, dtype=long)
         ordered_perturbed = perturbed[perturbed_indices_tensor].to(self.device)
@@ -375,7 +373,8 @@ class HopSkipJumpDistance:
 
         """
         success = np.zeros(len(self.data_loader.dataset), dtype=bool)
-        passed_random_noises = zeros((len(self.data_loader.dataset), self.image_shape[0], self.image_shape[1], self.image_shape[2]))
+        passed_random_noises = zeros((len(self.data_loader.dataset), self.image_shape[0],
+                                      self.image_shape[1], self.image_shape[2]))
         active_indices = np.arange(self.batch_size)
         passed_ordered_indices = []
         num_evals = 0
@@ -408,7 +407,8 @@ class HopSkipJumpDistance:
 
             num_evals += 1
             if len(active_indices) == 0:
-                self.logger.info(f"All data points have been successfully perturbed by random noise after {num_evals} evaluations.")
+                self.logger.info("All data points have been successfully perturbed by random noise "
+                                 f"after {num_evals} evaluations.")
                 break
 
         return passed_random_noises, passed_ordered_indices
@@ -606,7 +606,8 @@ class HopSkipJumpDistance:
                 batch_active_indices = np.delete(batch_active_indices, positions_to_delete)
             num_evals += 1
             if self.verbose:
-                self.logger.info(f"Stepsize search: {num_evals} evaluations, and failed data {len(batch_active_indices)} in {b_i}.")
+                message = f"Stepsize search: {num_evals} evaluations, and failed data {len(batch_active_indices)} in {b_i}."
+                self.logger.info(message)
         return batch_epsilon
 
 
