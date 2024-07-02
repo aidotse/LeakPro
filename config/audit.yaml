@@ -50,12 +50,8 @@ audit:  # Configurations for auditing
 target:
   # Target model path
   module_path: "./leakpro/shadow_model_blueprints.py"
-<<<<<<< HEAD
-  model_class: "ConvNet" #"ConvNet"
-=======
   model_class: "ResNet18"
   # Data paths
->>>>>>> main
   trained_model_path: "./target/target_model.pkl" 
   trained_model_metadata_path: "./target/model_metadata.pkl"
   data_path: "./target/data/cifar100.pkl"
@@ -66,11 +62,7 @@ shadow_model:
   # Path to a Python file with the shadow model architecture
   #module_path: "./leakpro/shadow_model_blueprints.py"
   # Name of the class to instantiate from the specified file
-<<<<<<< HEAD
-  model_class_path: "ConvNet" #"ConvNet"
-=======
   model_class: "ResNet18" #"ConvNet"
->>>>>>> main
   optimizer: 
     name: sgd #adam, sgd, rmsprop
     lr: 0.01
@@ -95,7 +87,6 @@ distillation_model:
     name: crossentropyloss # crossentropyloss, nllloss, mseloss
   # Initialization parameters
   init_params: {}
-<<<<<<< HEAD
   trained_model_path: "./leakpro_output/attack_objects/distillation_target_models/distillation_model.pkl"
   trained_model_metadata_path: "./leakpro_output/attack_objects/distillation_target_models/model_metadata.pkl"
   data_path: "./leakpro_output/attack_objects/distillation_target_models/cifar100.pkl"
@@ -118,5 +109,3 @@ distillation_shadow_model:
   data_path: "./leakpro_output/attack_objects/distillation_shadow_models/cifar100.pkl"
 
 
-=======
->>>>>>> main
