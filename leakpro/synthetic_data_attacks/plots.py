@@ -8,6 +8,7 @@ from matplotlib.axes import Axes
 
 from leakpro.synthetic_data_attacks.inference_utils import InferenceResults
 from leakpro.synthetic_data_attacks.linkability_utils import LinkabilityResults
+from leakpro.synthetic_data_attacks.singling_out_utils import SinglingOutResults
 
 # Set global plot properties
 colors = ["b", "g", "orange"]
@@ -52,7 +53,13 @@ def set_legend(*, ax: Axes) -> None:
     legend_handles = [mpatches.Patch(color=c, label=ll) for c, ll in zip(colors, legend_labels)]
     ax.legend(handles=legend_handles, fontsize=10)
 
-def iterate_values_plot_bar_charts(*, ax: Axes, res: np.array, set_values: set, values: List) -> None:
+def iterate_values_plot_bar_charts(*,
+    ax: Axes,
+    res: np.array,
+    set_values: set,
+    values: List,
+    max_value_flag: bool = False
+) -> None:
     """Function to iterate through set_values and plot them in bar charts."""
     # Iterate through set of values
     for x_idx, value in enumerate(set_values):
@@ -70,6 +77,10 @@ def iterate_values_plot_bar_charts(*, ax: Axes, res: np.array, set_values: set, 
                 # Plot bar charts
                 ax.bar(x_idx+r*bar_width, median, alpha=alpha, width=bar_width, color=colors[r], align="center")
                 ax.bar(x_idx+r*bar_width, up-down, alpha=alpha, width=conf_bar_width, color="black", align="center", bottom=down)
+    # Add extra space between the plot box and the highest value
+    if max_value_flag:
+        max_value = res[:, 4:7].max()
+        ax.set_ylim(0, max_value * 1.05)
 
 def plot_linkability(*, link_res: LinkabilityResults, high_res_flag: bool = True) -> None:
     """Function to plot linkability results from given res.
@@ -115,7 +126,13 @@ def plot_ir_worst_case(*, inf_res: InferenceResults, high_res_flag: bool = True)
     # Set up the figure and get axes
     ax = get_figure_axes()
     # Iterate through secrets and plot bar charts
-    iterate_values_plot_bar_charts(ax=ax, res=res, set_values=set_secrets, values=secrets)
+    iterate_values_plot_bar_charts(
+        ax = ax,
+        res = res,
+        set_values = set_secrets,
+        values = secrets,
+        max_value_flag = True
+    )
     # Adding labels and title
     set_labels_and_title(
         ax = ax,
@@ -170,4 +187,43 @@ def plot_ir_base_case(*, inf_res: InferenceResults, high_res_flag: bool = True) 
         # Adding legend
         set_legend(ax=ax)
     plt.tight_layout()
+    plt.show()
+
+def plot_singling_out(*, sin_out_res: SinglingOutResults, high_res_flag: bool = True) -> None:
+    """Function to plot singling out given results.
+
+    Note: function is not tested and is used in examples.
+    """
+    #Set res, n_cols and set_n_cols
+    res = np.array(sin_out_res.res)
+    n_cols = res[:,-1].astype(int).tolist()
+    set_n_cols = np.unique(n_cols)
+    # High res flag
+    if high_res_flag:
+        plot_save_high_res()
+    # Set up the figure and get axes
+    ax = get_figure_axes()
+    # Iterate through values and plot bar charts
+    iterate_values_plot_bar_charts(
+        ax = ax,
+        res = res,
+        set_values = set_n_cols,
+        values = n_cols,
+        max_value_flag = True
+    )
+    # Adding labels and title
+    fig_title = f"Singling out risk total attacks: {int(res[:,0].sum())}"
+    if res.shape[0]==1:
+        fig_title += f", n_cols={int(res[0,-1])}"
+    set_labels_and_title(
+        ax = ax,
+        xlabel = "n_cols for predicates",
+        ylabel = "Risk",
+        title = fig_title
+    )
+    # Adding ticks
+    set_ticks(ax=ax, xlabels=set_n_cols)
+    # Adding legend
+    set_legend(ax=ax)
+    # Show plot
     plt.show()

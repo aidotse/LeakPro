@@ -112,7 +112,7 @@ def inference_risk_evaluation(
     save_results_json: bool, default is False
         If True, saves results and combinations to json file.
     kwargs: dict
-        Other keyword arguments for LinkabilityEvaluator.
+        Other keyword arguments for InferenceEvaluator.
 
     Returns
     -------
@@ -121,7 +121,7 @@ def inference_risk_evaluation(
 
     """
     if verbose:
-        print(f"\nRunning inference_risk_evaluation_each_against_rest_columns for `{dataset}`") # noqa: T201
+        print(f"\nRunning inference risk evaluation each column against rest of columns for `{dataset}`") # noqa: T201
     #Placeholder variables
     res = []
     secrets = []
