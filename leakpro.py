@@ -64,7 +64,6 @@ def generate_user_input(configs: dict, logger: logging.Logger)->None:
 
     retrain = True
     # Create the population dataset and target_model
-    print(configs["data"]["dataset"])
     if configs["data"]["dataset"] == "adult":
         population = get_adult_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
         target_model = shadow_model_blueprints.NN(configs["train"]["inputs"], configs["train"]["outputs"])

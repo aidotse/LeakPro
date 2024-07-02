@@ -273,8 +273,8 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
 
         """
         self.logger.info("Performing sanity check on the perturbation distances")
-        assert shadow_distances_in.shape[0] == len(self.shadow_train_dataset), "Perturbation distances in not equal to the shadow train dataset size"
-        assert shadow_distances_out.shape[0] == len(self.shadow_test_dataset), "Perturbation distances out not equal to the shadow test dataset size"
+        assert shadow_distances_in.shape[0] == len(self.shadow_train_dataset), " distances in not equal to shadow train dataset"
+        assert shadow_distances_out.shape[0] == len(self.shadow_test_dataset), " distances out not equal to shadow test dataset"
 
         target_train_indices = self.target_model_metadata["train_indices"]
         target_test_indices = self.target_model_metadata["test_indices"]
