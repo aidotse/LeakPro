@@ -10,7 +10,7 @@ from leakpro.import_helper import Self
 class NN(Module):
     """NN for Adult dataset."""
 
-    def __init__(self:Self, in_shape:int, num_classes:int) -> None:
+    def __init__(self:Self, in_shape:int, num_classes:int=10) -> None:
         """Initialize the model.
 
         Args:
@@ -41,20 +41,16 @@ class NN(Module):
 class ConvNet(Module):
     """Convolutional Neural Network model."""
 
-    def __init__(self:Self,  num_classes:int) -> None:
+    def __init__(self:Self) -> None:
         """Initialize the ConvNet model."""
         super().__init__()
-        self.init_params = {
-            "num_classes": num_classes
-        }
-        # self.num_classes = num_classes
 
         self.conv1 = nn.Conv2d(3, 6, 5)
         self.pool = nn.MaxPool2d(2, 2)
         self.conv2 = nn.Conv2d(6, 16, 5)
         self.fc1 = nn.Linear(16 * 5 * 5, 120)
         self.fc2 = nn.Linear(120, 84)
-        self.fc3 = nn.Linear(84, self.init_params["num_classes"])
+        self.fc3 = nn.Linear(84, 10)
 
     def forward(self:Self, x:Tensor) -> Tensor:
         """Forward pass of the model.

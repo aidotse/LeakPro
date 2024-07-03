@@ -7,8 +7,8 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from leakpro.dataset import Dataset
-from leakpro.import_helper import List, Optional, Self, Tuple
-from leakpro.signal_extractor import Model
+from leakpro.import_helper import List, Self, Tuple
+from leakpro.model import Model
 
 ########################################################################################################################
 # SIGNAL CLASS
@@ -191,6 +191,7 @@ class ModelRescaledLogits(Signal):
 # MODEL_INTERMEDIATE_OUTPUT CLASS
 ########################################################################################################################
 
+
 class ModelIntermediateOutput(Signal):
     """Used to represent any type of signal that can be obtained from a Model and/or a Dataset.
 
@@ -248,6 +249,7 @@ class ModelIntermediateOutput(Signal):
 # MODEL_LOSS CLASS
 ########################################################################################################################
 
+
 class ModelLoss(Signal):
     """Used to represent any type of signal that can be obtained from a Model and/or a Dataset.
 
@@ -284,7 +286,6 @@ class ModelLoss(Signal):
 ########################################################################################################################
 # MODEL_GRADIENT CLASS
 ########################################################################################################################
-
 class ModelGradient(Signal):
     """Used to represent any type of signal that can be obtained from a Model and/or a Dataset.
 
@@ -335,51 +336,95 @@ class ModelGradient(Signal):
 
 
 ########################################################################################################################
-# MODEL_HOPSKIPJUMPDISTANCE CLASS
+# Group Information
 ########################################################################################################################
 
-class HopSkipJumpDistance(Signal):
+
+class GroupInfo(Signal):
     """Used to represent any type of signal that can be obtained from a Model and/or a Dataset.
 
-    This particular class is used to get the hop skip jump distance of a model.
+    This particular class is used to get the group membership of data records.
     """
 
     def __call__(
         self:Self,
-        model: Model,
-        data_loader: DataLoader,
-        norm: int = 2,
-        y_target: Optional[int] = None,
-        image_target: Optional[int] = None,
-        initial_num_evals: int = 100,
-        max_num_evals: int = 10000,
-        stepsize_search: str = "geometric_progression",
-        num_iterations: int = 100,
-        gamma: float = 1.0,
-        constraint: int = 2,
-        batch_size: int = 128,
-        verbose: bool = True,
-        clip_min: float = -1,
-        clip_max: float = 1,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+        models: List[Model],
+        datasets: List[Dataset],
+        model_to_split_mapping: List[Tuple[int, str, str, str]],
+    ) -> List[np.ndarray]:
+        """Built-in call method.
+
+        Args:
+        ----
+            models: List of models that can be queried.
+            datasets: List of datasets that can be queried.
+            model_to_split_mapping: List of tuples, indicating how each model should query the dataset.
+                More specifically, for model #i:
+                model_to_split_mapping[i][0] contains the index of the dataset in the list,
+                model_to_split_mapping[i][1] contains the name of the split,
+                model_to_split_mapping[i][2] contains the name of the group feature
+                This can also be provided once and for all at the instantiation of InformationSource, through the
+                default_model_to_split_mapping argument.
+            extra: Dictionary containing any additional parameter that should be passed to the signal object.
+
+        Returns:
+        -------
+            The signal value.
+
+        """
+        results = []
+        # Given the group membership for each dataset used by each model
+        for k in range(len(models)):
+            dataset_index, split_name, group_feature = model_to_split_mapping[k]
+            g = datasets[dataset_index].get_feature(split_name, group_feature)
+            results.append(g)
+        return results
 
 
+class ModelGradientNorm(Signal):
+    """sed to represent any type of signal that can be obtained from a Model and/or a Dataset.
+
+    This particular class is used to get the gradient norm of a model.
+    """
+
+    def __call__(
+        self:Self,
+        models: List[Model],
+        datasets: List[Dataset],
+        model_to_split_mapping: List[Tuple[int, str, str, str]],
+    ) -> List[np.ndarray]:
+        """Built-in call method.
+
+        Args:
+        ----
+            models: List of models that can be queried.
+            datasets: List of datasets that can be queried.
+            model_to_split_mapping: List of tuples, indicating how each model should query the dataset.
+                More specifically, for model #i:
+                model_to_split_mapping[i][0] contains the index of the dataset in the list,
+                model_to_split_mapping[i][1] contains the name of the split,
+                model_to_split_mapping[i][2] contains the name of the input feature,
+                model_to_split_mapping[i][3] contains the name of the output feature.
+                This can also be provided once and for all at the instantiation of InformationSource, through the
+                default_model_to_split_mapping argument.
+            extra: Dictionary containing any additional parameter that should be passed to the signal object.
+
+        Returns:
+        -------
+            The signal value.
+
+        """
+        results = []
         # Compute the signal for each model
-        perturbed_imgs, perturbed_distance = model.get_hop_skip_jump_distance(
-                                                    data_loader,
-                                                    norm,
-                                                    y_target,
-                                                    image_target,
-                                                    initial_num_evals,
-                                                    max_num_evals,
-                                                    stepsize_search,
-                                                    num_iterations,
-                                                    gamma,
-                                                    constraint,
-                                                    batch_size,
-                                                    verbose,
-                                                    clip_min,
-                                                    clip_max
-                                                    )
-
-        return perturbed_imgs, perturbed_distance
+        for k, model in enumerate(models):
+            # Extract the features to be used
+            (
+                dataset_index,
+                split_name,
+                input_feature,
+                output_feature,
+            ) = model_to_split_mapping[k]
+            x = datasets[dataset_index].get_feature(split_name, input_feature)
+            y = datasets[dataset_index].get_feature(split_name, output_feature)
+            results.append(model.get_gradnorm(x, y))
+        return results
