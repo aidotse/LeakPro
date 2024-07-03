@@ -101,17 +101,6 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
         self.shadow_train_dataset = self.population.subset(shadow_train_data_indices)
         self.shadow_test_dataset = self.population.subset(shadow_test_data_indices)
 
-
-        # # train shadow models
-        # self.logger.info(f"Training shadow models on {len(self.shadow_train_dataset)} points")
-        # ShadowModelHandler().create_shadow_models(
-        #     self.num_shadow_models,
-        #     self.shadow_train_dataset,
-        #     shadow_train_data_indices,
-        #     training_fraction = 5.0,
-        #     retrain= True,
-        # )
-
         #--------------------------------------------------------
         # Train and load shadow model
         #--------------------------------------------------------
@@ -285,8 +274,8 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
 
         """
         self.logger.info("Performing sanity check on the perturbation distances")
-        assert shadow_distances_in.shape[0] == len(self.shadow_train_dataset), "Perturbation distances in not equal to the shadow train dataset size"
-        assert shadow_distances_out.shape[0] == len(self.shadow_test_dataset), "Perturbation distances out not equal to the shadow test dataset size"
+        assert shadow_distances_in.shape[0] == len(self.shadow_train_dataset), "Perturbation distances in not equal to the shadow train dataset size"  # noqa: E501
+        assert shadow_distances_out.shape[0] == len(self.shadow_test_dataset), "Perturbation distances out not equal to the shadow test dataset size"  # noqa: E501
         assert shadow_distances_in.shape[1] == 1, "Perturbation distances in not equal to 1"
         assert shadow_distances_out.shape[1] == 1, "Perturbation distances out not equal to 1"
         self.logger.info("Sanity check passed")
@@ -345,13 +334,6 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
         best_statistic = -np.inf
 
         for threshold in thresholds:
-            in_above_threshold = in_data_distances >= threshold
-            out_above_threshold = out_data_distances >= threshold
-
-            tp = np.sum(in_above_threshold)
-            fn = np.sum(~in_above_threshold)
-            fp = np.sum(out_above_threshold)
-            tn = np.sum(~out_above_threshold)
 
             # Use the Kolmogorov-Smirnov statistic as the metric
             statistic, _ = ks_2samp(in_data_distances, out_data_distances)

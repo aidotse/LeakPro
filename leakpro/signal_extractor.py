@@ -108,7 +108,7 @@ class Model(ABC):
         pass
 
     @abstractmethod
-    def get_hop_skip_jump_distance(self:Self,
+    def get_hop_skip_jump_distance(self:Self,  # noqa: D417
                                     data_loader: DataLoader,
                                     norm: int ,
                                     y_target: Optional[int] ,
@@ -127,8 +127,20 @@ class Model(ABC):
 
         Args:
         ----
-            batch_samples: Model input.
-            batch_labels: Model expected output.
+            data_loader: DataLoader object.
+            norm: Norm of the attack.
+            y_target: Target label.
+            image_target: Target image.
+            initial_num_evals: Initial number of evaluations.
+            max_num_evals: Maximum number of evaluations.
+            stepsize_search: Step size search.
+            num_iterations: Number of iterations.
+            gamma: Gamma value.
+            constraint: Constraint value.
+            batch_size: Batch size.
+            verbose: Boolean indicating if the attack should be verbose.
+            clip_min: Minimum value of the clip.
+            clip_max: Maximum value of the clip.
 
         Returns:
         -------
@@ -338,7 +350,7 @@ class PytorchModel(Model):
             self.model_obj.to("cpu")
             return all_rescaled_logits
 
-    def get_hop_skip_jump_distance(self:Self,
+    def get_hop_skip_jump_distance(self:Self,  # noqa: D417
                                     data_loader: DataLoader,
                                     norm: int ,
                                     y_target: Optional[int] ,
