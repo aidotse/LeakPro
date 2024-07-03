@@ -41,9 +41,12 @@ class NN(Module):
 class ConvNet(Module):
     """Convolutional Neural Network model."""
 
-    def __init__(self:Self) -> None:
+    def __init__(self:Self, num_classes: int = 10) -> None:
         """Initialize the ConvNet model."""
         super().__init__()
+        self.init_params = {
+            "num_classes": num_classes
+        }
 
         self.conv1 = nn.Conv2d(3, 6, 5)
         self.pool = nn.MaxPool2d(2, 2)

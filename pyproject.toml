@@ -47,4 +47,5 @@ lint.ignore = [
   "D107", # Missing docstring in `__init__`
   "PLW2901", # redefined-loop-name
   "D202", # No blank lines allowed after function docstring
+  "F811" # redefinition of function
 ]
