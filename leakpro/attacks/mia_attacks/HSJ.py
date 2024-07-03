@@ -332,6 +332,7 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
         best_statistic = -np.inf
 
         for threshold in thresholds:
+
             in_above_threshold = in_data_distances >= threshold
             out_above_threshold = out_data_distances >= threshold
 

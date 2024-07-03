@@ -109,7 +109,7 @@ class Model(ABC):
         pass
 
     @abstractmethod
-    def get_hop_skip_jump_distance(self:Self,
+    def get_hop_skip_jump_distance(self:Self,  # noqa: D417
                                     data_loader: DataLoader,
                                     logger: logging.Logger,
                                     norm: int ,
@@ -353,7 +353,7 @@ class PytorchModel(Model):
             self.model_obj.to("cpu")
             return all_rescaled_logits
 
-    def get_hop_skip_jump_distance(self:Self,
+    def get_hop_skip_jump_distance(self:Self,  # noqa: D417
                                     data_loader: DataLoader,
                                     logger: logging.Logger,
                                     norm: int ,

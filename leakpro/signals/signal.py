@@ -345,7 +345,7 @@ class HopSkipJumpDistance(Signal):
     This particular class is used to get the hop skip jump distance of a model.
     """
 
-    def __call__(
+    def __call__(  # noqa: D102
         self:Self,
         model: Model,
         data_loader: DataLoader,
@@ -390,6 +390,7 @@ class HopSkipJumpDistance(Signal):
             Tuple containing the perturbed images and perturbed distance.
 
         """
+
 
         # Compute the signal for each model
         perturbed_imgs, perturbed_distance = model.get_hop_skip_jump_distance(
