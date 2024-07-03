@@ -85,25 +85,3 @@ distillation_model:
     name: crossentropyloss # crossentropyloss, nllloss, mseloss
   # Initialization parameters
   init_params: {}
-  trained_model_path: "./leakpro_output/attack_objects/distillation_target_models/distillation_model.pkl"
-  trained_model_metadata_path: "./leakpro_output/attack_objects/distillation_target_models/model_metadata.pkl"
-  data_path: "./leakpro_output/attack_objects/distillation_target_models/cifar100.pkl"
-
-distillation_shadow_model:
-  storage_path: "./leakpro_output/attack_objects/distillation_shadow_models"
-  module_path: "./leakpro/shadow_model_blueprints.py"
-  # model_class: "ConvNet"
-  optimizer: 
-    name: sgd #adam, sgd, rmsprop
-    lr: 0.001
-    momentum: 0.9
-    weight_decay: 0.001
-  loss: 
-    name: crossentropyloss # crossentropyloss, nllloss, mseloss
-  # Initialization parameters
-  init_params: {}
-  trained_model_path: "./leakpro_output/attack_objects/distillation_shadow_models/distillation_model.pkl"
-  trained_model_metadata_path: "./leakpro_output/attack_objects/distillation_shadow_models/model_metadata.pkl"
-  data_path: "./leakpro_output/attack_objects/distillation_shadow_models/cifar100.pkl"
-
-

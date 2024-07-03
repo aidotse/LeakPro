@@ -47,6 +47,7 @@ class ConvNet(Module):
         self.init_params = {
             "num_classes": num_classes
         }
+        # self.num_classes = num_classes
 
         self.conv1 = nn.Conv2d(3, 6, 5)
         self.pool = nn.MaxPool2d(2, 2)

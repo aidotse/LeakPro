@@ -23,7 +23,7 @@ from leakpro.dev_utils.data_preparation import (
     prepare_train_test_datasets,
 )
 from leakpro.reporting.utils import prepare_priavcy_risk_report
-from leakpro.user_inputs.cifar100_input_handler import Cifar100InputHandler
+from leakpro.user_inputs.cifar10_input_handler import Cifar10InputHandler
 
 
 def setup_log(name: str, save_file: bool=True) -> logging.Logger:
@@ -62,7 +62,7 @@ def generate_user_input(configs: dict, logger: logging.Logger)->None:
     """Generate user input for the target model."""
     # ------------------------------------------------
 
-    retrain = True
+    retrain = False
     # Create the population dataset and target_model
     if configs["data"]["dataset"] == "adult":
         population = get_adult_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
@@ -72,7 +72,7 @@ def generate_user_input(configs: dict, logger: logging.Logger)->None:
         target_model = shadow_model_blueprints.ResNet18()
     elif configs["data"]["dataset"] == "cifar100":
         population = get_cifar100_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
-        target_model = shadow_model_blueprints.ResNet18(configs["train"]["num_classes"])
+        target_model = shadow_model_blueprints.ConvNet(configs["train"]["num_classes"])
     elif configs["data"]["dataset"] == "cinic10":
         population = get_cinic10_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
         target_model = shadow_model_blueprints.ResNet18(configs["train"]["num_classes"])
@@ -99,7 +99,7 @@ def generate_user_input(configs: dict, logger: logging.Logger)->None:
 
 if __name__ == "__main__":
 
-    user_args = "./config/dev_config/cifar100.yaml" # noqa: ERA001
+    user_args = "./config/dev_config/cifar10.yaml" # noqa: ERA001
 
     with open(user_args, "rb") as f:
         user_configs = yaml.safe_load(f)
@@ -127,7 +127,7 @@ if __name__ == "__main__":
     Path(report_dir).mkdir(parents=True, exist_ok=True)
 
     # Create user input handler
-    handler = Cifar100InputHandler(configs=configs, logger=logger)
+    handler = Cifar10InputHandler(configs=configs, logger=logger)
 
     attack_scheduler = AttackScheduler(handler)
     audit_results = attack_scheduler.run_attacks()

@@ -101,6 +101,17 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
         self.shadow_train_dataset = self.population.subset(shadow_train_data_indices)
         self.shadow_test_dataset = self.population.subset(shadow_test_data_indices)
 
+
+        # # train shadow models
+        # self.logger.info(f"Training shadow models on {len(self.shadow_train_dataset)} points")
+        # ShadowModelHandler().create_shadow_models(
+        #     self.num_shadow_models,
+        #     self.shadow_train_dataset,
+        #     shadow_train_data_indices,
+        #     training_fraction = 5.0,
+        #     retrain= True,
+        # )
+
         #--------------------------------------------------------
         # Train and load shadow model
         #--------------------------------------------------------
@@ -128,47 +139,48 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
         shadow_test_loader = DataLoader(self.shadow_test_dataset, batch_size=self.batch_size, shuffle=True)
 
         self.logger.info("Running Hop Skip Jump distance attack")
-        _ , perturbation_distances_in = self.signal(shadow_model,
-                                                    shadow_train_loader,
-                                                    self.logger,
-                                                    self.norm,
-                                                    self.y_target,
-                                                    self.image_target,
-                                                    self.initial_num_evals,
-                                                    self.max_num_evals,
-                                                    self.stepsize_search,
-                                                    self.num_iterations,
-                                                    self.gamma,
-                                                    self.constraint,
-                                                    self.batch_size,
-                                                    self.verbose,
-                                                    self.clip_min,
-                                                    self.clip_max,
+        _ , perturbation_distances_in = self.signal( model = shadow_model,
+                                                    data_loader = shadow_train_loader,
+                                                    norm = self.norm,
+                                                    y_target = self.y_target,
+                                                    image_target = self.image_target,
+                                                    initial_num_evals = self.initial_num_evals,
+                                                    max_num_evals = self.max_num_evals,
+                                                    stepsize_search = self.stepsize_search,
+                                                    num_iterations = self.num_iterations,
+                                                    gamma = self.gamma,
+                                                    constraint = self.constraint,
+                                                    batch_size = self.batch_size,
+                                                    verbose = self.verbose,
+                                                    clip_min = self.clip_min,
+                                                    clip_max = self.clip_max,
+                                                    logger = self.logger
                                                     )
 
-        _ , perturbation_distances_out = self.signal( shadow_model,
-                                                shadow_test_loader,
-                                                self.logger,
-                                                self.norm,
-                                                self.y_target,
-                                                self.image_target,
-                                                self.initial_num_evals,
-                                                self.max_num_evals,
-                                                self.stepsize_search,
-                                                self.num_iterations,
-                                                self.gamma,
-                                                self.constraint,
-                                                self.batch_size,
-                                                self.verbose,
-                                                self.clip_min,
-                                                self.clip_max,
+        _ , perturbation_distances_out = self.signal(model = shadow_model,
+                                                data_loader = shadow_test_loader,
+                                                norm = self.norm,
+                                                y_target = self.y_target,
+                                                image_target = self.image_target,
+                                                initial_num_evals = self.initial_num_evals,
+                                                max_num_evals = self.max_num_evals,
+                                                stepsize_search = self.stepsize_search,
+                                                num_iterations = self.num_iterations,
+                                                gamma = self.gamma,
+                                                constraint = self.constraint,
+                                                batch_size = self.batch_size,
+                                                verbose = self.verbose,
+                                                clip_min = self.clip_min,
+                                                clip_max = self.clip_max,
+                                                logger = self.logger
                                                 )
-
-        sanity_check = False
+        sanity_check = True
         if sanity_check:
             self.sanity_check(perturbation_distances_in, perturbation_distances_out)
         np.save("perturbation_in.npy", perturbation_distances_in)
         np.save("perturbation_out.npy", perturbation_distances_out)
+
+
 
         perturbed_dist = np.concatenate([perturbation_distances_in , perturbation_distances_out], axis=0)
 
@@ -273,8 +285,11 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
 
         """
         self.logger.info("Performing sanity check on the perturbation distances")
-        assert shadow_distances_in.shape[0] == len(self.shadow_train_dataset), " distances in not equal to shadow train dataset"
-        assert shadow_distances_out.shape[0] == len(self.shadow_test_dataset), " distances out not equal to shadow test dataset"
+        assert shadow_distances_in.shape[0] == len(self.shadow_train_dataset), "Perturbation distances in not equal to the shadow train dataset size"
+        assert shadow_distances_out.shape[0] == len(self.shadow_test_dataset), "Perturbation distances out not equal to the shadow test dataset size"
+        assert shadow_distances_in.shape[1] == 1, "Perturbation distances in not equal to 1"
+        assert shadow_distances_out.shape[1] == 1, "Perturbation distances out not equal to 1"
+        self.logger.info("Sanity check passed")
 
         target_train_indices = self.target_model_metadata["train_indices"]
         target_test_indices = self.target_model_metadata["test_indices"]
@@ -285,42 +300,40 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
         target_train_loader = DataLoader(target_train_dataset, batch_size=self.batch_size, shuffle=True)
         target_test_loader = DataLoader(target_test_dataset, batch_size=self.batch_size, shuffle=True)
 
-
-        _, in_data_distances = self.signal( self.target_model,
-                                            target_train_loader,
-                                            self.logger,
-                                            self.norm,
-                                            self.y_target,
-                                            self.image_target,
-                                            self.initial_num_evals,
-                                            self.max_num_evals,
-                                            self.stepsize_search,
-                                            self.num_iterations,
-                                            self.gamma,
-                                            self.constraint,
-                                            self.batch_size,
-                                            self.verbose,
-                                            self.clip_min,
-                                            self.clip_max,
+        _, in_data_distances = self.signal( model = self.target_model,
+                                                    data_loader = target_train_loader,
+                                                    norm = self.norm,
+                                                    y_target = self.y_target,
+                                                    image_target = self.image_target,
+                                                    initial_num_evals = self.initial_num_evals,
+                                                    max_num_evals = self.max_num_evals,
+                                                    stepsize_search = self.stepsize_search,
+                                                    num_iterations = self.num_iterations,
+                                                    gamma = self.gamma,
+                                                    constraint = self.constraint,
+                                                    batch_size = self.batch_size,
+                                                    verbose = self.verbose,
+                                                    clip_min = self.clip_min,
+                                                    clip_max = self.clip_max,
+                                                    logger = self.logger
+                                                    )
+        _ , out_data_distances = self.signal(model = self.target_model,
+                                            data_loader = target_test_loader,
+                                            norm = self.norm,
+                                            y_target = self.y_target,
+                                            image_target = self.image_target,
+                                            initial_num_evals = self.initial_num_evals,
+                                            max_num_evals = self.max_num_evals,
+                                            stepsize_search = self.stepsize_search,
+                                            num_iterations = self.num_iterations,
+                                            gamma = self.gamma,
+                                            constraint = self.constraint,
+                                            batch_size = self.batch_size,
+                                            verbose = self.verbose,
+                                            clip_min = self.clip_min,
+                                            clip_max = self.clip_max,
+                                            logger = self.logger
                                             )
-        _ , out_data_distances = self.signal(self.target_model,
-                                            target_test_loader,
-                                            self.logger,
-                                            self.norm,
-                                            self.y_target,
-                                            self.image_target,
-                                            self.initial_num_evals,
-                                            self.max_num_evals,
-                                            self.stepsize_search,
-                                            self.num_iterations,
-                                            self.gamma,
-                                            self.constraint,
-                                            self.batch_size,
-                                            self.verbose,
-                                            self.clip_min,
-                                            self.clip_max,
-                                            )
-
 
 
 
@@ -346,13 +359,8 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
             if statistic > best_statistic:
                 best_statistic = statistic
                 best_threshold = threshold
-                best_tp = tp
-                best_fn = fn
-                best_fp = fp
-                best_tn = tn
 
-
-        self.logger.info(f"Best threshold: {best_threshold}, with best tp: {best_tp}, best fn: {best_fn}, best fp: {best_fp}, best tn: {best_tn}")  # noqa: E501
+        self.logger(f"Best threshold: {best_threshold}")
 
 
 
@@ -396,3 +404,4 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
 
         """
         return distance >= threshold
+
