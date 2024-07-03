@@ -586,28 +586,28 @@ class PDFReport(AuditReport):
             # Compile the .tex file to a .pdf file. Several rounds are required to get the references (to papers, to
             # page numbers, and to figure numbers)
 
-            process = subprocess.Popen(
+            process = subprocess.Popen(  # noqa: S603
                 ["pdflatex", os.path.abspath(f"{filename_no_extension}.tex")],  # noqa: S607, S603
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
             stdout, stderr = process.communicate()
 
-            process = subprocess.Popen(
+            process = subprocess.Popen( # noqa: S603
                 ["biber", os.path.abspath(f"{filename_no_extension}")], # noqa: S607, S603
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
             stdout, stderr = process.communicate()
 
-            process = subprocess.Popen(
+            process = subprocess.Popen( # noqa: S603
                 ["pdflatex", os.path.abspath(f"{filename_no_extension}.tex")], # noqa: S607, S603
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
             stdout, stderr = process.communicate()
 
-            process = subprocess.Popen(
+            process = subprocess.Popen( # noqa: S603
                 ["pdflatex", os.path.abspath(f"{filename_no_extension}.tex")], # noqa: S607, S603
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,

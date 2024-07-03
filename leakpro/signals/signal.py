@@ -344,7 +344,7 @@ class HopSkipJumpDistance(Signal):
     This particular class is used to get the hop skip jump distance of a model.
     """
 
-    def __call__(
+    def __call__(  # noqa: D102
         self:Self,
         model: Model,
         data_loader: DataLoader,
@@ -362,6 +362,7 @@ class HopSkipJumpDistance(Signal):
         clip_min: float = -1,
         clip_max: float = 1,
     ) -> Tuple[np.ndarray, np.ndarray]:
+
 
 
         # Compute the signal for each model
