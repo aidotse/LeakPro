@@ -64,7 +64,7 @@ class ConvNet(Module):
 
         Returns:
         -------
-            torch.Tensor: The output tensor.
+            torch.Tensor: The output tensor.s
 
         """
         x = self.pool(functional.relu(self.conv1(x)))
