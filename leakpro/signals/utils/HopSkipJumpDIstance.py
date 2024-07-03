@@ -113,14 +113,13 @@ class HopSkipJumpDistance:
         self.gamma = gamma
         self.constraint = constraint
         self.batch_size = batch_size
+        self.image_shape = self.data_loader.dataset[0][0].shape
         self.verbose = verbose
         self.clip_min = clip_min
         self.clip_max = clip_max
         self.device = device("cuda" if cuda.is_available() else "cpu")
 
-        # TODO: Chnage this
-        # TODO: amke sure shape and batch_shape are not used instead of each other
-        self.batch_shape = (self.batch_size, 3, 32, 32)
+        self.batch_shape = (self.batch_size, self.image_shape[0], self.image_shape[1], self.image_shape[2])
         self.shape = self.batch_shape[1:]
         d = int(np.prod(self.shape))
 
@@ -210,8 +209,6 @@ class HopSkipJumpDistance:
         else:
             perturbed = batch_target_image
 
-
-        #TODO: check if the indices are correct ( should not be sequential)
         # Ordering the perturbed images same as the samples by perturbed_indices
         perturbed_indices_tensor = tensor(perturbed_indices, dtype=long)
         ordered_perturbed = perturbed[perturbed_indices_tensor].to(self.device)
@@ -232,7 +229,7 @@ class HopSkipJumpDistance:
             perturbation_distances.append(perturbation_distance)
             perturbed_images.append(perturbed)
             if self.verbose:
-                self.logger(f"Batch {i} ")
+                self.logger.info(f"Batch {i} ")
         return perturbed_images, perturbation_distances
 
 
@@ -266,7 +263,7 @@ class HopSkipJumpDistance:
         dist = self.compute_distance(perturbed, batch_sample)
         sum_intial_distance = torch_sum(dist, dim=0)
         if self.verbose:
-            self.log(f"Batch {b_i} Initial distance: {sum_intial_distance}")
+            self.logger.info(f"Batch {b_i} Initial distance: {sum_intial_distance}")
 
         perturbation_distance = 0
         j = 0
@@ -330,7 +327,7 @@ class HopSkipJumpDistance:
             perturbation_distance = self.compute_distance(perturbed, batch_sample)
 
             if j % 2 == 0 and self.verbose:
-                self.logger(f"iteration: {j + 1}, distance {perturbation_distance}")
+                self.logger.info(f"iteration: {j + 1}, distance {perturbation_distance}")
 
         return perturbed, perturbation_distance
 
@@ -376,7 +373,8 @@ class HopSkipJumpDistance:
 
         """
         success = np.zeros(len(self.data_loader.dataset), dtype=bool)
-        passed_random_noises = zeros((len(self.data_loader.dataset), 3, 32, 32))
+        passed_random_noises = zeros((len(self.data_loader.dataset), self.image_shape[0],
+                                      self.image_shape[1], self.image_shape[2]))
         active_indices = np.arange(self.batch_size)
         passed_ordered_indices = []
         num_evals = 0
@@ -409,7 +407,8 @@ class HopSkipJumpDistance:
 
             num_evals += 1
             if len(active_indices) == 0:
-                self.logger(f"All data points have been successfully perturbed after {num_evals} evaluations.")
+                self.logger.info("All data points have been successfully perturbed by random noise "
+                                 f"after {num_evals} evaluations.")
                 break
 
         return passed_random_noises, passed_ordered_indices
@@ -441,7 +440,7 @@ class HopSkipJumpDistance:
         mid = zeros(len(self.data_loader.dataset), dtype=float).to(self.device)
         success = np.zeros(len(self.data_loader.dataset), dtype=bool)
         active_indices = np.arange(self.batch_size)
-        passed_opt_noises = zeros((len(self.data_loader.dataset), 3, 32, 32))
+        passed_opt_noises = zeros((len(self.data_loader.dataset), self.image_shape[0], self.image_shape[1], self.image_shape[2]))
         passed_opt_ordered_indices = []
         num_evals = 0
 
@@ -486,11 +485,11 @@ class HopSkipJumpDistance:
             if num_evals % 20 == 0 and self.verbose:
                 # Print progress
                 ratio_success = sum(success).item() / len(self.data_loader.dataset)
-                self.logger(f"Iteration {num_evals}: {ratio_success*100:.4f}% success")
+                self.logger.info(f"Iteration {num_evals}: {ratio_success*100:.4f}% success")
 
             num_evals += 1
             if len(active_indices) == 0:
-                self.logger(f"All data points have been successfully perturbed after {num_evals} evaluations.")
+                self.logger.info(f"Initialized binary search has been completed after {num_evals} evaluations.")
                 break
 
         return passed_opt_noises, passed_opt_ordered_indices
@@ -607,7 +606,8 @@ class HopSkipJumpDistance:
                 batch_active_indices = np.delete(batch_active_indices, positions_to_delete)
             num_evals += 1
             if self.verbose:
-                self.logger(f"Stepsize search: {num_evals} evaluations, and failed data {len(batch_active_indices)} in {b_i}.")
+                message = f"Stepsize search: {num_evals} evaluations, and failed data {len(batch_active_indices)} in {b_i}."
+                self.logger.info(message)
         return batch_epsilon
 
 
