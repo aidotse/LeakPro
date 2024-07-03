@@ -1,87 +1,21 @@
-audit:  # Configurations for auditing
-  random_seed: 1234  # Integer specifying the random seed
-  attack_list:
-    rmia:
-      training_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
-      attack_data_fraction: 0.025 # Fraction of auxiliary dataset to sample from during attack
-      num_shadow_models: 2 # Number of shadow models to train
-      online: False # perform online or offline attack
-    qmia:
-      training_data_fraction: 0.5  # Fraction of the auxilary dataset (data without train and test indices) to use for training the quantile regressor
-      epochs: 5  # Number of training epochs for quantile regression
-    population:
-      attack_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack
-    lira:
-      training_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
-      num_shadow_models: 8 # Number of shadow models to train
-      online: False # perform online or offline attack
-      fixed_variance: True # Use a fixed variance for the whole audit
-    loss_traj:
-      training_distill_data_fraction : 0.2 # Fraction of the auxilary dataset to use for training the distillation models D_s = (1-D_KD)/2
-      number_of_traj: 1 # Number of epochs (number of points in the loss trajectory)
-      label_only: "False" # True or False
-      attack_data_dir: "./leakpro_output/attack_objects/loss_traj"
-      mia_classifier_epochs: 10
-    HSJ:
-      training_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
-      num_shadow_models: 1 # Number of shadow models to train
-      target_metadata_path: "./target/model_metadata.pkl"
-      attack_data_fraction: 0.5 # Fraction of auxiliary dataset to sample from during attack
-      num_iterations: 100 # Number of iterations for the optimization
-      initial_num_evals: 100 # Number of evaluations for number of random vecotr to estimate the gradient
-      max_num_evals: 10000 # Maximum number of evaluations
-      stepsize_search: "geometric_progression" # Step size search method
-      gamma: 1.0 # Gamma for the optimization
-      constraint: 2 
-      batch_size: 128 
-      verbose: True
-      clip_min: -1
-      clip_max: 1
+run: # Configurations for a specific run
+  random_seed: 1234 # Integer number of specifying random seed
+  log_dir: target # String for indicating where to save all the information, including models and computed signals. We can reuse the models saved in the same log_dir.
+
+train: # Configuration for training
+  type: pytorch # Training framework (we only support pytorch now).
+  num_target_model: 1 #Integer number for indicating how many target models we want to audit for the privacy game
+  epochs: 100 # Integer number for indicating the epochs for training target model. For speedyresnet, it uses its own number of epochs.
+  batch_size: 128 # Integer number for indicating batch size for training the target model. For speedyresnet, it uses its own batch size.
+  optimizer: SGD # String which indicates the optimizer. We support Adam and SGD. For speedyresnet, it uses its own optimizer.
+  learning_rate: 0.1 # Float number for indicating learning rate for training the target model. For speedyresnet, it uses its own learning_rate.
+  weight_decay: 0.01 # Float number for indicating weight decay for training the target model. For speedyresnet, it uses its own weight_decay.
+  test_batch_size: 256
+  
+data: # Configuration for data
+  dataset: adult # String indicates the name of the dataset (i.e., cifar10, cifar100, purchase100, texas1000)
+  f_train: 0.01 # Float number from 0 to 1 indicating the fraction of the train dataset
+  f_test: 0.01 # Float number from 0 to 1 indicating the fraction of the test dataset
+  data_dir: ./target/data # String about where to save the data.
 
 
-  report_log: "./leakpro_output/results"  # Folder to save the auditing report
-  config_log: "./leakpro_output/config"  # Folder to save the configuration files
-  target_model_folder: "./target"
-  attack_folder: "attack_objects"
-  attack_type: "mia"
-  split_method: "no_overlapping"  # Method of creating the attack dataset
-
-target:
-  # Target model path
-  module_path: "./leakpro/shadow_model_blueprints.py"
-  model_class: "ResNet18"
-  # Data paths
-  trained_model_path: "./target/target_model.pkl" 
-  trained_model_metadata_path: "./target/model_metadata.pkl"
-  data_path: "./target/data/cinic10.pkl"
-
-shadow_model:
-  storage_path: "./leakpro_output/attack_objects/shadow_models"
-  # [Optional] Define a shadow model (if none, shadow model will follow the target model)
-  # Path to a Python file with the shadow model architecture
-  #module_path: "./leakpro/shadow_model_blueprints.py"
-  # Name of the class to instantiate from the specified file
-  model_class: "ResNet18" #"ConvNet"
-  optimizer: 
-    name: sgd #adam, sgd, rmsprop
-    lr: 0.01
-    momentum: 0.9
-    weight_decay: 0.0
-  loss: 
-    name: crossentropyloss # crossentropyloss, nllloss, mseloss
-  # Initialization parameters
-  init_params: {}
-
-distillation_model:
-  storage_path: "./leakpro_output/attack_objects/distillation_models"
-  #module_path: "./leakpro/shadow_model_blueprints.py"
-  #model_class: "ConvNet"
-  optimizer: 
-    name: sgd #adam, sgd, rmsprop
-    lr: 0.01
-    momentum: 0.9
-    weight_decay: 0.001
-  loss: 
-    name: crossentropyloss # crossentropyloss, nllloss, mseloss
-  # Initialization parameters
-  init_params: {}

@@ -18,7 +18,6 @@ from leakpro.dataset import get_dataloader
 from leakpro.dev_utils.data_preparation import (
     get_adult_dataset,
     get_cifar10_dataset,
-    get_cifar100_dataset,
     get_cinic10_dataset,
     prepare_train_test_datasets,
 )
@@ -62,18 +61,15 @@ def generate_user_input(configs: dict, logger: logging.Logger)->None:
     """Generate user input for the target model."""
     # ------------------------------------------------
 
-    retrain = False
+    retrain = True
     # Create the population dataset and target_model
-    if configs["data"]["dataset"] == "adult":
+    if "adult" in configs["data"]["dataset"]:
         population = get_adult_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
         target_model = shadow_model_blueprints.NN(configs["train"]["inputs"], configs["train"]["outputs"])
-    elif configs["data"]["dataset"] == "cifar10":
+    elif "cifar10" in configs["data"]["dataset"]:
         population = get_cifar10_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
         target_model = shadow_model_blueprints.ResNet18()
-    elif configs["data"]["dataset"] == "cifar100":
-        population = get_cifar100_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
-        target_model = shadow_model_blueprints.ConvNet(configs["train"]["num_classes"])
-    elif configs["data"]["dataset"] == "cinic10":
+    elif "cinic10" in configs["data"]["dataset"]:
         population = get_cinic10_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
         target_model = shadow_model_blueprints.ResNet18(configs["train"]["num_classes"])
 
@@ -99,7 +95,7 @@ def generate_user_input(configs: dict, logger: logging.Logger)->None:
 
 if __name__ == "__main__":
 
-    user_args = "./config/dev_config/cifar10.yaml" # noqa: ERA001
+    user_args = "./config/dev_config/cinic10.yaml" # noqa: ERA001
 
     with open(user_args, "rb") as f:
         user_configs = yaml.safe_load(f)
@@ -112,8 +108,8 @@ if __name__ == "__main__":
 
     start_time = time.time()
     # ------------------------------------------------
-    # LEAKPRO starts her
-    args = "./config/audit.yaml"
+    # LEAKPRO starts here
+    args = "./config/audit.yaml" # noqa: ERA001
     with open(args, "rb") as f:
         configs = yaml.safe_load(f)
 
