@@ -112,8 +112,8 @@ if __name__ == "__main__":
 
     start_time = time.time()
     # ------------------------------------------------
-    # LEAKPRO starts here
-    args = "./config/audit.yaml" # noqa: ERA001
+    # LEAKPRO starts her
+    args = "./config/audit.yaml"
     with open(args, "rb") as f:
         configs = yaml.safe_load(f)
 

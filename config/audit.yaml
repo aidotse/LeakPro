@@ -1,44 +1,43 @@
 audit:  # Configurations for auditing
   random_seed: 1234  # Integer specifying the random seed
   attack_list:
-    rmia:
-      training_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
-      attack_data_fraction: 0.025 # Fraction of auxiliary dataset to sample from during attack
-      num_shadow_models: 2 # Number of shadow models to train
-      online: False # perform online or offline attack
-    qmia:
-      training_data_fraction: 0.5  # Fraction of the auxilary dataset (data without train and test indices) to use for training the quantile regressor
-      epochs: 5  # Number of training epochs for quantile regression
-    population:
-      attack_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack
-    lira:
-      training_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
-      num_shadow_models: 8 # Number of shadow models to train
-      online: False # perform online or offline attack
-      fixed_variance: True # Use a fixed variance for the whole audit
-    loss_traj:
-      training_distill_data_fraction : 0.2 # Fraction of the auxilary dataset to use for training the distillation models D_s = (1-D_KD)/2
-      number_of_traj: 1 # Number of epochs (number of points in the loss trajectory)
-      label_only: "False" # True or False
-      attack_data_dir: "./leakpro_output/attack_objects/loss_traj"
-      mia_classifier_epochs: 10
+    # rmia:
+    #   training_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
+    #   attack_data_fraction: 0.025 # Fraction of auxiliary dataset to sample from during attack
+    #   num_shadow_models: 2 # Number of shadow models to train
+    #   online: False # perform online or offline attack
+    # qmia:
+    #   training_data_fraction: 0.5  # Fraction of the auxilary dataset (data without train and test indices) to use for training the quantile regressor
+    #   epochs: 5  # Number of training epochs for quantile regression
+    # population:
+    #   attack_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack
+    # lira:
+    #   training_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
+    #   num_shadow_models: 8 # Number of shadow models to train
+    #   online: False # perform online or offline attack
+    #   fixed_variance: True # Use a fixed variance for the whole audit
+    # loss_traj:
+    #   training_distill_data_fraction : 0.2 # Fraction of the auxilary dataset to use for training the distillation models D_s = (1-D_KD)/2
+    #   number_of_traj: 1 # Number of epochs (number of points in the loss trajectory)
+    #   label_only: "False" # True or False
+    #   attack_data_dir: "./leakpro_output/attack_objects/loss_traj"
+    #   mia_classifier_epochs: 10
     HSJ:
-      attack_data_fraction: 0.5  # Fraction of the auxilary dataset to use for this attack
+      training_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
       num_shadow_models: 1 # Number of shadow models to train
       target_metadata_path: "./target/model_metadata.pkl"
-      norm: 2  # The distance to optimize. Possible values: 2 or np.inf             
-      y_target: null # A tensor of shape (n, nb_classes) for target labels. Required for targeted attack.
-      image_target: null # A tensor of shape (n, **image shape) for initial target images. Required for targeted attack.
-      initial_num_evals: 100 # initial number of evaluations for gradient estimation.
-      max_num_evals: 10000 # maximum number of evaluations for gradient estimation.
-      stepsize_search: "geometric_progression" # How to search for stepsize; choices are 'geometric_progression', 'grid_search'.
-      num_iterations: 100 # The number of iterations.
-      gamma: 1.0 # The binary search threshold theta is gamma / d^{3/2} for l2 attack and gamma / d^2 for linf attack.
-      constraint: 2 # The distance to optimize. Possible values: 2 or np.inf.
-      batch_size: 128 # batch_size for model prediction.
-      verbose: True # (boolean) Whether distance at each step is printed.
-      clip_min: -1 # (optional float) Minimum input component value
-      clip_max: 1 # (optional float) Maximum input component value
+      attack_data_fraction: 0.5 # Fraction of auxiliary dataset to sample from during attack
+      num_iterations: 100 # Number of iterations for the optimization
+      initial_num_evals: 100 # Number of evaluations for number of random vecotr to estimate the gradient
+      max_num_evals: 10000 # Maximum number of evaluations
+      stepsize_search: "geometric_progression" # Step size search method
+      gamma: 1.0 # Gamma for the optimization
+      constraint: 2 
+      batch_size: 128 
+      verbose: True
+      clip_min: -1
+      clip_max: 1
+
 
   report_log: "./leakpro_output/results"  # Folder to save the auditing report
   config_log: "./leakpro_output/config"  # Folder to save the configuration files
@@ -54,7 +53,7 @@ target:
   # Data paths
   trained_model_path: "./target/target_model.pkl" 
   trained_model_metadata_path: "./target/model_metadata.pkl"
-  data_path: "./target/data/cifar100.pkl"
+  data_path: "./target/data/cinic10.pkl"
 
 shadow_model:
   storage_path: "./leakpro_output/attack_objects/shadow_models"
@@ -71,8 +70,7 @@ shadow_model:
   loss: 
     name: crossentropyloss # crossentropyloss, nllloss, mseloss
   # Initialization parameters
-  init_params: 
-    num_classes: 100
+  init_params: {}
 
 distillation_model:
   storage_path: "./leakpro_output/attack_objects/distillation_models"
