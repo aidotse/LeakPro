@@ -2,7 +2,7 @@ import pickle  # noqa: D100
 
 import numpy as np
 from scipy.stats import ks_2samp
-from sklearn.metrics import precision_score, recall_score
+from sklearn.metrics import precision_score, recall_score, roc_curve
 from torch.utils.data import DataLoader
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
@@ -41,7 +41,8 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
         with open(self.target_metadata_path, "rb") as f:
              self.target_model_metadata = pickle.load(f)  # noqa: S301
 
-        self.attack_data_fraction = configs.get("attack_data_fraction", 0.5)
+        self.shadow_data_fraction = configs.get("shadow_data_fraction", 1)
+        self.shadow_train_fraction = configs.get("shadow_train_fraction", 0.5)
         self.num_shadow_models = configs.get("num_shadow_models", 1)
         self.norm = configs.get("norm", 2)
         self.y_target = configs.get("y_target")
@@ -53,9 +54,12 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
         self.gamma = configs.get("gamma", 1.0)
         self.constraint = configs.get("constraint", 2)
         self.batch_size = configs.get("batch_size", 128)
-        self.verbose = False # configs.get("verbose", True)
+        self.verbose = configs.get("verbose", True)
         self.clip_min = configs.get("clip_min", -1)
         self.clip_max = configs.get("clip_max", 1)
+
+        self.reproducing_paper_results = configs.get("reproducing_paper_results", True)
+        self.paper_data_fr = configs.get("paper_data_fr", 0.083)
 
 
 
@@ -88,25 +92,29 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
         self.logger.info("Preparing the data for Hop Skip Jump attack")
 
         # Get all available indices for auxiliary dataset
-        shadow_data_index = self.sample_indices_from_population(include_train_indices = False,
+        aux_data_index = self.sample_indices_from_population(include_train_indices = False,
                                                                 include_test_indices = False)
 
 
-        # create auxiliary dataset
-        shadow_data_size = len(shadow_data_index)
-        shadow_train_data_size = int(shadow_data_size * self.attack_data_fraction)
-        shadow_train_data_indices = np.random.choice(shadow_data_index, shadow_train_data_size, replace=False)
-        shadow_test_data_indices = np.setdiff1d(shadow_data_index, shadow_train_data_indices)
+        # create shadow dataset from aux data
+        aux_data_size = len(aux_data_index)
+        shadow_data_size = int(aux_data_size * self.shadow_data_fraction)
+        shadow_data_indices = np.random.choice(aux_data_index, shadow_data_size, replace=False)
 
-        self.shadow_train_dataset = self.population.subset(shadow_train_data_indices)
-        self.shadow_test_dataset = self.population.subset(shadow_test_data_indices)
+        # Split the shadow data into training and test datasets
+        split_point = int(len(shadow_data_indices) * self.shadow_train_fraction)
+        self.shadow_train_data_indices = shadow_data_indices[:split_point]
+        self.shadow_test_data_indices = shadow_data_indices[split_point:]
+
+        self.shadow_train_dataset = self.population.subset(self.shadow_train_data_indices)
+        self.shadow_test_dataset = self.population.subset(self.shadow_test_data_indices)
 
         #--------------------------------------------------------
         # Train and load shadow model
         #--------------------------------------------------------
-        self.logger.info(f"Training shadow models on {len(shadow_train_data_indices)} points")
+        self.logger.info(f"Training shadow models on {len(self.shadow_train_data_indices)} points")
         self.shadow_model_indices = ShadowModelHandler().create_shadow_models(self.num_shadow_models,
-                                                                         shadow_train_data_indices,
+                                                                         self.shadow_train_data_indices,
                                                                          training_fraction = 1.0)
         # load shadow models
         self.shadow_model, self.shadow_model_indices = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)
@@ -124,12 +132,25 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
         """
         shadow_model = self.shadow_model[0]
 
-        shadow_train_loader = DataLoader(self.shadow_train_dataset, batch_size=self.batch_size, shuffle=True)
-        shadow_test_loader = DataLoader(self.shadow_test_dataset, batch_size=self.batch_size, shuffle=True)
+
+        if self.reproducing_paper_results:
+            aux_data_size = int(len(self.shadow_train_data_indices)*self.paper_data_fr)
+            attack_in_indices = np.random.choice(self.shadow_train_data_indices, aux_data_size, replace=False)
+            attack_out_indices = np.random.choice(self.shadow_test_data_indices, aux_data_size, replace=False)
+
+            attack_in_dataset = self.population.subset(attack_in_indices)
+            attack_out_dataset = self.population.subset(attack_out_indices)
+
+            attack_in_dataloader = DataLoader(attack_in_dataset, batch_size=self.batch_size, shuffle=True)
+            attack_out_dataloader = DataLoader(attack_out_dataset, batch_size=self.batch_size, shuffle=True)
+        else:
+            attack_in_dataloader = DataLoader(self.shadow_train_dataset, batch_size=self.batch_size, shuffle=True)
+            attack_out_dataloader = DataLoader(self.shadow_test_dataset, batch_size=self.batch_size, shuffle=True)
+
 
         self.logger.info("Running Hop Skip Jump distance attack")
         _ , perturbation_distances_in = self.signal(shadow_model,
-                                                    shadow_train_loader,
+                                                    attack_in_dataloader,
                                                     self.logger,
                                                     self.norm,
                                                     self.y_target,
@@ -147,7 +168,7 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
                                                     )
 
         _ , perturbation_distances_out = self.signal( shadow_model,
-                                                shadow_test_loader,
+                                                attack_out_dataloader,
                                                 self.logger,
                                                 self.norm,
                                                 self.y_target,
@@ -164,11 +185,13 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
                                                 self.clip_max,
                                                 )
 
-        sanity_check = False
-        if sanity_check:
-            self.sanity_check(perturbation_distances_in, perturbation_distances_out)
         np.save("perturbation_in.npy", perturbation_distances_in)
         np.save("perturbation_out.npy", perturbation_distances_out)
+
+
+        if self.reproducing_paper_results:
+            self.sanity_check(perturbation_distances_in, perturbation_distances_out)
+
 
         perturbed_dist = np.concatenate([perturbation_distances_in , perturbation_distances_out], axis=0)
 
@@ -273,21 +296,21 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
 
         """
         self.logger.info("Performing sanity check on the perturbation distances")
-        assert shadow_distances_in.shape[0] == len(self.shadow_train_dataset), " distances in not equal to shadow train dataset"
-        assert shadow_distances_out.shape[0] == len(self.shadow_test_dataset), " distances out not equal to shadow test dataset"
-
         target_train_indices = self.target_model_metadata["train_indices"]
         target_test_indices = self.target_model_metadata["test_indices"]
 
-        target_train_dataset = self.population.subset(target_train_indices)
-        target_test_dataset = self.population.subset(target_test_indices)
+        aux_data_size = int(len(target_train_indices)*self.reproducing_paper_results)
+        attack_in_indices = np.random.choice(target_train_indices, aux_data_size, replace=False)
+        attack_out_indices = np.random.choice(target_test_indices, aux_data_size, replace=False)
 
-        target_train_loader = DataLoader(target_train_dataset, batch_size=self.batch_size, shuffle=True)
-        target_test_loader = DataLoader(target_test_dataset, batch_size=self.batch_size, shuffle=True)
+        attack_in_dataset = self.population.subset(attack_in_indices)
+        attack_out_dataset = self.population.subset(attack_out_indices)
 
+        attack_in_dataloader = DataLoader(attack_in_dataset, batch_size=self.batch_size, shuffle=True)
+        attack_out_dataloader = DataLoader(attack_out_dataset, batch_size=self.batch_size, shuffle=True)
 
         _, in_data_distances = self.signal( self.target_model,
-                                            target_train_loader,
+                                            attack_in_dataloader,
                                             self.logger,
                                             self.norm,
                                             self.y_target,
@@ -304,7 +327,7 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
                                             self.clip_max,
                                             )
         _ , out_data_distances = self.signal(self.target_model,
-                                            target_test_loader,
+                                            attack_out_dataloader,
                                             self.logger,
                                             self.norm,
                                             self.y_target,
@@ -321,62 +344,15 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
                                             self.clip_max,
                                             )
 
-
-
-
         # Find the optimal threshold
-        all_distances = np.concatenate([in_data_distances, out_data_distances])
-        thresholds = np.sort(all_distances)
-
-        best_threshold = None
-        best_statistic = -np.inf
-
-        for threshold in thresholds:
-
-            in_above_threshold = in_data_distances >= threshold
-            out_above_threshold = out_data_distances >= threshold
-
-            tp = np.sum(in_above_threshold)
-            fn = np.sum(~in_above_threshold)
-            fp = np.sum(out_above_threshold)
-            tn = np.sum(~out_above_threshold)
-
-            # Use the Kolmogorov-Smirnov statistic as the metric
-            statistic, _ = ks_2samp(in_data_distances, out_data_distances)
-
-            if statistic > best_statistic:
-                best_statistic = statistic
-                best_threshold = threshold
-                best_tp = tp
-                best_fn = fn
-                best_fp = fp
-                best_tn = tn
+        self.best_threshold_precision(self.find_threshold1(in_data_distances, out_data_distances),
+                                       shadow_distances_in, shadow_distances_out)
+        self.best_threshold_precision(self.find_threshold2(in_data_distances, out_data_distances),
+                                      shadow_distances_in, shadow_distances_out)
+        self.best_threshold_precision(self.find_threshold3(in_data_distances, out_data_distances),
+                                      shadow_distances_in, shadow_distances_out)
 
 
-        self.logger.info(f"Best threshold: {best_threshold}, with best tp: {best_tp}, best fn: {best_fn}, best fp: {best_fp}, best tn: {best_tn}")  # noqa: E501
-
-
-
-        # Apply the threshold to classify shadow model's data
-        shadow_in_predictions = [self.is_member(dist, best_threshold) for dist in shadow_distances_in]
-        shadow_out_predictions = [self.is_member(dist, best_threshold) for dist in shadow_distances_out]
-
-
-        # True labels for shadow model data
-        # 1 indicates in-data, 0 indicates out-data
-        shadow_in_labels = np.ones(len(shadow_distances_in))
-        shadow_out_labels = np.zeros(len(shadow_distances_out))
-
-        # Combine predictions and labels
-        all_predictions = np.concatenate([shadow_in_predictions, shadow_out_predictions])
-        all_labels = np.concatenate([shadow_in_labels, shadow_out_labels])
-
-        # Calculate precision and recall
-        precision = precision_score(all_labels, all_predictions)
-        recall = recall_score(all_labels, all_predictions)
-
-        self.logger(f"Precision: {precision:.4f}")
-        self.logger(f"Recall: {recall:.4f}")
 
 
 
@@ -397,3 +373,169 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
 
         """
         return distance >= threshold
+
+    def find_threshold1(self: Self, in_data: np.ndarray, out_data: np.ndarray) -> float:
+        """Find the optimal threshold based on the Kolmogorov-Smirnov statistic.
+
+        Parameters
+        ----------
+        in_data : np.ndarray
+            The in-data.
+        out_data : np.ndarray
+            The out-data.
+
+        Returns
+        -------
+        float
+            The optimal threshold.
+
+        """
+        # Find the optimal threshold
+        all_distances = np.concatenate([in_data, out_data])
+        thresholds = np.sort(all_distances)
+
+        best_threshold = None
+        best_statistic = -np.inf
+
+        for threshold in thresholds:
+
+            in_above_threshold = in_data >= threshold
+            out_above_threshold = out_data >= threshold
+
+            tp = np.sum(in_above_threshold)
+            fn = np.sum(~in_above_threshold)
+            fp = np.sum(out_above_threshold)
+            tn = np.sum(~out_above_threshold)
+
+            # Use the Kolmogorov-Smirnov statistic as the metric
+            statistic, _ = ks_2samp(in_data, out_data)
+
+            if statistic > best_statistic:
+                best_statistic = statistic
+                best_threshold = threshold
+                best_tp = tp
+                best_fn = fn
+                best_fp = fp
+                best_tn = tn
+
+
+        self.logger.info(f"Best threshold1: {best_threshold}, with best tp: {best_tp}, best fn: {best_fn}, best fp: {best_fp}, best tn: {best_tn}")  # noqa: E501
+        return best_threshold
+
+    def find_threshold2(self: Self, in_data: np.ndarray, out_data: np.ndarray) -> float:
+        """Find the optimal threshold based on the ROC curve.
+
+        Parameters
+        ----------
+        in_data : np.ndarray
+            The in-data.
+        out_data : np.ndarray
+            The out-data.
+
+        Returns
+        -------
+        float
+            The optimal threshold.
+
+        """
+        # Create label array
+        labels = np.array([1] * len(in_data) + [0] * len(out_data))
+
+        # Find optimal threshold
+        fpr, tpr, thresholds = roc_curve(labels, np.concatenate((in_data, out_data)))
+        optimal_idx = np.argmax(tpr - fpr)
+        optimal_threshold = thresholds[optimal_idx]
+        self.logger.info(f"Optimal Threshold2: {optimal_threshold}")
+
+        return optimal_threshold
+
+
+    def find_threshold3(self: Self, in_data: np.ndarray, out_data: np.ndarray) -> float:
+        """Find the optimal threshold based on the KS test.
+
+        Parameters
+        ----------
+        in_data : np.ndarray
+            The in-data.
+        out_data : np.ndarray
+            The out-data.
+
+        Returns
+        -------
+        float
+            The optimal threshold.
+
+        """
+        # Merge
+        all_data = np.concatenate((in_data, out_data))
+
+        # Perform the KS test
+        ks_stat, p_value = ks_2samp(in_data, out_data)
+
+        # Find the optimal threshold
+        thresholds = np.linspace(min(all_data), max(all_data), num=100)
+        distances = []
+
+        for threshold in thresholds:
+            a_above = np.sum(in_data > threshold) / len(in_data)
+            b_above = np.sum(out_data > threshold) / len(out_data)
+            distances.append(abs(a_above - b_above))
+
+        optimal_idx = np.argmax(distances)
+        optimal_threshold = thresholds[optimal_idx]
+
+        self.logger.info(f"Optimal Threshold3: {optimal_threshold}")
+
+        return optimal_threshold
+
+    def best_threshold_precision(self: Self,
+                                 best_threshold: float,
+                                 shadow_distances_in: np.ndarray
+                                 , shadow_distances_out: np.ndarray) -> None:
+        """Calculate precision, recall, and accuracy based on the best threshold.
+
+        Parameters
+        ----------
+        best_threshold : float
+            The best threshold value.
+        shadow_distances_in : np.ndarray
+            The distances of shadow model's in-data.
+        shadow_distances_out : np.ndarray
+            The distances of shadow model's out-data.
+
+        Returns
+        -------
+        None
+
+        """
+        # Apply the threshold to classify shadow model's data
+        shadow_in_predictions = [self.is_member(dist, best_threshold) for dist in shadow_distances_in]
+        shadow_out_predictions = [self.is_member(dist, best_threshold) for dist in shadow_distances_out]
+
+
+        # True labels for shadow model data
+        # 1 indicates in-data, 0 indicates out-data
+        shadow_in_labels = np.ones(len(shadow_distances_in))
+        shadow_out_labels = np.zeros(len(shadow_distances_out))
+
+        # Combine predictions and labels
+        all_predictions = np.concatenate([shadow_in_predictions, shadow_out_predictions])
+        all_labels = np.concatenate([shadow_in_labels, shadow_out_labels])
+
+        # Calculate precision and recall
+        precision = precision_score(all_labels, all_predictions)
+        recall = recall_score(all_labels, all_predictions)
+
+        self.logger.info(f"Precision: {precision:.4f}")
+        self.logger.info(f"Recall: {recall:.4f}")
+
+        #stats
+        in_above_threshold = shadow_distances_in >= best_threshold
+        out_above_threshold = shadow_distances_out >= best_threshold
+
+        tp = np.sum(in_above_threshold)
+        fn = np.sum(~in_above_threshold)
+        fp = np.sum(out_above_threshold)
+        tn = np.sum(~out_above_threshold)
+        accuracy = (tp + tn) / (tp + tn + fp + fn)
+        self.logger.info(f"Accuracy: {accuracy:.4f}")

@@ -257,24 +257,24 @@ class HopSkipJumpDistance:
 
         """
         # Project the initialization to the boundary.
-        perturbed, dist_post_update, perturbed_label = self.binary_search_batch(
+        perturbed, dist_post_update, _ = self.binary_search_batch(
             batch_sample, batch_perturbed, active_indices)
 
         dist = self.compute_distance(perturbed, batch_sample)
         sum_intial_distance = torch_sum(dist, dim=0)
         if self.verbose:
-            self.logger.info(f"Batch {b_i} Initial distance: {sum_intial_distance}")
+            self.logger.info(f"Batch {b_i} Initial distance: {sum_intial_distance/len(batch_sample)} per sample")
 
         perturbation_distance = 0
         j = 0
         for j in np.arange(self.num_iterations):
 
-            current_iteration = j + 1
+            current_iter = j + 1
 
             # Choose delta.
             delta = self.select_delta(
                 dist_post_update,
-                current_iteration
+                current_iter
             )
 
             # approximate gradient.
@@ -290,7 +290,7 @@ class HopSkipJumpDistance:
             if self.stepsize_search == "geometric_progression":
                 # find step size.
                 epsilon = self.geometric_progression_for_stepsize(
-                    perturbed, update, dist, current_iteration, active_indices, b_i
+                    perturbed, update, dist, current_iter, active_indices, b_i
                 )
 
                 # Update the sample.
@@ -299,7 +299,7 @@ class HopSkipJumpDistance:
                 )
 
                 # Binary search to return to the boundary.
-                perturbed, dist_post_update , perturbed_label= self.binary_search_batch(
+                perturbed, dist_post_update , _ = self.binary_search_batch(
                     batch_sample, perturbed, active_indices )
 
             elif self.stepsize_search == "grid_search":
@@ -314,20 +314,22 @@ class HopSkipJumpDistance:
                     perturbed + epsilons.view((20,) + (1,) * (len(self.shape) - 1)) * update
                 )
                 perturbeds = clamp(perturbeds, self.clip_min, self.clip_max)
-                idx_perturbed,perturbed_label = self.decision_function(perturbeds, active_indices)
+                idx_perturbed,_ = self.decision_function(perturbeds, active_indices)
 
                 if torch_sum(idx_perturbed) > 0:
                     # Select the perturbation that yields the minimum distance # after binary search.
-                    perturbed, dist_post_update, perturbed_label = self.binary_search_batch(
+                    perturbed, dist_post_update, _  = self.binary_search_batch(
                         batch_sample,
                         perturbeds[idx_perturbed],
                     )
 
             # compute new distance.
             perturbation_distance = self.compute_distance(perturbed, batch_sample)
-
-            if j % 2 == 0 and self.verbose:
-                self.logger.info(f"iteration: {j + 1}, distance {perturbation_distance}")
+            if self.verbose:
+                self.logger.info(f"iteration: {current_iter}, avg. distance"
+                                f"{torch_sum(perturbation_distance, dim=0)/len(batch_sample)} per sample")
+                if (current_iter == self.num_iterations):
+                    self.logger.info(f"iteration: {current_iter}, avg. distance {perturbation_distance}")
 
         return perturbed, perturbation_distance
 
