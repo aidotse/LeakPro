@@ -11,7 +11,7 @@ from torch.nn import Module
 
 from leakpro.attacks.utils.model_handler import ModelHandler
 from leakpro.import_helper import Self, Tuple
-from leakpro.model import PytorchModel
+from leakpro.signal_extractor import PytorchModel
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 
 
@@ -154,7 +154,7 @@ class ShadowModelHandler(ModelHandler):
             model, criterion, optimizer = self._get_model_criterion_optimizer()
 
             # Train shadow model
-            self.logger.info(f"Training shadow model {i} on {len(data_loader)} points")
+            self.logger.info(f"Training shadow model {i} on {len(data_loader)* data_loader.batch_size} points")
             training_results = self.handler.train(data_loader, model, criterion, optimizer, self.epochs)
             # Read out results
             shadow_model = training_results["model"]

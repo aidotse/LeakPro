@@ -228,7 +228,11 @@ def save_model_and_metadata(  # noqa: PLR0913
         torch.save(model.state_dict(), f)
     meta_data = {}
 
-    meta_data["init_params"] = model.init_params if hasattr(model, "init_params") else {}
+    if hasattr(model, "init_params"):
+        meta_data["init_params"] = model.init_params
+    else:
+        meta_data["init_params"] = {"num_classes": configs["train"]["num_classes"]}
+
     meta_data["train_indices"] = data_split["train_indices"]
     meta_data["test_indices"] = data_split["test_indices"]
     meta_data["num_train"] = len(data_split["train_indices"])
