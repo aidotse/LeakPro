@@ -78,11 +78,11 @@ class AttackP(AbstractMIA):
         # subsample the attack data based on the fraction
         self.logger.info(f"Subsampling attack data from {len(self.attack_data_indices)} points")
         n_points = int(self.attack_data_fraction * len(self.attack_data_indices))
-        attack_data = self.sample_data_from_dataset(self.attack_data_indices, n_points).dataset
-        self.logger.info(f"Number of attack data points after subsampling: {len(attack_data)}")
+        attack_data_indices = np.random.choice(self.attack_data_indices, n_points, replace=False)
+        self.logger.info(f"Number of attack data points after subsampling: {len(attack_data_indices)}")
 
         # signals based on training dataset
-        self.attack_signal = np.array(self.signal([self.target_model], attack_data))
+        self.attack_signal = np.array(self.signal([self.target_model], self.handler, attack_data_indices))
 
     def run_attack(self:Self) -> CombinedMetricResult:
         """Run the attack on the target model and dataset.
@@ -106,8 +106,7 @@ class AttackP(AbstractMIA):
 
         self.logger.info("Running the Population attack on the target model")
         # get the loss for the audit dataset
-        audit_data = self.get_dataloader(self.audit_dataset["data"]).dataset
-        audit_signal = np.array(self.signal([self.target_model], audit_data)).squeeze()
+        audit_signal = np.array(self.signal([self.target_model], self.handler, self.audit_dataset["data"])).squeeze()
 
         # pick out the in-members and out-members
         self.in_member_signals =  audit_signal[self.audit_dataset["in_members"]]

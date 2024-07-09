@@ -138,7 +138,27 @@ class AbstractInputHandler(ABC):
     def get_dataloader(self: Self, dataset_indices: np.ndarray, batch_size: int = 32) -> DataLoader:
         """Default implementation of the dataloader."""
         dataset = self.get_dataset(dataset_indices)
-        return DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True)
+        return DataLoader(dataset=dataset, batch_size=batch_size, shuffle=False)
+
+    def get_labels(self:Self, indices: np.ndarray) -> list:
+        """Get the labels for given indices in the population."""
+        labels = []
+
+        for idx in indices:
+            _, label = self.population[idx]  # Assuming the dataset returns (data, label) tuple
+            labels.append(label)
+
+        return labels
+
+    def get_features(self:Self, indices: np.ndarray) -> list:
+        """Get the features for given indices in the population."""
+        features = []
+
+        for idx in indices:
+            feature, _ = self.population[idx]  # Assuming the dataset returns (data, label) tuple
+            features.append(feature)
+
+        return features
 
     #------------------------------------------------
     # Methods related to target model

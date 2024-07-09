@@ -3,7 +3,7 @@
 import numpy as np
 import torch
 from torch import nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
@@ -163,16 +163,17 @@ class AttackQMIA(AbstractMIA):
         # subsample the attack data based on the fraction
         self.logger.info(f"Subsampling attack data from {len(self.attack_data_indices)} points")
         n_points = int(self.training_data_fraction * len(self.attack_data_indices))
-        attack_data = self.sample_data_from_dataset(self.attack_data_indices, n_points).dataset
-        self.logger.info(f"Number of attack data points after subsampling: {len(self.attack_data_indices)}")
-
-        # create attack dataset
-        attack_data = self.population.subset(self.attack_data_indices)
+        chosen_attack_data_indices = np.random.choice(self.attack_data_indices, n_points, replace=False)
+        self.logger.info(f"Number of attack data points after subsampling: {len(chosen_attack_data_indices)}")
 
         # create labels and change dataset to be used for regression
-        regression_labels = np.array(self.signal([self.target_model], attack_data)).squeeze()
-        attack_data.y = regression_labels
-        attack_data.task_type = "regression"
+        regression_features = self.handler.get_features(chosen_attack_data_indices)
+        regression_labels = np.array(self.signal([self.target_model],
+                                                 self.handler,
+                                                 self.attack_data_indices)).squeeze()
+
+        # Create a TensorDataset
+        attack_data = Dataset(regression_features, regression_labels)
         attack_dataloader = DataLoader(attack_data, batch_size=64, shuffle=True,)
 
         # train quantile regressor
@@ -253,10 +254,11 @@ class AttackQMIA(AbstractMIA):
             Result(s) of the metric.
 
         """
-        audit_dataset = self.get_dataloader(self.audit_dataset["data"]).dataset
-        self.target_logits = np.array(self.signal([self.target_model], audit_dataset)).squeeze()
+        self.target_logits = np.array(self.signal([self.target_model],
+                                                  self.handler,
+                                                  self.audit_dataset["data"])).squeeze()
 
-        audit_dataloader = DataLoader(audit_dataset, batch_size=64, shuffle=False)
+        audit_dataloader = self.get_dataloader(self.audit_dataset["data"])
         self.logger.info("Running the attack on the target model")
         score = []
         for data, _ in audit_dataloader:
