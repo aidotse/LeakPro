@@ -103,7 +103,7 @@ class AttackLiRA(AbstractMIA):
         self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)
 
         self.logger.info("Create masks for all IN samples")
-        self.in_indices_mask = ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"])
+        self.in_indices_mask = ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"]).T
 
         # Check offline attack for possible IN- sample(s)
         if self.online:
@@ -136,9 +136,7 @@ class AttackLiRA(AbstractMIA):
 
         # Calculate logits for all shadow models
         self.logger.info(f"Calculating the logits for all {self.num_shadow_models} shadow models")
-        self.shadow_models_logits = np.swapaxes(np.array(self.signal(self.shadow_models,
-                                                                     self.handler,
-                                                                     audit_data_indices)), 0, 1)
+        self.shadow_models_logits = np.array(self.signal(self.shadow_models, self.handler, audit_data_indices))
 
         # Calculate logits for the target model
         self.logger.info("Calculating the logits for the target model")
@@ -159,7 +157,8 @@ class AttackLiRA(AbstractMIA):
         true labels, and signal values.
 
         """
-        score = []  # List to hold the computed probability scores for each sample
+        n_audit_samples = self.shadow_models_logits.shape[1]
+        score = np.zeros(n_audit_samples)  # List to hold the computed probability scores for each sample
 
         # If fixed_variance is to be used, calculate it from all logits of shadow models
         if self.fixed_variance:
@@ -168,9 +167,9 @@ class AttackLiRA(AbstractMIA):
                 in_std = np.nanstd(self.shadow_models_logits[self.in_indices_mask].flatten())
 
         # Iterate and extract logits from shadow models for each sample in the audit dataset
-        for i, (shadow_models_logits, mask) in tqdm(enumerate(zip(self.shadow_models_logits, self.in_indices_mask)),
-                                                    total=len(self.shadow_models_logits),
-                                                    desc="Processing samples"):
+        for i in tqdm(range(n_audit_samples), total=n_audit_samples, desc="Processing samples"):
+            shadow_models_logits = self.shadow_models_logits[:, i]
+            mask = self.in_indices_mask[:, i]
 
             # Calculate the mean for OUT shadow model logits
             out_mean = np.mean(shadow_models_logits[~mask])
@@ -192,9 +191,7 @@ class AttackLiRA(AbstractMIA):
             else:
                 pr_in = 0
 
-            score.append(pr_in - pr_out)  # Append the calculated probability density value to the score list
-
-        score = np.asarray(score)  # Convert the list of scores to a numpy array
+            score[i] = (pr_in - pr_out)  # Append the calculated probability density value to the score list
 
         # Generate thresholds based on the range of computed scores for decision boundaries
         self.thresholds = np.linspace(np.min(score), np.max(score), 1000)
@@ -220,8 +217,8 @@ class AttackLiRA(AbstractMIA):
 
         # Return a result object containing predictions, true labels, and the signal values for further evaluation
         return CombinedMetricResult(
-            predicted_labels=predictions[:, ~self.skip_indices],
-            true_labels=true_labels[~self.skip_indices],
+            predicted_labels=predictions,
+            true_labels=true_labels,
             predictions_proba=None,  # Note: Direct probability predictions are not computed here
-            signal_values=signal_values[~self.skip_indices],
+            signal_values=signal_values,
         )

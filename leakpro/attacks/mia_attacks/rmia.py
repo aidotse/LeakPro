@@ -154,6 +154,7 @@ class AttackRMIA(AbstractMIA):
 
             # get the true label indices
             z_true_labels = self.handler.get_labels(chosen_attack_data_indices)
+            assert np.issubdtype(z_true_labels.dtype, np.integer)
 
             # run points through real model to collect the logits
             logits_theta = np.array(self.signal([self.target_model], self.handler, chosen_attack_data_indices))
@@ -192,6 +193,10 @@ class AttackRMIA(AbstractMIA):
         num_out_members = np.sum(mask[self.audit_dataset["out_members"]])
         out_members = np.arange(len(in_members), len(in_members) + num_out_members)
         ground_truth_indices = self.handler.get_labels(audit_data_indices)
+        assert np.issubdtype(ground_truth_indices.dtype, np.integer)
+
+        assert len(audit_data_indices) == len(ground_truth_indices)
+        assert len(audit_data_indices) == len(in_members) + len(out_members)
 
         if len(audit_data_indices) == 0:
             raise ValueError("No points in the audit dataset are used for the shadow models")
@@ -216,7 +221,10 @@ class AttackRMIA(AbstractMIA):
         ratio_x = p_x_given_target_model / (p_x + self.epsilon)
 
         # Make a "random sample" to compute p(z) for points in attack dataset on the OUT shadow models for each audit point
-        self.attack_data_index = self.sample_indices_from_population(include_train_indices = False, include_test_indices = False)
+        self.attack_data_index = self.sample_indices_from_population(include_train_indices = False,
+                                                                     include_test_indices = False)
+        if len(self.attack_data_index) == 0:
+            raise ValueError("There are no auxilliary points to use for the attack.")
 
         # subsample the attack data based on the fraction
         self.logger.info(f"Subsampling attack data from {len(self.attack_data_index)} points")
@@ -229,6 +237,8 @@ class AttackRMIA(AbstractMIA):
 
         # get the true label indices
         z_true_labels = self.handler.get_labels(self.attack_data_index)
+        assert np.issubdtype(z_true_labels.dtype, np.integer)
+
         # run points through real model to collect the logits
         logits_target_model = np.array(self.signal([self.target_model], self.handler, self.attack_data_index))
         # collect the softmax output of the correct class
@@ -263,6 +273,8 @@ class AttackRMIA(AbstractMIA):
         logits_theta = np.array(self.signal([self.target_model], self.handler, self.audit_dataset["data"]))
         # collect the softmax output of the correct class
         ground_truth_indices = self.handler.get_labels(self.audit_dataset["data"])
+        assert np.issubdtype(ground_truth_indices.dtype, np.integer)
+
         p_x_given_target_model = self.softmax(logits_theta, ground_truth_indices)
 
         # run points through shadow models and collect the logits

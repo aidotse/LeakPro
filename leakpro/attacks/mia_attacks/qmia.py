@@ -7,11 +7,45 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
-from leakpro.import_helper import Self
+from leakpro.import_helper import Any, Self, Tuple
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.signals.signal import ModelRescaledLogits
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 
+
+class QMIADataset(Dataset):
+    """Dataset class for the QMIA attack."""
+
+    def __init__(self:Self, dataloader:DataLoader, new_labels:np.ndarray)->None:
+        self.features = None
+        self.labels = None
+        for data, _  in dataloader:
+            self.features = data
+            self.labels = new_labels
+
+    def __len__(self:Self) -> int:
+        """Get the length of the dataset.
+
+        Returns
+        -------
+            int: The length of the dataset.
+
+        """
+        return len(self.features)
+
+    def __getitem__(self:Self, idx:int) -> Tuple[Any, Any]:
+        """Get an item from the dataset.
+
+        Args:
+        ----
+            idx (int): Index of the item to retrieve.
+
+        Returns:
+        -------
+            Tuple[Any, Any]: The features and labels of the item.
+
+        """
+        return self.features[idx], self.labels[idx]
 
 class QuantileRegressor(nn.Module):
     """QuantileRegressor module for predicting quantiles."""
@@ -50,7 +84,6 @@ class QuantileRegressor(nn.Module):
         x = self.feature_extractor(x)
         x = x.view(x.size(0), -1)  # Flatten the features
         return self.regressor(x)
-
 
 class PinballLoss(torch.nn.Module):
     """Pinball loss for quantile regression."""
@@ -167,23 +200,22 @@ class AttackQMIA(AbstractMIA):
         self.logger.info(f"Number of attack data points after subsampling: {len(chosen_attack_data_indices)}")
 
         # create labels and change dataset to be used for regression
-        regression_features = self.handler.get_features(chosen_attack_data_indices)
         regression_labels = np.array(self.signal([self.target_model],
                                                  self.handler,
-                                                 self.attack_data_indices)).squeeze()
+                                                 chosen_attack_data_indices)).squeeze()
 
-        # Create a TensorDataset
-        attack_data = Dataset(regression_features, regression_labels)
-        attack_dataloader = DataLoader(attack_data, batch_size=64, shuffle=True,)
+        # Create custom dataset for regression
+        attack_dataloader = self.get_dataloader(chosen_attack_data_indices)
+        quantile_regression_dataloader = DataLoader(QMIADataset(attack_dataloader, regression_labels), batch_size=64)
 
         # train quantile regressor
         self.logger.info("Training the quantile regressor")
         optimizer = torch.optim.Adam(self.quantile_regressor.parameters(), lr=1e-3, weight_decay=1e-4)
         criterion = PinballLoss(self.quantiles)
-        self.train_quantile_regressor(attack_dataloader, criterion, optimizer, self.epochs)
+        self._train_quantile_regressor(quantile_regression_dataloader, criterion, optimizer, self.epochs)
         self.logger.info("Training of quantile regressor completed")
 
-    def train_quantile_regressor(
+    def _train_quantile_regressor(
         self:Self,
         attack_dataloader: DataLoader,
         criterion:torch.nn.Module,

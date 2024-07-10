@@ -82,6 +82,7 @@ class AttackP(AbstractMIA):
         self.logger.info(f"Number of attack data points after subsampling: {len(attack_data_indices)}")
 
         # signals based on training dataset
+        self.logger.info("Computing signals for the Population attack")
         self.attack_signal = np.array(self.signal([self.target_model], self.handler, attack_data_indices))
 
     def run_attack(self:Self) -> CombinedMetricResult:
