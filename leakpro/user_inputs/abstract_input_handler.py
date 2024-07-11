@@ -138,7 +138,16 @@ class AbstractInputHandler(ABC):
     def get_dataloader(self: Self, dataset_indices: np.ndarray, batch_size: int = 32) -> DataLoader:
         """Default implementation of the dataloader."""
         dataset = self.get_dataset(dataset_indices)
-        return DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True)
+        return DataLoader(dataset=dataset, batch_size=batch_size, shuffle=False)
+
+    def get_labels(self:Self, indices: np.ndarray) -> np.ndarray:
+        """Get the labels for given indices in the population."""
+        labels = np.empty(len(indices), dtype=np.int16)
+
+        for k, idx in enumerate(indices):
+            _, labels[k] = self.population[idx]  # Assuming the dataset returns (data, label) tuple
+
+        return labels
 
     #------------------------------------------------
     # Methods related to target model
@@ -150,16 +159,16 @@ class AbstractInputHandler(ABC):
             model_replica = self.target_model_blueprint(**init_params)
             return model_replica, self.get_criterion(), self.get_optimizer(model_replica)
         except Exception as e:
-            raise ValueError("Failed to create an instance of the shadow model.") from e
+            raise ValueError("Failed to create an instance of the target model.") from e
 
     @abstractmethod
     def get_criterion(self:Self, criterion: torch.nn.modules.loss._Loss) -> None:
-        """Get the loss function for the target model to be used in shadow model training."""
+        """Get the loss function for the target model to be used in model training."""
         pass
 
     @abstractmethod
     def get_optimizer(self:Self, model:torch.nn.Module) -> torch.optim.Optimizer:
-        """Get the optimizer used for the target model to be used in shadow model training."""
+        """Get the optimizer used for the target model to be used in model training."""
         pass
 
     @abstractmethod
@@ -170,7 +179,7 @@ class AbstractInputHandler(ABC):
         criterion: torch.nn.modules.loss._Loss,
         optimizer: torch.optim.Optimizer
     ) -> nn.Module:
-        """Procedure to train the shadow models on data from the population."""
+        """Procedure to train a model on data from the population."""
         pass
 
     #------------------------------------------------
