@@ -1,5 +1,7 @@
 """Test the image handler module."""
 
+from copy import deepcopy
+
 import numpy as np
 from torch import equal
 from torch.utils.data import SequentialSampler
@@ -71,7 +73,7 @@ def test_cifar10_input_handler(image_handler:Cifar10InputHandler) -> None:
     # Check that shuffle = false in dataloader
     assert isinstance(train_loader.sampler, SequentialSampler)
 
-    before_weights =  image_handler.target_model.state_dict()
+    before_weights =  deepcopy(image_handler.target_model.state_dict())
     # train the model
     train_dict = image_handler.train(train_loader,
                                       image_handler.target_model,
