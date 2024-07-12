@@ -20,11 +20,11 @@ parameters.batch_size = 64
 parameters.learning_rate = 0.001
 parameters.optimizer = "sgd"
 parameters.loss = "crossentropyloss"
-parameters.data_points = 100
+parameters.data_points = 130
 parameters.train_data_points = 20
 parameters.test_data_points = 20
 parameters.img_size = (3, 32, 32)
-parameters.num_classes = 10
+parameters.num_classes = 13
 parameters.images_per_class = parameters.data_points // parameters.num_classes
 
 
@@ -108,7 +108,7 @@ def create_mock_image_dataset() -> str:
 
     # Constants to create a mock image dataset same size as CIFAR10
     image_size = parameters.img_size  # CIFAR-10 image size
-    num_classes = parameters.num_classes = 10       # CIFAR-10 has 10 classes
+    num_classes = parameters.num_classes # CIFAR-10 has 10 classes
     images_per_class = parameters.images_per_class
     dataset_name = "image_handler_dataset.pkl"
 
