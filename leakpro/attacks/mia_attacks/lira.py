@@ -103,45 +103,46 @@ class AttackLiRA(AbstractMIA):
         self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)
 
         self.logger.info("Create masks for all IN samples")
-        self.in_indices_mask = ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"])
-
-        self.audit_data = self.get_dataloader(self.audit_dataset["data"]).dataset
+        self.in_indices_mask = ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"]).T
 
         # Check offline attack for possible IN- sample(s)
-        if not self.online:
+        if self.online:
+            # filter out the points that no shadow model has seen and points that all shadow models have seen
+            num_shadow_models_seen_points = np.sum(self.in_indices_mask, axis=0)
+            # make sure that the audit points are included in the shadow model training (but not all)
+            mask = (num_shadow_models_seen_points > 0) & (num_shadow_models_seen_points < self.num_shadow_models)
+
+            # Select datapoints that are auditable
+            audit_data_indices = self.audit_dataset["data"][mask]
+            self.in_members = np.arange(np.sum(mask[self.audit_dataset["in_members"]]))
+            # find out how many out-members survived the filtering
+            num_out_members = np.sum(mask[self.audit_dataset["out_members"]])
+            self.out_members = np.arange(len(self.in_members), len(self.in_members) + num_out_members)
+            self.in_indices_mask = self.in_indices_mask[:,mask]
+
+            assert len(audit_data_indices) == len(self.in_members) + len(self.out_members)
+
+            if len(audit_data_indices) == 0:
+                raise ValueError("No points in the audit dataset are used for the shadow models")
+        else:
+            audit_data_indices = self.audit_dataset["data"]
+            self.in_members = self.audit_dataset["in_members"]
+            self.out_members = self.audit_dataset["out_members"]
+
             count_in_samples = np.count_nonzero(self.in_indices_mask)
             if count_in_samples > 0:
                 self.logger.info(f"Some shadow model(s) contains {count_in_samples} IN samples in total for the model(s)")
                 self.logger.info("This is not an offline attack!")
 
-        self.skip_indices = np.zeros(len(self.in_indices_mask), dtype=bool)
-        if self.online:
-            no_in = 0
-            no_out = 0
-            for i, mask in enumerate(self.in_indices_mask):
-                if np.count_nonzero(mask) == len(mask):
-                    no_out += 1
-                    self.skip_indices[i] = True
-                elif np.count_nonzero(mask) == 0:
-                    no_in += 1
-                    self.skip_indices[i] = True
-
-            if no_out > 0 or no_in > 0:
-                self.logger.info(f"There are {no_out} audit examples with 0 OUT sample(s) and {no_in} 0 IN sample(s)")
-                self.logger.info("When using few shadow models in online attacks")
-                self.logger.info("some audit sample(s) mighthave a few or even 0 IN or OUT logits")
-                self.logger.info(f"In total {np.count_nonzero(self.skip_indices)} indices will be skipped!")
-
-            if len(self.audit_data) == np.sum(self.skip_indices):
-                raise ValueError("All audit samples are skipped. Please adjust the number of shadow models or the audit dataset.")
-
         # Calculate logits for all shadow models
         self.logger.info(f"Calculating the logits for all {self.num_shadow_models} shadow models")
-        self.shadow_models_logits = np.swapaxes(np.array(self.signal(self.shadow_models, self.audit_data)), 0, 1)
+        self.shadow_models_logits = np.array(self.signal(self.shadow_models, self.handler, audit_data_indices))
 
         # Calculate logits for the target model
         self.logger.info("Calculating the logits for the target model")
-        self.target_logits = np.array(self.signal([self.target_model], self.audit_data)).squeeze()
+        self.target_logits = np.array(self.signal([self.target_model],
+                                                  self.handler,
+                                                  audit_data_indices)).squeeze()
 
     def run_attack(self:Self) -> CombinedMetricResult:
         """Runs the attack on the target model and dataset and assess privacy risks or data leakage.
@@ -156,7 +157,8 @@ class AttackLiRA(AbstractMIA):
         true labels, and signal values.
 
         """
-        score = []  # List to hold the computed probability scores for each sample
+        n_audit_samples = self.shadow_models_logits.shape[1]
+        score = np.zeros(n_audit_samples)  # List to hold the computed probability scores for each sample
 
         # If fixed_variance is to be used, calculate it from all logits of shadow models
         if self.fixed_variance:
@@ -165,9 +167,9 @@ class AttackLiRA(AbstractMIA):
                 in_std = np.nanstd(self.shadow_models_logits[self.in_indices_mask].flatten())
 
         # Iterate and extract logits from shadow models for each sample in the audit dataset
-        for i, (shadow_models_logits, mask) in tqdm(enumerate(zip(self.shadow_models_logits, self.in_indices_mask)),
-                                                    total=len(self.shadow_models_logits),
-                                                    desc="Processing samples"):
+        for i in tqdm(range(n_audit_samples), total=n_audit_samples, desc="Processing samples"):
+            shadow_models_logits = self.shadow_models_logits[:, i]
+            mask = self.in_indices_mask[:, i]
 
             # Calculate the mean for OUT shadow model logits
             out_mean = np.mean(shadow_models_logits[~mask])
@@ -189,16 +191,14 @@ class AttackLiRA(AbstractMIA):
             else:
                 pr_in = 0
 
-            score.append(pr_in - pr_out)  # Append the calculated probability density value to the score list
-
-        score = np.asarray(score)  # Convert the list of scores to a numpy array
+            score[i] = (pr_in - pr_out)  # Append the calculated probability density value to the score list
 
         # Generate thresholds based on the range of computed scores for decision boundaries
         self.thresholds = np.linspace(np.min(score), np.max(score), 1000)
 
         # Split the score array into two parts based on membership: in (training) and out (non-training)
-        self.in_member_signals = score[self.audit_dataset["in_members"]].reshape(-1,1)  # Scores for known training data members
-        self.out_member_signals = score[self.audit_dataset["out_members"]].reshape(-1,1)  # Scores for non-training data members
+        self.in_member_signals = score[self.in_members].reshape(-1,1)  # Scores for known training data members
+        self.out_member_signals = score[self.out_members].reshape(-1,1)  # Scores for non-training data members
 
         # Create prediction matrices by comparing each score against all thresholds
         member_preds = np.less(self.in_member_signals, self.thresholds).T  # Predictions for training data members
@@ -217,8 +217,8 @@ class AttackLiRA(AbstractMIA):
 
         # Return a result object containing predictions, true labels, and the signal values for further evaluation
         return CombinedMetricResult(
-            predicted_labels=predictions[:, ~self.skip_indices],
-            true_labels=true_labels[~self.skip_indices],
+            predicted_labels=predictions,
+            true_labels=true_labels,
             predictions_proba=None,  # Note: Direct probability predictions are not computed here
-            signal_values=signal_values[~self.skip_indices],
+            signal_values=signal_values,
         )

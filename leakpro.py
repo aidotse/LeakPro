@@ -61,7 +61,7 @@ def generate_user_input(configs: dict, logger: logging.Logger)->None:
     """Generate user input for the target model."""
     # ------------------------------------------------
 
-    retrain = True
+    retrain = False
     # Create the population dataset and target_model
     if "adult" in configs["data"]["dataset"]:
         population = get_adult_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
@@ -95,7 +95,7 @@ def generate_user_input(configs: dict, logger: logging.Logger)->None:
 
 if __name__ == "__main__":
 
-    user_args = "./config/dev_config/cinic10.yaml" # noqa: ERA001
+    user_args = "./config/dev_config/cifar10.yaml" # noqa: ERA001
 
     with open(user_args, "rb") as f:
         user_configs = yaml.safe_load(f)
