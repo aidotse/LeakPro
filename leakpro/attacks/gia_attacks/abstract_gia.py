@@ -2,13 +2,8 @@
 
 from abc import ABC, abstractmethod
 
-import numpy as np
-import torch
-from torch.utils.data import DataLoader
-
-from leakpro.import_helper import List, Self, Union
-from leakpro.metrics.attack_result import AttackResult, GIAResults
-from leakpro.model import PytorchModel
+from leakpro.import_helper import Self
+from leakpro.metrics.attack_result import GIAResults
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 
 ########################################################################################################################

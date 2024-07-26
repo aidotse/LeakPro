@@ -20,7 +20,6 @@ from leakpro.dev_utils.data_preparation import (
     get_cinic10_dataset,
 )
 from leakpro.fl_utils.client_data import prepare_fl_client_dataset
-from leakpro.reporting.utils import prepare_priavcy_risk_report
 from leakpro.user_inputs.cifar10_gia_input_handler import Cifar10GIAInputHandler
 
 

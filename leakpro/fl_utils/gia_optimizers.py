@@ -63,7 +63,7 @@ class MetaAdam(MetaOptimizer):
         Args:
         ----
             lr (float, optional): Learning rate. Default is 1e-2.
-            betas (Tuple[float, float], optional): Coefficients used for computing running averages of gradient and its square. 
+            betas (Tuple[float, float], optional): Coefficients used for computing running averages of gradient and its square.
             Default is (0.9, 0.999).
             eps (float, optional): Term added to the denominator to improve numerical stability. Default is 1e-08.
             weight_decay (float, optional): Weight decay (L2 penalty). Default is 0.
