@@ -1,6 +1,7 @@
 audit:  # Configurations for auditing
   random_seed: 1234  # Integer specifying the random seed
   attack_list:
+    # mia attacks
     rmia:
       training_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
       attack_data_fraction: 0.025 # Fraction of auxiliary dataset to sample from during attack
@@ -22,12 +23,24 @@ audit:  # Configurations for auditing
       label_only: "False" # True or False
       attack_data_dir: "./leakpro_output/attack_objects/loss_traj"
       mia_classifier_epochs: 10
+    # gia attacks
+    inverting_gradients:
+      total_variation: 0.000001
+      attack_lr: 0.1 # lr for the reconstruction optimizer
+  gia_settings:
+    client_batch_size: 1
+    num_train_batches: 1
+    epochs: 3
+    optimizer: SGD
+    learning_rate: 0.1
+    dataset: cifar10
+    data_dir: ./target/data
 
   report_log: "./leakpro_output/results"  # Folder to save the auditing report
   config_log: "./leakpro_output/config"  # Folder to save the configuration files
   target_model_folder: "./target"
   attack_folder: "attack_objects"
-  attack_type: "mia"
+  attack_type: "gia"
   split_method: "no_overlapping"  # Method of creating the attack dataset
 
 target:

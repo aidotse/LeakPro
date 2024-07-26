@@ -1,6 +1,10 @@
 """Contains the AttackResult class, which stores the results of an attack."""
 
+import os
+
 import numpy as np
+import torch
+import torchvision
 from sklearn.metrics import (
     accuracy_score,
     auc,
@@ -133,3 +137,22 @@ class CombinedMetricResult:
 
             txt_list.append("\n".join(txt))
         return "\n\n".join(txt_list)
+
+class GIAResults:
+    """Contains results for a GIA attack."""
+
+    def __init__(self: Self, original_data: torch.tensor, recreated_data: torch.tensor,
+                 psnr_score: float, data_mean: float, data_std: float) -> None:
+        self.original_data = original_data
+        self.recreated_data = recreated_data
+        self.PSNR_score = psnr_score
+        self.data_mean = data_mean
+        self.data_std = data_std
+
+    def prepare_privacy_risk_report(self: Self, attack_name: str, save_path: str) -> None:
+        """Risk report for GIA. WIP."""
+        output_denormalized = torch.clamp(self.recreated_data * self.data_std + self.data_mean, 0, 1)
+        torchvision.utils.save_image(output_denormalized, os.path.join(save_path, "recreated_image.png"))
+        gt_denormalized = torch.clamp(self.original_data * self.data_std + self.data_mean, 0, 1)
+        torchvision.utils.save_image(gt_denormalized, os.path.join(save_path, "original_image.png"))
+        return attack_name
