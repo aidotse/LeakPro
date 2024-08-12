@@ -13,7 +13,6 @@ from torch import (
     cuda,
     device,
     float32,
-    from_numpy,
     full,
     long,
     max,
@@ -23,12 +22,9 @@ from torch import (
     norm,
     ones,
     rand,
-    rand_like,
-    randn,
     sign,
     stack,
     tensor,
-    where,
     zeros,
 )
 from torch import any as torch_any
@@ -96,8 +92,6 @@ class HopSkipJumpDistance:
                  constraint: int =2,
                  batch_size: int =128,
                  verbose: bool =True,
-                 clip_min: int = -1,
-                 clip_max: int =1,
                  ) -> None:
 
         self.model = model
@@ -113,19 +107,17 @@ class HopSkipJumpDistance:
         self.gamma = gamma
         self.constraint = constraint
         self.batch_size = batch_size
-        self.image_shape = self.data_loader.dataset[0][0].shape
         self.verbose = verbose
-        self.clip_min = clip_min
-        self.clip_max = clip_max
+        self.clip_min = -1
+        self.clip_max = 1
         self.device = device("cuda" if cuda.is_available() else "cpu")
-
+        self.image_shape = self.data_loader.dataset[0][0].shape
         self.batch_shape = (self.batch_size, self.image_shape[0], self.image_shape[1], self.image_shape[2])
-        self.shape = self.batch_shape[1:]
-        d = int(np.prod(self.shape))
+        d = int(np.prod(self.image_shape))
 
         if self.constraint == 2:
             # In the original code self.gamma / (np.sqrt(d) * d)
-            self.theta = self.gamma /  d
+            self.theta = self.gamma / (np.sqrt(d) * d)
         else:
             self.theta = self.gamma / (d * d)
 
@@ -160,9 +152,7 @@ class HopSkipJumpDistance:
             self.model_output_labels = self.model_output_labels.to(self.device)
 
         # untargeted attack without an initialized image.
-        pert_imgs, perturbation_distances = self.hsja(self.data_loader,
-                                                      None
-                                                      )
+        pert_imgs, perturbation_distances = self.hsja(self.data_loader, None)
 
         pert_imgs = cat(pert_imgs, 0).cpu().numpy()
         perturbation_distances = cat(perturbation_distances, 0).cpu().numpy()
@@ -203,28 +193,27 @@ class HopSkipJumpDistance:
 
         """
         self.model.eval()
-        # Initialize.
-        if batch_target_image is None:
-            perturbed, perturbed_indices = self.initialize()
-        else:
-            perturbed = batch_target_image
 
-        # Ordering the perturbed images same as the samples by perturbed_indices
-        perturbed_indices_tensor = tensor(perturbed_indices, dtype=long)
-        ordered_perturbed = perturbed[perturbed_indices_tensor].to(self.device)
+        init_perturbed, init_indices = self.initialize()
+        np.save("init_in_ours_complete.npy", init_perturbed.cpu().numpy())
+        init_indices_tensor = tensor(init_indices, dtype=long)
+        init_perturbed_ordered = init_perturbed[init_indices_tensor].to(self.device)
+
 
         perturbation_distances = []
         perturbed_images = []
         for i, (batch_sample, _) in enumerate(tqdm(samples, desc="Epoch")):
             active_indices = list(range(i*self.batch_size,
-                                        builtins.min((i +1) * self.batch_size,  len(ordered_perturbed))))
-            batch_perturbed = stack([ordered_perturbed[j] for j in active_indices])
+                                        builtins.min((i +1) * self.batch_size,  len(init_perturbed_ordered))))
+            init_batch_perturbed = stack([init_perturbed_ordered[j] for j in active_indices])
 
             batch_sample = batch_sample.to(self.device)  # noqa: PLW2901
-            batch_perturbed = batch_perturbed.to(self.device)
+            init_batch_perturbed = init_batch_perturbed.to(self.device)
 
-            perturbed, perturbation_distance = self.distance_batch(
-                batch_sample, batch_perturbed, active_indices,i)
+            perturbed, perturbation_distance = self.distance_batch(batch_sample,
+                                                                   init_batch_perturbed,
+                                                                   np.array(active_indices),
+                                                                   i)
 
             perturbation_distances.append(perturbation_distance)
             perturbed_images.append(perturbed)
@@ -232,10 +221,9 @@ class HopSkipJumpDistance:
                 self.logger.info(f"Batch {i} ")
         return perturbed_images, perturbation_distances
 
-
     def distance_batch(self: Self,
                        batch_sample: Tensor,
-                       batch_perturbed: Tensor,
+                       init_batch_perturbed: Tensor,
                        active_indices: np.ndarray,
                         b_i: int) -> Tuple[Tensor, Tensor]:
         """Compute the distance between a batch of perturbed images and the original batch of samples.
@@ -244,8 +232,8 @@ class HopSkipJumpDistance:
         ----------
         batch_sample : Tensor
             The original batch of samples.
-        batch_perturbed : Tensor
-            The batch of perturbed images.
+        init_batch_perturbed : Tensor
+            The batch of init perturbed images.
         active_indices : List[int]
             The indices of the active samples.
         b_i : int
@@ -256,24 +244,33 @@ class HopSkipJumpDistance:
         Tuple of the perturbed images and the perturbation distance.
 
         """
-        # Project the initialization to the boundary.
-        perturbed, dist_post_update, _ = self.binary_search_batch(
-            batch_sample, batch_perturbed, active_indices)
+        # Find the d_0
+        distance_zero = self.compute_distance(batch_sample, init_batch_perturbed)
+        sum_intial_distance = torch_sum(distance_zero, dim=0)
+        # foor loop
 
-        dist = self.compute_distance(perturbed, batch_sample)
-        sum_intial_distance = torch_sum(dist, dim=0)
+        # Project the initialization to the boundary.
+        self.current_batch_size = len(batch_sample)
+
         if self.verbose:
             self.logger.info(f"Batch {b_i} Initial distance: {sum_intial_distance/len(batch_sample)} per sample")
 
         perturbation_distance = 0
         j = 0
-        for j in np.arange(self.num_iterations):
+        perturbed_previous_step = init_batch_perturbed.clone().detach()
 
+
+
+        for j in np.arange(self.num_iterations):
             current_iter = j + 1
+
+            # Binary search to approach the boundary.
+            perturbed, dist_previous_step = self.binary_search_batch(
+                batch_sample, perturbed_previous_step, active_indices)
 
             # Choose delta.
             delta = self.select_delta(
-                dist_post_update,
+                dist_previous_step,
                 current_iter
             )
 
@@ -290,48 +287,24 @@ class HopSkipJumpDistance:
             if self.stepsize_search == "geometric_progression":
                 # find step size.
                 epsilon = self.geometric_progression_for_stepsize(
-                    perturbed, update, dist, current_iter, active_indices, b_i
+                    perturbed, update, perturbed, current_iter, active_indices, b_i
                 )
 
                 # Update the sample.
-                perturbed = clamp(
+                updated_perturbed = clamp(
                     perturbed + epsilon.view(len(epsilon),1,1,1) * update, self.clip_min, self.clip_max
                 )
 
-                # Binary search to return to the boundary.
-                perturbed, dist_post_update , _ = self.binary_search_batch(
-                    batch_sample, perturbed, active_indices )
-
-            elif self.stepsize_search == "grid_search":
-                # Grid search for stepsize.
-                epsilons = (
-                    from_numpy(np.logspace(-4, 0, num=20, endpoint=True))
-                    .to(self.device)
-                    .float()
-                    * dist
-                )
-                perturbeds = (
-                    perturbed + epsilons.view((20,) + (1,) * (len(self.shape) - 1)) * update
-                )
-                perturbeds = clamp(perturbeds, self.clip_min, self.clip_max)
-                idx_perturbed,_ = self.decision_function(perturbeds, active_indices)
-
-                if torch_sum(idx_perturbed) > 0:
-                    # Select the perturbation that yields the minimum distance # after binary search.
-                    perturbed, dist_post_update, _  = self.binary_search_batch(
-                        batch_sample,
-                        perturbeds[idx_perturbed],
-                    )
-
             # compute new distance.
-            perturbation_distance = self.compute_distance(perturbed, batch_sample)
+            perturbation_distance = self.compute_distance(updated_perturbed, batch_sample)
+            perturbed_previous_step = updated_perturbed.clone().detach()
             if self.verbose:
                 self.logger.info(f"iteration: {current_iter}, avg. distance"
                                 f"{torch_sum(perturbation_distance, dim=0)/len(batch_sample)} per sample")
                 if (current_iter == self.num_iterations):
                     self.logger.info(f"iteration: {current_iter}, avg. distance {perturbation_distance}")
 
-        return perturbed, perturbation_distance
+        return perturbed_previous_step, perturbation_distance
 
 
     def decision_function(self: Self,
@@ -352,13 +325,15 @@ class HopSkipJumpDistance:
         # Check if active_indices is None and set it to all indices if so
         if active_indices is None:
             active_indices = np.arange(images.size(0))
-
+        # TODO: Maybe it is not needed?
         images = clamp(images, self.clip_min, self.clip_max)
         images = images.to(float32)
 
         with no_grad():
             prob = self.model(images)
         perturbed_label = max(prob, dim=1)[1]
+        #TODO: check the print out
+        # print(f"perturbed_label{perturbed_label} for the data point {active_indices}")
         model_output_labels_tensor = self.model_output_labels[active_indices].clone().detach()
 
 
@@ -392,16 +367,15 @@ class HopSkipJumpDistance:
             # Stack all tensors into a single tensor
             active_data = stack(all_tensors)
 
-            random_noise = self.clip_min + rand_like(active_data) * (
-                self.clip_max - self.clip_min
-            )
-            random_noise = random_noise.to(self.device)
-            decision, _ = self.decision_function(random_noise, active_indices)
+            #TODO: normalizing in 1 and -1 imstead of clpping
+            random_noises = self.clip_min + rand(active_data.shape) * (self.clip_max - self.clip_min)
+            random_noises = random_noises.to(self.device)
+            decision, _ = self.decision_function(random_noises, active_indices)
 
             for i, idx in enumerate(active_indices):
                 if decision[i]:
                     success[idx] = True
-                    passed_random_noises[idx] = random_noise[i]
+                    passed_random_noises[idx] = random_noises[i]
                     passed_ordered_indices.append(idx)
 
             # Update active_indices with new data points
@@ -409,7 +383,7 @@ class HopSkipJumpDistance:
 
             num_evals += 1
             if len(active_indices) == 0:
-                self.logger.info("All data points have been successfully perturbed by random noise "
+                self.logger.info("All data points in the batch have been successfully perturbed by random noise "
                                  f"after {num_evals} evaluations.")
                 break
 
@@ -441,61 +415,75 @@ class HopSkipJumpDistance:
         high = ones(len(self.data_loader.dataset), dtype=float).to(self.device)
         mid = zeros(len(self.data_loader.dataset), dtype=float).to(self.device)
         success = np.zeros(len(self.data_loader.dataset), dtype=bool)
-        active_indices = np.arange(self.batch_size)
-        passed_opt_noises = zeros((len(self.data_loader.dataset), self.image_shape[0], self.image_shape[1], self.image_shape[2]))
-        passed_opt_ordered_indices = []
+        active_indices = np.where(~success)[0][:self.batch_size]
+        passed_init = zeros((len(self.data_loader.dataset), self.image_shape[0], self.image_shape[1], self.image_shape[2]))
+        init_orderd_indices = []
         num_evals = 0
+        batch_i = 0
 
 
         while not success.all():
 
-            active_data = []
+            batch_init_ordered_indices = []
+            active_data_batch = []
+
             for idx in active_indices:
-                active_data.append(self.data_loader.dataset[idx])
-            all_tensors = [unpack_tuple[0] for unpack_tuple in active_data]
-            active_data = stack(all_tensors).to(self.device)
+                active_data_batch.append(self.data_loader.dataset[idx])
+            all_tensors = [unpack_tuple[0] for unpack_tuple in active_data_batch]
+            active_data_batch = stack(all_tensors).to(self.device)
 
-            active_noise = passed_random_noises[active_indices]
+            batch_active_indices =tensor(np.arange(len(active_indices))).to(self.device)
+            batch_noise = passed_random_noises[active_indices]
+            batch_mid = mid[active_indices]
+            batch_low = low[active_indices]
+            batch_high = high[active_indices]
 
-            mid_batch = mid[active_indices]
-            low_batch = low[active_indices]
-            high_batch = high[active_indices]
+            while len(batch_active_indices) > 0:
+                batch_mid[batch_active_indices] = (batch_high[batch_active_indices] + batch_low[batch_active_indices]) / 2.0
 
-            mid_batch = (high_batch + low_batch) / 2.0
-            blended = (1 -  mid_batch.view(-1, 1, 1, 1) ) * active_noise +  mid_batch.view(-1, 1, 1, 1) * active_noise
+                # Projections of the data: blended = (1-mid) * sample + mid * noise
+                midds = batch_mid[batch_active_indices].reshape(-1, 1, 1, 1)
+                sampels = active_data_batch[batch_active_indices]
+                noises = batch_noise[batch_active_indices]
+                blended = (1 - midds) * sampels  +  midds * noises
+                blended = blended.to(self.device)
+                original_indices = batch_active_indices + batch_i * self.batch_size
+                decisions, _  = self.decision_function(blended, original_indices)
 
+                # Update high where decisions is True
+                batch_high[batch_active_indices[decisions]] = batch_mid[batch_active_indices[decisions]].clone().detach()
 
-            blended = blended.to(self.device)
-            decisions, _  = self.decision_function(blended, active_indices)
-            # Update high where decisions is True
-            high_batch[decisions] = mid_batch[decisions].clone().detach()
+                # Update low where decisions is False
+                batch_low[batch_active_indices[~decisions]] = batch_mid[batch_active_indices[~decisions]].clone().detach()
 
-            # Update low where decisions is False
-            low_batch[~decisions] = mid_batch[~decisions].clone().detach()
+                # Update success where the difference between high and low is less than X
+                mask_out = (batch_high[batch_active_indices] - batch_low[batch_active_indices] <= 0.01)
+                for _ , i in enumerate(batch_active_indices):
+                    if  mask_out[i]:
+                        idx = i + batch_i * self.batch_size
+                        success[idx] = True
+                        sample = active_data_batch[i]
+                        opt_noise = (1 - batch_high[i]) * sample + batch_high[i] * batch_noise[i]
+                        passed_init[idx] = opt_noise.clone().detach()
+                        batch_init_ordered_indices.append(idx)
 
-            for i, idx in enumerate(active_indices):
-                if high_batch[i] - low_batch[i] > 0.00001 : #< 1.5:
-                    success[idx] = True
-                    opt_noise = (1 - high_batch[i]) * active_data[i] + high_batch[i] * passed_random_noises[i]
-                    passed_opt_noises[idx] = opt_noise.clone().detach()
-                    passed_opt_ordered_indices.append(idx)
-
+                batch_active_indices = batch_active_indices[~mask_out]
 
             # Update active_indices with new data points
             active_indices = np.where(~success)[0][:self.batch_size]
+            init_orderd_indices.extend(batch_init_ordered_indices)
+            batch_i += 1
 
             if num_evals % 20 == 0 and self.verbose:
                 # Print progress
                 ratio_success = sum(success).item() / len(self.data_loader.dataset)
                 self.logger.info(f"Iteration {num_evals}: {ratio_success*100:.4f}% success")
-
             num_evals += 1
             if len(active_indices) == 0:
                 self.logger.info(f"Initialized binary search has been completed after {num_evals} evaluations.")
                 break
 
-        return passed_opt_noises, passed_opt_ordered_indices
-
+        return passed_init, init_orderd_indices
 
 
     def compute_distance(self: Self,
@@ -559,7 +547,7 @@ class HopSkipJumpDistance:
     def geometric_progression_for_stepsize(self: Self,
                                            samples: Tensor,
                                            updates: Tensor,
-                                           dist: Tensor,
+                                           disturbed: Tensor,
                                            current_iteration: int,
                                            active_indices: np.ndarray, b_i:int) -> Tensor:
         """Calculates the step size for geometric progression in the HopSkipJumpDistance algorithm.
@@ -568,7 +556,7 @@ class HopSkipJumpDistance:
         ----
             samples (Tensor): The input samples.
             updates (Tensor): The updates to be applied to the samples.
-            dist (Tensor): The distance value.
+            disturbed (Tensor): disturbed
             current_iteration (int): The current iteration of the algorithm.
             active_indices (np.ndarray): The active indices.
             b_i (int): The value of b_i.
@@ -578,8 +566,8 @@ class HopSkipJumpDistance:
             Tensor: The calculated step size for geometric progression.
 
         """
+        dist = self.compute_distance(samples, disturbed )
         batch_epsilon = dist / np.sqrt(current_iteration)
-        active_indices = np.array(active_indices)
 
         success = np.zeros(len(samples), dtype=bool)
         batch_active_indices = np.arange(len(samples))
@@ -630,7 +618,7 @@ class HopSkipJumpDistance:
             None
 
         """
-        d = int(np.prod(self.shape))
+        d = int(np.prod(self.image_shape))
         if current_iteration == 1:
             delta = 0.1 * (self.clip_max - self.clip_min)
             delta_batch = full((len(dist_post_update),), delta)
@@ -671,16 +659,16 @@ class HopSkipJumpDistance:
         # Choose number of evaluations.
         num_evals = int(builtins.min(self.initial_num_evals * np.sqrt(iteration + 1),
                                         self.max_num_evals))
-        approx_grad = zeros((len(samples),) + self.shape).to(self.device)
+        approx_grad = zeros((len(samples),) + self.image_shape).to(self.device)
 
         for i, sample in enumerate(samples):
-            noise_shape = [num_evals] + list(self.shape)
+            noise_shape = [num_evals] + list(self.image_shape)
             if self.constraint == 2:
-                rv = randn(noise_shape)
+                rv = rand(noise_shape)
             elif self.constraint == np.inf:
                 rv = -1 + rand(noise_shape) * 2
 
-            axis = tuple(range(1, 1 + len(self.shape)))
+            axis = tuple(range(1, 1 + len(self.image_shape)))
             rv = rv / torch_sqrt(torch_sum(rv ** 2, dim=axis, keepdim=True))
             rv = rv.to(self.device)
             perturbed = sample + delta[i] * rv
@@ -691,7 +679,7 @@ class HopSkipJumpDistance:
             sample_index = np.full(num_evals, active_indices[i])
             decisions, _ = self.decision_function(perturbed, sample_index)
             fval = 2.0 * decisions.view((decisions.shape[0],) +
-                                        (1,) * len(self.shape)) - 1.0
+                                        (1,) * len(self.image_shape)) - 1.0
 
             # Baseline subtraction (when fval differs)
             fval_mean = mean(fval)
@@ -707,7 +695,6 @@ class HopSkipJumpDistance:
             approx_grad[i] = gradf / norm(gradf, p=2)
 
         return approx_grad
-
 
 
     def binary_search_batch(self: Self,
@@ -731,55 +718,56 @@ class HopSkipJumpDistance:
             None
 
         """
-        # I think this should be included when stepsize_search is grid_search.
-        if self.stepsize_search == "grid_search":
-            dists_post_update = stack(
-                [
-                    self.compute_distance(original_image_batch, perturbed_image)
-                    for perturbed_image in perturbed_images_batch
-                ]
-            )
-        else:
-            dists_post_update = self.compute_distance(original_image_batch, perturbed_images_batch)
+
+        out_images = zeros((len(perturbed_images_batch),) + self.image_shape).to(self.device)
+        dists_pre_update = self.compute_distance(original_image_batch, perturbed_images_batch)
 
         # Choose upper thresholds in binary searches based on constraint.
         if self.constraint == np.inf:
-            highs = dists_post_update
+            highs = dists_pre_update
             # Stopping criteria.
-            thresholds = min(dists_post_update * self.theta, self.theta)
+            thresholds = min(dists_pre_update * self.theta, self.theta)
         else:
             highs = ones(len(perturbed_images_batch)).to(self.device)
             thresholds = self.theta
 
         lows = zeros(len(perturbed_images_batch)).to(self.device)
+        mids = zeros(len(perturbed_images_batch)).to(self.device)
 
-        while max((highs - lows) / thresholds) > 1:
-            # projection to mids.
-            mids = (highs + lows) / 2.0
-            mid_images = self.project(original_image_batch, perturbed_images_batch, mids)
+        active_data_batch = []
+        for idx in active_indices:
+            active_data_batch.append(self.data_loader.dataset[idx])
+        all_tensors = [unpack_tuple[0] for unpack_tuple in active_data_batch]
+        active_data_batch = stack(all_tensors).to(self.device)
+        batch_active_indices =np.arange(len(active_indices))
 
-            # Update highs and lows based on model decisions.
-            decisions, perturbed_label = self.decision_function(mid_images, active_indices)
-            lows = where(decisions == 0, mids, lows)
-            highs = where(decisions == 1, mids, highs)
+        while len(batch_active_indices) > 0:
+            mids[batch_active_indices] = (highs[batch_active_indices] + lows[batch_active_indices]) / 2.0
+            blended_images = self.project(original_image_batch[batch_active_indices],
+                                          perturbed_images_batch[batch_active_indices],
+                                          mids[batch_active_indices])
+            decisions, _ = self.decision_function(blended_images,
+                                                active_indices[batch_active_indices])
+            decisions = decisions.cpu().numpy()
 
-        out_images = self.project(original_image_batch, perturbed_images_batch, highs)
+            # Update high where decisions is True
+            highs[batch_active_indices[decisions]] = mids[batch_active_indices[decisions]].clone().detach()
 
-        # Compute distance of the output image to select the best choice.
-        if self.stepsize_search == "grid_search":
-            dists = stack(
-                [
-                    self.compute_distance(original_image_batch, out_image)
-                    for out_image in out_images
-                ]
-            )
-            _, idx = min(dists, 0)
+            # Update low where decisions is False
+            lows[batch_active_indices[~decisions]] = mids[batch_active_indices[~decisions]].clone().detach()
 
-            dist = dists_post_update[idx]
-            out_image = out_images[idx].unsqueeze(0)
-            return out_image, dist, perturbed_label
+            a = (highs[batch_active_indices] - lows[batch_active_indices]) / thresholds
+            mask_out = (a.cpu().numpy() <= 1)
+            for _ , i in enumerate(batch_active_indices):
+                if  mask_out[i]:
+                    sample = original_image_batch[i]
+                    perturbed = perturbed_images_batch[i]
+                    out_images[i] = self.project(sample.unsqueeze(0), perturbed.unsqueeze(0), highs[i].unsqueeze(0))
+            batch_active_indices = batch_active_indices[~mask_out]
 
-        return out_images, dists_post_update, perturbed_label
+        return out_images, dists_pre_update
+
+
 
 
 

@@ -128,7 +128,7 @@ class SimpleCNN(Module):
         x = functional.relu(self.conv4(x))
 
         # # Flatten the output from conv layers
-        x = x.view(-1, 64 * 16 * 16)
+        x = x.reshape(-1, 64 * 16 * 16)
 
         # Fully connected layers
         x = functional.relu(self.fc1(x))

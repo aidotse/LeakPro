@@ -1,4 +1,5 @@
 import pickle  # noqa: D100
+from itertools import chain
 
 import numpy as np
 from scipy.stats import ks_2samp
@@ -6,6 +7,7 @@ from sklearn.metrics import precision_score, recall_score, roc_curve
 from torch.utils.data import DataLoader
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
+from leakpro.attacks.mia_attacks.delete2 import hop_skip_jump_attack
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
@@ -45,8 +47,8 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
         self.shadow_train_fraction = configs.get("shadow_train_fraction", 0.5)
         self.num_shadow_models = configs.get("num_shadow_models", 1)
         self.norm = configs.get("norm", 2)
-        self.y_target = configs.get("y_target")
-        self.image_target = configs.get("image_target")
+        self.y_target = configs.get("y_target", None)  # noqa: SIM910
+        self.image_target = configs.get("image_target", None)  # noqa: SIM910
         self.initial_num_evals = configs.get("initial_num_evals", 100)
         self.max_num_evals = configs.get("max_num_evals", 10000)
         self.stepsize_search = configs.get("stepsize_search", "geometric_progression")
@@ -55,12 +57,90 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
         self.constraint = configs.get("constraint", 2)
         self.batch_size = configs.get("batch_size", 128)
         self.verbose = configs.get("verbose", True)
-        self.clip_min = configs.get("clip_min", -1)
-        self.clip_max = configs.get("clip_max", 1)
 
         self.reproducing_paper_results = configs.get("reproducing_paper_results", True)
-        self.paper_data_fr = configs.get("paper_data_fr", 0.083)
+        self.paper_data_fr = configs.get("paper_data_fr", 0.83)
+        self.user_input_validation()
 
+    def user_input_validation(self:Self) -> None:
+        """Validate the user input configurations."""
+        self._validate_norm()
+        self._validate_stepsize_search()
+        self._validate_constraint()
+        self._validate_initial_num_evals()
+        self._validate_max_num_evals()
+        self._validate_num_iterations()
+        self._validate_gamma()
+        self._validate_batch_size()
+        self._validate_num_shadow_models()
+        self._validate_shadow_data_fraction()
+        self._validate_shadow_train_fraction()
+        self._validate_y_target()
+
+    def _validate_norm(self:Self) -> None:
+        """Validate the norm value."""
+        valid_norm_values = [1, 2, np.inf]
+        if self.norm not in valid_norm_values:
+            raise ValueError(f"Invalid norm value: {self.norm}. Must be one of {valid_norm_values}")
+
+    def _validate_stepsize_search(self:Self) -> None:
+        """Validate the stepsize_search value."""
+        valid_stepsize_search_values = ["geometric_progression", "grid_search"]
+        if self.stepsize_search not in valid_stepsize_search_values:
+            raise ValueError(f"Invalid stepsize_search value: {self.stepsize_search}. Must be one of {valid_stepsize_search_values}")
+
+    def _validate_constraint(self:Self) -> None:
+        """Validate the constraint value."""
+        valid_constraint_values = [1, 2]
+        if self.constraint not in valid_constraint_values:
+            raise ValueError(f"Invalid constraint value: {self.constraint}. Must be one of {valid_constraint_values}")
+
+    def _validate_initial_num_evals(self) -> None:
+        """Validate the initial_num_evals value."""
+        if not (1 <= self.initial_num_evals <= 1000):
+            raise ValueError(f"Invalid initial_num_evals value: {self.initial_num_evals}. "
+                            "Must be between 1 and 1000 (inclusive).")
+
+    def _validate_max_num_evals(self:Self) -> None:
+        """Validate the max_num_evals value."""
+        if self.max_num_evals <= self.initial_num_evals:
+            raise ValueError("max_num_evals must be greater than initial_num_evals")
+
+    def _validate_num_iterations(self:Self) -> None:
+        """Validate the num_iterations value."""
+        if self.num_iterations <= 0:
+            raise ValueError("num_iterations must be greater than 0")
+
+    def _validate_gamma(self:Self) -> None:
+        """Validate the gamma value."""
+        if self.gamma <= 0:
+            raise ValueError("gamma must be greater than 0")
+
+    def _validate_batch_size(self:Self) -> None:
+        """Validate the batch_size value."""
+        if self.batch_size <= 0:
+            raise ValueError("batch_size must be greater than 0")
+
+    def _validate_num_shadow_models(self:Self) -> None:
+        """Validate the num_shadow_models value."""
+        if self.num_shadow_models <= 0:
+            raise ValueError("num_shadow_models must be greater than 0")
+
+    def _validate_shadow_data_fraction(self:Self) -> None:
+        """Validate the shadow_data_fraction value."""
+        if self.shadow_data_fraction <= 0 or self.shadow_data_fraction > 1:
+            raise ValueError("shadow_data_fraction must be in the range (0, 1]")
+
+    def _validate_shadow_train_fraction(self:Self) -> None:
+        """Validate the shadow_train_fraction value."""
+        if self.shadow_train_fraction <= 0 or self.shadow_train_fraction > 1:
+            raise ValueError("shadow_train_fraction must be in the range (0, 1]")
+
+    def _validate_y_target(self:Self) -> None:
+        """Validate the y_target value."""
+        num_classes = self.target_model_metadata["init_params"]["num_classes"]
+        if self.y_target is not None and self.y_target not in range(num_classes):
+            raise ValueError("y_target must be an integer and in the range of the number of classes in the target model.")
 
 
     def description(self:Self) -> dict:
@@ -68,8 +148,10 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
         title_str = "Label-Only Membership Inference Attacks"
         reference_str = "Christopher A. Choquette-Choo, Florian Tramer, Nicholas Carlini and Nicolas Papernot\
             Label-Only Membership Inference Attacks. (2020)."
-        summary_str = ""
-        detailed_str = ""
+        summary_str = "This attack is one of the introduce black-box membership inference attacks in the paper."
+        detailed_str = "The distance attack executed based on the estimation of the distance between the input \
+                        data and the decision boundary of a shadow model of the target model. \
+                        The attack aims to use this distance as a signal to infer membership."
         return {
             "title_str": title_str,
             "reference": reference_str,
@@ -131,24 +213,27 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
 
         """
         shadow_model = self.shadow_model[0]
+        # shadow_model = self.target_model
 
 
-        if self.reproducing_paper_results:
-            aux_data_size = int(len(self.shadow_train_data_indices)*self.paper_data_fr)
-            attack_in_indices = np.random.choice(self.shadow_train_data_indices, aux_data_size, replace=False)
-            attack_out_indices = np.random.choice(self.shadow_test_data_indices, aux_data_size, replace=False)
+        # if self.reproducing_paper_results:
+        aux_data_size = int(len(self.shadow_train_data_indices)*self.paper_data_fr)
+        attack_in_indices = np.random.choice(self.shadow_train_data_indices, aux_data_size, replace=False)
+        attack_out_indices = np.random.choice(self.shadow_test_data_indices, aux_data_size, replace=False)
 
-            attack_in_dataset = self.population.subset(attack_in_indices)
-            attack_out_dataset = self.population.subset(attack_out_indices)
+        attack_in_dataset = self.population.subset(attack_in_indices)
+        attack_out_dataset = self.population.subset(attack_out_indices)
 
-            attack_in_dataloader = DataLoader(attack_in_dataset, batch_size=self.batch_size, shuffle=True)
-            attack_out_dataloader = DataLoader(attack_out_dataset, batch_size=self.batch_size, shuffle=True)
-        else:
-            attack_in_dataloader = DataLoader(self.shadow_train_dataset, batch_size=self.batch_size, shuffle=True)
-            attack_out_dataloader = DataLoader(self.shadow_test_dataset, batch_size=self.batch_size, shuffle=True)
+        attack_in_dataloader = DataLoader(attack_in_dataset, batch_size=self.batch_size, shuffle=False)
+        attack_out_dataloader = DataLoader(attack_out_dataset, batch_size=self.batch_size, shuffle=False)
+        # else:
+        #     attack_in_dataloader = DataLoader(self.shadow_train_dataset, batch_size=self.batch_size, shuffle=False)
+        #     attack_out_dataloader = DataLoader(self.shadow_test_dataset, batch_size=self.batch_size, shuffle=False)
 
 
-        self.logger.info("Running Hop Skip Jump distance attack")
+        self.logger.info("Running Hop Skip Jump distance attack, in data ")
+
+        # compute the perturbation distances for the in-members of the shadow model
         _ , perturbation_distances_in = self.signal(shadow_model,
                                                     attack_in_dataloader,
                                                     self.logger,
@@ -162,11 +247,11 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
                                                     self.gamma,
                                                     self.constraint,
                                                     self.batch_size,
-                                                    self.verbose,
-                                                    self.clip_min,
-                                                    self.clip_max,
+                                                    self.verbose
                                                     )
 
+        # compute the perturbation distances for the out-members of the shadow model
+        self.logger.info("Running Hop Skip Jump distance attack, out data")
         _ , perturbation_distances_out = self.signal( shadow_model,
                                                 attack_out_dataloader,
                                                 self.logger,
@@ -180,17 +265,28 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
                                                 self.gamma,
                                                 self.constraint,
                                                 self.batch_size,
-                                                self.verbose,
-                                                self.clip_min,
-                                                self.clip_max,
+                                                self.verbose
                                                 )
 
         np.save("perturbation_in.npy", perturbation_distances_in)
         np.save("perturbation_out.npy", perturbation_distances_out)
-
+        # perturbation_distances_in = np.load("perturbation_in.npy")
+        # perturbation_distances_out = np.load("perturbation_out.npy")
 
         if self.reproducing_paper_results:
+
+            # getting HSJ for in and out data in target model from cleverhans and save them for sanity check
+            self.logger.info("first sanity check")
+            hans_distances_in = self.sanity_check_hansclevernce(attack_in_dataset, self.target_model)
+            # hans_distances_out = self.sanity_check_hansclevernce(attack_out_dataset, self.target_model.model_obj)
+            np.save("hans_distances_in_target.npy", hans_distances_in)
+
+            self.logger.info("Second sanity check")
+            # getting HSJ for in and out data in target model and save them for sanity check
             self.sanity_check(perturbation_distances_in, perturbation_distances_out)
+
+            # np.save("hans_distances_out.npy", hans_distances_out)
+
 
 
         perturbed_dist = np.concatenate([perturbation_distances_in , perturbation_distances_out], axis=0)
@@ -299,15 +395,15 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
         target_train_indices = self.target_model_metadata["train_indices"]
         target_test_indices = self.target_model_metadata["test_indices"]
 
-        aux_data_size = int(len(target_train_indices)*self.reproducing_paper_results)
+        aux_data_size = int(len(target_train_indices)*self.paper_data_fr)
         attack_in_indices = np.random.choice(target_train_indices, aux_data_size, replace=False)
         attack_out_indices = np.random.choice(target_test_indices, aux_data_size, replace=False)
 
         attack_in_dataset = self.population.subset(attack_in_indices)
         attack_out_dataset = self.population.subset(attack_out_indices)
 
-        attack_in_dataloader = DataLoader(attack_in_dataset, batch_size=self.batch_size, shuffle=True)
-        attack_out_dataloader = DataLoader(attack_out_dataset, batch_size=self.batch_size, shuffle=True)
+        attack_in_dataloader = DataLoader(attack_in_dataset, batch_size=self.batch_size, shuffle=False)
+        attack_out_dataloader = DataLoader(attack_out_dataset, batch_size=self.batch_size, shuffle=False)
 
         _, in_data_distances = self.signal( self.target_model,
                                             attack_in_dataloader,
@@ -322,9 +418,7 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
                                             self.gamma,
                                             self.constraint,
                                             self.batch_size,
-                                            self.verbose,
-                                            self.clip_min,
-                                            self.clip_max,
+                                            self.verbose
                                             )
         _ , out_data_distances = self.signal(self.target_model,
                                             attack_out_dataloader,
@@ -339,10 +433,12 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
                                             self.gamma,
                                             self.constraint,
                                             self.batch_size,
-                                            self.verbose,
-                                            self.clip_min,
-                                            self.clip_max,
+                                            self.verbose
                                             )
+        np.save("in_data_distances_target_load_init.npy", in_data_distances)
+        np.save("out_data_distances_target.npy", out_data_distances)
+        # in_data_distances = np.load("perturbation_in.npy")
+        out_data_distances = np.load("perturbation_out.npy")
 
         # Find the optimal threshold
         self.best_threshold_precision(self.find_threshold1(in_data_distances, out_data_distances),
@@ -539,3 +635,51 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
         tn = np.sum(~out_above_threshold)
         accuracy = (tp + tn) / (tp + tn + fp + fn)
         self.logger.info(f"Accuracy: {accuracy:.4f}")
+
+    def sanity_check_hansclevernce(self, dataset, model):
+        """Sanity check the hop skip jump attack using the cleverhans library.
+
+        Parameters
+        ----------
+        dataloder : DataLoader
+            The dataloader for the dataset.
+        model : torch.nn.Module
+            The target model.
+
+        Returns
+        -------
+        None
+
+        """
+        distances = []
+        # dataset = dataloder.dataset
+        new_dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+        attacked_model = model.model_obj
+        attacked_model.eval()
+        attacked_model.to("cpu")
+        init = []
+        distances = []
+
+        for idx , (data, _) in enumerate(new_dataloader):
+            if idx <15 :
+                adv_x, distance, init_i = hop_skip_jump_attack(attacked_model, data,self.logger, 2, None, None, 100,10000,"geometric_progression", 64,
+                                             1.0, 2, 128, True, -1, 1)
+
+                distances.append(distance)
+                init.append(init_i)
+        numpy_list = [tensor.cpu().numpy() for tensor in init]
+        final_numpy_array = np.concatenate(numpy_list)
+
+        # Step 4: Save the final NumPy array
+        np.save("init_hans_in.npy", final_numpy_array)
+
+        flat_distances = list(chain.from_iterable(distances))
+        # Convert tensors to numpy arrays, ensuring each tensor is at least one-dimensional
+        nump_dist_list = [tensor.cpu().numpy() if tensor.dim() > 0 else np.array([tensor.cpu().item()]) for tensor in flat_distances]
+
+        # Concatenate the numpy arrays if necessary
+        final_numpy_array_dist = np.concatenate(nump_dist_list)
+
+        # Save the final numpy array
+        np.save("cleverhans_target_in_distance.npy", final_numpy_array_dist)
+        return final_numpy_array_dist

@@ -27,18 +27,16 @@ audit:  # Configurations for auditing
       shadow_training_data_fraction: 0.5  # Fraction of shadow data to use for training the shadow models
       num_shadow_models: 1 # Number of shadow models to train
       target_metadata_path: "./target/model_metadata.pkl"
-      num_iterations: 10 # Number of iterations for the optimization
+      num_iterations: 4 # Number of iterations for the optimization
       initial_num_evals: 100 # Number of evaluations for number of random vecotr to estimate the gradient
       max_num_evals: 10000 # Maximum number of evaluations
       stepsize_search: "geometric_progression" # Step size search method
       gamma: 1.0 # Gamma for the optimization
       constraint: 2 
-      batch_size: 128 
+      batch_size: 50 
       verbose: True
-      clip_min: -1
-      clip_max: 1
       reproducing_paper_results: True
-      paper_data_fr : 0.083
+      paper_data_fr : 0.04
 
 
   report_log: "./leakpro_output/results"  # Folder to save the auditing report

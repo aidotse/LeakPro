@@ -361,8 +361,6 @@ class HopSkipJumpDistance(Signal):
         constraint: int = 2,
         batch_size: int = 128,
         verbose: bool = True,
-        clip_min: float = -1,
-        clip_max: float = 1,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Built-in call method.
 
@@ -382,8 +380,6 @@ class HopSkipJumpDistance(Signal):
             constraint: The constraint value.
             batch_size: The batch size.
             verbose: Whether to print verbose output.
-            clip_min: The minimum clipping value.
-            clip_max: The maximum clipping value.
 
         Returns:
         -------
@@ -406,9 +402,7 @@ class HopSkipJumpDistance(Signal):
                                                     gamma,
                                                     constraint,
                                                     batch_size,
-                                                    verbose,
-                                                    clip_min,
-                                                    clip_max
+                                                    verbose
                                                     )
 
         return perturbed_imgs, perturbed_distance

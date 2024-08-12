@@ -122,9 +122,7 @@ class Model(ABC):
                                     gamma: float,
                                     constraint: int ,
                                     batch_size: int,
-                                    verbose: bool ,
-                                    clip_min: float,
-                                    clip_max: float) -> np.ndarray:
+                                    verbose: bool ) -> np.ndarray:
         """Calculate the hop-skip-jump distance for a given set of parameters.
 
         Args:
@@ -142,8 +140,6 @@ class Model(ABC):
             constraint: Integer indicating the constraint.
             batch_size: Integer indicating the batch size.
             verbose: Boolean indicating if verbose output should be displayed.
-            clip_min: Float indicating the minimum clipping value.
-            clip_max: Float indicating the maximum clipping value.
 
         Returns:
         -------
@@ -366,9 +362,7 @@ class PytorchModel(Model):
                                     gamma: float,
                                     constraint: int ,
                                     batch_size: int,
-                                    verbose: bool ,
-                                    clip_min: float,
-                                    clip_max: float) -> Tuple[np.ndarray, np.ndarray]:
+                                    verbose: bool) -> Tuple[np.ndarray, np.ndarray]:
         """Calculate the hop-skip-jump distance for a given set of inputs.
 
         Args:
@@ -394,7 +388,7 @@ class PytorchModel(Model):
             A tuple containing the perturbed images and the hop-skip-jump distances.
 
         """
-        hop_skip_jump= HopSkipJumpDistance(self.model_obj,
+        hop_skip_jump_instance= HopSkipJumpDistance(self.model_obj,
                                                     data_loader,
                                                     logger,
                                                     norm,
@@ -407,8 +401,6 @@ class PytorchModel(Model):
                                                     gamma,
                                                     constraint,
                                                     batch_size,
-                                                    verbose,
-                                                    clip_min,
-                                                    clip_max)
-        hop_skip_jump_perturbed_img, hop_skip_jump_distances = hop_skip_jump.hop_skip_jump()
+                                                    verbose)
+        hop_skip_jump_perturbed_img, hop_skip_jump_distances = hop_skip_jump_instance.hop_skip_jump()
         return hop_skip_jump_perturbed_img, hop_skip_jump_distances
