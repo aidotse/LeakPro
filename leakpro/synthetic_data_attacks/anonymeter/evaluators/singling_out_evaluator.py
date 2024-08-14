@@ -19,10 +19,10 @@ def escape_quotes(*, input: str) -> str:
     """Function escapes quotes for given input string."""
     return input.replace('"', '\\"').replace("'", "\\'")
 
-def safe_query_counts(*, query: str, df: pd.DataFrame) -> int:
-    """Return number of elements in df satisfying a given query."""
+def safe_query_elements(*, query: str, df: pd.DataFrame) -> List[int]:
+    """Return elements indexes in df satisfying a given query."""
     try:
-        return len(df.query(query, engine="python"))
+        return df.query(query, engine="python").index.to_list()
     except Exception as ex:
         raise Exception(f"Query {query} failed with {ex}.") # noqa: B904
 
@@ -100,6 +100,7 @@ class UniqueSinglingOutQueries(BaseModel):
     df: pd.DataFrame
     sorted_queries_set: Set[str] = set()
     queries: List[str] = []
+    idxs: List[int] = []
     count: int = 0
 
     def evaluate_queries(self: Self, *, queries: List[str]) -> Self:
@@ -107,6 +108,11 @@ class UniqueSinglingOutQueries(BaseModel):
 
         Function returns UniqueSinglingOutQueries instance with unique singling out queries and count.
         """
+        #Reset parameters
+        self.sorted_queries_set = set()
+        self.queries = []
+        self.idxs = []
+        self.count = 0
         #Iterate through queries
         for query in queries:
             self.check_and_append(query=query)
@@ -116,7 +122,8 @@ class UniqueSinglingOutQueries(BaseModel):
         """Add a singling out query to the collection.
 
         A query singles out if it returns one record from self.df.
-        Only queries that are not already in this collection
+        Only queries which element's index has not been added,
+        or that are not already in the collection
         are appended.
 
         Parameters
@@ -125,15 +132,17 @@ class UniqueSinglingOutQueries(BaseModel):
             query expression to be added.
 
         """
-        #Get sorted_query
-        sorted_query = "".join(sorted(query))
-        if sorted_query not in self.sorted_queries_set:
-            #Get nr_records
-            nr_records = safe_query_counts(query=query, df=self.df)
-            if nr_records == 1:
-                #If 1 record, append query and add to count
+        #Get indexes for query
+        idxs = safe_query_elements(query=query, df=self.df)
+        #Check for 1 record, idxs and sorted query
+        if (len(idxs) == 1) and (idxs[0] not in self.idxs):
+            #Get sorted_query
+            sorted_query = "".join(sorted(query))
+            if sorted_query not in self.sorted_queries_set:
+                #Append to sorted_queries, queries, idxs and count
                 self.sorted_queries_set.add(sorted_query)
                 self.queries.append(query)
+                self.idxs.append(idxs[0])
                 self.count += 1
 
 def naive_singling_out_attack(*,
