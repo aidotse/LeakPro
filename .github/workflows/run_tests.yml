@@ -35,7 +35,7 @@ jobs:
       - name: provision-with-micromamba
         uses: mamba-org/provision-with-micromamba@main
         with:
-          environment-file: environment.yml
+          environment-file: AMLsim/environment.yml
           environment-name: leakpro
           cache-downloads: true
 
