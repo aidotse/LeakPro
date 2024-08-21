@@ -30,16 +30,13 @@ def test_shadow_model_handler_singleton(image_handler:Cifar10InputHandler) -> No
     with raises(ValueError) as excinfo:
         ShadowModelHandler(image_handler)
     assert str(excinfo.value) == "Singleton already created with specific parameters."
-    
-    # delete the singleton to not get error in the next tests
-    del sm 
 
 def test_shadow_model_creation_and_loading(image_handler:Cifar10InputHandler) -> None:
     shadow_model_config = _setup_shadow_test()
     image_handler.configs.shadow_model = shadow_model_config
     
     # Test initialization
-    sm = ShadowModelHandler(image_handler)
+    sm = ShadowModelHandler()
     
     assert sm.batch_size == shadow_model_config.batch_size
     assert sm.epochs == shadow_model_config.epochs
