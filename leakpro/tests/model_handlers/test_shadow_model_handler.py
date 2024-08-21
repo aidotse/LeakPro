@@ -20,6 +20,7 @@ def _setup_shadow_test() -> DotMap:
     shadow_model_config.loss = {"name": "crossentropyloss"}
     return shadow_model_config
 
+
 def test_shadow_model_handler_singleton(image_handler:Cifar10InputHandler) -> None:
     """Test that only one instance gets created."""
     shadow_model_config = _setup_shadow_test()
@@ -29,6 +30,9 @@ def test_shadow_model_handler_singleton(image_handler:Cifar10InputHandler) -> No
     with raises(ValueError) as excinfo:
         ShadowModelHandler(image_handler)
     assert str(excinfo.value) == "Singleton already created with specific parameters."
+    
+    # delete the singleton to not get error in the next tests
+    del sm 
 
 def test_shadow_model_creation_and_loading(image_handler:Cifar10InputHandler) -> None:
     shadow_model_config = _setup_shadow_test()
@@ -91,3 +95,5 @@ def test_shadow_model_creation_and_loading(image_handler:Cifar10InputHandler) ->
     
     # remove created files
     shutil.rmtree(sm.storage_path)
+    del sm
+    
