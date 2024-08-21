@@ -182,7 +182,7 @@ class AttackLiRA(AbstractMIA):
                 self.online,
                 self.logger,
             )
-            memorization_mask = memorization.run()
+            memorization_mask, _, _ = memorization.run()
 
             # Filter masks
             self.in_indices_masks = self.in_indices_masks[memorization_mask, :]

@@ -83,7 +83,7 @@ class Memorization():
 
         mem_mask, privacy_mask = self.adjust_memorization_mask()
 
-        return (mem_mask | privacy_mask)
+        return (mem_mask | privacy_mask), self.memorization_score, self.privacy_score
 
     def _memorization_score(self:Self) -> None:
         """Run memorization score enhancement.
