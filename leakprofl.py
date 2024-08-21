@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+import torchvision
 import yaml
 from torch import manual_seed
 from torch.utils.data import Subset
@@ -16,6 +17,7 @@ from leakpro.attacks.attack_scheduler import AttackScheduler
 from leakpro.dataset import get_dataloader
 from leakpro.dev_utils.data_preparation import (
     get_adult_dataset,
+    get_ciar10_dataset_fl,
     get_cifar10_dataset,
     get_cinic10_dataset,
 )
@@ -64,23 +66,26 @@ def generate_client_input(configs: dict, logger: logging.Logger) -> tuple:
         population = get_adult_dataset(configs["gia_settings"]["dataset"], "./target/data", logger)
         target_model = shadow_model_blueprints.NN("not implemented")
     elif "cifar10" in configs["gia_settings"]["dataset"]:
-        population = get_cifar10_dataset(configs["gia_settings"]["dataset"], "./target/data", logger)
-        target_model = shadow_model_blueprints.ConvNet()
+        # population = get_cifar10_dataset(configs["gia_settings"]["dataset"], "./target/data", logger)
+        # target_model = shadow_model_blueprints.ResNet18()
+        target_model = shadow_model_blueprints.ResNet(torchvision.models.resnet.BasicBlock, [5, 5, 5], num_classes=100, base_width=16 * 10)
+        population, data_mean, data_std, at_image = get_ciar10_dataset_fl(target_model)
     elif "cinic10" in configs["gia_settings"]["dataset"]:
         population = get_cinic10_dataset(configs["gia_settings"]["dataset"], "./target/data", logger)
         target_model = shadow_model_blueprints.ResNet18(num_classes=10)
 
-    n_population = len(population)
+    # n_population = len(population)
 
-    train_dataset, _ = prepare_fl_client_dataset(n_population, configs)
+    # train_dataset, _ = prepare_fl_client_dataset(n_population, configs)
 
-    client_loader = get_dataloader(
-        Subset(population, train_dataset),
-        batch_size=configs["gia_settings"]["client_batch_size"],
-        shuffle=True,
-    )
+    # client_loader = get_dataloader(
+    #     Subset(population, train_dataset),
+    #     batch_size=configs["gia_settings"]["client_batch_size"],
+    #     shuffle=True,
+    # )
+    client_loader = population
 
-    return client_loader, target_model
+    return client_loader, target_model, data_mean, data_std, at_image
 
 if __name__ == "__main__":
 
@@ -96,7 +101,7 @@ if __name__ == "__main__":
         configs = yaml.safe_load(f)
 
     # Create client loader and model
-    client_loader, target_model = generate_client_input(configs["audit"], logger)
+    client_loader, target_model, data_mean, data_std, at_image = generate_client_input(configs["audit"], logger)
     # Set the random seed, log_dir
     manual_seed(configs["audit"]["random_seed"])
     np.random.seed(configs["audit"]["random_seed"])
@@ -107,7 +112,7 @@ if __name__ == "__main__":
     Path(report_dir).mkdir(parents=True, exist_ok=True)
 
     # Create user input handler
-    handler = Cifar10GIAInputHandler(configs=configs, logger=logger, client_data=client_loader,target_model=target_model)
+    handler = Cifar10GIAInputHandler(configs=configs, logger=logger, client_data=client_loader,target_model=target_model, data_mean=data_mean, data_std=data_std, at_image=at_image)
 
     attack_scheduler = AttackScheduler(handler)
     audit_results = attack_scheduler.run_attacks()

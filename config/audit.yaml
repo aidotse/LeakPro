@@ -26,6 +26,7 @@ audit:  # Configurations for auditing
     inverting_gradients:
       total_variation: 0.000001
       attack_lr: 0.1 # lr for the reconstruction optimizer
+      at_iterations: 1000
   gia_settings:
     client_batch_size: 1
     num_train_batches: 1

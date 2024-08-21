@@ -7,7 +7,6 @@ from copy import deepcopy
 import torch
 from torch import cuda, device
 from torch.utils.data import DataLoader
-from tqdm import tqdm
 
 from leakpro.fl_utils.gia_optimizers import MetaAdam, MetaOptimizer, MetaSGD
 from leakpro.fl_utils.gia_train import MetaModule
@@ -18,8 +17,8 @@ from leakpro.user_inputs.abstract_gia_input_handler import AbstractGIAInputHandl
 class Cifar10GIAInputHandler(AbstractGIAInputHandler):
     """Class to handle the user input for the CIFAR10 dataset."""
 
-    def __init__(self:Self, configs: dict, logger:logging.Logger, client_data: DataLoader, target_model: torch.nn.Module) -> None:
-        super().__init__(configs, logger, client_data, target_model)
+    def __init__(self:Self, configs: dict, logger:logging.Logger, client_data: DataLoader, target_model: torch.nn.Module, data_mean, data_std, at_image) -> None:
+        super().__init__(configs, logger, client_data, target_model, data_mean, data_std, at_image)
         self.criterion = self.get_criterion()
 
     def get_criterion(self:Self)->None:
@@ -51,7 +50,6 @@ class Cifar10GIAInputHandler(AbstractGIAInputHandler):
 
         Training does not update the original model, but returns a norm of what the update would have been.
         """
-
         gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
         self.target_model.to(gpu_or_cpu)
         patched_model = MetaModule(deepcopy(self.target_model))
@@ -59,9 +57,9 @@ class Cifar10GIAInputHandler(AbstractGIAInputHandler):
         patched_model_origin = {name: param.clone() for name, param in patched_model.parameters.items()}
         outputs = None
         epochs = self.configs["audit"]["gia_settings"]["epochs"]
-        for epoch in range(epochs):
+        for _ in range(epochs):
             train_loss, train_acc = 0, 0
-            for inputs, labels in tqdm(data, desc=f"Epoch {epoch+1}/{epochs}"):
+            for inputs, labels in data:
                 labels = labels.long()
                 inputs, labels = inputs.to(gpu_or_cpu, non_blocking=True), labels.to(gpu_or_cpu, non_blocking=True)
                 outputs = patched_model(inputs, patched_model.parameters)
@@ -70,11 +68,6 @@ class Cifar10GIAInputHandler(AbstractGIAInputHandler):
                 patched_model.parameters = optimizer.step(loss, patched_model.parameters)
                 train_acc += pred.eq(labels.data.view_as(pred)).sum()
                 train_loss += loss.item()
-            log_train_str = (
-                    f"Epoch: {epoch+1}/{epochs} | Train Loss: {train_loss/len(data):.8f} | "
-                    f"Train Acc: {float(train_acc)/len(data):.8f}"
-                    )
-            self.logger.info(log_train_str)
 
         model_delta = OrderedDict((name, param - param_origin)
                                                 for ((name, param), (name_origin, param_origin))

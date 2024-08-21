@@ -17,6 +17,7 @@ class InvertingGradients(AbstractGIA):
         self.logger.info("Inverting gradient initialized :)")
         self.t_v_scale = configs.get("total_variation")
         self.attack_lr = configs.get("attack_lr")
+        self.iterations = configs.get("at_iterations")
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
@@ -74,7 +75,7 @@ class InvertingGradients(AbstractGIA):
 
                                                                         24000 // 1.142], gamma=0.1)
 
-        for i in range(500):
+        for i in range(self.iterations):
             closure = self.gradient_closure(optimizer)
 
             loss = optimizer.step(closure)
@@ -89,13 +90,13 @@ class InvertingGradients(AbstractGIA):
         # Collect client data to one tensor
         all_data = []
 
-        for i in range(len(self.client_loader.dataset)):
-            x, _ = self.client_loader.dataset[i]
+        for i in range(len(self.client_loader)):
+            x, _ = self.client_loader[i]
             all_data.append(x)
 
         # Convert lists to tensors
         original_data_tensor = torch.stack(all_data)
-        return GIAResults(original_data_tensor, self.reconstruction, 0, self.data_mean, self.data_std)
+        return GIAResults(all_data[0], self.reconstruction, 0, self.data_mean, self.data_std)
 
     def total_variation(self: Self, x: torch.Tensor) -> torch.Tensor:
         """Anisotropic TV."""
@@ -130,7 +131,7 @@ class InvertingGradients(AbstractGIA):
             rec_loss = self.reconstruction_costs([gradient], self.client_gradient)
 
             self.logger.info(f"rec loss {rec_loss}")
-            rec_loss += self.t_v_scale * self.total_variation(self.reconstruction)
+            rec_loss += (self.t_v_scale * self.total_variation(self.reconstruction))
             rec_loss.backward()
             self.reconstruction.grad.sign_()
             return rec_loss
