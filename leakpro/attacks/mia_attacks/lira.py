@@ -52,7 +52,7 @@ class AttackLiRA(AbstractMIA):
         # Memorization config
         self.memorization = configs.get("memorization", False) # Set True
         self.use_privacy_score = configs.get("use_privacy_score", False) # Set True to filter based on privacy score aswell as memorization score
-        self.memorization_threshold = configs.get("memorization_threshold", 0.8) # Set percentile for most vulnerable data points (Not compatible with "num_memorization_audit_points" )
+        self.memorization_threshold = configs.get("memorization_threshold", 0.8) # Set percentile for most vulnerable data points (Not compatible with "num_memorization_audit_points" ), use 0.0 for paper thresholds 
         self.min_num_memorization_audit_points = configs.get("min_num_memorization_audit_points", 10) # Set minimum allowed audit points after memorization
         self.num_memorization_audit_points = configs.get("num_memorization_audit_points", 0) # Set direct number of most vulnerable audit data points (Not compatible with "memorization_threshold" )
 
