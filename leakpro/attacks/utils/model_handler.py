@@ -28,17 +28,13 @@ class ModelHandler():
         self.loss_config = {}
         self.optimizer_config = {}
 
-    def _import_model_from_path(self:Self, module_path:str, model_class:str)->Module:
+    def _import_model_from_path(self:Self, module_path:str, model_class:str)->None:
         """Import the model from the given path.
 
         Args:
         ----
             module_path (str): The path to the module.
             model_class (str): The name of the model class.
-
-        Returns:
-        -------
-            Module: The imported blueprint of a model.
 
         """
         try:
@@ -87,7 +83,7 @@ class ModelHandler():
 
         return model, criterion, optimizer
 
-    def _load_model(self:Self, model_path:str) -> Module:
+    def _load_model(self:Self, model_path:str) -> Tuple[Module, Module]:
         """Load a model from a path.
 
         Args:
@@ -97,6 +93,7 @@ class ModelHandler():
         Returns:
         -------
             Module: The loaded shadow model.
+            Module: The loaded criterion.
 
         """
         # First create the blueprint to inject the weights
