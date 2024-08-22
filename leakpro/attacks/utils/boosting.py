@@ -13,7 +13,8 @@ from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 
 
 class Memorization():
-    """Implementation of memorization."""
+    """Implementation of memorization from the paper
+    Why Train More? Effective and Efficient Membership Inference via Memorization, Choi J. et al."""
 
     def __init__(
             self:Self,
