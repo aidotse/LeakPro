@@ -50,14 +50,20 @@ class AttackLiRA(AbstractMIA):
         self.include_test_data = configs.get("include_test_data", self.online)
 
         # Memorization config
-        self.memorization = configs.get("memorization", False) # Set True
-        self.use_privacy_score = configs.get("use_privacy_score", False) # Set True to filter based on privacy score aswell as memorization score
-        self.memorization_threshold = configs.get("memorization_threshold", 0.8) # Set percentile for most vulnerable data points (Not compatible with "num_memorization_audit_points" ), use 0.0 for paper thresholds 
-        self.min_num_memorization_audit_points = configs.get("min_num_memorization_audit_points", 10) # Set minimum allowed audit points after memorization
-        self.num_memorization_audit_points = configs.get("num_memorization_audit_points", 0) # Set direct number of most vulnerable audit data points (Not compatible with "memorization_threshold" )
+        # Activate memorization
+        self.memorization = configs.get("memorization", False)
+        # Set True to filter based on privacy score aswell as memorization score
+        self.use_privacy_score = configs.get("use_privacy_score", False)
+        # Set percentile for most vulnerable data points, use 0.0 for paper thresholds
+        self.memorization_threshold = configs.get("memorization_threshold", 0.8)
+        # Set minimum allowed audit points after memorization
+        self.min_num_memorization_audit_points = configs.get("min_num_memorization_audit_points", 10)
+        # Directly set number of most vulnerable audit data points (Overrides "memorization_threshold" )
+        self.num_memorization_audit_points = configs.get("num_memorization_audit_points", 0)
 
         # LiRA specific
-        self.var_calculation = configs.get("var_calculation", "carlini") # Determine which variance estimation method to use [carlini, individual_carlini, bayesian]
+        # Determine which variance estimation method to use [carlini, individual_carlini]
+        self.var_calculation = configs.get("var_calculation", "carlini")
 
         # Define the validation dictionary as: {parameter_name: (parameter, min_value, max_value)}
         validation_dict = {
@@ -125,7 +131,7 @@ class AttackLiRA(AbstractMIA):
             mask = (num_shadow_models_seen_points > 0) & (num_shadow_models_seen_points < self.num_shadow_models)
 
             # Filter the audit data
-            audit_data = self.get_dataloader(self.audit_dataset["data"][mask]).dataset
+            audit_data_indices = self.audit_dataset["data"][mask]
             self.in_indices_masks = self.in_indices_masks[mask, :]
 
             # Filter IN and OUT members
@@ -133,29 +139,32 @@ class AttackLiRA(AbstractMIA):
             num_out_members = np.sum(mask[self.audit_dataset["out_members"]])
             self.out_members = np.arange(len(self.in_members), len(self.in_members) + num_out_members)
 
-            assert len(audit_data) == len(self.in_members) + len(self.out_members)
+            assert len(audit_data_indices) == len(self.in_members) + len(self.out_members)
 
-            if len(audit_data) == 0:
+            if len(audit_data_indices) == 0:
                 raise ValueError("No points in the audit dataset are used for the shadow models")
 
         else:
-            audit_data = self.get_dataloader(self.audit_dataset["data"]).dataset
+            audit_data_indices = self.audit_dataset["data"]
             self.in_members = self.audit_dataset["in_members"]
             self.out_members = self.audit_dataset["out_members"]
 
         # Check offline attack for possible IN- sample(s)
         if not self.online:
-            count_in_samples = np.count_nonzero(self.in_indices_mask)
+            count_in_samples = np.count_nonzero(self.in_indices_masks)
             if count_in_samples > 0:
                 self.logger.info(f"Some shadow model(s) contains {count_in_samples} IN samples in total for the model(s)")
                 self.logger.info("This is not an offline attack!")
 
+        self.batch_size = len(audit_data_indices)
         self.logger.info(f"Calculating the logits for all {self.num_shadow_models} shadow models")
-        self.shadow_models_logits = np.swapaxes(self.signal(self.shadow_models, self.handler, audit_data_indices), 0, 1)
+        self.shadow_models_logits = np.swapaxes(self.signal(self.shadow_models, self.handler, audit_data_indices,\
+                                                            self.batch_size), 0, 1)
 
         # Calculate logits for the target model
         self.logger.info("Calculating the logits for the target model")
-        self.target_logits = np.swapaxes(self.signal([self.target_model], self.handler, audit_data_indices), 0, 1).squeeze()
+        self.target_logits = np.swapaxes(self.signal([self.target_model], self.handler, audit_data_indices, self.batch_size),\
+                                        0, 1).squeeze()
 
         # Using Memorizationg boosting
         if self.memorization:
@@ -163,7 +172,7 @@ class AttackLiRA(AbstractMIA):
             # Prepare for memorization
             org_audit_data_length = self.audit_dataset["data"].size
             audit_data_indices = self.audit_dataset["data"][mask] if self.online else self.audit_dataset["data"]
-            audit_data_labels = audit_data._labels
+            audit_data_labels = self.handler.get_labels(audit_data_indices)
 
             self.logger.info("Running memorization")
             memorization = Memorization(
@@ -174,13 +183,13 @@ class AttackLiRA(AbstractMIA):
                 self.in_indices_masks,
                 self.shadow_models,
                 self.target_model,
-                audit_data,
                 audit_data_indices,
                 audit_data_labels,
                 org_audit_data_length,
                 self.handler,
                 self.online,
                 self.logger,
+                self.batch_size,
             )
             memorization_mask, _, _ = memorization.run()
 
@@ -199,30 +208,42 @@ class AttackLiRA(AbstractMIA):
             self.shadow_models_logits = self.shadow_models_logits[memorization_mask, :]
             self.target_logits = self.target_logits[memorization_mask]
 
-    def get_std(self:Self, logits: list, mask: list, is_in: bool, var_calculation: str):
-        """A function to define what method to use for calculating variance for LiRA"""
+    def get_std(self:Self, logits: list, mask: list, is_in: bool, var_calculation: str) -> np.ndarray:
+        """A function to define what method to use for calculating variance for LiRA."""
 
-        # To be used for fixed/global variance calculation.
+        # Fixed/Global variance calculation.
         if var_calculation == "fixed":
-            if is_in and not self.online:
-                return None
-            return np.std(logits[mask])
+            return self._fixed_variance(logits, mask, is_in)
 
-        # Use the variance calculation as in the paper ( Membership Inference Attacks From First Principles )
+        # Variance calculation as in the paper ( Membership Inference Attacks From First Principles )
         if var_calculation == "carlini":
-            if self.num_shadow_models >= self.fix_var_threshold*2:
-                return np.std(logits[mask])
-            if is_in:
-                return self.fixed_in_std
-            return self.fixed_out_std
+            return self._carlini_variance(logits, mask, is_in)
 
-        # The same as in the paper but check IN and OUT samples individualy
+        # Variance calculation as in the paper ( Membership Inference Attacks From First Principles )
+        #   but check IN and OUT samples individualy
         if var_calculation == "individual_carlini":
-            if np.count_nonzero(mask) >= self.fix_var_threshold:
+            return self._individual_carlini(logits, mask, is_in)
+
+        return np.array([None])
+
+    def _fixed_variance(self:Self, logits: list, mask: list, is_in: bool) -> np.ndarray:
+        if is_in and not self.online:
+            return np.array([None])
+        return np.std(logits[mask])
+
+    def _carlini_variance(self:Self, logits: list, mask: list, is_in: bool) -> np.ndarray:
+        if self.num_shadow_models >= self.fix_var_threshold*2:
                 return np.std(logits[mask])
-            if is_in:
-                return self.fixed_in_std
-            return self.fixed_out_std
+        if is_in:
+            return self.fixed_in_std
+        return self.fixed_out_std
+
+    def _individual_carlini(self:Self, logits: list, mask: list, is_in: bool) -> np.ndarray:
+        if np.count_nonzero(mask) >= self.fix_var_threshold:
+            return np.std(logits[mask])
+        if is_in:
+            return self.fixed_in_std
+        return self.fixed_out_std
 
     def run_attack(self:Self) -> CombinedMetricResult:
         """Runs the attack on the target model and dataset and assess privacy risks or data leakage.
@@ -237,7 +258,7 @@ class AttackLiRA(AbstractMIA):
         true labels, and signal values.
 
         """
-        n_audit_samples = self.shadow_models_logits.shape[1]
+        n_audit_samples = self.shadow_models_logits.shape[0]
         score = np.zeros(n_audit_samples)  # List to hold the computed probability scores for each sample
 
         self.fixed_in_std = self.get_std(self.shadow_models_logits.flatten(), self.in_indices_masks.flatten(), True, "fixed")
