@@ -13,8 +13,10 @@ from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 
 
 class Memorization():
-    """Implementation of memorization from the paper
-    Why Train More? Effective and Efficient Membership Inference via Memorization, Choi J. et al."""
+    """Implementation of memorization filtering.
+
+    From the paper "Why Train More? Effective and Efficient Membership Inference via Memorization", Choi J. et al.
+    """
 
     def __init__(
             self:Self,
@@ -80,7 +82,7 @@ class Memorization():
         self.audit_data_length = len(self.audit_data_indices)
         if self.org_audit_data_length*(1-self.memorization_threshold) < self.min_num_memorization_audit_points:
             self.logger.info("Warning!")
-            self.logger.info("Memorization threshold gives less audit points than the minimum allowed is set to.")
+            self.logger.info("Memorization threshold gives less audit points than the minimum allowed")
             self.logger.info('Please adjust "memorization_threshold" or "min_num_memorization_audit_points"')
             self.memorization_threshold = 1-self.min_num_memorization_audit_points/self.org_audit_data_length
             self.logger.info(f'Setting "memorization_threshold" to {self.memorization_threshold}')
@@ -139,7 +141,8 @@ class Memorization():
     def _privacy_score(self:Self) -> None:
         """Run privacy score enhancement.
 
-        Privacy score enhances the attack performance by only including vulnerable data points
+        Privacy score enhances the attack performance by only including vulnerable data points.
+        The privacy score definition can be found in "Membership Inference Attacks From First Principles" by Carlini et al.
         """
 
         logits_function = ModelRescaledLogits()
@@ -149,6 +152,7 @@ class Memorization():
 
         privacy_score = []
 
+        # From "Membership Inference Attacks From First Principles", fixed variance is used when number of shadow models < 64
         if len(self.shadow_models) < 64:
             in_std, out_std = np.std(logits[self.in_indices_mask].flatten()), np.std(logits[~self.in_indices_mask].flatten())
 
@@ -186,11 +190,11 @@ class Memorization():
     def adjust_memorization_mask(self:Self) -> list:
         """Adjust thesholds to achieve the desired amount or percentile of most vulnerable datapoints."""
 
-        # Set initial thresholds, from literature ("why train more...")
+        # Set starting thresholds, from the paper ("why train more...")
         mem_thrshld = 0.8
         priv_thrshld = 2.0
 
-        # Use the thresholds from literature
+        # Use the thresholds from the paper
         if self.memorization_threshold == 0.0:
             return self.memorization_score > mem_thrshld, self.privacy_score > priv_thrshld
 
