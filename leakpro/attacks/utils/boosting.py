@@ -3,9 +3,9 @@
 import logging
 
 import numpy as np
-import torch
 from tqdm import tqdm
 
+from leakpro.attacks.utils.utils import softmax_logits
 from leakpro.import_helper import Self
 from leakpro.model import PytorchModel
 from leakpro.signals.signal import ModelLogits, ModelRescaledLogits
@@ -120,8 +120,8 @@ class Memorization():
         target_logits = np.swapaxes(logits_function([self.target_model], self.handler, self.audit_data_indices, self.batch_size),\
                                     0, 1).squeeze()
 
-        logits = self.softmax_logits(logits)
-        target_logits = self.softmax_logits(target_logits)
+        logits = softmax_logits(logits)
+        target_logits = softmax_logits(target_logits)
 
         if self.online:
             for i, (logit, mask, label) in tqdm(enumerate(zip(logits, self.in_indices_mask, self.audit_data_labels)),
@@ -172,20 +172,6 @@ class Memorization():
                 privacy_score.append(np.abs(target_logit-out_mean)/(2*out_std+1e-30))
 
         self.privacy_score = np.asarray(privacy_score)
-
-    def softmax_logits(self:Self, logits: np.ndarray) -> np.ndarray:
-        """Rescale logits to (0, 1).
-
-        Args:
-        ----
-            logits ( len(dataset) x ... x nb_classes ): Logits to be rescaled.
-
-        """
-        logits = torch.from_numpy(logits)
-        logits = logits - torch.max(logits, dim=-1, keepdim=True).values
-        logits = torch.exp(logits)
-        logits = logits/torch.sum(logits, dim=-1, keepdim=True)
-        return logits.numpy()
 
     def adjust_memorization_mask(self:Self) -> list:
         """Adjust thesholds to achieve the desired amount or percentile of most vulnerable datapoints."""
