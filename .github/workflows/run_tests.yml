@@ -37,7 +37,7 @@ jobs:
         with:
           environment-file: environment.yml
           environment-name: leakpro
-          cache-downloads: true
+          cache-downloads: false
 
       - name: Test with pytest
         shell: bash -l {0}
