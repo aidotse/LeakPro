@@ -107,7 +107,7 @@ class ShadowModelHandler(ModelHandler):
     def create_shadow_models(
         self:Self,
         num_models:int,
-        shadow_population: np.ndarray,
+        shadow_population: list,
         training_fraction:float=0.1,
         online:bool=False
     ) -> list[int]:
@@ -246,13 +246,13 @@ class ShadowModelHandler(ModelHandler):
             metadata.append(self._load_shadow_metadata(i))
         return metadata
 
-    def get_in_indices_mask(self:Self, shadow_model_indices:list[int], dataset:np.ndarray) -> np.ndarray:
+    def get_in_indices_mask(self:Self, shadow_model_indices:list[int], dataset_indices:np.ndarray) -> np.ndarray:
         """Get the mask indicating which indices in the dataset are present in the shadow model training set.
 
         Args:
         ----
             shadow_model_indices (list[int]): The number of shadow models.
-            dataset (np.ndarray): The dataset.
+            dataset_indices (np.ndarray): The dataset indices to consider.
 
         Returns:
         -------
@@ -270,8 +270,8 @@ class ShadowModelHandler(ModelHandler):
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model_indices_tensor = torch.from_numpy(models_in_indices).to(device=device)
-        dataset_tensor = torch.from_numpy(dataset).to(device=device)
-        indice_masks_tensor = torch.zeros((len(dataset), len(models_in_indices)), dtype=torch.bool, device=device)
+        dataset_tensor = torch.from_numpy(dataset_indices).to(device=device)
+        indice_masks_tensor = torch.zeros((len(dataset_indices), len(models_in_indices)), dtype=torch.bool, device=device)
 
         return torch_indice_in_shadowmodel_training_set(indice_masks_tensor,\
                                                         dataset_tensor, model_indices_tensor).cpu().numpy()
