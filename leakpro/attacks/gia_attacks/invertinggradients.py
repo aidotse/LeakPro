@@ -2,6 +2,7 @@
 import torch
 
 from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
+from leakpro.attacks.utils.util_functions import total_variation
 from leakpro.import_helper import Callable, Self
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.user_inputs.abstract_gia_input_handler import AbstractGIAInputHandler
@@ -21,7 +22,8 @@ class InvertingGradients(AbstractGIA):
     def description(self:Self) -> dict:
         """Return a description of the attack."""
         title_str = "Inverting gradients"
-        reference_str = "Geiping, Jonas, et al. Inverting gradients-how easy is it to break privacy in federated learning?(2020)."
+        reference_str = """Geiping, Jonas, et al. Inverting gradients-how easy is it to
+            break privacy in federated learning? Neurips, 2020."""
         summary_str = ""
         detailed_str = ""
         return {
@@ -67,6 +69,7 @@ class InvertingGradients(AbstractGIA):
                                                                         24000 // 1.142], gamma=0.1)
 
         for i in range(self.iterations):
+            # loss function which does training and compares distance from reconstruction training to the real training.
             closure = self.gradient_closure(optimizer)
 
             loss = optimizer.step(closure)
@@ -80,12 +83,6 @@ class InvertingGradients(AbstractGIA):
             # add PSNR calculation and pick best image..
         # Collect client data to one tensor
         return GIAResults(self.client_loader, self.reconstruction_loader, 0, self.data_mean, self.data_std)
-
-    def total_variation(self: Self, x: torch.Tensor) -> torch.Tensor:
-        """Anisotropic TV."""
-        dx = torch.mean(torch.abs(x[:, :, :, :-1] - x[:, :, :, 1:]))
-        dy = torch.mean(torch.abs(x[:, :, :-1, :] - x[:, :, 1:, :]))
-        return dx + dy
 
 
     def gradient_closure(self: Self, optimizer: torch.optim.Optimizer) -> Callable:
@@ -111,16 +108,16 @@ class InvertingGradients(AbstractGIA):
             self.handler.target_model.zero_grad()
 
             gradient = self.handler.train(self.reconstruction_loader, self.handler.get_optimizer())
-            rec_loss = self.reconstruction_costs([gradient], self.client_gradient)
+            rec_loss = self.reconstruction_costs(gradient, self.client_gradient)
 
-            self.logger.info(f"rec loss {rec_loss}")
-            rec_loss += (self.t_v_scale * self.total_variation(self.reconstruction))
+            # Add the TV loss term to penalize large variations between pixels, encouraging smoother images.
+            rec_loss += (self.t_v_scale * total_variation(self.reconstruction))
             rec_loss.backward()
             self.reconstruction.grad.sign_()
             return rec_loss
         return closure
 
-    def reconstruction_costs(self: Self, client_gradients: torch.Tensor, reconstruction_gradient: torch.Tensor) -> torch.Tensor:
+    def reconstruction_costs(self: Self, client_gradient: torch.Tensor, reconstruction_gradient: torch.Tensor) -> torch.Tensor:
         """Computes the reconstruction costs between client gradients and the reconstruction gradient.
 
         This function calculates the pairwise costs between each client gradient and the reconstruction gradient
@@ -134,18 +131,16 @@ class InvertingGradients(AbstractGIA):
         indices = torch.arange(len(reconstruction_gradient))
         weights = reconstruction_gradient[0].new_ones(len(reconstruction_gradient))
         total_costs = 0
-        for trial_gradient in client_gradients:
-            pnorm = [0, 0]
-            costs = 0
-            for i in indices:
-                costs -= (trial_gradient[i] * reconstruction_gradient[i]).sum() * weights[i]
-                pnorm[0] += trial_gradient[i].pow(2).sum() * weights[i]
-                pnorm[1] += reconstruction_gradient[i].pow(2).sum() * weights[i]
-            costs = 1 + costs / pnorm[0].sqrt() / pnorm[1].sqrt()
+        pnorm = [0, 0]
+        costs = 0
+        for i in indices:
+            costs -= (client_gradient[i] * reconstruction_gradient[i]).sum() * weights[i]
+            pnorm[0] += client_gradient[i].pow(2).sum() * weights[i]
+            pnorm[1] += reconstruction_gradient[i].pow(2).sum() * weights[i]
+        costs = 1 + costs / pnorm[0].sqrt() / pnorm[1].sqrt()
 
-            # Accumulate final costs
-            total_costs += costs
-        return total_costs / len(client_gradients)
+        total_costs += costs
+        return total_costs / len(client_gradient)
 
     def _configure_attack(self: Self, configs: dict) -> None:
         pass

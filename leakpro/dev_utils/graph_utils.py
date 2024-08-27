@@ -1,8 +1,8 @@
 """Functions relating to computational graph investigations."""
-import torch
+from torch.nn import Module
 
 
-def calculate_graph_depth(grad_fn: torch.nn.Module, cache: dict=None) -> int:
+def calculate_graph_depth(grad_fn: Module, cache: dict=None) -> int:
     """Calculates graph depth from a tensors grad_fn."""
     if not grad_fn:
         return 0

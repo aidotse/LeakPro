@@ -1,8 +1,9 @@
-"""Utils used for GIA training."""
+"""Optimizer objects used for GIA training to allow graph utilization through multiple epochs."""
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 
-import torch
+from torch import Tensor, zeros_like
+from torch.autograd import grad
 
 from leakpro.import_helper import Dict, Self, Tuple
 
@@ -15,7 +16,7 @@ class MetaOptimizer(ABC):
         raise NotImplementedError("This is an abstract class and should not be instantiated directly.")
 
     @abstractmethod
-    def step(self: "MetaOptimizer", loss: torch.Tensor, params: Dict[str, torch.Tensor]) -> OrderedDict[str, torch.Tensor]:
+    def step(self: "MetaOptimizer", loss: Tensor, params: Dict[str, Tensor]) -> OrderedDict[str, Tensor]:
         """Perform a single optimization step.
 
         Args:
@@ -37,7 +38,7 @@ class MetaSGD(MetaOptimizer):
         """Init."""
         self.lr = lr
 
-    def step(self: Self, loss: torch.Tensor, params: Dict[str, torch.Tensor]) -> OrderedDict[str, torch.Tensor]:
+    def step(self: Self, loss: Tensor, params: Dict[str, Tensor]) -> OrderedDict[str, Tensor]:
         """Perform a single optimization step.
 
         Args:
@@ -50,7 +51,7 @@ class MetaSGD(MetaOptimizer):
             OrderedDict[str, torch.Tensor]: A new set of parameters which have been updated.
 
         """
-        grads = torch.autograd.grad(loss, params.values(), retain_graph=True, create_graph=True, only_inputs=True)
+        grads = grad(loss, params.values(), retain_graph=True, create_graph=True, only_inputs=True)
         return OrderedDict((name, param - self.lr * grad_part) for ((name, param), grad_part) in zip (params.items(), grads))
 
 class MetaAdam(MetaOptimizer):
@@ -78,7 +79,7 @@ class MetaAdam(MetaOptimizer):
         self.v = {}
         self.t = 0
 
-    def step(self: Self, loss: torch.Tensor, params: Dict[str, torch.Tensor]) -> OrderedDict[str, torch.Tensor]:
+    def step(self: Self, loss: Tensor, params: Dict[str, Tensor]) -> OrderedDict[str, Tensor]:
         """Perform a single optimization step.
 
         Args:
@@ -91,20 +92,20 @@ class MetaAdam(MetaOptimizer):
             OrderedDict[str, torch.Tensor]: A new set of parameters which have been updated.
 
         """
-        grads = torch.autograd.grad(loss, params.values(), retain_graph=True, create_graph=True, only_inputs=True)
+        gradients = grad(loss, params.values(), retain_graph=True, create_graph=True, only_inputs=True)
 
         if self.weight_decay != 0:
-            grads = [grad + self.weight_decay * param for grad, param in zip(grads, params.values())]
+            gradients = [grad + self.weight_decay * param for grad, param in zip(gradients, params.values())]
 
         # Initialize m and v
         if not self.m:
-            self.m = {name: torch.zeros_like(param) for name, param in params.items()}
-            self.v = {name: torch.zeros_like(param) for name, param in params.items()}
+            self.m = {name: zeros_like(param) for name, param in params.items()}
+            self.v = {name: zeros_like(param) for name, param in params.items()}
         self.t += 1
         new_params = OrderedDict()
-        for (name, param), grad in zip(params.items(), grads):
-            self.m[name] = self.beta1 * self.m[name] + (1 - self.beta1) * grad
-            self.v[name] = self.beta2 * self.v[name] + (1 - self.beta2) * (grad ** 2)
+        for (name, param), gradient in zip(params.items(), gradients):
+            self.m[name] = self.beta1 * self.m[name] + (1 - self.beta1) * gradient
+            self.v[name] = self.beta2 * self.v[name] + (1 - self.beta2) * (gradient ** 2)
 
             m_hat = self.m[name] / (1 - self.beta1**self.t)
             v_hat = self.v[name] / (1 - self.beta2**self.t)

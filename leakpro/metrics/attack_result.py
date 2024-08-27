@@ -3,7 +3,6 @@
 import os
 
 import numpy as np
-import torchvision
 from sklearn.metrics import (
     accuracy_score,
     auc,
@@ -13,6 +12,7 @@ from sklearn.metrics import (
 )
 from torch import Tensor, clamp, stack
 from torch.utils.data import DataLoader, Dataset, Subset
+from torchvision.utils import save_image
 
 from leakpro.import_helper import Any, List, Self
 
@@ -168,9 +168,9 @@ class GIAResults:
         original_data = extract_tensors_from_subset(self.original_data.dataset)
 
         output_denormalized = clamp(recreated_data * self.data_std + self.data_mean, 0, 1)
-        torchvision.utils.save_image(output_denormalized, os.path.join(save_path, "recreated_image.png"))
+        save_image(output_denormalized, os.path.join(save_path, "recreated_image.png"))
 
         gt_denormalized = clamp(original_data * self.data_std + self.data_mean, 0, 1)
-        torchvision.utils.save_image(gt_denormalized, os.path.join(save_path, "original_image.png"))
+        save_image(gt_denormalized, os.path.join(save_path, "original_image.png"))
 
         return attack_name

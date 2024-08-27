@@ -1,14 +1,23 @@
 """Utils used for GIA training."""
 from collections import OrderedDict
+from copy import deepcopy
 from functools import partial
 
 import torch
 import torch.nn.functional as f
-from torch import nn
+from torch import cuda, device, nn
 
 from leakpro.import_helper import Any, Dict, Self
 
 # Predefined mapping for known functional calls and their parameters
+# If your model contains more modules than the ones specified here, add them
+# by mapping the module name to its functional representation in
+# <name_to_functional_mapping>. Then find and add their attributes
+# e.g. through inspection of the module's class definition, or by
+# referring to the PyTorch documentation. This allows for the conversion
+# of module-based representations to their corresponding functional API calls.
+# Below is a mapping of common layers and their respective parameters.
+
 functional_params = {
     "conv2d": ["weight", "bias", "stride", "padding", "dilation", "groups"],
     "batch_norm": ["weight", "bias", "eps", "momentum", "training", "running_mean", "running_var"],
@@ -32,9 +41,11 @@ class MetaModule(nn.Module):
 
     def __init__(self: Self, net: nn.Module) -> None:
         """Init with network."""
+        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
         super().__init__()
-        self.net = net
-        self.parameters = OrderedDict(net.named_parameters())
+        self.net = deepcopy(net)
+        self.net.to(gpu_or_cpu)
+        self.parameters = OrderedDict(self.net.named_parameters())
         self.original_forwards = {}  # Store original forward methods here
 
     def forward(self: Self, input: torch.Tensor, parameters: Dict[str, Any]) -> torch.Tensor:

@@ -2,15 +2,14 @@
 
 import logging
 from collections import OrderedDict
-from copy import deepcopy
 
-import torch
 from torch import cuda, device
+from torch.nn import Module
 from torch.utils.data import DataLoader
 
 from leakpro.dev_utils.data_modules import CifarModule
-from leakpro.fl_utils.gia_optimizers import MetaAdam, MetaOptimizer, MetaSGD
-from leakpro.fl_utils.gia_train import MetaModule
+from leakpro.fl_utils.gia_module_to_functional import MetaModule
+from leakpro.fl_utils.gia_optimizers import MetaOptimizer
 from leakpro.import_helper import Self
 from leakpro.user_inputs.abstract_gia_input_handler import AbstractGIAInputHandler
 
@@ -18,24 +17,10 @@ from leakpro.user_inputs.abstract_gia_input_handler import AbstractGIAInputHandl
 class Cifar10GIAInputHandler(AbstractGIAInputHandler):
     """Class to handle the user input for the CIFAR10 dataset."""
 
-    def __init__(self:Self, configs: dict, logger:logging.Logger, target_model: torch.nn.Module) -> None:
+    def __init__(self:Self, configs: dict, logger:logging.Logger, target_model: Module) -> None:
         self.data_module = CifarModule(batch_size=configs["audit"]["gia_settings"]["client_batch_size"])
         super().__init__(configs, logger, target_model, self.data_module)
         self.criterion = self.get_criterion()
-
-    def get_criterion(self:Self)->None:
-        """Set the CrossEntropyLoss for the model."""
-        return torch.nn.CrossEntropyLoss()
-
-    def get_optimizer(self: Self) -> MetaOptimizer:
-        """Set the optimizer for the model."""
-        optimizer = self.configs["audit"]["gia_settings"]["optimizer"]
-        lr = self.configs["audit"]["gia_settings"]["learning_rate"]
-        if optimizer == "SGD":
-            return MetaSGD(lr=lr)
-        if optimizer == "Adam":
-            return MetaAdam(lr=lr)
-        raise ValueError(f"Optimizer '{optimizer}' not found. Please check the optimizer settings.")
 
     def train(
         self: Self,
@@ -53,9 +38,7 @@ class Cifar10GIAInputHandler(AbstractGIAInputHandler):
         Training does not update the original model, but returns a norm of what the update would have been.
         """
         gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
-        model = deepcopy(self.target_model)
-        model.to(gpu_or_cpu)
-        patched_model = MetaModule(model)
+        patched_model = MetaModule(self.target_model)
 
         outputs = None
         epochs = self.configs["audit"]["gia_settings"]["epochs"]
