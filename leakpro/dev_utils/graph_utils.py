@@ -16,8 +16,7 @@ def calculate_graph_depth(grad_fn: torch.nn.Module, cache: dict=None) -> int:
     for sub_fn, _ in grad_fn.next_functions:
         if sub_fn is not None:
             sub_depth = calculate_graph_depth(sub_fn, cache) + 1
-            if sub_depth > max_depth:
-                max_depth = sub_depth
+            max_depth = max(sub_depth, max_depth)
 
     cache[grad_fn] = max_depth
     return max_depth

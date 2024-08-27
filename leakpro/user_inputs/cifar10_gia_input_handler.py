@@ -8,6 +8,7 @@ import torch
 from torch import cuda, device
 from torch.utils.data import DataLoader
 
+from leakpro.dev_utils.data_modules import CifarModule
 from leakpro.fl_utils.gia_optimizers import MetaAdam, MetaOptimizer, MetaSGD
 from leakpro.fl_utils.gia_train import MetaModule
 from leakpro.import_helper import Self
@@ -17,8 +18,9 @@ from leakpro.user_inputs.abstract_gia_input_handler import AbstractGIAInputHandl
 class Cifar10GIAInputHandler(AbstractGIAInputHandler):
     """Class to handle the user input for the CIFAR10 dataset."""
 
-    def __init__(self:Self, configs: dict, logger:logging.Logger, client_data: DataLoader, target_model: torch.nn.Module, data_mean, data_std, at_image) -> None:
-        super().__init__(configs, logger, client_data, target_model, data_mean, data_std, at_image)
+    def __init__(self:Self, configs: dict, logger:logging.Logger, target_model: torch.nn.Module) -> None:
+        self.data_module = CifarModule(batch_size=configs["audit"]["gia_settings"]["client_batch_size"])
+        super().__init__(configs, logger, target_model, self.data_module)
         self.criterion = self.get_criterion()
 
     def get_criterion(self:Self)->None:
@@ -51,10 +53,10 @@ class Cifar10GIAInputHandler(AbstractGIAInputHandler):
         Training does not update the original model, but returns a norm of what the update would have been.
         """
         gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
-        self.target_model.to(gpu_or_cpu)
-        patched_model = MetaModule(deepcopy(self.target_model))
+        model = deepcopy(self.target_model)
+        model.to(gpu_or_cpu)
+        patched_model = MetaModule(model)
 
-        patched_model_origin = {name: param.clone() for name, param in patched_model.parameters.items()}
         outputs = None
         epochs = self.configs["audit"]["gia_settings"]["epochs"]
         for _ in range(epochs):
@@ -68,8 +70,8 @@ class Cifar10GIAInputHandler(AbstractGIAInputHandler):
                 patched_model.parameters = optimizer.step(loss, patched_model.parameters)
                 train_acc += pred.eq(labels.data.view_as(pred)).sum()
                 train_loss += loss.item()
-
         model_delta = OrderedDict((name, param - param_origin)
                                                 for ((name, param), (name_origin, param_origin))
-                                                in zip(patched_model.parameters.items(), patched_model_origin.items()))
+                                                in zip(patched_model.parameters.items(),
+                                                       OrderedDict(self.target_model.named_parameters()).items()))
         return list(model_delta.values())

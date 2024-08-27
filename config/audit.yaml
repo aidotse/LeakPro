@@ -26,13 +26,13 @@ audit:  # Configurations for auditing
     inverting_gradients:
       total_variation: 0.000001
       attack_lr: 0.1 # lr for the reconstruction optimizer
-      at_iterations: 1000
+      at_iterations: 500
   gia_settings:
     client_batch_size: 1
-    num_train_batches: 1
-    epochs: 3
+    num_client_images: 1
+    epochs: 4
     optimizer: SGD
-    learning_rate: 0.1
+    learning_rate: 0.0001
     dataset: cifar10
     data_dir: ./target/data
 

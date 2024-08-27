@@ -1,5 +1,7 @@
 """Models for the datasets."""
 
+from typing import Callable, Optional
+
 import torch
 import torchvision
 from torch import Tensor, flatten, nn
@@ -136,9 +138,10 @@ class ResNet18(nn.Module):
 class ResNet(torchvision.models.ResNet):
     """ResNet generalization for CIFAR thingies."""
 
-    def __init__(self, block, layers, num_classes=10, zero_init_residual=False,
-                 groups=1, base_width=64, replace_stride_with_dilation=None,
-                 norm_layer=None, strides=[1, 2, 2, 2], pool='avg'):
+    def __init__(self: Self, block: Module = torchvision.models.resnet.BasicBlock, layers: list=[5,5,5], num_classes: int=10,  # noqa: B006, C901
+                 zero_init_residual: bool=False, groups: int = 1, base_width : int =160,
+                 replace_stride_with_dilation: Optional[list[bool]] =None, norm_layer: Optional[Callable[..., nn.Module]] =None,
+                 strides: list = [1, 2, 2, 2], pool: str = "avg") -> None:  # noqa: B006
         """Initialize as usual. Layers and strides are scriptable."""
         super(torchvision.models.ResNet, self).__init__()  # nn.Module
         if norm_layer is None:
@@ -165,15 +168,16 @@ class ResNet(torchvision.models.ResNet):
         self.layers = torch.nn.ModuleList()
         width = self.inplanes
         for idx, layer in enumerate(layers):
-            self.layers.append(self._make_layer(block, width, layer, stride=strides[idx], dilate=replace_stride_with_dilation[idx]))
+            self.layers.append(self._make_layer(block, width, layer, stride=strides[idx],
+                                                dilate=replace_stride_with_dilation[idx]))
             width *= 2
 
-        self.pool = nn.AdaptiveAvgPool2d((1, 1)) if pool == 'avg' else nn.AdaptiveMaxPool2d((1, 1))
+        self.pool = nn.AdaptiveAvgPool2d((1, 1)) if pool == "avg" else nn.AdaptiveMaxPool2d((1, 1))
         self.fc = nn.Linear(width // 2 * block.expansion, num_classes)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
             elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
@@ -189,7 +193,7 @@ class ResNet(torchvision.models.ResNet):
                     nn.init.constant_(m.bn2.weight, 0)
 
 
-    def _forward_impl(self, x):
+    def _forward_impl(self: Self, x: Tensor) -> Tensor:
         # See note [TorchScript super()]
         x = self.conv1(x)
         x = self.bn1(x)
@@ -200,6 +204,4 @@ class ResNet(torchvision.models.ResNet):
 
         x = self.pool(x)
         x = torch.flatten(x, 1)
-        x = self.fc(x)
-
-        return x
+        return self.fc(x)

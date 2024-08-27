@@ -1,6 +1,5 @@
 """Geiping, Jonas, et al. "Inverting gradients-how easy is it to break privacy in federated learning?."."""
 import torch
-from torch.utils.data import DataLoader, TensorDataset
 
 from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
 from leakpro.import_helper import Callable, Self
@@ -14,10 +13,10 @@ class InvertingGradients(AbstractGIA):
     def __init__(self: Self, handler: AbstractGIAInputHandler, configs: dict) -> None:
         super().__init__(handler)
         self.handler = handler
-        self.logger.info("Inverting gradient initialized :)")
         self.t_v_scale = configs.get("total_variation")
         self.attack_lr = configs.get("attack_lr")
         self.iterations = configs.get("at_iterations")
+        self.logger.info("Inverting gradient initialized :)")
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
@@ -45,17 +44,10 @@ class InvertingGradients(AbstractGIA):
 
         """
         self.handler.target_model.eval()
-        self.client_loader = self.handler.client_data
+        self.client_loader = self.handler.get_client_loader()
         self.data_mean, self.data_std = self.handler.get_meanstd()
-        self.reconstruction = self.handler.init_at_image()
-
-        # Extract the labels from self.handler.client_data
-        labels = []
-        for _, label in self.handler.client_data:
-            labels.extend(label.numpy())
-        labels = torch.tensor(labels)
-        reconstruction_dataset = TensorDataset(self.reconstruction, labels)
-        self.reconstruction_loader = DataLoader(reconstruction_dataset, batch_size=32, shuffle=True)
+        self.reconstruction, self.reconstruction_loader = self.handler.get_at_images()
+        self.reconstruction.requires_grad = True
 
         client_gradient = self.handler.train(self.client_loader, self.handler.get_optimizer())
         self.client_gradient = [p.detach() for p in client_gradient]
@@ -68,7 +60,6 @@ class InvertingGradients(AbstractGIA):
             GIAResults: Container for results on GIA attacks.
 
         """
-        self.reconstruction.requires_grad = True
         optimizer = torch.optim.Adam([self.reconstruction], lr=self.attack_lr)
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
                                                             milestones=[24000 // 2.667, 24000 // 1.6,
@@ -88,15 +79,7 @@ class InvertingGradients(AbstractGIA):
                 self.logger.info(f"{i}: {loss}")
             # add PSNR calculation and pick best image..
         # Collect client data to one tensor
-        all_data = []
-
-        for i in range(len(self.client_loader)):
-            x, _ = self.client_loader[i]
-            all_data.append(x)
-
-        # Convert lists to tensors
-        original_data_tensor = torch.stack(all_data)
-        return GIAResults(all_data[0], self.reconstruction, 0, self.data_mean, self.data_std)
+        return GIAResults(self.client_loader, self.reconstruction_loader, 0, self.data_mean, self.data_std)
 
     def total_variation(self: Self, x: torch.Tensor) -> torch.Tensor:
         """Anisotropic TV."""

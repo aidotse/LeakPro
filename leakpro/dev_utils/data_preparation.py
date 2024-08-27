@@ -10,16 +10,13 @@ from urllib.request import urlretrieve
 import joblib
 import numpy as np
 import pandas as pd
-import torch
 import torchvision
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
-from torch.utils.data import DataLoader
 from torchvision import transforms
 
 from leakpro.dataset import GeneralDataset
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def get_adult_dataset(dataset_name: str, data_dir: str, logger:logging.Logger) -> GeneralDataset:
     """Get the dataset."""
@@ -97,10 +94,6 @@ def get_cifar10_dataset(dataset_name: str, data_dir: str, logger:logging.Logger)
         Path(path).mkdir(parents=True, exist_ok=True)
         save_dataset(all_data, path, logger)
     return all_data
-
-def get_ciar10_dataset_fl(model):
-    module = CifarModule()
-    return module.get_subset(1), module.data_mean, module.data_std, module.init_at_image(1, model)
 
 def download_file(url: str, download_path: str) -> None:
     """Download a file from a given URL."""
@@ -181,74 +174,3 @@ def prepare_train_test_datasets(dataset_size: int, configs: dict) -> dict:
     selected_index = np.random.choice(all_index, train_size + test_size, replace=False)
     train_index, test_index = train_test_split(selected_index, test_size=test_size)
     return {"train_indices": train_index, "test_indices": test_index}
-
-class CifarModule:
-
-    def __init__(self, ds = 'CIFAR10', root: str = "./data", batch_size: int = 32, num_workers = 2) -> None:
-        # Dynamically construct the class name
-        dataset_name = ds
-        # Use getattr to access the dataset class from the datasets module
-        DatasetClass = getattr(torchvision.datasets, dataset_name)
-        trainset = DatasetClass(root=root, train=True, download=True, transform=transforms.ToTensor())
-        valset = DatasetClass(root=root, train=False, download=True, transform=transforms.ToTensor())
-        
-        data_mean, data_std = self._get_meanstd(trainset)
-
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize(data_mean, data_std)])
-        
-        trainset.transform = transform
-        valset.transform = transform
-
-        self.trainloader = DataLoader(trainset, batch_size=batch_size,
-                                              shuffle=True, drop_last=True, num_workers=num_workers)
-        self.valloader = DataLoader(valset, batch_size=batch_size,
-                                                shuffle=True, drop_last=False, num_workers=num_workers)
-        self.data_mean = torch.as_tensor(data_mean)[:, None, None].to(DEVICE)
-        self.data_std = torch.as_tensor(data_std)[:, None, None].to(DEVICE)
-        
-    def get_train_val_loaders(self) -> tuple[DataLoader, DataLoader]:
-        return self.trainloader, self.valloader
-
-    def _get_meanstd(self, trainset):
-        cc = torch.cat([trainset[i][0].reshape(3, -1) for i in range(len(trainset))], dim=1)
-        data_mean = torch.mean(cc, dim=1).tolist()
-        data_std = torch.std(cc, dim=1).tolist()
-        return data_mean, data_std
-    
-    def get_subset(self, num_examples):
-        labels = []
-        ground_truths = []
-        target_ids = np.random.choice(len(self.valloader.dataset), size=num_examples, replace=False)
-        for target_id in target_ids:
-            img, label = self.valloader.dataset[target_id]
-            labels.append(torch.as_tensor((label,), device=DEVICE))
-            ground_truths.append(img.to(DEVICE))
-        return [(torch.stack(ground_truths), torch.cat(labels))]
-    
-    def get_subset_idx(self, indexes):
-        labels = []
-        ground_truths = []
-        target_ids = np.array(indexes)
-        for target_id in target_ids:
-            img, label = self.valloader.dataset[target_id]
-            labels.append(torch.as_tensor((label,), device=DEVICE))
-            ground_truths.append(img.to(DEVICE))
-        return torch.cat(labels), torch.stack(ground_truths)
-    
-    def init_at_image(self, num_images, model):
-        img_shape = self.trainloader.dataset[0][0].shape
-        return torch.randn((num_images, *img_shape), **dict(device=next(model.parameters()).device, dtype=next(model.parameters()).dtype))
-    
-    def init_at_label(self, num_images):
-        """Inits the fake labels
-
-        Args:
-            batch_size: the batch size
-
-        Returns:
-            randomly initialized or estimated labels
-        """
-        label_shape = self.trainloader.dataset[0][1].shape
-        return torch.randn((num_images, label_shape), requires_grad=True, device=DEVICE)

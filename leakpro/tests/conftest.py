@@ -10,7 +10,7 @@ from leakpro.tests.input_handler.image_utils import setup_image_test
 from leakpro.user_inputs.cifar10_input_handler import Cifar10InputHandler
 
 
-@pytest.fixture()
+@pytest.fixture
 def image_handler() -> Generator[Cifar10InputHandler, None, None]:
     """Fixture for the image input handler to be shared between many tests."""
 

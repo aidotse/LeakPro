@@ -1,6 +1,5 @@
 """Utils used for GIA training."""
 from collections import OrderedDict
-from copy import deepcopy
 from functools import partial
 
 import torch
@@ -34,8 +33,9 @@ class MetaModule(nn.Module):
     def __init__(self: Self, net: nn.Module) -> None:
         """Init with network."""
         super().__init__()
-        self.net = deepcopy(net)
+        self.net = net
         self.parameters = OrderedDict(net.named_parameters())
+        self.original_forwards = {}  # Store original forward methods here
 
     def forward(self: Self, input: torch.Tensor, parameters: Dict[str, Any]) -> torch.Tensor:
         """Forward through module using functional call."""
@@ -44,16 +44,21 @@ class MetaModule(nn.Module):
         param_gen = iter(parameters.values())
 
         # Iterate over all modules in the network
-        for _, net_module in self.net.named_modules():
+        for name, net_module in self.net.named_modules():
             # Get the name of the module in lower case
             class_name = net_module.__class__.__name__.lower()
             functional_name = name_to_functional_mapping.get(class_name)
+
             # Check if the module has a functional equivalent
             if functional_name in functional_params:
+                # Save the original forward method
+                self.original_forwards[name] = net_module.forward
+
                 # Get all parameters that are present in the functional call
                 params = functional_params[functional_name]
                 # Create a dictionary with the parameters for the functional call
                 kwargs = {param: getattr(net_module, param) for param in params if hasattr(net_module, param)}
+
                 # Replace the parameters with the ones from the iterator
                 if "weight" in kwargs and kwargs["weight"] is not None:
                     kwargs["weight"] = next(param_gen)
@@ -64,4 +69,11 @@ class MetaModule(nn.Module):
                 net_module.forward = partial(getattr(f, functional_name), **kwargs)
 
         # Forward the input through the network
-        return self.net(input)
+        output = self.net(input)
+
+        # Restore the original forward methods
+        for name, net_module in self.net.named_modules():
+            if name in self.original_forwards:
+                net_module.forward = self.original_forwards[name]
+
+        return output

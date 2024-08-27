@@ -3,44 +3,38 @@
 import logging
 from abc import ABC, abstractmethod
 
-import torch
+from torch import Tensor
+from torch.nn import Module
 from torch.utils.data import DataLoader
 
+from leakpro.dev_utils.data_modules import DataModule
 from leakpro.fl_utils.gia_optimizers import MetaOptimizer
-from leakpro.import_helper import Self, Tuple
+from leakpro.import_helper import Self
 
 
 class AbstractGIAInputHandler(ABC):
     """Parent class for user inputs."""
 
-    def __init__(self:Self, configs: dict, logger:logging.Logger, client_data: DataLoader, target_model: torch.nn.Module, data_mean, data_std, at_image) -> None:
+    def __init__(self:Self, configs: dict, logger:logging.Logger,
+                 target_model: Module, data_module: DataModule) -> None:
         self.configs = configs
         self.logger = logger
-        self.client_data = client_data
         self.target_model = target_model
-        self.data_mean = data_mean
-        self.data_std = data_std
-        self.at_image = at_image
+        self.data_module = data_module
+        self.client_loader = self.data_module.get_subset(self.configs["audit"]["gia_settings"]["num_client_images"])
+        self.at_tensor, self.at_loader = self.data_module.get_at_images(self.client_loader)
 
-    def init_at_image(self: Self) -> torch.Tensor:
-        """Initializes images with random pixels."""
-        # img_shape = self.client_data.dataset[0][0].shape
-        # num_images = len(self.client_data.dataset)
-        # return torch.randn((num_images, *img_shape),
-        #                    **{"device": next(self.target_model.parameters()).device,
-        #                        "dtype": next(self.target_model.parameters()).dtype}
-        #                        )
-        return self.at_image
+    def get_meanstd(self: Self) -> tuple[Tensor, Tensor]:
+        """Get mean and std from the data."""
+        return self.data_module.get_meanstd()
 
-    def get_meanstd(self: Self) -> Tuple[list, list]:
-        """Calculate mean and std of the client dataloader."""
-        # dataset = self.client_data.dataset
-        # cc = torch.cat([dataset[i][0].reshape(3, -1) for i in range(len(dataset))], dim=1)
-        # data_mean = torch.mean(cc, dim=1).tolist()
-        # data_std = torch.std(cc, dim=1).tolist()
-        # data_mean = torch.as_tensor(data_mean)[:, None, None].to(next(self.target_model.parameters()).device)
-        # data_std = torch.as_tensor(data_std)[:, None, None].to(next(self.target_model.parameters()).device)
-        return self.data_mean, self.data_std
+    def get_client_loader(self: Self) -> DataLoader:
+        """Get the client data loader."""
+        return self.client_loader
+
+    def get_at_images(self: Self) -> DataLoader:
+        """Get attack image loader in the shape of client data."""
+        return self.at_tensor, self.at_loader
 
     @abstractmethod
     def train(self: Self,
