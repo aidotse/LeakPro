@@ -35,6 +35,8 @@ lint.select = [
 
 exclude = [
   ".venv",
+  "leakpro/synthetic_data_attacks/examples",
+  "leakpro/tests",
 ]
 
 lint.ignore = [

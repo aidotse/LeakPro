@@ -28,23 +28,29 @@ def test_escape_quotes(input:str, e_output: str) -> None:
     output = singl_ev.escape_quotes(input=input)
     assert output == e_output
 
-def test_safe_query_counts() -> None:
-    """Assert results of function safe_query_counts for mal-formed and well-formed input queries."""
+def test_safe_query_elements() -> None:
+    """Assert results of function safe_query_elements for mal-formed and well-formed input queries."""
     df = pd.DataFrame({"c1": [0, 0, 2, 1], "c2": ["a", "a", "c", "d"], "c3": [1, 2, 4, 4]})
     #Case mal-formed queries
     query = "c4==4"
     with pytest.raises(Exception, match=f"Query {query} failed with name 'c4' is not defined."):
-        singl_ev.safe_query_counts(query=query, df=df)
+        singl_ev.safe_query_elements(query=query, df=df)
     query = "c2#=4"
     with pytest.raises(Exception, match=f"Query {query} failed with "):
-        singl_ev.safe_query_counts(query=query, df=df)
+        singl_ev.safe_query_elements(query=query, df=df)
     #Case well-formed queries
+    query = "c2=='e'"
+    idxs = singl_ev.safe_query_elements(query=query, df=df)
+    assert idxs == []
     query = "c2=='a'"
-    counts = singl_ev.safe_query_counts(query=query, df=df)
-    assert counts == 2
+    idxs = singl_ev.safe_query_elements(query=query, df=df)
+    assert idxs == [0,1]
     query = "c2=='a' & c3==1"
-    counts = singl_ev.safe_query_counts(query=query, df=df)
-    assert counts == 1
+    idxs = singl_ev.safe_query_elements(query=query, df=df)
+    assert idxs == [0]
+    query = "c3==4 & (c2=='c' or c1==1)"
+    idxs = singl_ev.safe_query_elements(query=query, df=df)
+    assert sorted(idxs) == [2,3]
 
 def test_query_equality_expression() -> None:
     """Assert results of function query_equality_expression for different input values."""
@@ -155,58 +161,72 @@ def test_UniqueSinglingOutQueries_init() -> None: # noqa: N802
     assert queries.df.equals(df)
     assert queries.sorted_queries_set == set()
     assert queries.queries == []
+    assert queries.idxs == []
     assert queries.count == 0
 
 @pytest.mark.parametrize(
-    ("queries", "e_count", "e_m_queries"),
+    ("queries", "e_count", "e_m_queries", "e_idxs"),
     [
-        (["c2=='fuffa'"], 0, []), #0 matches
-        (["c1==0 and c2=='a'"], 0, []), #2 total matches
-        (["c1==2 and c2=='c'"], 1, ["c1==2 and c2=='c'"]),
-        (["c1==2 and c2=='c'", "c3==1", "c2=='fuffa'"], 2, ["c1==2 and c2=='c'", "c3==1"]),
-        (["c1==2 and c2=='c'", "c3==1", "c2=='fuffa'", "c1==1 and c3==4"], 3, ["c1==2 and c2=='c'", "c3==1", "c1==1 and c3==4"]),
+        (["c2=='fuffa'"], 0, [], []), #0 total matches
+        (["c1==0 and c2=='a'"], 0, [], []), #2 total matches
+        (["c1==2 and c2=='c'"], 1, ["c1==2 and c2=='c'"], [2]),
+        (["c1==2 and c2=='c'", "c3==1", "c2=='fuffa'"], 2, ["c1==2 and c2=='c'", "c3==1"], [0, 2]),
+        (["c1==2 and c2=='c'", "c3==1", "c2=='fuffa'", "c1==1 and c3==4"], 3, ["c1==2 and c2=='c'", "c3==1", "c1==1 and c3==4"], [0, 2, 3]), # noqa: E501
+        (["c1==2 and c2=='c'", "c3==1", "c2=='fuffa'", "c1==1 and c3==4", "c2=='d'", "c2=='c'"], 3, ["c1==2 and c2=='c'", "c3==1", "c1==1 and c3==4"], [0, 2, 3]) # noqa: E501 #repeated matches
     ]
 )
-def test_evaluate_queries(queries: List[str], e_count: int, e_m_queries: List[str]) -> None:
+def test_evaluate_queries(queries: List[str], e_count: int, e_m_queries: List[str], e_idxs: List[int]) -> None:
     """Assert results of UniqueSinglingOutQueries.evaluate_queries method with different input values."""
     df = pd.DataFrame({"c1": [0, 0, 2, 1], "c2": ["a", "a", "c", "d"], "c3": [1, 2, 4, 4]})
     queries = singl_ev.UniqueSinglingOutQueries(df=df).evaluate_queries(queries=queries)
     assert isinstance(queries, singl_ev.UniqueSinglingOutQueries)
     assert queries.count == e_count
     assert queries.queries == e_m_queries
+    assert sorted(queries.idxs) == e_idxs
+    assert e_count == len(queries.queries)
+    assert e_count == len(queries.idxs)
 
 def test_check_and_append() -> None:
     """Assert results of UniqueSinglingOutQueries.check_and_append method with different input values."""
     #Test auxiliary function
-    def aux_assert_queries_count(*, queries:  singl_ev.UniqueSinglingOutQueries, queries_: List[str]) -> None:
+    def aux_assert_queries_count(*,
+        queries: singl_ev.UniqueSinglingOutQueries,
+        queries_: List[str],
+        idxs: List[int]
+    ) -> None:
         assert queries.queries == queries_
+        assert queries.idxs == idxs
         assert len(queries.queries) == queries.count
+        assert len(queries.idxs) == queries.count
     #Set df
     df = pd.DataFrame({"c1": [1], "c2": [2]})
     #Instantiate UniqueSinglingOutQueries
     queries = singl_ev.UniqueSinglingOutQueries(df=df)
+    q1 = "c1 == 2"
+    queries.check_and_append(query=q1)
+    aux_assert_queries_count(queries=queries, queries_=[], idxs=[])
     q1, q2 = "c1 == 1", "c2 == 2"
     queries.check_and_append(query=q1)
     queries.check_and_append(query=q1)
-    aux_assert_queries_count(queries=queries, queries_=[q1])
+    aux_assert_queries_count(queries=queries, queries_=[q1], idxs=[0])
     queries.check_and_append(query=q2)
-    aux_assert_queries_count(queries=queries, queries_=[q1, q2])
+    aux_assert_queries_count(queries=queries, queries_=[q1], idxs=[0])
     #Instantiate UniqueSinglingOutQueries
     queries = singl_ev.UniqueSinglingOutQueries(df=df)
     q3, q4 = f"{q1} and {q2}", f"{q2} and {q1}"
     queries.check_and_append(query=q3)
     queries.check_and_append(query=q4)
-    aux_assert_queries_count(queries=queries, queries_=[q3])
+    aux_assert_queries_count(queries=queries, queries_=[q3], idxs=[0])
     #Reset df
     df = pd.DataFrame({"c1": [1, 1], "c2": [2, 3]})
     q1 = "c1 == 1"
     #Instantiate UniqueSinglingOutQueries
     queries = singl_ev.UniqueSinglingOutQueries(df=df)
     queries.check_and_append(query=q1)
-    aux_assert_queries_count(queries=queries, queries_=[])
+    aux_assert_queries_count(queries=queries, queries_=[], idxs=[])
     q1 = "c1 == 1 and c2 == 3"
     queries.check_and_append(query=q1)
-    aux_assert_queries_count(queries=queries, queries_=[q1])
+    aux_assert_queries_count(queries=queries, queries_=[q1], idxs=[1])
 
 def test_naive_singling_out_attack() -> None:
     """Assert function naive_singling_out_attack raises no errors with adults simple input."""
@@ -222,18 +242,26 @@ def test_naive_singling_out_attack() -> None:
         for query in queries.queries:
             assert len(query.split("&")) == n_cols
 
-def test_univariate_singling_out_queries() -> None:
-    """Assert results of function random_queries with simple input."""
-    df = pd.DataFrame({
-        "col1": ["a", "b", "c", "d", np.nan],
-        "col2": [-2, -1, 2, 1, np.nan],
-    })
-    queries = singl_ev.univariate_singling_out_queries(df=df, n_queries=15)
-    expected_queries = [
-        "col1 == 'a'", "col1 == 'b'", "col1 == 'c'", "col1 == 'd'", "col1.isna()",
-        "col2 == -2.0", "col2 == -1.0", "col2 == 2.0", "col2 == 1.0", "col2.isna()", "col2 >= 2.0", "col2 <= -2.0"
+#Following variables are for following test
+col1 =  ["a", "b", "c", "d", np.nan]
+col2 =  [-2, -1, 2, 1, np.nan]
+e_queries_col1 = ["col1 == 'a'", "col1 == 'b'", "col1 == 'c'", "col1 == 'd'", "col1.isna()"]
+e_queries_col2 = ["col2 == -2.0", "col2 == -1.0", "col2 == 2.0", "col2 == 1.0", "col2.isna()", "col2 >= 2.0", "col2 <= -2.0"]
+
+@pytest.mark.parametrize(
+    ("input_dict", "e_queries"),
+    [
+        ({"col1": col1}, e_queries_col1),
+        ({"col2": col2}, e_queries_col2),
+        ({"col1": col1, "col2": col2}, e_queries_col1+e_queries_col2)
     ]
-    assert sorted(queries) == sorted(expected_queries)
+)
+def test_univariate_singling_out_queries(input_dict: dict, e_queries: List[str]) -> None:
+    """Assert results of function univariate_singling_out_queries with simple input."""
+    df = pd.DataFrame(input_dict)
+    queries = singl_ev.univariate_singling_out_queries(df=df, n_queries=15)
+    assert set(queries).issubset(set(e_queries))
+    assert len(set(queries)) == 5
 
 @pytest.mark.parametrize("max_attempts", [1, 2, 3])
 def test_multivariate_singling_out_queries_max_attempts(max_attempts: int) -> None:
@@ -297,5 +325,5 @@ def test_SinglingOutEvaluator(n_cols: int) -> None: # noqa: N802
     assert isinstance(soe.naive_queries, singl_ev.UniqueSinglingOutQueries)
     assert isinstance(soe.results, EvaluationResults)
     for q in soe.main_queries.queries:
-        assert singl_ev.safe_query_counts(query=q, df=ori) == 1
-        assert singl_ev.safe_query_counts(query=q, df=syn) == 1
+        assert len(singl_ev.safe_query_elements(query=q, df=ori)) == 1
+        assert len(singl_ev.safe_query_elements(query=q, df=syn)) == 1
