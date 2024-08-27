@@ -1,0 +1,1 @@
+STORAGE_PATH = "./leakpro/tests/tmp"

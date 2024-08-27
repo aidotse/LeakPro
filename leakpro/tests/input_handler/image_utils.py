@@ -12,7 +12,7 @@ from torchvision import transforms
 
 from leakpro.import_helper import Self
 
-STORAGE_PATH = "./leakpro/tests/input_handler"
+from leakpro.tests.constants import STORAGE_PATH
 
 parameters = DotMap()
 parameters.epochs = 10
