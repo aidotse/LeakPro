@@ -39,6 +39,11 @@ jobs:
           environment-name: leakpro
           cache-downloads: false
 
+      - name: Clean up __pycache__ and .pyc files
+        run: |
+          find . -name "__pycache__" -exec rm -rf {} +
+          find . -name "*.pyc" -exec rm -rf {} +
+
       - name: Test with pytest
         shell: bash -l {0}
         run: |
