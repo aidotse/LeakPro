@@ -76,9 +76,6 @@ class Memorization():
         self.logger = logger
         self.batch_size = batch_size
 
-    def run(self:Self) -> list:
-        """Run memorization enhancement."""
-
         self.audit_data_length = len(self.audit_data_indices)
         if self.org_audit_data_length*(1-self.memorization_threshold) < self.min_num_memorization_audit_points:
             self.logger.info("Warning!")
@@ -99,13 +96,16 @@ class Memorization():
         self.memorization_score = np.zeros(self.audit_data_length, dtype=float)
         self.privacy_score = np.zeros(self.audit_data_length, dtype=float)
 
+    def run(self:Self) -> list:
+        """Run memorization enhancement."""
+
         self._memorization_score()
 
         if self.use_privacy_score:
             self._privacy_score()
 
         mem_mask, privacy_mask = self.adjust_memorization_mask()
-        mask = (mem_mask | privacy_mask)
+        mask = (mem_mask & privacy_mask)
 
         return mask, self.memorization_score, self.privacy_score
 
@@ -117,11 +117,8 @@ class Memorization():
 
         logits_function = ModelLogits()
         logits = np.swapaxes(logits_function(self.shadow_models, self.handler, self.audit_data_indices, self.batch_size), 0, 1)
-        target_logits = np.swapaxes(logits_function([self.target_model], self.handler, self.audit_data_indices, self.batch_size),\
-                                    0, 1).squeeze()
 
         logits = self.softmax_logits(logits)
-        target_logits = self.softmax_logits(target_logits)
 
         if self.online:
             for i, (logit, mask, label) in tqdm(enumerate(zip(logits, self.in_indices_mask, self.audit_data_labels)),
@@ -131,6 +128,14 @@ class Memorization():
                                                 ):
                 self.memorization_score[i] = np.mean(logit[mask, label]) - np.mean(logit[~mask, label])
         else:
+            # Offline impementation details.
+            # 1. Assumption made: The target logits will be a good approximate to the missing IN-samples
+            # 2. Given that memorization scores of the target model will likely be higher for IN-samples 
+            #       and low for OUT-samples, the offline version does more directly impact the 
+            #       filtering of IN- vs. OUT-samples.
+            target_logits = np.swapaxes(logits_function([self.target_model], self.handler, self.audit_data_indices,\
+                                        self.batch_size), 0, 1).squeeze()
+            target_logits = self.softmax_logits(target_logits)
             for i, (logit, target_logit, label) in tqdm(enumerate(zip(logits, target_logits, self.audit_data_labels)),
                                                 total=len(logits),
                                                 desc="Calculating memorization score",
@@ -169,6 +174,9 @@ class Memorization():
             if self.online:
                 privacy_score.append(np.abs(in_mean-out_mean)/(in_std+out_std+1e-30))
             else:
+                # Assumptions
+                # 1. target_logit is a good aproximation for the missing IN-samples
+                # 2. out_std ~= in_std => in_std+out_std ~= 2*out_std 
                 privacy_score.append(np.abs(target_logit-out_mean)/(2*out_std+1e-30))
 
         self.privacy_score = np.asarray(privacy_score)
@@ -192,7 +200,20 @@ class Memorization():
 
         # Set starting thresholds, from the paper ("why train more...")
         mem_thrshld = 0.8
-        priv_thrshld = 2.0
+        priv_thrshld = 2.0 if self.use_privacy_score else -1
+
+        # Check for negative memorization scores
+        if (positive_mem := np.count_nonzero((self.memorization_score > 0) & (self.privacy_score >= 0)))\
+                                            < self.num_memorization_audit_points:
+            self.logger.info(f"Too many samples with negative memorization score")
+            self.logger.info(f"Only {positive_mem} points with positive score but requesting {self.num_memorization_audit_points}")
+            self.logger.info("Please make sure to train the models enough")
+            if positive_mem > 0:
+                self.logger.info(f"Returning {positive_mem} points")
+                self.num_memorization_audit_points = positive_mem
+            else:
+                self.logger.info("Returning the 50% most vulnerable data points")
+                return self.memorization_score >= np.median(self.memorization_score), self.privacy_score >= np.min(self.privacy_score)
 
         # Use the thresholds from the paper
         if self.memorization_threshold == 0.0:
@@ -200,13 +221,13 @@ class Memorization():
 
         # Adjust initial thresholds if they are set too high
         while (np.count_nonzero((self.memorization_score > mem_thrshld)\
-                | (self.privacy_score > priv_thrshld)) < self.num_memorization_audit_points):
+                & (self.privacy_score >= priv_thrshld)) < self.num_memorization_audit_points):
             mem_thrshld = mem_thrshld/2
             priv_thrshld = priv_thrshld/2
 
         # Find the thresholds corresponding to the percentile set in config
         while (np.count_nonzero((self.memorization_score > mem_thrshld)\
-                | (self.privacy_score > priv_thrshld)) > self.num_memorization_audit_points):
+                & (self.privacy_score >= priv_thrshld)) > self.num_memorization_audit_points):
             mem_thrshld = 1 - (1 - mem_thrshld)/(1.001)
             priv_thrshld = priv_thrshld*1.001
         return self.memorization_score > mem_thrshld, self.privacy_score > priv_thrshld
