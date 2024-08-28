@@ -86,7 +86,7 @@ class Memorization():
 
         if self.memorization_threshold != 0.0 and self.num_memorization_audit_points != 0:
             self.logger.info("Warning!")
-            self.logger.info('"memorization_threshold" and "num_memorization_audit_points" is both used.')
+            self.logger.info('"memorization_threshold" and "num_memorization_audit_points" are both used.')
             self.logger.info('"memorization_threshold" is by default set to 0.8, try setting it to 0.0')
             self.logger.info('Overriding "memorization_threshold" for "num_memorization_audit_points"')
 
