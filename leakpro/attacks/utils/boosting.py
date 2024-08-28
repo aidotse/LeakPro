@@ -130,8 +130,8 @@ class Memorization():
         else:
             # Offline impementation details.
             # 1. Assumption made: The target logits will be a good approximate to the missing IN-samples
-            # 2. Given that memorization scores of the target model will likely be higher for IN-samples 
-            #       and low for OUT-samples, the offline version does more directly impact the 
+            # 2. Given that memorization scores of the target model will likely be higher for IN-samples
+            #       and low for OUT-samples, the offline version does more directly impact the
             #       filtering of IN- vs. OUT-samples.
             target_logits = np.swapaxes(logits_function([self.target_model], self.handler, self.audit_data_indices,\
                                         self.batch_size), 0, 1).squeeze()
@@ -176,7 +176,7 @@ class Memorization():
             else:
                 # Assumptions
                 # 1. target_logit is a good aproximation for the missing IN-samples
-                # 2. out_std ~= in_std => in_std+out_std ~= 2*out_std 
+                # 2. out_std ~= in_std => in_std+out_std ~= 2*out_std
                 privacy_score.append(np.abs(target_logit-out_mean)/(2*out_std+1e-30))
 
         self.privacy_score = np.asarray(privacy_score)
@@ -205,15 +205,16 @@ class Memorization():
         # Check for negative memorization scores
         if (positive_mem := np.count_nonzero((self.memorization_score > 0) & (self.privacy_score >= 0)))\
                                             < self.num_memorization_audit_points:
-            self.logger.info(f"Too many samples with negative memorization score")
-            self.logger.info(f"Only {positive_mem} points with positive score but requesting {self.num_memorization_audit_points}")
+            self.logger.info("Too many samples with negative memorization score")
+            self.logger.info(f"Only {positive_mem} points with positive score, requesting {self.num_memorization_audit_points}")
             self.logger.info("Please make sure to train the models enough")
             if positive_mem > 0:
                 self.logger.info(f"Returning {positive_mem} points")
                 self.num_memorization_audit_points = positive_mem
             else:
                 self.logger.info("Returning the 50% most vulnerable data points")
-                return self.memorization_score >= np.median(self.memorization_score), self.privacy_score >= np.min(self.privacy_score)
+                return self.memorization_score >= np.median(self.memorization_score),\
+                        self.privacy_score >= np.min(self.privacy_score)
 
         # Use the thresholds from the paper
         if self.memorization_threshold == 0.0:
