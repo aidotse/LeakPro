@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import yaml
 from torch import manual_seed
+from torchvision.models.resnet import BasicBlock
 
 from leakpro import shadow_model_blueprints
 from leakpro.attacks.attack_scheduler import AttackScheduler
@@ -53,7 +54,7 @@ def generate_client_input(configs: dict) -> tuple:
 
     # Create the population dataset and target_model
     if "cifar10" in configs["gia_settings"]["dataset"]:
-        target_model = shadow_model_blueprints.ResNet()
+        target_model = shadow_model_blueprints.ResNet(BasicBlock, [5, 5, 5], num_classes=10, base_width=16 * 10)
     else:
         raise KeyError(f"""dataset {configs["gia_settings"]["dataset"]} not implemented.""")
 

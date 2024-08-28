@@ -138,7 +138,7 @@ class ResNet18(nn.Module):
 class ResNet(torchvision.models.ResNet):
     """ResNet generalization for CIFAR thingies."""
 
-    def __init__(self: Self, block: Module = torchvision.models.resnet.BasicBlock, layers: list=[5,5,5], num_classes: int=10,  # noqa: B006, C901
+    def __init__(self: Self, block: Module, layers: list, num_classes: int=10,  # noqa: C901
                  zero_init_residual: bool=False, groups: int = 1, base_width : int =160,
                  replace_stride_with_dilation: Optional[list[bool]] =None, norm_layer: Optional[Callable[..., nn.Module]] =None,
                  strides: list = [1, 2, 2, 2], pool: str = "avg") -> None:  # noqa: B006

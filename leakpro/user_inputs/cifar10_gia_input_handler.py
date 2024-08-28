@@ -38,6 +38,7 @@ class Cifar10GIAInputHandler(AbstractGIAInputHandler):
         Training does not update the original model, but returns a norm of what the update would have been.
         """
         gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        self.target_model.to(gpu_or_cpu)
         patched_model = MetaModule(self.target_model)
 
         outputs = None
