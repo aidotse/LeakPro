@@ -1,3 +1,4 @@
+"""Diverse util functions."""
 from torch import Tensor, abs, mean
 
 

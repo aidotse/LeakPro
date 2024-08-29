@@ -64,9 +64,9 @@ class InvertingGradients(AbstractGIA):
         """
         optimizer = torch.optim.Adam([self.reconstruction], lr=self.attack_lr)
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
-                                                            milestones=[24000 // 2.667, 24000 // 1.6,
+                                                            milestones=[self.iterations // 2.667, self.iterations // 1.6,
 
-                                                                        24000 // 1.142], gamma=0.1)
+                                                                        self.iterations // 1.142], gamma=0.1)
 
         for i in range(self.iterations):
             # loss function which does training and compares distance from reconstruction training to the real training.
