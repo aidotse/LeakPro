@@ -360,6 +360,7 @@ class HopSkipJumpDistance(Signal):
         gamma: float = 1.0,
         constraint: int = 2,
         batch_size: int = 128,
+        epsilon_threshold: float = 1e-6,
         verbose: bool = True,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Built-in call method.
@@ -402,6 +403,7 @@ class HopSkipJumpDistance(Signal):
                                                     gamma,
                                                     constraint,
                                                     batch_size,
+                                                    epsilon_threshold,
                                                     verbose
                                                     )
 

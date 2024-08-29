@@ -7,7 +7,6 @@ from sklearn.metrics import precision_score, recall_score, roc_curve
 from torch.utils.data import DataLoader
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
-from leakpro.attacks.mia_attacks.delete2 import hop_skip_jump_attack
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
@@ -57,6 +56,7 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
         self.constraint = configs.get("constraint", 2)
         self.batch_size = configs.get("batch_size", 128)
         self.verbose = configs.get("verbose", True)
+        self.epsilon_threshold = configs.get("epsilon_threshold", 1e-6)
 
         self.reproducing_paper_results = configs.get("reproducing_paper_results", True)
         self.paper_data_fr = configs.get("paper_data_fr", 0.83)
@@ -142,6 +142,13 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
         if self.y_target is not None and self.y_target not in range(num_classes):
             raise ValueError("y_target must be an integer and in the range of the number of classes in the target model.")
 
+    def _validate_epsilon_threshold(self:Self) -> None:
+        """Validate the epsilon_threshold value."""
+        if self.epsilon_threshold <= 0:
+            raise ValueError("epsilon_threshold must be greater than 0")
+        if self.epsilon_threshold >= 0.001:
+            raise ValueError("epsilon_threshold must be a very small value")
+
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
@@ -213,8 +220,6 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
 
         """
         shadow_model = self.shadow_model[0]
-        # shadow_model = self.target_model
-
 
         # if self.reproducing_paper_results:
         aux_data_size = int(len(self.shadow_train_data_indices)*self.paper_data_fr)
@@ -252,7 +257,7 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
 
         # compute the perturbation distances for the out-members of the shadow model
         self.logger.info("Running Hop Skip Jump distance attack, out data")
-        _ , perturbation_distances_out = self.signal( shadow_model,
+        _ , perturbation_distances_out = self.signal(shadow_model,
                                                 attack_out_dataloader,
                                                 self.logger,
                                                 self.norm,
@@ -273,19 +278,19 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
         # perturbation_distances_in = np.load("perturbation_in.npy")
         # perturbation_distances_out = np.load("perturbation_out.npy")
 
-        if self.reproducing_paper_results:
+        # if self.reproducing_paper_results:
 
-            # getting HSJ for in and out data in target model from cleverhans and save them for sanity check
-            self.logger.info("first sanity check")
-            hans_distances_in = self.sanity_check_hansclevernce(attack_in_dataset, self.target_model)
-            # hans_distances_out = self.sanity_check_hansclevernce(attack_out_dataset, self.target_model.model_obj)
-            np.save("hans_distances_in_target.npy", hans_distances_in)
+        #     # getting HSJ for in and out data in target model from cleverhans and save them for sanity check
+        #     self.logger.info("first sanity check")
+        #     hans_distances_in = self.sanity_check_hansclevernce(attack_in_dataset, self.target_model)
+        #     # hans_distances_out = self.sanity_check_hansclevernce(attack_out_dataset, self.target_model.model_obj)
+        #     np.save("hans_distances_in_target.npy", hans_distances_in)
 
-            self.logger.info("Second sanity check")
-            # getting HSJ for in and out data in target model and save them for sanity check
-            self.sanity_check(perturbation_distances_in, perturbation_distances_out)
+        #     self.logger.info("Second sanity check")
+        #     # getting HSJ for in and out data in target model and save them for sanity check
+        #     self.sanity_check(perturbation_distances_in, perturbation_distances_out)
 
-            # np.save("hans_distances_out.npy", hans_distances_out)
+        #     # np.save("hans_distances_out.npy", hans_distances_out)
 
 
 
@@ -305,6 +310,9 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
         perturbation_distances_in_tr = self.transformation(perturbation_distances_in_n)
         perturbation_distances_out_tr = self.transformation(perturbation_distances_out_n)
 
+        # self.sanity_check(perturbation_distances_in, perturbation_distances_out)
+        # self.sanity_check(perturbation_distances_in_n, perturbation_distances_out_n)
+        # self.sanity_check(perturbation_distances_in_tr, perturbation_distances_out_tr)
 
         # compute the signals for the in-members and out-members
         member_signals = (np.array(perturbation_distances_in_tr).reshape(-1, 1).repeat(num_threshold, 1).T)
@@ -440,14 +448,56 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
         # in_data_distances = np.load("perturbation_in.npy")
         out_data_distances = np.load("perturbation_out.npy")
 
+        # Traget model
+        t_perturbed_dist = np.concatenate([in_data_distances , out_data_distances], axis=0)
+        t_min_signal_val = np.min(t_perturbed_dist)
+        t_max_signal_val = np.max(t_perturbed_dist)
+
+        target_in_n= self.normalize(in_data_distances, t_min_signal_val, t_max_signal_val)
+        target_out_n= self.normalize(out_data_distances, t_min_signal_val, t_max_signal_val)
+
+        target_in_tr = self.transformation(target_in_n)
+        target_out_tr = self.transformation(target_out_n)
+
+
+        # Shadow model
+        s_perturbed_dist = np.concatenate([shadow_distances_in , shadow_distances_out], axis=0)
+        s_min_signal_val = np.min(s_perturbed_dist)
+        s_max_signal_val = np.max(s_perturbed_dist)
+
+        shadow_in_n= self.normalize(shadow_distances_in, s_min_signal_val, s_max_signal_val)
+        shadow_out_n= self.normalize(shadow_distances_out, s_min_signal_val, s_max_signal_val)
+
+        shadow_in_tr = self.transformation(shadow_in_n)
+        shadow_out_tr = self.transformation(shadow_out_n)
+        
+        
         # Find the optimal threshold
+        self.logger.info("Finding the optimal threshold, ditances")
         self.best_threshold_precision(self.find_threshold1(in_data_distances, out_data_distances),
                                        shadow_distances_in, shadow_distances_out)
         self.best_threshold_precision(self.find_threshold2(in_data_distances, out_data_distances),
                                       shadow_distances_in, shadow_distances_out)
         self.best_threshold_precision(self.find_threshold3(in_data_distances, out_data_distances),
                                       shadow_distances_in, shadow_distances_out)
+        
+        # Find the optimal threshold
+        self.logger.info("Finding the optimal threshold, ditances, normilized")
+        self.best_threshold_precision(self.find_threshold1(target_in_n, target_out_n),
+                                       shadow_in_n, shadow_out_n)
+        self.best_threshold_precision(self.find_threshold2(target_in_n, target_out_n),
+                                      shadow_in_n, shadow_out_n)
+        self.best_threshold_precision(self.find_threshold3(target_in_n, target_out_n),
+                                      shadow_in_n, shadow_out_n)
 
+        # Find the optimal threshold
+        self.logger.info("Finding the optimal threshold, ditances, normilized and transformed (log)")
+        self.best_threshold_precision(self.find_threshold1(target_in_tr, target_out_tr),
+                                       shadow_in_tr, shadow_out_tr)
+        self.best_threshold_precision(self.find_threshold2(target_in_tr, target_out_tr),
+                                      shadow_in_tr, shadow_out_tr)
+        self.best_threshold_precision(self.find_threshold3(target_in_tr, target_out_tr),
+                                      shadow_in_tr, shadow_out_tr)
 
 
 
@@ -636,50 +686,50 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
         accuracy = (tp + tn) / (tp + tn + fp + fn)
         self.logger.info(f"Accuracy: {accuracy:.4f}")
 
-    def sanity_check_hansclevernce(self, dataset, model):
-        """Sanity check the hop skip jump attack using the cleverhans library.
+    # def sanity_check_hansclevernce(self, dataset, model):
+    #     """Sanity check the hop skip jump attack using the cleverhans library.
 
-        Parameters
-        ----------
-        dataloder : DataLoader
-            The dataloader for the dataset.
-        model : torch.nn.Module
-            The target model.
+    #     Parameters
+    #     ----------
+    #     dataloder : DataLoader
+    #         The dataloader for the dataset.
+    #     model : torch.nn.Module
+    #         The target model.
 
-        Returns
-        -------
-        None
+    #     Returns
+    #     -------
+    #     None
 
-        """
-        distances = []
-        # dataset = dataloder.dataset
-        new_dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
-        attacked_model = model.model_obj
-        attacked_model.eval()
-        attacked_model.to("cpu")
-        init = []
-        distances = []
+    #     """
+    #     distances = []
+    #     # dataset = dataloder.dataset
+    #     new_dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
+    #     attacked_model = model.model_obj
+    #     attacked_model.eval()
+    #     attacked_model.to("cpu")
+    #     init = []
+    #     distances = []
 
-        for idx , (data, _) in enumerate(new_dataloader):
-            if idx <15 :
-                adv_x, distance, init_i = hop_skip_jump_attack(attacked_model, data,self.logger, 2, None, None, 100,10000,"geometric_progression", 64,
-                                             1.0, 2, 128, True, -1, 1)
+    #     for idx , (data, _) in enumerate(new_dataloader):
+    #         if idx <15 :
+    #             adv_x, distance, init_i = hop_skip_jump_attack(attacked_model, data,self.logger, 2, None, None, 100,10000,"geometric_progression", 64,
+    #                                          1.0, 2, 128, True, -1, 1)
 
-                distances.append(distance)
-                init.append(init_i)
-        numpy_list = [tensor.cpu().numpy() for tensor in init]
-        final_numpy_array = np.concatenate(numpy_list)
+    #             distances.append(distance)
+    #             init.append(init_i)
+    #     numpy_list = [tensor.cpu().numpy() for tensor in init]
+    #     final_numpy_array = np.concatenate(numpy_list)
 
-        # Step 4: Save the final NumPy array
-        np.save("init_hans_in.npy", final_numpy_array)
+    #     # Step 4: Save the final NumPy array
+    #     np.save("init_hans_in.npy", final_numpy_array)
 
-        flat_distances = list(chain.from_iterable(distances))
-        # Convert tensors to numpy arrays, ensuring each tensor is at least one-dimensional
-        nump_dist_list = [tensor.cpu().numpy() if tensor.dim() > 0 else np.array([tensor.cpu().item()]) for tensor in flat_distances]
+    #     flat_distances = list(chain.from_iterable(distances))
+    #     # Convert tensors to numpy arrays, ensuring each tensor is at least one-dimensional
+    #     nump_dist_list = [tensor.cpu().numpy() if tensor.dim() > 0 else np.array([tensor.cpu().item()]) for tensor in flat_distances]
 
-        # Concatenate the numpy arrays if necessary
-        final_numpy_array_dist = np.concatenate(nump_dist_list)
+    #     # Concatenate the numpy arrays if necessary
+    #     final_numpy_array_dist = np.concatenate(nump_dist_list)
 
-        # Save the final numpy array
-        np.save("cleverhans_target_in_distance.npy", final_numpy_array_dist)
-        return final_numpy_array_dist
+    #     # Save the final numpy array
+    #     np.save("cleverhans_target_in_distance.npy", final_numpy_array_dist)
+    #     return final_numpy_array_dist

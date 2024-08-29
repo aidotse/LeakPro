@@ -9,7 +9,7 @@ from torch import IntTensor, Tensor, cuda, exp, flatten, float32, log, nn, no_gr
 from torch.utils.data import DataLoader
 
 from leakpro.import_helper import Callable, List, Optional, Self, Tuple
-from leakpro.signals.utils.HopSkipJumpDIstance import HopSkipJumpDistance
+from leakpro.signals.utils.HopSkipJumpDistance import HopSkipJumpDistance
 
 ########################################################################################################################
 # MODEL CLASS
@@ -122,6 +122,7 @@ class Model(ABC):
                                     gamma: float,
                                     constraint: int ,
                                     batch_size: int,
+                                    epsilon_threshold: float,
                                     verbose: bool ) -> np.ndarray:
         """Calculate the hop-skip-jump distance for a given set of parameters.
 
@@ -140,6 +141,7 @@ class Model(ABC):
             constraint: Integer indicating the constraint.
             batch_size: Integer indicating the batch size.
             verbose: Boolean indicating if verbose output should be displayed.
+            epsilon_threshold: Float indicating the epsilon threshold.
 
         Returns:
         -------
@@ -362,6 +364,7 @@ class PytorchModel(Model):
                                     gamma: float,
                                     constraint: int ,
                                     batch_size: int,
+                                    epsilon_threshold: float,
                                     verbose: bool) -> Tuple[np.ndarray, np.ndarray]:
         """Calculate the hop-skip-jump distance for a given set of inputs.
 
@@ -382,6 +385,7 @@ class PytorchModel(Model):
             verbose: Boolean indicating whether to print verbose output.
             clip_min: Float indicating the minimum clipping value.
             clip_max: Float indicating the maximum clipping value.
+            epsilon_threshold: Float indicating the epsilon threshold.
 
         Returns:
         -------
@@ -401,6 +405,7 @@ class PytorchModel(Model):
                                                     gamma,
                                                     constraint,
                                                     batch_size,
+                                                    epsilon_threshold,
                                                     verbose)
         hop_skip_jump_perturbed_img, hop_skip_jump_distances = hop_skip_jump_instance.hop_skip_jump()
         return hop_skip_jump_perturbed_img, hop_skip_jump_distances
