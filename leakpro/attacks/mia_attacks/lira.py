@@ -5,6 +5,7 @@ from scipy.stats import norm
 from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
+from leakpro.attacks.utils.boosting import Memorization
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
@@ -41,21 +42,36 @@ class AttackLiRA(AbstractMIA):
             configs (dict): Configuration parameters for the attack.
 
         """
-        self.training_data_fraction = configs.get("training_data_fraction", 0.5)
-
         self.shadow_models = []
         self.num_shadow_models = configs.get("num_shadow_models", 64)
-
         self.online = configs.get("online", False)
-        self.fixed_variance = configs.get("fixed_variance", False)
-
+        self.training_data_fraction = configs.get("training_data_fraction", 0.5)
         self.include_train_data = configs.get("include_train_data", self.online)
         self.include_test_data = configs.get("include_test_data", self.online)
+
+        # Memorization config
+        # Activate memorization
+        self.memorization = configs.get("memorization", False)
+        # Set True to filter based on privacy score aswell as memorization score
+        self.use_privacy_score = configs.get("use_privacy_score", False)
+        # Set percentile for most vulnerable data points, use 0.0 for paper thresholds
+        self.memorization_threshold = configs.get("memorization_threshold", 0.8)
+        # Set minimum allowed audit points after memorization
+        self.min_num_memorization_audit_points = configs.get("min_num_memorization_audit_points", 10)
+        # Directly set number of most vulnerable audit data points (Overrides "memorization_threshold" )
+        self.num_memorization_audit_points = configs.get("num_memorization_audit_points", 0)
+
+        # LiRA specific
+        # Determine which variance estimation method to use [carlini, individual_carlini]
+        self.var_calculation = configs.get("var_calculation", "carlini")
 
         # Define the validation dictionary as: {parameter_name: (parameter, min_value, max_value)}
         validation_dict = {
             "num_shadow_models": (self.num_shadow_models, 1, None),
             "training_data_fraction": (self.training_data_fraction, 0, 1),
+            "memorization_threshold": (self.memorization_threshold, 0, 1),
+            "min_num_memorization_audit_points": (self.min_num_memorization_audit_points, 1, 1_000_000),
+            "num_memorization_audit_points": (self.num_memorization_audit_points, 0, 1_000_000),
         }
 
         # Validate parameters
@@ -91,9 +107,13 @@ class AttackLiRA(AbstractMIA):
         of the audit dataset, prepares the data for evaluation, and computes the logits
         for both shadow models and the target model.
         """
+
+        # Fixed variance is used when the number of shadow models is below 32 (64, IN and OUT models)
+        #       from (Membership Inference Attacks From First Principles)
+        self.fix_var_threshold = 32
+
         self.attack_data_indices = self.sample_indices_from_population(include_train_indices = self.online,
                                                                        include_test_indices = self.online)
-
 
         self.shadow_model_indices = ShadowModelHandler().create_shadow_models(num_models = self.num_shadow_models,
                                                                               shadow_population =  self.attack_data_indices,
@@ -102,47 +122,128 @@ class AttackLiRA(AbstractMIA):
 
         self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)
 
-        self.logger.info("Create masks for all IN samples")
-        self.in_indices_mask = ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"]).T
+        self.logger.info("Create masks for all IN and OUT samples")
+        self.in_indices_masks = ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"])
 
-        # Check offline attack for possible IN- sample(s)
         if self.online:
-            # filter out the points that no shadow model has seen and points that all shadow models have seen
-            num_shadow_models_seen_points = np.sum(self.in_indices_mask, axis=0)
-            # make sure that the audit points are included in the shadow model training (but not all)
+            # Exclude all audit points that have either no IN or OUT samples
+            num_shadow_models_seen_points = np.sum(self.in_indices_masks, axis=1)
             mask = (num_shadow_models_seen_points > 0) & (num_shadow_models_seen_points < self.num_shadow_models)
 
-            # Select datapoints that are auditable
+            # Filter the audit data
             audit_data_indices = self.audit_dataset["data"][mask]
+            self.in_indices_masks = self.in_indices_masks[mask, :]
+
+            # Filter IN and OUT members
             self.in_members = np.arange(np.sum(mask[self.audit_dataset["in_members"]]))
-            # find out how many out-members survived the filtering
             num_out_members = np.sum(mask[self.audit_dataset["out_members"]])
             self.out_members = np.arange(len(self.in_members), len(self.in_members) + num_out_members)
-            self.in_indices_mask = self.in_indices_mask[:,mask]
 
             assert len(audit_data_indices) == len(self.in_members) + len(self.out_members)
 
             if len(audit_data_indices) == 0:
                 raise ValueError("No points in the audit dataset are used for the shadow models")
+
         else:
             audit_data_indices = self.audit_dataset["data"]
             self.in_members = self.audit_dataset["in_members"]
             self.out_members = self.audit_dataset["out_members"]
 
-            count_in_samples = np.count_nonzero(self.in_indices_mask)
+        # Check offline attack for possible IN- sample(s)
+        if not self.online:
+            count_in_samples = np.count_nonzero(self.in_indices_masks)
             if count_in_samples > 0:
                 self.logger.info(f"Some shadow model(s) contains {count_in_samples} IN samples in total for the model(s)")
                 self.logger.info("This is not an offline attack!")
 
-        # Calculate logits for all shadow models
+        self.batch_size = len(audit_data_indices)
         self.logger.info(f"Calculating the logits for all {self.num_shadow_models} shadow models")
-        self.shadow_models_logits = np.array(self.signal(self.shadow_models, self.handler, audit_data_indices))
+        self.shadow_models_logits = np.swapaxes(self.signal(self.shadow_models, self.handler, audit_data_indices,\
+                                                            self.batch_size), 0, 1)
 
         # Calculate logits for the target model
         self.logger.info("Calculating the logits for the target model")
-        self.target_logits = np.array(self.signal([self.target_model],
-                                                  self.handler,
-                                                  audit_data_indices)).squeeze()
+        self.target_logits = np.swapaxes(self.signal([self.target_model], self.handler, audit_data_indices, self.batch_size),\
+                                        0, 1).squeeze()
+
+        # Using Memorizationg boosting
+        if self.memorization:
+
+            # Prepare for memorization
+            org_audit_data_length = self.audit_dataset["data"].size
+            audit_data_indices = self.audit_dataset["data"][mask] if self.online else self.audit_dataset["data"]
+            audit_data_labels = self.handler.get_labels(audit_data_indices)
+
+            self.logger.info("Running memorization")
+            memorization = Memorization(
+                self.use_privacy_score,
+                self.memorization_threshold,
+                self.min_num_memorization_audit_points,
+                self.num_memorization_audit_points,
+                self.in_indices_masks,
+                self.shadow_models,
+                self.target_model,
+                audit_data_indices,
+                audit_data_labels,
+                org_audit_data_length,
+                self.handler,
+                self.online,
+                self.logger,
+                self.batch_size,
+            )
+            memorization_mask, _, _ = memorization.run()
+
+            # Filter masks
+            self.in_indices_masks = self.in_indices_masks[memorization_mask, :]
+
+            # Filter IN and OUT members
+            self.in_members = np.arange(np.sum(memorization_mask[self.in_members]))
+            num_out_members = np.sum(memorization_mask[self.out_members])
+            self.out_members = np.arange(len(self.in_members), len(self.in_members) + num_out_members)
+
+            assert len(self.out_members) > 0
+            assert len(self.in_members) > 0
+
+            # Filter logits
+            self.shadow_models_logits = self.shadow_models_logits[memorization_mask, :]
+            self.target_logits = self.target_logits[memorization_mask]
+
+    def get_std(self:Self, logits: list, mask: list, is_in: bool, var_calculation: str) -> np.ndarray:
+        """A function to define what method to use for calculating variance for LiRA."""
+
+        # Fixed/Global variance calculation.
+        if var_calculation == "fixed":
+            return self._fixed_variance(logits, mask, is_in)
+
+        # Variance calculation as in the paper ( Membership Inference Attacks From First Principles )
+        if var_calculation == "carlini":
+            return self._carlini_variance(logits, mask, is_in)
+
+        # Variance calculation as in the paper ( Membership Inference Attacks From First Principles )
+        #   but check IN and OUT samples individualy
+        if var_calculation == "individual_carlini":
+            return self._individual_carlini(logits, mask, is_in)
+
+        return np.array([None])
+
+    def _fixed_variance(self:Self, logits: list, mask: list, is_in: bool) -> np.ndarray:
+        if is_in and not self.online:
+            return np.array([None])
+        return np.std(logits[mask])
+
+    def _carlini_variance(self:Self, logits: list, mask: list, is_in: bool) -> np.ndarray:
+        if self.num_shadow_models >= self.fix_var_threshold*2:
+                return np.std(logits[mask])
+        if is_in:
+            return self.fixed_in_std
+        return self.fixed_out_std
+
+    def _individual_carlini(self:Self, logits: list, mask: list, is_in: bool) -> np.ndarray:
+        if np.count_nonzero(mask) >= self.fix_var_threshold:
+            return np.std(logits[mask])
+        if is_in:
+            return self.fixed_in_std
+        return self.fixed_out_std
 
     def run_attack(self:Self) -> CombinedMetricResult:
         """Runs the attack on the target model and dataset and assess privacy risks or data leakage.
@@ -157,24 +258,20 @@ class AttackLiRA(AbstractMIA):
         true labels, and signal values.
 
         """
-        n_audit_samples = self.shadow_models_logits.shape[1]
+        n_audit_samples = self.shadow_models_logits.shape[0]
         score = np.zeros(n_audit_samples)  # List to hold the computed probability scores for each sample
 
-        # If fixed_variance is to be used, calculate it from all logits of shadow models
-        if self.fixed_variance:
-            out_std = np.std(self.shadow_models_logits[~self.in_indices_mask].flatten())
-            if self.online:
-                in_std = np.nanstd(self.shadow_models_logits[self.in_indices_mask].flatten())
+        self.fixed_in_std = self.get_std(self.shadow_models_logits.flatten(), self.in_indices_masks.flatten(), True, "fixed")
+        self.fixed_out_std = self.get_std(self.shadow_models_logits.flatten(), (~self.in_indices_masks).flatten(), False, "fixed")
 
-        # Iterate and extract logits from shadow models for each sample in the audit dataset
-        for i in tqdm(range(n_audit_samples), total=n_audit_samples, desc="Processing samples"):
-            shadow_models_logits = self.shadow_models_logits[:, i]
-            mask = self.in_indices_mask[:, i]
+        # Iterate over and extract logits for IN and OUT shadow models for each audit sample
+        for i, (shadow_models_logits, mask) in tqdm(enumerate(zip(self.shadow_models_logits, self.in_indices_masks)),
+                                                    total=len(self.shadow_models_logits),
+                                                    desc="Processing audit samples"):
 
             # Calculate the mean for OUT shadow model logits
             out_mean = np.mean(shadow_models_logits[~mask])
-            if not self.fixed_variance:
-                    out_std = np.std(shadow_models_logits[~mask])
+            out_std = self.get_std(shadow_models_logits, ~mask, False, self.var_calculation)
 
             # Get the logit from the target model for the current sample
             target_logit = self.target_logits[i]
@@ -184,8 +281,7 @@ class AttackLiRA(AbstractMIA):
 
             if self.online:
                 in_mean = np.mean(shadow_models_logits[mask])
-                if not self.fixed_variance:
-                    in_std = np.std(shadow_models_logits[mask])
+                in_std = self.get_std(shadow_models_logits, mask, True, self.var_calculation)
 
                 pr_in = -norm.logpdf(target_logit, in_mean, in_std + 1e-30)
             else:
@@ -194,7 +290,7 @@ class AttackLiRA(AbstractMIA):
             score[i] = (pr_in - pr_out)  # Append the calculated probability density value to the score list
 
         # Generate thresholds based on the range of computed scores for decision boundaries
-        self.thresholds = np.linspace(np.min(score), np.max(score), 1000)
+        self.thresholds = np.linspace(np.min(score), np.max(score), 2000)
 
         # Split the score array into two parts based on membership: in (training) and out (non-training)
         self.in_member_signals = score[self.in_members].reshape(-1,1)  # Scores for known training data members
