@@ -7,23 +7,11 @@ import numpy as np
 from pytest import raises
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.user_inputs.cifar10_input_handler import Cifar10InputHandler
-
-def _setup_shadow_test() -> DotMap:
-    """Setup the shadow model test."""
-    shadow_model_config = DotMap()
-    shadow_model_config.module_path = "./leakpro/tests/input_handler/image_utils.py"
-    shadow_model_config.model_class = "ConvNet"
-    shadow_model_config.storage_path = "./leakpro/tests/model_handlers/model_handler_output"
-    shadow_model_config.batch_size = 32
-    shadow_model_config.epochs = 1
-    shadow_model_config.optimizer = {"name": "sgd", "lr": 0.001}
-    shadow_model_config.loss = {"name": "crossentropyloss"}
-    return shadow_model_config
-
+from leakpro.tests.constants import shadow_model_config
 
 def test_shadow_model_handler_singleton(image_handler:Cifar10InputHandler) -> None:
     """Test that only one instance gets created."""
-    shadow_model_config = _setup_shadow_test()
+    
     image_handler.configs.shadow_model = shadow_model_config
     sm = ShadowModelHandler(image_handler)
     
@@ -32,7 +20,6 @@ def test_shadow_model_handler_singleton(image_handler:Cifar10InputHandler) -> No
     assert str(excinfo.value) == "Singleton already created with specific parameters."
 
 def test_shadow_model_creation_and_loading(image_handler:Cifar10InputHandler) -> None:
-    shadow_model_config = _setup_shadow_test()
     image_handler.configs.shadow_model = shadow_model_config
     
     # Test initialization

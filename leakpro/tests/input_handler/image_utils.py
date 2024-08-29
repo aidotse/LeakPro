@@ -12,22 +12,7 @@ from torchvision import transforms
 
 from leakpro.import_helper import Self
 
-from leakpro.tests.constants import STORAGE_PATH
-
-parameters = DotMap()
-parameters.epochs = 10
-parameters.batch_size = 64
-parameters.learning_rate = 0.001
-parameters.optimizer = "sgd"
-parameters.loss = "crossentropyloss"
-parameters.data_points = 130
-parameters.train_data_points = 20
-parameters.test_data_points = 20
-parameters.img_size = (3, 32, 32)
-parameters.num_classes = 13
-parameters.images_per_class = parameters.data_points // parameters.num_classes
-
-
+from leakpro.tests.constants import STORAGE_PATH, parameters
 
 class ConvNet(Module):
     """Convolutional Neural Network model."""

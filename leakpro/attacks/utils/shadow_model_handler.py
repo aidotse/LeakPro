@@ -30,6 +30,12 @@ def singleton(cls):  # noqa: ANN001, ANN201
             raise ValueError("Singleton already created with specific parameters.")
         return instances[cls]
 
+    def is_created() -> bool:
+        return cls in instances
+
+    # Attach a check method to the class
+    get_instance.is_created = is_created
+
     return get_instance
 
 @singleton

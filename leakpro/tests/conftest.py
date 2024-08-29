@@ -1,8 +1,13 @@
 """Test for the image input handler."""
 import logging
 import os
+import pickle
 import shutil
+import copy
+import random 
+
 from typing import Generator
+from torch import randn_like, save
 
 import pytest
 from dotmap import DotMap
@@ -28,7 +33,7 @@ def manage_storage_directory():
         shutil.rmtree(STORAGE_PATH)
 
 @pytest.fixture()
-def image_handler() -> Generator[Cifar10InputHandler, None, None]:
+def image_handler(manage_storage_directory) -> Generator[Cifar10InputHandler, None, None]:
     """Fixture for the image input handler to be shared between many tests."""
 
     config = DotMap()
@@ -44,23 +49,44 @@ def image_handler() -> Generator[Cifar10InputHandler, None, None]:
     yield handler
 
 @pytest.fixture()
-def offline_shadow_model_handler(image_handler) -> Generator[ShadowModelHandler, None, None]:
+def create_shadow_models(image_handler) -> Generator[ShadowModelHandler, None, None]:
     """Fixture for the shadow model handler to be shared between many tests."""
 
+    model_storage_name = "shadow_model"
+    metadata_storage_name = "metadata"
+        
     # Add shadow model configs
-    image_handler.configs.shadow_model = DotMap()
-    image_handler.configs.shadow_model.storage_path = STORAGE_PATH + "/shadow_models"
-    image_handler.configs.shadow_model.model_class = "ConvNet"
-    image_handler.configs.shadow_model.optimizer = {"name": "sgd", "lr": 0.001}
-    image_handler.configs.shadow_model.loss = {"name": "crossentropyloss", "init_params": {}}
-    
+    model = image_handler.target_model
 
+    # Create three models for offline and three models for online
     n_models = 3
-    training_fraction = 0.5
-    online = False
+    for online in [True, False]:
+        
+        # Make a funky split of the data where online choose from the train data and offline only from the test data
+        if online:
+            indices = random.randint(1, len(image_handler.train_indices), len(image_handler.train_indices)//2)
+        else:
+            indices = random.randint(1, len(image_handler.test_indices), len(image_handler.test_indices)//2)
+        
+        meta_data = {}
+        meta_data["init_params"] = {}
+        meta_data["train_indices"] = indices
+        meta_data["num_train"] = len(indices)
+        meta_data["optimizer"] = image_handler.configs.target.optimizer.name.lower()
+        meta_data["criterion"] = image_handler.configs.target.loss.name.lower()
+        meta_data["batch_size"] = image_handler.configs.target.batch_size
+        meta_data["epochs"] = image_handler.configs.target.epochs
+        meta_data["online"] = online
+        
+        for i in range(n_models):
+            shadow_model = copy.deepcopy(model)
+            for param in shadow_model.parameters():
+                param.data = randn_like(param)  # Fills each parameter tensor with random numbers
+            os.makedirs(STORAGE_PATH + f"/{model_storage_name}/model_{i}.pkl", exist_ok=True)
+            with open(STORAGE_PATH + f"/{model_storage_name}/model_{i}.pkl", "wb") as f:
+                save(shadow_model.state_dict(), f)
+            with open(STORAGE_PATH + f"/{metadata_storage_name}_{i}.pkl", "wb") as f:
+                pickle.dump(meta_data, f)
 
-    shadow_handler = ShadowModelHandler(image_handler)
-    shadow_handler.create_shadow_models(n_models, image_handler.test_indices, training_fraction, online)
-    
     # Yield control back to the test session
-    yield shadow_handler
+    yield
