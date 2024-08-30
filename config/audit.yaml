@@ -1,40 +1,47 @@
 audit:  # Configurations for auditing
   random_seed: 1234  # Integer specifying the random seed
   attack_list:
-    # rmia:
-    #   training_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
-    #   attack_data_fraction: 0.1 # Fraction of auxiliary dataset to sample from during attack
-    #   num_shadow_models: 4 # Number of shadow models to train
-    #   online: True # perform online or offline attack
+    rmia:
+      training_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
+      attack_data_fraction: 0.1 # Fraction of auxiliary dataset to sample from during attack
+      num_shadow_models: 3 # Number of shadow models to train
+      online: True # perform online or offline attack
+      temperature: 2
+      gamma: 2.0
+      offline_a: 0.33 # parameter from which we compute p(x) from p_OUT(x) such that p_IN(x) = a p_OUT(x) + b.
+      offline_b: 0.66
     # qmia:
     #   training_data_fraction: 0.1  # Fraction of the auxilary dataset (data without train and test indices) to use for training the quantile regressor
     #   epochs: 5  # Number of training epochs for quantile regression
     # population:
     #   attack_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack
     # lira:
-    #   training_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
+    #   training_data_fraction: 0.5  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
     #   num_shadow_models: 4 # Number of shadow models to train
     #   online: False # perform online or offline attack
     #   fixed_variance: True # Use a fixed variance for the whole audit
-    loss_traj:
-      training_distill_data_fraction : 0.2 # Fraction of the auxilary dataset to use for training the distillation models D_s = (1-D_KD)/2
-      number_of_traj: 1 # Number of epochs (number of points in the loss trajectory)
-      label_only: "False" # True or False
-      attack_data_dir: "./leakpro_output/attack_objects/loss_traj"
-      mia_classifier_epochs: 10
+    #   memorization: True # Use memorization score to boost performance
+    # loss_traj:
+    #   training_distill_data_fraction : 0.2 # Fraction of the auxilary dataset to use for training the distillation models D_s = (1-D_KD)/2
+    #   number_of_traj: 1 # Number of epochs (number of points in the loss trajectory)
+    #   label_only: "False" # True or False
+    #   attack_data_dir: "./leakpro_output/attack_objects/loss_traj"
+    #   mia_classifier_epochs: 10
+
     # gia attacks
     inverting_gradients:
       total_variation: 0.000001
       attack_lr: 0.1 # lr for the reconstruction optimizer
       at_iterations: 500
-  gia_settings:
-    client_batch_size: 1
-    num_client_images: 1
-    epochs: 4
-    optimizer: SGD
-    learning_rate: 0.0001
-    dataset: cifar10
-    data_dir: ./target/data
+    gia_settings:
+      client_batch_size: 1
+      num_client_images: 1
+      epochs: 4
+      optimizer: SGD
+      learning_rate: 0.0001
+      dataset: cifar10
+      data_dir: ./target/data
+
 
   report_log: "./leakpro_output/results"  # Folder to save the auditing report
   config_log: "./leakpro_output/config"  # Folder to save the configuration files
@@ -56,9 +63,11 @@ shadow_model:
   storage_path: "./leakpro_output/attack_objects/shadow_models"
   # [Optional] Define a shadow model (if none, shadow model will follow the target model)
   # Path to a Python file with the shadow model architecture
-  #module_path: "./leakpro/shadow_model_blueprints.py"
+  module_path: "./leakpro/shadow_model_blueprints.py"
   # Name of the class to instantiate from the specified file
   model_class: "ResNet18" #"ConvNet"
+  batch_size: 256
+  epochs: 1
   optimizer: 
     name: sgd #adam, sgd, rmsprop
     lr: 0.01

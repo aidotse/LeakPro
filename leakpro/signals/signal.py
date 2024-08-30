@@ -59,6 +59,7 @@ class ModelLogits(Signal):
         models: List[Model],
         handler: AbstractInputHandler,
         indices: np.ndarray,
+        batch_size: int = 32,
     ) -> List[np.ndarray]:
         """Built-in call method.
 
@@ -67,6 +68,7 @@ class ModelLogits(Signal):
             models: List of models that can be queried.
             handler: The input handler object.
             indices: List of indices in population dataset that can be queried from handler.
+            batch_size: Integer to determine batch size for dataloader.
 
         Returns:
         -------
@@ -76,7 +78,7 @@ class ModelLogits(Signal):
 
         # Iterate over the DataLoader (ensures we use transforms etc)
         # NOTE: Shuffle must be false to maintain indices order
-        data_loader = handler.get_dataloader(indices)
+        data_loader = handler.get_dataloader(indices, batch_size=batch_size)
         assert self._is_shuffling(data_loader) is False, "DataLoader must not shuffle data to maintain order of indices"
 
         results = []
@@ -84,7 +86,7 @@ class ModelLogits(Signal):
             # Initialize a list to store the logits sfor the current model
             model_logits = []
 
-            for data, _ in tqdm(data_loader, desc=f"Getting logits for model {m+1}/ {len(models)}"):
+            for data, _ in tqdm(data_loader, desc=f"Getting logits for model {m+1}/ {len(models)}", leave=False):
                 # Get logits for each data point
                 logits = model.get_logits(data)
                 model_logits.extend(logits)
@@ -105,6 +107,7 @@ class ModelRescaledLogits(Signal):
         models: List[Model],
         handler: AbstractInputHandler,
         indices: np.ndarray,
+        batch_size: int = 32,
     ) -> List[np.ndarray]:
         """Built-in call method.
 
@@ -113,13 +116,14 @@ class ModelRescaledLogits(Signal):
             models: List of models that can be queried.
             handler: The input handler object.
             indices: List of indices in population dataset that can be queried from handler.
+            batch_size: Integer to determine batch size for dataloader.
 
         Returns:
         -------
             The signal value.
 
         """
-        data_loader = handler.get_dataloader(indices)
+        data_loader = handler.get_dataloader(indices, batch_size=batch_size)
         assert self._is_shuffling(data_loader) is False, "DataLoader must not shuffle data to maintain order of indices"
 
         results = []
@@ -127,7 +131,7 @@ class ModelRescaledLogits(Signal):
             # Initialize a list to store the logits for the current model
             model_logits = []
 
-            for data, labels in tqdm(data_loader, desc=f"Getting rescaled logits for model {m+1}/ {len(models)}"):
+            for data, labels in tqdm(data_loader, desc=f"Getting rescaled logits for model {m+1}/ {len(models)}", leave=False):
                 # Get logits for each data point
                 logits = model.get_rescaled_logits(data,labels)
                 model_logits.extend(logits)
@@ -148,6 +152,7 @@ class ModelLoss(Signal):
         models: List[Model],
         handler: AbstractInputHandler,
         indices: np.ndarray,
+        batch_size: int = 32,
     ) -> List[np.ndarray]:
         """Built-in call method.
 
@@ -156,6 +161,7 @@ class ModelLoss(Signal):
             models: List of models that can be queried.
             handler: The input handler object.
             indices: List of indices in population dataset that can be queried from handler.
+            batch_size: Integer to determine batch size for dataloader.
 
         Returns:
         -------
@@ -163,7 +169,7 @@ class ModelLoss(Signal):
 
         """
         # Compute the signal for each model
-        data_loader = handler.get_dataloader(indices)
+        data_loader = handler.get_dataloader(indices, batch_size=batch_size)
         assert self._is_shuffling(data_loader) is False, "DataLoader must not shuffle data to maintain order of indices"
 
         results = []
