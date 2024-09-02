@@ -1,5 +1,6 @@
 """Module that contains the AttackScheduler class, which is responsible for creating and executing attacks."""
 
+from leakpro.attacks.gia_attacks.attack_factory_gia import AttackFactoryGIA
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
 from leakpro.import_helper import Any, Dict, Self
@@ -9,7 +10,8 @@ from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 class AttackScheduler:
     """Class responsible for creating and executing attacks."""
 
-    attack_type_to_factory = {"mia": AttackFactoryMIA}
+    attack_type_to_factory = {"mia": AttackFactoryMIA,
+                              "gia": AttackFactoryGIA}
 
     def __init__(
         self:Self,

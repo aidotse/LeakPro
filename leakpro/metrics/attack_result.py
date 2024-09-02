@@ -1,5 +1,7 @@
 """Contains the AttackResult class, which stores the results of an attack."""
 
+import os
+
 import numpy as np
 from sklearn.metrics import (
     accuracy_score,
@@ -8,6 +10,9 @@ from sklearn.metrics import (
     roc_auc_score,
     roc_curve,
 )
+from torch import Tensor, clamp, stack
+from torch.utils.data import DataLoader, Dataset, Subset
+from torchvision.utils import save_image
 
 from leakpro.import_helper import Any, List, Self
 
@@ -133,3 +138,39 @@ class CombinedMetricResult:
 
             txt_list.append("\n".join(txt))
         return "\n\n".join(txt_list)
+
+class GIAResults:
+    """Contains results for a GIA attack."""
+
+    def __init__(self: Self, original_data: DataLoader, recreated_data: DataLoader,
+                 psnr_score: float, data_mean: float, data_std: float) -> None:
+        self.original_data = original_data
+        self.recreated_data = recreated_data
+        self.PSNR_score = psnr_score
+        self.data_mean = data_mean
+        self.data_std = data_std
+
+    def prepare_privacy_risk_report(self: Self, attack_name: str, save_path: str) -> None:
+        """Risk report for GIA. WIP."""
+
+        def extract_tensors_from_subset(dataset: Dataset) -> Tensor:
+            all_tensors = []
+            if isinstance(dataset, Subset):
+                for idx in dataset.indices:
+                    all_tensors.append(dataset.dataset[idx][0])
+
+            else:
+                for idx in range(len(dataset)):
+                    all_tensors.append(dataset[idx][0])
+            return stack(all_tensors)
+
+        recreated_data = extract_tensors_from_subset(self.recreated_data.dataset)
+        original_data = extract_tensors_from_subset(self.original_data.dataset)
+
+        output_denormalized = clamp(recreated_data * self.data_std + self.data_mean, 0, 1)
+        save_image(output_denormalized, os.path.join(save_path, "recreated_image.png"))
+
+        gt_denormalized = clamp(original_data * self.data_std + self.data_mean, 0, 1)
+        save_image(gt_denormalized, os.path.join(save_path, "original_image.png"))
+
+        return attack_name

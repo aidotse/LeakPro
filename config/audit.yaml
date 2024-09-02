@@ -19,6 +19,7 @@ audit:  # Configurations for auditing
     #   training_data_fraction: 0.5  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
     #   num_shadow_models: 4 # Number of shadow models to train
     #   online: False # perform online or offline attack
+    #   fixed_variance: True # Use a fixed variance for the whole audit
     #   memorization: True # Use memorization score to boost performance
     # loss_traj:
     #   training_distill_data_fraction : 0.2 # Fraction of the auxilary dataset to use for training the distillation models D_s = (1-D_KD)/2
@@ -27,11 +28,26 @@ audit:  # Configurations for auditing
     #   attack_data_dir: "./leakpro_output/attack_objects/loss_traj"
     #   mia_classifier_epochs: 10
 
+    # gia attacks
+    inverting_gradients:
+      total_variation: 0.000001
+      attack_lr: 0.1 # lr for the reconstruction optimizer
+      at_iterations: 500
+    gia_settings:
+      client_batch_size: 1
+      num_client_images: 1
+      epochs: 4
+      optimizer: SGD
+      learning_rate: 0.0001
+      dataset: cifar10
+      data_dir: ./target/data
+
+
   report_log: "./leakpro_output/results"  # Folder to save the auditing report
   config_log: "./leakpro_output/config"  # Folder to save the configuration files
   target_model_folder: "./target"
   attack_folder: "attack_objects"
-  attack_type: "mia"
+  attack_type: "gia"
   split_method: "no_overlapping"  # Method of creating the attack dataset
 
 target:
