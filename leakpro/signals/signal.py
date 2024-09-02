@@ -380,6 +380,7 @@ class HopSkipJumpDistance(Signal):
             gamma: The gamma value.
             constraint: The constraint value.
             batch_size: The batch size.
+            epsilon_threshold: The epsilon threshold.
             verbose: Whether to print verbose output.
 
         Returns:

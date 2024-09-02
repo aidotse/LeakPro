@@ -1,12 +1,9 @@
 import pickle  # noqa: D100
 
 import numpy as np
-from scipy.stats import ks_2samp
-from sklearn.metrics import precision_score, recall_score, roc_curve
-from torch.utils.data import DataLoader, ConcatDataset
+from torch.utils.data import DataLoader
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
-from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.signals.signal import HopSkipJumpDistance
@@ -76,9 +73,9 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
 
     def _validate_stepsize_search(self:Self) -> None:
         """Validate the stepsize_search value."""
-        valid_stepsize_search_values = ["geometric_progression", "grid_search"]
+        valid_stepsize_search_values = ["geometric_progression"]
         if self.stepsize_search not in valid_stepsize_search_values:
-            raise ValueError(f"Invalid stepsize_search value: {self.stepsize_search}. Must be one of {valid_stepsize_search_values}")
+            raise ValueError(f"Invalid stepsize_search. This version supports{valid_stepsize_search_values}")
 
     def _validate_constraint(self:Self) -> None:
         """Validate the constraint value."""
@@ -86,7 +83,7 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
         if self.constraint not in valid_constraint_values:
             raise ValueError(f"Invalid constraint value: {self.constraint}. Must be one of {valid_constraint_values}")
 
-    def _validate_initial_num_evals(self) -> None:
+    def _validate_initial_num_evals(self:Self) -> None:
         """Validate the initial_num_evals value."""
         if not (1 <= self.initial_num_evals <= 1000):
             raise ValueError(f"Invalid initial_num_evals value: {self.initial_num_evals}. "

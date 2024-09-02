@@ -7,8 +7,8 @@ import time
 from pathlib import Path
 
 import numpy as np
-import torch
 import yaml
+from torch import manual_seed
 from torch.utils.data import Subset
 
 import leakpro.dev_utils.train as utils
@@ -117,20 +117,10 @@ if __name__ == "__main__":
     with open(args, "rb") as f:
         configs = yaml.safe_load(f)
 
-    # # Set the random seed, log_dir and inference_game
-    # manual_seed(configs["audit"]["random_seed"])
-    # np.random.seed(configs["audit"]["random_seed"])
-    # random.seed(configs["audit"]["random_seed"])
-    seed = 42
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-            torch.cuda.manual_seed(seed)
-            torch.cuda.manual_seed_all(seed)  # if you are using multi-GPU.
-            # Ensure deterministic behavior on GPUs
-            torch.backends.cudnn.deterministic = True
-            torch.backends.cudnn.benchmark = False
+    # Set the random seed, log_dir and inference_game
+    manual_seed(configs["audit"]["random_seed"])
+    np.random.seed(configs["audit"]["random_seed"])
+    random.seed(configs["audit"]["random_seed"])
 
     # Create directory to store results
     report_dir = f"{configs['audit']['report_log']}"
