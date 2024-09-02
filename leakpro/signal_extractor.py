@@ -5,23 +5,17 @@ from abc import ABC, abstractmethod
 from copy import deepcopy
 
 import numpy as np
-from torch import IntTensor, Tensor, cuda, exp, flatten, float32, log, nn, no_grad, split
+from torch import IntTensor, Tensor, cuda, exp, flatten, float32, log, nn, no_grad
 from torch.utils.data import DataLoader
 
 from leakpro.import_helper import Callable, List, Optional, Self, Tuple
 from leakpro.signals.utils.HopSkipJumpDistance import HopSkipJumpDistance
 
-########################################################################################################################
-# MODEL CLASS
-########################################################################################################################
-
 
 class Model(ABC):
     """Interface to query a model without any assumption on how it is implemented."""
 
-    def __init__(self:Self,
-                 model_obj: nn.Module,
-                 loss_fn: nn.modules.loss._Loss) -> None:
+    def __init__(self:Self, model_obj:nn.Module, loss_fn: nn.modules.loss._Loss) -> None:
         """Initialize the Model.
 
         Args:
@@ -34,8 +28,7 @@ class Model(ABC):
         self.loss_fn = loss_fn
 
     @abstractmethod
-    def get_logits(self:Self,
-                    batch_samples:np.ndarray) -> np.ndarray:
+    def get_logits(self:Self, batch_samples:np.ndarray) -> np.ndarray:
         """Get the model output from a given input.
 
         Args:
@@ -50,10 +43,7 @@ class Model(ABC):
         pass
 
     @abstractmethod
-    def get_loss(self:Self,
-                 batch_samples:np.ndarray,
-                 batch_labels: np.ndarray,
-                   per_point:bool=True) -> np.ndarray:
+    def get_loss(self:Self, batch_samples:np.ndarray, batch_labels: np.ndarray, per_point:bool=True) -> np.ndarray:
         """Get the model loss on a given input and an expected output.
 
         Args:
@@ -70,9 +60,7 @@ class Model(ABC):
         pass
 
     @abstractmethod
-    def get_grad(self:Self,
-                 batch_samples:np.ndarray,
-                 batch_labels:np.ndarray) -> np.ndarray:
+    def get_grad(self:Self, batch_samples:np.ndarray, batch_labels:np.ndarray) -> np.ndarray:
         """Get the gradient of the model loss with respect to the model parameters, given an input and an expected output.
 
         Args:
@@ -108,57 +96,13 @@ class Model(ABC):
         """
         pass
 
-    @abstractmethod
-    def get_hop_skip_jump_distance(self:Self,  # noqa: D417
-                                    data_loader: DataLoader,
-                                    logger: logging.Logger,
-                                    norm: int ,
-                                    y_target: Optional[int] ,
-                                    image_target: Optional[int] ,
-                                    initial_num_evals: int ,
-                                    max_num_evals: int ,
-                                    stepsize_search: str,
-                                    num_iterations: int ,
-                                    gamma: float,
-                                    constraint: int ,
-                                    batch_size: int,
-                                    epsilon_threshold: float,
-                                    verbose: bool ) -> np.ndarray:
-        """Calculate the hop-skip-jump distance for a given set of parameters.
-
-        Args:
-        ----
-            data_loader: DataLoader object.
-            logger: Logger object.
-            norm: Integer indicating the norm to be used.
-            y_target: Optional integer indicating the target class.
-            image_target: Optional integer indicating the target image.
-            initial_num_evals: Integer indicating the initial number of evaluations.
-            max_num_evals: Integer indicating the maximum number of evaluations.
-            stepsize_search: String indicating the stepsize search method.
-            num_iterations: Integer indicating the number of iterations.
-            gamma: Float indicating the gamma value.
-            constraint: Integer indicating the constraint.
-            batch_size: Integer indicating the batch size.
-            verbose: Boolean indicating if verbose output should be displayed.
-            epsilon_threshold: Float indicating the epsilon threshold.
-
-        Returns:
-        -------
-            The hop-skip-jump distance as a numpy array.
-
-        """
-        pass
-
 class PytorchModel(Model):
     """Inherits from the Model class, an interface to query a model without any assumption on how it is implemented.
 
     This particular class is to be used with pytorch models.
     """
 
-    def __init__(self:Self,
-                 model_obj:nn.Module,
-                 loss_fn:nn.modules.loss._Loss)->None:
+    def __init__(self:Self, model_obj:nn.Module, loss_fn:nn.modules.loss._Loss)->None:
         """Initialize the PytorchModel.
 
         Args:
@@ -182,8 +126,7 @@ class PytorchModel(Model):
         self.loss_fn_no_reduction = deepcopy(loss_fn)
         self.loss_fn_no_reduction.reduction = "none"
 
-    def get_logits(self:Self,
-                   batch_samples:np.ndarray)->np.ndarray:
+    def get_logits(self:Self, batch_samples:np.ndarray)->np.ndarray:
         """Get the model output from a given input.
 
         Args:
@@ -195,15 +138,18 @@ class PytorchModel(Model):
             Model output.
 
         """
-        batch_samples_tensor = Tensor(
-            np.array(batch_samples), dtype=float32
-        )
-        return self.model_obj(batch_samples_tensor).detach().numpy()
 
-    def get_loss(self:Self,
-                 batch_samples:np.ndarray,
-                 batch_labels:np.ndarray,
-                 per_point:bool=True)->np.ndarray:
+        device = "cuda:0" if cuda.is_available() else "cpu"
+        self.model_obj.to(device)
+        self.model_obj.eval()
+
+        with no_grad():
+            logits = self.model_obj(batch_samples.to(device))
+
+        self.model_obj.to("cpu")
+        return logits.cpu().numpy()
+
+    def get_loss(self:Self, batch_samples:np.ndarray, batch_labels:np.ndarray, per_point:bool=True)->np.ndarray:
         """Get the model loss on a given input and an expected output.
 
         Args:
@@ -236,9 +182,7 @@ class PytorchModel(Model):
             Tensor(batch_labels_tensor),
         ).item()
 
-    def get_grad(self:Self,
-                 batch_samples:np.ndarray,
-                 batch_labels:np.ndarray)->np.ndarray:
+    def get_grad(self:Self, batch_samples:np.ndarray, batch_labels:np.ndarray)->np.ndarray:
         """Get the gradient of the model loss with respect to the model parameters, given an input and expected output.
 
         Args:
@@ -319,37 +263,29 @@ class PytorchModel(Model):
                 The rescaled logit value.
 
             """
-            self.batch_size = 1024
 
             device = "cuda:0" if cuda.is_available() else "cpu"
             self.model_obj.to(device)
             self.model_obj.eval()
-
             with no_grad():
-                rescaled_list = []
-                batched_samples = split(Tensor(np.array(batch_samples), dtype=float32), self.batch_size)
-                batched_labels = split(Tensor(np.array(batch_labels), dtype=float32), self.batch_size)
 
-                for x, y in zip(batched_samples, batched_labels):
-                    x = x.to(device)  # noqa: PLW2901
-                    y = y.to(device)  # noqa: PLW2901
-                    all_logits = self.model_obj(x)
+                x = batch_samples.to(device)
+                y = batch_labels.to(device)
+                all_logits = self.model_obj(x)
 
-                    predictions = all_logits - max(all_logits, dim=1, keepdim=True).values
-                    predictions = exp(predictions)
-                    predictions = predictions/sum(predictions,dim=1, keepdim=True)
+                predictions = all_logits - max(all_logits, dim=1, keepdim=True).values
+                predictions = exp(predictions)
+                predictions = predictions/sum(predictions,dim=1, keepdim=True)
 
-                    count = predictions.shape[0]
-                    y_true = predictions[np.arange(count), y.type(IntTensor)]
-                    predictions[np.arange(count), y.type(IntTensor)] = 0
+                count = predictions.shape[0]
+                y_true = predictions[np.arange(count), y.type(IntTensor)]
+                predictions[np.arange(count), y.type(IntTensor)] = 0
 
-                    y_wrong = sum(predictions, dim=1)
-                    output_signals = flatten(log(y_true+1e-45) - log(y_wrong+1e-45)).cpu().numpy()
+                y_wrong = sum(predictions, dim=1)
+                output_signals = flatten(log(y_true+1e-45) - log(y_wrong+1e-45)).cpu().numpy()
 
-                    rescaled_list.append(output_signals)
-                all_rescaled_logits = np.concatenate(rescaled_list)
             self.model_obj.to("cpu")
-            return all_rescaled_logits
+            return output_signals
 
     def get_hop_skip_jump_distance(self:Self,  # noqa: D417
                                     data_loader: DataLoader,

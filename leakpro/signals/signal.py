@@ -172,6 +172,7 @@ class ModelLoss(Signal):
         # Compute the signal for each model
         data_loader = handler.get_dataloader(indices, batch_size=batch_size)
         assert self._is_shuffling(data_loader) is False, "DataLoader must not shuffle data to maintain order of indices"
+<<<<<<< Updated upstream
 
         results = []
         for m, model in enumerate(models):
@@ -187,11 +188,23 @@ class ModelLoss(Signal):
             results.append(model_logits)
 
         return results
+=======
 
+        results = []
+        for m, model in enumerate(models):
+            # Initialize a list to store the logits for the current model
+            model_logits = []
+>>>>>>> Stashed changes
 
-########################################################################################################################
-# MODEL_HOPSKIPJUMPDISTANCE CLASS
-########################################################################################################################
+            for data, labels in tqdm(data_loader, desc=f"Getting loss for model {m+1}/ {len(models)}"):
+                # Get logits for each data point
+                loss = model.get_loss(data,labels)
+                model_logits.extend(loss)
+            model_logits = np.array(model_logits)
+            # Append the logits for the current model to the results
+            results.append(model_logits)
+
+        return results
 
 class HopSkipJumpDistance(Signal):
     """Used to represent any type of signal that can be obtained from a Model and/or a Dataset.
