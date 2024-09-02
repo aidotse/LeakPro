@@ -1,22 +1,21 @@
 """Module containing the Model class, an interface to query a model without any assumption on how it is implemented."""
 
+import logging
 from abc import ABC, abstractmethod
 from copy import deepcopy
 
 import numpy as np
-import torch
+from torch import IntTensor, Tensor, cuda, exp, flatten, log, max, nn, no_grad, sum
+from torch.utils.data import DataLoader
 
-from leakpro.import_helper import Callable, List, Self
-
-########################################################################################################################
-# MODEL CLASS
-########################################################################################################################
+from leakpro.import_helper import Callable, List, Optional, Self, Tuple
+from leakpro.signals.utils.HopSkipJumpDistance import HopSkipJumpDistance
 
 
 class Model(ABC):
     """Interface to query a model without any assumption on how it is implemented."""
 
-    def __init__(self:Self, model_obj: torch.nn.Module, loss_fn: torch.nn.modules.loss._Loss) -> None:
+    def __init__(self:Self, model_obj:nn.Module, loss_fn: nn.modules.loss._Loss) -> None:
         """Initialize the Model.
 
         Args:
@@ -103,7 +102,7 @@ class PytorchModel(Model):
     This particular class is to be used with pytorch models.
     """
 
-    def __init__(self:Self, model_obj:torch.nn.Module, loss_fn:torch.nn.modules.loss._Loss)->None:
+    def __init__(self:Self, model_obj:nn.Module, loss_fn:nn.modules.loss._Loss)->None:
         """Initialize the PytorchModel.
 
         Args:
@@ -140,11 +139,11 @@ class PytorchModel(Model):
 
         """
 
-        device = "cuda:0" if torch.cuda.is_available() else "cpu"
+        device = "cuda:0" if cuda.is_available() else "cpu"
         self.model_obj.to(device)
         self.model_obj.eval()
 
-        with torch.no_grad():
+        with no_grad():
             logits = self.model_obj(batch_samples.to(device))
 
         self.model_obj.to("cpu")
@@ -164,9 +163,7 @@ class PytorchModel(Model):
             The loss value, as defined by the loss_fn attribute.
 
         """
-        batch_samples_tensor = torch.tensor(
-            np.array(batch_samples), dtype=torch.float32
-        )
+        batch_samples_tensor = Tensor(np.array(batch_samples)).float()
         batch_labels_tensor = batch_labels.clone().detach().long()
 
         if per_point:
@@ -179,8 +176,8 @@ class PytorchModel(Model):
                 .numpy()
             )
         return self.loss_fn(
-            self.model_obj(torch.tensor(batch_samples_tensor)),
-            torch.tensor(batch_labels_tensor),
+            self.model_obj(Tensor(batch_samples_tensor)),
+            Tensor(batch_labels_tensor),
         ).item()
 
     def get_grad(self:Self, batch_samples:np.ndarray, batch_labels:np.ndarray)->np.ndarray:
@@ -197,7 +194,7 @@ class PytorchModel(Model):
 
         """
         loss = self.loss_fn(
-            self.model_obj(torch.tensor(batch_samples)), torch.tensor(batch_labels)
+            self.model_obj(Tensor(batch_samples)), Tensor(batch_labels)
         )
         loss.backward()
         return [p.grad.numpy() for p in self.model_obj.parameters()]
@@ -221,7 +218,7 @@ class PytorchModel(Model):
 
         """
         if forward_pass:
-            _ = self.get_logits(torch.tensor(batch_samples))
+            _ = self.get_logits(Tensor(batch_samples))
         layer_names = []
         for layer in layers:
             if isinstance(layer, str):
@@ -246,7 +243,7 @@ class PytorchModel(Model):
 
         """
 
-        def hook(_: torch.Tensor, __: torch.Tensor, output: torch.Tensor) -> None:
+        def hook(_: Tensor, __: Tensor, output: Tensor) -> None:
             self.intermediate_outputs[layer_name] = output
 
         return hook
@@ -265,25 +262,84 @@ class PytorchModel(Model):
 
             """
 
-            device = "cuda:0" if torch.cuda.is_available() else "cpu"
+            device = "cuda:0" if cuda.is_available() else "cpu"
             self.model_obj.to(device)
             self.model_obj.eval()
-            with torch.no_grad():
+            with no_grad():
 
                 x = batch_samples.to(device)
                 y = batch_labels.to(device)
                 all_logits = self.model_obj(x)
 
-                predictions = all_logits - torch.max(all_logits, dim=1, keepdim=True).values
-                predictions = torch.exp(predictions)
-                predictions = predictions/torch.sum(predictions,dim=1, keepdim=True)
+                predictions = all_logits - max(all_logits, dim=1, keepdim=True).values
+                predictions = exp(predictions)
+                predictions = predictions/sum(predictions,dim=1, keepdim=True)
 
                 count = predictions.shape[0]
-                y_true = predictions[np.arange(count), y.type(torch.IntTensor)]
-                predictions[np.arange(count), y.type(torch.IntTensor)] = 0
+                y_true = predictions[np.arange(count), y.type(IntTensor)]
+                predictions[np.arange(count), y.type(IntTensor)] = 0
 
-                y_wrong = torch.sum(predictions, dim=1)
-                output_signals = torch.flatten(torch.log(y_true+1e-45) - torch.log(y_wrong+1e-45)).cpu().numpy()
+                y_wrong = sum(predictions, dim=1)
+                output_signals = flatten(log(y_true+1e-45) - log(y_wrong+1e-45)).cpu().numpy()
 
             self.model_obj.to("cpu")
             return output_signals
+
+    def get_hop_skip_jump_distance(self:Self,  # noqa: D417
+                                    data_loader: DataLoader,
+                                    logger: logging.Logger,
+                                    norm: int ,
+                                    y_target: Optional[int] ,
+                                    image_target: Optional[int] ,
+                                    initial_num_evals: int ,
+                                    max_num_evals: int ,
+                                    stepsize_search: str,
+                                    num_iterations: int ,
+                                    gamma: float,
+                                    constraint: int ,
+                                    batch_size: int,
+                                    epsilon_threshold: float,
+                                    verbose: bool) -> Tuple[np.ndarray, np.ndarray]:
+        """Calculate the hop-skip-jump distance for a given set of inputs.
+
+        Args:
+        ----
+            data_loader: DataLoader object containing the input data.
+            logger: Logger object.
+            norm: Integer indicating the norm to be used for distance calculation.
+            y_target: Optional integer indicating the target class label.
+            image_target: Optional integer indicating the target image index.
+            initial_num_evals: Integer indicating the initial number of evaluations.
+            max_num_evals: Integer indicating the maximum number of evaluations.
+            stepsize_search: String indicating the stepsize search method.
+            num_iterations: Integer indicating the number of iterations.
+            gamma: Float indicating the gamma value.
+            constraint: Integer indicating the constraint value.
+            batch_size: Integer indicating the batch size.
+            verbose: Boolean indicating whether to print verbose output.
+            clip_min: Float indicating the minimum clipping value.
+            clip_max: Float indicating the maximum clipping value.
+            epsilon_threshold: Float indicating the epsilon threshold.
+
+        Returns:
+        -------
+            A tuple containing the perturbed images and the hop-skip-jump distances.
+
+        """
+        hop_skip_jump_instance= HopSkipJumpDistance(self.model_obj,
+                                                    data_loader,
+                                                    logger,
+                                                    norm,
+                                                    y_target,
+                                                    image_target,
+                                                    initial_num_evals,
+                                                    max_num_evals,
+                                                    stepsize_search,
+                                                    num_iterations,
+                                                    gamma,
+                                                    constraint,
+                                                    batch_size,
+                                                    epsilon_threshold,
+                                                    verbose)
+        hop_skip_jump_perturbed_img, hop_skip_jump_distances = hop_skip_jump_instance.hop_skip_jump()
+        return hop_skip_jump_perturbed_img, hop_skip_jump_distances

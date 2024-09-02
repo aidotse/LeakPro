@@ -1,5 +1,6 @@
 """Signal class, which is an abstract class representing any type of signal that can be obtained."""
 
+import logging as logger
 from abc import ABC, abstractmethod
 
 import numpy as np
@@ -7,13 +8,9 @@ from torch.utils.data import DataLoader
 from torch.utils.data.sampler import SequentialSampler
 from tqdm import tqdm
 
-from leakpro.import_helper import List, Self
-from leakpro.model import Model
+from leakpro.import_helper import List, Optional, Self, Tuple
+from leakpro.signal_extractor import Model
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
-
-########################################################################################################################
-# SIGNAL CLASS
-########################################################################################################################
 
 
 class Signal(ABC):
@@ -186,3 +183,74 @@ class ModelLoss(Signal):
             results.append(model_logits)
 
         return results
+
+class HopSkipJumpDistance(Signal):
+    """Used to represent any type of signal that can be obtained from a Model and/or a Dataset.
+
+    This particular class is used to get the hop skip jump distance of a model.
+    """
+
+    def __call__(  # noqa: D102
+        self:Self,
+        model: Model,
+        data_loader: DataLoader,
+        logger: logger.Logger,
+        norm: int = 2,
+        y_target: Optional[int] = None,
+        image_target: Optional[int] = None,
+        initial_num_evals: int = 100,
+        max_num_evals: int = 10000,
+        stepsize_search: str = "geometric_progression",
+        num_iterations: int = 100,
+        gamma: float = 1.0,
+        constraint: int = 2,
+        batch_size: int = 128,
+        epsilon_threshold: float = 1e-6,
+        verbose: bool = True,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Built-in call method.
+
+        Args:
+        ----
+            model: The model to be used.
+            data_loader: The data loader to load the data.
+            logger: The logger object for logging.
+            norm: The norm to be used for distance calculation.
+            y_target: The target class label (optional).
+            image_target: The target image index (optional).
+            initial_num_evals: The initial number of evaluations.
+            max_num_evals: The maximum number of evaluations.
+            stepsize_search: The step size search strategy.
+            num_iterations: The number of iterations.
+            gamma: The gamma value.
+            constraint: The constraint value.
+            batch_size: The batch size.
+            epsilon_threshold: The epsilon threshold.
+            verbose: Whether to print verbose output.
+
+        Returns:
+        -------
+            Tuple containing the perturbed images and perturbed distance.
+
+        """
+
+
+        # Compute the signal for each model
+        perturbed_imgs, perturbed_distance = model.get_hop_skip_jump_distance(
+                                                    data_loader,
+                                                    logger,
+                                                    norm,
+                                                    y_target,
+                                                    image_target,
+                                                    initial_num_evals,
+                                                    max_num_evals,
+                                                    stepsize_search,
+                                                    num_iterations,
+                                                    gamma,
+                                                    constraint,
+                                                    batch_size,
+                                                    epsilon_threshold,
+                                                    verbose
+                                                    )
+
+        return perturbed_imgs, perturbed_distance

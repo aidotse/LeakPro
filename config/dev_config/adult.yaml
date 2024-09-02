@@ -1,7 +1,3 @@
-run: # Configurations for a specific run
-  random_seed: 1234 # Integer number of specifying random seed
-  log_dir: target # String for indicating where to save all the information, including models and computed signals. We can reuse the models saved in the same log_dir.
-
 train: # Configuration for training
   type: pytorch # Training framework (we only support pytorch now).
   num_target_model: 1 #Integer number for indicating how many target models we want to audit for the privacy game
@@ -11,11 +7,9 @@ train: # Configuration for training
   learning_rate: 0.1 # Float number for indicating learning rate for training the target model. For speedyresnet, it uses its own learning_rate.
   weight_decay: 0.01 # Float number for indicating weight decay for training the target model. For speedyresnet, it uses its own weight_decay.
   test_batch_size: 256
-  
+
 data: # Configuration for data
   dataset: adult # String indicates the name of the dataset (i.e., cifar10, cifar100, purchase100, texas1000)
   f_train: 0.01 # Float number from 0 to 1 indicating the fraction of the train dataset
   f_test: 0.01 # Float number from 0 to 1 indicating the fraction of the test dataset
   data_dir: ./target/data # String about where to save the data.
-
-
