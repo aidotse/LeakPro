@@ -5,11 +5,12 @@ from abc import ABC, abstractmethod
 
 import numpy as np
 from torch.utils.data import DataLoader
+from torch.utils.data.sampler import SequentialSampler
 from tqdm import tqdm
 
-from leakpro.dataset import Dataset
 from leakpro.import_helper import List, Optional, Self, Tuple
 from leakpro.signal_extractor import Model
+from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 
 ########################################################################################################################
 # SIGNAL CLASS
@@ -23,7 +24,8 @@ class Signal(ABC):
     def __call__(  # noqa: ANN204
         self: Self,
         models: List[Model],
-        datasets: List[Dataset],
+        handler: AbstractInputHandler,
+        indices: np.ndarray,
         extra: dict,
     ):
         """Built-in call method.
@@ -31,15 +33,8 @@ class Signal(ABC):
         Args:
         ----
             models: List of models that can be queried.
-            datasets: List of datasets that can be queried.
-            model_to_split_mapping: List of tuples, indicating how each model should query the dataset.
-                More specifically, for model #i:
-                model_to_split_mapping[i][0] contains the index of the dataset in the list,
-                model_to_split_mapping[i][1] contains the name of the split,
-                model_to_split_mapping[i][2] contains the name of the input feature,
-                model_to_split_mapping[i][3] contains the name of the output feature.
-                This can also be provided once and for all at the instantiation of InformationSource, through the
-                default_model_to_split_mapping argument.
+            handler: The input handler object.
+            indices: List of indices in population dataset that can be queried from handler.
             extra: Dictionary containing any additional parameter that should be passed to the signal object.
 
         Returns:
@@ -49,10 +44,9 @@ class Signal(ABC):
         """
         pass
 
-
-########################################################################################################################
-# MODEL_LOGIT CLASS
-########################################################################################################################
+    def _is_shuffling(self:Self, dataloader:DataLoader)->bool:
+        """Check if the DataLoader is shuffling the data."""
+        return not isinstance(dataloader.sampler, SequentialSampler)
 
 
 class ModelLogits(Signal):
@@ -64,29 +58,36 @@ class ModelLogits(Signal):
     def __call__(
         self: Self,
         models: List[Model],
-        datasets: Dataset,
+        handler: AbstractInputHandler,
+        indices: np.ndarray,
+        batch_size: int = 32,
     ) -> List[np.ndarray]:
         """Built-in call method.
 
         Args:
         ----
             models: List of models that can be queried.
-            datasets: List of datasets that can be queried.
-            extra: Dictionary containing any additional parameter that should be passed to the signal object.
+            handler: The input handler object.
+            indices: List of indices in population dataset that can be queried from handler.
+            batch_size: Integer to determine batch size for dataloader.
 
         Returns:
         -------
             The signal value.
 
         """        # Compute the signal for each model
+
+        # Iterate over the DataLoader (ensures we use transforms etc)
+        # NOTE: Shuffle must be false to maintain indices order
+        data_loader = handler.get_dataloader(indices, batch_size=batch_size)
+        assert self._is_shuffling(data_loader) is False, "DataLoader must not shuffle data to maintain order of indices"
+
         results = []
-        for model in models:
-            # Initialize a list to store the logits for the current model
+        for m, model in enumerate(models):
+            # Initialize a list to store the logits sfor the current model
             model_logits = []
 
-            # Iterate over the dataset using the DataLoader (ensures we use transforms etc)
-            data_loader = DataLoader(datasets, batch_size=len(datasets), shuffle=False)
-            for data, _ in data_loader:
+            for data, _ in tqdm(data_loader, desc=f"Getting logits for model {m+1}/ {len(models)}", leave=False):
                 # Get logits for each data point
                 logits = model.get_logits(data)
                 model_logits.extend(logits)
@@ -95,56 +96,6 @@ class ModelLogits(Signal):
             results.append(model_logits)
 
         return results
-
-########################################################################################################################
-# MODEL_NEGATIVERESCALEDLOGIT CLASS
-########################################################################################################################
-
-
-class ModelNegativeRescaledLogits(Signal):
-    """Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a Dataset.
-
-    This particular class is used to get the output of a model.
-    """
-
-    def __call__(
-        self: Self,
-        models: List[Model],
-        datasets: Dataset,
-    ) -> List[np.ndarray]:
-        """Built-in call method.
-
-        Args:
-        ----
-            models: List of models that can be queried.
-            datasets: List of datasets that can be queried.
-
-        Returns:
-        -------
-            The signal value.
-
-        """
-        data_loader = DataLoader(datasets, batch_size=len(datasets), shuffle=False)
-
-        # Iterate over the dataset using the DataLoader (ensures we use transforms etc)
-        for data, labels in data_loader:
-
-            # Initialize a list to store the logits for the current model
-            model_logits = []
-            for model in tqdm(models):
-
-                # Get neg. rescaled logits for each data point
-                logits = -model.get_rescaled_logits(data, labels)
-
-                # Append the logits for the current model to the results
-                model_logits.append(logits)
-
-            model_logits = np.array(model_logits)
-        return model_logits
-
-########################################################################################################################
-# MODEL_RESCALEDLOGIT CLASS
-########################################################################################################################
 
 class ModelRescaledLogits(Signal):
     """Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a Dataset.
@@ -155,99 +106,41 @@ class ModelRescaledLogits(Signal):
     def __call__(
         self: Self,
         models: List[Model],
-        datasets: Dataset,
+        handler: AbstractInputHandler,
+        indices: np.ndarray,
+        batch_size: int = 32,
     ) -> List[np.ndarray]:
         """Built-in call method.
 
         Args:
         ----
             models: List of models that can be queried.
-            datasets: datasets that can be queried.
+            handler: The input handler object.
+            indices: List of indices in population dataset that can be queried from handler.
+            batch_size: Integer to determine batch size for dataloader.
 
         Returns:
         -------
             The signal value.
 
         """
-        data_loader = DataLoader(datasets, batch_size=len(datasets), shuffle=False)
-
-        # Iterate over the dataset using the DataLoader (ensures we use transforms etc)
-        for data, labels in data_loader:
-
-            # Initialize a list to store the logits for the current model
-            model_logits = []
-            for model in tqdm(models):
-
-                # Get rescaled logits for each data point
-                logits = model.get_rescaled_logits(data, labels)
-
-                # Append the logits for the current model to the results
-                model_logits.append(logits)
-
-            model_logits = np.array(model_logits)
-        return model_logits
-
-
-########################################################################################################################
-# MODEL_INTERMEDIATE_OUTPUT CLASS
-########################################################################################################################
-
-class ModelIntermediateOutput(Signal):
-    """Used to represent any type of signal that can be obtained from a Model and/or a Dataset.
-
-    This particular class is used to get the value of an intermediate layer of model.
-    """
-
-    def __call__(
-        self:Self,
-        models: List[Model],
-        datasets: List[Dataset],
-        model_to_split_mapping: List[Tuple[int, str, str, str]],
-        extra: dict,
-    ) -> List[np.ndarray]:
-        """Built-in call method.
-
-        Args:
-        ----
-            models: List of models that can be queried.
-            datasets: List of datasets that can be queried.
-            model_to_split_mapping: List of tuples, indicating how each model should query the dataset.
-                More specifically, for model #i:
-                model_to_split_mapping[i][0] contains the index of the dataset in the list,
-                model_to_split_mapping[i][1] contains the name of the split,
-                model_to_split_mapping[i][2] contains the name of the input feature,
-                model_to_split_mapping[i][3] contains the name of the output feature.
-                This can also be provided once and for all at the instantiation of InformationSource, through the
-                default_model_to_split_mapping argument.
-            extra: Dictionary containing any additional parameter that should be passed to the signal object.
-
-        Returns:
-        -------
-            The signal value.
-
-        """
-        if "layers" not in list(extra):
-            raise TypeError('extra parameter "layers" is required')
+        data_loader = handler.get_dataloader(indices, batch_size=batch_size)
+        assert self._is_shuffling(data_loader) is False, "DataLoader must not shuffle data to maintain order of indices"
 
         results = []
-        # Compute the signal for each model
-        for k, model in enumerate(models):
-            # Extract the features to be used
-            (
-                dataset_index,
-                split_name,
-                input_feature,
-                output_feature,
-            ) = model_to_split_mapping[k]
-            x = datasets[dataset_index].get_feature(split_name, input_feature)
-            # Compute the signal
-            results.append(model.get_intermediate_outputs(extra["layers"], x))
+        for m, model in enumerate(models):
+            # Initialize a list to store the logits for the current model
+            model_logits = []
+
+            for data, labels in tqdm(data_loader, desc=f"Getting rescaled logits for model {m+1}/ {len(models)}", leave=False):
+                # Get logits for each data point
+                logits = model.get_rescaled_logits(data,labels)
+                model_logits.extend(logits)
+            model_logits = np.array(model_logits)
+            # Append the logits for the current model to the results
+            results.append(model_logits)
+
         return results
-
-
-########################################################################################################################
-# MODEL_LOSS CLASS
-########################################################################################################################
 
 class ModelLoss(Signal):
     """Used to represent any type of signal that can be obtained from a Model and/or a Dataset.
@@ -258,80 +151,41 @@ class ModelLoss(Signal):
     def __call__(
         self:Self,
         models: List[Model],
-        dataset: Dataset,
+        handler: AbstractInputHandler,
+        indices: np.ndarray,
+        batch_size: int = 32,
     ) -> List[np.ndarray]:
         """Built-in call method.
 
         Args:
         ----
             models: List of models that can be queried.
-            dataset: datasets to be queried.
+            handler: The input handler object.
+            indices: List of indices in population dataset that can be queried from handler.
+            batch_size: Integer to determine batch size for dataloader.
 
         Returns:
         -------
             The signal value.
 
         """
-        results = []
         # Compute the signal for each model
-        data_loader = DataLoader(dataset, batch_size=len(dataset), shuffle=False)
-        for model in models:
-            for data, labels in data_loader:
-                results.append(model.get_loss(data, labels))
+        data_loader = handler.get_dataloader(indices, batch_size=batch_size)
+        assert self._is_shuffling(data_loader) is False, "DataLoader must not shuffle data to maintain order of indices"
 
-        return results
-
-
-########################################################################################################################
-# MODEL_GRADIENT CLASS
-########################################################################################################################
-
-class ModelGradient(Signal):
-    """Used to represent any type of signal that can be obtained from a Model and/or a Dataset.
-
-    This particular class is used to get the gradient of a model.
-    """
-
-    def __call__(
-        self:Self,
-        models: List[Model],
-        datasets: List[Dataset],
-        model_to_split_mapping: List[Tuple[int, str, str, str]],
-    ) -> List[np.ndarray]:
-        """Built-in call method.
-
-        Args:
-        ----
-            models: List of models that can be queried.
-            datasets: List of datasets that can be queried.
-            model_to_split_mapping: List of tuples, indicating how each model should query the dataset.
-                More specifically, for model #i:
-                model_to_split_mapping[i][0] contains the index of the dataset in the list,
-                model_to_split_mapping[i][1] contains the name of the split,
-                model_to_split_mapping[i][2] contains the name of the input feature,
-                model_to_split_mapping[i][3] contains the name of the output feature.
-                This can also be provided once and for all at the instantiation of InformationSource, through the
-                default_model_to_split_mapping argument.
-            extra: Dictionary containing any additional parameter that should be passed to the signal object.
-
-        Returns:
-        -------
-            The signal value.
-
-        """
         results = []
-        # Compute the signal for each model
-        for k, model in enumerate(models):
-            # Extract the features to be used
-            (
-                dataset_index,
-                split_name,
-                input_feature,
-                output_feature,
-            ) = model_to_split_mapping[k]
-            x = datasets[dataset_index].get_feature(split_name, input_feature)
-            y = datasets[dataset_index].get_feature(split_name, output_feature)
-            results.append(model.get_grad(x, y))
+        for m, model in enumerate(models):
+            # Initialize a list to store the logits for the current model
+            model_logits = []
+
+            for data, labels in tqdm(data_loader, desc=f"Getting loss for model {m+1}/ {len(models)}"):
+                # Get logits for each data point
+                loss = model.get_loss(data,labels)
+                model_logits.extend(loss)
+            model_logits = np.array(model_logits)
+            # Append the logits for the current model to the results
+            results.append(model_logits)
+
         return results
 
 

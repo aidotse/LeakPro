@@ -9,7 +9,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
-from leakpro.import_helper import Self, Tuple
+from leakpro.import_helper import Any, Self, Tuple
 from leakpro.utils.input_handler import get_class_from_module, import_module_from_file
 
 
@@ -45,6 +45,8 @@ class AbstractInputHandler(ABC):
         try:
             with open(self.configs["target"]["data_path"], "rb") as file:
                 self.population = joblib.load(file)
+                if not self._is_indexable(self.population):
+                    raise ValueError("Population dataset is not indexable.")
                 self.logger.info(f"Loaded population dataset from {self.configs['target']['data_path']}")
             self.logger.info(f"Loaded population dataset from {self.configs['target']['data_path']}")
         except FileNotFoundError as e:
@@ -130,15 +132,42 @@ class AbstractInputHandler(ABC):
         if not np.issubdtype(dataset_indices.dtype, np.integer):
             raise ValueError("Dataset indices are not integers.")
 
+    def _is_indexable(self:Self, obj:Any) -> bool:
+        """Check if an object is indexable using NumPy array indexing."""
+
+        # Check for common indexable types
+        if hasattr(obj, "__getitem__"):
+            return True
+        raise ValueError("Object is not indexable.")
+
     def get_dataset(self:Self, dataset_indices: np.ndarray) -> np.ndarray:
         """Get the dataset from the population."""
+
+        if isinstance(dataset_indices, np.ndarray) is False:
+            dataset_indices = np.array(dataset_indices)
+
         self._validate_indices(dataset_indices)
-        return self.population.subset(dataset_indices)
+
+        # Handle different types of population structures
+        if hasattr(self.population, "subset"):
+            dataset = self.population.subset(dataset_indices)
+        else:
+            dataset = [self.population[indx] for indx in dataset_indices]
+        return dataset
 
     def get_dataloader(self: Self, dataset_indices: np.ndarray, batch_size: int = 32) -> DataLoader:
         """Default implementation of the dataloader."""
         dataset = self.get_dataset(dataset_indices)
-        return DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True)
+        return DataLoader(dataset=dataset, batch_size=batch_size, shuffle=False)
+
+    def get_labels(self:Self, indices: np.ndarray) -> np.ndarray:
+        """Get the labels for given indices in the population."""
+        labels = np.empty(len(indices), dtype=np.int16)
+
+        for k, idx in enumerate(indices):
+            _, labels[k] = self.population[idx]  # Assuming the dataset returns (data, label) tuple
+
+        return labels
 
     #------------------------------------------------
     # Methods related to target model
@@ -150,16 +179,16 @@ class AbstractInputHandler(ABC):
             model_replica = self.target_model_blueprint(**init_params)
             return model_replica, self.get_criterion(), self.get_optimizer(model_replica)
         except Exception as e:
-            raise ValueError("Failed to create an instance of the shadow model.") from e
+            raise ValueError("Failed to create an instance of the target model.") from e
 
     @abstractmethod
     def get_criterion(self:Self, criterion: torch.nn.modules.loss._Loss) -> None:
-        """Get the loss function for the target model to be used in shadow model training."""
+        """Get the loss function for the target model to be used in model training."""
         pass
 
     @abstractmethod
     def get_optimizer(self:Self, model:torch.nn.Module) -> torch.optim.Optimizer:
-        """Get the optimizer used for the target model to be used in shadow model training."""
+        """Get the optimizer used for the target model to be used in model training."""
         pass
 
     @abstractmethod
@@ -170,7 +199,7 @@ class AbstractInputHandler(ABC):
         criterion: torch.nn.modules.loss._Loss,
         optimizer: torch.optim.Optimizer
     ) -> nn.Module:
-        """Procedure to train the shadow models on data from the population."""
+        """Procedure to train a model on data from the population."""
         pass
 
     #------------------------------------------------

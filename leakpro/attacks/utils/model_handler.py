@@ -1,7 +1,6 @@
 """Abstract class for the model handler."""
 
 import joblib
-import torch
 from torch import load
 from torch.nn import Module
 
@@ -25,19 +24,21 @@ class ModelHandler():
         """Initialize the ModelHandler class."""
         self.logger = handler.logger
         self.handler = handler
+<<<<<<< HEAD
         self.init_params = handler.target_model_metadata["init_params"]
+=======
+        self.init_params = {}
+        self.loss_config = {}
+        self.optimizer_config = {}
+>>>>>>> main
 
-    def _import_model_from_path(self:Self, module_path:str, model_class:str)->Module:
+    def _import_model_from_path(self:Self, module_path:str, model_class:str)->None:
         """Import the model from the given path.
 
         Args:
         ----
             module_path (str): The path to the module.
             model_class (str): The name of the model class.
-
-        Returns:
-        -------
-            Module: The imported blueprint of a model.
 
         """
         try:
@@ -46,16 +47,12 @@ class ModelHandler():
         except Exception as e:
             raise ValueError(f"Failed to create model blueprint from {model_class} in {module_path}") from e
 
-    def _get_optimizer_class(self:Self, optimizer_name:str)->torch.optim.Optimizer:
+    def _get_optimizer_class(self:Self, optimizer_name:str) -> None:
         """Get the optimizer class based on the optimizer name.
 
         Args:
         ----
             optimizer_name (str): The name of the optimizer.
-
-        Returns:
-        -------
-            torch.optim.Optimizer: The optimizer class.
 
         """
         try:
@@ -63,16 +60,12 @@ class ModelHandler():
         except Exception as e:
             raise ValueError(f"Failed to create optimizer from {self.optimizer_config['name']}") from e
 
-    def _get_criterion_class(self:Self, criterion_name:str)->torch.nn.Module:
+    def _get_criterion_class(self:Self, criterion_name:str)->None:
         """Get the criterion class based on the criterion name.
 
         Args:
         ----
             criterion_name (str): The name of the criterion.
-
-        Returns:
-        -------
-            torch.nn.Module: The criterion class.
 
         """
         try:
@@ -94,8 +87,8 @@ class ModelHandler():
 
         return model, criterion, optimizer
 
-    def _load_model(self:Self, model_path:str) -> Module:
-        """Load a shadow model from a saved state.
+    def _load_model(self:Self, model_path:str) -> Tuple[Module, Module]:
+        """Load a model from a path.
 
         Args:
         ----
@@ -104,8 +97,10 @@ class ModelHandler():
         Returns:
         -------
             Module: The loaded shadow model.
+            Module: The loaded criterion.
 
         """
+        # First create the blueprint to inject the weights
         try:
             blueprint = self.handler.target_model_blueprint if self.model_blueprint is None else self.model_blueprint
             model = blueprint(**self.init_params)  # noqa: E501
@@ -113,6 +108,7 @@ class ModelHandler():
         except Exception as e:
             raise ValueError("Failed to create model from blueprint") from e
 
+        # Then load the weights and instert them into the model
         try:
             with open(model_path, "rb") as f:
                 model.load_state_dict(load(f))

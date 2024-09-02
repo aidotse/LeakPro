@@ -222,7 +222,9 @@ class AttackLossTrajectory(AbstractMIA):
         predicted_labels = np.array([])
         predicted_status = np.array([])
 
-        for loader_idx, (data, target) in enumerate(tqdm(data_loader)):
+        for loader_idx, (data, target) in tqdm(enumerate(data_loader),
+                                               total=len(data_indices),
+                                               desc=f"Preparing MIA data {dataset_name}"):
             data = data.to(gpu_or_cpu)
             target = target.to(gpu_or_cpu)
 

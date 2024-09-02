@@ -3,9 +3,13 @@ audit:  # Configurations for auditing
   attack_list:
     rmia:
       training_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
-      attack_data_fraction: 0.025 # Fraction of auxiliary dataset to sample from during attack
-      num_shadow_models: 2 # Number of shadow models to train
-      online: False # perform online or offline attack
+      attack_data_fraction: 0.1 # Fraction of auxiliary dataset to sample from during attack
+      num_shadow_models: 3 # Number of shadow models to train
+      online: True # perform online or offline attack
+      temperature: 2
+      gamma: 2.0
+      offline_a: 0.33 # parameter from which we compute p(x) from p_OUT(x) such that p_IN(x) = a p_OUT(x) + b.
+      offline_b: 0.66
     qmia:
       training_data_fraction: 0.5  # Fraction of the auxilary dataset (data without train and test indices) to use for training the quantile regressor
       epochs: 5  # Number of training epochs for quantile regression
@@ -35,12 +39,26 @@ audit:  # Configurations for auditing
       verbose: True
       epsilon_threshold: 1e-6
 
+    # gia attacks
+    inverting_gradients:
+      total_variation: 0.000001
+      attack_lr: 0.1 # lr for the reconstruction optimizer
+      at_iterations: 500
+    gia_settings:
+      client_batch_size: 1
+      num_client_images: 1
+      epochs: 4
+      optimizer: SGD
+      learning_rate: 0.0001
+      dataset: cifar10
+      data_dir: ./target/data
+
 
   report_log: "./leakpro_output/results"  # Folder to save the auditing report
   config_log: "./leakpro_output/config"  # Folder to save the configuration files
   target_model_folder: "./target"
   attack_folder: "attack_objects"
-  attack_type: "mia"
+  attack_type: "gia"
   split_method: "no_overlapping"  # Method of creating the attack dataset
 
 target:
@@ -56,9 +74,15 @@ shadow_model:
   storage_path: "./leakpro_output/attack_objects/shadow_models"
   # [Optional] Define a shadow model (if none, shadow model will follow the target model)
   # Path to a Python file with the shadow model architecture
-  #module_path: "./leakpro/shadow_model_blueprints.py"
+  module_path: "./leakpro/shadow_model_blueprints.py"
   # Name of the class to instantiate from the specified file
+<<<<<<< HEAD
   model_class: "ResNet18" #"ResNet18, SimpleCNN, ConvNet"
+=======
+  model_class: "ResNet18" #"ConvNet"
+  batch_size: 256
+  epochs: 1
+>>>>>>> main
   optimizer: 
     name: sgd #adam, sgd, rmsprop
     lr: 0.01

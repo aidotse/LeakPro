@@ -62,7 +62,7 @@ def generate_user_input(configs: dict, logger: logging.Logger)->None:
     """Generate user input for the target model."""
     # ------------------------------------------------
 
-    retrain = True
+    retrain = False
     # Create the population dataset and target_model
     if configs["data"]["dataset"] == "adult":
         population = get_adult_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
