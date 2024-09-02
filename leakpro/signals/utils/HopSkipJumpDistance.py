@@ -294,7 +294,7 @@ class HopSkipJumpDistance:
                                                                   b_i)
 
                 # Update the sample.
-                updated_perturbed = self.clampping(perturbed + epsilon.view(len(epsilon),1,1,1) * update )
+                updated_perturbed = self.clamping(perturbed + epsilon.view(len(epsilon),1,1,1) * update )
                 self.check_in_range(updated_perturbed)
 
             # compute new distance.
@@ -445,7 +445,7 @@ class HopSkipJumpDistance:
                 sampels = active_data_batch[batch_active_indices]
                 noises = batch_noise[batch_active_indices]
                 blended = (1 - midds) * sampels  +  midds * noises
-                blended = self.clampping(blended).to(self.device)
+                blended = self.clamping(blended).to(self.device)
                 original_indices = batch_active_indices + batch_i * self.batch_size
                 decisions, _  = self.decision_function(blended, original_indices)
 
@@ -464,7 +464,7 @@ class HopSkipJumpDistance:
                         success[idx] = True
                         sample = active_data_batch[i]
                         opt_noise = (1 - batch_high[i]) * sample + batch_high[i] * batch_noise[i]
-                        passed_init[idx] = self.clampping(opt_noise)
+                        passed_init[idx] = self.clamping(opt_noise)
                         batch_init_ordered_indices.append(idx)
 
                 batch_active_indices = batch_active_indices[~mask_out]
@@ -576,7 +576,7 @@ class HopSkipJumpDistance:
             active_epsilon = batch_epsilon[batch_active_indices].view(len(batch_active_indices), 1, 1, 1)
 
             active_updateed_samples = active_disturbed + active_epsilon * active_updates
-            active_updateed_samples = self.clampping(active_updateed_samples)
+            active_updateed_samples = self.clamping(active_updateed_samples)
             decisions, _  = self.decision_function(active_updateed_samples,
                                                    active_indices[batch_active_indices])
             passed_index= []
@@ -623,7 +623,7 @@ class HopSkipJumpDistance:
         dist_post_update = self.compute_distance(samples, previous_perturbed)
         d = int(np.prod(self.image_shape))
         if self.constraint == 2:
-            # Proposed by the authors of the paper:
+            # Proposed by the authors of the paper (Appendix B):
              delta_batch = 10  * np.sqrt(d) * self.theta * dist_post_update
         elif self.constraint == np.inf:
             delta_batch = d * self.theta * dist_post_update
@@ -672,7 +672,7 @@ class HopSkipJumpDistance:
             rv = randv.to(self.device)
 
             update_perturbed = perturbed + delta[i] * rv
-            update_perturbed = self.clampping(update_perturbed)
+            update_perturbed = self.clamping(update_perturbed)
 
             if torch_any(torch_isnan(update_perturbed)):
                 raise ValueError(f"NaN found in perturbed at iteration {iteration}, index {i}")
@@ -750,7 +750,7 @@ class HopSkipJumpDistance:
             blended_images = self.project(original_image_batch[batch_active_indices],
                                           perturbed_images_batch[batch_active_indices],
                                           mids[batch_active_indices])
-            blended_images = self.clampping(blended_images)
+            blended_images = self.clamping(blended_images)
             decisions, _ = self.decision_function(blended_images,
                                                 active_indices[batch_active_indices])
             decisions = decisions.cpu().numpy()
@@ -770,17 +770,16 @@ class HopSkipJumpDistance:
                     sample = original_image_batch[i]
                     perturbed = perturbed_images_batch[i]
                     out_images[i] = self.project(sample.unsqueeze(0), perturbed.unsqueeze(0), highs[i].unsqueeze(0))
-                    out_images[i] = self.clampping(out_images[i])
+                    out_images[i] = self.clamping(out_images[i])
                     if self.decision_function(out_images[i].unsqueeze(0), idx)[0] is False:
-                        self.logger.info(f"Using aplpha_ mid instrad of high for data point {idx}")
-                        out_images[i] = self.project(sample.unsqueeze(0), perturbed.unsqueeze(0), mids[i].unsqueeze(0))
-                        out_images[i] = self.clampping(out_images[i])
+                        self.logger.info(f"Using alpha_ mid instead of high for data point {idx}")
+                        out_images[i] = blended_images[i]
             batch_active_indices = batch_active_indices[~mask_out]
 
         return out_images, dists_pre_update
 
 
-    def clampping(self: Self, data: Tensor) -> Tensor:
+    def clamping(self: Self, data: Tensor) -> Tensor:
         """Scaling function for the input tensor.
 
         Args:
@@ -806,19 +805,8 @@ class HopSkipJumpDistance:
             Tensor: The tensor with values clamped to the specified range.
 
         """
-        if min(x) == self.clip_max or max(x) == self.clip_min:
-             self.logger.info("*********** flat image *******")
-        if min(x) < self.clip_min or max(x) > self.clip_max:
-             self.logger.info("*********** Out of range *******")
+        same_max_min =  min(x) == self.clip_max or max(x) == self.clip_min
+        assert same_max_min is False, "The input tensor is out of range"
 
-
-
-
-
-
-
-
-
-
-
-
+        out_of_range = min(x) < self.clip_min or max(x) > self.clip_max
+        assert out_of_range is False, "The input tensor is out of range"

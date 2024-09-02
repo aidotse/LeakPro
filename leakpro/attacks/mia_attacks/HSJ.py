@@ -1,7 +1,6 @@
 import pickle  # noqa: D100
 
 import numpy as np
-from torch.utils.data import DataLoader
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.import_helper import Self
@@ -165,8 +164,7 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
                                                 replace=False)
         audit_indices = np.concatenate((audit_in_member_indicies, audit_out_member_indicies))
 
-        attack_dataset = self.population.subset(audit_indices)
-        self.attack_dataloader = DataLoader(attack_dataset, batch_size=self.batch_size, shuffle=False)
+        self.attack_dataloader = self.handler.get_dataloader(audit_indices, batch_size=self.batch_size)
 
 
 
@@ -180,7 +178,7 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
 
         """
 
-        self.logger.info("Running Hop Skip Jump distance attack, in data ")
+        self.logger.info("Running Hop Skip Jump distance attack")
 
         # compute the perturbation distances of the attack data from the target model decision boundary
         _ , perturbation_distances = self.signal(self.target_model,
@@ -199,13 +197,10 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
                                                     self.verbose
                                                     )
 
-        np.save("perturbation.npy", perturbation_distances)
-        perturbation_distances = np.load("perturbation.npy")
-
         # create thresholds
         min_signal_val = np.min(perturbation_distances)
         max_signal_val = np.max(perturbation_distances)
-        thresholds = np.linspace(min_signal_val, max_signal_val, 100)
+        thresholds = np.linspace(min_signal_val, max_signal_val, 1000)
         num_threshold = len(thresholds)
 
         # compute the signals for the in-members and out-members
@@ -228,64 +223,3 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
             predictions_proba=None,
             signal_values= perturbation_distances,
         )
-
-
-    def transformation( self: Self, a: np.ndarray) -> np.ndarray:
-        """Apply log transformation to the input array.
-
-        Parameters
-        ----------
-        a : np.ndarray
-            The input array.
-
-        Returns
-        -------
-        np.ndarray
-            The transformed array.
-
-        """
-        epsilon = 1e-10  # Small constant to avoid division by zero
-
-        # Applying log transformation with epsilon regularization
-        return np.log((a + epsilon) / (1 - a + epsilon))
-
-    def normalize(self: Self, x:np.ndarray, min_value:float, max_value: float) -> np.ndarray:
-        """Normalize the input array.
-
-        Parameters
-        ----------
-        x : np.ndarray
-            The input array.
-        min_value : float
-            The minimum value for normalization.
-        max_value : float
-            The maximum value for normalization.
-
-        Returns
-        -------
-        np.ndarray
-            The normalized array.
-
-        """
-        near_one = 0.999999
-        return ((x - min_value) / (max_value-min_value) * near_one)
-
-
-    def is_member(self: Self, distance: np.ndarray, threshold: float) -> bool:
-        """Check if the distance is above the threshold.
-
-        Parameters
-        ----------
-        distance : np.ndarray
-            The distance to check.
-        threshold : float
-            The threshold value.
-
-        Returns
-        -------
-        bool
-            True if the distance is above the threshold, False otherwise.
-
-        """
-        return distance >= threshold
-
