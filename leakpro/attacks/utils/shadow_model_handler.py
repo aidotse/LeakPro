@@ -53,7 +53,7 @@ class ShadowModelHandler(ModelHandler):
         self.optimizer_config = self.configs.get("optimizer", None)
         self.loss_config = self.configs.get("loss", None)
         self.batch_size = self.configs.get("batch_size", 32)
-        self.epochs = self.configs.get("epochs", 10)
+        self.epochs = self.configs.get("epochs", 40)
         self.storage_path = self.configs.get("storage_path")
 
         if module_path is None or model_class is None:

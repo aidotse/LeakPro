@@ -69,7 +69,7 @@ def generate_user_input(configs: dict, logger: logging.Logger)->None:
         target_model = shadow_model_blueprints.NN(configs["train"]["inputs"], configs["train"]["outputs"])
     elif configs["data"]["dataset"] == "cifar10":
         population = get_cifar10_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
-        target_model = shadow_model_blueprints.SimpleCNN(configs["train"]["num_classes"])
+        target_model = shadow_model_blueprints.ResNet18(configs["train"]["num_classes"])
     elif configs["data"]["dataset"] == "cifar100":
         population = get_cifar100_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
         target_model = shadow_model_blueprints.ResNet18(configs["train"]["num_classes"])
