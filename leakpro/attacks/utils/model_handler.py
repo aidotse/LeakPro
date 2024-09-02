@@ -24,13 +24,7 @@ class ModelHandler():
         """Initialize the ModelHandler class."""
         self.logger = handler.logger
         self.handler = handler
-<<<<<<< HEAD
         self.init_params = handler.target_model_metadata["init_params"]
-=======
-        self.init_params = {}
-        self.loss_config = {}
-        self.optimizer_config = {}
->>>>>>> main
 
     def _import_model_from_path(self:Self, module_path:str, model_class:str)->None:
         """Import the model from the given path.

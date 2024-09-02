@@ -1,33 +1,23 @@
 audit:  # Configurations for auditing
   random_seed: 1234  # Integer specifying the random seed
   attack_list:
-    rmia:
-      training_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
-<<<<<<< Updated upstream
-      attack_data_fraction: 0.1 # Fraction of auxiliary dataset to sample from during attack
-      num_shadow_models: 3 # Number of shadow models to train
-      online: True # perform online or offline attack
-      temperature: 2
-      gamma: 2.0
-      offline_a: 0.33 # parameter from which we compute p(x) from p_OUT(x) such that p_IN(x) = a p_OUT(x) + b.
-      offline_b: 0.66
-=======
-      attack_data_fraction: 0.025 # Fraction of auxiliary dataset to sample from during attack
-      num_shadow_models: 2 # Number of shadow models to train
-      online: False # perform online or offline attack
->>>>>>> Stashed changes
-    qmia:
-      training_data_fraction: 0.5  # Fraction of the auxilary dataset (data without train and test indices) to use for training the quantile regressor
-      epochs: 5  # Number of training epochs for quantile regression
+    # rmia:
+    #   training_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
+    #   attack_data_fraction: 0.1 # Fraction of auxiliary dataset to sample from during attack
+    #   num_shadow_models: 3 # Number of shadow models to train
+    #   online: True # perform online or offline attack
+    #   temperature: 2
+    #   gamma: 2.0
+    #   offline_a: 0.33 # parameter from which we compute p(x) from p_OUT(x) such that p_IN(x) = a p_OUT(x) + b.
+    #   offline_b: 0.66
+    # qmia:
+    #   training_data_fraction: 0.5  # Fraction of the auxilary dataset (data without train and test indices) to use for training the quantile regressor
+    #   epochs: 5  # Number of training epochs for quantile regression
     population:
       attack_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack
     lira:
       training_data_fraction: 0.1  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
-<<<<<<< Updated upstream
       num_shadow_models: 8 # Number of shadow models to train
-=======
-      num_shadow_models: 1 # Number of shadow models to train
->>>>>>> Stashed changes
       online: False # perform online or offline attack
       fixed_variance: True # Use a fixed variance for the whole audit
     loss_traj:
@@ -68,7 +58,7 @@ audit:  # Configurations for auditing
   config_log: "./leakpro_output/config"  # Folder to save the configuration files
   target_model_folder: "./target"
   attack_folder: "attack_objects"
-  attack_type: "gia"
+  attack_type: "mia" #mia, gia
   split_method: "no_overlapping"  # Method of creating the attack dataset
 
 target:
@@ -86,13 +76,10 @@ shadow_model:
   # Path to a Python file with the shadow model architecture
   module_path: "./leakpro/shadow_model_blueprints.py"
   # Name of the class to instantiate from the specified file
-<<<<<<< HEAD
-  model_class: "ResNet18" #"ResNet18, SimpleCNN, ConvNet"
-=======
   model_class: "ResNet18" #"ConvNet"
   batch_size: 256
   epochs: 1
->>>>>>> main
+
   optimizer: 
     name: sgd #adam, sgd, rmsprop
     lr: 0.01

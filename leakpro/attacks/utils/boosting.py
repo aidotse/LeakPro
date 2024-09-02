@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 from leakpro.attacks.utils.utils import softmax_logits
 from leakpro.import_helper import Self
-from leakpro.model import PytorchModel
+from leakpro.signal_extractor import PytorchModel
 from leakpro.signals.signal import ModelLogits, ModelRescaledLogits
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 

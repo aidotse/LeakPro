@@ -12,10 +12,6 @@ from leakpro.import_helper import List, Optional, Self, Tuple
 from leakpro.signal_extractor import Model
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 
-########################################################################################################################
-# SIGNAL CLASS
-########################################################################################################################
-
 
 class Signal(ABC):
     """Abstract class, representing any type of signal that can be obtained from a Model and/or a Dataset."""
@@ -172,29 +168,11 @@ class ModelLoss(Signal):
         # Compute the signal for each model
         data_loader = handler.get_dataloader(indices, batch_size=batch_size)
         assert self._is_shuffling(data_loader) is False, "DataLoader must not shuffle data to maintain order of indices"
-<<<<<<< Updated upstream
 
         results = []
         for m, model in enumerate(models):
             # Initialize a list to store the logits for the current model
             model_logits = []
-
-            for data, labels in tqdm(data_loader, desc=f"Getting loss for model {m+1}/ {len(models)}"):
-                # Get logits for each data point
-                loss = model.get_loss(data,labels)
-                model_logits.extend(loss)
-            model_logits = np.array(model_logits)
-            # Append the logits for the current model to the results
-            results.append(model_logits)
-
-        return results
-=======
-
-        results = []
-        for m, model in enumerate(models):
-            # Initialize a list to store the logits for the current model
-            model_logits = []
->>>>>>> Stashed changes
 
             for data, labels in tqdm(data_loader, desc=f"Getting loss for model {m+1}/ {len(models)}"):
                 # Get logits for each data point

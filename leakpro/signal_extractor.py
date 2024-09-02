@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from copy import deepcopy
 
 import numpy as np
-from torch import IntTensor, Tensor, cuda, exp, flatten, float32, log, nn, no_grad
+from torch import IntTensor, Tensor, cuda, exp, flatten, log, max, nn, no_grad, sum
 from torch.utils.data import DataLoader
 
 from leakpro.import_helper import Callable, List, Optional, Self, Tuple
@@ -163,9 +163,7 @@ class PytorchModel(Model):
             The loss value, as defined by the loss_fn attribute.
 
         """
-        batch_samples_tensor = Tensor(
-            np.array(batch_samples), dtype=float32
-        )
+        batch_samples_tensor = Tensor(np.array(batch_samples)).float()
         batch_labels_tensor = batch_labels.clone().detach().long()
 
         if per_point:
