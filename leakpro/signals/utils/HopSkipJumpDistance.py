@@ -207,7 +207,7 @@ class HopSkipJumpDistance:
 
         perturbation_distances = []
         perturbed_images = []
-        for i, (batch_sample, _) in enumerate(tqdm(samples, desc="Epoch")):
+        for i, (batch_sample, _) in enumerate(tqdm(samples, desc="Batch")):
             active_dataset_indices = list(range(i*self.batch_size,
                                         builtins.min((i +1) * self.batch_size,  len(init_perturbed_ordered))))
             init_batch_perturbed = stack([init_perturbed_ordered[j] for j in active_dataset_indices])
@@ -302,7 +302,7 @@ class HopSkipJumpDistance:
             self.check_in_range(updated_perturbed)
             perturbed_previous_step = updated_perturbed.clone().detach()
             if self.verbose:
-                self.logger.info(f"iteration: {current_iter}, avg. distance"
+                self.logger.info(f"iteration: {current_iter}, avg. distance "
                                 f"{torch_sum(perturbation_distance, dim=0)/len(batch_sample)} per sample")
                 if (current_iter == self.num_iterations):
                     self.logger.info(f"iteration: {current_iter}, avg. distance {perturbation_distance}")
@@ -377,15 +377,11 @@ class HopSkipJumpDistance:
 
             # Update active_indices with new data points
             active_indices = np.where(~success)[0][:self.batch_size]
-            if num_evals % 200 == 0 and self.verbose:
-                # Print progress
-                ratio_success = sum(success).item() / len(self.data_loader.dataset)
-                self.logger.info(f"Iteration {num_evals}: {ratio_success*100:.4f}% success")
+
             num_evals += 1
             if len(active_indices) == 0:
                 self.logger.info("All data points in the batch have been successfully perturbed by random noise "
                                  f"after {num_evals} evaluations.")
-                break
 
         return passed_random_noises
 
@@ -418,7 +414,6 @@ class HopSkipJumpDistance:
         active_indices = np.where(~success)[0][:self.batch_size]
         passed_init = zeros((len(self.data_loader.dataset), self.image_shape[0], self.image_shape[1], self.image_shape[2]))
         init_orderd_indices = []
-        num_evals = 0
         batch_i = 0
 
         while not success.all():
@@ -473,12 +468,6 @@ class HopSkipJumpDistance:
             active_indices = np.where(~success)[0][:self.batch_size]
             init_orderd_indices.extend(batch_init_ordered_indices)
             batch_i += 1
-
-            if num_evals % 20 == 0 and self.verbose:
-                # Print progress
-                ratio_success = sum(success).item() / len(self.data_loader.dataset)
-                self.logger.info(f"Iteration {num_evals}: {ratio_success*100:.4f}% success")
-            num_evals += 1
 
         return passed_init, init_orderd_indices
 
@@ -590,7 +579,7 @@ class HopSkipJumpDistance:
                         success[idx] = True
                         batch_epsilon[idx] = 0
                         passed_index.append(idx)
-                        self.logger.info(f"Batch {b_i},data point {idx}, itr {num_evals}: epsilon is less than threshold")
+                        self.logger.info(f"Batch {b_i},data point {idx}, iter {num_evals}: epsilon is less than threshold")
 
             if passed_index:
                 # Find the positions in batch_active_indices corresponding to the values in passed_index
@@ -805,8 +794,8 @@ class HopSkipJumpDistance:
             Tensor: The tensor with values clamped to the specified range.
 
         """
-        same_max_min =  min(x) == self.clip_max or max(x) == self.clip_min
+        same_max_min =  bool(min(x) == self.clip_max or max(x) == self.clip_min)
         assert same_max_min is False, "The input tensor is out of range"
 
-        out_of_range = min(x) < self.clip_min or max(x) > self.clip_max
+        out_of_range = bool(min(x) < self.clip_min or max(x) > self.clip_max)
         assert out_of_range is False, "The input tensor is out of range"
