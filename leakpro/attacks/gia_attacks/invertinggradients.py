@@ -1,8 +1,9 @@
 """Geiping, Jonas, et al. "Inverting gradients-how easy is it to break privacy in federated learning?."."""
+from copy import deepcopy
 import torch
 
 from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
-from leakpro.attacks.utils.util_functions import total_variation
+from leakpro.attacks.utils.img_utils import dataloaders_psnr, total_variation
 from leakpro.import_helper import Callable, Self
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.user_inputs.abstract_gia_input_handler import AbstractGIAInputHandler
@@ -18,6 +19,9 @@ class InvertingGradients(AbstractGIA):
         self.attack_lr = configs.get("attack_lr")
         self.iterations = configs.get("at_iterations")
         self.logger.info("Inverting gradient initialized :)")
+        self.best_psnr = 0
+        self.best_reconstruction = None
+        self.best_reconstruction_round = None
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
@@ -80,9 +84,15 @@ class InvertingGradients(AbstractGIA):
                     )
             if i % 20 == 0:
                 self.logger.info(f"{i}: {loss}")
-            # add PSNR calculation and pick best image..
-        # Collect client data to one tensor
-        return GIAResults(self.client_loader, self.reconstruction_loader, 0, self.data_mean, self.data_std)
+            psnr = dataloaders_psnr(self.client_loader, self.reconstruction_loader)
+            # Compares with original image to find which recreation is most similar
+            if psnr > self.best_psnr:
+                self.best_psnr = psnr
+                self.best_reconstruction = deepcopy(self.reconstruction_loader)
+                self.best_reconstruction_round = i
+                self.logger.info(f"New best psnr: {psnr} on round: {i}")
+
+        return GIAResults(self.client_loader, self.best_reconstruction, 0, self.data_mean, self.data_std)
 
 
     def gradient_closure(self: Self, optimizer: torch.optim.Optimizer) -> Callable:

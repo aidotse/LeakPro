@@ -18,3 +18,4 @@ numba
 ruff
 pydantic
 tqdm
+torchmetrics==1.4.1
