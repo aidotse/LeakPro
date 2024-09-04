@@ -25,8 +25,8 @@ class Cifar10InputHandler(AbstractInputHandler):
     def get_optimizer(self: Self, model:torch.nn.Module) -> None:
         """Set the optimizer for the model."""
         learning_rate = 0.1
-        momentum = 0.8
-        return optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
+        momentum = 0.9
+        return optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum, weight_decay=5e-4, nesterov=True)
 
     def train(
         self: Self,
@@ -37,7 +37,6 @@ class Cifar10InputHandler(AbstractInputHandler):
         epochs: int = None,
     ) -> dict:
         """Model training procedure."""
-
         # read hyperparams for training (the parameters for the dataloader are defined in get_dataloader):
         if epochs is None:
             raise ValueError("epochs not found in configs")

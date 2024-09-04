@@ -1,5 +1,6 @@
 """Geiping, Jonas, et al. "Inverting gradients-how easy is it to break privacy in federated learning?."."""
 from copy import deepcopy
+
 import torch
 
 from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
@@ -7,6 +8,7 @@ from leakpro.attacks.utils.img_utils import dataloaders_psnr, total_variation
 from leakpro.import_helper import Callable, Self
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.user_inputs.abstract_gia_input_handler import AbstractGIAInputHandler
+from leakpro.user_inputs.cifar10_input_handler import Cifar10InputHandler
 
 
 class InvertingGradients(AbstractGIA):
@@ -19,7 +21,7 @@ class InvertingGradients(AbstractGIA):
         self.attack_lr = configs.get("attack_lr")
         self.iterations = configs.get("at_iterations")
         self.logger.info("Inverting gradient initialized :)")
-        self.best_psnr = 0
+        self.best_loss = 0
         self.best_reconstruction = None
         self.best_reconstruction_round = None
 
@@ -49,6 +51,11 @@ class InvertingGradients(AbstractGIA):
             None
 
         """
+        # should be somewhere else.. for testing
+        ih = Cifar10InputHandler(configs=self.handler.configs, logger=self.logger)
+        trainloader, valloader = self.handler.data_module.get_train_val_loaders()
+        ih.train(trainloader, self.handler.target_model, ih.get_criterion(), ih.get_optimizer(), 120)
+        # real code..
         self.handler.target_model.eval()
         self.client_loader = self.handler.get_client_loader()
         self.data_mean, self.data_std = self.handler.get_meanstd()
@@ -82,17 +89,17 @@ class InvertingGradients(AbstractGIA):
                 self.reconstruction.data = torch.max(
                     torch.min(self.reconstruction, (1 - self.data_mean) / self.data_std), -self.data_mean / self.data_std
                     )
-            if i % 20 == 0:
+            if i % 100 == 0:
                 self.logger.info(f"{i}: {loss}")
-            psnr = dataloaders_psnr(self.client_loader, self.reconstruction_loader)
             # Compares with original image to find which recreation is most similar
-            if psnr > self.best_psnr:
-                self.best_psnr = psnr
+            if loss > self.best_loss:
+                self.best_loss = loss
                 self.best_reconstruction = deepcopy(self.reconstruction_loader)
                 self.best_reconstruction_round = i
-                self.logger.info(f"New best psnr: {psnr} on round: {i}")
+                self.logger.info(f"New best psnr: {loss} on round: {i}")
 
-        return GIAResults(self.client_loader, self.best_reconstruction, 0, self.data_mean, self.data_std)
+        return GIAResults(self.client_loader, self.best_reconstruction,
+                          dataloaders_psnr(self.client_loader, self.reconstruction_loader), self.data_mean, self.data_std)
 
 
     def gradient_closure(self: Self, optimizer: torch.optim.Optimizer) -> Callable:
@@ -117,7 +124,7 @@ class InvertingGradients(AbstractGIA):
             optimizer.zero_grad()
             self.handler.target_model.zero_grad()
 
-            gradient = self.handler.train(self.reconstruction_loader, self.handler.get_optimizer())
+            gradient = self.handler.train(self.reconstruction_loader, self.handler.get_optimizer)
             rec_loss = self.reconstruction_costs(gradient, self.client_gradient)
 
             # Add the TV loss term to penalize large variations between pixels, encouraging smoother images.
