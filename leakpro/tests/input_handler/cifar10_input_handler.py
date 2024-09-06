@@ -7,7 +7,6 @@ from torch import cuda, device, optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-import leakpro
 from leakpro.import_helper import Self
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 

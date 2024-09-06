@@ -3,15 +3,18 @@ import logging
 import os
 import shutil
 
+import sys
+sys.path.append("../..")
+
 from typing import Generator
 
 import pytest
 from dotmap import DotMap
 
 
-from input_handler.image_utils import setup_image_test
-from input_handler.cifar10_input_handler import Cifar10InputHandler
-from constants import STORAGE_PATH
+from leakpro.tests.input_handler.image_utils import setup_image_test
+from leakpro.tests.input_handler.cifar10_input_handler import Cifar10InputHandler
+from leakpro.tests.constants import STORAGE_PATH
 
 
 @pytest.fixture(scope="session")
