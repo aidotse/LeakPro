@@ -1,1 +1,1 @@
-"""Dummy init file for leakpro package."""
+"""Init file for leakpro package."""

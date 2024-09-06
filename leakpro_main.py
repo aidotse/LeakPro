@@ -22,7 +22,7 @@ from leakpro.dev_utils.data_preparation import (
     get_cinic10_dataset,
     prepare_train_test_datasets,
 )
-from leakpro.reporting.utils import prepare_priavcy_risk_report
+from leakpro.reporting.utils import prepare_privacy_risk_report
 from leakpro.user_inputs.cifar10_input_handler import Cifar10InputHandler
 
 
@@ -135,7 +135,7 @@ if __name__ == "__main__":
     for attack_name in audit_results:
         logger.info(f"Preparing results for attack: {attack_name}")
 
-        prepare_priavcy_risk_report(
+        prepare_privacy_risk_report(
                 audit_results[attack_name]["result_object"],
                 configs["audit"],
                 save_path=f"{report_dir}/{attack_name}",
