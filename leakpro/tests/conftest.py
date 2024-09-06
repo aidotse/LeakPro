@@ -5,6 +5,7 @@ import shutil
 
 import sys
 sys.path.append("../..")
+print (sys.path)
 
 from typing import Generator
 
