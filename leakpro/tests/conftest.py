@@ -1,20 +1,15 @@
 """Test for the image input handler."""
 import logging
 import os
-import pickle
 import shutil
-import copy
-import random 
 
 from typing import Generator
-from torch import randn_like, save
 
 import pytest
 from dotmap import DotMap
 
 from leakpro.tests.input_handler.image_utils import setup_image_test
-from leakpro.user_inputs.cifar10_input_handler import Cifar10InputHandler
-from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
+from leakpro.tests.input_handler.cifar10_input_handler import Cifar10InputHandler
 from leakpro.tests.constants import STORAGE_PATH
 
 
