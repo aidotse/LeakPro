@@ -2,7 +2,7 @@
 from pytest import raises
 from math import isnan
 
-from leakpro.user_inputs.cifar10_input_handler import Cifar10InputHandler
+from leakpro.tests.input_handler.cifar10_input_handler import Cifar10InputHandler
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.attacks.mia_attacks.lira import AttackLiRA
 from leakpro.tests.constants import shadow_model_config, lira_params
