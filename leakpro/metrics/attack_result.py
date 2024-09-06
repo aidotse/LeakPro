@@ -3,6 +3,7 @@
 import os
 
 import numpy as np
+from leakpro.import_helper import Any, List, Self
 from sklearn.metrics import (
     accuracy_score,
     auc,
@@ -13,8 +14,6 @@ from sklearn.metrics import (
 from torch import Tensor, clamp, stack
 from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision.utils import save_image
-
-from leakpro.import_helper import Any, List, Self
 
 ########################################################################################################################
 # METRIC_RESULT CLASS

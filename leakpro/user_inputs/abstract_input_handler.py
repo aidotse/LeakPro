@@ -6,11 +6,10 @@ from abc import ABC, abstractmethod
 import joblib
 import numpy as np
 import torch
-from torch import nn
-from torch.utils.data import DataLoader
-
 from leakpro.import_helper import Any, Self, Tuple
 from leakpro.utils.input_handler import get_class_from_module, import_module_from_file
+from torch import nn
+from torch.utils.data import DataLoader
 
 
 class AbstractInputHandler(ABC):

@@ -2,15 +2,14 @@
 
 import numpy as np
 import torch
-from torch import nn
-from torch.utils.data import DataLoader, Dataset
-from tqdm import tqdm
-
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.import_helper import Any, Self, Tuple
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.signals.signal import ModelRescaledLogits
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
+from torch import nn
+from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
 
 
 class QMIADataset(Dataset):

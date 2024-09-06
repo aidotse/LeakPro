@@ -11,11 +11,14 @@ import yaml
 from torch import manual_seed
 from torch.utils.data import Subset
 
-import leakpro.dev_utils.train as utils
+import dev_utils.train as utils
+from dev_utils.cifar10_input_handler import Cifar10InputHandler
+
+from leakpro.utils.handler_logger import setup_log
 from leakpro import shadow_model_blueprints
 from leakpro.attacks.attack_scheduler import AttackScheduler
 from leakpro.dataset import get_dataloader
-from leakpro.dev_utils.data_preparation import (
+from dev_utils.data_preparation import (
     get_adult_dataset,
     get_cifar10_dataset,
     get_cifar100_dataset,
@@ -23,46 +26,11 @@ from leakpro.dev_utils.data_preparation import (
     prepare_train_test_datasets,
 )
 from leakpro.reporting.utils import prepare_privacy_risk_report
-from leakpro.user_inputs.cifar10_input_handler import Cifar10InputHandler
 
-
-def setup_log(name: str, save_file: bool=True) -> logging.Logger:
-    """Generate the logger for the current run.
-
-    Args:
-    ----
-        name (str): Logging file name.
-        save_file (bool): Flag about whether to save to file.
-
-    Returns:
-    -------
-        logging.Logger: Logger object for the current run.
-
-    """
-    my_logger = logging.getLogger(name)
-    my_logger.setLevel(logging.INFO)
-    log_format = logging.Formatter("%(asctime)s %(levelname)-8s %(message)s")
-
-    # Console handler for output to the console
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(log_format)
-    my_logger.addHandler(console_handler)
-
-    if save_file:
-        filename = f"log_{name}.log"
-        log_handler = logging.FileHandler(filename, mode="w")
-        log_handler.setLevel(logging.INFO)
-        log_handler.setFormatter(log_format)
-        my_logger.addHandler(log_handler)
-
-    return my_logger
-
-def generate_user_input(configs: dict, logger: logging.Logger)->None:
+def generate_user_input(configs: dict, retrain: bool = False, logger: logging.Logger = None)->None:
     """Generate user input for the target model."""
     # ------------------------------------------------
 
-    retrain = False
     # Create the population dataset and target_model
     if configs["data"]["dataset"] == "adult":
         population = get_adult_dataset(configs["data"]["dataset"], configs["data"]["data_dir"], logger)
@@ -108,7 +76,7 @@ if __name__ == "__main__":
     logger = setup_log("LeakPro", save_file=True)
 
     # Generate user input
-    generate_user_input(user_configs, logger) # This is for developing purposes only
+    generate_user_input(user_configs, retrain=True, logger=logger) # This is for developing purposes only
 
     start_time = time.time()
     # ------------------------------------------------

@@ -4,11 +4,10 @@ import math
 from typing import List, Union
 
 import numpy as np
-from pandas import DataFrame
-from pydantic import BaseModel
-
 from leakpro.synthetic_data_attacks.anonymeter.evaluators.linkability_evaluator import LinkabilityEvaluator
 from leakpro.synthetic_data_attacks.utils import load_res_json_file, save_res_json_file
+from pandas import DataFrame
+from pydantic import BaseModel
 
 
 def aux_assert_input_values_get_combs_2_buckets(*, cols: List, buck1_nr: int, buck2_nr: int) -> None:

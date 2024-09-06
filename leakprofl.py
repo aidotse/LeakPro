@@ -13,7 +13,7 @@ from torchvision.models.resnet import BasicBlock
 
 from leakpro import shadow_model_blueprints
 from leakpro.attacks.attack_scheduler import AttackScheduler
-from leakpro.user_inputs.cifar10_gia_input_handler import Cifar10GIAInputHandler
+from dev_utils.cifar10_gia_input_handler import Cifar10GIAInputHandler
 
 
 def setup_log(name: str, save_file: bool=True) -> logging.Logger:

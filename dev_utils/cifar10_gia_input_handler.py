@@ -3,15 +3,14 @@
 import logging
 from collections import OrderedDict
 
-from torch import cuda, device
-from torch.nn import Module
-from torch.utils.data import DataLoader
-
-from leakpro.dev_utils.data_modules import CifarModule
+from dev_utils.data_modules import CifarModule
 from leakpro.fl_utils.gia_module_to_functional import MetaModule
 from leakpro.fl_utils.gia_optimizers import MetaOptimizer
 from leakpro.import_helper import Self
 from leakpro.user_inputs.abstract_gia_input_handler import AbstractGIAInputHandler
+from torch import cuda, device
+from torch.nn import Module
+from torch.utils.data import DataLoader
 
 
 class Cifar10GIAInputHandler(AbstractGIAInputHandler):

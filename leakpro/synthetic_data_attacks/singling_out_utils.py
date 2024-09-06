@@ -3,11 +3,10 @@ import multiprocessing as mp
 from itertools import repeat
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-from pandas import DataFrame
-from pydantic import BaseModel
-
 from leakpro.synthetic_data_attacks.anonymeter.evaluators.singling_out_evaluator import SinglingOutEvaluator
 from leakpro.synthetic_data_attacks.utils import load_res_json_file, save_res_json_file
+from pandas import DataFrame
+from pydantic import BaseModel
 
 
 class SinglingOutResults(BaseModel):

@@ -4,13 +4,12 @@ import logging as logger
 from abc import ABC, abstractmethod
 
 import numpy as np
-from torch.utils.data import DataLoader
-from torch.utils.data.sampler import SequentialSampler
-from tqdm import tqdm
-
 from leakpro.import_helper import List, Optional, Self, Tuple
 from leakpro.signal_extractor import Model
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
+from torch.utils.data import DataLoader
+from torch.utils.data.sampler import SequentialSampler
+from tqdm import tqdm
 
 
 class Signal(ABC):

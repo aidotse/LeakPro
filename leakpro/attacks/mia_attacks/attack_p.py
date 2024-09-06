@@ -1,7 +1,6 @@
 """Module that contains the implementation of the attack P."""
 
 import numpy as np
-
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.threshold_computation import linear_itp_threshold_func
 from leakpro.import_helper import Self

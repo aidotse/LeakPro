@@ -1,9 +1,6 @@
 """Abstract class for the model handler."""
 
 import joblib
-from torch import load
-from torch.nn import Module
-
 from leakpro.import_helper import Self, Tuple
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 from leakpro.utils.input_handler import (
@@ -12,6 +9,8 @@ from leakpro.utils.input_handler import (
     get_optimizer_mapping,
     import_module_from_file,
 )
+from torch import load
+from torch.nn import Module
 
 
 class ModelHandler():

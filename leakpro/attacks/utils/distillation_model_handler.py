@@ -5,13 +5,12 @@ import pickle
 
 import numpy as np
 import torch.nn.functional as F  # noqa: N812
-from torch import cuda, device, save
-from torch.nn import CrossEntropyLoss, KLDivLoss, Module
-from tqdm import tqdm
-
 from leakpro.attacks.utils.model_handler import ModelHandler
 from leakpro.import_helper import Self
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
+from torch import cuda, device, save
+from torch.nn import CrossEntropyLoss, KLDivLoss, Module
+from tqdm import tqdm
 
 
 def singleton(cls):  # noqa: ANN001, ANN201

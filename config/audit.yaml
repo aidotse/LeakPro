@@ -27,39 +27,39 @@ audit:  # Configurations for auditing
     #   label_only: "False" # True or False
     #   attack_data_dir: "./leakpro_output/attack_objects/loss_traj"
     #   mia_classifier_epochs: 10
-    HSJ:
-      attack_data_fraction: 0.01  # Fraction of the auxilary dataset to use for this attack
-      target_metadata_path: "./target/model_metadata.pkl"
-      num_iterations: 2 # Number of iterations for the optimization
-      initial_num_evals: 100 # Number of evaluations for number of random vecotr to estimate the gradient
-      max_num_evals: 10000 # Maximum number of evaluations
-      stepsize_search: "geometric_progression" # Step size search method
-      gamma: 1.0 # Gamma for the optimization
-      constraint: 2 
-      batch_size: 50 
-      verbose: True
-      epsilon_threshold: 1e-6
+    # HSJ:
+    #   attack_data_fraction: 0.01  # Fraction of the auxilary dataset to use for this attack
+    #   target_metadata_path: "./target/model_metadata.pkl"
+    #   num_iterations: 2 # Number of iterations for the optimization
+    #   initial_num_evals: 100 # Number of evaluations for number of random vecotr to estimate the gradient
+    #   max_num_evals: 10000 # Maximum number of evaluations
+    #   stepsize_search: "geometric_progression" # Step size search method
+    #   gamma: 1.0 # Gamma for the optimization
+    #   constraint: 2 
+    #   batch_size: 50 
+    #   verbose: True
+    #   epsilon_threshold: 1e-6
 
     # gia attacks
     inverting_gradients:
       total_variation: 0.000001
       attack_lr: 0.1 # lr for the reconstruction optimizer
       at_iterations: 500
-    gia_settings:
-      client_batch_size: 1
-      num_client_images: 1
-      epochs: 4
-      optimizer: SGD
-      learning_rate: 0.0001
-      dataset: cifar10
-      data_dir: ./target/data
+  gia_settings:
+    client_batch_size: 1
+    num_client_images: 1
+    epochs: 4
+    optimizer: SGD
+    learning_rate: 0.0001
+    dataset: cifar10
+    data_dir: ./target/data
 
 
   report_log: "./leakpro_output/results"  # Folder to save the auditing report
   config_log: "./leakpro_output/config"  # Folder to save the configuration files
   target_model_folder: "./target"
   attack_folder: "attack_objects"
-  attack_type: "mia" #mia, gia
+  attack_type: "gia" #mia, gia
   split_method: "no_overlapping"  # Method of creating the attack dataset
 
 target:

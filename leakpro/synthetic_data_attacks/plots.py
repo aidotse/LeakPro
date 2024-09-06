@@ -4,11 +4,10 @@ from typing import List
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.axes import Axes
-
 from leakpro.synthetic_data_attacks.inference_utils import InferenceResults
 from leakpro.synthetic_data_attacks.linkability_utils import LinkabilityResults
 from leakpro.synthetic_data_attacks.singling_out_utils import SinglingOutResults
+from matplotlib.axes import Axes
 
 # Set global plot properties
 colors = ["b", "g", "orange"]
