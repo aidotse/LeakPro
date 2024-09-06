@@ -6,8 +6,8 @@ import numpy as np
 from torch import equal
 from torch.utils.data import SequentialSampler
 
-from leakpro.tests.input_handler.image_utils import parameters
-from leakpro.tests.input_handler.cifar10_input_handler import Cifar10InputHandler
+from input_handler.image_utils import parameters
+from input_handler.cifar10_input_handler import Cifar10InputHandler
 
 
 def test_abstract_handler_setup(image_handler:Cifar10InputHandler) -> None:

@@ -4,8 +4,8 @@ import numpy as np
 
 from pytest import raises
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
-from leakpro.tests.input_handler.cifar10_input_handler import Cifar10InputHandler
-from leakpro.tests.constants import shadow_model_config
+from input_handler.cifar10_input_handler import Cifar10InputHandler
+from constants import shadow_model_config
 
 def test_shadow_model_handler_singleton(image_handler:Cifar10InputHandler) -> None:
     """Test that only one instance gets created."""

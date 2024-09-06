@@ -12,7 +12,7 @@ from torchvision import transforms
 
 from leakpro.import_helper import Self
 
-from leakpro.tests.constants import STORAGE_PATH, parameters
+from constants import STORAGE_PATH, parameters
 
 class ConvNet(Module):
     """Convolutional Neural Network model."""
