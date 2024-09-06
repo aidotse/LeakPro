@@ -8,6 +8,7 @@ from typing import Generator
 import pytest
 from dotmap import DotMap
 
+
 from input_handler.image_utils import setup_image_test
 from input_handler.cifar10_input_handler import Cifar10InputHandler
 from constants import STORAGE_PATH
