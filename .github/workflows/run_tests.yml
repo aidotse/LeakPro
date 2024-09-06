@@ -13,7 +13,7 @@ jobs:
   code-checks:
     runs-on: ubuntu-latest
     steps:
-      - name: checkout
+      - name: Checkout code
         uses: actions/checkout@v3
 
       - name: Ruff Linting
@@ -25,24 +25,39 @@ jobs:
       pull-requests: write
       contents: write  # Ensure write permission for contents
     steps:
-      - uses: actions/checkout@v2
+      - name: Checkout code
+        uses: actions/checkout@v2
 
       - name: Set up Python 3.9
         uses: actions/setup-python@v2
         with:
           python-version: 3.9
 
-      - name: provision-with-micromamba
+      - name: Install dependencies with micromamba
         uses: mamba-org/provision-with-micromamba@main
         with:
           environment-file: environment.yml
           environment-name: leakpro
           cache-downloads: true
 
-      - name: Test with pytest
+      - name: Set PYTHONPATH
+        run: echo "PYTHONPATH=$(pwd)" >> $GITHUB_ENV
+
+      - name: Install pytest and pytest-cov
         shell: bash -l {0}
         run: |
           micromamba activate leakpro
           micromamba install pytest pytest-cov
+
+      - name: Run tests with pytest
+        shell: bash -l {0}
+        run: |
+          micromamba activate leakpro
           pytest --junitxml=pytest.xml --cov-report=term-missing:skip-covered --cov=leakpro leakpro/tests/ | tee pytest-coverage.txt
           cat ./pytest-coverage.txt
+
+      - name: Upload test coverage report
+        uses: actions/upload-artifact@v2
+        with:
+          name: pytest-coverage.txt
+          path: pytest-coverage.txt
