@@ -7,29 +7,27 @@ from torch import cuda, device, optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from leakpro.import_helper import Self
-from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
-
+from leakpro import AbstractInputHandler
 
 class AdultInputHandler(AbstractInputHandler):
     """Class to handle the user input for the CIFAR10 dataset."""
 
-    def __init__(self:Self, configs: dict, logger:logging.Logger) -> None:
+    def __init__(self, configs: dict, logger:logging.Logger) -> None:
         super().__init__(configs = configs, logger = logger)
 
 
-    def get_criterion(self:Self)->None:
+    def get_criterion(self)->None:
         """Set the CrossEntropyLoss for the model."""
         return torch.nn.CrossEntropyLoss()
 
-    def get_optimizer(self: Self, model:torch.nn.Module) -> None:
+    def get_optimizer(self, model:torch.nn.Module) -> None:
         """Set the optimizer for the model."""
         learning_rate = 0.1
         momentum = 0.8
         return optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
 
     def train(
-        self: Self,
+        self,
         dataloader: DataLoader,
         model: torch.nn.Module = None,
         criterion: torch.nn.Module = None,

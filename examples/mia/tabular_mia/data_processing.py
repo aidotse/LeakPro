@@ -1,18 +1,19 @@
 import os
-import joblib
 import numpy as np
 import pandas as pd
+import joblib
+import pickle
 from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
 from sklearn.model_selection import train_test_split
 import urllib.request
-from torch import Tensor, float32, long
+from torch import from_numpy
 from torch.utils.data import Dataset, Subset, DataLoader
 
 
 class AdultDataset(Dataset):
     def __init__(self, x, y):
-        self.x = Tensor(x, dtype=float32)  # Convert features to torch tensors
-        self.y = Tensor(y, dtype=long)     # Convert labels to torch tensors
+        self.x = from_numpy(x).float()  # Convert features to torch tensors
+        self.y = from_numpy(y).long()     # Convert labels to torch tensors
 
     def __len__(self):
         return len(self.y)
@@ -27,6 +28,12 @@ def download_adult_dataset(data_dir):
     data_file = os.path.join(data_dir, "adult.data")
     test_file = os.path.join(data_dir, "adult.test")
 
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+        print("Created directory:", data_dir)
+    else:
+        print("Directory already exists:", data_dir)
+
     # Download the dataset if not present
     if not os.path.exists(data_file):
         print("Downloading adult.data...")
@@ -40,15 +47,13 @@ def get_adult_dataset():
     """Get the dataset, download it if necessary, and store it."""
     
     # Download the dataset if not present
-    path = "data"
+    path = "data/"
     download_adult_dataset(path)
     
-    dataset_path = os.path.join(path, "adult.pkl")
-    
-    if os.path.exists(dataset_path):
-        with open(dataset_path, "rb") as file:
-            x, y = joblib.load(file)  # Load x and y directly
-    else:
+    if os.path.exists(os.path.join(path, "adult_data.pkl")):
+        with open(os.path.join(path, "adult_data.pkl"), "rb") as f:
+            return AdultDataset(*joblib.load(f))
+    else: 
         column_names = [
             "age", "workclass", "fnlwgt", "education", "education-num", 
             "marital-status", "occupation", "relationship", "race", "sex",
@@ -83,12 +88,13 @@ def get_adult_dataset():
 
         # Label encode the target variable
         y = LabelEncoder().fit_transform(y)
-
-        # Save the processed features (x) and labels (y) using joblib
-        with open(dataset_path, "wb") as file:
-            joblib.dump((x, y), file)  # Save x and y as a tuple
+        
+        dataset = AdultDataset(x, y)
+        with open(f"{path}/adult_data.pkl", "wb") as file:
+            pickle.dump(dataset, file)
+            print(f"Save data to {path}.pkl")
     
-    return AdultDataset(x, y)
+        return dataset
     
 def get_adult_dataloaders(dataset, train_fraction=0.3, test_fraction=0.3):
     
@@ -106,4 +112,4 @@ def get_adult_dataloaders(dataset, train_fraction=0.3, test_fraction=0.3):
     train_loader = DataLoader(train_subset, batch_size=128, shuffle=True)
     test_loader = DataLoader(test_subset, batch_size=128, shuffle=False)
 
-    return train_loader, test_loader, {"train_indices": train_indices, "test_indices": test_indices}
+    return train_loader, test_loader

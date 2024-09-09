@@ -5,12 +5,13 @@ import pickle
 
 import numpy as np
 import torch.nn.functional as F  # noqa: N812
-from leakpro.attacks.utils.model_handler import ModelHandler
-from leakpro.import_helper import Self
-from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 from torch import cuda, device, save
 from torch.nn import CrossEntropyLoss, KLDivLoss, Module
 from tqdm import tqdm
+
+from leakpro.attacks.utils.model_handler import ModelHandler
+from leakpro.import_helper import Self
+from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 
 
 def singleton(cls):  # noqa: ANN001, ANN201
@@ -43,15 +44,27 @@ class DistillationModelHandler(ModelHandler):
 
         """
         super().__init__(handler)
-        self.configs = handler.configs["distillation_model"]
+        self.configs = handler.configs.get("distillation_model", None)
 
-        module_path = self.configs.get("module_path", None)
-        model_class_path =  self.configs.get("model_class", None)
-        self.storage_path = self.configs.get("storage_path", None)
-        self.batch_size = self.configs.get("batch_size", 32)
-        self.epochs = self.configs.get("epochs", 10)
-        self.optimizer_config = self.configs.get("optimizer", None)
-        self.loss_config = self.configs.get("loss", None)
+        # Check if the distillation model configuration is provided
+        if self.configs is None:
+            module_path = None
+            model_class_path = None
+            self.batch_size = 32
+            self.epochs = 10
+        else:
+            module_path = self.configs.get("module_path", None)
+            model_class_path =  self.configs.get("model_class", None)
+            self.batch_size = self.configs.get("batch_size", 32)
+            self.epochs = self.configs.get("epochs", 10)
+            self.optimizer_config = self.configs.get("optimizer", None)
+            self.loss_config = self.configs.get("loss", None)
+
+        storage_path = handler.configs["audit"].get("output_dir", None)
+        if storage_path is not None:
+            self.storage_path = f"{storage_path}/attack_objects/distillation_models"
+        else:
+            raise ValueError("Storage path not provided")
 
         # If no path to distillation model is provided, use the target model blueprint
         if module_path is None or model_class_path is None:
@@ -68,17 +81,17 @@ class DistillationModelHandler(ModelHandler):
                 raise ValueError("Loss configuration not provided")
             self._get_criterion_class(self.loss_config.pop("name"))
 
+            if self.batch_size < 0:
+                raise ValueError("Batch size cannot be negative")
+
+            if self.epochs < 0:
+                raise ValueError("Number of epochs cannot be negative")
+
         # Check if the folder does not exist
         if not os.path.exists(self.storage_path):
             # Create the folder
             os.makedirs(self.storage_path)
             self.logger.info(f"Created folder {self.storage_path}")
-
-        if self.batch_size < 0:
-            raise ValueError("Batch size cannot be negative")
-
-        if self.epochs < 0:
-            raise ValueError("Number of epochs cannot be negative")
 
         self.model_storage_name = "distillation_epochs"
         self.metadata_storage_name = "metadata"

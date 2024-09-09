@@ -40,11 +40,10 @@ audit:  # Configurations for auditing
       verbose: True
       epsilon_threshold: 1e-6
 
+  output_dir: "./leakpro_output"
 
-  report_log: "./leakpro_output/results"  # Folder to save the auditing report
-  config_log: "./leakpro_output/config"  # Folder to save the configuration files
-  target_model_folder: "./target"
-  attack_folder: "attack_objects"
+  
+  # attack_folder: "attack_objects"
   attack_type: "mia" #mia, gia
 
 target:
@@ -52,15 +51,9 @@ target:
   module_path: "model.py"
   model_class: "AdultNet" 
   # Data paths
-  trained_model_path: "./target/target_model.pkl" 
-  trained_model_metadata_path: "./target/model_metadata.pkl"
-  data_path: "./target/data/adult.pkl"
+  target_folder: "./target"
+  data_path: "./data/adult_data.pkl"
 
 shadow_model:
-  storage_path: "./leakpro_output/attack_objects/shadow_models"
   
 distillation_model:
-  storage_path: "./leakpro_output/attack_objects/distillation_models"
-  trained_model_path: "./leakpro_output/attack_objects/distillation_target_models/distillation_model.pkl"
-  trained_model_metadata_path: "./leakpro_output/attack_objects/distillation_target_models/model_metadata.pkl"
-  data_path: "./leakpro_output/attack_objects/distillation_target_models/adult.pkl"

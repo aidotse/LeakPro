@@ -6,12 +6,13 @@ import re
 
 import numpy as np
 import torch
+from torch import Tensor, jit, save
+from torch.nn import Module
+
 from leakpro.attacks.utils.model_handler import ModelHandler
 from leakpro.import_helper import Self, Tuple
 from leakpro.signal_extractor import PytorchModel
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
-from torch import Tensor, jit, save
-from torch.nn import Module
 
 
 def singleton(cls):  # noqa: ANN001, ANN201
@@ -50,16 +51,29 @@ class ShadowModelHandler(ModelHandler):
 
         """
         super().__init__(handler)
-        self.configs = handler.configs["shadow_model"]
+        self.configs = handler.configs.get("shadow_model", None)
 
         # Read from the config file
-        module_path = self.configs.get("module_path", None)
-        model_class = self.configs.get("model_class", None)
-        self.optimizer_config = self.configs.get("optimizer", None)
-        self.loss_config = self.configs.get("loss", None)
-        self.batch_size = self.configs.get("batch_size", 32)
-        self.epochs = self.configs.get("epochs", 40)
-        self.storage_path = self.configs.get("storage_path")
+        # In case there is no config file, set default values
+        if self.configs is None:
+            module_path = None
+            model_class = None
+            # Default values
+            self.batch_size = 32
+            self.epochs = 40
+        else:
+            module_path = self.configs.get("module_path", None)
+            model_class = self.configs.get("model_class", None)
+            self.optimizer_config = self.configs.get("optimizer", None)
+            self.loss_config = self.configs.get("loss", None)
+            self.batch_size = self.configs.get("batch_size", 32)
+            self.epochs = self.configs.get("epochs", 40)
+
+        storage_path = handler.configs["audit"].get("output_dir", None)
+        if storage_path is not None:
+            self.storage_path = f"{storage_path}/attack_objects/shadow_models"
+        else:
+            raise ValueError("Storage path not provided")
 
         if module_path is None or model_class is None:
             self.model_blueprint = None

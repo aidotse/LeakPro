@@ -6,6 +6,10 @@ import pickle
 import matplotlib.pyplot as plt
 import numpy as np
 import torch.nn.functional as F  # noqa: N812
+from torch import argmax, cuda, device, load, nn, no_grad, optim, save, tensor
+from torch.utils.data import DataLoader, TensorDataset
+from tqdm import tqdm
+
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.distillation_model_handler import DistillationModelHandler
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
@@ -13,9 +17,6 @@ from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.signals.signal import ModelLogits
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
-from torch import argmax, cuda, device, load, nn, no_grad, optim, save, tensor
-from torch.utils.data import DataLoader, TensorDataset
-from tqdm import tqdm
 
 
 class AttackLossTrajectory(AbstractMIA):

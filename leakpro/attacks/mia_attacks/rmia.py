@@ -1,6 +1,7 @@
 """Implementation of the RMIA attack."""
 
 import numpy as np
+
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.attacks.utils.utils import softmax_logits

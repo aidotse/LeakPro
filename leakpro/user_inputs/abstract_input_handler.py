@@ -6,10 +6,11 @@ from abc import ABC, abstractmethod
 import joblib
 import numpy as np
 import torch
-from leakpro.import_helper import Any, Self, Tuple
-from leakpro.utils.input_handler import get_class_from_module, import_module_from_file
 from torch import nn
 from torch.utils.data import DataLoader
+
+from leakpro.import_helper import Any, Self, Tuple
+from leakpro.utils.input_handler import get_class_from_module, import_module_from_file
 
 
 class AbstractInputHandler(ABC):
@@ -78,25 +79,27 @@ class AbstractInputHandler(ABC):
 
     def _load_target_metadata(self:Self) -> None:
         """Get the target model metadata from the trained model metadata file."""
-        target_model_metadata_path = self.configs["target"].get("trained_model_metadata_path", None)
+        target_model_metadata_path = self.configs["target"].get("target_folder", None)
         if target_model_metadata_path is None:
             raise ValueError("Trained model metadata path not found in configs.")
         try:
-            with open(target_model_metadata_path, "rb") as f:
+            self.target_model_metadata_path = f"{target_model_metadata_path}/model_metadata.pkl"
+            with open(self.target_model_metadata_path, "rb") as f:
                 self.target_model_metadata = joblib.load(f)
                 self._validate_target_metadata()
-            self.logger.info(f"Loaded target model metadata from {target_model_metadata_path}")
+            self.logger.info(f"Loaded target model metadata from {self.target_model_metadata_path}")
         except FileNotFoundError as e:
-            raise FileNotFoundError(f"Could not find the target model metadata at {target_model_metadata_path}") from e
+            raise FileNotFoundError(f"Could not find the target model metadata at {self.target_model_metadata_path}") from e
 
     def _load_trained_target_model(self:Self) -> None:
         """Get the trained target model."""
-        model_path = self.configs["target"].get("trained_model_path", None)
+        model_path = self.configs["target"].get("target_folder", None)
         if model_path is None:
             raise ValueError("Trained model path not found in configs.")
+        self.model_path = f"{model_path}/target_model.pkl"
         init_params = self.target_model_metadata.get("init_params", {})
         try:
-            with open(self.configs["target"]["trained_model_path"], "rb") as f:
+            with open(self.model_path, "rb") as f:
                 self.target_model = self.target_model_blueprint(**init_params)
                 self.target_model.load_state_dict(torch.load(f))
             self.logger.info(f"Loaded target model from {model_path}")
