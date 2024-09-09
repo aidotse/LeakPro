@@ -3,20 +3,18 @@
 import logging
 from abc import ABC, abstractmethod
 
+from leakpro.fl_utils.gia_optimizers import MetaAdam, MetaOptimizer, MetaSGD
+from leakpro.import_helper import Self
 from torch import Tensor
 from torch.nn import CrossEntropyLoss, Module
 from torch.utils.data import DataLoader
-
-from leakpro.dev_utils.data_modules import DataModule
-from leakpro.fl_utils.gia_optimizers import MetaAdam, MetaOptimizer, MetaSGD
-from leakpro.import_helper import Self
 
 
 class AbstractGIAInputHandler(ABC):
     """Parent class for user inputs."""
 
     def __init__(self:Self, configs: dict, logger:logging.Logger,
-                 target_model: Module, data_module: DataModule) -> None:
+                 target_model: Module, data_module: DataLoader) -> None:
         self.configs = configs
         self.logger = logger
         self.target_model = target_model

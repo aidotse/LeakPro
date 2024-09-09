@@ -7,12 +7,11 @@ from typing import Any, List, Optional
 import numpy as np
 import numpy.typing as npt
 import pandas as pd
-from pydantic import BaseModel, ConfigDict
-
 from leakpro.import_helper import Self
 from leakpro.synthetic_data_attacks.anonymeter.neighbors.mixed_types_n_neighbors import mixed_type_n_neighbors
 from leakpro.synthetic_data_attacks.anonymeter.stats.confidence import EvaluationResults
 from leakpro.synthetic_data_attacks.anonymeter.utils import assert_x_in_bound
+from pydantic import BaseModel, ConfigDict
 
 
 class InferenceGuesses(BaseModel):

@@ -1,9 +1,6 @@
 """Implementation of the LiRA attack."""
 
 import numpy as np
-from scipy.stats import norm
-from tqdm import tqdm
-
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.boosting import Memorization
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
@@ -11,6 +8,8 @@ from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.signals.signal import ModelRescaledLogits
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
+from scipy.stats import norm
+from tqdm import tqdm
 
 
 class AttackLiRA(AbstractMIA):

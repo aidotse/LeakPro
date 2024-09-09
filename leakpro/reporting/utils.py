@@ -7,7 +7,7 @@ from leakpro.reporting.audit_report import (
 )
 
 
-def prepare_priavcy_risk_report(
+def prepare_privacy_risk_report(
     audit_results: CombinedMetricResult,
     configs: dict,
     save_path: str = None,
