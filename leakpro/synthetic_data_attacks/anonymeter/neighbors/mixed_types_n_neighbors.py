@@ -10,9 +10,10 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 from joblib import Parallel, delayed
+from numba import jit
+
 from leakpro.synthetic_data_attacks.anonymeter.preprocessing.transformations import mixed_types_transform
 from leakpro.synthetic_data_attacks.anonymeter.preprocessing.type_detection import detect_consistent_col_types
-from numba import jit
 
 logger = logging.getLogger(__name__)
 

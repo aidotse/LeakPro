@@ -6,10 +6,11 @@ from typing import Any, Dict, List, Optional, Set
 
 import numpy as np
 import pandas as pd
-from leakpro.import_helper import Self
-from leakpro.synthetic_data_attacks.anonymeter.stats.confidence import EvaluationResults
 from pandas.api.types import is_bool_dtype, is_datetime64_any_dtype, is_numeric_dtype
 from pydantic import BaseModel, ConfigDict
+
+from leakpro.import_helper import Self
+from leakpro.synthetic_data_attacks.anonymeter.stats.confidence import EvaluationResults
 
 #Set rng
 rng = np.random.default_rng()

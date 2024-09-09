@@ -4,10 +4,11 @@ import math
 import random
 from typing import List, Union
 
-from leakpro.synthetic_data_attacks.anonymeter.evaluators.inference_evaluator import InferenceEvaluator
-from leakpro.synthetic_data_attacks.utils import load_res_json_file, save_res_json_file
 from pandas import DataFrame
 from pydantic import BaseModel
+
+from leakpro.synthetic_data_attacks.anonymeter.evaluators.inference_evaluator import InferenceEvaluator
+from leakpro.synthetic_data_attacks.utils import load_res_json_file, save_res_json_file
 
 
 class InferenceResults(BaseModel):

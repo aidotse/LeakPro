@@ -4,8 +4,9 @@ This module is originally from the privacy meter package.
 """
 
 import numpy as np
-from leakpro.import_helper import Any, Dict, List
 from scipy.stats import norm
+
+from leakpro.import_helper import Any, Dict, List
 
 ########################################################################################################################
 # HYPOTHESIS TEST: LINEAR INTERPOLATION THRESHOLDING

@@ -5,7 +5,6 @@ import builtins
 import logging
 
 import numpy as np
-from leakpro.import_helper import List, Self, Tuple
 from torch import (
     Tensor,
     amax,
@@ -33,6 +32,8 @@ from torch import sum as torch_sum
 from torch.nn import Module
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+
+from leakpro.import_helper import List, Self, Tuple
 
 
 class HopSkipJumpDistance:

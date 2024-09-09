@@ -4,8 +4,9 @@ import importlib.util
 import inspect
 import os
 
-from leakpro.import_helper import Callable, ModuleType
 from torch import nn, optim
+
+from leakpro.import_helper import Callable, ModuleType
 
 
 def import_module_from_file(filepath:str) -> ModuleType:
