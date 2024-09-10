@@ -39,7 +39,8 @@ class AttackLossTrajectory(AbstractMIA):
         logger.info("Configuring Loss trajecatory attack")
         self._configure_attack(configs)
 
-        self.storage_dir = f"{self.handler.configs["audit"]["output_dir"]}/attack_objects/loss_traj"
+        output_dir = self.handler.configs["audit"]["output_dir"]
+        self.storage_dir = f"{output_dir}/attack_objects/loss_traj"
 
 
     def _configure_attack(self: Self, configs: dict) -> None:

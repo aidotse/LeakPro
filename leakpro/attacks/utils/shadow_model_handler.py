@@ -34,8 +34,14 @@ def singleton(cls):  # noqa: ANN001, ANN201
     def is_created() -> bool:
         return cls in instances
 
-    # Attach a check method to the class
+    def delete_instance() -> None:
+        """Delete the singleton instance (for resetting or testing purposes)."""
+        if cls in instances:
+            del instances[cls]
+
+    # Attach methods to the class
     get_instance.is_created = is_created
+    get_instance.delete_instance = delete_instance
 
     return get_instance
 
