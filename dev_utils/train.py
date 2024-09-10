@@ -9,7 +9,7 @@ import torch
 from torch import nn, optim
 from tqdm import tqdm
 
-from leakpro.import_helper import Tuple
+from leakpro.utils.import_helper import Tuple
 
 
 def get_optimizer(model: torch.nn.Module, configs: dict, logger: logging.Logger = None) -> torch.optim.Optimizer:
