@@ -1,0 +1,53 @@
+lint = ["ruff>=0.0.220"] # MIT License (MIT)
+
+[tool.ruff]
+line-length = 130
+target-version = "py39"
+
+lint.select = [
+  "ANN", # flake8-annotations
+  "ARG", # flake8-unused-arguments
+  "B",   # flake8-bugbear
+  "C4",  # flake8-comprehensions
+  "C90", # mccabe
+  "D",   # pydocstyle
+  "DTZ", # flake8-datetimez
+  "E",   # pycodestyle
+  "ERA", # eradicate
+  "F",   # Pyflakes
+  "I",   # isort
+  "N",   # pep8-naming
+  "PD",  # pandas-vet
+  "PGH", # pygrep-hooks
+  "PLC", # Pylint
+  "PLE", # Pylint
+  "PLR", # Pylint
+  "PLW", # Pylint
+  "PT",  # flake8-pytest-style
+  "Q",   # flake8-quotes
+  "RET", # flake8-return
+  "S",   # flake8-bandit
+  "SIM", # flake8-simplify
+  "T20", # flake8-print
+  "TID", # flake8-tidy-imports
+  "W",   # pycodestyle
+]
+
+exclude = [
+  ".venv",
+  "./examples",
+  "./dev_utils",
+]
+
+lint.ignore = [
+  "D401", # non-imperative-mood
+  "PD901", # Avoid using df variable name as pd.Dataframe
+  "PD011", # pandas-use-of-dot-values
+  "PLR0913", # too-many-arguments in function
+  "S101", # Using assert
+  "PLR2004", # magic-value-comparison
+  "D107", # Missing docstring in `__init__`
+  "PLW2901", # redefined-loop-name
+  "D202", # No blank lines allowed after function docstring
+  "F811" # redefinition of function
+]
