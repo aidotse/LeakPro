@@ -4,7 +4,7 @@ import pickle
 
 import numpy as np
 import torch.nn.functional as F  # noqa: N812
-from torch import cuda, device, save, cat, sigmoid
+from torch import cat, cuda, device, save, sigmoid
 from torch.nn import CrossEntropyLoss, KLDivLoss, Module
 from tqdm import tqdm
 
@@ -68,7 +68,7 @@ class DistillationModelHandler(ModelHandler):
         student, _, optimizer = self._get_model_criterion_optimizer()
         self.model_pairs[name] = {"student": student, "teacher": teacher, "optimizer": optimizer}
 
-    def distill_model(
+    def distill_model(  # noqa: PLR0915
         self:Self,
         model_pair_name:str,
         num_trajectory_epochs:int,

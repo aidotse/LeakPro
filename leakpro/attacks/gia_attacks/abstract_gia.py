@@ -5,7 +5,6 @@ from abc import ABC, abstractmethod
 from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
-from leakpro.utils.logger import logger
 
 ########################################################################################################################
 # METRIC CLASS

@@ -3,10 +3,9 @@
 import os
 import pickle
 
-import matplotlib.pyplot as plt
 import numpy as np
 import torch.nn.functional as F  # noqa: N812
-from torch import argmax, cuda, device, load, nn, no_grad, optim, save, tensor
+from torch import cuda, device, load, nn, no_grad, optim, save, tensor
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 

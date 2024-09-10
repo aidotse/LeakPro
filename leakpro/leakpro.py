@@ -6,9 +6,10 @@ import yaml
 
 from leakpro.attacks.attack_scheduler import AttackScheduler
 from leakpro.import_helper import Self
+from leakpro.reporting.utils import prepare_privacy_risk_report
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 from leakpro.utils.logger import add_file_handler, logger
-from leakpro.reporting.utils import prepare_privacy_risk_report
+
 
 class LeakPro:
     """Main class for LeakPro."""

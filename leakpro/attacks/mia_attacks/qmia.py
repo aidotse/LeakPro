@@ -59,7 +59,7 @@ class QuantileRegressor(nn.Module):
         Args:
         ----
             model (nn.Module): The model to extract features from.
-            dummy_data_pt (torch.Tensor): A dummy input tensor for inferring the penultimate layer size.
+            dummy_dataloader (DataLoader): A dummy input dataloader for inferring the penultimate layer size.
             n_quantiles (int): Number of quantiles to predict.
 
         """
