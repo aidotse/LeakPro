@@ -6,6 +6,7 @@ from leakpro.attacks.utils.util_functions import total_variation
 from leakpro.import_helper import Callable, Self
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.user_inputs.abstract_gia_input_handler import AbstractGIAInputHandler
+from leakpro.utils.logger import logger
 
 
 class InvertingGradients(AbstractGIA):
@@ -17,7 +18,7 @@ class InvertingGradients(AbstractGIA):
         self.t_v_scale = configs.get("total_variation")
         self.attack_lr = configs.get("attack_lr")
         self.iterations = configs.get("at_iterations")
-        self.logger.info("Inverting gradient initialized :)")
+        logger.info("Inverting gradient initialized :)")
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
@@ -79,7 +80,7 @@ class InvertingGradients(AbstractGIA):
                     torch.min(self.reconstruction, (1 - self.data_mean) / self.data_std), -self.data_mean / self.data_std
                     )
             if i % 20 == 0:
-                self.logger.info(f"{i}: {loss}")
+                logger.info(f"{i}: {loss}")
             # add PSNR calculation and pick best image..
         # Collect client data to one tensor
         return GIAResults(self.client_loader, self.reconstruction_loader, 0, self.data_mean, self.data_std)

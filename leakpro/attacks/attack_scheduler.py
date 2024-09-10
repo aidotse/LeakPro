@@ -5,6 +5,7 @@ from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
 from leakpro.import_helper import Any, Dict, Self
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
+from leakpro.utils.logger import logger
 
 
 class AttackScheduler:
@@ -34,8 +35,6 @@ class AttackScheduler:
         # Prepare factory
         factory = self.attack_type_to_factory[configs["audit"]["attack_type"]]
 
-        self.logger = handler.logger
-
         # Create the attacks
         self.attack_list = list(configs["audit"]["attack_list"].keys())
         self.attacks = []
@@ -43,10 +42,10 @@ class AttackScheduler:
             try:
                 attack = factory.create_attack(attack_name, handler)
                 self.add_attack(attack)
-                self.logger.info(f"Added attack: {attack_name}")
+                logger.info(f"Added attack: {attack_name}")
             except ValueError as e:
-                self.logger.info(e)
-                self.logger.info(f"Failed to create attack: {attack_name}, supported attacks: {factory.attack_classes.keys()}")
+                logger.info(e)
+                logger.info(f"Failed to create attack: {attack_name}, supported attacks: {factory.attack_classes.keys()}")
 
     def add_attack(self:Self, attack: AbstractMIA) -> None:
         """Add an attack to the list of attacks."""
@@ -56,15 +55,15 @@ class AttackScheduler:
         """Run the attacks and return the results."""
         results = {}
         for attack, attack_type in zip(self.attacks, self.attack_list):
-            self.logger.info(f"Preparing attack: {attack_type}")
+            logger.info(f"Preparing attack: {attack_type}")
             attack.prepare_attack()
 
-            self.logger.info(f"Running attack: {attack_type}")
+            logger.info(f"Running attack: {attack_type}")
 
             result = attack.run_attack()
             results[attack_type] = {"attack_object": attack, "result_object": result}
 
-            self.logger.info(f"Finished attack: {attack_type}")
+            logger.info(f"Finished attack: {attack_type}")
         return results
 
     def map_setting_to_attacks(self:Self) -> None:

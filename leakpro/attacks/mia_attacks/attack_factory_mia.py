@@ -10,6 +10,7 @@ from leakpro.attacks.mia_attacks.rmia import AttackRMIA
 from leakpro.attacks.utils.distillation_model_handler import DistillationModelHandler
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
+from leakpro.utils.logger import logger
 
 
 class AttackFactoryMIA:
@@ -48,11 +49,11 @@ class AttackFactoryMIA:
         """
 
         if AttackFactoryMIA.shadow_model_handler is None:
-            handler.logger.info("Creating shadow model handler singleton")
+            logger.info("Creating shadow model handler singleton")
             AttackFactoryMIA.shadow_model_handler = ShadowModelHandler(handler)
 
         if AttackFactoryMIA.distillation_model_handler is None:
-            handler.logger.info("Creating distillation model handler singleton")
+            logger.info("Creating distillation model handler singleton")
             AttackFactoryMIA.distillation_model_handler = DistillationModelHandler(handler)
 
         if name in cls.attack_classes:

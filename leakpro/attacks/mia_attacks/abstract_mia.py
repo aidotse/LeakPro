@@ -58,7 +58,6 @@ class AbstractMIA(ABC):
             AbstractMIA._initialized = True
 
         # These objects are instance specific
-        self.logger = handler.logger
         self.signal_data = []
 
     def _validate_shared_quantities(self:Self)->None:

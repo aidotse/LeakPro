@@ -7,6 +7,7 @@ from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.signals.signal import HopSkipJumpDistance
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
+from leakpro.utils.logger import logger
 
 
 class AttackHopSkipJump(AbstractMIA):  # noqa: D101
@@ -24,7 +25,7 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
 
         """
 
-        self.logger.info("Configuring label only attack")
+        logger.info("Configuring label only attack")
         self._configure_attack(configs)
         self.signal = HopSkipJumpDistance()
 
@@ -150,7 +151,7 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
             None
 
         """
-        self.logger.info("Preparing the data for Hop Skip Jump attack")
+        logger.info("Preparing the data for Hop Skip Jump attack")
 
         in_member_indices = self.audit_dataset["in_members"]
         out_member_indices = self.audit_dataset["out_members"]
@@ -178,12 +179,11 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
 
         """
 
-        self.logger.info("Running Hop Skip Jump distance attack")
+        logger.info("Running Hop Skip Jump distance attack")
 
         # compute the perturbation distances of the attack data from the target model decision boundary
         _ , perturbation_distances = self.signal(self.target_model,
                                                     self.attack_dataloader,
-                                                    self.logger,
                                                     self.norm,
                                                     self.y_target,
                                                     self.image_target,

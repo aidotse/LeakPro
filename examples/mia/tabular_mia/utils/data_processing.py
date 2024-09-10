@@ -13,7 +13,7 @@ from torch.utils.data import Dataset, Subset, DataLoader
 class AdultDataset(Dataset):
     def __init__(self, x, y):
         self.x = from_numpy(x).float()  # Convert features to torch tensors
-        self.y = from_numpy(y).long()     # Convert labels to torch tensors
+        self.y = from_numpy(y).float()     # Convert labels to torch tensors
 
     def __len__(self):
         return len(self.y)
@@ -43,16 +43,15 @@ def download_adult_dataset(data_dir):
         print("Downloading adult.test...")
         urllib.request.urlretrieve(base_url + "adult.test", test_file)
 
-def get_adult_dataset():
+def get_adult_dataset(path):
     """Get the dataset, download it if necessary, and store it."""
     
     # Download the dataset if not present
-    path = "data/"
     download_adult_dataset(path)
     
     if os.path.exists(os.path.join(path, "adult_data.pkl")):
         with open(os.path.join(path, "adult_data.pkl"), "rb") as f:
-            return AdultDataset(*joblib.load(f))
+            dataset = joblib.load(f)
     else: 
         column_names = [
             "age", "workclass", "fnlwgt", "education", "education-num", 
@@ -94,7 +93,7 @@ def get_adult_dataset():
             pickle.dump(dataset, file)
             print(f"Save data to {path}.pkl")
     
-        return dataset
+    return dataset
     
 def get_adult_dataloaders(dataset, train_fraction=0.3, test_fraction=0.3):
     

@@ -1,9 +1,8 @@
 """Module containing the class to handle the user input for the CIFAR10 dataset."""
 
-import logging
-
 import torch
-from torch import cuda, device, optim
+from torch import cuda, device, optim, sigmoid
+from torch.nn import BCEWithLogitsLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -12,13 +11,13 @@ from leakpro import AbstractInputHandler
 class AdultInputHandler(AbstractInputHandler):
     """Class to handle the user input for the CIFAR10 dataset."""
 
-    def __init__(self, configs: dict, logger:logging.Logger) -> None:
-        super().__init__(configs = configs, logger = logger)
+    def __init__(self, configs: dict) -> None:
+        super().__init__(configs = configs)
 
 
     def get_criterion(self)->None:
         """Set the CrossEntropyLoss for the model."""
-        return torch.nn.CrossEntropyLoss()
+        return BCEWithLogitsLoss()
 
     def get_optimizer(self, model:torch.nn.Module) -> None:
         """Set the optimizer for the model."""
@@ -36,36 +35,32 @@ class AdultInputHandler(AbstractInputHandler):
     ) -> dict:
         """Model training procedure."""
 
-        # read hyperparams for training (the parameters for the dataloader are defined in get_dataloader):
-        if epochs is None:
-            raise ValueError("epochs not found in configs")
+        dev = device("cuda" if cuda.is_available() else "cpu")
+        model.to(dev)
+        model.train()
 
-        # prepare training
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
-        model.to(gpu_or_cpu)
-
-        # training loop
-        for epoch in range(epochs):
-            train_loss, train_acc = 0, 0
+        criterion = self.get_criterion()
+        optimizer = self.get_optimizer(model)
+        
+        for e in tqdm(range(epochs), desc="Training Progress"):
             model.train()
-            for inputs, labels in tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}"):
-                labels = labels.long()
-                inputs, labels = inputs.to(gpu_or_cpu, non_blocking=True), labels.to(gpu_or_cpu, non_blocking=True)
+            train_acc, train_loss = 0.0, 0.0
+            
+            for data, target in dataloader:
+                target = target.float().unsqueeze(1)
+                data, target = data.to(dev, non_blocking=True), target.to(dev, non_blocking=True)
                 optimizer.zero_grad()
-                outputs = model(inputs)
-                loss = criterion(outputs, labels)
-                pred = outputs.data.max(1, keepdim=True)[1]
+                output = model(data)
+
+                loss = criterion(output, target)
+                pred = sigmoid(output) >= 0.5
+                train_acc += pred.eq(target).sum().item()
+                
                 loss.backward()
                 optimizer.step()
-
-                # Accumulate performance of shadow model
-                train_acc += pred.eq(labels.data.view_as(pred)).sum()
                 train_loss += loss.item()
-
-            log_train_str = (
-                f"Epoch: {epoch+1}/{epochs} | Train Loss: {train_loss/len(dataloader):.8f} | "
-                f"Train Acc: {float(train_acc)/len(dataloader.dataset):.8f}")
-            self.logger.info(log_train_str)
-        model.to("cpu")
+        
+        train_acc = train_acc/len(dataloader.dataset)
+        train_loss = train_loss/len(dataloader)
 
         return {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}

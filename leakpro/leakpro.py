@@ -7,8 +7,8 @@ import yaml
 from leakpro.attacks.attack_scheduler import AttackScheduler
 from leakpro.import_helper import Self
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
-from leakpro.utils.handler_logger import setup_log
-
+from leakpro.utils.logger import add_file_handler, logger
+from leakpro.reporting.utils import prepare_privacy_risk_report
 
 class LeakPro:
     """Main class for LeakPro."""
@@ -26,15 +26,15 @@ class LeakPro:
             raise FileNotFoundError(f"File {configs_path} not found") from e
 
         # Create report directory
-        report_dir = f"{configs['audit']['output_dir']}/results"
-        Path(report_dir).mkdir(parents=True, exist_ok=True)
+        self.report_dir = f"{configs['audit']['output_dir']}/results"
+        Path(self.report_dir).mkdir(parents=True, exist_ok=True)
 
-
-        # Set up logger
-        logger = setup_log("LeakPro", save_file=True)
+        # Set folder for logger
+        log_path = f"{configs['audit']['output_dir']}/{logger.name}.log"
+        add_file_handler(logger, log_path)
 
         # Initialize handler and attack scheduler
-        self.handler = handler(configs, logger)
+        self.handler = handler(configs)
         self.attack_scheduler = AttackScheduler(self.handler)
 
     def run_audit(self:Self) -> None:
@@ -42,11 +42,12 @@ class LeakPro:
         audit_results = self.attack_scheduler.run_attacks()
 
         for attack_name in audit_results:
-            self.handler.logger.info(f"Preparing results for attack: {attack_name}")
+            logger.info(f"Preparing results for attack: {attack_name}")
 
-            self.handler.prepare_privacy_risk_report(
+            prepare_privacy_risk_report(
                 audit_results[attack_name]["result_object"],
                 self.handler.configs["audit"],
-                save_path=f"{self.handler.configs['audit']['report_log']}/{attack_name}",
+                save_path=f"{self.report_dir}/{attack_name}",
             )
 
+        logger.info("Auditing completed")

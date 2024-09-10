@@ -1,5 +1,7 @@
 """Implementation of the RMIA attack."""
 
+from copy import deepcopy
+
 import numpy as np
 import torch
 from torch import nn
@@ -11,6 +13,7 @@ from leakpro.import_helper import Any, Self, Tuple
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.signals.signal import ModelRescaledLogits
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
+from leakpro.utils.logger import logger
 
 
 class QMIADataset(Dataset):
@@ -50,24 +53,30 @@ class QMIADataset(Dataset):
 class QuantileRegressor(nn.Module):
     """QuantileRegressor module for predicting quantiles."""
 
-    def __init__(self:Self, n_quantiles: int = 1) -> None:
+    def __init__(self:Self, model:nn.Module, dummy_dataloader:DataLoader, n_quantiles: int = 1) -> None:
         """Initialize the QuantileRegressor.
 
         Args:
         ----
+            model (nn.Module): The model to extract features from.
+            dummy_data_pt (torch.Tensor): A dummy input tensor for inferring the penultimate layer size.
             n_quantiles (int): Number of quantiles to predict.
 
         """
         super(QuantileRegressor, self).__init__()
-        self.feature_extractor = nn.Sequential(
-            nn.Conv2d(3, 32, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2)
-        )
-        self.regressor = nn.Linear(64 * 8 * 8, n_quantiles)  # Assuming we predict 3 quantiles
+
+        # Create a regressor from the target model
+        self.feature_extractor = deepcopy(model)
+        layers = list(self.feature_extractor.children())[:-1]  # Remove the last layer
+        self.feature_extractor = nn.Sequential(*layers) # Rebuid the model without the last layer
+
+        # Figure out the size of the penultimate layer
+        for x, _ in dummy_dataloader:
+            dummy_output = self.feature_extractor(x)
+        in_features = dummy_output.view(dummy_output.size(0), -1).size(1)
+
+        # Add the regression layer
+        self.regressor = nn.Linear(in_features, n_quantiles)  # Assuming we predict n quantiles
 
     def forward(self:Self, x:torch.Tensor) -> torch.Tensor:
         """Forward pass of the QuantileRegressor module.
@@ -139,11 +148,14 @@ class AttackQMIA(AbstractMIA):
         # Initializes the parent metric
         super().__init__(handler)
 
-        self.logger.info("Configuring the QMIA attack")
+        logger.info("Configuring the QMIA attack")
         self._configure_attack(configs)
 
         self.signal = ModelRescaledLogits()
-        self.quantile_regressor = QuantileRegressor(len(self.quantiles))
+        dummy_index = np.atleast_1d(np.ones(1)).astype(int)
+        self.quantile_regressor = QuantileRegressor(self.handler.target_model,
+                                                    self.handler.get_dataloader(dummy_index),
+                                                    len(self.quantiles))
 
     def _configure_attack(self:Self, configs:dict) -> None:
         self.training_data_fraction = configs.get("training_data_fraction", 0.5)
@@ -189,15 +201,15 @@ class AttackQMIA(AbstractMIA):
         Signals are computed on the auxiliary model(s) and dataset.
         """
         # sample dataset to train quantile regressor
-        self.logger.info("Preparing attack data for training the quantile regressor")
+        logger.info("Preparing attack data for training the quantile regressor")
         self.attack_data_indices = self.sample_indices_from_population(include_train_indices = False,
                                                                        include_test_indices = False)
 
         # subsample the attack data based on the fraction
-        self.logger.info(f"Subsampling attack data from {len(self.attack_data_indices)} points")
+        logger.info(f"Subsampling attack data from {len(self.attack_data_indices)} points")
         n_points = int(self.training_data_fraction * len(self.attack_data_indices))
         chosen_attack_data_indices = np.random.choice(self.attack_data_indices, n_points, replace=False)
-        self.logger.info(f"Number of attack data points after subsampling: {len(chosen_attack_data_indices)}")
+        logger.info(f"Number of attack data points after subsampling: {len(chosen_attack_data_indices)}")
 
         # create labels and change dataset to be used for regression
         regression_labels = np.array(self.signal([self.target_model],
@@ -209,11 +221,11 @@ class AttackQMIA(AbstractMIA):
         quantile_regression_dataloader = DataLoader(QMIADataset(attack_dataloader, regression_labels), batch_size=64)
 
         # train quantile regressor
-        self.logger.info("Training the quantile regressor")
+        logger.info("Training the quantile regressor")
         optimizer = torch.optim.Adam(self.quantile_regressor.parameters(), lr=1e-3, weight_decay=1e-4)
         criterion = PinballLoss(self.quantiles)
         self._train_quantile_regressor(quantile_regression_dataloader, criterion, optimizer, self.epochs)
-        self.logger.info("Training of quantile regressor completed")
+        logger.info("Training of quantile regressor completed")
 
     def _train_quantile_regressor(
         self:Self,
@@ -268,7 +280,7 @@ class AttackQMIA(AbstractMIA):
                 train_loss += loss.item()
 
             log_train_str = f"Epoch: {epoch_idx+1}/{epochs} | Train Loss: {train_loss/len(attack_dataloader):.8f}"  # noqa: E501
-            self.logger.info(log_train_str)
+            logger.info(log_train_str)
 
         # Move the model back to the CPU
         self.quantile_regressor.to("cpu")
@@ -291,13 +303,13 @@ class AttackQMIA(AbstractMIA):
                                                   self.audit_dataset["data"])).squeeze()
 
         audit_dataloader = self.get_dataloader(self.audit_dataset["data"])
-        self.logger.info("Running the attack on the target model")
+        logger.info("Running the attack on the target model")
         score = []
         for data, _ in audit_dataloader:
             score.extend(self.quantile_regressor(data).detach().numpy())
         score = np.array(score).T
 
-        self.logger.info("Attack completed")
+        logger.info("Attack completed")
 
         # pick out the in-members and out-members signals
         self.in_member_signals = self.target_logits[self.audit_dataset["in_members"]]

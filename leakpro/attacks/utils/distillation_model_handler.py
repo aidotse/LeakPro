@@ -1,17 +1,17 @@
 """Module for handling shadow models."""
 
-import os
 import pickle
 
 import numpy as np
 import torch.nn.functional as F  # noqa: N812
-from torch import cuda, device, save
+from torch import cuda, device, save, cat, sigmoid
 from torch.nn import CrossEntropyLoss, KLDivLoss, Module
 from tqdm import tqdm
 
 from leakpro.attacks.utils.model_handler import ModelHandler
 from leakpro.import_helper import Self
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
+from leakpro.utils.logger import logger
 
 
 def singleton(cls):  # noqa: ANN001, ANN201
@@ -43,55 +43,9 @@ class DistillationModelHandler(ModelHandler):
             handler (AbstractInputHandler): The input handler.
 
         """
-        super().__init__(handler)
+        caller = "distillation_model"
+        super().__init__(handler, caller)
         self.configs = handler.configs.get("distillation_model", None)
-
-        # Check if the distillation model configuration is provided
-        if self.configs is None:
-            module_path = None
-            model_class_path = None
-            self.batch_size = 32
-            self.epochs = 10
-        else:
-            module_path = self.configs.get("module_path", None)
-            model_class_path =  self.configs.get("model_class", None)
-            self.batch_size = self.configs.get("batch_size", 32)
-            self.epochs = self.configs.get("epochs", 10)
-            self.optimizer_config = self.configs.get("optimizer", None)
-            self.loss_config = self.configs.get("loss", None)
-
-        storage_path = handler.configs["audit"].get("output_dir", None)
-        if storage_path is not None:
-            self.storage_path = f"{storage_path}/attack_objects/distillation_models"
-        else:
-            raise ValueError("Storage path not provided")
-
-        # If no path to distillation model is provided, use the target model blueprint
-        if module_path is None or model_class_path is None:
-            self.model_blueprint = None
-        else:
-            self.init_params = self.configs.get("init_params", {})
-            self._import_model_from_path(module_path, model_class_path)
-
-            if self.optimizer_config is None:
-                raise ValueError("Optimizer configuration not provided")
-            self._get_optimizer_class(self.optimizer_config.pop("name"))
-
-            if self.loss_config is None:
-                raise ValueError("Loss configuration not provided")
-            self._get_criterion_class(self.loss_config.pop("name"))
-
-            if self.batch_size < 0:
-                raise ValueError("Batch size cannot be negative")
-
-            if self.epochs < 0:
-                raise ValueError("Number of epochs cannot be negative")
-
-        # Check if the folder does not exist
-        if not os.path.exists(self.storage_path):
-            # Create the folder
-            os.makedirs(self.storage_path)
-            self.logger.info(f"Created folder {self.storage_path}")
 
         self.model_storage_name = "distillation_epochs"
         self.metadata_storage_name = "metadata"
@@ -151,7 +105,7 @@ class DistillationModelHandler(ModelHandler):
         teacher_model.eval()
 
         data_loader = self.handler.get_dataloader(distillation_data_indices, self.batch_size)
-        self.logger.info(f"Created distillation dataset with size {len(distillation_data_indices)}")
+        logger.info(f"Created distillation dataset with size {len(distillation_data_indices)}")
 
         distillation_checkpoints = []
 
@@ -163,30 +117,41 @@ class DistillationModelHandler(ModelHandler):
 
                 # Move data to the device
                 data = data.to(gpu_or_cpu, non_blocking=True)
-                target_labels = target_labels.to(gpu_or_cpu, non_blocking=True).long()
+                target_labels = target_labels.to(gpu_or_cpu, non_blocking=True)
 
                 # Output of the distillation model
                 output_student = student_model(data)
                 output_teacher = teacher_model(data)
 
+                # In case we are dealing with binary classification, we need to add a dimension
+                if output_student.shape[1] == 1:
+                    prob_student_positives = sigmoid(output_student)
+                    neg_prob_student = 1 - prob_student_positives
+                    prob_teacher_positives = sigmoid(output_teacher)
+                    neg_prob_teacher = 1 - prob_teacher_positives
+                    student_signal = cat((neg_prob_student, prob_student_positives), dim=1)
+                    teacher_signal = cat((neg_prob_teacher, prob_teacher_positives), dim=1)
+                else:
+                    student_signal = F.log_softmax(output_student, dim=1)
+                    teacher_signal = F.softmax(output_teacher.float(), dim=1)
+
                 # TODO: add hopskipjump distance here
                 if label_only:
-                    loss = CrossEntropyLoss()(output_student, target_labels) # TODO: I think this is wrong
+                    loss = CrossEntropyLoss()(output_student, target_labels) # TODO: I think this is wrong (teacher?)
                 else:
-                    loss = KLDivLoss(reduction="batchmean")(F.log_softmax(output_student, dim=1),
-                                                            F.softmax(output_teacher.float(), dim=1))
+                    loss = KLDivLoss(reduction="batchmean")(student_signal, teacher_signal)
                 optimizer.zero_grad(set_to_none=True)
                 loss.backward()
                 optimizer.step()
                 epoch_loss += loss.item()
 
-            self.logger.info(f"Epoch {d+1}/{num_trajectory_epochs} | Loss: {epoch_loss}")
+            logger.info(f"Epoch {d+1}/{num_trajectory_epochs} | Loss: {epoch_loss}")
             with open(f"{self.storage_path}/{model_pair_name}_{d}.pkl", "wb") as f:
                 save(student_model.state_dict(), f)
-                self.logger.info(f"Saved distillation model for epoch {d} to {self.storage_path}")
+                logger.info(f"Saved distillation model for epoch {d} to {self.storage_path}")
             distillation_checkpoints.append(student_model)
 
-            self.logger.info("Storing metadata for distillation model")
+            logger.info("Storing metadata for distillation model")
             meta_data = {}
             meta_data["init_params"] = self.init_params
             meta_data["train_indices"] = distillation_data_indices
@@ -199,6 +164,6 @@ class DistillationModelHandler(ModelHandler):
             with open(f"{self.storage_path}/{model_pair_name}_metadata_{d}.pkl", "wb") as f:
                 pickle.dump(meta_data, f)
 
-            self.logger.info(f"Metadata for distillation model stored in {self.storage_path}")
+            logger.info(f"Metadata for distillation model stored in {self.storage_path}")
 
         return distillation_checkpoints
