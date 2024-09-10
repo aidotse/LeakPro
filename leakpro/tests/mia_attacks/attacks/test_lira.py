@@ -6,10 +6,11 @@ from math import isnan
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.attacks.mia_attacks.lira import AttackLiRA
 from leakpro.tests.input_handler.cifar10_input_handler import Cifar10InputHandler
-from leakpro.tests.constants import shadow_model_config, audit_config
+from leakpro.tests.constants import get_shadow_model_config, get_audit_config
 
 def test_lira_setup(image_handler:Cifar10InputHandler) -> None:
     """Test the initialization of LiRA."""
+    audit_config = get_audit_config()
     lira_params = audit_config.attack_list.lira
     lira_obj = AttackLiRA(image_handler, lira_params)
     
@@ -31,10 +32,11 @@ def test_lira_setup(image_handler:Cifar10InputHandler) -> None:
     assert len(description) == 4
 
 def test_lira_prepare_online_attack(image_handler:Cifar10InputHandler) -> None:
+    audit_config = get_audit_config()
     lira_params = audit_config.attack_list.lira
     lira_params.online = True
     
-    image_handler.configs.shadow_model = shadow_model_config
+    image_handler.configs.shadow_model = get_shadow_model_config()
     lira_obj = AttackLiRA(image_handler, lira_params)
     
     if ShadowModelHandler.is_created() == False:
@@ -56,10 +58,11 @@ def test_lira_prepare_online_attack(image_handler:Cifar10InputHandler) -> None:
     assert lira_obj.target_logits.shape == (n_attack_points, )
     
 def test_lira_prepare_offline_attack(image_handler:Cifar10InputHandler) -> None:
+    audit_config = get_audit_config()
     lira_params = audit_config.attack_list.lira
     lira_params.online = False
     
-    image_handler.configs.shadow_model = shadow_model_config
+    image_handler.configs.shadow_model = get_shadow_model_config()
     lira_obj = AttackLiRA(image_handler, lira_params)
     
     if ShadowModelHandler.is_created() == False:
@@ -83,9 +86,10 @@ def test_lira_prepare_offline_attack(image_handler:Cifar10InputHandler) -> None:
 
 def test_lira_online_attack(image_handler:Cifar10InputHandler):
     # Set up for testing
+    audit_config = get_audit_config()
     lira_params = audit_config.attack_list.lira
     lira_params.online = True
-    image_handler.configs.shadow_model = shadow_model_config
+    image_handler.configs.shadow_model = get_shadow_model_config()
     lira_obj = AttackLiRA(image_handler, lira_params)
     if ShadowModelHandler.is_created() == False:
         ShadowModelHandler(image_handler)
@@ -121,9 +125,10 @@ def test_lira_online_attack(image_handler:Cifar10InputHandler):
     
 def test_lira_online_attack(image_handler:Cifar10InputHandler):
     # Set up for testing
+    audit_config = get_audit_config()
     lira_params = audit_config.attack_list.lira
     lira_params.online = False
-    image_handler.configs.shadow_model = shadow_model_config
+    image_handler.configs.shadow_model = get_shadow_model_config()
     lira_obj = AttackLiRA(image_handler, lira_params)
     if ShadowModelHandler.is_created() == False:
         ShadowModelHandler(image_handler)

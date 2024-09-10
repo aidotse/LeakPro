@@ -9,17 +9,10 @@ from typing import Generator
 
 import pytest
 from dotmap import DotMap
-import sys
-print("Python search paths:")
-for path in sys.path:
-    print(path)
-
-import leakpro
-print("leakpro imported from:", leakpro.__file__)
 
 from leakpro.tests.input_handler.image_utils import setup_image_test
 from leakpro.tests.input_handler.cifar10_input_handler import Cifar10InputHandler
-from leakpro.tests.constants import STORAGE_PATH, audit_config
+from leakpro.tests.constants import STORAGE_PATH, get_audit_config
 
 
 @pytest.fixture(scope="session")
@@ -42,7 +35,7 @@ def image_handler(manage_storage_directory) -> Generator[Cifar10InputHandler, No
 
     config = DotMap()
     config.target = setup_image_test()
-    config.audit = audit_config
+    config.audit = get_audit_config()
 
     handler = Cifar10InputHandler(config)
 

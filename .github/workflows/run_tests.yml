@@ -19,7 +19,7 @@ jobs:
       - name: Ruff Linting
         uses: chartboost/ruff-action@v1
         with:
-          args: check Leakpro/leakpro
+          args: check Leakpro/leakpro --exclude Leakpro/examples
 
   build:
     runs-on: ubuntu-latest

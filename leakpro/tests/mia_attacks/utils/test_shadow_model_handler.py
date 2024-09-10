@@ -1,17 +1,16 @@
 """Test the shadow model handler module."""
 import os
 import numpy as np
-from copy import deepcopy
 
 from pytest import raises
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.tests.input_handler.cifar10_input_handler import Cifar10InputHandler
-from leakpro.tests.constants import shadow_model_config
+from leakpro.tests.constants import get_shadow_model_config
 
 def test_shadow_model_handler_singleton(image_handler:Cifar10InputHandler) -> None:
     """Test that only one instance gets created."""
     
-    image_handler.configs.shadow_model = deepcopy(shadow_model_config)
+    image_handler.configs.shadow_model = get_shadow_model_config()
     if ShadowModelHandler.is_created() == False:
         sm = ShadowModelHandler(image_handler)
         assert ShadowModelHandler.is_created() == True
@@ -39,15 +38,15 @@ def test_shadow_model_handler_creation_from_target(image_handler:Cifar10InputHan
     assert sm.loss_config == image_handler.target_model_metadata["loss"]
 
 def test_shadow_model_creation_and_loading(image_handler:Cifar10InputHandler) -> None:
-    image_handler.configs.shadow_model = deepcopy(shadow_model_config)
+    image_handler.configs.shadow_model = get_shadow_model_config()
     
     # Test initialization
     if ShadowModelHandler.is_created() == True:
         ShadowModelHandler.delete_instance()
     sm = ShadowModelHandler(image_handler)
     
-    assert sm.batch_size == shadow_model_config.batch_size
-    assert sm.epochs == shadow_model_config.epochs
+    assert sm.batch_size == image_handler.configs.shadow_model.batch_size
+    assert sm.epochs == image_handler.configs.shadow_model.epochs
     assert sm.init_params == {}
     assert sm.model_blueprint is not None
     assert sm.optimizer_config is not None

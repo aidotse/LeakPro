@@ -6,13 +6,13 @@ import numpy as np
 from torch import equal
 from torch.utils.data import SequentialSampler
 
-from leakpro.tests.input_handler.image_utils import parameters
+from leakpro.tests.constants import get_image_handler_config
 from leakpro.tests.input_handler.cifar10_input_handler import Cifar10InputHandler
 
 
 def test_abstract_handler_setup(image_handler:Cifar10InputHandler) -> None:
     """Test the initialization of the image handler."""
-
+    parameters = get_image_handler_config()
     assert image_handler is not None
     assert isinstance(image_handler, Cifar10InputHandler)
 
@@ -64,7 +64,7 @@ def test_abstract_handler_setup(image_handler:Cifar10InputHandler) -> None:
 
 def test_cifar10_input_handler(image_handler:Cifar10InputHandler) -> None:
     """Test the CIFAR10 input handler."""
-
+    parameters = get_image_handler_config()
     # get dataloader for training
     train_loader = image_handler.get_dataloader(image_handler.train_indices, parameters.batch_size)
     assert train_loader is not None
