@@ -19,6 +19,25 @@ def test_shadow_model_handler_singleton(image_handler:Cifar10InputHandler) -> No
         ShadowModelHandler(image_handler)
     assert str(excinfo.value) == "Singleton already created with specific parameters."
 
+def test_shadow_model_handler_creation_from_target(image_handler:Cifar10InputHandler) -> None:
+    image_handler.configs.shadow_model = None
+
+    # Test initialization
+    if ShadowModelHandler.is_created() == False:
+        sm = ShadowModelHandler(image_handler)
+    else:
+        sm = ShadowModelHandler()
+    
+    assert sm.batch_size == image_handler._target_model_metadata["batch_size"]
+    assert sm.epochs == image_handler._target_model_metadata["epochs"]
+    assert sm.init_params == image_handler._target_model_metadata["init_params"]
+    assert sm.model_blueprint == image_handler.target_model.__class__
+    
+    image_handler.target_model_metadata["optimizer"].pop("name")
+    assert sm.optimizer_config == image_handler.target_model_metadata["optimizer"]
+    image_handler.target_model_metadata["loss"].pop("name")
+    assert sm.loss_config == image_handler.target_model_metadata["loss"]
+
 def test_shadow_model_creation_and_loading(image_handler:Cifar10InputHandler) -> None:
     image_handler.configs.shadow_model = shadow_model_config
     

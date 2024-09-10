@@ -1,5 +1,4 @@
 """Test for the image input handler."""
-import logging
 import os
 import shutil
 
@@ -16,11 +15,11 @@ for path in sys.path:
     print(path)
 
 import leakpro
-print(leakpro)
+print("leakpro imported from:", leakpro.__file__)
 
 from leakpro.tests.input_handler.image_utils import setup_image_test
 from leakpro.tests.input_handler.cifar10_input_handler import Cifar10InputHandler
-from leakpro.tests.constants import STORAGE_PATH
+from leakpro.tests.constants import STORAGE_PATH, audit_config
 
 
 @pytest.fixture(scope="session")
@@ -43,12 +42,9 @@ def image_handler(manage_storage_directory) -> Generator[Cifar10InputHandler, No
 
     config = DotMap()
     config.target = setup_image_test()
+    config.audit = audit_config
 
-    # Create dummy logger
-    logger = logging.getLogger("dummy")
-    logger.addHandler(logging.NullHandler())
-
-    handler = Cifar10InputHandler(config, logger)
+    handler = Cifar10InputHandler(config)
 
     # Yield control back to the test session
     yield handler

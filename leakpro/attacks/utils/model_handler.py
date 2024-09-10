@@ -34,7 +34,7 @@ class ModelHandler():
         if caller_configs is None:
             caller_configs = {}
 
-        self.model_path = caller_configs.get("model_path", None)
+        self.model_path = caller_configs.get("module_path", None)
         self.model_class = caller_configs.get("model_class", None)
 
         self.use_target_model_setup = self.model_path is None or self.model_class is None

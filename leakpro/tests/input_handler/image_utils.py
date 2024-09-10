@@ -12,7 +12,7 @@ from torchvision import transforms
 
 from leakpro.import_helper import Self
 
-from constants import STORAGE_PATH, parameters
+from leakpro.tests.constants import STORAGE_PATH, parameters
 
 class ConvNet(Module):
     """Convolutional Neural Network model."""
@@ -76,15 +76,13 @@ def setup_image_test()->None:
     # Set up the model and add path to config
     config.module_path = "./leakpro/tests/input_handler/image_utils.py"
     config.model_class = "ConvNet"
+    config.target_folder = parameters.target_folder
 
     model_path, metadata_path = create_mock_model_and_metadata()
 
     # ensure mock dataset is correct
     assert os.path.exists(model_path)
     assert os.path.exists(metadata_path)
-
-    config.trained_model_path = model_path
-    config.trained_model_metadata_path = metadata_path
 
     return config
 
@@ -132,7 +130,7 @@ def create_mock_model_and_metadata() -> str:
 
     # Create a mock model
     model = ConvNet()
-    model_path = STORAGE_PATH + "/mock_model.pkl"
+    model_path = parameters.target_folder + "/target_model.pkl"
     with open(model_path, "wb") as f:
         save(model.state_dict(), f)
 
@@ -151,7 +149,7 @@ def create_mock_model_and_metadata() -> str:
         "batch_size": parameters.batch_size,
         "epochs": parameters.epochs,
     }
-    metadata_path = STORAGE_PATH + "/mock_metadata.pkl"
+    metadata_path = parameters.target_folder + "/model_metadata.pkl"
 
     with open(metadata_path, "wb") as f:
         pickle.dump(metadata, f)
