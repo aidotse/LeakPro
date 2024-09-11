@@ -1,6 +1,6 @@
 #  MIMIC-III Data Preprocessing
 This document is a based on this and that.
-The aim is to load MIMIC-III dataset and preprosesse it according to for following tasks:
+The aim is to load MIMIC-III dataset and preprosesse it according to [this repo](https://github.com/MLforHealth/MIMIC_Extract) for following tasks:
 
 **Binary Classifications:**
 
@@ -19,10 +19,12 @@ The aim is to load MIMIC-III dataset and preprosesse it according to for followi
 ## Step-by-step instructions
 ### Requirments:
 - psql (PostgreSQL 9.4 or higher)
-- mimic code repo: 
+- mimic code [repo: ](https://github.com/MIT-LCP/mimic-code) 
 - decompressed mimic dataset in MIMIC_DATA_DIR
 
 ### Create a conda env
+Clone [MIMIC_Extract](https://github.com/MLforHealth/MIMIC_Extract) repo, and use their enviroment file to create a conda enviroment.
+
 ``` bash
 $ conda env create -f ./mimic_extract_env_py36.yml
 ```
@@ -62,7 +64,7 @@ $ psql -d mimic
 mimic=# SET search_path TO mimiciii;
 
 ```
-Ref of section: https://github.com/MIT-LCP/mimic-code/tree/main/mimic-iii/buildmimic/postgres
+[Section Ref:](https://github.com/MIT-LCP/mimic-code/tree/main/mimic-iii/buildmimic/postgres)
 
 ### Building concepts
 In mimic code repo, go to the concepts_postgres folder, run the postgres-functions.sql and postgres-make-concepts.sql scripts, in that order.
@@ -107,4 +109,4 @@ The default setting will create an hdf5 file inside MIMIC_EXTRACT_OUTPUT_DIR wit
 * **interventions**: hourly binary indicators for administered interventions
   * One row per (subj_id,hadm_id,icustay_id,hours_in)
 
-Ref of this section: https://github.com/MLforHealth/MIMIC_Extract/blob/master/README.md#step-4-set-cohort-selection-and-extraction-criteria
+[Section Ref:](https://github.com/MLforHealth/MIMIC_Extract/blob/master/README.md#step-4-set-cohort-selection-and-extraction-criteria)
