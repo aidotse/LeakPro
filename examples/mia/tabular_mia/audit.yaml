@@ -29,10 +29,11 @@ audit:  # Configurations for auditing
 
   output_dir: "./leakpro_output"
   attack_type: "mia" #mia, gia
+  modality: "tabular"
 
 target:
   # Target model path
-  module_path: "utils/model.py"
+  module_path: "utils/adult_model_preparation.py"
   model_class: "AdultNet" 
   # Data paths
   target_folder: "./target"

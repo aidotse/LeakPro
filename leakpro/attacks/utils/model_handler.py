@@ -9,7 +9,7 @@ from torch.nn import Module
 
 from leakpro.import_helper import Self, Tuple
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
-from leakpro.utils.input_handler import (
+from leakpro.user_inputs.user_imports import (
     get_class_from_module,
     get_criterion_mapping,
     get_optimizer_mapping,
