@@ -1,13 +1,15 @@
 """Implementation of the RMIA attack."""
 
 import numpy as np
+
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.attacks.utils.utils import softmax_logits
-from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.signals.signal import ModelLogits
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
+from leakpro.utils.import_helper import Self
+from leakpro.utils.logger import logger
 
 
 class AttackRMIA(AbstractMIA):
@@ -33,7 +35,7 @@ class AttackRMIA(AbstractMIA):
         self.shadow_models = None
         self.shadow_model_indices = None
 
-        self.logger.info("Configuring RMIA attack")
+        logger.info("Configuring RMIA attack")
         self._configure_attack(configs)
 
 
@@ -92,18 +94,18 @@ class AttackRMIA(AbstractMIA):
 
         Signals are computed on the auxiliary model(s) and dataset.
         """
-        self.logger.info("Preparing shadow models for RMIA attack")
+        logger.info("Preparing shadow models for RMIA attack")
         # Check number of shadow models that are available
 
         # sample dataset to compute histogram
-        self.logger.info("Preparing attack data for training the RMIA attack")
+        logger.info("Preparing attack data for training the RMIA attack")
 
         # Get all available indices for attack dataset, if self.online = True, include training and test data
         self.attack_data_indices = self.sample_indices_from_population(include_train_indices = self.online,
                                                                        include_test_indices = self.online)
 
         # train shadow models
-        self.logger.info(f"Check for {self.num_shadow_models} shadow models (dataset: {len(self.attack_data_indices)} points)")
+        logger.info(f"Check for {self.num_shadow_models} shadow models (dataset: {len(self.attack_data_indices)} points)")
         self.shadow_model_indices = ShadowModelHandler().create_shadow_models(
             num_models = self.num_shadow_models,
             shadow_population = self.attack_data_indices,
@@ -118,10 +120,10 @@ class AttackRMIA(AbstractMIA):
             # for all points in the attack dataset output from signal: # models x # data points x # classes
 
             # subsample the attack data based on the fraction
-            self.logger.info(f"Subsampling attack data from {len(self.attack_data_indices)} points")
+            logger.info(f"Subsampling attack data from {len(self.attack_data_indices)} points")
             n_points = int(self.attack_data_fraction * len(self.attack_data_indices))
             chosen_attack_data_indices = np.random.choice(self.attack_data_indices, n_points, replace=False)
-            self.logger.info(f"Number of attack data points after subsampling: {len(chosen_attack_data_indices)}")
+            logger.info(f"Number of attack data points after subsampling: {len(chosen_attack_data_indices)}")
 
             # get the true label indices
             z_true_labels = self.handler.get_labels(chosen_attack_data_indices)
@@ -146,7 +148,7 @@ class AttackRMIA(AbstractMIA):
             self.ratio_z = p_z_given_theta / (p_z + self.epsilon)
 
     def _online_attack(self:Self) -> None:
-        self.logger.info("Running RMIA online attack")
+        logger.info("Running RMIA online attack")
 
         # STEP 1: find out which audit data points can actually be audited
         # find the shadow models that are trained on what points in the audit dataset
@@ -174,7 +176,7 @@ class AttackRMIA(AbstractMIA):
 
         out_model_indices = ~in_indices_mask[:,mask]
 
-        self.logger.info(f"Number of points in the audit dataset that are used for online attack: {len(audit_data_indices)}")
+        logger.info(f"Number of points in the audit dataset that are used for online attack: {len(audit_data_indices)}")
 
         # STEP 3: Run the attack
         # run points through target model to get logits
@@ -199,13 +201,13 @@ class AttackRMIA(AbstractMIA):
             raise ValueError("There are no auxilliary points to use for the attack.")
 
         # subsample the attack data based on the fraction
-        self.logger.info(f"Subsampling attack data from {len(self.attack_data_index)} points")
+        logger.info(f"Subsampling attack data from {len(self.attack_data_index)} points")
         self.attack_data_index = np.random.choice(
             self.attack_data_index,
             int(self.attack_data_fraction * len(self.attack_data_index)),
             replace=False
         )
-        self.logger.info(f"Number of attack data points after subsampling: {len(self.attack_data_index)}")
+        logger.info(f"Number of attack data points after subsampling: {len(self.attack_data_index)}")
 
         # get the true label indices
         z_true_labels = self.handler.get_labels(self.attack_data_index)
@@ -239,7 +241,7 @@ class AttackRMIA(AbstractMIA):
         self.out_member_signals = score[out_members].reshape(-1,1)
 
     def _offline_attack(self:Self) -> None:
-        self.logger.info("Running RMIA offline attack")
+        logger.info("Running RMIA offline attack")
 
         # run target points through real model to get logits
         logits_theta = np.array(self.signal([self.target_model], self.handler, self.audit_dataset["data"]))

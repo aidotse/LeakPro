@@ -1,15 +1,14 @@
 """Module containing the Model class, an interface to query a model without any assumption on how it is implemented."""
 
-import logging
 from abc import ABC, abstractmethod
 from copy import deepcopy
 
 import numpy as np
-from torch import IntTensor, Tensor, cuda, exp, flatten, log, max, nn, no_grad, sum
+from torch import IntTensor, Tensor, cat, cuda, exp, flatten, log, max, nn, no_grad, sigmoid, sum
 from torch.utils.data import DataLoader
 
-from leakpro.import_helper import Callable, List, Optional, Self, Tuple
 from leakpro.signals.utils.HopSkipJumpDistance import HopSkipJumpDistance
+from leakpro.utils.import_helper import Callable, List, Optional, Self, Tuple
 
 
 class Model(ABC):
@@ -163,8 +162,11 @@ class PytorchModel(Model):
             The loss value, as defined by the loss_fn attribute.
 
         """
-        batch_samples_tensor = Tensor(np.array(batch_samples)).float()
-        batch_labels_tensor = batch_labels.clone().detach().long()
+        batch_samples_tensor = Tensor(np.array(batch_samples))
+        batch_labels_tensor = batch_labels.clone().detach()
+
+        if batch_labels_tensor.dim() == 1:
+            batch_labels_tensor = batch_labels_tensor.unsqueeze(1)
 
         if per_point:
             return (
@@ -271,9 +273,13 @@ class PytorchModel(Model):
                 y = batch_labels.to(device)
                 all_logits = self.model_obj(x)
 
-                predictions = all_logits - max(all_logits, dim=1, keepdim=True).values
-                predictions = exp(predictions)
-                predictions = predictions/sum(predictions,dim=1, keepdim=True)
+                if all_logits.shape[1] == 1:
+                    positive_class_prob = sigmoid(all_logits)
+                    predictions = cat([1 - positive_class_prob, positive_class_prob], dim=1)
+                else:
+                    predictions = all_logits - max(all_logits, dim=1, keepdim=True).values
+                    predictions = exp(predictions)
+                    predictions = predictions/sum(predictions,dim=1, keepdim=True)
 
                 count = predictions.shape[0]
                 y_true = predictions[np.arange(count), y.type(IntTensor)]
@@ -287,7 +293,6 @@ class PytorchModel(Model):
 
     def get_hop_skip_jump_distance(self:Self,  # noqa: D417
                                     data_loader: DataLoader,
-                                    logger: logging.Logger,
                                     norm: int ,
                                     y_target: Optional[int] ,
                                     image_target: Optional[int] ,
@@ -305,7 +310,6 @@ class PytorchModel(Model):
         Args:
         ----
             data_loader: DataLoader object containing the input data.
-            logger: Logger object.
             norm: Integer indicating the norm to be used for distance calculation.
             y_target: Optional integer indicating the target class label.
             image_target: Optional integer indicating the target image index.
@@ -328,7 +332,6 @@ class PytorchModel(Model):
         """
         hop_skip_jump_instance= HopSkipJumpDistance(self.model_obj,
                                                     data_loader,
-                                                    logger,
                                                     norm,
                                                     y_target,
                                                     image_target,

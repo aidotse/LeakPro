@@ -2,9 +2,9 @@
 
 from abc import ABC, abstractmethod
 
-from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
+from leakpro.utils.import_helper import Self
 
 ########################################################################################################################
 # METRIC CLASS
@@ -32,8 +32,7 @@ class AbstractGIA(ABC):
         # Add similarity tracking here..
         # Add image saving functions here..
 
-        # These objects are instance specific
-        self.logger = handler.logger
+        self.handler = handler #TODO: update with what is necessary here.
 
     @abstractmethod
     def _configure_attack(self:Self, configs:dict)->None:

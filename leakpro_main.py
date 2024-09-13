@@ -15,7 +15,7 @@ import dev_utils.train as utils
 from dev_utils.cifar10_input_handler import Cifar10InputHandler
 
 from leakpro.utils.handler_logger import setup_log
-from leakpro import shadow_model_blueprints
+from dev_utils import shadow_model_blueprints
 from leakpro.attacks.attack_scheduler import AttackScheduler
 from leakpro.dataset import get_dataloader
 from dev_utils.data_preparation import (

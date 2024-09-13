@@ -2,9 +2,10 @@
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 
-from leakpro.import_helper import Dict, Self, Tuple
 from torch import Tensor, zeros_like
 from torch.autograd import grad
+
+from leakpro.utils.import_helper import Dict, Self, Tuple
 
 
 class MetaOptimizer(ABC):

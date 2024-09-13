@@ -5,12 +5,12 @@ import numpy as np
 from pytest import raises
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.tests.input_handler.cifar10_input_handler import Cifar10InputHandler
-from leakpro.tests.constants import shadow_model_config
+from leakpro.tests.constants import get_shadow_model_config
 
 def test_shadow_model_handler_singleton(image_handler:Cifar10InputHandler) -> None:
     """Test that only one instance gets created."""
     
-    image_handler.configs.shadow_model = shadow_model_config
+    image_handler.configs.shadow_model = get_shadow_model_config()
     if ShadowModelHandler.is_created() == False:
         sm = ShadowModelHandler(image_handler)
         assert ShadowModelHandler.is_created() == True
@@ -19,17 +19,34 @@ def test_shadow_model_handler_singleton(image_handler:Cifar10InputHandler) -> No
         ShadowModelHandler(image_handler)
     assert str(excinfo.value) == "Singleton already created with specific parameters."
 
+def test_shadow_model_handler_creation_from_target(image_handler:Cifar10InputHandler) -> None:
+    image_handler.configs.shadow_model = None
+
+    # Test initialization
+    if ShadowModelHandler.is_created() == True:
+        ShadowModelHandler.delete_instance()
+    sm = ShadowModelHandler(image_handler)
+    
+    assert sm.batch_size == image_handler._target_model_metadata["batch_size"]
+    assert sm.epochs == image_handler._target_model_metadata["epochs"]
+    assert sm.init_params == image_handler._target_model_metadata["init_params"]
+    assert sm.model_blueprint == image_handler.target_model.__class__
+    
+    image_handler.target_model_metadata["optimizer"].pop("name")
+    assert sm.optimizer_config == image_handler.target_model_metadata["optimizer"]
+    image_handler.target_model_metadata["loss"].pop("name")
+    assert sm.loss_config == image_handler.target_model_metadata["loss"]
+
 def test_shadow_model_creation_and_loading(image_handler:Cifar10InputHandler) -> None:
-    image_handler.configs.shadow_model = shadow_model_config
+    image_handler.configs.shadow_model = get_shadow_model_config()
     
     # Test initialization
-    if ShadowModelHandler.is_created() == False:
-        sm = ShadowModelHandler(image_handler)
-    else:
-        sm = ShadowModelHandler()
+    if ShadowModelHandler.is_created() == True:
+        ShadowModelHandler.delete_instance()
+    sm = ShadowModelHandler(image_handler)
     
-    assert sm.batch_size == shadow_model_config.batch_size
-    assert sm.epochs == shadow_model_config.epochs
+    assert sm.batch_size == image_handler.configs.shadow_model.batch_size
+    assert sm.epochs == image_handler.configs.shadow_model.epochs
     assert sm.init_params == {}
     assert sm.model_blueprint is not None
     assert sm.optimizer_config is not None

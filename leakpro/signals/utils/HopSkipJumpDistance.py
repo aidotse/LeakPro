@@ -2,10 +2,8 @@
 # Copyright (c) 2019 Google Inc., OpenAI and Pennsylvania State University
 # See https://github.com/cleverhans-lab/cleverhans?tab=MIT-1-ov-file#readme for details.
 import builtins
-import logging
 
 import numpy as np
-from leakpro.import_helper import List, Self, Tuple
 from torch import (
     Tensor,
     amax,
@@ -33,6 +31,9 @@ from torch import sum as torch_sum
 from torch.nn import Module
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+
+from leakpro.utils.import_helper import List, Self, Tuple
+from leakpro.utils.logger import logger
 
 
 class HopSkipJumpDistance:
@@ -78,7 +79,6 @@ class HopSkipJumpDistance:
     def __init__(self: Self,
                  model: Module,
                  data_loader: DataLoader,
-                 logger:logging.Logger,
                  norm: int =2,
                  y_target: np.ndarray =None,
                  image_target: np.ndarray =None,
@@ -95,7 +95,6 @@ class HopSkipJumpDistance:
 
         self.model = model
         self.data_loader = data_loader
-        self.logger = logger
         self.norm = norm
         self.y_target = y_target
         self.image_target = image_target
@@ -222,7 +221,7 @@ class HopSkipJumpDistance:
             perturbation_distances.append(perturbation_distance)
             perturbed_images.append(perturbed)
             if self.verbose:
-                self.logger.info(f"Batch {i} ")
+                logger.info(f"Batch {i} ")
         return perturbed_images, perturbation_distances
 
     def distance_batch(self: Self,
@@ -257,7 +256,7 @@ class HopSkipJumpDistance:
         self.current_batch_size = len(batch_sample)
 
         if self.verbose:
-            self.logger.info(f"Batch {b_i} Initial distance: {sum_intial_distance/len(batch_sample)} per sample")
+            logger.info(f"Batch {b_i} Initial distance: {sum_intial_distance/len(batch_sample)} per sample")
 
         perturbation_distance = 0
         perturbed_previous_step = init_batch_perturbed.clone().detach()
@@ -301,10 +300,10 @@ class HopSkipJumpDistance:
             self.check_in_range(updated_perturbed)
             perturbed_previous_step = updated_perturbed.clone().detach()
             if self.verbose:
-                self.logger.info(f"iteration: {current_iter}, avg. distance "
+                logger.info(f"iteration: {current_iter}, avg. distance "
                                 f"{torch_sum(perturbation_distance, dim=0)/len(batch_sample)} per sample")
                 if (current_iter == self.num_iterations):
-                    self.logger.info(f"iteration: {current_iter}, avg. distance {perturbation_distance}")
+                    logger.info(f"iteration: {current_iter}, avg. distance {perturbation_distance}")
 
         return perturbed_previous_step, perturbation_distance
 
@@ -379,7 +378,7 @@ class HopSkipJumpDistance:
 
             num_evals += 1
             if len(active_indices) == 0:
-                self.logger.info("All data points in the batch have been successfully perturbed by random noise "
+                logger.info("All data points in the batch have been successfully perturbed by random noise "
                                  f"after {num_evals} evaluations.")
 
         return passed_random_noises
@@ -578,7 +577,7 @@ class HopSkipJumpDistance:
                         success[idx] = True
                         batch_epsilon[idx] = 0
                         passed_index.append(idx)
-                        self.logger.info(f"Batch {b_i},data point {idx}, iter {num_evals}: epsilon is less than threshold")
+                        logger.info(f"Batch {b_i},data point {idx}, iter {num_evals}: epsilon is less than threshold")
 
             if passed_index:
                 # Find the positions in batch_active_indices corresponding to the values in passed_index
@@ -760,7 +759,7 @@ class HopSkipJumpDistance:
                     out_images[i] = self.project(sample.unsqueeze(0), perturbed.unsqueeze(0), highs[i].unsqueeze(0))
                     out_images[i] = self.clamping(out_images[i])
                     if self.decision_function(out_images[i].unsqueeze(0), idx)[0] is False:
-                        self.logger.info(f"Using alpha_ mid instead of high for data point {idx}")
+                        logger.info(f"Using alpha_ mid instead of high for data point {idx}")
                         out_images[i] = blended_images[i]
             batch_active_indices = batch_active_indices[~mask_out]
 

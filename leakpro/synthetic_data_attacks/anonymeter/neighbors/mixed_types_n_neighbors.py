@@ -2,7 +2,6 @@
 # Copyright (c) 2022 Anonos IP LLC.
 # See https://github.com/statice/anonymeter/blob/main/LICENSE.md for details.
 """Nearest neighbor search for mixed type data."""
-import logging
 from math import fabs, isnan
 from typing import Dict, List, Optional, Tuple, Union
 
@@ -10,11 +9,12 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 from joblib import Parallel, delayed
-from leakpro.synthetic_data_attacks.anonymeter.preprocessing.transformations import mixed_types_transform
-from leakpro.synthetic_data_attacks.anonymeter.preprocessing.type_detection import detect_consistent_col_types
 from numba import jit
 
-logger = logging.getLogger(__name__)
+from leakpro.synthetic_data_attacks.anonymeter.preprocessing.transformations import mixed_types_transform
+from leakpro.synthetic_data_attacks.anonymeter.preprocessing.type_detection import detect_consistent_col_types
+from leakpro.utils.logger import logger
+
 
 @jit(nopython=True, nogil=True)
 def gower_distance(

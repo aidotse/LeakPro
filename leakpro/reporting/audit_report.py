@@ -11,9 +11,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sn
-from leakpro.import_helper import Dict, List, Tuple, Union
-from leakpro.metrics.attack_result import AttackResult, CombinedMetricResult
 from scipy import interpolate
+
+from leakpro.metrics.attack_result import AttackResult, CombinedMetricResult
+from leakpro.utils.import_helper import Dict, List, Tuple, Union
 
 ########################################################################################################################
 # GLOBAL SETTINGS

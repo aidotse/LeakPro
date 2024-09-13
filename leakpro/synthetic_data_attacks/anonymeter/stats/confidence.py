@@ -5,10 +5,11 @@
 from math import sqrt
 from typing import List, Optional, Tuple, Union
 
-from leakpro.import_helper import Self
-from leakpro.synthetic_data_attacks.anonymeter.utils import assert_x_in_bound
 from pydantic import BaseModel
 from scipy.stats import norm
+
+from leakpro.synthetic_data_attacks.anonymeter.utils import assert_x_in_bound
+from leakpro.utils.import_helper import Self
 
 
 def get_confidence_interval(*, rate: float, error: float) -> Tuple[float, float]:

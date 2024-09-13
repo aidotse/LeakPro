@@ -6,7 +6,7 @@ from collections import OrderedDict
 from dev_utils.data_modules import CifarModule
 from leakpro.fl_utils.gia_module_to_functional import MetaModule
 from leakpro.fl_utils.gia_optimizers import MetaOptimizer
-from leakpro.import_helper import Self
+from leakpro.utils.import_helper import Self
 from leakpro.user_inputs.abstract_gia_input_handler import AbstractGIAInputHandler
 from torch import cuda, device
 from torch.nn import Module
