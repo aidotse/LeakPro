@@ -1,12 +1,14 @@
 """Module that contains the implementation of the attack P."""
 
 import numpy as np
+
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.threshold_computation import linear_itp_threshold_func
 from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.signals.signal import ModelLoss
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
+from leakpro.utils.logger import logger
 
 
 class AttackP(AbstractMIA):
@@ -31,7 +33,7 @@ class AttackP(AbstractMIA):
         self.signal = ModelLoss()
         self.hypothesis_test_func = linear_itp_threshold_func
 
-        self.logger.info("Configuring the Population attack")
+        logger.info("Configuring the Population attack")
         self._configure_attack(configs)
 
     def _configure_attack(self:Self, configs:dict) -> None:
@@ -70,19 +72,19 @@ class AttackP(AbstractMIA):
     def prepare_attack(self:Self) -> None:
         """Prepare data needed for running the metric on the target model and dataset."""
         # sample dataset to compute histogram
-        self.logger.info("Preparing attack data for training the Population attack")
+        logger.info("Preparing attack data for training the Population attack")
         self.attack_data_indices = self.sample_indices_from_population(include_train_indices = False,
                                                                 include_test_indices = False)
 
         # subsample the attack data based on the fraction
-        self.logger.info(f"Subsampling attack data from {len(self.attack_data_indices)} points")
+        logger.info(f"Subsampling attack data from {len(self.attack_data_indices)} points")
         n_points = int(self.attack_data_fraction * len(self.attack_data_indices))
         attack_data_indices = np.random.choice(self.attack_data_indices, n_points, replace=False)
-        self.logger.info(f"Number of attack data points after subsampling: {len(attack_data_indices)}")
+        logger.info(f"Number of attack data points after subsampling: {len(attack_data_indices)}")
 
         # signals based on training dataset
-        self.logger.info("Computing signals for the Population attack")
-        self.attack_signal = np.array(self.signal([self.target_model], self.handler, attack_data_indices))
+        logger.info("Computing signals for the Population attack")
+        self.attack_signal = np.array(self.signal([self.target_model], self.handler, attack_data_indices)).squeeze()
 
     def run_attack(self:Self) -> CombinedMetricResult:
         """Run the attack on the target model and dataset.
@@ -100,11 +102,11 @@ class AttackP(AbstractMIA):
         # map the threshold with the alpha
         self.quantiles = np.logspace(-5, 0, 100)
         # obtain the threshold values based on the reference dataset
-        thresholds = self.hypothesis_test_func(self.attack_signal, self.quantiles).reshape(-1, 1)
+        thresholds = self.hypothesis_test_func(self.attack_signal, self.quantiles)[:, np.newaxis]
 
         num_threshold = len(self.quantiles)
 
-        self.logger.info("Running the Population attack on the target model")
+        logger.info("Running the Population attack on the target model")
         # get the loss for the audit dataset
         audit_signal = np.array(self.signal([self.target_model], self.handler, self.audit_dataset["data"])).squeeze()
 
@@ -118,7 +120,7 @@ class AttackP(AbstractMIA):
         member_preds = np.less(member_signals, thresholds)
         non_member_preds = np.less(non_member_signals, thresholds)
 
-        self.logger.info("Attack completed")
+        logger.info("Attack completed")
 
         # what does the attack predict on test and train dataset
         predictions = np.concatenate([member_preds, non_member_preds], axis=1)

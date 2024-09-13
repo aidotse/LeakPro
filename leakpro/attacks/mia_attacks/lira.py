@@ -1,6 +1,9 @@
 """Implementation of the LiRA attack."""
 
 import numpy as np
+from scipy.stats import norm
+from tqdm import tqdm
+
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.boosting import Memorization
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
@@ -8,8 +11,7 @@ from leakpro.import_helper import Self
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.signals.signal import ModelRescaledLogits
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
-from scipy.stats import norm
-from tqdm import tqdm
+from leakpro.utils.logger import logger
 
 
 class AttackLiRA(AbstractMIA):
@@ -121,7 +123,7 @@ class AttackLiRA(AbstractMIA):
 
         self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)
 
-        self.logger.info("Create masks for all IN and OUT samples")
+        logger.info("Create masks for all IN and OUT samples")
         self.in_indices_masks = ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"])
 
         if self.online:
@@ -152,16 +154,16 @@ class AttackLiRA(AbstractMIA):
         if not self.online:
             count_in_samples = np.count_nonzero(self.in_indices_masks)
             if count_in_samples > 0:
-                self.logger.info(f"Some shadow model(s) contains {count_in_samples} IN samples in total for the model(s)")
-                self.logger.info("This is not an offline attack!")
+                logger.info(f"Some shadow model(s) contains {count_in_samples} IN samples in total for the model(s)")
+                logger.info("This is not an offline attack!")
 
         self.batch_size = len(audit_data_indices)
-        self.logger.info(f"Calculating the logits for all {self.num_shadow_models} shadow models")
+        logger.info(f"Calculating the logits for all {self.num_shadow_models} shadow models")
         self.shadow_models_logits = np.swapaxes(self.signal(self.shadow_models, self.handler, audit_data_indices,\
                                                             self.batch_size), 0, 1)
 
         # Calculate logits for the target model
-        self.logger.info("Calculating the logits for the target model")
+        logger.info("Calculating the logits for the target model")
         self.target_logits = np.swapaxes(self.signal([self.target_model], self.handler, audit_data_indices, self.batch_size),\
                                         0, 1).squeeze()
 
@@ -173,7 +175,7 @@ class AttackLiRA(AbstractMIA):
             audit_data_indices = self.audit_dataset["data"][mask] if self.online else self.audit_dataset["data"]
             audit_data_labels = self.handler.get_labels(audit_data_indices)
 
-            self.logger.info("Running memorization")
+            logger.info("Running memorization")
             memorization = Memorization(
                 self.use_privacy_score,
                 self.memorization_threshold,
@@ -187,7 +189,6 @@ class AttackLiRA(AbstractMIA):
                 org_audit_data_length,
                 self.handler,
                 self.online,
-                self.logger,
                 self.batch_size,
             )
             memorization_mask, _, _ = memorization.run()

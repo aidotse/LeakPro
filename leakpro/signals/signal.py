@@ -1,15 +1,15 @@
 """Signal class, which is an abstract class representing any type of signal that can be obtained."""
 
-import logging as logger
 from abc import ABC, abstractmethod
 
 import numpy as np
-from leakpro.import_helper import List, Optional, Self, Tuple
-from leakpro.signal_extractor import Model
-from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 from torch.utils.data import DataLoader
 from torch.utils.data.sampler import SequentialSampler
 from tqdm import tqdm
+
+from leakpro.import_helper import List, Optional, Self, Tuple
+from leakpro.signal_extractor import Model
+from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 
 
 class Signal(ABC):
@@ -193,7 +193,6 @@ class HopSkipJumpDistance(Signal):
         self:Self,
         model: Model,
         data_loader: DataLoader,
-        logger: logger.Logger,
         norm: int = 2,
         y_target: Optional[int] = None,
         image_target: Optional[int] = None,
@@ -213,7 +212,6 @@ class HopSkipJumpDistance(Signal):
         ----
             model: The model to be used.
             data_loader: The data loader to load the data.
-            logger: The logger object for logging.
             norm: The norm to be used for distance calculation.
             y_target: The target class label (optional).
             image_target: The target image index (optional).
@@ -237,7 +235,6 @@ class HopSkipJumpDistance(Signal):
         # Compute the signal for each model
         perturbed_imgs, perturbed_distance = model.get_hop_skip_jump_distance(
                                                     data_loader,
-                                                    logger,
                                                     norm,
                                                     y_target,
                                                     image_target,

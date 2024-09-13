@@ -5,8 +5,9 @@ from functools import partial
 
 import torch
 import torch.nn.functional as f
-from leakpro.import_helper import Any, Dict, Self
 from torch import cuda, device, nn
+
+from leakpro.import_helper import Any, Dict, Self
 
 # Predefined mapping for known functional calls and their parameters
 # If your model contains more modules than the ones specified here, add them

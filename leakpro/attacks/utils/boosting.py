@@ -1,14 +1,14 @@
 """Class(es) built to boost membership attacks."""
 
-import logging
-
 import numpy as np
+from tqdm import tqdm
+
 from leakpro.attacks.utils.utils import softmax_logits
 from leakpro.import_helper import Self
 from leakpro.signal_extractor import PytorchModel
 from leakpro.signals.signal import ModelLogits, ModelRescaledLogits
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
-from tqdm import tqdm
+from leakpro.utils.logger import logger
 
 
 class Memorization():
@@ -31,7 +31,6 @@ class Memorization():
             org_audit_data_length: int,
             handler: AbstractInputHandler,
             online: bool,
-            logger: logging.Logger,
             batch_size: int = 32,
         ) -> None:
         """Initialize the memorization boosting.
@@ -50,7 +49,6 @@ class Memorization():
             org_audit_data_length (int): Length of the original audit dataset, before any filtering.
             handler (AbstractInputHandler): Data handler to manage data.
             online (bool): Flag if the attack is online or not.
-            logger (logging.Logger): Logger for logging the memorization process.
             batch_size (int): Integer to set batch size when loading data (will effect performance).
 
         Returns:
@@ -72,22 +70,21 @@ class Memorization():
         self.org_audit_data_length = org_audit_data_length
         self.handler = handler
         self.online = online
-        self.logger = logger
         self.batch_size = batch_size
 
         self.audit_data_length = len(self.audit_data_indices)
         if self.org_audit_data_length*(1-self.memorization_threshold) < self.min_num_memorization_audit_points:
-            self.logger.info("Warning!")
-            self.logger.info("Memorization threshold gives less audit points than the minimum allowed")
-            self.logger.info('Please adjust "memorization_threshold" or "min_num_memorization_audit_points"')
+            logger.info("Warning!")
+            logger.info("Memorization threshold gives less audit points than the minimum allowed")
+            logger.info('Please adjust "memorization_threshold" or "min_num_memorization_audit_points"')
             self.memorization_threshold = 1-self.min_num_memorization_audit_points/self.org_audit_data_length
-            self.logger.info(f'Setting "memorization_threshold" to {self.memorization_threshold}')
+            logger.info(f'Setting "memorization_threshold" to {self.memorization_threshold}')
 
         if self.memorization_threshold != 0.0 and self.num_memorization_audit_points != 0:
-            self.logger.info("Warning!")
-            self.logger.info('"memorization_threshold" and "num_memorization_audit_points" are both used.')
-            self.logger.info('"memorization_threshold" is by default set to 0.8, try setting it to 0.0')
-            self.logger.info('Overriding "memorization_threshold" for "num_memorization_audit_points"')
+            logger.info("Warning!")
+            logger.info('"memorization_threshold" and "num_memorization_audit_points" are both used.')
+            logger.info('"memorization_threshold" is by default set to 0.8, try setting it to 0.0')
+            logger.info('Overriding "memorization_threshold" for "num_memorization_audit_points"')
 
         elif self.memorization_threshold != 0.0:
             self.num_memorization_audit_points = int(self.org_audit_data_length * (1-self.memorization_threshold))
@@ -191,14 +188,14 @@ class Memorization():
         # Check for negative memorization scores
         if (positive_mem := np.count_nonzero((self.memorization_score > 0) & (self.privacy_score >= 0)))\
                                             < self.num_memorization_audit_points:
-            self.logger.info("Too many samples with negative memorization score")
-            self.logger.info(f"Only {positive_mem} points with positive score, requesting {self.num_memorization_audit_points}")
-            self.logger.info("Please make sure to train the models enough")
+            logger.info("Too many samples with negative memorization score")
+            logger.info(f"Only {positive_mem} points with positive score, requesting {self.num_memorization_audit_points}")
+            logger.info("Please make sure to train the models enough")
             if positive_mem > 0:
-                self.logger.info(f"Returning {positive_mem} points")
+                logger.info(f"Returning {positive_mem} points")
                 self.num_memorization_audit_points = positive_mem
             else:
-                self.logger.info("Returning the 50% most vulnerable data points")
+                logger.info("Returning the 50% most vulnerable data points")
                 return self.memorization_score >= np.median(self.memorization_score),\
                         self.privacy_score >= np.min(self.privacy_score)
 

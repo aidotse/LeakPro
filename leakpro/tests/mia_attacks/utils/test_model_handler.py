@@ -15,7 +15,8 @@ def test_model_handler(image_handler:Cifar10InputHandler) -> None:
     model_handler._import_model_from_path(configs.module_path, configs.model_class)
     assert model_handler.model_blueprint.__name__ == configs.model_class
 
-    meta_data = model_handler._load_metadata(configs.trained_model_metadata_path)
+    meta_data_path = f"{configs.target_folder}/model_metadata.pkl"
+    meta_data = model_handler._load_metadata(meta_data_path)
     assert meta_data == image_handler.target_model_metadata
 
     model_handler._get_optimizer_class(meta_data["optimizer"]["name"])
@@ -24,7 +25,8 @@ def test_model_handler(image_handler:Cifar10InputHandler) -> None:
     model_handler._get_criterion_class(meta_data["loss"]["name"])
     assert model_handler.criterion_class.__name__.lower() == meta_data["loss"]["name"]
 
-    new_model, new_criterion = model_handler._load_model(configs.trained_model_path)
+    model_path = f"{configs.target_folder}/target_model.pkl"
+    new_model, new_criterion = model_handler._load_model(model_path)
     assert new_model.__class__.__name__ == image_handler.target_model.__class__.__name__ # Check that the model is the same class
     assert id(new_model) != id(image_handler.target_model) # Check that the model is not the same instance
     assert new_criterion.__class__.__name__ == image_handler.get_criterion().__class__.__name__

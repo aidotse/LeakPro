@@ -6,12 +6,14 @@ import re
 
 import numpy as np
 import torch
+from torch import Tensor, jit, save
+from torch.nn import Module
+
 from leakpro.attacks.utils.model_handler import ModelHandler
 from leakpro.import_helper import Self, Tuple
 from leakpro.signal_extractor import PytorchModel
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
-from torch import Tensor, jit, save
-from torch.nn import Module
+from leakpro.utils.logger import logger
 
 
 def singleton(cls):  # noqa: ANN001, ANN201
@@ -32,8 +34,14 @@ def singleton(cls):  # noqa: ANN001, ANN201
     def is_created() -> bool:
         return cls in instances
 
-    # Attach a check method to the class
+    def delete_instance() -> None:
+        """Delete the singleton instance (for resetting or testing purposes)."""
+        if cls in instances:
+            del instances[cls]
+
+    # Attach methods to the class
     get_instance.is_created = is_created
+    get_instance.delete_instance = delete_instance
 
     return get_instance
 
@@ -49,46 +57,9 @@ class ShadowModelHandler(ModelHandler):
             handler (AbstractInputHandler): The input handler object.
 
         """
-        super().__init__(handler)
-        self.configs = handler.configs["shadow_model"]
-
-        # Read from the config file
-        module_path = self.configs.get("module_path", None)
-        model_class = self.configs.get("model_class", None)
-        self.optimizer_config = self.configs.get("optimizer", None)
-        self.loss_config = self.configs.get("loss", None)
-        self.batch_size = self.configs.get("batch_size", 32)
-        self.epochs = self.configs.get("epochs", 40)
-        self.storage_path = self.configs.get("storage_path")
-
-        if module_path is None or model_class is None:
-            self.model_blueprint = None
-            self.criterion_class = None
-            self.optimizer_class = None
-        else:
-            self.init_params = self.configs.get("init_params", {})
-            self._import_model_from_path(module_path, model_class)
-
-            # Read the optimizer for shadow models if it has been provided
-            if self.optimizer_config is None:
-                raise ValueError("Optimizer configuration not found in configs.")
-            optimizer_name = self.optimizer_config.pop("name") # pop to only have input parameters left
-            self._get_optimizer_class(optimizer_name)
-
-            # Read the loss function for shadow models if it has been provided
-            if self.loss_config is None:
-                raise ValueError("Loss configuration not found in configs.")
-            criterion_class = self.loss_config.pop("name") # pop to only have input parameters left
-            self._get_criterion_class(criterion_class)
-
-        # Create the shadow model storage folder
-        if self.storage_path is None:
-            raise ValueError("Storage path for shadow models not provided")
-        # Check if the folder does not exist
-        if not os.path.exists(self.storage_path):
-            # Create the folder
-            os.makedirs(self.storage_path)
-            self.logger.info(f"Created folder {self.storage_path}")
+        caller = "shadow_model"
+        super().__init__(handler, caller)
+        self.configs = handler.configs.get("shadow_model", None)
 
         # Set up the names of the shadow model
         self.model_storage_name = "shadow_model"
@@ -141,7 +112,7 @@ class ShadowModelHandler(ModelHandler):
         n_existing_models = len(filtered_indices)
 
         if n_existing_models >= num_models:
-            self.logger.info("Number of existing models exceeds or equals the number of models to create")
+            logger.info("Number of existing models exceeds or equals the number of models to create")
             return filtered_indices[:num_models]
 
         indices_to_use = []
@@ -159,19 +130,19 @@ class ShadowModelHandler(ModelHandler):
             model, criterion, optimizer = self._get_model_criterion_optimizer()
 
             # Train shadow model
-            self.logger.info(f"Training shadow model {i} on {len(data_loader)* data_loader.batch_size} points")
+            logger.info(f"Training shadow model {i} on {len(data_loader)* data_loader.batch_size} points")
             training_results = self.handler.train(data_loader, model, criterion, optimizer, self.epochs)
             # Read out results
             shadow_model = training_results["model"]
             train_acc = training_results["metrics"]["accuracy"]
             train_loss = training_results["metrics"]["loss"]
 
-            self.logger.info(f"Training shadow model {i} complete")
+            logger.info(f"Training shadow model {i} complete")
             with open(f"{self.storage_path}/{self.model_storage_name}_{i}.pkl", "wb") as f:
                 save(shadow_model.state_dict(), f)
-                self.logger.info(f"Saved shadow model {i} to {self.storage_path}")
+                logger.info(f"Saved shadow model {i} to {self.storage_path}")
 
-            self.logger.info(f"Storing metadata for shadow model {i}")
+            logger.info(f"Storing metadata for shadow model {i}")
             meta_data = {}
             meta_data["init_params"] = self.init_params
             meta_data["train_indices"] = data_indices
@@ -187,7 +158,7 @@ class ShadowModelHandler(ModelHandler):
             with open(f"{self.storage_path}/{self.metadata_storage_name}_{i}.pkl", "wb") as f:
                 pickle.dump(meta_data, f)
 
-            self.logger.info(f"Metadata for shadow model {i} stored in {self.storage_path}")
+            logger.info(f"Metadata for shadow model {i} stored in {self.storage_path}")
         return filtered_indices + indices_to_use
 
     def _load_shadow_model(self:Self, index:int) -> Module:
@@ -216,7 +187,7 @@ class ShadowModelHandler(ModelHandler):
         shadow_models = []
         shadow_model_indices = []
         for i in num_models:
-            self.logger.info(f"Loading shadow model {i}")
+            logger.info(f"Loading shadow model {i}")
             model = self._load_shadow_model(i)
             shadow_models.append(model)
             shadow_model_indices.append(i)
@@ -247,7 +218,7 @@ class ShadowModelHandler(ModelHandler):
         if model_indices is int:
             model_indices = range(model_indices)
         for i in model_indices:
-            self.logger.info(f"Loading metadata {i}")
+            logger.info(f"Loading metadata {i}")
             metadata.append(self._load_shadow_metadata(i))
         return metadata
 

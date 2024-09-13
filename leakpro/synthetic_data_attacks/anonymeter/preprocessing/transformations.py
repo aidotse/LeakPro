@@ -2,13 +2,13 @@
 # This file is part of Anonymeter and is released under BSD 3-Clause Clear License.
 # Copyright (c) 2022 Anonos IP LLC.
 # See https://github.com/statice/anonymeter/blob/main/LICENSE.md for details.
-import logging
 from typing import List, Tuple
 
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder
 
-logger = logging.getLogger(__name__)
+from leakpro.utils.logger import logger
+
 
 def encode_categorical(
     df1: pd.DataFrame,
