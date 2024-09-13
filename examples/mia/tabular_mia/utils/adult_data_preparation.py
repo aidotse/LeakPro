@@ -102,6 +102,13 @@ def get_adult_dataloaders(dataset, train_fraction=0.3, test_fraction=0.3):
     # Use sklearn's train_test_split to split into train and test indices
     selected_index = np.random.choice(np.arange(dataset_size), train_size + test_size, replace=False)
     train_indices, test_indices = train_test_split(selected_index, test_size=test_size)
+    
+    # Convert features and labels to PyTorch tensors
+    X_tensor = torch.tensor(X, dtype=torch.float32)
+    y_tensor = torch.tensor(y, dtype=torch.float32)
+    
+    # Create a TensorDataset
+    tensor_dataset = TensorDataset(X_tensor, y_tensor)
 
     train_subset = Subset(dataset, train_indices)
     test_subset = Subset(dataset, test_indices)
