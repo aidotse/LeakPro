@@ -14,10 +14,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Ruff Linting
-        uses: chartboost/ruff-action@v1
+        uses: chartboost/ruff-action@v4
         with:
           args: check leakpro --exclude examples,leakpro/tests
 
@@ -28,10 +28,10 @@ jobs:
       contents: write  # Ensure write permission for contents
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Set up Python 3.9
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
           python-version: 3.9
 
@@ -59,7 +59,7 @@ jobs:
           cat ./pytest-coverage.txt
 
       - name: Upload test coverage report
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: pytest-coverage.txt
           path: pytest-coverage.txt
