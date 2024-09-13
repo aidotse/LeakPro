@@ -21,7 +21,7 @@ class TabularExtension:
 
         logger.info(f"Continuous cols: {self.cont_cols}")
         logger.info(f"Categorical cols: {self.cat_cols}")
-    
+
 
     def one_hot_encode(self:Self, data:pd.DataFrame) -> pd.DataFrame:
         """One-hot encode all categorical columns in the DataFrame.

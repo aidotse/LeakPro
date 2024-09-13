@@ -6,21 +6,19 @@ import pickle
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.model_selection import train_test_split
 import urllib.request
-from torch import from_numpy
 from torch.utils.data import Dataset, Subset, DataLoader
 
 
 class AdultDataset(Dataset):
-    def __init__(self, x, y, column_info):
-        self.x = x  # Convert features to torch tensors
-        self.y = y     # Convert labels to torch tensors
-        self.column_info = column_info
+    def __init__(self, x, y, ):
+        self.x = x 
+        self.y = y  
 
     def __len__(self):
         return len(self.y)
 
     def __getitem__(self, idx):
-        return self.x[idx], self.y[idx]
+        return self.x.iloc[idx], self.y.iloc[idx]
     
 def download_adult_dataset(data_dir):
     """Download the Adult Dataset if it's not present."""
@@ -73,36 +71,22 @@ def get_adult_dataset(path):
 
         # Categorical and numerical columns
         categorical_features = [col for col in x.columns if x[col].dtype == "object"]
-        categorical_indices = [x.columns.get_loc(col) for col in categorical_features]
-
         numerical_features = [col for col in x.columns if x[col].dtype in ["int64", "float64"]]
-        numerical_indices = [x.columns.get_loc(col) for col in numerical_features]
 
         # Scaling numerical features
         scaler = StandardScaler()
-        x_numerical = scaler.fit_transform(x[numerical_features])
+        x_numerical = pd.DataFrame(scaler.fit_transform(x[numerical_features]), columns=numerical_features, index=x.index)
         
         # Label encode the categories
-        x[categorical_features] = x[categorical_features].apply(LabelEncoder().fit_transform)
-
-        # Concatenate numerical and categorical features
-        x_combined = np.hstack([x_numerical, x[categorical_features].values])
-        x_tensor = from_numpy(x_combined).float()
+        x_categorical = x[categorical_features].apply(lambda col: LabelEncoder().fit_transform(col))
+        x = pd.concat([x_numerical, x_categorical], axis=1)
 
         # Label encode the target variable
-        y_encoded = LabelEncoder().fit_transform(y)
-        y_tensor = from_numpy(y_encoded).float()
-        
-        #----------------
-        # Create column_info dictionary to store mappings
-        column_info = {
-            'numerical': list(range(x_numerical.shape[1])),  
-            'categorical': list(range(x_numerical.shape[1], x_combined.shape[1]))
-        }
+        y = pd.Series(LabelEncoder().fit_transform(y))
         
         #--------------------
         # Create dataset to be stored
-        dataset = AdultDataset(x_tensor, y_tensor, column_info)
+        dataset = AdultDataset(x, y)
         with open(f"{path}/adult_data.pkl", "wb") as file:
             pickle.dump(dataset, file)
             print(f"Save data to {path}.pkl")
