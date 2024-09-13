@@ -32,7 +32,7 @@ from torch.nn import Module
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from leakpro.import_helper import List, Self, Tuple
+from leakpro.utils.import_helper import List, Self, Tuple
 from leakpro.utils.logger import logger
 
 

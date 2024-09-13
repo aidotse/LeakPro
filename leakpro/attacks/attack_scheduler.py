@@ -3,8 +3,8 @@
 from leakpro.attacks.gia_attacks.attack_factory_gia import AttackFactoryGIA
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
-from leakpro.import_helper import Any, Dict, Self
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
+from leakpro.utils.import_helper import Any, Dict, Self
 from leakpro.utils.logger import logger
 
 

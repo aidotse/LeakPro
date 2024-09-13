@@ -14,7 +14,7 @@ from torch import Tensor, clamp, stack
 from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision.utils import save_image
 
-from leakpro.import_helper import Any, List, Self
+from leakpro.utils.import_helper import Any, List, Self
 
 ########################################################################################################################
 # METRIC_RESULT CLASS
