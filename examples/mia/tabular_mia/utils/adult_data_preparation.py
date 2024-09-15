@@ -7,18 +7,22 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.model_selection import train_test_split
 import urllib.request
 from torch.utils.data import Dataset, Subset, DataLoader
+from torch import from_numpy
 
 
 class AdultDataset(Dataset):
     def __init__(self, x, y, ):
         self.x = x 
         self.y = y  
-
+    
     def __len__(self):
         return len(self.y)
 
     def __getitem__(self, idx):
-        return self.x.iloc[idx], self.y.iloc[idx]
+        if isinstance(self.x, (pd.DataFrame, pd.Series)):
+            return self.x.iloc[idx], self.y.iloc[idx]
+        return self.x[idx], self.y[idx]
+    
     
 def download_adult_dataset(data_dir):
     """Download the Adult Dataset if it's not present."""
@@ -92,7 +96,13 @@ def get_adult_dataset(path):
             print(f"Save data to {path}.pkl")
     
     return dataset
-    
+
+def collate_fn(batch) -> tuple:
+    features_df, labels_df = zip(*batch)
+    features_tensor = from_numpy(np.array(features_df, dtype=np.float32))
+    labels_tensor = from_numpy(np.array(labels_df, dtype=np.float32))
+    return features_tensor, labels_tensor    
+
 def get_adult_dataloaders(dataset, train_fraction=0.3, test_fraction=0.3):
     
     dataset_size = len(dataset)
@@ -103,17 +113,10 @@ def get_adult_dataloaders(dataset, train_fraction=0.3, test_fraction=0.3):
     selected_index = np.random.choice(np.arange(dataset_size), train_size + test_size, replace=False)
     train_indices, test_indices = train_test_split(selected_index, test_size=test_size)
     
-    # Convert features and labels to PyTorch tensors
-    X_tensor = torch.tensor(X, dtype=torch.float32)
-    y_tensor = torch.tensor(y, dtype=torch.float32)
-    
-    # Create a TensorDataset
-    tensor_dataset = TensorDataset(X_tensor, y_tensor)
-
     train_subset = Subset(dataset, train_indices)
     test_subset = Subset(dataset, test_indices)
-
-    train_loader = DataLoader(train_subset, batch_size=128, shuffle=True)
-    test_loader = DataLoader(test_subset, batch_size=128, shuffle=False)
+    
+    train_loader = DataLoader(train_subset, batch_size=128, shuffle=True, collate_fn=collate_fn)
+    test_loader = DataLoader(test_subset, batch_size=128, shuffle=False, collate_fn=collate_fn)
 
     return train_loader, test_loader

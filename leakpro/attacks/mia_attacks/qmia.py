@@ -68,7 +68,7 @@ class QuantileRegressor(nn.Module):
         # Create a regressor from the target model
         self.feature_extractor = deepcopy(model)
         layers = list(self.feature_extractor.children())[:-1]  # Remove the last layer
-        self.feature_extractor = nn.Sequential(*layers) # Rebuid the model without the last layer
+        self.feature_extractor = nn.Sequential(*layers) # Rebuild the model without the last layer
 
         # Figure out the size of the penultimate layer
         for x, _ in dummy_dataloader:

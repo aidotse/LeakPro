@@ -165,8 +165,7 @@ class AttackRMIA(AbstractMIA):
         # find out how many out-members survived the filtering
         num_out_members = np.sum(mask[self.audit_dataset["out_members"]])
         out_members = np.arange(len(in_members), len(in_members) + num_out_members)
-        ground_truth_indices = self.handler.get_labels(audit_data_indices)
-        assert np.issubdtype(ground_truth_indices.dtype, np.integer)
+        ground_truth_indices = self.handler.get_labels(audit_data_indices).astype(int)
 
         assert len(audit_data_indices) == len(ground_truth_indices)
         assert len(audit_data_indices) == len(in_members) + len(out_members)
@@ -210,7 +209,7 @@ class AttackRMIA(AbstractMIA):
         logger.info(f"Number of attack data points after subsampling: {len(self.attack_data_index)}")
 
         # get the true label indices
-        z_true_labels = self.handler.get_labels(self.attack_data_index)
+        z_true_labels = self.handler.get_labels(self.attack_data_index).astype(int)
         assert np.issubdtype(z_true_labels.dtype, np.integer)
 
         # run points through real model to collect the logits

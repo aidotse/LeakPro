@@ -18,6 +18,7 @@ from leakpro.user_inputs.handler_setup import (
     _validate_target_metadata,
     get_dataloader,
     get_dataset,
+    get_labels,
     get_population_size,
     get_target_model,
     get_target_model_blueprint,
@@ -28,6 +29,8 @@ from leakpro.user_inputs.handler_setup import (
     set_target_model,
     set_target_model_blueprint,
     set_target_model_metadata,
+    set_test_indices,
+    set_train_indices,
     setup,
 )
 from leakpro.user_inputs.modality_extensions.tabular_extension import TabularExtension
@@ -86,8 +89,10 @@ class LeakPro:
         handler.target_model_metadata = property(types.MethodType(get_target_model_metadata, handler),
                                                       types.MethodType(set_target_model_metadata, handler))
         handler.population_size = property(types.MethodType(get_population_size, handler))
-        handler.test_indices = property(types.MethodType(get_test_indices, handler))
-        handler.train_indices = property(types.MethodType(get_train_indices, handler))
+        handler.test_indices = property(types.MethodType(get_test_indices, handler),
+                                           types.MethodType(set_test_indices, handler))
+        handler.train_indices = property(types.MethodType(get_train_indices, handler),
+                                            types.MethodType(set_train_indices, handler))
 
         # attach provided methods to handler as read-only properties
         handler.criterion = property(types.MethodType(handler.get_criterion, handler))
@@ -97,6 +102,7 @@ class LeakPro:
         handler.get_target_replica = types.MethodType(get_target_replica, handler)
         handler.get_dataset = types.MethodType(get_dataset, handler)
         handler.get_dataloader = types.MethodType(get_dataloader, handler)
+        handler.get_labels = types.MethodType(get_labels, handler)
 
         # Attach setup methods to handler
         handler.setup = types.MethodType(setup, handler)
@@ -109,7 +115,7 @@ class LeakPro:
 
         # Load population data, target model, and target model metadata
         handler.setup()
-        handler.check_data()
+        extension_class.__init__(handler)
 
         return handler
 

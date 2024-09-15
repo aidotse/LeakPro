@@ -69,6 +69,15 @@ def _load_target_metadata(self:Self) -> None:
         with open(self.target_model_metadata_path, "rb") as f:
             self.target_model_metadata = joblib.load(f)
             self._validate_target_metadata()
+
+            self.train_indices = self.target_model_metadata["train_indices"]
+            self.test_indices = self.target_model_metadata["test_indices"]
+
+            if len(self.train_indices) == 0:
+                raise ValueError("Train indices are empty.")
+            if len(self.test_indices) == 0:
+                raise ValueError("Test indices are empty.")
+
         logger.info(f"Loaded target model metadata from {self.target_model_metadata_path}")
     except FileNotFoundError as e:
         raise FileNotFoundError(f"Could not find the target model metadata at {self.target_model_metadata_path}") from e
@@ -132,17 +141,28 @@ def get_dataset(self:Self, dataset_indices: np.ndarray) -> np.ndarray:
 
     self._validate_indices(dataset_indices)
 
-    # Handle different types of population structures
-    if hasattr(self.population, "subset"):
-        dataset = self.population.subset(dataset_indices)
-    else:
-        dataset = [self.population[indx] for indx in dataset_indices]
-    return dataset
+    return self.population[dataset_indices]
 
 def get_dataloader(self: Self, dataset_indices: np.ndarray, batch_size: int = 32) -> DataLoader:
     """Default implementation of the dataloader."""
     dataset = self.get_dataset(dataset_indices)
-    return DataLoader(dataset=dataset, batch_size=batch_size, shuffle=False)
+    collate_fn = self.population.collate_fn if hasattr(self.population, "collate_fn") else None
+    return DataLoader(dataset=dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+
+def get_labels(self:Self, dataset_indices: np.ndarray, batch_size: int = 32) -> np.ndarray:
+    """Get the labels for given indices in the population."""
+    dataset = self.get_dataset(dataset_indices)
+    collate_fn = self.population.collate_fn if hasattr(self.population, "collate_fn") else None
+    dataloader = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
+
+    # Initialize an empty list to store the labels
+    all_labels = []
+
+    # Iterate over the DataLoader to extract the labels
+    for _, labels in dataloader:
+        all_labels.append(labels.numpy())  # Convert labels from tensors to NumPy arrays
+
+    return np.concatenate(all_labels)
 
 #------------------------------------------------
 # Methods related to target model
@@ -195,10 +215,18 @@ def get_population_size(self:Self) -> int:
     """Get the size of the population."""
     return self._population_size
 
+def set_train_indices(self:Self, indices:np.ndarray) -> None:
+    """Set the training indices of the target model."""
+    self._train_indices = indices
+
 def get_train_indices(self:Self) -> np.ndarray:
     """Get the training indices of the target model."""
-    return self.target_model_metadata["train_indices"]
+    return self._train_indices
+
+def set_test_indices(self:Self, indices:np.ndarray) -> None:
+    """Set the testing indices of the target model."""
+    self._test_indices = indices
 
 def get_test_indices(self:Self) -> np.ndarray:
     """Get the testing indices of the target model."""
-    return self.target_model_metadata["test_indices"]
+    return self._test_indices

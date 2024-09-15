@@ -1,60 +1,91 @@
 """TabularExtension class for handling tabular data with one-hot encoding and decoding."""
 
 import numpy as np
-import pandas as pd
+from pandas import DataFrame, Series
+from torch import argmax, cat, float32, tensor
+from torch.nn.functional import one_hot
 
 from leakpro.import_helper import Self
 from leakpro.utils.logger import logger
 
 
 class TabularExtension:
-    """Class for handling tabular data with one-hot encoding and decoding."""
+    """Class for handling tabular data with one-hot encoding and decoding.
 
-    def check_data(self:Self) -> None:
+    Assumes that the data is a pandas DataFrame where features are NOT one-hot encoded.
+    """
+
+    def __init__(self:Self) -> None:
         """Check if the data is a pandas DataFrame."""
 
-        data = self.get_dataset(dataset_indices = 0)
-        if not isinstance(data, pd.DataFrame):
-            raise TypeError("Data must be a pandas DataFrame.")
-        self.cat_cols = data.select_dtypes(exclude=[np.number]).columns.tolist()
-        self.cont_cols = data.select_dtypes(include=[np.number]).columns.tolist()
+        x,y = self.get_dataset(dataset_indices = np.arange(0, self.population_size))
+        if isinstance(x, (DataFrame, Series)) and isinstance(y, (DataFrame, Series)):
+            # find categorical columns, continuous columns and their indices
+            self.cat_cols = x.select_dtypes(include=[np.int_]).columns.tolist()
+            self.cat_index_to_n_classes = {x.columns.get_loc(col): x[col].nunique() for col in self.cat_cols}
+            self.cont_cols = x.select_dtypes(include=[np.float_]).columns.tolist()
+            self.n_cols = len(x.columns)
+        else:
+            raise ValueError("Data must be a pandas DataFrame.")
 
         logger.info(f"Continuous cols: {self.cont_cols}")
         logger.info(f"Categorical cols: {self.cat_cols}")
 
+        # overwrite the pandas dataframes in population with tensor versions,
+        # this will speed things up alot for training/attacking
+        for attr_name in dir(self.population):
+            attr_value = getattr(self.population, attr_name)
 
-    def one_hot_encode(self:Self, data:pd.DataFrame) -> pd.DataFrame:
-        """One-hot encode all categorical columns in the DataFrame.
+            # Check if the attribute is a pandas DataFrame
+            if isinstance(attr_value, (DataFrame, Series)):
+                # Convert DataFrame to a tensor and overwrite the attribute
+                tensor_value = tensor(attr_value.values, dtype=float32)
+                setattr(self.population, attr_name, tensor_value)
+                logger.info(f"Converted {attr_name} to tensor.")
 
-        Returns
-        -------
-            pd.DataFrame: The one-hot encoded DataFrame with all categorical columns encoded.
-
-        """
-        return pd.get_dummies(data, columns=self.cat_cols)
-
-    def one_hot_to_categorical(self:Self, one_hot_data: pd.DataFrame) -> pd.DataFrame:
-        """Convert one-hot encoded columns back to their original categorical values.
+    def one_hot_encode(self:Self, data:tensor) -> tensor:
+        """One-hot encode all categorical columns in the tensor.
 
         Args:
         ----
-            one_hot_data (pd.DataFrame): The one-hot encoded DataFrame.
+            data (torch.Tensor): The tensor to be one-hot encoded.
 
         Returns:
         -------
-            pd.DataFrame: The DataFrame with one-hot encoded columns converted back to categorical columns.
+            tensor: The one-hot encoded tensor with all categorical columns encoded.
 
         """
-        result = one_hot_data.copy()
+        pointer = 0
+        for i in range(self.n_cols):
+            if i in self.cat_index_to_n_classes:
+                num_classes = self.cat_index_to_n_classes[i]
+                one_hot_encoded = one_hot(data[:, pointer].long(), num_classes)
+                data = cat([data[:, :pointer], one_hot_encoded, data[:, pointer + 1:]], dim=1)
+                pointer += num_classes
+            else:
+                pointer += 1
+        return data
 
-        for column in self.cat_cols:
-            # Find all columns that are related to this original categorical column
-            one_hot_columns = [col for col in one_hot_data.columns if col.startswith(column + "_")]
+    def one_hot_to_categorical(self:Self, data: tensor) -> tensor:
+        """Convert one-hot encoded columns back to categorical labels.
 
-            # Convert one-hot encoded columns back to the original categorical values
-            result[column] = one_hot_data[one_hot_columns].idxmax(axis=1).apply(lambda x: x.split("_")[-1])
+        Args:
+        ----
+            data (torch.Tensor): The one-hot encoded tensor.
 
-            # Drop the one-hot encoded columns
-            result = result.drop(columns=one_hot_columns)
+        Returns:
+        -------
+            torch.Tensor: The tensor with categorical columns restored.
 
-        return result
+        """
+        # Iterate over all columns, decode one-hot where needed
+        for i in range(self.n_cols):
+            if i in self.cat_index_to_n_classes:
+                num_classes = self.cat_index_to_n_classes[i]
+                one_hot_columns = data[:, i:i + num_classes]
+                # Get the categorical labels from one-hot encoded columns
+                categorical_col = argmax(one_hot_columns, dim=1)
+                # Concatenate the categorical labels back into the result tensor
+                data = cat([data[:, :i], categorical_col.unsqueeze(1), data[:, i + num_classes:]], dim=1)
+
+        return data
