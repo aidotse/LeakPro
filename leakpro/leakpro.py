@@ -6,7 +6,6 @@ from pathlib import Path
 import yaml
 
 from leakpro.attacks.attack_scheduler import AttackScheduler
-from leakpro.import_helper import Self
 from leakpro.reporting.utils import prepare_privacy_risk_report
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 from leakpro.user_inputs.handler_setup import (
@@ -34,6 +33,7 @@ from leakpro.user_inputs.handler_setup import (
     setup,
 )
 from leakpro.user_inputs.modality_extensions.tabular_extension import TabularExtension
+from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import add_file_handler, logger
 
 modality_extensions = {"tabular": TabularExtension,

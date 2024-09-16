@@ -4,7 +4,7 @@ from numpy import ndarray
 from torch import Tensor, argmax, cat, tensor
 from torch.nn.functional import one_hot
 
-from leakpro.import_helper import Self
+from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 

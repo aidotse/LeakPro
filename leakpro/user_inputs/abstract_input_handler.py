@@ -6,7 +6,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
-from leakpro.import_helper import Self
+from leakpro.utils.import_helper import Self
 
 
 class AbstractInputHandler(ABC):

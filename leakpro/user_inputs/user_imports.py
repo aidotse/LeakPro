@@ -6,7 +6,7 @@ import os
 
 from torch import nn, optim
 
-from leakpro.import_helper import Callable, ModuleType
+from leakpro.utils.import_helper import Callable, ModuleType
 
 
 def import_module_from_file(filepath:str) -> ModuleType:

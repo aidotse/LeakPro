@@ -6,8 +6,8 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
-from leakpro.import_helper import Any, Self, Tuple
 from leakpro.user_inputs.user_imports import get_class_from_module, import_module_from_file
+from leakpro.utils.import_helper import Any, Self, Tuple
 from leakpro.utils.logger import logger
 
 

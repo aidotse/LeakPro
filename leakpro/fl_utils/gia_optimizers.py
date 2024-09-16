@@ -5,7 +5,7 @@ from collections import OrderedDict
 from torch import Tensor, zeros_like
 from torch.autograd import grad
 
-from leakpro.import_helper import Dict, Self, Tuple
+from leakpro.utils.import_helper import Dict, Self, Tuple
 
 
 class MetaOptimizer(ABC):

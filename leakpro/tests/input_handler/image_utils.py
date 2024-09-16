@@ -10,7 +10,7 @@ from torch.nn import Module
 from torch.utils.data import TensorDataset
 from torchvision import transforms
 
-from leakpro.import_helper import Self
+from leakpro.utils.import_helper import Self
 
 from leakpro.tests.constants import STORAGE_PATH, get_image_handler_config
 

@@ -7,8 +7,8 @@ import numpy as np
 from torch import IntTensor, Tensor, cat, cuda, exp, flatten, log, max, nn, no_grad, sigmoid, sum
 from torch.utils.data import DataLoader
 
-from leakpro.import_helper import Callable, List, Optional, Self, Tuple
 from leakpro.signals.utils.HopSkipJumpDistance import HopSkipJumpDistance
+from leakpro.utils.import_helper import Callable, List, Optional, Self, Tuple
 
 
 class Model(ABC):

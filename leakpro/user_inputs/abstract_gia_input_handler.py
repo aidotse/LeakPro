@@ -8,7 +8,7 @@ from torch.nn import CrossEntropyLoss, Module
 from torch.utils.data import DataLoader
 
 from leakpro.fl_utils.gia_optimizers import MetaAdam, MetaOptimizer, MetaSGD
-from leakpro.import_helper import Self
+from leakpro.utils.import_helper import Self
 
 
 class AbstractGIAInputHandler(ABC):

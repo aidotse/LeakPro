@@ -3,9 +3,9 @@ import torch
 
 from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
 from leakpro.attacks.utils.util_functions import total_variation
-from leakpro.import_helper import Callable, Self
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.user_inputs.abstract_gia_input_handler import AbstractGIAInputHandler
+from leakpro.utils.import_helper import Callable, Self
 from leakpro.utils.logger import logger
 
 

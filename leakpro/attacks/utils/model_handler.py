@@ -7,7 +7,6 @@ import joblib
 from torch import load
 from torch.nn import Module
 
-from leakpro.import_helper import Self, Tuple
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 from leakpro.user_inputs.user_imports import (
     get_class_from_module,
@@ -15,6 +14,7 @@ from leakpro.user_inputs.user_imports import (
     get_optimizer_mapping,
     import_module_from_file,
 )
+from leakpro.utils.import_helper import Self, Tuple
 from leakpro.utils.logger import logger
 
 

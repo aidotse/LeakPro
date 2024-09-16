@@ -9,8 +9,8 @@ from torch.nn import CrossEntropyLoss, KLDivLoss, Module
 from tqdm import tqdm
 
 from leakpro.attacks.utils.model_handler import ModelHandler
-from leakpro.import_helper import Self
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
+from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 

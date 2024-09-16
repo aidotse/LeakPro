@@ -7,7 +7,7 @@ from torch import Tensor, as_tensor, cat, cuda, device, mean, randn, std, tensor
 from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from torchvision import transforms
 
-from leakpro.import_helper import List, Self
+from leakpro.utils.import_helper import List, Self
 
 DEVICE = device("cuda" if cuda.is_available() else "cpu")
 
