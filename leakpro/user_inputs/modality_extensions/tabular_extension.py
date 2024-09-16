@@ -1,8 +1,7 @@
 """TabularExtension class for handling tabular data with one-hot encoding and decoding."""
 
-import numpy as np
-from pandas import DataFrame, Series
-from torch import argmax, cat, float32, tensor
+from numpy import ndarray
+from torch import Tensor, argmax, cat, tensor
 from torch.nn.functional import one_hot
 
 from leakpro.import_helper import Self
@@ -18,33 +17,28 @@ class TabularExtension:
     def __init__(self:Self) -> None:
         """Check if the data is a pandas DataFrame."""
 
-        x,y = self.get_dataset(dataset_indices = np.arange(0, self.population_size))
-        if isinstance(x, (DataFrame, Series)) and isinstance(y, (DataFrame, Series)):
-            # find categorical columns, continuous columns and their indices
-            self.cat_cols = x.select_dtypes(include=[np.int_]).columns.tolist()
-            self.cat_index_to_n_classes = {x.columns.get_loc(col): x[col].nunique() for col in self.cat_cols}
-            self.cont_cols = x.select_dtypes(include=[np.float_]).columns.tolist()
-            self.n_cols = len(x.columns)
+        x,y = next(iter(self.get_dataloader(0)))
+        if not isinstance(x, (Tensor, ndarray)) or not isinstance(y, (Tensor,ndarray)):
+            raise ValueError("Data must be a tensor or nparray.")
+
+        if hasattr(self.population, "dec_to_onehot"):
+            self.dec_to_onehot = self.population.dec_to_onehot
+
+            # Check number of continuous and categorical columns
+            n_dec_cols = len(self.dec_to_onehot)
+            n_cat_cols = len([v for v in self.dec_to_onehot.values() if len(v) > 1])
+            n_cont_cols = n_dec_cols - n_cat_cols
+            logger.info(f"Data contains {n_cat_cols} categorical columns and {n_cont_cols} continuous columns.")
+
+            # Set flag to know if data is one-hot encoded
+            self.one_hot_encoded = x.shape[1] != n_dec_cols
+            logger.info(f"Data is one-hot encoded: {self.one_hot_encoded}")
         else:
-            raise ValueError("Data must be a pandas DataFrame.")
+            raise ValueError("Data object must contain dec_to_onehot dict.")
 
-        logger.info(f"Continuous cols: {self.cont_cols}")
-        logger.info(f"Categorical cols: {self.cat_cols}")
-
-        # overwrite the pandas dataframes in population with tensor versions,
-        # this will speed things up alot for training/attacking
-        for attr_name in dir(self.population):
-            attr_value = getattr(self.population, attr_name)
-
-            # Check if the attribute is a pandas DataFrame
-            if isinstance(attr_value, (DataFrame, Series)):
-                # Convert DataFrame to a tensor and overwrite the attribute
-                tensor_value = tensor(attr_value.values, dtype=float32)
-                setattr(self.population, attr_name, tensor_value)
-                logger.info(f"Converted {attr_name} to tensor.")
 
     def one_hot_encode(self:Self, data:tensor) -> tensor:
-        """One-hot encode all categorical columns in the tensor.
+        """One-hot encode all categorical columns in the feature tensor.
 
         Args:
         ----
@@ -55,15 +49,19 @@ class TabularExtension:
             tensor: The one-hot encoded tensor with all categorical columns encoded.
 
         """
+        if self.one_hot_encoded:
+            return data
         pointer = 0
-        for i in range(self.n_cols):
-            if i in self.cat_index_to_n_classes:
-                num_classes = self.cat_index_to_n_classes[i]
+        for i in range(len(self.dec_to_onehot)):
+            num_classes = len(self.dec_to_onehot[i])
+            categorical = num_classes > 1
+            if categorical:
                 one_hot_encoded = one_hot(data[:, pointer].long(), num_classes)
                 data = cat([data[:, :pointer], one_hot_encoded, data[:, pointer + 1:]], dim=1)
                 pointer += num_classes
             else:
                 pointer += 1
+        self.one_hot_encoded = True
         return data
 
     def one_hot_to_categorical(self:Self, data: tensor) -> tensor:
@@ -79,13 +77,16 @@ class TabularExtension:
 
         """
         # Iterate over all columns, decode one-hot where needed
-        for i in range(self.n_cols):
-            if i in self.cat_index_to_n_classes:
-                num_classes = self.cat_index_to_n_classes[i]
+        if not self.one_hot_encoded:
+            return data
+        for i in range(len(self.dec_to_onehot)):
+            num_classes = len(self.dec_to_onehot[i])
+            categorical = num_classes > 1
+            if categorical:
                 one_hot_columns = data[:, i:i + num_classes]
                 # Get the categorical labels from one-hot encoded columns
-                categorical_col = argmax(one_hot_columns, dim=1)
+                label = argmax(one_hot_columns, dim=1)
                 # Concatenate the categorical labels back into the result tensor
-                data = cat([data[:, :i], categorical_col.unsqueeze(1), data[:, i + num_classes:]], dim=1)
-
+                data = cat([data[:, :i], label.unsqueeze(1), data[:, i + num_classes:]], dim=1)
+        self.one_hot_encoded = False
         return data

@@ -3,25 +3,30 @@ import numpy as np
 import pandas as pd
 import joblib
 import pickle
-from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.preprocessing import LabelEncoder, StandardScaler, OneHotEncoder
 from sklearn.model_selection import train_test_split
 import urllib.request
 from torch.utils.data import Dataset, Subset, DataLoader
-from torch import from_numpy
+from torch import tensor, float32
 
 
 class AdultDataset(Dataset):
-    def __init__(self, x, y, ):
-        self.x = x 
-        self.y = y  
+    def __init__(self, x:tensor, y:tensor, dec_to_onehot:dict, one_hot_encoded:bool=True):
+        self.x = x
+        self.y = y
+        
+        # create dictionary to map categorical columns to number of classes
+        self.dec_to_onehot = dec_to_onehot
+        self.one_hot_encoded = one_hot_encoded
     
     def __len__(self):
         return len(self.y)
 
     def __getitem__(self, idx):
-        if isinstance(self.x, (pd.DataFrame, pd.Series)):
-            return self.x.iloc[idx], self.y.iloc[idx]
         return self.x[idx], self.y[idx]
+
+    def subset(self, indices):
+        return AdultDataset(self.x[indices], self.y[indices], self.dec_to_onehot, self.one_hot_encoded)
     
     
 def download_adult_dataset(data_dir):
@@ -46,11 +51,8 @@ def download_adult_dataset(data_dir):
         print("Downloading adult.test...")
         urllib.request.urlretrieve(base_url + "adult.test", test_file)
 
-def get_adult_dataset(path):
+def preprocess_adult_dataset(path):
     """Get the dataset, download it if necessary, and store it."""
-    
-    # Download the dataset if not present
-    download_adult_dataset(path)
     
     if os.path.exists(os.path.join(path, "adult_data.pkl")):
         with open(os.path.join(path, "adult_data.pkl"), "rb") as f:
@@ -82,26 +84,39 @@ def get_adult_dataset(path):
         x_numerical = pd.DataFrame(scaler.fit_transform(x[numerical_features]), columns=numerical_features, index=x.index)
         
         # Label encode the categories
-        x_categorical = x[categorical_features].apply(lambda col: LabelEncoder().fit_transform(col))
-        x = pd.concat([x_numerical, x_categorical], axis=1)
+        one_hot_encoder = OneHotEncoder(sparse_output=False)
+        x_categorical_one_hot = one_hot_encoder.fit_transform(x[categorical_features])
+        one_hot_feature_names = one_hot_encoder.get_feature_names_out(categorical_features)
+        x_categorical_one_hot_df = pd.DataFrame(x_categorical_one_hot, columns=one_hot_feature_names, index=x.index)
+        
+        # Concatenate the numerical and one-hot encoded categorical features
+        x_final = pd.concat([x_numerical, x_categorical_one_hot_df], axis=1)
 
         # Label encode the target variable
         y = pd.Series(LabelEncoder().fit_transform(y))
         
+        # Add numerical features to the dictionary
+        dec_to_onehot_mapping = {}
+        for i, feature in enumerate(numerical_features):
+            dec_to_onehot_mapping[i] = [x_final.columns.get_loc(feature)]  # Mapping to column index
+
+        # Add one-hot encoded features to the dictionary
+        for i, categorical_feature in enumerate(categorical_features):
+            j = i + len(numerical_features)
+            one_hot_columns = [col for col in one_hot_feature_names if col.startswith(categorical_feature)]
+            dec_to_onehot_mapping[j] = [x_final.columns.get_loc(col) for col in one_hot_columns]
+
+        
         #--------------------
-        # Create dataset to be stored
-        dataset = AdultDataset(x, y)
+        # Create tensor dataset to be stored
+        x_tensor = tensor(x_final.values, dtype=float32)
+        y_tensor = tensor(y.values, dtype=float32)
+        dataset = AdultDataset(x_tensor, y_tensor, dec_to_onehot_mapping, one_hot_encoded=True)
         with open(f"{path}/adult_data.pkl", "wb") as file:
             pickle.dump(dataset, file)
             print(f"Save data to {path}.pkl")
     
     return dataset
-
-def collate_fn(batch) -> tuple:
-    features_df, labels_df = zip(*batch)
-    features_tensor = from_numpy(np.array(features_df, dtype=np.float32))
-    labels_tensor = from_numpy(np.array(labels_df, dtype=np.float32))
-    return features_tensor, labels_tensor    
 
 def get_adult_dataloaders(dataset, train_fraction=0.3, test_fraction=0.3):
     
@@ -116,7 +131,7 @@ def get_adult_dataloaders(dataset, train_fraction=0.3, test_fraction=0.3):
     train_subset = Subset(dataset, train_indices)
     test_subset = Subset(dataset, test_indices)
     
-    train_loader = DataLoader(train_subset, batch_size=128, shuffle=True, collate_fn=collate_fn)
-    test_loader = DataLoader(test_subset, batch_size=128, shuffle=False, collate_fn=collate_fn)
+    train_loader = DataLoader(train_subset, batch_size=128, shuffle=True)
+    test_loader = DataLoader(test_subset, batch_size=128, shuffle=False)
 
     return train_loader, test_loader
