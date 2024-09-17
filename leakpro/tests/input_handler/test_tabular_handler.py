@@ -39,8 +39,6 @@ def test_abstract_handler_setup_tabular(tabular_handler:TabularInputHandler) -> 
     assert tabular_handler.population is not None
 
     # Check data-related methods
-    population = tabular_handler.get_dataset(np.arange(parameters.data_points))
-
     subset_of_population = tabular_handler.get_dataset(np.arange(parameters.data_points // 2))
     assert len(subset_of_population) == parameters.data_points // 2
 
@@ -52,22 +50,20 @@ def test_abstract_handler_setup_tabular(tabular_handler:TabularInputHandler) -> 
     
 def test_tabular_extension_class(tabular_handler:TabularInputHandler) -> None:
     """Test the extension methods of the tabular handler."""
-    data = tabular_handler.get_dataset(np.arange(10))
+    data, _ = next(iter(tabular_handler.get_dataloader(np.arange(10))))
     
     assert data is not None
-    if tabular_handler.one_hot_encoded:
-        data2 = tabular_handler.one_hot_to_categorical(data)
-        assert data2 is not None
-        data3 = tabular_handler.categorical_to_one_hot(data2)
-        assert data3 is not None
-    else:
-        data2 = tabular_handler.categorical_to_one_hot(data)
-        assert data2 is not None
-        data3 = tabular_handler.one_hot_to_categorical(data2)
-        assert data3 is not None
     
-    assert data == data3
-    assert data2.shape[1] >= data.shape[1]
+    if not tabular_handler.one_hot_encoded:
+        data = tabular_handler.one_hot_encode(data)
+    
+    data2 = tabular_handler.one_hot_to_categorical(data)
+    assert data2 is not None
+    data3 = tabular_handler.one_hot_encode(data2)
+    assert data3 is not None
+    
+    assert equal(data, data3)
+    assert data2.shape[1] <= data.shape[1]
     
 
 def test_tabular_input_handler(tabular_handler:TabularInputHandler) -> None:
@@ -81,13 +77,14 @@ def test_tabular_input_handler(tabular_handler:TabularInputHandler) -> None:
     # Check that shuffle = false in dataloader
     assert isinstance(train_loader.sampler, SequentialSampler)
 
-    before_weights =  deepcopy(tabular_handler.target_model.state_dict())
+    before_weights =  deepcopy(tabular_handler.target_model.to("cpu").state_dict())
     # train the model
     train_dict = tabular_handler.train(train_loader,
                                       tabular_handler.target_model,
                                       tabular_handler.get_criterion(),
                                       tabular_handler.get_optimizer(tabular_handler.target_model),
                                       parameters.epochs)
-    after_weights = train_dict["model"].state_dict()
+    # move back to cpu  
+    after_weights = train_dict["model"].to("cpu").state_dict()
     weights_changed = [equal(before_weights[key], after_weights[key]) for key in before_weights]
     assert any(weights_changed) is False

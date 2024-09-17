@@ -7,7 +7,7 @@ STORAGE_PATH = "./leakpro/tests/tmp"
 
 def get_image_handler_config():
     parameters = DotMap()
-    parameters.target_folder = "./leakpro/tests/tmp/"
+    parameters.target_folder = "./leakpro/tests/tmp/image"
     parameters.epochs = 10
     parameters.batch_size = 64
     parameters.learning_rate = 0.001
@@ -19,6 +19,22 @@ def get_image_handler_config():
     parameters.img_size = (3, 32, 32)
     parameters.num_classes = 13
     parameters.images_per_class = parameters.data_points // parameters.num_classes
+    return parameters
+
+def get_tabular_handler_config():
+    parameters = DotMap()
+    parameters.target_folder = "./leakpro/tests/tmp/tabular"
+    parameters.epochs = 10
+    parameters.batch_size = 64
+    parameters.learning_rate = 0.001
+    parameters.optimizer = "sgd"
+    parameters.loss = "BCEWithLogitsLoss"
+    parameters.data_points = 500
+    parameters.train_data_points = 200
+    parameters.test_data_points = 200
+    parameters.num_classes = 1
+    parameters.n_continuous = 10
+    parameters.n_categorical = 5
     return parameters
 
 def get_audit_config():

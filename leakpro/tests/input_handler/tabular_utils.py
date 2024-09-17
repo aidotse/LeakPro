@@ -9,7 +9,7 @@ from dotmap import DotMap
 from sklearn.preprocessing import OneHotEncoder
 
 from torch import from_numpy, tensor, save
-from torch.nn import Module
+from torch.nn import Module, Linear, ReLU
 from torch.utils.data import TensorDataset
 
 from leakpro.tests.constants import STORAGE_PATH, get_tabular_handler_config
@@ -20,9 +20,9 @@ class MLP(Module):
         self.init_params = {"input_size": input_size,
                             "hidden_size": hidden_size,
                             "num_classes": num_classes}
-        self.fc1 = nn.Linear(input_size, hidden_size)
-        self.relu = nn.ReLU()
-        self.fc1 = nn.Linear(hidden_size, num_classes)
+        self.fc1 = Linear(input_size, hidden_size)
+        self.relu = ReLU()
+        self.fc2 = Linear(hidden_size, num_classes)
     
     def forward(self, x):
         out = self.fc1(x)
@@ -58,7 +58,7 @@ def setup_tabular_test()->None:
     config = DotMap()
     parameters = get_tabular_handler_config()
     # Set up the mock image dataset and add path to config
-    dataset_path = create_mock_tabular_dataset()
+    dataset_path, one_hot_encoded_cols = create_mock_tabular_dataset()
 
     # ensure mock dataset is correct
     assert os.path.exists(dataset_path)
@@ -77,7 +77,7 @@ def setup_tabular_test()->None:
     config.model_class = "MLP"
     config.target_folder = parameters.target_folder
 
-    model_path, metadata_path = create_mock_model_and_metadata()
+    model_path, metadata_path = create_mock_model_and_metadata(input_size=one_hot_encoded_cols)
 
     # ensure mock dataset is correct
     assert os.path.exists(model_path)
@@ -100,7 +100,7 @@ def create_mock_tabular_dataset() -> str:
     
     categorical_data = []
     for _ in range(n_categorical):
-        classes = np.random.randint(0, 10)
+        classes = np.random.randint(2, 10)
         categorical_data.append([random.choice(range(classes)) for _ in range(n_points)])
     categorical_data = np.array(categorical_data).T  # Transpose to align rows with n_points
     
@@ -110,14 +110,16 @@ def create_mock_tabular_dataset() -> str:
     
     dec_to_onehot = {}
     for i in range(n_continuous):
-        dec_to_onehot[i] = i # Continuous features are identity-mapped
+        dec_to_onehot[i] = [i] # Continuous features are identity-mapped
     
-    for i in range(n_continuous, combined_data.shape[1]):
-        dec_to_onehot[i] = one_hot_encoder.categories_[i - n_continuous]
+    n_cols = n_continuous
+    for i in range(n_continuous, n_continuous + n_categorical):
+        dec_to_onehot[i] = list(one_hot_encoder.categories_[i - n_continuous] + n_cols)
+        n_cols += len(dec_to_onehot[i])
 
     one_hot_encoded = True
     
-    data = from_numpy(data).float()
+    data = from_numpy(combined_data).float()
     label = from_numpy(np.random.randint(0, num_classes, n_points)).float()
     
     dataset = DatasetWithSubset(data, label, dec_to_onehot, one_hot_encoded)
@@ -132,8 +134,12 @@ def create_mock_tabular_dataset() -> str:
 def create_mock_model_and_metadata(input_size:int) -> str:
     """Creates a mock model and saves it to a file."""
     parameters = get_tabular_handler_config()
+    
+    if not os.path.exists(parameters.target_folder):
+        os.makedirs(parameters.target_folder)
+    
     # Create a mock model
-    model = MLP()
+    model = MLP(input_size=input_size, hidden_size=64, num_classes=parameters.num_classes)
     model_path = parameters.target_folder + "/target_model.pkl"
     with open(model_path, "wb") as f:
         save(model.state_dict(), f)
@@ -142,7 +148,7 @@ def create_mock_model_and_metadata(input_size:int) -> str:
     metadata = {
         "init_params": {"input_size": input_size,
                         "hidden_size": 64,
-                        "output_size": parameters.num_classes},
+                        "num_classes": parameters.num_classes},
         "train_indices": np.arange(parameters.train_data_points).tolist(),
         "test_indices": np.arange(parameters.train_data_points,
                                   parameters.train_data_points + parameters.test_data_points).tolist(),

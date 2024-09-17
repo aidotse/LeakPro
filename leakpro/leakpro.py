@@ -75,10 +75,16 @@ class LeakPro:
         # Get the modality extension class
         if "modality" in configs["audit"] and configs["audit"]["modality"].lower() in modality_extensions:
             extension_class = modality_extensions[configs["audit"]["modality"].lower()]
+        else:
+            extension_class = None
 
-        # Initialize handler from both user input and extension classes
-        ExtendedHandlerClass = type("ExtendedHandler", (handler_class, extension_class), {})  # noqa: N806
-        handler = ExtendedHandlerClass.__new__(ExtendedHandlerClass)
+        if extension_class is not None:
+            # Initialize handler from both user input and extension classes
+            ExtendedHandlerClass = type("ExtendedHandler", (handler_class, extension_class), {})  # noqa: N806
+            handler = ExtendedHandlerClass.__new__(ExtendedHandlerClass)
+        else:
+            handler = handler_class.__new__(handler_class)
+
         handler_class.__init__(handler, configs)
 
         # Attach properties to handler
@@ -115,7 +121,8 @@ class LeakPro:
 
         # Load population data, target model, and target model metadata
         handler.setup()
-        extension_class.__init__(handler)
+        if extension_class is not None:
+            extension_class.__init__(handler)
 
         return handler
 
