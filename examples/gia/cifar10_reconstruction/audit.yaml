@@ -1,0 +1,23 @@
+audit:  # Configurations for auditing
+  random_seed: 1234  # Integer specifying the random seed
+  attack_list:
+      inverting_gradients:
+        total_variation: 0.000001
+        attack_lr: 0.1 # lr for the reconstruction optimizer
+        at_iterations: 500
+
+  output_dir: "./leakpro_output"
+  attack_type: "gia" #mia, gia
+  modality: "image"
+
+target:
+  # Target model path
+  module_path: "utils/model_preparation.py"
+  model_class: "ResNet" 
+  # Data paths
+  target_folder: "./target"
+  data_path: "./data/adult_data.pkl"
+
+shadow_model:
+  
+distillation_model:
