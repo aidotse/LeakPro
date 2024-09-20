@@ -4,9 +4,9 @@ import numpy as np
 from tqdm import tqdm
 
 from leakpro.attacks.utils.utils import softmax_logits
+from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.signals.signal import ModelLogits, ModelRescaledLogits
 from leakpro.signals.signal_extractor import PytorchModel
-from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 

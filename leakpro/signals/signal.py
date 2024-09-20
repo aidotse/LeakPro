@@ -7,8 +7,8 @@ from torch.utils.data import DataLoader
 from torch.utils.data.sampler import SequentialSampler
 from tqdm import tqdm
 
+from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.signals.signal_extractor import Model
-from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 from leakpro.utils.import_helper import List, Optional, Self, Tuple
 
 

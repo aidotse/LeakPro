@@ -1,10 +1,10 @@
 """Test the model handler module."""
 
 from leakpro.attacks.utils.model_handler import ModelHandler
-from leakpro.tests.input_handler.cifar10_input_handler import Cifar10InputHandler
+from leakpro.tests.input_handler.image_input_handler import ImageInputHandler
 
 
-def test_model_handler(image_handler:Cifar10InputHandler) -> None:
+def test_model_handler(image_handler:ImageInputHandler) -> None:
     """Test the initialization of the model handler."""
     model_handler = ModelHandler(image_handler)
     assert model_handler.handler is not None

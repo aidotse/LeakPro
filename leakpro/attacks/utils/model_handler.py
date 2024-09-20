@@ -7,8 +7,8 @@ import joblib
 from torch import load
 from torch.nn import Module
 
-from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
-from leakpro.user_inputs.utils import (
+from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.user_imports import (
     get_class_from_module,
     get_criterion_mapping,
     get_optimizer_mapping,
@@ -52,12 +52,12 @@ class ModelHandler():
 
         # Get optimizer class
         self.optimizer_config = setup_config["optimizer"]
-        optimizer_name = self.optimizer_config.pop("name") # pop to only have input parameters left
+        optimizer_name = self.optimizer_config.pop("name").lower() # pop to only have input parameters left
         self.optimizer_class = self._get_optimizer_class(optimizer_name)
 
         # Get criterion class
         self.loss_config = setup_config["loss"]
-        criterion_class = self.loss_config.pop("name") # pop to only have input parameters left
+        criterion_class = self.loss_config.pop("name").lower() # pop to only have input parameters left
         self.criterion_class = self._get_criterion_class(criterion_class)
 
         self.batch_size = setup_config.get("batch_size", 32)
