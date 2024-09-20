@@ -7,8 +7,8 @@ import joblib
 from torch import load
 from torch.nn import Module
 
-from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
-from leakpro.user_inputs.user_imports import (
+from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.user_imports import (
     get_class_from_module,
     get_criterion_mapping,
     get_optimizer_mapping,

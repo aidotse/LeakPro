@@ -7,7 +7,7 @@ from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.attacks.utils.utils import softmax_logits
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.signals.signal import ModelLogits
-from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
