@@ -18,6 +18,7 @@ from leakpro.user_inputs.handler_setup import (
     get_dataloader,
     get_dataset,
     get_labels,
+    get_optimizer,
     get_population_size,
     get_target_model,
     get_target_model_blueprint,
@@ -118,6 +119,10 @@ class LeakPro:
         handler._load_trained_target_model = types.MethodType(_load_trained_target_model, handler)
         handler._validate_indices = types.MethodType(_validate_indices, handler)
         handler._validate_target_metadata = types.MethodType(_validate_target_metadata, handler)
+
+        # if FL: Enable the handler to map to meta-optimizer from target metadata
+        if handler.configs["audit"]["gia"]:
+            handler.get_optimizer = types.MethodType(get_optimizer, handler)
 
         # Load population data, target model, and target model metadata
         handler.setup()
