@@ -6,9 +6,8 @@ from pathlib import Path
 import yaml
 
 from leakpro.attacks.attack_scheduler import AttackScheduler
-from leakpro.reporting.utils import prepare_privacy_risk_report
-from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
-from leakpro.user_inputs.handler_setup import (
+from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.handler_setup import (
     _load_model_class,
     _load_population,
     _load_target_metadata,
@@ -32,6 +31,7 @@ from leakpro.user_inputs.handler_setup import (
     set_train_indices,
     setup,
 )
+from leakpro.reporting.utils import prepare_privacy_risk_report
 from leakpro.user_inputs.modality_extensions.tabular_extension import TabularExtension
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import add_file_handler, logger

@@ -15,7 +15,8 @@ class AdultDataset(Dataset):
         self.x = x
         self.y = y
         
-        # create dictionary to map categorical columns to number of classes
+        # create dictionary to map between indices in categorical representation and one-hot encoded representation
+        # For example: cols 1,2 continuous and col 3 categorical with 3 categories will be mapped to {1:1,2:2,3:[3,4,5]}
         self.dec_to_onehot = dec_to_onehot
         self.one_hot_encoded = one_hot_encoded
     
@@ -106,7 +107,6 @@ def preprocess_adult_dataset(path):
             one_hot_columns = [col for col in one_hot_feature_names if col.startswith(categorical_feature)]
             dec_to_onehot_mapping[j] = [x_final.columns.get_loc(col) for col in one_hot_columns]
 
-        
         #--------------------
         # Create tensor dataset to be stored
         x_tensor = tensor(x_final.values, dtype=float32)
