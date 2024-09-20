@@ -11,7 +11,7 @@ from leakpro.utils.logger import logger
 class TabularExtension:
     """Class for handling tabular data with one-hot encoding and decoding.
 
-    Assumes that the data is a pandas DataFrame where features are NOT one-hot encoded.
+    Assumes that the data is a tensor or numpy array.
     """
 
     def __init__(self:Self) -> None:
