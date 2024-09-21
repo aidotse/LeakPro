@@ -1,51 +1,94 @@
 """Module with functions for preparing the dataset for training the target models."""
+import os
+import pickle
 
-import torchvision
-from torch import Tensor, as_tensor, cat, cuda, device, mean, std
-from torch.utils.data import DataLoader, Dataset
+import torch
+from torch.utils.data import Dataset
+from torchvision.datasets import CIFAR10
 from torchvision import transforms
 
+class CombinedCIFAR10(Dataset):
+    def __init__(self, data, targets, transform=None, indices=None):
 
-DEVICE = device("cuda" if cuda.is_available() else "cpu")
+        self.data = data
+        self.targets = targets
+        self.transform = transform
+        self.indices = indices
 
-class CifarDataset(Dataset):
-    """Module working with the Cifar10 dataset."""
+    def __len__(self):
+        return len(self.data)
 
-    def __init__(self, root: str = "./data", batch_size: int = 32, num_workers: int = 2) -> None:
-        trainset = torchvision.datasets.CIFAR10(root=root, train=True, download=True, transform=transforms.ToTensor())
-        testset = torchvision.datasets.CIFAR10(root=root, train=False, download=True, transform=transforms.ToTensor())
+    def __getitem__(self, index):
+        # Retrieve the image and label at the given index
+        image, label = self.data[index], self.targets[index]
 
-        data_mean, data_std = self._get_meanstd(trainset)
+        # Apply the transform, if specified
+        if self.transform:
+            image = self.transform(image)
 
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize(data_mean, data_std)])
+        return image, label
 
-        trainset.transform = transform
-        testset.transform = transform
+    @classmethod
+    def from_cifar10(cls, root="./data", download=True, transform=None):
+        # Load the CIFAR10 train and test datasets
+        trainset = CIFAR10(root=root, train=True, download=download, transform=transforms.ToTensor())
+        testset = CIFAR10(root=root, train=False, download=download, transform=transforms.ToTensor())
 
-        self.trainloader = DataLoader(trainset, batch_size=batch_size,
-                                              shuffle=False, drop_last=True, num_workers=num_workers)
-        self.testloader = DataLoader(testset, batch_size=batch_size,
-                                                shuffle=False, drop_last=False, num_workers=num_workers)
-        self.data_mean = as_tensor(data_mean)[:, None, None]
-        self.data_std = as_tensor(data_std)[:, None, None]
-        self.batch_size = batch_size
-        self.num_workers = num_workers
+        # Concatenate both datasets' data and labels
+        data = torch.cat([torch.tensor(trainset.data, dtype=torch.float32), 
+                          torch.tensor(testset.data, dtype=torch.float32)], 
+                          dim=0)
+        # Rescale data from [0, 255] to [0, 1]
+        data /= 255.0
+        normalize = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        # Permute to change shape from [batch_size, 32, 32, 3] to [batch_size, 3, 32, 32]
+        data = data.permute(0, 3, 1, 2)
+        data = normalize(data)
+        
+        targets = torch.cat([torch.tensor(trainset.targets), torch.tensor(testset.targets)], dim=0)
 
-    def get_train_val_loaders(self) -> tuple[DataLoader, DataLoader]:
-        """Getter for train and validation loader."""
-        return self.trainloader, self.testloader
+        
+        
+        # Return an instance of CombinedCIFAR10
+        return cls(data, targets)
 
-    def get_meanstd(self) -> tuple[Tensor, Tensor]:
-        """Get mean and std for the dataset."""
-        return self.data_mean, self.data_std
+    def subset(self, indices):
+        """
+        Returns a new CombinedCIFAR10 object that is a subset of the original dataset.
+        
+        Args:
+            indices (list): List of indices for the subset.
 
-    def _get_meanstd(self, trainset: Dataset) -> tuple[Tensor, Tensor]:
-        cc = cat([trainset[i][0].reshape(3, -1) for i in range(len(trainset))], dim=1)
-        data_mean = mean(cc, dim=1).tolist()
-        data_std = std(cc, dim=1).tolist()
-        return data_mean, data_std
+        Returns:
+            CombinedCIFAR10: A new dataset that contains only the subset of data.
+        """
+        # Create a subset of the data and targets
+        subset_data = self.data[indices]
+        subset_targets = self.targets[indices]
+        return CombinedCIFAR10(subset_data, subset_targets, self.transform, indices)
 
 
+
+def get_cifar10_dataset(data_path):
+    # Create the combined CIFAR-10 dataset
+    
+    transform = transforms.Compose(
+        [transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+    
+    population = CombinedCIFAR10.from_cifar10(root=data_path, download=True, transform=transform)
+
+    file_path = data_path + "cifar10.pkl"
+    if not os.path.exists(file_path):
+        with open(file_path, "wb") as file:
+            pickle.dump(population, file)
+            print(f"Save data to {file_path}.pkl")
+            
+    # Create a subset of the dataset (first 1000 samples)   
+    train_indices = list(range(5,7)) # first 1000 indices is the training set
+    test_indices = list(range(1000, 2000)) # next 1000 indices is the test set
+    trainset = population.subset(train_indices)
+    testset = population.subset(test_indices)
+
+    return trainset, testset
 

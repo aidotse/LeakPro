@@ -32,7 +32,13 @@ class AbstractGIA(ABC):
         # Add similarity tracking here..
         # Add image saving functions here..
 
-        self.handler = handler #TODO: update with what is necessary here.
+        self.handler = handler
+        self.train_indices = self.handler.train_indices
+        self.criterion = self.handler.get_criterion()
+        self.optimizer = self.handler.get_optimizer(model = None)
+        self.batch_size = handler.target_model_metadata["batch_size"]
+        self.epochs = handler.target_model_metadata["epochs"]
+
 
     @abstractmethod
     def _configure_attack(self:Self, configs:dict)->None:

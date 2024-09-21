@@ -1,5 +1,7 @@
 """Parent class for user inputs."""
 
+from copy import deepcopy
+
 import joblib
 import numpy as np
 import torch
@@ -180,20 +182,19 @@ def get_target_replica(self:Self) -> Tuple[torch.nn.Module, nn.modules.loss._Los
 #------------------------------------------------
 # Methods for federated learning
 #------------------------------------------------
-def get_optimizer(self:Self) -> MetaOptimizer:
+def get_optimizer(self:Self, model: nn.Module = None) -> MetaOptimizer:
     """Read the optimizer for the target model."""
-    optimizer = self.target_model_metadata.get("optimizer", None)
+    optimizer_config = deepcopy(self.target_model_metadata.get("optimizer", None))
     if self.target_model_metadata.get("optimizer") is None:
         raise ValueError("Optimizer not found in target model metadata.")
 
-    optimizer = optimizer.lower()
-    optimizer_config = self.target_model_metadata.get("optimizer_config", {})
+    optimizer_class = optimizer_config.pop("name").lower()
 
-    if optimizer == "sgd":
+    if optimizer_class == "sgd":
         return MetaSGD( **optimizer_config)
-    if optimizer == "Adam":
+    if optimizer_class == "Adam":
         return MetaAdam( **optimizer_config)
-    raise ValueError(f"Optimizer '{optimizer}' not supported. Please check the optimizer settings.")
+    raise ValueError(f"Optimizer '{optimizer_class}' not supported. Please check the optimizer settings.")
 
 #------------------------------------------------
 # get-set methods

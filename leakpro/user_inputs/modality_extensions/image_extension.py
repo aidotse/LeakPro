@@ -33,15 +33,15 @@ class ImageExtension:
 
         logger.info(f"Found feature attribute: {self.feature_name} and label attribute: {self.label_name}")
 
-    def replace_data_with_noise(self: Self, indices:np.array, batch_size:int) -> DataLoader:
+    def replace_data_with_noise(self: Self, indices:np.array, batch_size:int=32, req_grad:bool=False) -> DataLoader:
         """Get dataloader with random noise images of the same shape as the client_loader, using the same labels."""
 
         dataset = self.get_dataset(indices)
-
-        num_images = len(dataset)
-        random_images = randn((num_images, *self.img_shape))
+        dataset_shape = getattr(dataset, self.feature_name).shape
+        random_images = randn(*dataset_shape)
 
         dataset_copy = deepcopy(dataset)
         setattr(dataset_copy, self.feature_name, random_images)
+        getattr(dataset_copy, self.feature_name).requires_grad = req_grad
 
         return DataLoader(dataset_copy, batch_size=batch_size, shuffle=True)

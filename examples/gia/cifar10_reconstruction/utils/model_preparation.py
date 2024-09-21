@@ -145,10 +145,7 @@ def evaluate_model(model: Module, dataloader: DataLoader) -> float:
 def train_model(model: Module, 
                 train_loader: DataLoader, 
                 test_loader:DataLoader, 
-                epochs:int, 
-                save_model:bool=False, 
-                model_name:str=None, 
-                save_metadata:bool=False) -> None:
+                epochs:int) -> None:
     """Train the model."""
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
@@ -174,45 +171,42 @@ def train_model(model: Module,
     # Store the model and metadata
     # Move the model back to the CPU
     model.to("cpu")
-    if save_model:
-        if not os.path.exists("target"):
-            os.mkdir("target")
-        with open(f"target/{model_name}.pkl", "wb") as f:
-            save(model.state_dict(), f)
-
-    if save_metadata:
-        # Create metadata and store it
-        meta_data = {}
-        meta_data["train_indices"] = train_loader.dataset.indices
-        meta_data["test_indices"] = test_loader.dataset.indices
-        meta_data["num_train"] = len(meta_data["train_indices"])
-        
-        # Write init params
-        meta_data["init_params"] = {}
-        for key, value in model.init_params.items():
-            meta_data["init_params"][key] = value
-        
-        # read out optimizer parameters
-        meta_data["optimizer"] = {}
-        meta_data["optimizer"]["name"] = optimizer.__class__.__name__.lower()
-        meta_data["optimizer"]["lr"] = optimizer.param_groups[0].get("lr", 0)
-        meta_data["optimizer"]["weight_decay"] = optimizer.param_groups[0].get("weight_decay", 0)
-        meta_data["optimizer"]["momentum"] = optimizer.param_groups[0].get("momentum", 0)
-        meta_data["optimizer"]["dampening"] = optimizer.param_groups[0].get("dampening", 0)
-        meta_data["optimizer"]["nesterov"] = optimizer.param_groups[0].get("nesterov", False)
-
-        # read out criterion parameters
-        meta_data["loss"] = {}
-        meta_data["loss"]["name"] = criterion.__class__.__name__.lower()
-
-        meta_data["batch_size"] = train_loader.batch_size
-        meta_data["epochs"] = epochs
-        meta_data["train_accuracy"] = train_accuracy
-        meta_data["test_acc"] = test_accuracy
-        meta_data["train_loss"] = 0
-        meta_data["test_loss"] = 0
-        meta_data["dataset"] = "cifar10"
-        
-        with open("target/model_metadata.pkl", "wb") as f:
-            pickle.dump(meta_data, f)
     
+    if not os.path.exists("./target"):
+        os.mkdir("./target")
+    with open("./target/target_model.pkl", "wb") as f:
+        save(model.state_dict(), f)
+    
+    # Store the metadata needed to train the local models
+    epochs = 1
+    batch_size = 4
+    
+    meta_data = {}
+    meta_data["train_indices"] = train_loader.dataset.indices
+    meta_data["test_indices"] = test_loader.dataset.indices
+    meta_data["num_train"] = len(meta_data["train_indices"])
+
+    # Write init params
+    meta_data["init_params"] = {}
+    for key, value in model.init_params.items():
+        meta_data["init_params"][key] = value
+
+    # read out optimizer parameters
+    meta_data["optimizer"] = {}
+    meta_data["optimizer"]["name"] = "sgd"
+    meta_data["optimizer"]["lr"] = 1e-3
+
+    # read out criterion parameters
+    meta_data["loss"] = {}
+    meta_data["loss"]["name"] = "crossentropyloss"
+
+    meta_data["batch_size"] = batch_size
+    meta_data["epochs"] = epochs
+    meta_data["train_acc"] = train_accuracy
+    meta_data["test_acc"] = test_accuracy
+    meta_data["train_loss"] = None
+    meta_data["test_loss"] = None
+    meta_data["dataset"] = "cifar10"
+
+    with open("./target/model_metadata.pkl", "wb") as f:
+        pickle.dump(meta_data, f)

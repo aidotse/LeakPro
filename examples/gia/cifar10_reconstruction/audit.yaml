@@ -16,7 +16,7 @@ target:
   model_class: "ResNet" 
   # Data paths
   target_folder: "./target"
-  data_path: "./data/adult_data.pkl"
+  data_path: "./data/cifar10.pkl"
 
 shadow_model:
   

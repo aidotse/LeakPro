@@ -1,10 +1,12 @@
 """Geiping, Jonas, et al. "Inverting gradients-how easy is it to break privacy in federated learning?."."""
 import torch
+from torchvision.utils import save_image
 
 from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
 from leakpro.attacks.utils.util_functions import total_variation
+from leakpro.fl_utils.gia_module_to_functional import MetaModule
 from leakpro.metrics.attack_result import GIAResults
-from leakpro.user_inputs.abstract_gia_input_handler import AbstractGIAInputHandler
+from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 from leakpro.utils.import_helper import Callable, Self
 from leakpro.utils.logger import logger
 
@@ -12,13 +14,13 @@ from leakpro.utils.logger import logger
 class InvertingGradients(AbstractGIA):
     """Gradient inversion attack by Geiping et al."""
 
-    def __init__(self: Self, handler: AbstractGIAInputHandler, configs: dict) -> None:
+    def __init__(self: Self, handler: AbstractInputHandler, configs: dict) -> None:
         super().__init__(handler)
         self.handler = handler
         self.t_v_scale = configs.get("total_variation")
         self.attack_lr = configs.get("attack_lr")
         self.iterations = configs.get("at_iterations")
-        logger.info("Inverting gradient initialized :)")
+        logger.info("Inverting gradient initialized")
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
@@ -46,14 +48,25 @@ class InvertingGradients(AbstractGIA):
             None
 
         """
-        self.handler.target_model.eval()
-        self.client_loader = self.handler.get_client_loader()
-        self.data_mean, self.data_std = self.handler.get_meanstd()
-        self.reconstruction, self.reconstruction_loader = self.handler.get_at_images()
-        self.reconstruction.requires_grad = True
 
-        client_gradient = self.handler.train(self.client_loader, self.handler.get_optimizer())
+        self.handler.target_model.eval()
+        self.client_loader = self.handler.get_dataloader(self.train_indices)
+        #self.data_mean, self.data_std = self.handler.get_meanstd() # TODO: this transform is not general...
+        self.reconstruction_loader = self.handler.replace_data_with_noise(self.train_indices, req_grad=True)
+        feature_name = self.handler.feature_name
+        self.reconstruction_data = getattr(self.reconstruction_loader.dataset, feature_name)
+        assert self.reconstruction_data.requires_grad, "The dataset must require gradients."
+
+        self.global_model = MetaModule(self.handler.target_model)
+        client_gradient = self.handler.train(self.reconstruction_loader,
+                                             self.global_model,
+                                             self.criterion,
+                                             self.optimizer,
+                                             self.epochs,)
+
         self.client_gradient = [p.detach() for p in client_gradient]
+        path = self.handler.configs["audit"]["output_dir"] + "/true_images.png"
+        save_image(self.client_loader.dataset.data, path)
 
     def run_attack(self:Self) -> GIAResults:
         """Run the attack and return the combined metric result.
@@ -63,27 +76,33 @@ class InvertingGradients(AbstractGIA):
             GIAResults: Container for results on GIA attacks.
 
         """
-        optimizer = torch.optim.Adam([self.reconstruction], lr=self.attack_lr)
+        optimizer = torch.optim.Adam([self.reconstruction_data], lr=self.attack_lr)
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
-                                                            milestones=[self.iterations // 2.667, self.iterations // 1.6,
-
-                                                                        self.iterations // 1.142], gamma=0.1)
+                                                            milestones=[self.iterations // 2.667,
+                                                                        self.iterations // 1.6,
+                                                                        self.iterations // 1.142],
+                                                            gamma=0.1)
 
         for i in range(self.iterations):
             # loss function which does training and compares distance from reconstruction training to the real training.
+
             closure = self.gradient_closure(optimizer)
 
             loss = optimizer.step(closure)
             scheduler.step()
-            with torch.no_grad():
-                self.reconstruction.data = torch.max(
-                    torch.min(self.reconstruction, (1 - self.data_mean) / self.data_std), -self.data_mean / self.data_std
-                    )
+            # with torch.no_grad():
+            #     self.reconstruction_data = torch.max(
+            #         torch.min(self.reconstruction_data, (1 - self.data_mean) / self.data_std), -self.data_mean / self.data_std
+            #         )
             if i % 20 == 0:
                 logger.info(f"{i}: {loss}")
+                tmp_name = f"iteration_{i}.png"
+                path = self.handler.configs["audit"]["output_dir"] + "/" + tmp_name
+                save_image(self.reconstruction_data, path)
+
             # add PSNR calculation and pick best image..
         # Collect client data to one tensor
-        return GIAResults(self.client_loader, self.reconstruction_loader, 0, self.data_mean, self.data_std)
+        return GIAResults(self.client_loader, self.reconstruction_loader, 0, 0, 1)
 
 
     def gradient_closure(self: Self, optimizer: torch.optim.Optimizer) -> Callable:
@@ -107,14 +126,20 @@ class InvertingGradients(AbstractGIA):
             """
             optimizer.zero_grad()
             self.handler.target_model.zero_grad()
+            self.global_model = MetaModule(self.handler.target_model)
 
-            gradient = self.handler.train(self.reconstruction_loader, self.handler.get_optimizer())
+            gradient = self.handler.train(self.reconstruction_loader,
+                                          self.global_model,
+                                          self.criterion,
+                                          self.optimizer,
+                                          self.epochs)
+
             rec_loss = self.reconstruction_costs(gradient, self.client_gradient)
 
             # Add the TV loss term to penalize large variations between pixels, encouraging smoother images.
-            rec_loss += (self.t_v_scale * total_variation(self.reconstruction))
+            rec_loss += (self.t_v_scale * total_variation(self.reconstruction_data))
             rec_loss.backward()
-            self.reconstruction.grad.sign_()
+            self.reconstruction_data.grad.sign_()
             return rec_loss
         return closure
 
