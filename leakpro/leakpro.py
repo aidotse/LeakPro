@@ -147,10 +147,11 @@ class LeakPro:
         for attack_name in audit_results:
             logger.info(f"Preparing results for attack: {attack_name}")
 
-            prepare_privacy_risk_report(
-                audit_results[attack_name]["result_object"],
-                self.handler.configs["audit"],
-                save_path=f"{self.report_dir}/{attack_name}",
-            )
+            if self.handler.configs["audit"]["attack_type"] == "mia":
+                prepare_privacy_risk_report(
+                    audit_results[attack_name]["result_object"],
+                    self.handler.configs["audit"],
+                    save_path=f"{self.report_dir}/{attack_name}",
+                )
 
         logger.info("Auditing completed")

@@ -3,7 +3,7 @@
 from torch.nn.modules import Module
 from torch.optim.optimizer import Optimizer as Optimizer
 
-from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from torch import cuda, device
 from torch.nn import  CrossEntropyLoss
 
