@@ -3,7 +3,7 @@
 from copy import deepcopy
 
 import numpy as np
-from torch import Tensor, as_tensor, cat, mean, randn, std
+from torch import Tensor, cat, mean, randn, std
 from torch.utils.data import DataLoader, Dataset
 
 from leakpro.utils.import_helper import Self
@@ -47,9 +47,9 @@ class ImageExtension:
         return DataLoader(dataset_copy, batch_size=batch_size, shuffle=True)
 
     def get_meanstd(self: Self, trainset: Dataset) -> tuple[Tensor, Tensor]:
+        """Get the mean and standard deviation of the data in the trainset."""
         cc = cat([trainset[i].reshape(3, -1) for i in range(len(trainset))], dim=1)
-        data_mean = mean(cc, dim=1).tolist()
-        data_std = std(cc, dim=1).tolist()
-        data_mean = as_tensor(data_mean)[:, None, None]
-        data_std = as_tensor(data_std)[:, None, None]
-        return data_mean, data_std
+        data_mean = mean(cc, dim=1, keepdim=True)
+        data_std = std(cc, dim=1, keepdim=True)
+        return data_mean[:, None, None], data_std[:, None, None]
+

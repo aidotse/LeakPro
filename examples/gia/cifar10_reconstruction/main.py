@@ -24,7 +24,7 @@ pretrainloader = DataLoader(pretrainset, batch_size=128, shuffle=False, drop_las
 target_model = ResNet(num_classes=10)
 
 # # Pretrain the global model on all training data
-train_model(target_model, pretrainloader, trainloader, testloader, epochs=25)
+#train_model(target_model, pretrainloader, trainloader, testloader, epochs=25)
 
 
 

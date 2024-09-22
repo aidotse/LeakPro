@@ -182,7 +182,7 @@ def get_target_replica(self:Self) -> Tuple[torch.nn.Module, nn.modules.loss._Los
 #------------------------------------------------
 # Methods for federated learning
 #------------------------------------------------
-def get_optimizer(self:Self, model: nn.Module = None) -> MetaOptimizer:
+def get_optimizer(self:Self, model: nn.Module = None) -> MetaOptimizer:  # noqa: ARG001
     """Read the optimizer for the target model."""
     optimizer_config = deepcopy(self.target_model_metadata.get("optimizer", None))
     if self.target_model_metadata.get("optimizer") is None:

@@ -5,11 +5,13 @@ from collections import OrderedDict
 
 from torch.nn import Module
 from torch.utils.data import DataLoader
+
+from leakpro.fl_utils.gia_module_to_functional import MetaModule
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 from leakpro.utils.import_helper import Self
-from leakpro.fl_utils.gia_module_to_functional import MetaModule
 from leakpro.utils.logger import logger
+
 ########################################################################################################################
 # METRIC CLASS
 ########################################################################################################################
@@ -42,13 +44,12 @@ class AbstractGIA(ABC):
         self.optimizer = self.handler.get_optimizer(model = None)
         self.batch_size = self.handler.target_model_metadata["batch_size"]
         self.epochs = self.handler.target_model_metadata["epochs"]
-        
+
         # Compute the client update on the true client data
-        self.handler.target_model.eval()
         self.client_loader = self.handler.get_dataloader(self.train_indices)
         client_gradient = self._get_pseudo_gradient(self.handler.target_model, self.client_loader)
         self.client_gradient = [p.detach() for p in client_gradient]
-        
+
         frobenius_norm = sum([p.norm()**2 for p in client_gradient])**0.5
         assert frobenius_norm > 0, "Gradient norm from client update is zero."
         logger.info(f"Client gradient computed, norm is: {frobenius_norm}")
@@ -56,19 +57,20 @@ class AbstractGIA(ABC):
 
     def _get_pseudo_gradient(self:Self, init_model:Module, dataloader:DataLoader) -> list:
         """Wrapper for the train method provided by user."""
-        self.handler.target_model.train()
+        # Train the model on the client data
         model = self.handler.train(dataloader,
                                     MetaModule(init_model),
                                     self.criterion,
                                     self.optimizer,
                                     self.epochs)
-    
+
+        # Compute the difference between the updated model and the initial model
         model_delta = OrderedDict((name, param - param_origin)
                                         for ((name, param), (name_origin, param_origin))
                                         in zip(model.parameters.items(),
                                                 OrderedDict(init_model.named_parameters()).items()))
         return list(model_delta.values())
-    
+
     @abstractmethod
     def _configure_attack(self:Self, configs:dict)->None:
         """Configure the attack.

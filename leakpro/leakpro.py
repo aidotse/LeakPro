@@ -33,8 +33,8 @@ from leakpro.user_inputs.handler_setup import (
     set_train_indices,
     setup,
 )
-from leakpro.user_inputs.modality_extensions.tabular_extension import TabularExtension
 from leakpro.user_inputs.modality_extensions.image_extension import ImageExtension
+from leakpro.user_inputs.modality_extensions.tabular_extension import TabularExtension
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import add_file_handler, logger
 
