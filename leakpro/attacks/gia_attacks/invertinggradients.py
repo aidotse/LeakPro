@@ -4,8 +4,8 @@ from torchvision.utils import save_image
 
 from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
 from leakpro.attacks.utils.util_functions import total_variation
+from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.metrics.attack_result import GIAResults
-from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 from leakpro.utils.import_helper import Callable, Self
 from leakpro.utils.logger import logger
 

@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from leakpro import AbstractInputHandler
-from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 
 class TabularInputHandler(AbstractInputHandler):
     """Class to handle the user input for the CIFAR10 dataset."""

@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from leakpro.utils.import_helper import Self
-from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.utils.logger import logger
 
 class ImageInputHandler(AbstractInputHandler):

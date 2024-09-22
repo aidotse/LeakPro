@@ -7,8 +7,8 @@ from torch.nn import Module
 from torch.utils.data import DataLoader
 
 from leakpro.fl_utils.gia_module_to_functional import MetaModule
+from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.metrics.attack_result import GIAResults
-from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
