@@ -45,12 +45,21 @@ class ConvNet(Module):
 
 class DatasetWithSubset(TensorDataset):
     """Dataset with a subset method."""
-
-    def subset(self:Self, indices:np.ndarray) -> Self:
-        """Extract a subset of the dataset based on the given indices."""
-
-        subsets = [tensor[indices] for tensor in self.tensors]
-        return DatasetWithSubset(*subsets)
+    
+    def __init__(self:Self, x:Tensor, y:Tensor) -> None:
+        self.x = x
+        self.y = y
+    
+    def __getitem__(self:Self, index:int) -> tuple[Tensor, Tensor]:
+        return self.x[index], self.y[index]
+    
+    def __len__(self:Self) -> int:
+        return len(self.y)
+        
+    def subset(self, indices):
+        subset_data = self.x[indices]
+        subset_targets = self.y[indices]
+        return DatasetWithSubset(subset_data, subset_targets)
 
 def setup_image_test()->None:
     """Setup for the input handler test."""
@@ -68,7 +77,7 @@ def setup_image_test()->None:
 
     # Ensure the dataset has the correct size and shape
     assert len(dataset) == parameters.data_points
-    assert dataset.tensors[0][0].shape == parameters.img_size
+    assert dataset.x[0].shape == parameters.img_size
 
     del dataset
     config.data_path = dataset_path
