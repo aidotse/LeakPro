@@ -85,10 +85,12 @@ def get_cifar10_dataset(data_path):
             print(f"Save data to {file_path}.pkl")
             
     # Create a subset of the dataset (first 1000 samples)   
-    train_indices = list(range(5,7)) # first 1000 indices is the training set
-    test_indices = list(range(1000, 2000)) # next 1000 indices is the test set
-    trainset = population.subset(train_indices)
+    pretrain_indices = list(range(50000)) # first 1000 indices is the training set
+    test_indices = list(range(50001, 51000)) # next 1000 indices is the test set
+    client_indices = list(range(51001, 51002)) # first 1000 indices is the pretrain set
+    trainset = population.subset(client_indices)
     testset = population.subset(test_indices)
+    pretrainset = population.subset(pretrain_indices)
 
-    return trainset, testset
+    return trainset, testset, pretrainset
 

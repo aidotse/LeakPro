@@ -1,7 +1,5 @@
 """Module containing the class to handle the user input for the CIFAR10 dataset."""
 
-from collections import OrderedDict
-
 from torch.nn.modules import Module
 from torch.optim.optimizer import Optimizer as Optimizer
 
@@ -54,8 +52,4 @@ class Cifar10GIAInputHandler(AbstractInputHandler):
                 model.parameters = optimizer.step(loss, model.parameters)
                 train_acc += pred.eq(labels.data.view_as(pred)).sum()
                 train_loss += loss.item()
-        model_delta = OrderedDict((name, param - param_origin)
-                                                for ((name, param), (name_origin, param_origin))
-                                                in zip(model.parameters.items(),
-                                                       OrderedDict(self.target_model.named_parameters()).items()))
-        return list(model_delta.values())
+        return model

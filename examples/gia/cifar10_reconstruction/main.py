@@ -15,15 +15,16 @@ from utils.data_preparation import get_cifar10_dataset
 
 # Load the dataset
 path = "./data/"
-trainset, testset = get_cifar10_dataset(path)
+trainset, testset, pretrainset = get_cifar10_dataset(path)
 trainloader = DataLoader(trainset, batch_size=128, shuffle=False, drop_last=True)
 testloader = DataLoader(testset, batch_size=128, shuffle=False, drop_last=False)
+pretrainloader = DataLoader(pretrainset, batch_size=128, shuffle=False, drop_last=False)
 
 # Load the model
 target_model = ResNet(num_classes=10)
 
-# Train the global model on all training data
-train_model(target_model, trainloader, testloader, epochs=1)
+# # Pretrain the global model on all training data
+train_model(target_model, pretrainloader, trainloader, testloader, epochs=25)
 
 
 

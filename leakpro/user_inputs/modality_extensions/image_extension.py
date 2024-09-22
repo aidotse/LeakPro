@@ -3,8 +3,8 @@
 from copy import deepcopy
 
 import numpy as np
-from torch import randn
-from torch.utils.data import DataLoader
+from torch import Tensor, as_tensor, cat, mean, randn, std
+from torch.utils.data import DataLoader, Dataset
 
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
@@ -45,3 +45,11 @@ class ImageExtension:
         getattr(dataset_copy, self.feature_name).requires_grad = req_grad
 
         return DataLoader(dataset_copy, batch_size=batch_size, shuffle=True)
+
+    def get_meanstd(self: Self, trainset: Dataset) -> tuple[Tensor, Tensor]:
+        cc = cat([trainset[i].reshape(3, -1) for i in range(len(trainset))], dim=1)
+        data_mean = mean(cc, dim=1).tolist()
+        data_std = std(cc, dim=1).tolist()
+        data_mean = as_tensor(data_mean)[:, None, None]
+        data_std = as_tensor(data_std)[:, None, None]
+        return data_mean, data_std

@@ -143,6 +143,7 @@ def evaluate_model(model: Module, dataloader: DataLoader) -> float:
     return correct / total
 
 def train_model(model: Module, 
+                pretrain_loader: DataLoader,
                 train_loader: DataLoader, 
                 test_loader:DataLoader, 
                 epochs:int) -> None:
@@ -155,7 +156,7 @@ def train_model(model: Module,
     model.to(device)
     train_accuracy = 0
     for _ in tqdm(range(epochs), desc="Training Progress"):
-        for inputs, labels in train_loader:
+        for inputs, labels in pretrain_loader:
             inputs, labels = inputs.to(device), labels.to(device)
             optimizer.zero_grad()
             outputs = model(inputs)
@@ -163,7 +164,7 @@ def train_model(model: Module,
             loss =  criterion(outputs, labels)
             loss.backward()
             optimizer.step()
-        train_accuracy /= len(train_loader.dataset)
+        train_accuracy /= len(pretrain_loader.dataset)
 
         test_accuracy = evaluate_model(model, test_loader)
         print(f"Train accuracy: {train_accuracy}, Test accuracy: {test_accuracy}")
@@ -179,7 +180,7 @@ def train_model(model: Module,
     
     # Store the metadata needed to train the local models
     epochs = 1
-    batch_size = 4
+    batch_size = 1
     
     meta_data = {}
     meta_data["train_indices"] = train_loader.dataset.indices
