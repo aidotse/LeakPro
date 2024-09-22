@@ -80,6 +80,8 @@ class InvertingGradients(AbstractGIA):
             loss = optimizer.step(closure)
             scheduler.step()
             mu, sigma = self.handler.get_meanstd(self.reconstruction_data)
+            mu = mu.view(1, 3, 1, 1)
+            sigma = sigma.view(1, 3, 1, 1)
             with torch.no_grad():
                 self.reconstruction_data = torch.max(torch.min(self.reconstruction_data, (1 - mu) / sigma), -mu / sigma)
             if i % 20 == 0:

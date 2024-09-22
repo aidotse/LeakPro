@@ -10,7 +10,7 @@ sys.path.insert(0, project_root)
 os.chdir('/home/johan/project/LeakPro/examples/gia/cifar10_reconstruction')
 
 from torch.utils.data import DataLoader
-from utils.model_preparation import ResNet18, train_model
+from utils.model_preparation import ResNet, train_model
 from utils.data_preparation import get_cifar10_dataset
 
 # Load the dataset
@@ -21,10 +21,10 @@ testloader = DataLoader(testset, batch_size=128, shuffle=False, drop_last=False)
 pretrainloader = DataLoader(pretrainset, batch_size=128, shuffle=False, drop_last=False)
 
 # Load the model
-target_model = ResNet18(num_classes=10)
+target_model = ResNet(num_classes=10)
 
-# # Pretrain the global model on all training data
-train_model(target_model, pretrainloader, trainloader, testloader, epochs=10)
+# Pretrain the global model on almost all training data
+#train_model(target_model, pretrainloader, trainloader, testloader, epochs=10)
 
 
 

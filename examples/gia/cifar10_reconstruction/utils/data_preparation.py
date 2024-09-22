@@ -41,28 +41,14 @@ class CombinedCIFAR10(Dataset):
         # Rescale data from [0, 255] to [0, 1]
         data /= 255.0
         normalize = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-        # Permute to change shape from [batch_size, 32, 32, 3] to [batch_size, 3, 32, 32]
         data = data.permute(0, 3, 1, 2)
         data = normalize(data)
         
         targets = torch.cat([torch.tensor(trainset.targets), torch.tensor(testset.targets)], dim=0)
 
-        
-        
-        # Return an instance of CombinedCIFAR10
         return cls(data, targets)
 
     def subset(self, indices):
-        """
-        Returns a new CombinedCIFAR10 object that is a subset of the original dataset.
-        
-        Args:
-            indices (list): List of indices for the subset.
-
-        Returns:
-            CombinedCIFAR10: A new dataset that contains only the subset of data.
-        """
-        # Create a subset of the data and targets
         subset_data = self.data[indices]
         subset_targets = self.targets[indices]
         return CombinedCIFAR10(subset_data, subset_targets, self.transform, indices)
