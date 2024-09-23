@@ -290,7 +290,7 @@ class AttackLiRA(AbstractMIA):
             score[i] = (pr_in - pr_out)  # Append the calculated probability density value to the score list
 
         # Generate thresholds based on the range of computed scores for decision boundaries
-        self.thresholds = np.linspace(np.min(score), np.max(score), 2000)
+        self.thresholds = np.linspace(np.min(score), np.max(score), 1000)
 
         # Split the score array into two parts based on membership: in (training) and out (non-training)
         self.in_member_signals = score[self.in_members].reshape(-1,1)  # Scores for known training data members
@@ -317,4 +317,5 @@ class AttackLiRA(AbstractMIA):
             true_labels=true_labels,
             predictions_proba=None,  # Note: Direct probability predictions are not computed here
             signal_values=signal_values,
+            # masks = masks
         )

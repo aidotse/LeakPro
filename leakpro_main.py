@@ -23,7 +23,7 @@ from dev_utils.data_preparation import (
 )
 from leakpro.attacks.attack_scheduler import AttackScheduler
 from leakpro.dataset import get_dataloader
-from leakpro.reporting.utils import prepare_privacy_risk_report
+from leakpro.reporting.report_handler import report_handler
 from leakpro.utils.handler_logger import setup_log
 
 
@@ -100,14 +100,26 @@ if __name__ == "__main__":
     attack_scheduler = AttackScheduler(handler)
     audit_results = attack_scheduler.run_attacks()
 
+    # Initiate report handler
+    ReportHandler = report_handler(report_dir=report_dir, logger=logger)
+
     for attack_name in audit_results:
         logger.info(f"Preparing results for attack: {attack_name}")
 
-        prepare_privacy_risk_report(
-                audit_results[attack_name]["result_object"],
-                configs["audit"],
-                save_path=f"{report_dir}/{attack_name}",
+        # Save results to be used later
+        ReportHandler.save_results(
+            attack_name=attack_name,
+            result_data=audit_results[attack_name]["result_object"],
+            config=configs["audit"]
             )
+
+    # Create report from the saved results
+    ReportHandler.load_results()
+    ReportHandler.create_results_all()
+    ReportHandler.create_results_strong()
+    ReportHandler.create_results_attackname_grouped()
+    ReportHandler.create_report()
+
     # ------------------------------------------------
     # Save the configs and user_configs
     config_log_path = configs["audit"]["config_log"]

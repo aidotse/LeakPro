@@ -1,7 +1,7 @@
 """Contains the AttackResult class, which stores the results of an attack."""
 
 import os
-
+import json
 import numpy as np
 from sklearn.metrics import (
     accuracy_score,
@@ -100,11 +100,14 @@ class CombinedMetricResult:
             threshold: Threshold computed by the metric.
 
         """
+        # TODO REDIFINE THE CLASS SO IT DOSE NOT STORE MATRICIES BUT VECTORS 
+
         self.predicted_labels = predicted_labels
         self.true_labels = true_labels
         self.predictions_proba = predictions_proba
         self.signal_values = signal_values
         self.threshold = threshold
+        self.id = None
 
         self.accuracy = np.mean(predicted_labels == true_labels, axis=1)
         self.tn = np.sum(true_labels == 0) - np.sum(
@@ -123,6 +126,39 @@ class CombinedMetricResult:
         self.tpr = self.tpr[sorted_indices]
 
         self.roc_auc = auc(self.fpr, self.tpr)
+
+    def _get_primitives(self:Self):
+        """Return the primitives of the CombinedMetricResult class."""
+        return {"predicted_labels": self.predicted_labels.tolist(), 
+            "true_labels": self.true_labels.tolist(),
+            "predictions_proba": self.predictions_proba.tolist() if isinstance(self.predictions_proba, np.ndarray) else None, 
+            "signal_values": self.signal_values.tolist() if isinstance(self.signal_values, np.ndarray) else None,
+            "threshold": self.threshold.tolist() if isinstance(self.threshold, np.ndarray) else None,
+        }
+    
+    def save(self:Self, path: str, name: str, config:dict):
+        """Save the CombinedMetricResult class to disk."""
+
+        # Primitives are the set of variables to re-create the class from scratch
+        primitives = self._get_primitives()
+
+        # Data to be saved
+        data = {
+            "resulttype": self.__class__.__name__,
+            "primitives": primitives,
+            "config": config
+        }
+
+        # Get the name for the attack configuration
+        config_name = get_config_name(config["attack_list"][name])
+
+        # Check if path exists, otherwise create it.
+        if not os.path.exists(f'{path}/{name}/{name}{config_name}'):
+            os.makedirs(f'{path}/{name}/{name}{config_name}')
+
+        # Save the results to a file
+        with open(f'{path}/{name}/{name}{config_name}/data.json', 'w') as f:
+            json.dump(data, f)
 
     def __str__(self:Self) -> str:
         """Return a string describing the metric result."""
@@ -174,3 +210,19 @@ class GIAResults:
         save_image(gt_denormalized, os.path.join(save_path, "original_image.png"))
 
         return attack_name
+
+def get_config_name(config):
+    config = dict(sorted(config.items()))
+
+    exclude = ["attack_data_dir"]
+
+    config_name = ""
+    for key, value in zip(list(config.keys()), list(config.values())):
+        if key in exclude:
+            pass
+        else:
+            if type(value) is bool:
+                config_name += f"-{key}"
+            else:
+                config_name += f"-{key}={value}"
+    return config_name

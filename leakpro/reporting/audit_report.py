@@ -224,6 +224,8 @@ class ROCCurveReport(AuditReport):
             verticalalignment="center",
             bbox={"facecolor": "white", "alpha": 0.5},
         )
+        plt.xlim(left=1e-5)
+        plt.ylim(bottom=1e-5)
         if save:
             plt.savefig(fname=filename, dpi=1000)
         if show:
