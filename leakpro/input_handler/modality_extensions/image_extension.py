@@ -1,7 +1,5 @@
 """TabularExtension class for handling tabular data with one-hot encoding and decoding."""
 
-from copy import deepcopy
-
 import numpy as np
 from torch import Tensor, cat, mean, randn, std
 from torch.utils.data import DataLoader, Dataset
@@ -33,18 +31,18 @@ class ImageExtension:
 
         logger.info(f"Found feature attribute: {self.feature_name} and label attribute: {self.label_name}")
 
-    def replace_data_with_noise(self: Self, indices:np.array, batch_size:int=32, req_grad:bool=False) -> DataLoader:
+    def replace_data_with_noise(self: Self, indices:np.array) -> DataLoader:
         """Get dataloader with random noise images of the same shape as the client_loader, using the same labels."""
 
         dataset = self.get_dataset(indices)
         dataset_shape = getattr(dataset, self.feature_name).shape
         random_images = randn(*dataset_shape)
+        labels = getattr(dataset, self.label_name).clone()
 
-        dataset_copy = deepcopy(dataset)
-        setattr(dataset_copy, self.feature_name, random_images)
-        getattr(dataset_copy, self.feature_name).requires_grad = req_grad
+        return random_images, labels
 
-        return DataLoader(dataset_copy, batch_size=batch_size, shuffle=True)
+
+
 
     def get_meanstd(self: Self, trainset: Dataset) -> tuple[Tensor, Tensor]:
         """Get the mean and standard deviation of the data in the trainset."""
@@ -52,4 +50,3 @@ class ImageExtension:
         data_mean = mean(cc, dim=1, keepdim=True)
         data_std = std(cc, dim=1, keepdim=True)
         return data_mean[:, None, None], data_std[:, None, None]
-

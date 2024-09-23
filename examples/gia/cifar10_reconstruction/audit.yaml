@@ -3,7 +3,7 @@ audit:  # Configurations for auditing
   attack_list:
       inverting_gradients:
         total_variation: 0.000001
-        attack_lr: 0.1 # lr for the reconstruction optimizer
+        attack_lr: 0.001
         at_iterations: 500
 
   output_dir: "./leakpro_output"

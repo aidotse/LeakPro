@@ -57,7 +57,8 @@ class AbstractGIA(ABC):
 
     def _get_pseudo_gradient(self:Self, init_model:Module, dataloader:DataLoader) -> list:
         """Wrapper for the train method provided by user."""
-        # Train the model on the client data
+        # Train the global model using the dataloader
+        init_model.eval()
         model = self.handler.train(dataloader,
                                     MetaModule(init_model),
                                     self.criterion,

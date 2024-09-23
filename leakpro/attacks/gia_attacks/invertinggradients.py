@@ -1,5 +1,6 @@
 """Geiping, Jonas, et al. "Inverting gradients-how easy is it to break privacy in federated learning?."."""
 import torch
+from torch.utils.data import DataLoader, TensorDataset
 from torchvision.utils import save_image
 
 from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
@@ -48,13 +49,11 @@ class InvertingGradients(AbstractGIA):
 
         """
 
-        self.reconstruction_loader = self.handler.replace_data_with_noise(self.train_indices, req_grad=True)
-        feature_name = self.handler.feature_name
-        self.reconstruction_data = getattr(self.reconstruction_loader.dataset, feature_name)
-        assert self.reconstruction_data.requires_grad, "The dataset must require gradients."
+        self.reconstruction_data, self.reconstruction_labels = self.handler.replace_data_with_noise(self.train_indices)
+        self.reconstruction_data.requires_grad = True
 
         path = self.handler.configs["audit"]["output_dir"] + "/true_images.png"
-        save_image(self.client_loader.dataset.data[:]*2+0.5, path)
+        save_image(self.client_loader.dataset.data, path)
 
     def run_attack(self:Self) -> GIAResults:
         """Run the attack and return the combined metric result.
@@ -64,35 +63,35 @@ class InvertingGradients(AbstractGIA):
             GIAResults: Container for results on GIA attacks.
 
         """
-        optimizer = torch.optim.Adam([self.reconstruction_data], lr=self.attack_lr)
+        optimizer = torch.optim.Adam([self.reconstruction_data], lr=1e-3)
         # Decay the learning rate similar to original paper
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
                                                             milestones=[self.iterations // 2.667,
                                                                         self.iterations // 1.6,
                                                                         self.iterations // 1.142],
                                                             gamma=0.1)
-
+        mu = torch.as_tensor([0.4914672374725342, 0.4822617471218109, 0.4467701315879822])[:, None, None]
+        sigma = torch.as_tensor([0.24703224003314972, 0.24348513782024384, 0.26158785820007324])[:, None, None]
         for i in range(self.iterations):
             # loss function which does training and compares distance from reconstruction training to the real training.
-
+            self.reconstruction_data_old = self.reconstruction_data.clone()
             closure = self._gradient_closure(optimizer)
-
             loss = optimizer.step(closure)
             scheduler.step()
-            mu, sigma = self.handler.get_meanstd(self.reconstruction_data)
-            mu = mu.view(1, 3, 1, 1)
-            sigma = sigma.view(1, 3, 1, 1)
             with torch.no_grad():
-                self.reconstruction_data = torch.max(torch.min(self.reconstruction_data, (1 - mu) / sigma), -mu / sigma)
+                self.reconstruction_data.data = torch.clamp(self.reconstruction_data, min=-mu / sigma, max=(1 - mu) / sigma)
+
             if i % 20 == 0:
                 logger.info(f"{i}: {loss}")
+                diff = (self.reconstruction_data - self.reconstruction_data_old).norm()
+                logger.info(f"Diff: {diff}")
                 tmp_name = f"iteration_{i}.png"
                 path = self.handler.configs["audit"]["output_dir"] + "/" + tmp_name
+
                 save_image(self.reconstruction_data, path)
 
-            # add PSNR calculation and pick best image..
         # Collect client data to one tensor
-        return GIAResults(self.client_loader, self.reconstruction_loader, 0, 0, 1)
+        return GIAResults(self.client_loader, self.reconstruction_data, 0, 0, 1)
 
 
     def _gradient_closure(self: Self, optimizer: torch.optim.Optimizer) -> Callable:
@@ -117,7 +116,9 @@ class InvertingGradients(AbstractGIA):
             optimizer.zero_grad()
             self.handler.target_model.zero_grad()
 
-            gradient = self._get_pseudo_gradient(self.handler.target_model, self.reconstruction_loader)
+            assert self.reconstruction_data.requires_grad, "The dataset must require gradients."
+            tmp_loader = DataLoader(TensorDataset(self.reconstruction_data, self.reconstruction_labels), self.batch_size)
+            gradient = self._get_pseudo_gradient(self.handler.target_model, tmp_loader)
             rec_loss = self._reconstruction_costs(gradient, self.client_gradient)
 
             if self.handler.configs["audit"]["modality"] == "image":
