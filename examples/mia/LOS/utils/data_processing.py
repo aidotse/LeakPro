@@ -1,0 +1,278 @@
+import os
+import h5py
+import numpy as np
+import pandas as pd
+import joblib
+import pickle
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
+from sklearn.model_selection import train_test_split
+import urllib.request
+from torch import from_numpy
+from torch.utils.data import Dataset, Subset, DataLoader
+from sklearn.preprocessing import StandardScaler
+import torch
+
+class MimicDataset(Dataset):
+    def __init__(self, x, y):
+        self.x = from_numpy(x).float()  # Convert features to torch tensors
+        self.y = from_numpy(y).float() # Convert labels to torch tensors
+        # self.index = index
+        # self.indices = torch.tensor(indices, dtype=torch.long)
+
+    def __len__(self):
+        return len(self.y)
+
+    def __getitem__(self, idx):
+        # print(f"Shape of self.x: {self.x.shape}")  # Print shape of features tensor
+        # print(f"Shape of self.y: {self.y.shape}")  # Print shape of labels tensor
+        # print(f"Index: {idx}")  # Print the index you are trying to access
+        
+        return self.x[idx], self.y[idx]
+
+    
+def simple_imputer(df, ID_COLS):
+    idx = pd.IndexSlice
+    df = df.copy()
+    if len(df.columns.names) > 2: df.columns = df.columns.droplevel(('label', 'LEVEL1', 'LEVEL2'))
+    
+    df_out = df.loc[:, idx[:, ['mean', 'count']]]
+    icustay_means = df_out.loc[:, idx[:, 'mean']].groupby(ID_COLS).mean()
+    
+    df_out.loc[:,idx[:,'mean']] = df_out.loc[:,idx[:,'mean']].groupby(ID_COLS).fillna(
+        method='ffill'
+    ).groupby(ID_COLS).fillna(icustay_means).fillna(0)
+    
+    df_out.loc[:, idx[:, 'count']] = (df.loc[:, idx[:, 'count']] > 0).astype(float)
+    df_out.rename(columns={'count': 'mask'}, level='Aggregation Function', inplace=True)
+    
+    is_absent = (1 - df_out.loc[:, idx[:, 'mask']])
+    hours_of_absence = is_absent.cumsum()
+    time_since_measured = hours_of_absence - hours_of_absence[is_absent==0].fillna(method='ffill')
+    time_since_measured.rename(columns={'mask': 'time_since_measured'}, level='Aggregation Function', inplace=True)
+
+    df_out = pd.concat((df_out, time_since_measured), axis=1)
+    df_out.loc[:, idx[:, 'time_since_measured']] = df_out.loc[:, idx[:, 'time_since_measured']].fillna(100)
+    
+    df_out.sort_index(axis=1, inplace=True)
+    return df_out
+
+
+def data_prep(statics, data_full_lvl2, GAP_TIME, WINDOW_SIZE, SEED):
+    # label = 'los_icu'
+    Ys = statics[statics.max_hours > WINDOW_SIZE + GAP_TIME][['los_icu']]
+    Ys['los_3'] = Ys['los_icu'] > 3
+    Ys.drop(columns=['los_icu'], inplace=True)
+    Ys = Ys.astype(float)
+
+    lvl2 = data_full_lvl2[
+        (data_full_lvl2.index.get_level_values('icustay_id').isin(set(Ys.index.get_level_values('icustay_id')))) &
+        (data_full_lvl2.index.get_level_values('hours_in') < WINDOW_SIZE)
+    ]
+    
+    lvl2_subj_idx, Ys_subj_idx = [df.index.get_level_values('subject_id') for df in (lvl2, Ys)]
+    lvl2_subjects = set(lvl2_subj_idx)
+    assert lvl2_subjects == set(Ys_subj_idx), "Subject ID pools differ!"
+
+    return lvl2, Ys, lvl2_subjects
+
+
+def get_mimic_dataset(path, train_frac, test_frac):
+    """Get the dataset, download it if necessary, and store it."""
+    
+    dataset_path = os.path.join(path, "dataset.pkl")
+    indices_path = os.path.join(path, "indices.pkl")
+    
+    if os.path.exists(dataset_path) and os.path.exists(indices_path):
+        with open(dataset_path, "rb") as f:
+            dataset = pickle.load(f)  # Load the dataset
+        with open(indices_path, "rb") as f:
+            train_indices, test_indices = pickle.load(f) 
+        return dataset, train_indices, test_indices
+
+    else:
+        data_file_path = os.path.join(path, "all_hourly_data.h5")
+        if os.path.exists(data_file_path):
+            data_full_lvl2 = pd.read_hdf(data_file_path, 'vitals_labs')
+            statics = pd.read_hdf(data_file_path, 'patients')
+
+            ID_COLS = ['subject_id', 'hadm_id', 'icustay_id']
+            GAP_TIME = 6  # In hours
+            WINDOW_SIZE = 24 # In hours
+            SEED = 1
+
+            lvl2_train, lvl2_test, Ys_train, Ys_test = data_splitter(statics,
+                                                                     data_full_lvl2,
+                                                                     GAP_TIME, WINDOW_SIZE, SEED,
+                                                                     train_frac)
+            
+            lvl2_train , lvl2_test = data_normalization(lvl2_train, lvl2_test)
+
+            lvl2_train, lvl2_test = [simple_imputer(df, ID_COLS) for df in (lvl2_train, lvl2_test)]
+            lvl2_flat_train, lvl2_flat_test = [df.pivot_table(index=['subject_id', 'hadm_id', 'icustay_id'], 
+                                                              columns=['hours_in']) for df in (lvl2_train, lvl2_test) ]
+            
+            # Reset the index to flatten the multi-index structure
+            lvl2_flat_train, lvl2_flat_test, Ys_train, Ys_test = [flatten_multi_index(df) 
+                                                                  for df in (lvl2_flat_train, lvl2_flat_test, Ys_train, Ys_test)]
+            
+            # Check for missing values in all relevant DataFrames
+            assert_no_missing_values(lvl2_train, lvl2_test, lvl2_flat_train, lvl2_flat_test)
+
+
+            train_df, test_df = standard_scaler(lvl2_flat_train, lvl2_flat_test)
+
+            # Creating the dataset
+            data_x = pd.concat((train_df, test_df), axis=0)
+            data_y = pd.concat((Ys_train, Ys_test), axis=0)
+            dataset = MimicDataset(data_x.values, data_y.values)
+            
+            # Generate indices for training and testing
+            train_indices, test_indices = data_indices(data_x, train_frac, test_frac)
+
+            # Save the dataset to dataset.pkl
+            with open(dataset_path, "wb") as file:
+                pickle.dump(dataset, file)
+                print(f"Saved dataset to {dataset_path}")
+
+            # Save train and test indices to indices.pkl
+            indices_to_save = {
+                "train_indices": train_indices,
+                "test_indices": test_indices
+            }
+            with open(indices_path, "wb") as file:
+                pickle.dump(indices_to_save, file)
+                print(f"Saved train and test indices to {indices_path}")
+
+        else: 
+            msg = "Please download the MIMIC-III dataset from https://physionet.org/content/mimiciii/1.4/ and save it in the specified path."
+            raise FileNotFoundError(msg)
+    return dataset, train_indices, test_indices
+
+def data_indices(dataset, train_frac, test_frac):
+    N = len(dataset)
+    N_train = int(train_frac * N)
+    N_test = int(test_frac * N)
+    
+    # Generate sequential indices for training and testing
+    train_indices = list(range(N_train))  # Indices from 0 to N_train-1
+    test_indices = list(range(N_train, N_train + N_test))  # Indices from N_train to N_train + N_test-1
+    
+    return train_indices, test_indices
+
+
+def get_mimic_dataloaders(dataset, train_indices, test_indices, batch_size=128):
+
+
+    train_subset = Subset(dataset, train_indices)
+    test_subset = Subset(dataset, test_indices)
+
+    train_loader = DataLoader(train_subset, batch_size, shuffle=False)
+    test_loader = DataLoader(test_subset, batch_size, shuffle=False)
+
+    return train_loader, test_loader
+
+
+def simple_imputer(df, ID_COLS):
+    idx = pd.IndexSlice
+    df = df.copy()
+    if len(df.columns.names) > 2: df.columns = df.columns.droplevel(('label', 'LEVEL1', 'LEVEL2'))
+    
+    df_out = df.loc[:, idx[:, ['mean', 'count']]]
+    icustay_means = df_out.loc[:, idx[:, 'mean']].groupby(ID_COLS).mean()
+    
+    df_out.loc[:,idx[:,'mean']] = df_out.loc[:,idx[:,'mean']].groupby(ID_COLS).fillna(
+        method='ffill'
+    ).groupby(ID_COLS).fillna(icustay_means).fillna(0)
+    
+    df_out.loc[:, idx[:, 'count']] = (df.loc[:, idx[:, 'count']] > 0).astype(float)
+    df_out.rename(columns={'count': 'mask'}, level='Aggregation Function', inplace=True)
+    
+    is_absent = (1 - df_out.loc[:, idx[:, 'mask']])
+    hours_of_absence = is_absent.cumsum()
+    time_since_measured = hours_of_absence - hours_of_absence[is_absent==0].fillna(method='ffill')
+    time_since_measured.rename(columns={'mask': 'time_since_measured'}, level='Aggregation Function', inplace=True)
+
+    df_out = pd.concat((df_out, time_since_measured), axis=1)
+    df_out.loc[:, idx[:, 'time_since_measured']] = df_out.loc[:, idx[:, 'time_since_measured']].fillna(100)
+    
+    df_out.sort_index(axis=1, inplace=True)
+    return df_out
+
+
+def data_splitter(statics, data_full_lvl2, GAP_TIME, WINDOW_SIZE, SEED, train_frac):
+
+    # label = 'los_icu'
+    Ys = statics[statics.max_hours > WINDOW_SIZE + GAP_TIME][['los_icu']]
+    Ys['los_3'] = Ys['los_icu'] > 3
+    Ys.drop(columns=['los_icu'], inplace=True)
+    Ys['los_3'] = Ys['los_3'].astype(float)
+
+    lvl2 = data_full_lvl2[
+        (data_full_lvl2.index.get_level_values('icustay_id').isin(set(Ys.index.get_level_values('icustay_id')))) &
+        (data_full_lvl2.index.get_level_values('hours_in') < WINDOW_SIZE)
+    ]
+    
+    lvl2_subj_idx, Ys_subj_idx = [df.index.get_level_values('subject_id') for df in (lvl2, Ys)]
+    lvl2_subjects = set(lvl2_subj_idx)
+    assert lvl2_subjects == set(Ys_subj_idx), "Subject ID pools differ!"
+    
+    # Randomly shuffle subjects and compute the sizes of the splits
+    np.random.seed(SEED)
+    subjects = np.random.permutation(list(lvl2_subjects))
+    N = len(subjects)
+
+    N_train = int(train_frac * N)
+
+    # Ensure no overlap between train and test sets
+    train_subj = subjects[:N_train]
+    test_subj = subjects[N_train::]
+
+    # Split the data according to the subjects
+    (lvl2_train, lvl2_test), (Ys_train, Ys_test) = [
+        [df[df.index.get_level_values('subject_id').isin(s)] for s in (train_subj, test_subj)] 
+        for df in (lvl2, Ys)
+    ]
+
+    return lvl2_train, lvl2_test, Ys_train, Ys_test
+
+
+
+
+def data_normalization(lvl2_train, lvl2_test):
+    idx = pd.IndexSlice
+    lvl2_means, lvl2_stds = lvl2_train.loc[:, idx[:,'mean']].mean(axis=0), lvl2_train.loc[:, idx[:,'mean']].std(axis=0)
+
+    lvl2_train.loc[:, idx[:,'mean']] = (lvl2_train.loc[:, idx[:,'mean']] - lvl2_means)/lvl2_stds
+    lvl2_test.loc[:, idx[:,'mean']] = (lvl2_test.loc[:, idx[:,'mean']] - lvl2_means)/lvl2_stds
+    return lvl2_train, lvl2_test
+
+def standard_scaler(flat_train, flat_test):
+    # Initialize the scaler
+    scaler = StandardScaler()
+
+    # Identify continuous columns (float64 and int64 types)
+    continuous_columns = flat_train.select_dtypes(include=['float64', 'int64']).columns
+
+    # Fit the scaler on training data and transform both training and test sets
+    train_flat_continuous = scaler.fit_transform(flat_train[continuous_columns])
+    test_flat_continuous = scaler.transform(flat_test[continuous_columns])
+
+    # Create copies of the original DataFrames
+    train_scaled = flat_train.copy()
+    test_scaled = flat_test.copy()
+
+    # Replace continuous columns with the scaled versions
+    train_scaled[continuous_columns] = train_flat_continuous
+    test_scaled[continuous_columns] = test_flat_continuous
+
+    # Return the scaled DataFrames
+    return train_scaled, test_scaled
+
+def flatten_multi_index(df):
+    """Flattens the multi-index DataFrame by resetting the index."""
+    return df.reset_index(drop=True)
+
+def assert_no_missing_values(*dfs):
+    """Asserts that no DataFrame in the input list contains any missing values."""
+    for df in dfs:
+        assert not df.isnull().any().any(), "DataFrame contains missing values!"
