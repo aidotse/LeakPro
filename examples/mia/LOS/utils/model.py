@@ -28,7 +28,7 @@ def evaluate(model, loader, criterion, device):
     with no_grad():
         for data, target in loader:
             data, target = data.to(device), target.to(device)
-            target = target.float()
+            target = target.float().unsqueeze(1)
             output = model(data)
             loss += criterion(output, target).item()
             pred = sigmoid(output) >= 0.5
@@ -62,7 +62,7 @@ def create_trained_model_and_metadata(model,
         train_acc, train_loss = 0.0, 0.0
         
         for data, target in train_loader:
-            target = target.float()
+            target = target.float().unsqueeze(1)
             data, target = data.to(device_name, non_blocking=True), target.to(device_name, non_blocking=True)
             optimizer.zero_grad()
             output = model(data)
