@@ -44,8 +44,8 @@ psql -U "${DBUSER}" "${DBSTRING}" -f ./utils/niv-durations.sql
 
 # Part 2: Run the Python script in the same directory
 
-python3 mimic_direct_extract.py --resource_path resources/ --out_path output/ --psql_password postgres --psql_dbname mimic --psql_schema_name mimiciii
+python3 mimic_direct_extract.py --resource_path resources/ --out_path output/ --psql_password postgres --psql_dbname mimic
 
-# Part 3: Copy the output to the data directory
-echo 'Copying file to target directory'
-cp ./output/all_hourly_data.h5 ../../data/
+# # Part 3: Copy the output to the data directory
+# echo 'Copying file to target directory'
+# cp ./output/all_hourly_data.h5 ../../data/

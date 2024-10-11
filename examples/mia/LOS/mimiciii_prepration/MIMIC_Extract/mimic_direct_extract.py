@@ -534,7 +534,7 @@ def save_outcome(
             query = """
             select i.subject_id, i.hadm_id, v.icustay_id, v.starttime, v.endtime
             FROM icustay_detail i
-            INNER JOIN {table} v ON i.icustay_id = v.icustay_id
+            INNER JOIN public.{table} v ON i.icustay_id = v.icustay_id
             where v.icustay_id in ({icuids})
             and v.starttime between intime and outtime
             and v.endtime between intime and outtime;
@@ -732,7 +732,7 @@ if __name__ == '__main__':
                     help='Postgres host. Try "/var/run/postgresql/" for Unix domain socket errors.')
     ap.add_argument('--psql_dbname', type=str, default='mimic',
                     help='Postgres database name.')
-    ap.add_argument('--psql_schema_name', type=str, default='mimiciii',
+    ap.add_argument('--psql_schema_name', type=str, default='mimiciii,public',
                     help='Postgres database name.')
     ap.add_argument('--psql_user', type=str, default='postgres',
                     help='Postgres user.')
