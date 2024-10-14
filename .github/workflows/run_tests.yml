@@ -35,10 +35,6 @@ jobs:
         with:
           python-version: 3.9
 
-      - name: Install micromamba
-        run: |
-          curl -L https://micromamba.snakepit.net/api/micromamba/linux-64/latest | tar -xvj -C /usr/local/bin/ --strip-components=1 bin/micromamba
-
       - name: Install dependencies with micromamba
         run: |
           micromamba create --file environment.yml --name leakpro --root-prefix /home/runner/micromamba-root
