@@ -1,5 +1,63 @@
 lint = ["ruff>=0.0.220"] # MIT License (MIT)
 
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "leakpro"
+version = "0.1"
+description = "A package for privacy risk analysis"
+authors = [{ name = "LeakPro team", email = "johan.ostman@ai.se" }]
+readme = "README.md"
+license = {file="LICENSE"}
+keywords = [
+    "Privacy",
+    "Risk analysis",
+    "Centralized learning",
+    "Federated learning",
+    "Synthethic data",
+    "Machine learning",
+]
+classifiers = [
+    "Natural Language :: English",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+requires-python = '>=3.8,<3.13'
+
+dependencies = [
+  "numpy",
+  "pandas",
+  "scipy",
+  "scikit-learn",
+  "matplotlib",
+  "seaborn",
+  "pillow",
+  "torch",
+  "torchvision",
+  "dotmap",
+  "loguru",
+  "jinja2",
+  "tqdm",
+  "pyyaml",
+  "numba",
+  "pydantic",
+  "joblib",
+  "pytest",
+]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["leakpro*"]
+
 [tool.ruff]
 line-length = 130
 target-version = "py39"
