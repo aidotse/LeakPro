@@ -1,7 +1,6 @@
 """Util functions relating to data."""
 from torch import Tensor, cat, mean, randn, std, tensor
 from torch.utils.data import DataLoader, Dataset, TensorDataset
-import numpy as np
 
 def get_meanstd(trainset: Dataset, axis_to_reduce: tuple=(-2,-1)) -> tuple[Tensor, Tensor]:
     """Get mean and std of a dataset."""
