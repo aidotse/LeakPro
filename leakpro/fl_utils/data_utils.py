@@ -1,13 +1,14 @@
 """Util functions relating to data."""
 from torch import Tensor, cat, mean, randn, std, tensor
 from torch.utils.data import DataLoader, Dataset, TensorDataset
+import numpy as np
 
-
-def get_meanstd(trainset: Dataset) -> tuple[Tensor, Tensor]:
+def get_meanstd(trainset: Dataset, axis_to_reduce: tuple=(-2,-1)) -> tuple[Tensor, Tensor]:
     """Get mean and std of a dataset."""
-    cc = cat([trainset[i][0].reshape(3, -1) for i in range(len(trainset))], dim=1)
-    data_mean = mean(cc, dim=1).tolist()
-    data_std = std(cc, dim=1).tolist()
+    cc = cat([trainset[i][0].unsqueeze(0) for i in range(len(trainset))], dim=0)
+    axis_to_reduce += (0,)
+    data_mean = mean(cc, dim=axis_to_reduce).tolist()
+    data_std = std(cc, dim=axis_to_reduce).tolist()
     return data_mean, data_std
 
 def get_at_images(client_loader: DataLoader) -> DataLoader:
