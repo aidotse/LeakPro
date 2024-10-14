@@ -41,6 +41,7 @@ jobs:
           environment-file: environment.yml
           environment-name: leakpro
           cache-downloads: true
+          micromamba-args: "--root-prefix /home/runner/micromamba-root"
 
       - name: Set PYTHONPATH
         run: echo "PYTHONPATH=$(pwd)" >> $GITHUB_ENV
