@@ -1,11 +1,14 @@
 """Parent class for user inputs."""
 
+from copy import deepcopy
+
 import joblib
 import numpy as np
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
+from leakpro.fl_utils.gia_optimizers import MetaAdam, MetaOptimizer, MetaSGD
 from leakpro.input_handler.user_imports import get_class_from_module, import_module_from_file
 from leakpro.utils.import_helper import Any, Self, Tuple
 from leakpro.utils.logger import logger
@@ -175,6 +178,23 @@ def get_target_replica(self:Self) -> Tuple[torch.nn.Module, nn.modules.loss._Los
         return model_replica, self.get_criterion(), self.get_optimizer(model_replica)
     except Exception as e:
         raise ValueError("Failed to create an instance of the target model.") from e
+
+#------------------------------------------------
+# Methods for federated learning
+#------------------------------------------------
+def get_optimizer(self:Self, model: nn.Module = None) -> MetaOptimizer:  # noqa: ARG001
+    """Read the optimizer for the target model."""
+    optimizer_config = deepcopy(self.target_model_metadata.get("optimizer", None))
+    if self.target_model_metadata.get("optimizer") is None:
+        raise ValueError("Optimizer not found in target model metadata.")
+
+    optimizer_class = optimizer_config.pop("name").lower()
+
+    if optimizer_class == "sgd":
+        return MetaSGD( **optimizer_config)
+    if optimizer_class == "Adam":
+        return MetaAdam( **optimizer_config)
+    raise ValueError(f"Optimizer '{optimizer_class}' not supported. Please check the optimizer settings.")
 
 #------------------------------------------------
 # get-set methods

@@ -17,6 +17,7 @@ from leakpro.input_handler.handler_setup import (
     get_dataloader,
     get_dataset,
     get_labels,
+    get_optimizer,
     get_population_size,
     get_target_model,
     get_target_model_blueprint,
@@ -31,15 +32,18 @@ from leakpro.input_handler.handler_setup import (
     set_train_indices,
     setup,
 )
+from leakpro.input_handler.modality_extensions.image_extension import ImageExtension
 from leakpro.input_handler.modality_extensions.tabular_extension import TabularExtension
 from leakpro.reporting.utils import prepare_privacy_risk_report
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import add_file_handler, logger
 
 modality_extensions = {"tabular": TabularExtension,
-                       "image":None,
+                       "image":ImageExtension,
                        "text":None,
                        "graph":None}
+
+attack_types = ["mia", "gia"]
 
 class LeakPro:
     """Main class for LeakPro."""
@@ -87,6 +91,9 @@ class LeakPro:
 
         handler_class.__init__(handler, configs)
 
+        attack_type = handler.configs["audit"]["attack_type"]
+        assert attack_type in attack_types, f"attack_type must be one of {attack_types}"
+
         # Attach properties to handler
         handler.target_model_blueprint = property(types.MethodType(get_target_model_blueprint, handler),
                                                        types.MethodType(set_target_model_blueprint, handler))
@@ -96,9 +103,9 @@ class LeakPro:
                                                       types.MethodType(set_target_model_metadata, handler))
         handler.population_size = property(types.MethodType(get_population_size, handler))
         handler.test_indices = property(types.MethodType(get_test_indices, handler),
-                                           types.MethodType(set_test_indices, handler))
+                                        types.MethodType(set_test_indices, handler))
         handler.train_indices = property(types.MethodType(get_train_indices, handler),
-                                            types.MethodType(set_train_indices, handler))
+                                        types.MethodType(set_train_indices, handler))
 
         # attach provided methods to handler as read-only properties
         handler.criterion = property(types.MethodType(handler.get_criterion, handler))
@@ -119,8 +126,15 @@ class LeakPro:
         handler._validate_indices = types.MethodType(_validate_indices, handler)
         handler._validate_target_metadata = types.MethodType(_validate_target_metadata, handler)
 
-        # Load population data, target model, and target model metadata
+        # if FL: Enable the handler to map to meta-optimizer from target metadata
+        if attack_type == "gia":
+            handler.get_optimizer = types.MethodType(get_optimizer, handler)
+
+        # gia: Load local training data (as population), global model (as target model and metadata)
+        # Note: we need to train the client model ourselves if we want to use batch statistics etc.
+        # mia: Load population data, target model, and target model metadata
         handler.setup()
+
         if extension_class is not None:
             extension_class.__init__(handler)
 
@@ -133,10 +147,11 @@ class LeakPro:
         for attack_name in audit_results:
             logger.info(f"Preparing results for attack: {attack_name}")
 
-            prepare_privacy_risk_report(
-                audit_results[attack_name]["result_object"],
-                self.handler.configs["audit"],
-                save_path=f"{self.report_dir}/{attack_name}",
-            )
+            if self.handler.configs["audit"]["attack_type"] == "mia":
+                prepare_privacy_risk_report(
+                    audit_results[attack_name]["result_object"],
+                    self.handler.configs["audit"],
+                    save_path=f"{self.report_dir}/{attack_name}",
+                )
 
         logger.info("Auditing completed")
