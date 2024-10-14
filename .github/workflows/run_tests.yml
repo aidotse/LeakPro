@@ -36,8 +36,12 @@ jobs:
           python-version: 3.9
 
       - name: Install dependencies with micromamba
-        run: |
-          micromamba create --file environment.yml --name leakpro --root-prefix /home/runner/micromamba-root
+        uses: mamba-org/provision-with-micromamba@main
+        with:
+          environment-file: environment.yml
+          environment-name: leakpro
+          cache-downloads: true
+          micromamba-args: "--root-prefix /home/runner/micromamba-root"
 
       - name: Set PYTHONPATH
         run: echo "PYTHONPATH=$(pwd)" >> $GITHUB_ENV
