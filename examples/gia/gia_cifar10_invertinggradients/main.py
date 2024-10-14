@@ -4,7 +4,7 @@ from model import ConvNet
 from torchvision.models.resnet import BasicBlock
 
 from leakpro.fl_utils.gia_train import train
-from leakpro.run import run_geiping
+from leakpro.run import run_inverting
 
 # will move this to examples folder after package is working
 if __name__ == "__main__":
@@ -14,4 +14,4 @@ if __name__ == "__main__":
     # Train function needs to follow a specific structu....
     train_fn = train
     configs = {"at_iterations": 1000}
-    result = run_geiping(model, client_dataloader, train_fn, data_mean, data_std, configs)
+    result = run_inverting(model, client_dataloader, train_fn, data_mean, data_std, configs)
