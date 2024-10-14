@@ -128,6 +128,10 @@ def create_mock_image_dataset() -> str:
 def create_mock_model_and_metadata() -> str:
     """Creates a mock model and saves it to a file."""
     parameters = get_image_handler_config()
+    
+    if not os.path.exists(parameters.target_folder):
+        os.makedirs(parameters.target_folder)
+            
     # Create a mock model
     model = ConvNet()
     model_path = parameters.target_folder + "/target_model.pkl"

@@ -2,16 +2,16 @@
 import os
 import shutil
 
-import sys
-print (sys.path)
-
 from typing import Generator
-
 import pytest
+import yaml
 from dotmap import DotMap
 
+from leakpro import LeakPro
 from leakpro.tests.input_handler.image_utils import setup_image_test
-from leakpro.tests.input_handler.cifar10_input_handler import Cifar10InputHandler
+from leakpro.tests.input_handler.image_input_handler import ImageInputHandler
+from leakpro.tests.input_handler.tabular_input_handler import TabularInputHandler
+from leakpro.tests.input_handler.tabular_utils import setup_tabular_test
 from leakpro.tests.constants import STORAGE_PATH, get_audit_config
 
 
@@ -30,14 +30,41 @@ def manage_storage_directory():
         shutil.rmtree(STORAGE_PATH)
 
 @pytest.fixture()
-def image_handler(manage_storage_directory) -> Generator[Cifar10InputHandler, None, None]:
+def image_handler(manage_storage_directory) -> Generator[ImageInputHandler, None, None]:
     """Fixture for the image input handler to be shared between many tests."""
 
     config = DotMap()
     config.target = setup_image_test()
     config.audit = get_audit_config()
+    config.audit.modality = "image"
+    #save config to file
+    config_path = f"{STORAGE_PATH}/image_test_config.yaml"
+    with open(config_path, "w") as f:
+        yaml.dump(config.toDict(), f)
+    
+    leakpro = LeakPro(ImageInputHandler, config_path)
+    handler = leakpro.handler
+    handler.configs = DotMap(handler.configs)
 
-    handler = Cifar10InputHandler(config)
+    # Yield control back to the test session
+    yield handler
+    
+@pytest.fixture()
+def tabular_handler(manage_storage_directory) -> Generator[TabularInputHandler, None, None]:
+    """Fixture for the image input handler to be shared between many tests."""
+
+    config = DotMap()
+    config.target = setup_tabular_test()
+    config.audit = get_audit_config()
+    config.audit.modality = "tabular"
+    #save config to file
+    config_path = f"{STORAGE_PATH}/tabular_test_config.yaml"
+    with open(config_path, "w") as f:
+        yaml.dump(config.toDict(), f)
+    
+    leakpro = LeakPro(TabularInputHandler, config_path)
+    handler = leakpro.handler
+    handler.configs = DotMap(handler.configs)
 
     # Yield control back to the test session
     yield handler

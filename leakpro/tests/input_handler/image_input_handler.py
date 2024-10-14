@@ -1,17 +1,15 @@
 """Module containing the class to handle the user input for the CIFAR10 dataset."""
 
-import logging
-
 import torch
 from torch import cuda, device, optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from leakpro.utils.import_helper import Self
-from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.utils.logger import logger
 
-class Cifar10InputHandler(AbstractInputHandler):
+class ImageInputHandler(AbstractInputHandler):
     """Class to handle the user input for the CIFAR10 dataset."""
 
     def __init__(self:Self, configs: dict) -> None:

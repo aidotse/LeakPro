@@ -5,10 +5,10 @@ from math import isnan
 
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.attacks.mia_attacks.lira import AttackLiRA
-from leakpro.tests.input_handler.cifar10_input_handler import Cifar10InputHandler
+from leakpro.tests.input_handler.image_input_handler import ImageInputHandler
 from leakpro.tests.constants import get_shadow_model_config, get_audit_config
 
-def test_lira_setup(image_handler:Cifar10InputHandler) -> None:
+def test_lira_setup(image_handler:ImageInputHandler) -> None:
     """Test the initialization of LiRA."""
     audit_config = get_audit_config()
     lira_params = audit_config.attack_list.lira
@@ -31,7 +31,7 @@ def test_lira_setup(image_handler:Cifar10InputHandler) -> None:
     description = lira_obj.description()
     assert len(description) == 4
 
-def test_lira_prepare_online_attack(image_handler:Cifar10InputHandler) -> None:
+def test_lira_prepare_online_attack(image_handler:ImageInputHandler) -> None:
     audit_config = get_audit_config()
     lira_params = audit_config.attack_list.lira
     lira_params.online = True
@@ -57,7 +57,7 @@ def test_lira_prepare_online_attack(image_handler:Cifar10InputHandler) -> None:
     assert lira_obj.shadow_models_logits.shape == (n_attack_points, lira_params.num_shadow_models)
     assert lira_obj.target_logits.shape == (n_attack_points, )
     
-def test_lira_prepare_offline_attack(image_handler:Cifar10InputHandler) -> None:
+def test_lira_prepare_offline_attack(image_handler:ImageInputHandler) -> None:
     audit_config = get_audit_config()
     lira_params = audit_config.attack_list.lira
     lira_params.online = False
@@ -84,7 +84,7 @@ def test_lira_prepare_offline_attack(image_handler:Cifar10InputHandler) -> None:
     assert lira_obj.target_logits.shape == (n_attack_points, )
 
 
-def test_lira_online_attack(image_handler:Cifar10InputHandler):
+def test_lira_online_attack(image_handler:ImageInputHandler):
     # Set up for testing
     audit_config = get_audit_config()
     lira_params = audit_config.attack_list.lira
@@ -123,7 +123,7 @@ def test_lira_online_attack(image_handler:Cifar10InputHandler):
     assert any(isnan(x) for x in lira_obj.in_member_signals) == False
     assert any(isnan(x) for x in lira_obj.out_member_signals) == False
     
-def test_lira_online_attack(image_handler:Cifar10InputHandler):
+def test_lira_online_attack(image_handler:ImageInputHandler):
     # Set up for testing
     audit_config = get_audit_config()
     lira_params = audit_config.attack_list.lira

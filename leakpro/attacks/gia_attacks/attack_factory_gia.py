@@ -2,7 +2,7 @@
 
 from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
 from leakpro.attacks.gia_attacks.invertinggradients import InvertingGradients
-from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 
 
 class AttackFactoryGIA:

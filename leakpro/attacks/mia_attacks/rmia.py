@@ -5,9 +5,9 @@ import numpy as np
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.attacks.utils.utils import softmax_logits
+from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.signals.signal import ModelLogits
-from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
@@ -165,8 +165,7 @@ class AttackRMIA(AbstractMIA):
         # find out how many out-members survived the filtering
         num_out_members = np.sum(mask[self.audit_dataset["out_members"]])
         out_members = np.arange(len(in_members), len(in_members) + num_out_members)
-        ground_truth_indices = self.handler.get_labels(audit_data_indices)
-        assert np.issubdtype(ground_truth_indices.dtype, np.integer)
+        ground_truth_indices = self.handler.get_labels(audit_data_indices).astype(int)
 
         assert len(audit_data_indices) == len(ground_truth_indices)
         assert len(audit_data_indices) == len(in_members) + len(out_members)
@@ -210,7 +209,7 @@ class AttackRMIA(AbstractMIA):
         logger.info(f"Number of attack data points after subsampling: {len(self.attack_data_index)}")
 
         # get the true label indices
-        z_true_labels = self.handler.get_labels(self.attack_data_index)
+        z_true_labels = self.handler.get_labels(self.attack_data_index).astype(int)
         assert np.issubdtype(z_true_labels.dtype, np.integer)
 
         # run points through real model to collect the logits

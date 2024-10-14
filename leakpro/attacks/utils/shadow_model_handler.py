@@ -10,8 +10,8 @@ from torch import Tensor, jit, save
 from torch.nn import Module
 
 from leakpro.attacks.utils.model_handler import ModelHandler
+from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.signals.signal_extractor import PytorchModel
-from leakpro.user_inputs.abstract_input_handler import AbstractInputHandler
 from leakpro.utils.import_helper import Self, Tuple
 from leakpro.utils.logger import logger
 
