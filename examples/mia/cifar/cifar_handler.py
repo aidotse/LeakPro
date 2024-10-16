@@ -8,11 +8,12 @@ from tqdm import tqdm
 
 from leakpro import AbstractInputHandler
 
-class Cifar100InputHandler(AbstractInputHandler):
+class CifarInputHandler(AbstractInputHandler):
     """Class to handle the user input for the CIFAR100 dataset."""
 
     def __init__(self, configs: dict) -> None:
         super().__init__(configs = configs)
+        print(configs)
 
 
     def get_criterion(self)->None:
@@ -61,10 +62,6 @@ class Cifar100InputHandler(AbstractInputHandler):
                 train_acc += pred.eq(labels.data.view_as(pred)).sum()
                 train_loss += loss.item()
 
-            log_train_str = (
-                f"Epoch: {epoch+1}/{epochs} | Train Loss: {train_loss/len(dataloader):.8f} | "
-                f"Train Acc: {float(train_acc)/len(dataloader.dataset):.8f}")
-            self.logger.info(log_train_str)
         model.to("cpu")
 
         return {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}
