@@ -33,7 +33,10 @@ class MimicDataset(Dataset):
 
     def __getitem__(self, idx):
         return self.x[idx], self.y[idx].squeeze(0)
-
+    
+    def subset(self, indices):
+        return MimicDataset(self.x[indices], self.y[indices])
+    
 
 def get_mimic_dataset(path, train_frac, test_frac):
     """Get the dataset, download it if necessary, and store it."""
