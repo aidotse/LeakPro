@@ -1,7 +1,7 @@
 """Module with functions for preparing the dataset for training the target models."""
 import torchvision
 from torch import as_tensor, cuda, device, randperm
-from torch.utils.data import DataLoader, TensorDataset, Subset
+from torch.utils.data import DataLoader, Subset, TensorDataset
 from torchvision import transforms
 
 from leakpro.fl_utils.data_utils import get_meanstd
