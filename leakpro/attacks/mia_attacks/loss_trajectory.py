@@ -414,7 +414,7 @@ class AttackLossTrajectory(AbstractMIA):
         self.mia_classifier()
         true_labels, predictions = self.mia_attack(self.mia_classifer)
 
-        #NOTE: We don't have signals in this attack, unlike RMIA. I set it to random to pass the PR before refactoring.
+        #TODO: We don't have signals in this attack, unlike RMIA. I set it to random to pass the PR before refactoring.
         signals = np.random.rand(*true_labels.shape)
 
         # compute ROC, TP, TN etc
