@@ -18,15 +18,24 @@ import os
 import numpy as np
 import pandas as pd
 import pickle
-from torch import from_numpy
+from torch import from_numpy, Tensor
 from torch.utils.data import Dataset, Subset, DataLoader
 from sklearn.preprocessing import StandardScaler
 
 
 class MimicDataset(Dataset):
     def __init__(self, x, y):
-        self.x = from_numpy(x).float()  # Convert features to torch tensors
-        self.y = from_numpy(y).float() # Convert labels to torch tensors
+        # Check if x is already a tensor
+        if not isinstance(x, Tensor):
+            self.x = from_numpy(x).float()  # Convert features to torch tensors if needed
+        else:
+            self.x = x.float()  # Ensure it is of type float
+        
+        # Check if y is already a tensor
+        if not isinstance(y, Tensor):
+            self.y = from_numpy(y).float()  # Convert labels to torch tensors if needed
+        else:
+            self.y = y.float()  # Ensure it is of type float
 
     def __len__(self):
         return len(self.y)
@@ -48,7 +57,9 @@ def get_mimic_dataset(path, train_frac, test_frac):
         with open(dataset_path, "rb") as f:
             dataset = pickle.load(f)  # Load the dataset
         with open(indices_path, "rb") as f:
-            train_indices, test_indices = pickle.load(f) 
+            indices_dict = pickle.load(f)  # Load the dictionary containing indices
+            train_indices = indices_dict['train_indices']  # Get the actual train indices
+            test_indices = indices_dict['test_indices']    # Get the actual test indices
         return dataset, train_indices, test_indices
 
     else:
