@@ -1,17 +1,20 @@
-"""Geiping on a single image."""
-from cifar import get_cifar10_tensor
+"""Inverting on a single image."""
+from dataclasses import asdict
+
+from cifar import get_cifar10_loader
 from model import ResNet
 from torchvision.models.resnet import BasicBlock
 
+from leakpro.attacks.gia_attacks.invertinggradients import InvertingConfig
 from leakpro.fl_utils.gia_train import train
 from leakpro.run import run_inverting
 
-# will move this to examples folder after package is working
 if __name__ == "__main__":
-    # model = ConvNet(10)
     model = ResNet(BasicBlock, [5, 5, 5], num_classes=10, base_width=16 * 10)
-    client_dataloader, data_mean, data_std = get_cifar10_tensor(num_images=1, batch_size=1, num_workers=2)
-    # Train function needs to follow a specific structu....
+    client_dataloader, data_mean, data_std = get_cifar10_loader(num_images=1, batch_size=1, num_workers=2)
+
+    # meta train function designed to work with GIA
     train_fn = train
-    configs = {"at_iterations": 1000}
+    # baseline config
+    configs = asdict(InvertingConfig())
     result = run_inverting(model, client_dataloader, train_fn, data_mean, data_std, configs)
