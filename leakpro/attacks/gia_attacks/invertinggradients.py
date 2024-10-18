@@ -1,5 +1,6 @@
 """Geiping, Jonas, et al. "Inverting gradients-how easy is it to break privacy in federated learning?."."""
 from copy import deepcopy
+from dataclasses import dataclass
 
 import torch
 from torch import Tensor
@@ -14,6 +15,23 @@ from leakpro.metrics.attack_result import GIAResults
 from leakpro.utils.import_helper import Callable, Self
 from leakpro.utils.logger import logger
 
+
+@dataclass
+class InvertingConfig():
+    """Possible configs for the Inverting Gradients attack."""
+
+    # total variation scale for smoothing the reconstrutcions after each iteration
+    total_varation = 1.0e-06
+    # learning rate on the attack optimizer
+    attack_lr = 0.1
+    # iterations for the attack steps
+    at_iterations = 8000
+    # MetaOptimizer, see MetaSGD for implementation
+    optimizer = MetaSGD()
+    # Client loss function
+    criterion = CrossEntropyLoss()
+    # Number of epochs for the client attack
+    epochs = 1
 
 class InvertingGradients(AbstractGIA):
     """Gradient inversion attack by Geiping et al."""
@@ -83,7 +101,6 @@ class InvertingGradients(AbstractGIA):
                                                             milestones=[self.iterations // 2.667, self.iterations // 1.6,
 
                                                                         self.iterations // 1.142], gamma=0.1)
-        # try:
         for i in range(self.iterations):
             # loss function which does training and compares distance from reconstruction training to the real training.
             closure = self.gradient_closure(optimizer)
@@ -104,8 +121,6 @@ class InvertingGradients(AbstractGIA):
                 self.best_reconstruction_round = i
                 logger.info(f"New best loss: {loss} on round: {i}")
                 pass
-        # except KeyboardInterrupt:
-        #     logger.info("Keyboard interrupt, saving best results.")
 
         return GIAResults(self.client_loader, self.best_reconstruction,
                           dataloaders_psnr(self.client_loader, self.reconstruction_loader), self.data_mean, self.data_std)

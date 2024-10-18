@@ -1,17 +1,12 @@
 """Run script."""
-from dataclasses import dataclass
 from typing import Callable
 
 from torch import Tensor
 from torch.nn import Module
-from torch.utils.data import TensorDataset, DataLoader
+from torch.utils.data import DataLoader, TensorDataset
 
 from leakpro.attacks.gia_attacks.invertinggradients import InvertingGradients
 
-
-@dataclass
-class InvertingConfig():
-    total_varation = 1e-6
 
 def run_inverting(model: Module, client_data: DataLoader, train_fn: Callable,
                 data_mean:Tensor, data_std: Tensor, config: dict) -> None:
@@ -20,7 +15,8 @@ def run_inverting(model: Module, client_data: DataLoader, train_fn: Callable,
     result = attack.run_attack()
     result.prepare_privacy_risk_report("InvertingGradients", "./leakpro_output/results")
 
-def run_inverting_noggrant(model, tensordataset, train_fn):
+def run_inverting_audit(model: Module, tensordataset: TensorDataset, train_fn: Callable) -> None:
+    """Runs an audit for InvertingGradients with different parameters and pre-training."""
     pass
     # NOT SAFE
     # setting 3 we start having good priavxy
@@ -32,5 +28,3 @@ def run_inverting_noggrant(model, tensordataset, train_fn):
     # run with tv = 1e4
     # run with tv = 1e6
 
-def run_gia_noggrant():
-    pass
