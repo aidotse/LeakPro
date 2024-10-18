@@ -12,12 +12,8 @@ from torch import manual_seed
 from torch.utils.data import Subset
 
 import dev_utils.train as utils
-from dev_utils.cifar10_input_handler import Cifar10InputHandler
-
-from leakpro.utils.handler_logger import setup_log
 from dev_utils import shadow_model_blueprints
-from leakpro.attacks.attack_scheduler import AttackScheduler
-from leakpro.dataset import get_dataloader
+from dev_utils.cifar10_input_handler import Cifar10InputHandler
 from dev_utils.data_preparation import (
     get_adult_dataset,
     get_cifar10_dataset,
@@ -25,7 +21,11 @@ from dev_utils.data_preparation import (
     get_cinic10_dataset,
     prepare_train_test_datasets,
 )
+from leakpro.attacks.attack_scheduler import AttackScheduler
+from leakpro.dataset import get_dataloader
 from leakpro.reporting.utils import prepare_privacy_risk_report
+from leakpro.utils.handler_logger import setup_log
+
 
 def generate_user_input(configs: dict, retrain: bool = False, logger: logging.Logger = None)->None:
     """Generate user input for the target model."""
