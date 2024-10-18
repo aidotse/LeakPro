@@ -1,7 +1,5 @@
 import os
 import numpy as np
-import pandas as pd
-import joblib
 import pickle
 from sklearn.model_selection import train_test_split
 from torchvision import transforms
@@ -44,7 +42,7 @@ class CifarDataset(Dataset):
     @classmethod
     def from_cifar(cls, config, download=True, transform=None):
 
-        root = config["data"]["data_path"]
+        root = config["data"]["data_dir"]
         # Load the CIFAR train and test datasets
         if config["data"]["dataset"] == "cifar10":
             trainset = CIFAR10(root=root, train=True, download=download, transform=transforms.ToTensor())
@@ -85,9 +83,9 @@ def get_cifar_dataloader(data_path, train_config):
     transform = transforms.Compose([transforms.ToTensor(),
                                     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
     
-    population_dataset = CifarDataset.from_cifar(root=data_path, download=True, transform=transform)
+    population_dataset = CifarDataset.from_cifar(config=train_config, download=True, transform=transform)
 
-    file_path = data_path + cifar_type + ".pkl"
+    file_path =  "data/"+ cifar_type + ".pkl"
     if not os.path.exists(file_path):
         with open(file_path, "wb") as file:
             pickle.dump(population_dataset, file)
