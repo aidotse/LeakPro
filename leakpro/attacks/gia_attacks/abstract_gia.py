@@ -2,7 +2,6 @@
 
 from abc import ABC, abstractmethod
 
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.utils.import_helper import Self
 

@@ -1,18 +1,19 @@
 """To be used in the future maybe."""
 from collections import defaultdict
-from typing import Self
 
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
+from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 
 def pre_train(model: nn.Module, trainloader: DataLoader, epochs: int = 10) -> None:
     """Pre train a model for a specified amount of epochs."""
     loss_fn = Classification()
-    {"dtype": torch.float, "device": torch.device("cuda" if torch.cuda.is_available() else "cpu")}
+    setup = {"dtype": torch.float, "device": torch.device("cuda" if torch.cuda.is_available() else "cpu")}
+    model.to(setup["device"])
     stats = defaultdict(list)
     optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9,
                                     weight_decay=5e-4, nesterov=True)
@@ -23,26 +24,22 @@ def pre_train(model: nn.Module, trainloader: DataLoader, epochs: int = 10) -> No
     for _ in range(epochs):
         logger.info(stats)
         model.train()
-        setup = {"dtype": torch.float, "device": torch.device("cuda" if torch.cuda.is_available() else "cpu")}
-        model.to(setup["device"])
-        epoch_loss, epoch_metric = 0, 0
-        for _, (inputs, targets) in enumerate(trainloader):
+        epoch_metric = 0
+        for i, (inputs, targets) in enumerate(trainloader):
             optimizer.zero_grad()
             inputs = inputs.to(**setup)
             targets = targets.to(device=setup["device"], non_blocking=False)
             outputs = model(inputs)
             loss, _, _ = loss_fn(outputs, targets)
-            epoch_loss += loss.item()
-
+            if i % 200 ==0 :
+                logger.info(f"train loss {loss}")
             loss.backward()
             optimizer.step()
 
             metric, name, _ = loss_fn.metric(outputs, targets)
             epoch_metric += metric.item()
-
         scheduler.step()
 
-        stats["train_losses"].append(epoch_loss / (len(trainloader) + 1))
         stats["train_" + name].append(epoch_metric / (len(trainloader) + 1))
         logger.info(stats)
 

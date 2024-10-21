@@ -1,5 +1,4 @@
 """Inverting on a single image."""
-from dataclasses import asdict
 
 from cifar import get_cifar10_loader
 from model import ResNet
@@ -16,5 +15,5 @@ if __name__ == "__main__":
     # meta train function designed to work with GIA
     train_fn = train
     # baseline config
-    configs = asdict(InvertingConfig())
+    configs = InvertingConfig()
     result = run_inverting(model, client_dataloader, train_fn, data_mean, data_std, configs)

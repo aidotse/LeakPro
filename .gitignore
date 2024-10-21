@@ -170,3 +170,5 @@ attack_objects/
 
 # Ignore outputs
 leakpro_output/*
+*.pth
+*.png

@@ -21,7 +21,7 @@ class InvertingConfig():
     """Possible configs for the Inverting Gradients attack."""
 
     # total variation scale for smoothing the reconstrutcions after each iteration
-    total_varation = 1.0e-06
+    total_variation = 1.0e-06
     # learning rate on the attack optimizer
     attack_lr = 0.1
     # iterations for the attack steps
@@ -37,19 +37,19 @@ class InvertingGradients(AbstractGIA):
     """Gradient inversion attack by Geiping et al."""
 
     def __init__(self: Self, model: Module, client_loader: DataLoader, train_fn: Callable,
-                 data_mean: Tensor, data_std: Tensor, configs: dict) -> None:
+                 data_mean: Tensor, data_std: Tensor, configs: InvertingConfig) -> None:
         super().__init__()
         self.model = model
         self.client_loader = client_loader
         self.train_fn = train_fn
         self.data_mean = data_mean
         self.data_std = data_std
-        self.t_v_scale = configs.get("total_variation", 1.0e-06)
-        self.attack_lr = configs.get("attack_lr", 0.1)
-        self.iterations = configs.get("at_iterations", 8000)
-        self.optimizer = configs.get("optimizer", MetaSGD())
-        self.criterion = configs.get("criterion", CrossEntropyLoss())
-        self.epochs = configs.get("epochs", 1)
+        self.t_v_scale = configs.total_variation
+        self.attack_lr = configs.attack_lr
+        self.iterations = configs.at_iterations
+        self.optimizer = configs.optimizer
+        self.criterion = configs.criterion
+        self.epochs = configs.epochs
         self.best_loss = float("inf")
         self.best_reconstruction = None
         self.best_reconstruction_round = None
@@ -111,8 +111,8 @@ class InvertingGradients(AbstractGIA):
                 self.reconstruction.data = torch.max(
                     torch.min(self.reconstruction, (1 - self.data_mean) / self.data_std), -self.data_mean / self.data_std
                     )
-            if i % 100 == 0:
-                logger.info(f"{i}: {loss}")
+            if i % 250 == 0:
+                logger.info(f"Iteration {i}, loss {loss}")
                 pass
             # Compares with original image to find which recreation is most similar
             if loss < self.best_loss:
