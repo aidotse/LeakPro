@@ -169,7 +169,7 @@ class GIAResults:
 
         output_denormalized = clamp(recreated_data * self.data_std + self.data_mean, 0, 1)
 
-        os.makedirs(save_path, exist_ok=True)
+        os.makedirs(save_path + "/" + attack_name, exist_ok=True)
 
         save_image(output_denormalized, os.path.join(save_path + "/" + attack_name, "recreated_image.png"))
 
