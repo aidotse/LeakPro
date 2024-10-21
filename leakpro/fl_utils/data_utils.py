@@ -2,6 +2,7 @@
 from torch import Tensor, cat, mean, randn, std, tensor
 from torch.utils.data import DataLoader, Dataset, TensorDataset
 
+
 def get_meanstd(trainset: Dataset, axis_to_reduce: tuple=(-2,-1)) -> tuple[Tensor, Tensor]:
     """Get mean and std of a dataset."""
     cc = cat([trainset[i][0].unsqueeze(0) for i in range(len(trainset))], dim=0)

@@ -1,7 +1,5 @@
 """Run script."""
-import os
-from collections import OrderedDict
-from typing import Callable, Optional
+from typing import Callable
 
 import torch
 from torch import Tensor
