@@ -1,10 +1,11 @@
 """Contains the AttackResult class, which stores the results of an attack."""
 
-from collections import defaultdict
-import os
 import json
-import numpy as np
+import os
+from collections import defaultdict
+
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import seaborn as sn
 from sklearn.metrics import (
@@ -104,7 +105,7 @@ class CombinedMetricResult:
             threshold: Threshold computed by the metric.
 
         """
-        # TODO REDIFINE THE CLASS SO IT DOSE NOT STORE MATRICIES BUT VECTORS 
+        # TODO REDIFINE THE CLASS SO IT DOSE NOT STORE MATRICIES BUT VECTORS
 
         self.predicted_labels = predicted_labels
         self.true_labels = true_labels
@@ -133,13 +134,13 @@ class CombinedMetricResult:
 
     def _get_primitives(self:Self):
         """Return the primitives of the CombinedMetricResult class."""
-        return {"predicted_labels": self.predicted_labels.tolist(), 
+        return {"predicted_labels": self.predicted_labels.tolist(),
             "true_labels": self.true_labels.tolist(),
-            "predictions_proba": self.predictions_proba.tolist() if isinstance(self.predictions_proba, np.ndarray) else None, 
+            "predictions_proba": self.predictions_proba.tolist() if isinstance(self.predictions_proba, np.ndarray) else None,
             "signal_values": self.signal_values.tolist() if isinstance(self.signal_values, np.ndarray) else None,
             "threshold": self.threshold.tolist() if isinstance(self.threshold, np.ndarray) else None,
         }
-    
+
     def save(self:Self, path: str, name: str, config:dict):
         """Save the CombinedMetricResult class to disk."""
 
@@ -157,11 +158,11 @@ class CombinedMetricResult:
         config_name = get_config_name(config["attack_list"][name])
 
         # Check if path exists, otherwise create it.
-        if not os.path.exists(f'{path}/{name}/{name}{config_name}'):
-            os.makedirs(f'{path}/{name}/{name}{config_name}')
+        if not os.path.exists(f"{path}/{name}/{name}{config_name}"):
+            os.makedirs(f"{path}/{name}/{name}{config_name}")
 
         # Save the results to a file
-        with open(f'{path}/{name}/{name}{config_name}/data.json', 'w') as f:
+        with open(f"{path}/{name}/{name}{config_name}/data.json", "w") as f:
             json.dump(data, f)
 
     def __str__(self:Self) -> str:
@@ -216,7 +217,7 @@ class MIAResult:
         self.metadata = metadata
         self.resultname = resultname
         self.id = id
-        
+
         if load:
             return
 
@@ -248,7 +249,7 @@ class MIAResult:
 
     def save(self:Self, path: str, name: str, config:dict = None):
         """Save the MIAResults to disk."""
-        
+
         print(config)
 
         result_config = config["attack_list"][name]
@@ -281,11 +282,11 @@ class MIAResult:
             os.makedirs(save_path)
 
         # Save the results to a file
-        with open(f'{save_path}/data.json', 'w') as f:
+        with open(f"{save_path}/data.json", "w") as f:
             json.dump(data, f)
 
         # Create ROC plot for MIAResult
-        filename = f'{save_path}/ROC'
+        filename = f"{save_path}/ROC"
         temp_res = MIAResult(load=True)
         temp_res.tpr = self.tpr
         temp_res.fpr = self.fpr
@@ -295,17 +296,17 @@ class MIAResult:
                         )
 
         # Create SignalHistogram plot for MIAResult
-        filename = f'{save_path}/SignalHistogram.png'
+        filename = f"{save_path}/SignalHistogram.png"
         self.create_signal_histogram(filename = filename,
                                     signal_values = self.signal_values,
                                     true_labels = self.true_labels,
                                     threshold = self.threshold
                                     )
-    
+
     def get_strongest(self, results) -> list:
         """Method for selecting the strongest attack."""
         return max((res for res in results), key=lambda d: d.roc_auc)
-    
+
     def create_signal_histogram(self, filename, signal_values, true_labels, threshold) -> None:
 
         values = np.array(signal_values).ravel()
@@ -347,7 +348,7 @@ class MIAResult:
         plt.title("Signal histogram")
         plt.savefig(fname=filename, dpi=1000)
         plt.clf()
-    
+
     def create_plot(self, results, filename = "", save_name = "") -> None:
 
         # Create plot for results
@@ -356,11 +357,11 @@ class MIAResult:
 
             plt.fill_between(res.fpr, res.tpr, alpha=0.15)
             plt.plot(res.fpr, res.tpr, label=label)
-        
+
         # Plot random guesses
         range01 = np.linspace(0, 1)
         plt.plot(range01, range01, "--", label="Random guess")
-        
+
         # Set plot parameters
         plt.yscale("log")
         plt.xscale("log")
@@ -368,12 +369,12 @@ class MIAResult:
         plt.ylim(bottom=1e-5)
         plt.tight_layout()
         plt.grid()
-        plt.legend(bbox_to_anchor =(0.5,-0.27), loc='lower center')
+        plt.legend(bbox_to_anchor =(0.5,-0.27), loc="lower center")
 
         plt.xlabel("False positive rate (FPR)")
         plt.ylabel("True positive rate (TPR)")
         plt.title(save_name+"ROC Curve")
-        plt.savefig(fname=f"{filename}.png", dpi=1000, bbox_inches='tight')
+        plt.savefig(fname=f"{filename}.png", dpi=1000, bbox_inches="tight")
         plt.clf()
 
     def create_results(
@@ -388,7 +389,7 @@ class MIAResult:
         self.create_plot(results, filename, save_name)
 
         return self._latex(results, save_name, filename)
-    
+
     def _latex(self, results, subsection, filename):
         """Latex method for MIAResult."""
 
@@ -400,12 +401,12 @@ class MIAResult:
         \\end{{figure}}
         """
 
-        latex_content += f'''
-        \\resizebox{{\\linewidth}}{{!}}{{%
-        \\begin{{tabularx}}{{\\textwidth}}{{l c l l l l}}
+        latex_content += """
+        \\resizebox{\\linewidth}{!}{%
+        \\begin{tabularx}{\\textwidth}{l c l l l l}
         Attack name & attack config & TPR: 1.0\\%FPR & 0.1\\%FPR & 0.01\\%FPR & 0.0\\%FPR \\\\
         \\hline 
-        '''
+        """
 
         def config_latex_style(config):
             config = " \\\\ ".join(config.split("-")[1:])
@@ -414,11 +415,11 @@ class MIAResult:
 
         for res in results:
             config = config_latex_style(res.id)
-            latex_content += f'''{"-".join(res.resultname.split("_"))} & {config} & {res.fixed_fpr_table["TPR@1.0%FPR"]} & {res.fixed_fpr_table["TPR@0.1%FPR"]} & {res.fixed_fpr_table["TPR@0.01%FPR"]} & {res.fixed_fpr_table["TPR@0.0%FPR"]} \\\\ \\hline 
-            '''
-        latex_content += f"""
-        \\end{{tabularx}}
-        }}
+            latex_content += f"""{"-".join(res.resultname.split("_"))} & {config} & {res.fixed_fpr_table["TPR@1.0%FPR"]} & {res.fixed_fpr_table["TPR@0.1%FPR"]} & {res.fixed_fpr_table["TPR@0.01%FPR"]} & {res.fixed_fpr_table["TPR@0.0%FPR"]} \\\\ \\hline 
+            """
+        latex_content += """
+        \\end{tabularx}
+        }
         \\newline
         """
         return latex_content
@@ -486,11 +487,11 @@ class GIAResults:
         }
 
         # Check if path exists, otherwise create it.
-        if not os.path.exists(f'{save_path}'):
-            os.makedirs(f'{save_path}')
+        if not os.path.exists(f"{save_path}"):
+            os.makedirs(f"{save_path}")
 
         # Save the results to a file
-        with open(f'{save_path}/data.json', 'w') as f:
+        with open(f"{save_path}/data.json", "w") as f:
             json.dump(data, f)
 
         pass
@@ -526,6 +527,7 @@ class SyntheticResult:
 
         Args:
         ----
+
         """
         # Initialize values to result object
         # self.values = values
@@ -555,16 +557,16 @@ class SyntheticResult:
         # Get the name for the attack configuration
         config_name = get_config_name(result_config)
         self.id = f"{name}{config_name}"
-        save_path = f'{path}/{name}/{self.id}'
+        save_path = f"{path}/{name}/{self.id}"
 
         # Check if path exists, otherwise create it.
-        if not os.path.exists(f'{save_path}'):
-            os.makedirs(f'{save_path}')
+        if not os.path.exists(f"{save_path}"):
+            os.makedirs(f"{save_path}")
 
         # Save the results to a file
-        with open(f'{save_path}/data.json', 'w') as f:
+        with open(f"{save_path}/data.json", "w") as f:
             json.dump(data, f)
-    
+
 class TEMPLATEResult:
     """Contains results related to the performance of the metric. It contains the results for multiple fpr."""
 
@@ -576,6 +578,7 @@ class TEMPLATEResult:
 
         Args:
         ----
+
         """
         # Initialize values to result object
         # self.values = values
@@ -607,13 +610,13 @@ class TEMPLATEResult:
         self.id = f"{name}{config_name}"
 
         # Check if path exists, otherwise create it.
-        if not os.path.exists(f'{path}/{name}/{self.id}'):
-            os.makedirs(f'{path}/{name}/{self.id}')
+        if not os.path.exists(f"{path}/{name}/{self.id}"):
+            os.makedirs(f"{path}/{name}/{self.id}")
 
         # Save the results to a file
-        with open(f'{path}/{name}/{self.id}/data.json', 'w') as f:
+        with open(f"{path}/{name}/{self.id}/data.json", "w") as f:
             json.dump(data, f)
-    
+
     def create_result(self, results):
         """Method for results."""
         def _latex(results):
@@ -629,7 +632,7 @@ class TEMPLATEResult:
         pass
 
 def get_result_fixed_fpr(fpr, tpr):
-    
+
     # Function to find TPR at given FPR thresholds
     def find_tpr_at_fpr(fpr_array:np.ndarray, tpr_array:np.ndarray, threshold:float): #-> Optional[str]:
         try:
@@ -655,11 +658,10 @@ def get_config_name(config):
     for key, value in zip(list(config.keys()), list(config.values())):
         if key in exclude:
             pass
+        elif type(value) is bool:
+            config_name += f"-{key}"
         else:
-            if type(value) is bool:
-                config_name += f"-{key}"
-            else:
-                config_name += f"-{key}={value}"
+            config_name += f"-{key}={value}"
     return config_name
 
 def reduce_to_unique_labels(results):
@@ -668,43 +670,43 @@ def reduce_to_unique_labels(results):
 
     # Dictionary to store name as key and a list of configurations as value
     name_configs = defaultdict(list)
-    
+
     # Parse each string and store configurations
     for s in strings:
-        parts = s.split('-')
+        parts = s.split("-")
         name = parts[0]  # The first part is the name
-        config = '-'.join(parts[1:]) if len(parts) > 1 else ''  # The rest is the configuration
+        config = "-".join(parts[1:]) if len(parts) > 1 else ""  # The rest is the configuration
         name_configs[name].append(config)  # Store the configuration under the name
-    
+
     def find_common_suffix(configs):
         """Helper function to find the common suffix among multiple configurations"""
         if not configs:
-            return ''
-        
+            return ""
+
         # Split each configuration by "-" and zip them in reverse to compare backwards
-        reversed_configs = [config.split('-')[::-1] for config in configs]
+        reversed_configs = [config.split("-")[::-1] for config in configs]
         common_suffix = []
-        
+
         for elements in zip(*reversed_configs):
             if all(e == elements[0] for e in elements):
                 common_suffix.append(elements[0])
             else:
                 break
-        
+
         # Return the common suffix as a string, reversed back to normal order
-        return '-'.join(common_suffix[::-1])
-    
+        return "-".join(common_suffix[::-1])
+
     result = []
-    
+
     # Process each name and its configurations
     for name, configs in name_configs.items():
         if len(configs) > 1:
             # Find the common suffix for the configurations
             common_suffix = find_common_suffix(configs)
-            
+
             # Remove the common suffix from each configuration
             trimmed_configs = [config[:-(len(common_suffix) + 1)] if common_suffix and config.endswith(common_suffix) else config for config in configs]
-            
+
             # Process configurations based on whether they share the same pattern
             for config in trimmed_configs:
                 if config:
@@ -714,7 +716,7 @@ def reduce_to_unique_labels(results):
         else:
             # If only one configuration, just return the string as is
             result.append(f"{name}")
-    
+
     return result
 
 

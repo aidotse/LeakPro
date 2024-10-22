@@ -316,7 +316,7 @@ class AttackLiRA(AbstractMIA):
         return MIAResult(
             predicted_labels=predictions,
             true_labels=true_labels,
-            predictions_proba=None, 
+            predictions_proba=None,
             signal_values=signal_values,
             audit_indices=self.audit_dataset["data"],
         )

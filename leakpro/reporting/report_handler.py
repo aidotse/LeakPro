@@ -1,12 +1,8 @@
 import json
 import logging
-import numpy as np
 import os
 import subprocess
 
-from leakpro.metrics.attack_result import CombinedMetricResult, MIAResult
-
-import matplotlib.pyplot as plt
 
 # Report Handler
 class ReportHandler():
@@ -20,15 +16,15 @@ class ReportHandler():
                            "GIAResults",
                            "SyntheticResult"
                            ]
-        
+
         # Initiate empty lists for the different types of LeakPro attack types
         for key in self.leakpro_types:
             self.pdf_results[key] = []
 
     def save_results(self, attack_name: str, result_data: dict, config: dict) -> None:
-        """Save attack results. """
-    
-        self.logger.info(f'Saving results for {attack_name}')
+        """Save attack results."""
+
+        self.logger.info(f"Saving results for {attack_name}")
         result_data.save(self.report_dir, attack_name, config)
 
     def load_results(self):
@@ -50,7 +46,7 @@ class ReportHandler():
                                 cls = globals()[resulttype]
                             else:
                                 raise ValueError(f"Class '{resulttype}' not found.")
-                            
+
                             # Initialize the class using the saved primitives
                             instance = cls(load=True)
                             instance.load(data)
@@ -69,7 +65,7 @@ class ReportHandler():
     def _get_results_of_name(self, results, resultname_value) -> list:
         indices = [idx for (idx, result) in enumerate(results) if result.resultname == resultname_value]
         return [results[idx] for idx in indices]
-    
+
     def _get_all_attacknames(self):
         attack_name_list = []
         for result in self.results:
@@ -103,11 +99,11 @@ class ReportHandler():
 
                 # If no results of type "result_type" is found, skip to next result_type
                 if len(results) == 0:
-                    self.logger.info(f"No \'strong\' results of type {result_type} found.")
+                    self.logger.info(f"No 'strong' results of type {result_type} found.")
                     continue
 
                 # Get all attack names
-                attack_name_grouped_results = [self._get_results_of_name(results, name) for name in self._get_all_attacknames()] 
+                attack_name_grouped_results = [self._get_results_of_name(results, name) for name in self._get_all_attacknames()]
 
                 # Get the strongest result for each attack name
                 strongest_results = [result[0].get_strongest(result) for result in attack_name_grouped_results]
@@ -132,9 +128,9 @@ class ReportHandler():
                 if len(results) == 0:
                     self.logger.info(f"No results of type {result_type} found.")
                     continue
-            
+
                 for name in all_attack_names:
-                    
+
                     try:
                         # Get result for each attack names
                         attack_results = self._get_results_of_name(results, name)
@@ -163,21 +159,21 @@ class ReportHandler():
         self._compile_pdf()
 
     def _init_pdf(self,):
-        self.latex_content = f"""
-        \\documentclass{{article}}
-        \\usepackage{{tabularx}}
-        \\usepackage{{graphicx}}
-        \\usepackage{{graphics}}        
-        \\begin{{document}}
+        self.latex_content = """
+        \\documentclass{article}
+        \\usepackage{tabularx}
+        \\usepackage{graphicx}
+        \\usepackage{graphics}        
+        \\begin{document}
         """
 
     def _compile_pdf(self, install_flag: bool = False):
         """Method to compile PDF."""
 
-        self.latex_content += f"""
-        \\end{{document}}
+        self.latex_content += """
+        \\end{document}
         """
-        with open(f'{self.report_dir}/LeakPro_output.tex', 'w') as f:
+        with open(f"{self.report_dir}/LeakPro_output.tex", "w") as f:
             f.write(self.latex_content)
 
         # Check if pdflatex is installed
@@ -186,7 +182,7 @@ class ReportHandler():
             assert "pdflatex" in check
         except:
             # Option to install pdflatex
-            self.logger.info("Could not find pdflatex installed\nPlease install pdflatex with \"apt install texlive-latex-base\"")
+            self.logger.info('Could not find pdflatex installed\nPlease install pdflatex with "apt install texlive-latex-base"')
             choice = input("Do you want to install pdflatex? (Y/n): ").lower()
             if (choice in {"y", "yes"} or install_flag==True):
                 proc = subprocess.Popen(["apt", "install", "-y", "texlive-latex-base"], stdout=subprocess.DEVNULL)
@@ -194,7 +190,7 @@ class ReportHandler():
 
         # Compile PDF if possible
         try:
-            cmd = ['pdflatex', '-interaction', 'nonstopmode', f'{self.report_dir}/LeakPro_output.tex']
+            cmd = ["pdflatex", "-interaction", "nonstopmode", f"{self.report_dir}/LeakPro_output.tex"]
             proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL)
             proc.communicate()
             self.logger.info("PDF compiled")
