@@ -165,8 +165,10 @@ class PytorchModel(Model):
         batch_samples_tensor = Tensor(np.array(batch_samples))
         batch_labels_tensor = batch_labels.clone().detach()
 
-        if batch_labels_tensor.dim() == 1:
-            batch_labels_tensor = batch_labels_tensor.unsqueeze(1)
+        if "num_classes" in self.model_obj.init_params:
+            num_classes = self.model_obj.init_params["num_classes"]
+            if num_classes <= 2 and batch_labels_tensor.dim() == 1:
+                batch_labels_tensor = batch_labels_tensor.unsqueeze(1)
 
         if per_point:
             return (
