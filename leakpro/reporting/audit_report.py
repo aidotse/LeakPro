@@ -648,7 +648,7 @@ def read_and_parse_data(filename:str) -> dict:
     return data
 
 # Main logic to process and save results
-def fixed_fpr_results(fpr:np.ndarray, tpr:np.ndarray, configs:dict, filename:str) -> None:
+def fixed_fpr_results(fpr:np.ndarray, tpr:np.ndarray, configs:dict, filename:str = None) -> None:
     """Compute and save fixed FPR results.
 
     Args:
