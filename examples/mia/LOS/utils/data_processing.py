@@ -47,7 +47,7 @@ class MimicDataset(Dataset):
         return MimicDataset(self.x[indices], self.y[indices])
     
 
-def get_mimic_dataset(path, train_frac, test_frac):
+def get_mimic_dataset(path, train_frac, validation_frac, test_frac):
     """Get the dataset, download it if necessary, and store it."""
     
     dataset_path = os.path.join(path, "dataset.pkl")
@@ -59,8 +59,9 @@ def get_mimic_dataset(path, train_frac, test_frac):
         with open(indices_path, "rb") as f:
             indices_dict = pickle.load(f)  # Load the dictionary containing indices
             train_indices = indices_dict['train_indices']  # Get the actual train indices
+            validation_indices = indices_dict['validation_indices']  # Get the actual validation indices
             test_indices = indices_dict['test_indices']    # Get the actual test indices
-        return dataset, train_indices, test_indices
+        return dataset, train_indices, validation_indices ,test_indices
 
     else:
         data_file_path = os.path.join(path, "all_hourly_data.h5")
@@ -81,17 +82,20 @@ def get_mimic_dataset(path, train_frac, test_frac):
                                                               columns=['hours_in']) for df in (train_data, holdout_data) ]
             
             # Reset the index to flatten the multi-index structure
-            flat_train, flat_holdout, Ys_train, Ys_test = [flatten_multi_index(df) 
-                                                                  for df in (flat_train, flat_holdout, y_train, y_holdout_data)]
+            flat_train, flat_holdout, y_flat_train, t_falt_houldout = [flatten_multi_index(df) 
+                                                                  for df in (flat_train, 
+                                                                             flat_holdout, 
+                                                                             y_train, 
+                                                                             y_holdout_data)]
             
             # Check for missing values in all relevant DataFrames
             assert_no_missing_values(train_data, holdout_data, flat_train, flat_holdout)
 
-            train_df, test_df = standard_scaler(flat_train, flat_holdout)
+            train_df, holdout_df = standard_scaler(flat_train, flat_holdout)
         
             # Creating the dataset
-            data_x = pd.concat((train_df, test_df), axis=0)
-            data_y = pd.concat((Ys_train, Ys_test), axis=0)
+            data_x = pd.concat((train_df, holdout_df), axis=0)
+            data_y = pd.concat((y_flat_train, t_falt_houldout), axis=0)
 
             assert np.issubdtype(data_x.values.dtype, np.number), "Non-numeric data found in features."
             assert np.issubdtype(data_y.values.dtype, np.number), "Non-numeric data found in labels."
@@ -99,7 +103,7 @@ def get_mimic_dataset(path, train_frac, test_frac):
             dataset = MimicDataset(data_x.values, data_y.values)
             
             # Generate indices for training and testing
-            train_indices, test_indices = data_indices(data_x, train_frac, test_frac)
+            train_indices, validation_indices, test_indices = data_indices(data_x, train_frac, validation_frac, test_frac)
 
             # Save the dataset to dataset.pkl
             with open(dataset_path, "wb") as file:
@@ -109,6 +113,7 @@ def get_mimic_dataset(path, train_frac, test_frac):
             # Save train and test indices to indices.pkl
             indices_to_save = {
                 "train_indices": train_indices,
+                "validation_indices": validation_indices,
                 "test_indices": test_indices
             }
             with open(indices_path, "wb") as file:
@@ -118,7 +123,7 @@ def get_mimic_dataset(path, train_frac, test_frac):
         else: 
             msg = "Please download the MIMIC-III dataset from https://physionet.org/content/mimiciii/1.4/ and save it in the specified path."
             raise FileNotFoundError(msg)
-    return dataset, train_indices, test_indices
+    return dataset, train_indices, validation_indices, test_indices
 
 
 def data_splitter(statics, data, train_frac):
@@ -184,26 +189,30 @@ def simple_imputer(df, ID_COLS):
     return df_out
 
 
-def data_indices(dataset, train_frac, test_frac):
+def data_indices(dataset, train_frac, valid_frac, test_frac):
     N = len(dataset)
     N_train = int(train_frac * N)
+    N_validation = int(valid_frac * N)
     N_test = int(test_frac * N)
     
     # Generate sequential indices for training and testing
     train_indices = list(range(N_train))  # Indices from 0 to N_train-1
-    test_indices = list(range(N_train, N_train + N_test))  # Indices from N_train to N_train + N_test-1
+    validation_indices = list(range(N_train, N_train + N_validation))  # Indices from N_train to N_train + N_validation-1
+    test_indices = list(range(N_train + N_validation, N_train + N_validation + N_test))  # Indices for test set
     
-    return train_indices, test_indices
+    return train_indices, validation_indices, test_indices
 
 
-def get_mimic_dataloaders(dataset, train_indices, test_indices, batch_size=128):
+def get_mimic_dataloaders(dataset, train_indices, validation_indices, test_indices, batch_size=128):
     train_subset = Subset(dataset, train_indices)
     test_subset = Subset(dataset, test_indices)
+    validation_subset = Subset(dataset, validation_indices)
 
     train_loader = DataLoader(train_subset, batch_size, shuffle=False)
     test_loader = DataLoader(test_subset, batch_size, shuffle=False)
+    validation_loader = DataLoader(validation_subset, batch_size, shuffle=False)
 
-    return train_loader, test_loader
+    return train_loader, validation_loader, test_loader
 
 
 def data_normalization(lvl2_train, lvl2_test):
