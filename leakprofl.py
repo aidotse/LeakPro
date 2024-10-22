@@ -12,8 +12,8 @@ from torch import manual_seed
 from torchvision.models.resnet import BasicBlock
 
 from dev_utils import shadow_model_blueprints
-from leakpro.attacks.attack_scheduler import AttackScheduler
 from dev_utils.cifar10_gia_input_handler import Cifar10GIAInputHandler
+from leakpro.attacks.attack_scheduler import AttackScheduler
 
 
 def setup_log(name: str, save_file: bool=True) -> logging.Logger:
