@@ -1,6 +1,6 @@
 """Geiping, Jonas, et al. "Inverting gradients-how easy is it to break privacy in federated learning?."."""
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import torch
 from torch import Tensor
@@ -17,21 +17,21 @@ from leakpro.utils.logger import logger
 
 
 @dataclass
-class InvertingConfig():
+class InvertingConfig:
     """Possible configs for the Inverting Gradients attack."""
 
-    # total variation scale for smoothing the reconstrutcions after each iteration
-    total_variation = 1.0e-06
+    # total variation scale for smoothing the reconstructions after each iteration
+    total_variation: float = 1.0e-06
     # learning rate on the attack optimizer
-    attack_lr = 0.1
+    attack_lr: float = 0.1
     # iterations for the attack steps
-    at_iterations = 8000
+    at_iterations: int = 8000
     # MetaOptimizer, see MetaSGD for implementation
-    optimizer = MetaSGD()
+    optimizer: object = field(default_factory=lambda: MetaSGD())
     # Client loss function
-    criterion = CrossEntropyLoss()
+    criterion: object = field(default_factory=lambda: CrossEntropyLoss())
     # Number of epochs for the client attack
-    epochs = 1
+    epochs: int = 1
 
 class InvertingGradients(AbstractGIA):
     """Gradient inversion attack by Geiping et al."""

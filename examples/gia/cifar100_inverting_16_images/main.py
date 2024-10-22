@@ -33,7 +33,6 @@ if __name__ == "__main__":
     # meta train function designed to work with GIA
     train_fn = train
     # lower total variation scale for larger batch sizes.
-    config = InvertingConfig()
-    config.total_variation = 1.0e-04
+    config = InvertingConfig(total_variation = 1.0e-04)
 
     result = run_inverting(model, client_trainloader, train_fn, data_mean, data_std, config)
