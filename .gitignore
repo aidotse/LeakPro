@@ -172,3 +172,4 @@ attack_objects/
 leakpro_output/*
 *.pth
 *.png
+nohup.out

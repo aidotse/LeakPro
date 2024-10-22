@@ -50,7 +50,7 @@ def run_inverting_audit(model: Module, dataset: Dataset,
         (4, 8)    # 4 batches of 8 images
     ]
 
-    total_variations = [1.0e-03, 1.0e-05, 1.0e-07]
+    total_variations = [1.0e-04, 1.0e-05, 1.0e-06]
 
     epochs_config = [1 , 4]
 
@@ -64,7 +64,7 @@ def run_inverting_audit(model: Module, dataset: Dataset,
             for epochs in epochs_config:
                 config.epochs = epochs
                 # Run the inverting attack with current client_loader and config
-                experiment_name = "Inverting_batch_size_"+str(num_batches)+"num_batches_"+str(num_batches) \
+                experiment_name = "Inverting_batch_size_"+str(batch_size)+"num_batches_"+str(num_batches) \
                                 +"_epochs_" + str(epochs) + "_tv_" + str(tv)
                 logger.info(f"Running experiment: {experiment_name}")
                 run_inverting(model, client_loader, train_fn, data_mean, data_std, config,
