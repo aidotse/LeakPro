@@ -168,9 +168,12 @@ class GIAResults:
         original_data = extract_tensors_from_subset(self.original_data.dataset)
 
         output_denormalized = clamp(recreated_data * self.data_std + self.data_mean, 0, 1)
-        save_image(output_denormalized, os.path.join(save_path, "recreated_image.png"))
+
+        os.makedirs(save_path + "/" + attack_name, exist_ok=True)
+
+        save_image(output_denormalized, os.path.join(save_path + "/" + attack_name, "recreated_image.png"))
 
         gt_denormalized = clamp(original_data * self.data_std + self.data_mean, 0, 1)
-        save_image(gt_denormalized, os.path.join(save_path, "original_image.png"))
+        save_image(gt_denormalized, os.path.join(save_path + "/" + attack_name, "original_image.png"))
 
         return attack_name
