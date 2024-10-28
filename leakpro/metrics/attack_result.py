@@ -303,6 +303,7 @@ class MIAResult:
                                     threshold = self.threshold
                                     )
 
+    @classmethod
     def get_strongest(self, results) -> list:
         """Method for selecting the strongest attack."""
         return max((res for res in results), key=lambda d: d.roc_auc)
@@ -377,6 +378,7 @@ class MIAResult:
         plt.savefig(fname=f"{filename}.png", dpi=1000, bbox_inches="tight")
         plt.clf()
 
+    @classmethod
     def create_results(
             self: Self,
             results: list,
@@ -496,6 +498,7 @@ class GIAResults:
 
         pass
 
+    @classmethod
     def create_result(self: Self, attack_name: str, save_path: str) -> None:
         """Result method for GIA."""
 
@@ -617,13 +620,7 @@ class TEMPLATEResult:
         with open(f"{path}/{name}/{self.id}/data.json", "w") as f:
             json.dump(data, f)
 
-    def create_result(self, results):
-        """Method for results."""
-        def _latex(results):
-            """Latex method for TEMPLATEResult"""
-            pass
-        pass
-
+    @classmethod
     def create_result(self, results):
         """Method for results."""
         def _latex(results):

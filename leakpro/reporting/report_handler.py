@@ -80,13 +80,22 @@ class ReportHandler():
                 results = [res for res in self.results if res.resulttype == result_type]
 
                 # If no results of type "result_type" is found, skip to next result_type
-                if len(results) == 0:
+                if not results:
                     self.logger.info(f"No results of type {result_type} found.")
                     continue
 
-                # Create all results
-                merged_result = results[0].create_results(results=results, save_dir=self.report_dir, save_name="all_results")
-                self.pdf_results[result_type].append(merged_result)
+                # Check if the result type has a 'create_results' method
+                try:
+                    result_class = globals().get(result_type)
+                except: 
+                    self.logger.info(f"No {result_type} class could be found or exists")
+                    continue
+                
+                if hasattr(result_class, 'create_results') and callable(getattr(result_class, 'create_results')):
+
+                    # Create all results
+                    merged_result = result_class.create_results(results=results, save_dir=self.report_dir, save_name="all_results")
+                    self.pdf_results[result_type].append(merged_result)
 
             except Exception as e:
                 print("all", e)
@@ -98,19 +107,26 @@ class ReportHandler():
                 results = [res for res in self.results if res.resulttype == result_type]
 
                 # If no results of type "result_type" is found, skip to next result_type
-                if len(results) == 0:
+                if not results:
                     self.logger.info(f"No 'strong' results of type {result_type} found.")
+                    continue
+
+                try:
+                    result_class = globals().get(result_type)
+                except: 
+                    self.logger.info(f"No {result_type} class could be found or exists")
                     continue
 
                 # Get all attack names
                 attack_name_grouped_results = [self._get_results_of_name(results, name) for name in self._get_all_attacknames()]
 
                 # Get the strongest result for each attack name
-                strongest_results = [result[0].get_strongest(result) for result in attack_name_grouped_results]
+                if hasattr(result_class, 'get_strongest') and callable(getattr(result_class, 'get_strongest')):
+                    strongest_results = [result_class.get_strongest(result) for result in attack_name_grouped_results]
 
-                # Create the strongest results
-                merged_result = results[0].create_results(results=strongest_results, save_dir=self.report_dir, save_name="strong_results")
-                self.pdf_results[result_type].append(merged_result)
+                    # Create the strongest results
+                    merged_result = result_class.create_results(results=strongest_results, save_dir=self.report_dir, save_name="strong_results")
+                    self.pdf_results[result_type].append(merged_result)
 
             except Exception as e:
                 print("results_strong", e)
@@ -125,22 +141,29 @@ class ReportHandler():
                 results = [res for res in self.results if res.resulttype == result_type]
 
                 # If no results of type "result_type" is found, skip to next result_type
-                if len(results) == 0:
-                    self.logger.info(f"No results of type {result_type} found.")
+                if not results:
+                    self.logger.info(f"No results of type {result_type} to group.")
+                    continue
+                
+                # Check if the result type has a 'create_results' method
+                try:
+                    result_class = globals().get(result_type)
+                except: 
+                    self.logger.info(f"No {result_type} class could be found or exists")
                     continue
 
                 for name in all_attack_names:
+                    if hasattr(result_class, 'create_results') and callable(getattr(result_class, 'create_results')):
+                        try:
+                            # Get result for each attack names
+                            attack_results = self._get_results_of_name(results, name)
 
-                    try:
-                        # Get result for each attack names
-                        attack_results = self._get_results_of_name(results, name)
+                            # Create results
+                            merged_result = result_class.create_results(results=attack_results, save_dir=self.report_dir, save_name="grouped_"+name)
+                            self.pdf_results[result_type].append(merged_result)
 
-                        # Create results
-                        merged_result = attack_results[0].create_results(results=attack_results, save_dir=self.report_dir, save_name="grouped_"+name)
-                        self.pdf_results[result_type].append(merged_result)
-
-                    except Exception as e:
-                        print("create_results_attackname_grouped", e)
+                        except Exception as e:
+                            print("create_results_attackname_grouped", e)
 
     def create_report(self):
         """Method to create PDF report"""
