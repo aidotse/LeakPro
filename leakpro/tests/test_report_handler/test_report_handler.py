@@ -1,27 +1,28 @@
-import unittest
-import os
-import json
 import logging
-import subprocess
+import os
 import tempfile
-from unittest.mock import MagicMock, patch, mock_open, call
-from leakpro.reporting.report_handler import ReportHandler
+from unittest.mock import MagicMock
+
 from leakpro.metrics.attack_result import *
+from leakpro.reporting.report_handler import ReportHandler
+from leakpro.utils.import_helper import Self
 
-class TestReportHandler(unittest.TestCase):
 
-    def setUp(self) -> None:
+class TestReportHandler():
+    """Test class of the ReportHandler."""
+
+    def setUp(self:Self) -> None:
         """Set up temporary directory and logger for ReportHandler."""
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.logger = logging.getLogger('test_logger')
+        self.logger = logging.getLogger("test_logger")
         self.logger.setLevel(logging.INFO)
         self.report_handler = ReportHandler(report_dir=self.temp_dir.name, logger=self.logger)
 
-    def tearDown(self) -> None:
+    def tearDown(self:Self) -> None:
         """Clean up temporary directory."""
         self.temp_dir.cleanup()
 
-    def test_report_handler_initialization(self) -> None:
+    def test_report_handler_initialization(self:Self) -> None:
         """Test the initialization of ReportHandler."""
         assert self.report_handler is not None
         assert self.report_handler.report_dir == self.temp_dir.name
@@ -29,27 +30,30 @@ class TestReportHandler(unittest.TestCase):
 
         types = ["MIAResult", "GIAResults", "SyntheticResult"]
         assert False not in [_type in types for _type in self.report_handler.leakpro_types]
-        assert True not in [True if self.report_handler.pdf_results[key] else False for key in self.report_handler.leakpro_types]
+        assert True not in [bool(self.report_handler.pdf_results[key]) for key in self.report_handler.leakpro_types]
         assert False not in [_type in globals() for _type in types]
 
-    def test_init_pdf(self) -> None:
-        assert hasattr(self.report_handler, 'latex_content') == False
+    def test_init_pdf(self:Self) -> None:
+        """Test the initialization method of the ReportHandler."""
+
+        if hasattr(self.report_handler, "latex_content"):
+            raise AssertionError
 
         self.report_handler._init_pdf()
         assert "documentclass" in self.report_handler.latex_content
         assert "begin" in self.report_handler.latex_content
 
-    def test_compile_pdf(self) -> None:
+    def test_compile_pdf(self:Self) -> None:
         """Test PDF compilation."""
 
         self.report_handler._init_pdf()
         self.report_handler._compile_pdf(install_flag=True)
 
         assert "end" in self.report_handler.latex_content
-        assert os.path.isfile(f'{self.report_handler.report_dir}/LeakPro_output.tex')
-        assert os.path.isfile(f'./LeakPro_output.pdf')
+        assert os.path.isfile(f"{self.report_handler.report_dir}/LeakPro_output.tex")
+        assert os.path.isfile("./LeakPro_output.pdf")
 
-    def test_get_all_attacknames(self) -> None:
+    def test_get_all_attacknames(self:Self) -> None:
         """Test retrieval of all attack names."""
         result_mock_1 = MagicMock(resultname="Attack1")
         result_mock_2 = MagicMock(resultname="Attack2")
@@ -59,8 +63,7 @@ class TestReportHandler(unittest.TestCase):
 
         assert attack_names == ["Attack1", "Attack2"]
 
-    def test_get_results_of_name(self):
-
+    def test_get_results_of_name(self:Self) -> None:
         """Test retrieval of all attack names."""
         result_mock_1 = MagicMock(resultname="Attack1")
         result_mock_2 = MagicMock(resultname="Attack2")

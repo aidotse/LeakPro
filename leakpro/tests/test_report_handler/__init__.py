@@ -1,1 +1,1 @@
-"""Init file for report handler tests"""
+"""Init file for report handler tests."""

@@ -1,15 +1,16 @@
-import unittest
-import os
 import json
-import logging
-import subprocess
+import os
 import tempfile
-from unittest.mock import MagicMock, patch, mock_open, call
+import unittest
+from unittest.mock import MagicMock
+
 from leakpro.metrics.attack_result import *
+from leakpro.utils.import_helper import Self
+
 
 class TestMIAResult(unittest.TestCase):
 
-    def setUp(self) -> None:
+    def setUp(self:Self) -> None:
         """Set up temporary directory and logger for MIAResult."""
         self.temp_dir = tempfile.TemporaryDirectory()
 
@@ -30,7 +31,7 @@ class TestMIAResult(unittest.TestCase):
                                     [ 0.46973035],
                                     [-0.1584589 ],
                                     [ 0.14289466]])
-        
+
 
         predictions_proba = None
         threshold = None
@@ -39,53 +40,53 @@ class TestMIAResult(unittest.TestCase):
         id = None
 
         self.miaresult = MIAResult(predicted_labels = predicted_labels,
-                                    true_labels = true_labels, 
+                                    true_labels = true_labels,
                                     signal_values = signal_values,
                                     predictions_proba = predictions_proba,
                                     threshold = threshold,
                                     audit_indices = audit_indices,
                                     resultname = resultname,
                                     id = id)
-        
-        
-        
-        self.config = {'random_seed': 1234, 'attack_list':
-                            {'lira': 
-                                    {'training_data_fraction': 0.5,
-                                     'num_shadow_models': 3,
-                                     'online': True}
+
+
+
+        self.config = {"random_seed": 1234, "attack_list":
+                            {"lira":
+                                    {"training_data_fraction": 0.5,
+                                     "num_shadow_models": 3,
+                                     "online": True}
                             },
-                        'report_log': 
-                                './leakpro_output/results',
-                                'config_log': 
-                                        './leakpro_output/config', 
-                                        'target_model_folder': 
-                                                        './target',     
-                                                        'attack_folder': 
-                                                                'attack_objects', 
-                                                                'attack_type': 
-                                                                        'mia', 
-                                                                        'split_method': 
-                                                                                'no_overlapping'
+                        "report_log":
+                                "./leakpro_output/results",
+                                "config_log":
+                                        "./leakpro_output/config",
+                                        "target_model_folder":
+                                                        "./target",
+                                                        "attack_folder":
+                                                                "attack_objects",
+                                                                "attack_type":
+                                                                        "mia",
+                                                                        "split_method":
+                                                                                "no_overlapping"
                         }
 
-    def tearDown(self) -> None:
+    def tearDown(self:Self) -> None:
         """Clean up temporary directory."""
         self.temp_dir.cleanup()
 
-    def test_MIAResult_init(self) -> None:
+    def test_MIAResult_init(self:Self) -> None:
         """Test the initialization of MIAResult."""
         assert self.miaresult.id == None
 
-    def test_check_tpr_fpr(self):
+    def test_check_tpr_fpr(self:Self) -> None:
         assert np.allclose(self.miaresult.tpr, np.array([0., 0., 0.16666667, 0.5, 1., 1., 1., 1., 1., 1.]))
         assert self.miaresult.fp.all() == 0.
         assert self.miaresult.tn.all() == 0.
 
-    def test_save_load_MIAResult(self) -> None:
-        
+    def test_save_load_MIAResult(self:Self) -> None:
+
         name = "lira"
-        config_name = get_config_name(self.config['attack_list'][name])
+        config_name = get_config_name(self.config["attack_list"][name])
         save_path = f"{self.temp_dir}/{name}/{name}{config_name}"
 
         # Test saving
@@ -99,16 +100,16 @@ class TestMIAResult(unittest.TestCase):
         # Test loading
         with open(f"{save_path}/data.json") as f:
             data = json.load(f)
-        
+
         self.miaresult_new = MIAResult(load=True)
         assert self.miaresult_new.predicted_labels == None
         assert self.miaresult_new.true_labels == None
         assert self.miaresult_new.signal_values == None
-        
+
         self.miaresult_new.load(data)
         assert np.allclose(self.miaresult_new.tpr, np.array([0., 0., 0.16666667, 0.5, 1., 1., 1., 1., 1., 1.]))
 
-    def test_get_strongest_MIAResult(self) -> None:
+    def test_get_strongest_MIAResult(self:Self) -> None:
         """Test selecting the strongest attack based on ROC AUC."""
         result_1 = MagicMock(roc_auc=0.75)
         result_2 = MagicMock(roc_auc=0.85)
@@ -120,7 +121,7 @@ class TestMIAResult(unittest.TestCase):
         # The strongest attack should be the one with the highest ROC AUC
         assert strongest == result_2
 
-    def test_latex(self):
+    def test_latex(self:Self) -> None:
         """Test if the LaTeX content is generated correctly."""
 
         result = [MagicMock(id="attack-config-1", resultname="test_attack_1", fixed_fpr_table={"TPR@1.0%FPR": 0.90, "TPR@0.1%FPR": 0.80, "TPR@0.01%FPR": 0.70, "TPR@0.0%FPR": 0.60})]
@@ -146,4 +147,4 @@ class TestMIAResult(unittest.TestCase):
         self.assertIn("0.6", latex_content)
 
         # Ensure the LaTeX content ends properly
-        self.assertIn("\\newline\n", latex_content)    
+        self.assertIn("\\newline\n", latex_content)

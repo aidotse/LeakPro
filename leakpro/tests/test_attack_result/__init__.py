@@ -1,1 +1,1 @@
-"""Init file for attack result tests"""
+"""Init file for attack result tests."""
