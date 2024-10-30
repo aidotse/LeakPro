@@ -1,12 +1,18 @@
-import copy, math, os, pickle, time, pandas as pd, numpy as np
+import copy, math, os, pickle, time, pandas as pd, numpy as np, scipy.stats as ss
 
-import torch, torch.utils.data as utils, torch.nn as nn, torch.nn.functional as F
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import average_precision_score, roc_auc_score, accuracy_score, f1_score
+
+import torch, torch.utils.data as utils, torch.nn as nn, torch.nn.functional as F, torch.optim as optim
 from torch.autograd import Variable
 from torch.nn.parameter import Parameter
 
+
 def to_3D_tensor(df):
     idx = pd.IndexSlice
-    return np.dstack((df.loc[idx[:,:,:,i], :].values for i in sorted(set(df.index.get_level_values('hours_in')))))
+    return np.dstack([df.loc[idx[:, :, :, i], :].values for i in sorted(set(df.index.get_level_values('hours_in')))])
+
 def prepare_dataloader(df, Ys, batch_size, shuffle=True):
     """
     dfs = (df_train, df_dev, df_test).
@@ -16,8 +22,7 @@ def prepare_dataloader(df, Ys, batch_size, shuffle=True):
     X     = torch.from_numpy(to_3D_tensor(df).astype(np.float32))
     label = torch.from_numpy(Ys.values.astype(np.int64))
     dataset = utils.TensorDataset(X, label)
-    
-    return utils.DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, drop_last = True)
+    return utils.DataLoader(dataset, batch_size =int(batch_size) , shuffle=shuffle, drop_last = True)
 
 class FilterLinear(nn.Module):
     def __init__(self, in_features, out_features, filter_square_matrix, bias=True):
@@ -133,8 +138,11 @@ class GRUD(nn.Module):
             h: the updated hidden state of the network
         """
         
+        # Assert to check for NaNs in x_mean
+        assert not torch.isnan(x_mean).any(), "NaN values found in x_mean"
+
         batch_size = x.size()[0]
-        dim_size = x.size()[1]
+        # dim_size = x.size()[1]
         
         gamma_x_l_delta = self.gamma_x_l(delta)
         delta_x = torch.exp(-torch.max(self.zeros, gamma_x_l_delta)) #exponentiated negative rectifier
@@ -143,11 +151,14 @@ class GRUD(nn.Module):
         delta_h = torch.exp(-torch.max(self.zeros_h, gamma_h_l_delta)) #self.zeros became self.zeros_h to accomodate hidden size != input size
         
         x_mean = x_mean.repeat(batch_size, 1)
-        
+
         x = mask * x + (1 - mask) * (delta_x * x_last_obsv + (1 - delta_x) * x_mean)
         h = delta_h * h
         
         combined = torch.cat((x, h, mask), 1)
+        # Assert to check for NaNs in combined
+        assert not torch.isnan(combined).any(), "NaN values found in combined"
+        
         z = torch.sigmoid(self.zl(combined)) #sigmoid(W_z*x_t + U_z*h_{t-1} + V_z*m_t + bz)
         r = torch.sigmoid(self.rl(combined)) #sigmoid(W_r*x_t + U_r*h_{t-1} + V_r*m_t + br)
         combined_new = torch.cat((x, r*h, mask), 1)
@@ -157,26 +168,21 @@ class GRUD(nn.Module):
         return h
     
     def forward(self, X, X_last_obsv, Mask, Delta):
+       
         batch_size = X.size(0)
-#         type_size = input.size(1)
         step_size = X.size(1) # num timepoints
-        spatial_size = X.size(2) # num features
-        
         Hidden_State = self.initHidden(batch_size)
-#         X = torch.squeeze(input[:,0,:,:])
-#         X_last_obsv = torch.squeeze(input[:,1,:,:])
-#         Mask = torch.squeeze(input[:,2,:,:])
-#         Delta = torch.squeeze(input[:,3,:,:])
+
         
         outputs = None
         for i in range(step_size):
             Hidden_State = self.step(
-                torch.squeeze(X[:,i:i+1,:], 1),
-                torch.squeeze(X_last_obsv[:,i:i+1,:], 1),
-                torch.squeeze(self.X_mean[:,i:i+1,:], 1),
+                torch.squeeze(X[:,i,:], 1),
+                torch.squeeze(X_last_obsv[:,i,:], 1), # At the starting point, this is the same as X
+                torch.squeeze(self.X_mean[:,i,:], 1), 
                 Hidden_State,
-                torch.squeeze(Mask[:,i:i+1,:], 1),
-                torch.squeeze(Delta[:,i:i+1,:], 1),
+                torch.squeeze(Mask[:,i,:], 1),
+                torch.squeeze(Delta[:,i,:], 1), # time of measurment 
             )
             if outputs is None:
                 outputs = Hidden_State.unsqueeze(1)
@@ -188,11 +194,6 @@ class GRUD(nn.Module):
         self.drop(self.bn(self.fc(Hidden_State)))
         return self.drop(self.bn(self.fc(Hidden_State)))
                 
-#         if self.output_last:
-#             return outputs[:,-1,:]
-#         else:
-#             return outputs
-    
     def initHidden(self, batch_size):
         use_gpu = torch.cuda.is_available()
         if use_gpu:
@@ -220,15 +221,13 @@ def Train_Model(
         print('Output type dermined by the model')
         
     loss_MSE = torch.nn.MSELoss()
-    loss_nll=torch.nn.NLLLoss()
     loss_CEL=torch.nn.CrossEntropyLoss()
-    loss_L1 = torch.nn.L1Loss()
     
 #     optimizer = torch.optim.RMSprop(model.parameters(), lr = learning_rate, alpha=0.99)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     use_gpu = False#torch.cuda.is_available()
     
-    interval = 100
+
     losses_train = []
     losses_valid = []
     losses_epochs_train = []
@@ -258,7 +257,7 @@ def Train_Model(
             mask = torch.transpose(mask, 1, 2)
             measurement = torch.transpose(measurement, 1, 2)
             time_ = torch.transpose(time_, 1, 2)
-            measurement_last_obsv = measurement            
+            measurement_last_obsv = measurement
 
             assert measurement.size()[0] == batch_size, "Batch Size doesn't match! %s" % str(measurement.size())
 
@@ -274,12 +273,7 @@ def Train_Model(
 
 #             outputs = model(inputs)
             prediction=model(X, X_last_obsv, Mask, Delta)
-    
-#             print(torch.sum(torch.sum(torch.isnan(prediction))))
-            
-#             print(labels.shape)
-#             print(prediction.shape)
-            
+
             if output_last:
                 loss_train = loss_CEL(torch.squeeze(prediction), torch.squeeze(labels))
             else:
@@ -406,8 +400,6 @@ def predict_proba(model, dataloader):
     
     probabilities = []
     labels        = []
-    ethnicities   = []
-    genders       = []
     for X, label in dataloader:
         X = X.numpy()
         mask        = torch.from_numpy(X[:, np.arange(0, X.shape[1], 3), :].astype(np.float32))
@@ -426,10 +418,8 @@ def predict_proba(model, dataloader):
 #                 inputs, labels = Variable(inputs), Variable(labels)
             convert_to_tensor=lambda x: Variable(x)
             X, X_last_obsv, Mask, Delta, label  = map(convert_to_tensor, [measurement, measurement_last_obsv, mask, time_, label])
-
         
         prob = model(X, X_last_obsv, Mask, Delta)
-        
         probabilities.append(prob.detach().cpu().data.numpy())
         labels.append(label.detach().cpu().data.numpy())
 
