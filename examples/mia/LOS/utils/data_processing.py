@@ -47,9 +47,17 @@ class MimicDataset(Dataset):
         return MimicDataset(self.x[indices], self.y[indices])
     
 
-def get_mimic_dataset(path, train_frac, validation_frac, test_frac):
+def get_mimic_dataset(path, 
+                      train_frac,
+                      validation_frac,
+                      test_frac,
+                      early_stop_frac):
     """Get the dataset, download it if necessary, and store it."""
     
+    # Assert that the sum of all fractions is between 0 and 1
+    total_frac = train_frac + validation_frac + test_frac + early_stop_frac
+    assert 0 < total_frac < 1, "The sum of dataset fractions must be between 0 and 1."
+
     dataset_path = os.path.join(path, "dataset.pkl")
     indices_path = os.path.join(path, "indices.pkl")
     
@@ -61,7 +69,8 @@ def get_mimic_dataset(path, train_frac, validation_frac, test_frac):
             train_indices = indices_dict['train_indices']  # Get the actual train indices
             validation_indices = indices_dict['validation_indices']  # Get the actual validation indices
             test_indices = indices_dict['test_indices']    # Get the actual test indices
-        return dataset, train_indices, validation_indices ,test_indices
+            early_stop_indices = indices_dict['early_stop_indices']  # Get the actual early stop indices
+        return dataset, train_indices, validation_indices ,test_indices, early_stop_indices
 
     else:
         data_file_path = os.path.join(path, "all_hourly_data.h5")
@@ -102,9 +111,13 @@ def get_mimic_dataset(path, train_frac, validation_frac, test_frac):
 
             dataset = MimicDataset(data_x.values, data_y.values)
             
-            # Generate indices for training and testing
-            train_indices, validation_indices, test_indices = data_indices(data_x, train_frac, validation_frac, test_frac)
-
+            # Generate indices for training, validation, test, and early stopping
+            train_indices, validation_indices, test_indices, early_stop_indices = data_indices(data_x,
+                                                                           train_frac,
+                                                                           validation_frac,
+                                                                           test_frac,
+                                                                           early_stop_frac)
+            
             # Save the dataset to dataset.pkl
             with open(dataset_path, "wb") as file:
                 pickle.dump(dataset, file)
@@ -114,7 +127,8 @@ def get_mimic_dataset(path, train_frac, validation_frac, test_frac):
             indices_to_save = {
                 "train_indices": train_indices,
                 "validation_indices": validation_indices,
-                "test_indices": test_indices
+                "test_indices": test_indices,
+                "early_stop_indices": early_stop_indices,
             }
             with open(indices_path, "wb") as file:
                 pickle.dump(indices_to_save, file)
@@ -123,10 +137,12 @@ def get_mimic_dataset(path, train_frac, validation_frac, test_frac):
         else: 
             msg = "Please download the MIMIC-III dataset from https://physionet.org/content/mimiciii/1.4/ and save it in the specified path."
             raise FileNotFoundError(msg)
-    return dataset, train_indices, validation_indices, test_indices
+    return dataset, train_indices, validation_indices, test_indices, early_stop_indices
 
 
-def data_splitter(statics, data, train_frac):
+def data_splitter(statics,
+                  data,
+                  train_frac):
     GAP_TIME = 6  # In hours
     WINDOW_SIZE = 24 # In hours
     SEED = 1
@@ -162,7 +178,8 @@ def data_splitter(statics, data, train_frac):
     ]
     return train_data, holdout_data, y_train, y_holdout
 
-def simple_imputer(df, ID_COLS):
+def simple_imputer(df,
+                   ID_COLS):
     idx = pd.IndexSlice
     df = df.copy()
     if len(df.columns.names) > 2: df.columns = df.columns.droplevel(('label', 'LEVEL1', 'LEVEL2'))
@@ -189,33 +206,46 @@ def simple_imputer(df, ID_COLS):
     return df_out
 
 
-def data_indices(dataset, train_frac, valid_frac, test_frac):
+def data_indices(dataset,
+                 train_frac,
+                 valid_frac,
+                 test_frac,
+                 early_stop_frac):
     N = len(dataset)
     N_train = int(train_frac * N)
     N_validation = int(valid_frac * N)
     N_test = int(test_frac * N)
+    N_early_stop = int(early_stop_frac * N)
     
     # Generate sequential indices for training and testing
     train_indices = list(range(N_train))  # Indices from 0 to N_train-1
     validation_indices = list(range(N_train, N_train + N_validation))  # Indices from N_train to N_train + N_validation-1
     test_indices = list(range(N_train + N_validation, N_train + N_validation + N_test))  # Indices for test set
-    
-    return train_indices, validation_indices, test_indices
+    early_stop_indices = list(range(N_train + N_validation + N_test, N_train + N_validation + N_test + N_early_stop))
+    return train_indices, validation_indices, test_indices, early_stop_indices
 
 
-def get_mimic_dataloaders(dataset, train_indices, validation_indices, test_indices, batch_size=128):
+def get_mimic_dataloaders(dataset,
+                          train_indices,
+                          validation_indices,
+                          test_indices,
+                          early_stop_indices,
+                          batch_size=128):
     train_subset = Subset(dataset, train_indices)
     test_subset = Subset(dataset, test_indices)
     validation_subset = Subset(dataset, validation_indices)
+    early_stop_subset = Subset(dataset, early_stop_indices)
 
     train_loader = DataLoader(train_subset, batch_size, shuffle=False)
     test_loader = DataLoader(test_subset, batch_size, shuffle=False)
     validation_loader = DataLoader(validation_subset, batch_size, shuffle=False)
+    early_stop_loader = DataLoader(early_stop_subset, batch_size, shuffle=False)
 
-    return train_loader, validation_loader, test_loader
+    return train_loader, validation_loader, test_loader, early_stop_loader
 
 
-def data_normalization(lvl2_train, lvl2_test):
+def data_normalization(lvl2_train,
+                       lvl2_test):
     idx = pd.IndexSlice
     lvl2_means, lvl2_stds = lvl2_train.loc[:, idx[:,'mean']].mean(axis=0), lvl2_train.loc[:, idx[:,'mean']].std(axis=0)
 
@@ -224,7 +254,8 @@ def data_normalization(lvl2_train, lvl2_test):
     return lvl2_train, lvl2_test
 
 
-def standard_scaler(flat_train, flat_test):
+def standard_scaler(flat_train,
+                    flat_test):
     # Initialize the scaler
     scaler = StandardScaler()
 
