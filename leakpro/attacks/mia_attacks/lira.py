@@ -7,7 +7,7 @@ from tqdm import tqdm
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.boosting import Memorization
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
-from leakpro.import_helper import Self
+from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.metrics.attack_result import CombinedMetricResult, MIAResult
 from leakpro.signals.signal import ModelRescaledLogits
 from leakpro.utils.import_helper import Self
@@ -49,6 +49,7 @@ class AttackLiRA(AbstractMIA):
         self.training_data_fraction = configs.get("training_data_fraction", 0.5)
         self.include_train_data = configs.get("include_train_data", self.online)
         self.include_test_data = configs.get("include_test_data", self.online)
+        self.eval_batch_size = configs.get("eval_batch_size", 32)
 
         # Memorization config
         # Activate memorization
@@ -70,6 +71,7 @@ class AttackLiRA(AbstractMIA):
         validation_dict = {
             "num_shadow_models": (self.num_shadow_models, 1, None),
             "training_data_fraction": (self.training_data_fraction, 0, 1),
+            "eval_batch_size": (self.eval_batch_size, 1, 1_000_000),
             "memorization_threshold": (self.memorization_threshold, 0, 1),
             "min_num_memorization_audit_points": (self.min_num_memorization_audit_points, 1, 1_000_000),
             "num_memorization_audit_points": (self.num_memorization_audit_points, 0, 1_000_000),
@@ -149,7 +151,6 @@ class AttackLiRA(AbstractMIA):
             self.audit_dataset["data"] = self.audit_dataset["data"]
             self.in_members = self.audit_dataset["in_members"]
             self.out_members = self.audit_dataset["out_members"]
-            # mask = [True if indice in self.in_members else False for indice in self.audit_dataset["data"]]
 
         # Check offline attack for possible IN- sample(s)
         if not self.online:
@@ -158,15 +159,14 @@ class AttackLiRA(AbstractMIA):
                 logger.info(f"Some shadow model(s) contains {count_in_samples} IN samples in total for the model(s)")
                 logger.info("This is not an offline attack!")
 
-        self.batch_size = 20000 #int(len(self.audit_dataset["data"])/2)
         self.logger.info(f"Calculating the logits for all {self.num_shadow_models} shadow models")
-        self.shadow_models_logits = np.swapaxes(self.signal(self.shadow_models, self.handler, self.audit_dataset["data"],\
-                                                            self.batch_size), 0, 1)
+        self.shadow_models_logits = np.swapaxes(self.signal(self.shadow_models, self.handler, self.audit_dataset["data"],
+                                                                                                self.eval_batch_size), 0, 1)
 
         # Calculate logits for the target model
         self.logger.info("Calculating the logits for the target model")
-        self.target_logits = np.swapaxes(self.signal([self.target_model], self.handler, self.audit_dataset["data"], self.batch_size),\
-                                        0, 1).squeeze()
+        self.target_logits = np.swapaxes(self.signal([self.target_model], self.handler, self.audit_dataset["data"],
+                                                                                    self.eval_batch_size), 0, 1).squeeze()
 
         # Using Memorizationg boosting
         if self.memorization:
@@ -190,7 +190,7 @@ class AttackLiRA(AbstractMIA):
                 org_audit_data_length,
                 self.handler,
                 self.online,
-                self.batch_size,
+                self.eval_batch_size,
             )
             memorization_mask, _, _ = memorization.run()
 

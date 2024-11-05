@@ -1,9 +1,10 @@
+"""Tests for the report_handler module."""
+
 import logging
 import os
 import tempfile
 from unittest.mock import MagicMock
 
-from leakpro.metrics.attack_result import *
 from leakpro.reporting.report_handler import ReportHandler
 from leakpro.utils.import_helper import Self
 

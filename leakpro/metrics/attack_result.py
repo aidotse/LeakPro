@@ -132,7 +132,7 @@ class CombinedMetricResult:
 
         self.roc_auc = auc(self.fpr, self.tpr)
 
-    def _get_primitives(self:Self):
+    def _get_primitives(self:Self) -> dict:
         """Return the primitives of the CombinedMetricResult class."""
         return {"predicted_labels": self.predicted_labels.tolist(),
             "true_labels": self.true_labels.tolist(),
@@ -141,7 +141,7 @@ class CombinedMetricResult:
             "threshold": self.threshold.tolist() if isinstance(self.threshold, np.ndarray) else None,
         }
 
-    def save(self:Self, path: str, name: str, config:dict):
+    def save(self:Self, path: str, name: str, config:dict) -> None:
         """Save the CombinedMetricResult class to disk."""
 
         # Primitives are the set of variables to re-create the class from scratch
@@ -205,6 +205,11 @@ class MIAResult:
             predictions_proba: Continuous version of the predicted_labels.
             signal_values: Values of the signal used by the metric.
             threshold: Threshold computed by the metric.
+            audit_indices: The connesponding dataset indices for the results
+            id: The identity of the attack
+            load: If the data should be loaded
+            metadata: Metadata about the results
+            resultname: The name of the attack and result
 
         """
 
@@ -234,7 +239,9 @@ class MIAResult:
         self.tpr = self.tp / (self.tp + self.fn)
         self.roc_auc = auc(self.fpr, self.tpr)
 
-    def load(self, data):
+    def load(self:Self, data: dict) -> None:
+        """Load the MIAResults to disk."""
+
         self.resultname = data["resultname"]
         self.resulttype = data["resulttype"]
         self.tpr = data["tpr"]
@@ -247,10 +254,8 @@ class MIAResult:
         self.true_labels = data["true_labels"]
         self.threshold = data["threshold"]
 
-    def save(self:Self, path: str, name: str, config:dict = None):
+    def save(self:Self, path: str, name: str, config:dict = None) -> None:
         """Save the MIAResults to disk."""
-
-        print(config)
 
         result_config = config["attack_list"][name]
         fixed_fpr_table = get_result_fixed_fpr(self.fpr, self.tpr)
@@ -303,16 +308,16 @@ class MIAResult:
                                     threshold = self.threshold
                                     )
 
-    @classmethod
-    def get_strongest(self, results) -> list:
+    @staticmethod
+    def get_strongest(results: list) -> list:
         """Method for selecting the strongest attack."""
         return max((res for res in results), key=lambda d: d.roc_auc)
 
-    def create_signal_histogram(self, filename, signal_values, true_labels, threshold) -> None:
+    def create_signal_histogram(self:Self, filename: str, signal_values: list, true_labels: list, threshold: float) -> None:
+        """Method to create Signal Histogram."""
 
         values = np.array(signal_values).ravel()
         labels = np.array(true_labels).ravel()
-        threshold = threshold
 
         data = pd.DataFrame(
                 {
@@ -350,7 +355,11 @@ class MIAResult:
         plt.savefig(fname=filename, dpi=1000)
         plt.clf()
 
-    def create_plot(self, results, filename = "", save_name = "") -> None:
+    @staticmethod
+    def create_plot(results: list, save_dir: str = "", save_name: str = "") -> None:
+        """Plot method for MIAResult."""
+
+        filename = f"{save_dir}/{save_name}"
 
         # Create plot for results
         reduced_labels = reduce_to_unique_labels(results)
@@ -378,26 +387,27 @@ class MIAResult:
         plt.savefig(fname=f"{filename}.png", dpi=1000, bbox_inches="tight")
         plt.clf()
 
-    @classmethod
+    @staticmethod
     def create_results(
-            self: Self,
             results: list,
             save_dir: str = "./",
             save_name: str = "foo",
-        ):
+        ) -> str:
+        """Result method for MIAResult."""
+
+        MIAResult.create_plot(results, save_dir, save_name)
+
+        return MIAResult._latex(results, save_dir, save_name)
+
+    @staticmethod
+    def _latex(results: list, save_dir: str, save_name: str) -> str:
+        """Latex method for MIAResult."""
 
         filename = f"{save_dir}/{save_name}"
 
-        self.create_plot(results, filename, save_name)
-
-        return self._latex(results, save_name, filename)
-
-    def _latex(self, results, subsection, filename):
-        """Latex method for MIAResult."""
-
         latex_content = ""
         latex_content += f"""
-        \\subsection{{{" ".join(subsection.split("_"))}}}
+        \\subsection{{{" ".join(save_name.split("_"))}}}
         \\begin{{figure}}[ht]
         \\includegraphics[width=0.8\\textwidth]{{{filename}.png}}
         \\end{{figure}}
@@ -407,18 +417,19 @@ class MIAResult:
         \\resizebox{\\linewidth}{!}{%
         \\begin{tabularx}{\\textwidth}{l c l l l l}
         Attack name & attack config & TPR: 1.0\\%FPR & 0.1\\%FPR & 0.01\\%FPR & 0.0\\%FPR \\\\
-        \\hline 
+        \\hline
         """
 
-        def config_latex_style(config):
+        def config_latex_style(config: str) -> str:
             config = " \\\\ ".join(config.split("-")[1:])
             config = "-".join(config.split("_"))
             return f"""\\shortstack{{{config}}}"""
 
         for res in results:
             config = config_latex_style(res.id)
-            latex_content += f"""{"-".join(res.resultname.split("_"))} & {config} & {res.fixed_fpr_table["TPR@1.0%FPR"]} & {res.fixed_fpr_table["TPR@0.1%FPR"]} & {res.fixed_fpr_table["TPR@0.01%FPR"]} & {res.fixed_fpr_table["TPR@0.0%FPR"]} \\\\ \\hline 
-            """
+            latex_content += f"""{"-".join(res.resultname.split("_"))} & {config} & {res.fixed_fpr_table["TPR@1.0%FPR"]} &
+                                {res.fixed_fpr_table["TPR@0.1%FPR"]} & {res.fixed_fpr_table["TPR@0.01%FPR"]} &
+                                {res.fixed_fpr_table["TPR@0.0%FPR"]} \\\\ \\hline"""
         latex_content += """
         \\end{tabularx}
         }
@@ -442,13 +453,15 @@ class GIAResults:
         if load:
             return
 
-    def load(self, data):
+    def load(self:Self, data: dict) -> None:
+        """Load the GIAResults from disk."""
+
         self.original = data["original"]
         self.resulttype = data["resulttype"]
         self.recreated = data["recreated"]
         self.id = data["id"]
 
-    def save(self: Self, save_path: str, name: str, config: dict):
+    def save(self: Self, save_path: str, name: str, config: dict) -> None:
         """Save the GIAResults to disk."""
 
         result_config = config["attack_list"][name]
@@ -496,14 +509,13 @@ class GIAResults:
         with open(f"{save_path}/data.json", "w") as f:
             json.dump(data, f)
 
-        pass
-
-    @classmethod
-    def create_result(self: Self, attack_name: str, save_path: str) -> None:
+    @staticmethod
+    def create_result(attack_name: str, save_path: str) -> None:
         """Result method for GIA."""
 
-        def _latex(attack_name, original, recreated):
-            latex_content = f"""
+        def _latex(attack_name: str, original: str, recreated: str) -> str:
+            """Latex method for GIAResults."""
+            return f"""
             \\subsection{{{" ".join(attack_name.split("_"))}}}
             \\begin{{figure}}[ht]
             \\includegraphics[width=0.8\\textwidth]{{{original}}}
@@ -515,8 +527,6 @@ class GIAResults:
             \\caption{{Original}}
             \\end{{figure}}
             """
-            return latex_content
-
         return _latex(attack_name=attack_name, original=save_path+"recreated_image.png", recreated=save_path+"original_image.png")
 
 class SyntheticResult:
@@ -524,30 +534,26 @@ class SyntheticResult:
 
     def __init__(  # noqa: PLR0913
         self:Self,
+        values: list,
         load: bool = False,
-    )-> None:
-        """Initalze Result method
+    ) -> None:
+        """Initalze Result method."""
 
-        Args:
-        ----
-
-        """
         # Initialize values to result object
-        # self.values = values
+        self.values = values
 
         # Have a method to return if the results are to be loaded
         if load:
             return
 
         # Create some result
-        # self.result_values = some_result
+        self.result_values = self.create_result(self.values)
 
-    def load(self, data: dict):
+    def load(self:Self, data: dict) -> None:
         """Load the TEMPLATEResult class to disk."""
-        # self.result_values = data["some_result"]
-        pass
+        self.result_values = data["some_result"]
 
-    def save(self:Self, path: str, name: str, config:dict = None):
+    def save(self:Self, path: str, name: str, config:dict = None) -> None:
         """Save the TEMPLATEResult class to disk."""
 
         result_config = config["attack_list"][name]
@@ -575,30 +581,26 @@ class TEMPLATEResult:
 
     def __init__(  # noqa: PLR0913
         self:Self,
+        values: list,
         load: bool = False,
-    )-> None:
-        """Initalze Result method
+    ) -> None:
+        """Initalze Result method."""
 
-        Args:
-        ----
-
-        """
         # Initialize values to result object
-        # self.values = values
+        self.values = values
 
         # Have a method to return if the results are to be loaded
         if load:
             return
 
         # Create some result
-        # self.result_values = some_result
+        self.result_values = self.create_result(self.values)
 
-    def load(self, data: dict):
+    def load(self:Self, data: dict) -> None:
         """Load the TEMPLATEResult class to disk."""
-        # self.result_values = data["some_result"]
-        pass
+        self.result_values = data["some_result"]
 
-    def save(self:Self, path: str, name: str, config:dict = None):
+    def save(self:Self, path: str, name: str, config:dict = None) -> None:
         """Save the TEMPLATEResult class to disk."""
 
         result_config = config["attack_list"][name]
@@ -620,18 +622,19 @@ class TEMPLATEResult:
         with open(f"{path}/{name}/{self.id}/data.json", "w") as f:
             json.dump(data, f)
 
-    @classmethod
-    def create_result(self, results):
+    @staticmethod
+    def create_result(results: list) -> str:
         """Method for results."""
-        def _latex(results):
-            """Latex method for TEMPLATEResult"""
-            pass
-        pass
+        def _latex(results: list) -> str:
+            """Latex method for TEMPLATEResult."""
+            return results
+        return _latex(results)
 
-def get_result_fixed_fpr(fpr, tpr):
-
+def get_result_fixed_fpr(fpr: list, tpr: list) -> dict:
+    """Find TPR values for fixed TPRs."""
     # Function to find TPR at given FPR thresholds
-    def find_tpr_at_fpr(fpr_array:np.ndarray, tpr_array:np.ndarray, threshold:float): #-> Optional[str]:
+    def find_tpr_at_fpr(fpr_array:np.ndarray, tpr_array:np.ndarray, threshold:float) -> float:
+        """Find tpr for a given fpr."""
         try:
             # Find the last index where FPR is less than the threshold
             valid_index = np.where(fpr_array < threshold)[0][-1]
@@ -646,7 +649,8 @@ def get_result_fixed_fpr(fpr, tpr):
             "TPR@0.01%FPR": find_tpr_at_fpr(fpr, tpr, 0.0001),
             "TPR@0.0%FPR": find_tpr_at_fpr(fpr, tpr, 0.0)}
 
-def get_config_name(config):
+def get_config_name(config: dict) -> str:
+    """Create id from the attack config."""
     config = dict(sorted(config.items()))
 
     exclude = ["attack_data_dir"]
@@ -661,7 +665,7 @@ def get_config_name(config):
             config_name += f"-{key}={value}"
     return config_name
 
-def reduce_to_unique_labels(results):
+def reduce_to_unique_labels(results: list) -> list:
     """Reduce very long labels to unique and distinct ones."""
     strings = [res.id for res in results]
 
@@ -675,8 +679,8 @@ def reduce_to_unique_labels(results):
         config = "-".join(parts[1:]) if len(parts) > 1 else ""  # The rest is the configuration
         name_configs[name].append(config)  # Store the configuration under the name
 
-    def find_common_suffix(configs):
-        """Helper function to find the common suffix among multiple configurations"""
+    def find_common_suffix(configs: list) -> str:
+        """Helper function to find the common suffix among multiple configurations."""
         if not configs:
             return ""
 
@@ -702,7 +706,8 @@ def reduce_to_unique_labels(results):
             common_suffix = find_common_suffix(configs)
 
             # Remove the common suffix from each configuration
-            trimmed_configs = [config[:-(len(common_suffix) + 1)] if common_suffix and config.endswith(common_suffix) else config for config in configs]
+            trimmed_configs = [config[:-(len(common_suffix) + 1)] if common_suffix and config.endswith(common_suffix)
+                                                                                    else config for config in configs]
 
             # Process configurations based on whether they share the same pattern
             for config in trimmed_configs:

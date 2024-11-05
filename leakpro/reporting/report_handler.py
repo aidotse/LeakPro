@@ -1,3 +1,5 @@
+"""Implementation of the Report module."""
+
 import json
 import logging
 import os
@@ -24,12 +26,14 @@ class ReportHandler():
             self.pdf_results[key] = []
 
     def save_results(self:Self, attack_name: str, result_data: dict, config: dict) -> None:
-        """Save attack results."""
+        """Save method for results."""
 
         self.logger.info(f"Saving results for {attack_name}")
         result_data.save(self.report_dir, attack_name, config)
 
-    def load_results(self:Self):
+    def load_results(self:Self) -> None:
+        """Load method for results."""
+
         self.results = []
         for parentdir in os.scandir(f"{self.report_dir}"):
             if parentdir.is_dir():
@@ -64,11 +68,11 @@ class ReportHandler():
                         except Exception as e:
                             self.logger.info(f"Not able to load data, Error: {e}")
 
-    def _get_results_of_name(self:Self, results, resultname_value) -> list:
+    def _get_results_of_name(self:Self, results: list, resultname_value: str) -> list:
         indices = [idx for (idx, result) in enumerate(results) if result.resultname == resultname_value]
         return [results[idx] for idx in indices]
 
-    def _get_all_attacknames(self:Self):
+    def _get_all_attacknames(self:Self) -> list:
         attack_name_list = []
         for result in self.results:
             if result.resultname not in attack_name_list:
@@ -76,6 +80,8 @@ class ReportHandler():
         return attack_name_list
 
     def create_results_all(self:Self) -> None:
+        """Result method to group all attacks."""
+
         for result_type in self.leakpro_types:
             try:
                 # Get all results of type "Result"
@@ -89,20 +95,24 @@ class ReportHandler():
                 # Check if the result type has a 'create_results' method
                 try:
                     result_class = globals().get(result_type)
-                except:
-                    self.logger.info(f"No {result_type} class could be found or exists")
+                except Exception as e:
+                    self.logger.info(f"No {result_type} class could be found or exists. Error: {e}")
                     continue
 
                 if hasattr(result_class, "create_results") and callable(result_class.create_results):
 
                     # Create all results
-                    merged_result = result_class.create_results(results=results, save_dir=self.report_dir, save_name="all_results")
+                    merged_result = result_class.create_results(results=results,
+                                                                save_dir=self.report_dir,
+                                                                save_name="all_results")
                     self.pdf_results[result_type].append(merged_result)
 
             except Exception as e:
-                print("all", e)
+                self.logger.info(f"Error in results all: {e}")
 
-    def create_results_strong(self:Self):
+    def create_results_strong(self:Self) -> None:
+        """Result method for grouping the strongest attacks."""
+
         for result_type in self.leakpro_types:
             try:
                 # Get all results of type "Result"
@@ -115,25 +125,31 @@ class ReportHandler():
 
                 try:
                     result_class = globals().get(result_type)
-                except:
-                    self.logger.info(f"No {result_type} class could be found or exists")
+                except Exception as e:
+                    self.logger.info(f"No {result_type} class could be found or exists. Error: {e}")
                     continue
 
                 # Get all attack names
-                attack_name_grouped_results = [self._get_results_of_name(results, name) for name in self._get_all_attacknames()]
+                attack_name_grouped_results = [self._get_results_of_name(results, name) for\
+                                                            name in self._get_all_attacknames()]
 
                 # Get the strongest result for each attack name
                 if hasattr(result_class, "get_strongest") and callable(result_class.get_strongest):
-                    strongest_results = [result_class.get_strongest(result) for result in attack_name_grouped_results]
+                    strongest_results = [result_class.get_strongest(result) for result in \
+                                                                attack_name_grouped_results]
 
                     # Create the strongest results
-                    merged_result = result_class.create_results(results=strongest_results, save_dir=self.report_dir, save_name="strong_results")
+                    merged_result = result_class.create_results(results=strongest_results,
+                                                                save_dir=self.report_dir,
+                                                                save_name="strong_results")
                     self.pdf_results[result_type].append(merged_result)
 
             except Exception as e:
-                print("results_strong", e)
+                self.logger.info(f"Error in results strong: {e}")
 
-    def create_results_attackname_grouped(self:Self):
+    def create_results_attackname_grouped(self:Self) -> None:
+        """Result method for grouping attacks by name."""
+
         # Get all attack names
         all_attack_names = self._get_all_attacknames()
 
@@ -150,8 +166,8 @@ class ReportHandler():
                 # Check if the result type has a 'create_results' method
                 try:
                     result_class = globals().get(result_type)
-                except:
-                    self.logger.info(f"No {result_type} class could be found or exists")
+                except Exception as e:
+                    self.logger.info(f"No {result_type} class could be found or exists. Error: {e}")
                     continue
 
                 for name in all_attack_names:
@@ -161,14 +177,16 @@ class ReportHandler():
                             attack_results = self._get_results_of_name(results, name)
 
                             # Create results
-                            merged_result = result_class.create_results(results=attack_results, save_dir=self.report_dir, save_name="grouped_"+name)
+                            merged_result = result_class.create_results(results=attack_results,
+                                                                        save_dir=self.report_dir,
+                                                                        save_name="grouped_"+name)
                             self.pdf_results[result_type].append(merged_result)
 
                         except Exception as e:
-                            print("create_results_attackname_grouped", e)
+                            self.logger.info(f"Error in results grouped: {e}")
 
-    def create_report(self:Self):
-        """Method to create PDF report"""
+    def create_report(self:Self) -> None:
+        """Method to create PDF report."""
 
         # Create initial part of the document.
         self._init_pdf()
@@ -183,16 +201,16 @@ class ReportHandler():
         # Compile the PDF
         self._compile_pdf()
 
-    def _init_pdf(self:Self):
+    def _init_pdf(self:Self) -> None:
         self.latex_content = """
         \\documentclass{article}
         \\usepackage{tabularx}
         \\usepackage{graphicx}
-        \\usepackage{graphics}        
+        \\usepackage{graphics}
         \\begin{document}
         """
 
-    def _compile_pdf(self:Self, install_flag: bool = False):
+    def _compile_pdf(self:Self) -> None:
         """Method to compile PDF."""
 
         self.latex_content += """
@@ -201,24 +219,17 @@ class ReportHandler():
         with open(f"{self.report_dir}/LeakPro_output.tex", "w") as f:
             f.write(self.latex_content)
 
-        # Check if pdflatex is installed
         try:
-            check = subprocess.check_output(["which", "pdflatex"], universal_newlines=True)
-            assert "pdflatex" in check
-        except:
-            # Option to install pdflatex
-            self.logger.info('Could not find pdflatex installed\nPlease install pdflatex with "apt install texlive-latex-base"')
-            choice = input("Do you want to install pdflatex? (Y/n): ").lower()
-            if (choice in {"y", "yes"} or install_flag==True):
-                proc = subprocess.Popen(["apt", "install", "-y", "texlive-latex-base"], stdout=subprocess.DEVNULL)
-                proc.communicate()
+            # Check if pdflatex is installed
+            check = subprocess.check_output(["which", "pdflatex"], universal_newlines=True) # noqa: S607 S603
+            if "pdflatex" not in check:
+                self.logger.info("Could not find pdflatex installed\
+                                 \nPlease install pdflatex with apt install texlive-latex-base")
 
-        # Compile PDF if possible
-        try:
             cmd = ["pdflatex", "-interaction", "nonstopmode", f"{self.report_dir}/LeakPro_output.tex"]
-            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL)
+            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL) # noqa: S603
             proc.communicate()
             self.logger.info("PDF compiled")
+
         except Exception as e:
-            print(e)
-            self.logger.info("Could not compile PDF")
+            self.logger.info(f"Could not compile PDF: {e}")
