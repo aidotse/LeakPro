@@ -40,6 +40,7 @@ dependencies = [
   "pillow",
   "torch",
   "torchvision",
+  "torchmetrics",
   "dotmap",
   "loguru",
   "jinja2",
