@@ -21,6 +21,7 @@ import pickle
 from torch import from_numpy, Tensor
 from torch.utils.data import Dataset, Subset, DataLoader
 from sklearn.preprocessing import StandardScaler
+from utils.grud import *
 
 
 class MimicDataset(Dataset):
@@ -75,27 +76,46 @@ def get_mimic_dataset(path,
     else:
         data_file_path = os.path.join(path, "all_hourly_data.h5")
         if os.path.exists(data_file_path):
-            data= pd.read_hdf(data_file_path, 'vitals_labs')
+            data = pd.read_hdf(data_file_path, 'vitals_labs')
             statics = pd.read_hdf(data_file_path, 'patients')
 
             ID_COLS = ['subject_id', 'hadm_id', 'icustay_id']
-
             train_data, holdout_data, y_train, y_holdout_data = data_splitter(statics,
                                                                      data,
                                                                      train_frac)
             
             train_data , holdout_data = data_normalization(train_data, holdout_data)
-
             train_data, holdout_data = [simple_imputer(df, ID_COLS) for df in (train_data, holdout_data)]
-            flat_train, flat_holdout = [df.pivot_table(index=['subject_id', 'hadm_id', 'icustay_id'], 
-                                                              columns=['hours_in']) for df in (train_data, holdout_data) ]
+
             
-            # Reset the index to flatten the multi-index structure
-            flat_train, flat_holdout, y_flat_train, t_falt_houldout = [flatten_multi_index(df) 
-                                                                  for df in (flat_train, 
-                                                                             flat_holdout, 
-                                                                             y_train, 
-                                                                             y_holdout_data)]
+
+            flatten = False
+            if flatten:
+                # Apply pivot_table to flatten the data
+                flat_train, flat_holdout = [
+                    df.pivot_table(index=ID_COLS, columns=['hours_in']) 
+                    for df in (train_data, holdout_data)
+                ]
+                
+                # Flatten multi-index structure if pivot_table was used
+                flat_train, flat_holdout, y_flat_train, y_flat_holdout = [
+                    flatten_multi_index(df) 
+                    for df in (flat_train, flat_holdout, y_train, y_holdout_data)
+                ]
+            else:
+                # Skip pivot_table if flatten is False
+                #TODO: rename flat_train, flat_holdout to train_data, holdout_data
+                flat_train, flat_holdout, y_flat_train, y_flat_holdout = train_data, holdout_data, y_train, y_holdout_data
+
+            # flat_train, flat_holdout = [df.pivot_table(index=['subject_id', 'hadm_id', 'icustay_id'], 
+            #                                                   columns=['hours_in']) for df in (train_data, holdout_data) ]
+            
+            # # Reset the index to flatten the multi-index structure
+            # flat_train, flat_holdout, y_flat_train, t_falt_houldout = [flatten_multi_index(df) 
+            #                                                       for df in (flat_train, 
+            #                                                                  flat_holdout, 
+            #                                                                  y_train, 
+            #                                                                  y_holdout_data)]
             
             # Check for missing values in all relevant DataFrames
             assert_no_missing_values(train_data, holdout_data, flat_train, flat_holdout)
@@ -104,12 +124,16 @@ def get_mimic_dataset(path,
         
             # Creating the dataset
             data_x = pd.concat((train_df, holdout_df), axis=0)
-            data_y = pd.concat((y_flat_train, t_falt_houldout), axis=0)
+            data_y = pd.concat((y_flat_train, y_flat_holdout), axis=0)
 
             assert np.issubdtype(data_x.values.dtype, np.number), "Non-numeric data found in features."
             assert np.issubdtype(data_y.values.dtype, np.number), "Non-numeric data found in labels."
 
-            dataset = MimicDataset(data_x.values, data_y.values)
+            if flatten: 
+                dataset = MimicDataset(data_x.values, data_y.values)
+            else:
+                data_x = to_3D_tensor(data_x)
+                dataset = MimicDataset(data_x, data_y.values)
             
             # Generate indices for training, validation, test, and early stopping
             train_indices, validation_indices, test_indices, early_stop_indices = data_indices(data_x,

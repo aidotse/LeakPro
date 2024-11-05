@@ -7,11 +7,13 @@ from sklearn.metrics import average_precision_score, roc_auc_score, accuracy_sco
 import torch, torch.utils.data as utils, torch.nn as nn, torch.nn.functional as F, torch.optim as optim
 from torch.autograd import Variable
 from torch.nn.parameter import Parameter
+from tqdm import tqdm
 
 
 def to_3D_tensor(df):
     idx = pd.IndexSlice
-    return np.dstack([df.loc[idx[:, :, :, i], :].values for i in sorted(set(df.index.get_level_values('hours_in')))])
+    np_3D = np.dstack([df.loc[idx[:, :, :, i], :].values for i in sorted(set(df.index.get_level_values('hours_in')))])
+    return torch.from_numpy(np_3D)
 
 def prepare_dataloader(df, Ys, batch_size, shuffle=True):
     """
@@ -25,7 +27,7 @@ def prepare_dataloader(df, Ys, batch_size, shuffle=True):
     return utils.DataLoader(dataset, batch_size =int(batch_size) , shuffle=shuffle, drop_last = True)
 
 class FilterLinear(nn.Module):
-    def __init__(self, in_features, out_features, filter_square_matrix, bias=True):
+    def __init__(self, in_features, out_features, filter_square_matrix, device, bias=True):
         '''
         filter_square_matrix : filter square matrix, whose each elements is 0 or 1.
         '''
@@ -35,15 +37,15 @@ class FilterLinear(nn.Module):
         
         assert in_features > 1 and out_features > 1, "Passing in nonsense sizes"
         
-        use_gpu = torch.cuda.is_available()
         self.filter_square_matrix = None
-        if use_gpu: self.filter_square_matrix = Variable(filter_square_matrix.cuda(), requires_grad=False)
-        else:       self.filter_square_matrix = Variable(filter_square_matrix, requires_grad=False)
+        self.filter_square_matrix = Variable(filter_square_matrix.to(device), requires_grad=False)
         
-        self.weight = Parameter(torch.Tensor(out_features, in_features))
+        self.weight = Parameter(torch.Tensor(out_features, in_features)).to(device)
 
-        if bias: self.bias = Parameter(torch.Tensor(out_features))
-        else:    self.register_parameter('bias', None)
+        if bias: 
+            self.bias = Parameter(torch.Tensor(out_features)).to(device)
+        else:    
+            self.register_parameter('bias', None)
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -97,7 +99,8 @@ class GRUD(nn.Module):
         self.hidden_size = hidden_size
         self.delta_size = input_size
         self.mask_size = input_size
-        
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        #TODO: check if this is the right way to do this
         use_gpu = torch.cuda.is_available()
         if use_gpu:
             self.identity = torch.eye(input_size).cuda()
@@ -110,20 +113,21 @@ class GRUD(nn.Module):
             self.zeros_h = Variable(torch.zeros(batch_size, self.hidden_size))
             self.X_mean = Variable(torch.Tensor(X_mean))
         
-        self.zl = nn.Linear(input_size + hidden_size + self.mask_size, hidden_size) # Wz, Uz are part of the same network. the bias is bz
-        self.rl = nn.Linear(input_size + hidden_size + self.mask_size, hidden_size) # Wr, Ur are part of the same network. the bias is br
-        self.hl = nn.Linear(input_size + hidden_size + self.mask_size, hidden_size) # W, U are part of the same network. the bias is b
+        self.zl = nn.Linear(input_size + hidden_size + self.mask_size, hidden_size).to(self.device) # Wz, Uz are part of the same network. the bias is bz
+        self.rl = nn.Linear(input_size + hidden_size + self.mask_size, hidden_size).to(self.device) # Wr, Ur are part of the same network. the bias is br
+        self.hl = nn.Linear(input_size + hidden_size + self.mask_size, hidden_size).to(self.device) # W, U are part of the same network. the bias is b
         
-        self.gamma_x_l = FilterLinear(self.delta_size, self.delta_size, self.identity)
+        self.gamma_x_l = FilterLinear(self.delta_size, self.delta_size, self.identity, self.device)
         
-        self.gamma_h_l = nn.Linear(self.delta_size, self.hidden_size) # this was wrong in available version. remember to raise the issue
+        self.gamma_h_l = nn.Linear(self.delta_size, self.hidden_size).to(self.device) # this was wrong in available version. remember to raise the issue
         
         self.output_last = output_last
         
-        self.fc = nn.Linear(self.hidden_size, 2)
-        self.bn= torch.nn.BatchNorm1d(2, eps=1e-05, momentum=0.1, affine=True)
+        self.fc = nn.Linear(self.hidden_size, 2).to(self.device)
+        self.bn= torch.nn.BatchNorm1d(2, eps=1e-05, momentum=0.1, affine=True).to(self.device)
         self.drop=nn.Dropout(p=0.5, inplace=False)
         
+
     def step(self, x, x_last_obsv, x_mean, h, mask, delta):
         """
         Inputs:
@@ -203,13 +207,17 @@ class GRUD(nn.Module):
             Hidden_State = Variable(torch.zeros(batch_size, self.hidden_size))
             return Hidden_State
 
-        
+def convert_to_device(x):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        return x.to(device)
+   
 def Train_Model(
     model, train_dataloader, valid_dataloader, num_epochs = 300, patience = 3, min_delta = 1e-5, learning_rate=1e-3, batch_size=None
 ):
     
     print('Model Structure: ', model)
     print('Start Training ... ')
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     model
     
@@ -221,11 +229,12 @@ def Train_Model(
         print('Output type dermined by the model')
         
     loss_MSE = torch.nn.MSELoss()
-    loss_CEL=torch.nn.CrossEntropyLoss()
+    loss_CEL = torch.nn.CrossEntropyLoss()
+    loss_BCE = torch.nn.BCELoss()
     
 #     optimizer = torch.optim.RMSprop(model.parameters(), lr = learning_rate, alpha=0.99)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-    use_gpu = False#torch.cuda.is_available()
+    use_gpu = torch.cuda.is_available()
     
 
     losses_train = []
@@ -248,7 +257,8 @@ def Train_Model(
         losses_epoch_train = []
         losses_epoch_valid = []
         
-        for X, labels in train_dataloader:
+        for batch_idx, (X, labels) in enumerate(tqdm(train_dataloader, desc="Training Batches")):
+
             X = X.numpy()
             mask        = torch.from_numpy(X[:, np.arange(0, X.shape[1], 3), :].astype(np.float32))
             measurement = torch.from_numpy(X[:, np.arange(1, X.shape[1], 3), :].astype(np.float32))
@@ -261,24 +271,22 @@ def Train_Model(
 
             assert measurement.size()[0] == batch_size, "Batch Size doesn't match! %s" % str(measurement.size())
 
-            if use_gpu:
-                convert_to_cuda=lambda x: Variable(x.cuda())
-                X, X_last_obsv, Mask, Delta, labels = map(convert_to_cuda, [measurement, measurement_last_obsv, mask, time_, labels])
-            else: 
-#                 inputs, labels = Variable(inputs), Variable(labels)
-                convert_to_tensor=lambda x: Variable(x)
-                X, X_last_obsv, Mask, Delta, labels  = map(convert_to_tensor, [measurement, measurement_last_obsv, mask, time_, labels])
-            
+
+            X, X_last_obsv, Mask, Delta, labels = map(convert_to_device, [measurement, measurement_last_obsv, mask, time_, labels])
+
             model.zero_grad()
 
-#             outputs = model(inputs)
-            prediction=model(X, X_last_obsv, Mask, Delta)
+#           outputs = model(inputs)
+            prediction = model(X, X_last_obsv, Mask, Delta)
 
-            if output_last:
-                loss_train = loss_CEL(torch.squeeze(prediction), torch.squeeze(labels))
-            else:
-                full_labels = torch.cat((inputs[:,1:,:], labels), dim = 1)
-                loss_train = loss_MSE(outputs, full_labels)
+            loss_train = loss_CEL(torch.squeeze(prediction), torch.squeeze(labels).long())
+
+
+            # if output_last:
+            #     loss_train = loss_CEL(torch.squeeze(prediction), torch.squeeze(labels))
+            # else:
+            #     full_labels = torch.cat((X[:,1:,:], labels), dim = 1)
+            #     loss_train = loss_MSE(prediction, full_labels)
         
             losses_train.append(loss_train.data)
             losses_epoch_train.append(loss_train.data)
@@ -314,14 +322,9 @@ def Train_Model(
                 time_val = torch.transpose(time_val, 1, 2)
                 measurement_last_obsv_val = measurement_val
             
-            if use_gpu:
-                convert_to_cuda=lambda x: Variable(x.cuda())
-                X_val, X_last_obsv_val, Mask_val, Delta_val, labels_val = map(convert_to_cuda, [measurement_val, measurement_last_obsv_val, mask_val, time_val, labels_val])
-            else: 
-#                 inputs, labels = Variable(inputs), Variable(labels)
-                convert_to_tensor=lambda x: Variable(x)
-                X_val, X_last_obsv_val, Mask_val, Delta_val, labels_val = map(convert_to_tensor, [measurement_val, measurement_last_obsv_val, mask_val, time_val, labels_val])
-            
+
+            X_val, X_last_obsv_val, Mask_val, Delta_val, labels_val = map(convert_to_device, 
+                                                                          [measurement_val, measurement_last_obsv_val, mask_val, time_val, labels_val])
                 
             model.zero_grad()
             
@@ -331,12 +334,12 @@ def Train_Model(
 #             print(labels.shape)
 #             print(prediction_val.shape)
             
-            if output_last:
-                loss_valid =loss_CEL(torch.squeeze(prediction_val), torch.squeeze(labels_val))
-            else:
-                raise NotImplementedError("Should be output last!")
-                full_labels_val = torch.cat((inputs_val[:,1:,:], labels_val), dim = 1)
-                loss_valid = loss_MSE(outputs_val, full_labels_val)
+            # if output_last:
+            loss_valid =loss_CEL(torch.squeeze(prediction_val), torch.squeeze(labels_val.long()))
+            # else:
+                # raise NotImplementedError("Should be output last!")
+                # full_labels_val = torch.cat((inputs_val[:,1:,:], labels_val), dim = 1)
+                # loss_valid = loss_MSE(outputs_val, full_labels_val)
 
             losses_valid.append(loss_valid.data)
             losses_epoch_valid.append(loss_valid.data)
@@ -396,8 +399,8 @@ def predict_proba(model, dataloader):
         labels: size[num_samples]
     """
     model.eval()
-    use_gpu = False# torch.cuda.is_available()
     
+
     probabilities = []
     labels        = []
     for X, label in dataloader:
@@ -411,16 +414,13 @@ def predict_proba(model, dataloader):
         time_ = torch.transpose(time_, 1, 2)
         measurement_last_obsv = measurement            
 
-        if use_gpu:
-            convert_to_cuda=lambda x: Variable(x.cuda())
-            X, X_last_obsv, Mask, Delta, label = map(convert_to_cuda, [measurement, measurement_last_obsv, mask, time_, label])
-        else: 
-#                 inputs, labels = Variable(inputs), Variable(labels)
-            convert_to_tensor=lambda x: Variable(x)
-            X, X_last_obsv, Mask, Delta, label  = map(convert_to_tensor, [measurement, measurement_last_obsv, mask, time_, label])
-        
+    
+
+        X, X_last_obsv, Mask, Delta, label = map(convert_to_device, [measurement, measurement_last_obsv, mask, time_, label])
+
         prob = model(X, X_last_obsv, Mask, Delta)
         probabilities.append(prob.detach().cpu().data.numpy())
         labels.append(label.detach().cpu().data.numpy())
 
     return probabilities, labels
+
