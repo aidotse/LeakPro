@@ -7,6 +7,18 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "leakpro"
 version = "0.1"
+dependencies = [
+  "numpy",
+  "pandas",
+  "scipy",
+  "matplotlib",
+  "seaborn",
+  "dotmap",
+  "jinja2",
+  "tqdm",
+  "joblib",
+  "pytest",
+]
 description = "A package for privacy risk analysis"
 authors = [{ name = "LeakPro team", email = "johan.ostman@ai.se" }]
 readme = "README.md"
@@ -30,17 +42,13 @@ classifiers = [
 
 requires-python = '>=3.8,<3.13'
 
-dependencies = [
-  "numpy",
-  "pandas",
-  "scipy",
-  "scikit-learn",
-  "matplotlib",
-  "seaborn",
+[project.optional-dependencies]
+mia = [
   "pillow",
-  "torch",
-  "torchvision",
+  "torch", 
+  "torchvision", 
   "torchmetrics",
+<<<<<<< HEAD
   "dotmap",
   "loguru",
   "jinja2",
@@ -54,7 +62,21 @@ dependencies = [
   "gdown",
   "optuna",
   "pytorch-ignite",
+=======
+>>>>>>> 44b435d (added dependencies for each subpackage)
 ]
+synthetic = [
+  "numba", 
+  "pydantic"
+]
+federated = [
+  "pillow", 
+  "torch", 
+  "torchvision", 
+  "torchmetrics",
+]
+
+
 
 [tool.setuptools]
 include-package-data = true
