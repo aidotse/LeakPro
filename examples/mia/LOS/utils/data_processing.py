@@ -57,7 +57,7 @@ def get_mimic_dataset(path,
     
     # Assert that the sum of all fractions is between 0 and 1
     total_frac = train_frac + validation_frac + test_frac + early_stop_frac
-    assert 0 < total_frac < 1, "The sum of dataset fractions must be between 0 and 1."
+    assert 0 < total_frac <= 1, "The sum of dataset fractions must be between 0 and 1."
 
     dataset_path = os.path.join(path, "dataset.pkl")
     indices_path = os.path.join(path, "indices.pkl")
