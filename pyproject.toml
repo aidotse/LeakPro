@@ -44,17 +44,14 @@ requires-python = '>=3.8,<3.13'
 
 [project.optional-dependencies]
 mia = [
-  "pillow",
   "torch", 
   "torchvision", 
-  "torchmetrics",
 ]
 synthetic = [
   "numba", 
   "pydantic"
 ]
 federated = [
-  "pillow", 
   "torch", 
   "torchvision", 
   "torchmetrics",
