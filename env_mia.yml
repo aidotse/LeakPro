@@ -1,4 +1,4 @@
-name: leakpro
+name: leakpro_mia
 channels:
   - conda-forge
 dependencies:
@@ -9,30 +9,19 @@ dependencies:
   - numpy  
   - pandas  
   - scipy
-  - scikit-learn
 
   # Visualization
   - matplotlib  
   - seaborn
-  - pillow
-
-  # Deep Learning
-  - pytorch
-  - torchvision
-  - torchmetrics
 
   # Utilities
   - dotmap
-  - loguru
   - jinja2
   - tqdm
-  - pyyaml
-  - numba
-  - pydantic
   - joblib
 
   # Development and Testing
   - pytest
-  - pytest-mock
-  
-
+  - pip
+  - pip:
+    - leakpro[mia] 

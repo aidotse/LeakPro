@@ -44,9 +44,9 @@ requires-python = '>=3.8,<3.13'
 
 [project.optional-dependencies]
 mia = [
-  "pillow",
   "torch", 
   "torchvision", 
+<<<<<<< HEAD
   "torchmetrics",
 <<<<<<< HEAD
   "dotmap",
@@ -64,13 +64,14 @@ mia = [
   "pytorch-ignite",
 =======
 >>>>>>> 44b435d (added dependencies for each subpackage)
+=======
+>>>>>>> bad23c7 (started subpackages)
 ]
 synthetic = [
   "numba", 
   "pydantic"
 ]
 federated = [
-  "pillow", 
   "torch", 
   "torchvision", 
   "torchmetrics",
