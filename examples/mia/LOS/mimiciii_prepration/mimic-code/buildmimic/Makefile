@@ -48,29 +48,34 @@ ifeq ($(PSQL_SERVER_GREATER_THAN_10),0)
 endif
 
 help:
-	@echo '                                                                            '
-	@echo '----------------------------------------------------------------------------'
-	@echo 'Makefile for building MIMIC-III in a local Postgres database                '
-	@echo '                                                                            '
-	@echo 'Usage:                                                                      '
-	@echo '                                                                            '
-	@echo '   Build MIMIC-III using the CSV files in the /path/to/data directory -     '
-	@echo '                                                                            '
-	@echo '             make mimic datadir="/path/to/data/"                            '
-	@echo '                                                                            '
-	@echo '             e.g. make mimic datadir="/data/mimic/v1_3/"                    '
-	@echo '                                                                            '
-	@echo '   Build MIMIC-III using the .csv.gz files in the /path/to/data directory - '
-	@echo '                                                                            '
-	@echo '             make mimic-gz datadir="/path/to/data/"                         '
-	@echo '                                                                            '
-	@echo '             e.g. make mimic-gz datadir="/data/mimic/v1_3/"                 '
-	@echo '----------------------------------------------------------------------------'
-	@echo '                                                                            '
-
-mimic-build: mimic-download mimic-check-csv mimic-build concepts extra_concept
-
-
+	@echo 'Usage: make <target>'
+	@echo ''
+	@echo 'Targets:'
+	@echo '  mimic-download: Download MIMIC-III from PhysioNet'
+	@echo '  mimic-check: Check that the downloaded data is present'
+	@echo '  mimic-build: Build the MIMIC-III database'
+	@echo '  mimic-builder: Build the MIMIC-III database'
+	@echo '  mimic-build-gz: Build the MIMIC-III database'
+	@echo '  mimic_download_check: Download and check the MIMIC-III data'
+	@echo '  create-user: Create the MIMIC-III user, database, and schema'
+	@echo '  concepts: Add the MIMIC-III concepts to the database'
+	@echo '  extra_concept: Add the MIMIC-III extra concepts to the database'
+	@echo '  clean: Clean up the build directory'
+	@echo ''
+	@echo 'Variables:'
+	@echo '  datadir: The directory to download the MIMIC-III data to'
+	@echo '  physionetuser: The PhysioNet username to use for downloading the data'
+	@echo '  DBNAME: The name of the database to create'
+	@echo '  DBUSER: The name of the user to create'
+	@echo '  DBPASS: The password for the user'
+	@echo '  DBSCHEMA: The schema to create'
+	@echo '  DBHOST: The host to connect to'
+	@echo '  DBPORT: The port to connect to'
+	@echo ''
+	@echo 'Example:'
+	@echo '  make mimic-download datadir=/path/to/data
+mimic-build:create-user mimic-builder concepts extra_concept
+mimic_download_check:  mimic-download mimic-check-csv
 
 create-user:
 	@echo '-------------------------------------'
@@ -127,7 +132,7 @@ mimic-build-gz:
 	@sleep 2
 	psql "$(DBSTRING)" -v ON_ERROR_STOP=1 -f postgres_checks.sql
 
-mimic-build:
+mimic-builder:
 	@echo '------------------------'
 	@echo '-- Building MIMIC-III --'
 	@echo '------------------------'
@@ -284,95 +289,6 @@ ifeq ("$(wildcard $(DATADIR)TRANSFERS.csv.gz)","")
 endif
 	@echo 'All data present!'
 	@echo ''
-
-mimic-check-csv:
-	@echo ''
-	@echo '-----------------------'
-	@echo '-- Checking for data --'
-	@echo '-----------------------'
-	@echo ''
-	@echo 'Data path: ' $(DATADIR)
-ifeq ("$(wildcard $(DATADIR)ADMISSIONS.csv)","")
-	@echo "Unable to find $(DATADIR)ADMISSIONS.csv - exiting before build."; exit 1
-endif
-ifeq ("$(wildcard $(DATADIR)CALLOUT.csv)","")
-	@echo "Unable to find $(DATADIR)CALLOUT.csv. Exiting before build."; exit 1
-endif
-ifeq ("$(wildcard $(DATADIR)CAREGIVERS.csv)","")
-	@echo "Unable to find $(DATADIR)CAREGIVERS.csv. Exiting before build."; exit 1
-endif
-ifeq ("$(wildcard $(DATADIR)CHARTEVENTS.csv)","")
-	@echo "Unable to find $(DATADIR)CHARTEVENTS.csv. Exiting before build."; exit 1
-endif
-ifeq ("$(wildcard $(DATADIR)CPTEVENTS.csv)","")
-	@echo "Unable to find $(DATADIR)CPTEVENTS.csv. Exiting before build."; exit 1
-endif
-ifeq ("$(wildcard $(DATADIR)DATETIMEEVENTS.csv)","")
-	@echo "Unable to find $(DATADIR)DATETIMEEVENTS.csv. Exiting before build."; exit 1
-endif
-ifeq ("$(wildcard $(DATADIR)D_CPT.csv)","")
-	@echo "Unable to find $(DATADIR)D_CPT.csv. Exiting before build."; exit 1
-endif
-ifeq ("$(wildcard $(DATADIR)DIAGNOSES_ICD.csv)","")
-	@echo "Unable to find $(DATADIR)DIAGNOSES_ICD.csv. Exiting before build."; exit 1
-endif
-ifeq ("$(wildcard $(DATADIR)D_ICD_DIAGNOSES.csv)","")
-	@echo "Unable to find $(DATADIR)D_ICD_DIAGNOSES.csv. Exiting before build."; exit 1
-endif
-ifeq ("$(wildcard $(DATADIR)D_ICD_PROCEDURES.csv)","")
-	@echo "Unable to find $(DATADIR)D_ICD_PROCEDURES.csv. Exiting before build."; exit 1
-endif
-ifeq ("$(wildcard $(DATADIR)D_ITEMS.csv)","")
-	@echo "Unable to find $(DATADIR)D_ITEMS.csv. Exiting before build."; exit 1
-endif
-ifeq ("$(wildcard $(DATADIR)D_LABITEMS.csv)","")
-	@echo "Unable to find $(DATADIR)D_LABITEMS.csv. Exiting before build."; exit 1
-endif
-ifeq ("$(wildcard $(DATADIR)DRGCODES.csv)","")
-	@echo "Unable to find $(DATADIR)DRGCODES.csv. Exiting before build."; exit 1
-endif
-ifeq ("$(wildcard $(DATADIR)ICUSTAYS.csv)","")
-	@echo "Unable to find $(DATADIR)ICUSTAYS.csv. Exiting before build."; exit 1
-endif
-ifeq ("$(wildcard $(DATADIR)INPUTEVENTS_CV.csv)","")
-	@echo "Unable to find $(DATADIR)INPUTEVENTS_CV.csv. Exiting before build."; exit 1
-endif
-ifeq ("$(wildcard $(DATADIR)INPUTEVENTS_MV.csv)","")
-	@echo "Unable to find $(DATADIR)INPUTEVENTS_MV.csv. Exiting before build."; exit 1
-endif
-ifeq ("$(wildcard $(DATADIR)LABEVENTS.csv)","")
-	@echo "Unable to find $(DATADIR)LABEVENTS.csv. Exiting before build."; exit 1
-endif
-ifeq ("$(wildcard $(DATADIR)MICROBIOLOGYEVENTS.csv)","")
-	@echo "Unable to find $(DATADIR)MICROBIOLOGYEVENTS.csv. Exiting before build."; exit 1
-endif
-ifeq ("$(wildcard $(DATADIR)NOTEEVENTS.csv)","")
-	@echo "Unable to find $(DATADIR)NOTEEVENTS.csv. Exiting before build."; exit 1
-endif
-ifeq ("$(wildcard $(DATADIR)OUTPUTEVENTS.csv)","")
-	@echo "Unable to find $(DATADIR)OUTPUTEVENTS.csv. Exiting before build."; exit 1
-endif
-ifeq ("$(wildcard $(DATADIR)PATIENTS.csv)","")
-	@echo "Unable to find $(DATADIR)PATIENTS.csv. Exiting before build."; exit 1
-endif
-ifeq ("$(wildcard $(DATADIR)PRESCRIPTIONS.csv)","")
-	@echo "Unable to find $(DATADIR)PRESCRIPTIONS.csv. Exiting before build."; exit 1
-endif
-ifeq ("$(wildcard $(DATADIR)PROCEDUREEVENTS_MV.csv)","")
-	@echo "Unable to find $(DATADIR)PROCEDUREEVENTS_MV.csv. Exiting before build."; exit 1
-endif
-ifeq ("$(wildcard $(DATADIR)PROCEDURES_ICD.csv)","")
-	@echo "Unable to find $(DATADIR)PROCEDURES_ICD.csv. Exiting before build."; exit 1
-endif
-ifeq ("$(wildcard $(DATADIR)SERVICES.csv)","")
-	@echo "Unable to find $(DATADIR)SERVICES.csv. Exiting before build."; exit 1
-endif
-ifeq ("$(wildcard $(DATADIR)TRANSFERS.csv)","")
-	@echo "Unable to find $(DATADIR)TRANSFERS.csv. Exiting before build."; exit 1
-endif
-	@echo 'All data present!'
-	@echo ''
-
 
 clean:
 	@echo
