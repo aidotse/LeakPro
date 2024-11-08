@@ -32,7 +32,7 @@ If you have not yet downloaded the dataset, use the following command to downloa
 $ make  mimic_download_check datadir=./data/ physionetuser=[your_username]
 ```
 
-Then to build the database run the following command:
+Then to create and build a postgres database run the below command. The default value for the postgres password is 'postgres'.
 ``` bash
 $ make mimic-build datadir=./data/ 
 ```
