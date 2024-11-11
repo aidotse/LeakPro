@@ -15,7 +15,7 @@ class MimicInputHandler(AbstractInputHandler):
 
 
     def get_criterion(self)->None:
-        """Set the CrossEntropyLoss for the model."""
+        """Set the Binary Cross Entropy Loss for the model."""
         return BCELoss()
 
     def get_optimizer(self, model:torch.nn.Module) -> None:

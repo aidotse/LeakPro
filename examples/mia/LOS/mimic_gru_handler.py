@@ -1,13 +1,15 @@
 
-import torch
-from torch import cuda, device, optim, sigmoid
-from torch.nn import BCELoss
+import torch.nn as nn
+from torch import cuda, device, optim, from_numpy, transpose, squeeze
+from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import numpy as np
 
+# from examples.mia.LOS.utils.grud import convert_to_device
 from leakpro import AbstractInputHandler
 
-class MimicInputHandler(AbstractInputHandler):
+class MimicInputHandlerGRU(AbstractInputHandler):
     """Class to handle the user input for the CIFAR10 dataset."""
 
     def __init__(self, configs: dict) -> None:
@@ -16,26 +18,29 @@ class MimicInputHandler(AbstractInputHandler):
 
     def get_criterion(self)->None:
         """Set the CrossEntropyLoss for the model."""
-        return BCELoss()
+        return CrossEntropyLoss()
 
-    def get_optimizer(self, model:torch.nn.Module) -> None:
+    def get_optimizer(self, model:nn.Module) -> None:
         """Set the optimizer for the model."""
-        learning_rate = 0.1
-        momentum = 0.8
-        return optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
+        learning_rate = 0.01
+        return optim.Adam(model.parameters(), lr=learning_rate)
 
+    def convert_to_device(self, x):
+        device_name = device("cuda" if cuda.is_available() else "cpu")
+        return x.to(device_name)
+    
     def train(
         self,
         dataloader: DataLoader,
-        model: torch.nn.Module = None,
-        criterion: torch.nn.Module = None,
+        model: nn.Module = None,
+        criterion: nn.Module = None,
         optimizer: optim.Optimizer = None,
         epochs: int = None,
     ) -> dict:
         """Model training procedure."""
 
-        compute_device = device("cuda" if cuda.is_available() else "cpu")
-        model.to(compute_device)
+        device_name = device("cuda" if cuda.is_available() else "cpu")
+        model.to(device_name)
         model.train()
 
         criterion = self.get_criterion()
@@ -43,23 +48,35 @@ class MimicInputHandler(AbstractInputHandler):
         
         for e in tqdm(range(epochs), desc="Training Progress"):
             model.train()
-            train_acc, train_loss = 0.0, 0.0
-            
-            for data, target in dataloader:
-                target = target.float().unsqueeze(1)
-                data, target = data.to(compute_device, non_blocking=True), target.to(compute_device, non_blocking=True)
-                optimizer.zero_grad()
-                output = model(data)
+            train_loss = 0.0
+            for _, (X, labels) in enumerate(tqdm(dataloader, desc="Training Batches")):
 
-                loss = criterion(output, target)
-                pred = sigmoid(output) >= 0.5
-                train_acc += pred.eq(target).sum().item()
+                X = X.numpy()
+                mask        = from_numpy(X[:, np.arange(0, X.shape[1], 3), :].astype(np.float32))
+                measurement = from_numpy(X[:, np.arange(1, X.shape[1], 3), :].astype(np.float32))
+                time_       = from_numpy(X[:, np.arange(2, X.shape[1], 3), :].astype(np.float32))
                 
+                mask = transpose(mask, 1, 2)
+                measurement = transpose(measurement, 1, 2)
+                time_ = transpose(time_, 1, 2)
+                measurement_last_obsv = measurement
+
+                X, X_last_obsv, Mask, Delta, labels = map(self.convert_to_device, [measurement, measurement_last_obsv, mask, time_, labels])
+
+                model.zero_grad()
+                prediction = model(X, X_last_obsv, Mask, Delta)
+                loss = criterion(squeeze(prediction), squeeze(labels).long())
+
+
+                optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
                 train_loss += loss.item()
-        
-        train_acc = train_acc/len(dataloader.dataset)
-        train_loss = train_loss/len(dataloader)
 
-        return {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}
+            train_loss /= len(dataloader)
+
+
+        return {"model": model, "metrics": { "loss": train_loss}}
+    
+
+
