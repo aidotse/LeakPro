@@ -8,6 +8,8 @@ import torch, torch.utils.data as utils, torch.nn as nn, torch.nn.functional as 
 from torch.autograd import Variable
 from torch.nn.parameter import Parameter
 from tqdm import tqdm
+import os
+
 from torch import save, device, cuda, Tensor, eye, transpose, nn, optim, save, sigmoid, no_grad, from_numpy, cat, zeros, ones, exp, tanh, zeros, ones, max, squeeze, isnan
 
 def to_3D_tensor(df):
@@ -95,19 +97,24 @@ class GRUD(nn.Module):
         """
         
         super(GRUD, self).__init__()
+
+        # Save init params to a dictionary 
+        self.init_params = {
+            "input_size": input_size,
+            "cell_size": cell_size,
+            "hidden_size": hidden_size,
+            "X_mean": X_mean,
+            "batch_size": batch_size,
+            "output_last": output_last
+        }
         
         self.hidden_size = hidden_size
         self.delta_size = input_size
         self.mask_size = input_size
+
         self.device = device("cuda" if cuda.is_available() else "cpu")
-        #TODO: check if this is the right way to do this
-        use_gpu = cuda.is_available()
-        if use_gpu:
-            self.identity = eye(input_size).cuda()
-            self.X_mean = Variable(Tensor(X_mean).cuda())
-        else:
-            self.identity = eye(input_size)
-            self.X_mean = Variable(Tensor(X_mean))
+        self.identity = eye(input_size).to(self.device)
+        self.X_mean = Variable(Tensor(X_mean).to(self.device))
         
         self.zl = nn.Linear(input_size + hidden_size + self.mask_size, hidden_size).to(self.device) # Wz, Uz are part of the same network. the bias is bz
         self.rl = nn.Linear(input_size + hidden_size + self.mask_size, hidden_size).to(self.device) # Wr, Ur are part of the same network. the bias is br
@@ -207,8 +214,8 @@ class GRUD(nn.Module):
             return Hidden_State
 
 def convert_to_device(x):
-        device = device("cuda" if cuda.is_available() else "cpu")
-        return x.to(device)
+        device_name = device("cuda" if cuda.is_available() else "cpu")
+        return x.to(device_name)
 
 
 # Focus on the audit 
@@ -239,13 +246,9 @@ def gru_trained_model_and_metadata(model,
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     
 
-    train_losses, train_accuracies = [], []
-    test_losses, test_accuracies = [], []
+    train_losses = []
+    test_losses = []
 
-    # losses_train = []
-    # losses_valid = []
-    # losses_epochs_train = []
-    # losses_epochs_valid = []
     
     cur_time = time.time()
     pre_time = time.time()
@@ -253,10 +256,12 @@ def gru_trained_model_and_metadata(model,
     # Variables for Early Stopping
     is_best_model = 0
     patient_epoch = 0
-    for epoch in tqdm.tqdm(range(epochs), desc="Training Progress"):
+    for epoch in tqdm(range(epochs), desc="Training Progress"):
         model.train()
-        train_acc, train_loss = 0.0, 0.0
+        train_loss = 0.0
         
+        test_dataloader_iter = iter(test_dataloader)
+
         for batch_idx, (X, labels) in enumerate(tqdm(train_dataloader, desc="Training Batches")):
 
             X = X.numpy()
@@ -282,88 +287,65 @@ def gru_trained_model_and_metadata(model,
             train_loss += loss.item()
 
         train_loss /= len(train_dataloader)
-        train_acc /= len(train_dataloader.dataset)
+        # train_acc /= len(train_dataloader.dataset)
             
         train_losses.append(train_loss)
-        train_accuracies.append(train_acc)
+        # train_accuracies.append(train_acc)
+
+
+
+        # test 
+        model.eval()
+        try: 
+            X_test, labels_test = next(test_dataloader_iter)
+            X_test = X_test.numpy()
+            mask_test        = from_numpy(X_test[:, np.arange(0, X_test.shape[1], 3), :].astype(np.float32))
+            measurement_test = from_numpy(X_test[:, np.arange(1, X_test.shape[1], 3), :].astype(np.float32))
+            time_test       = from_numpy(X_test[:, np.arange(2, X_test.shape[1], 3), :].astype(np.float32))
         
-        test_loss, test_acc = evaluate(model, test_dataloader, criterion, device_name)
+            mask_test = transpose(mask_test, 1, 2)
+            measurement_test = transpose(measurement_test, 1, 2)
+            time_test = transpose(time_test, 1, 2)
+            measurement_last_obsv_test = measurement_test
+        except StopIteration:
+            valid_dataloader_iter = iter(test_dataloader)
+            X_test, labels_test = next(valid_dataloader_iter)
+            X_test = X_test.numpy()
+            mask_test        = from_numpy(X_test[:, np.arange(0, X_test.shape[1], 3), :].astype(np.float32))
+            measurement_test = from_numpy(X_test[:, np.arange(1, X_test.shape[1], 3), :].astype(np.float32))
+            time_test       = from_numpy(X_test[:, np.arange(2, X_test.shape[1], 3), :].astype(np.float32))
+        
+            mask_test = transpose(mask_test, 1, 2)
+            measurement_test = transpose(measurement_test, 1, 2)
+            time_test = transpose(time_test, 1, 2)
+            measurement_last_obsv_test = measurement_test
+        
+
+        X_test, X_last_obsv_test, Mask_test, Delta_test, labels_test = map(convert_to_device, 
+                                                                        [measurement_test, measurement_last_obsv_test, mask_test, time_test, labels_test])
+            
+        model.zero_grad()
+        
+        prediction_val = model(X_test, X_last_obsv_test, Mask_test, Delta_test)
+
+
+        
+        # if output_last:
+        test_loss =criterion(squeeze(prediction_val), squeeze(labels_test.long()))
         test_losses.append(test_loss)
-        test_accuracies.append(test_acc)
-
-  
 
 
-             # validation 
-            try: 
-                X_val, labels_val = next(valid_dataloader_iter)
-                X_val = X_val.numpy()
-                mask_val        = from_numpy(X_val[:, np.arange(0, X_val.shape[1], 3), :].astype(np.float32))
-                measurement_val = from_numpy(X_val[:, np.arange(1, X_val.shape[1], 3), :].astype(np.float32))
-                time_val       = from_numpy(X_val[:, np.arange(2, X_val.shape[1], 3), :].astype(np.float32))
-            
-                mask_val = transpose(mask_val, 1, 2)
-                measurement_val = transpose(measurement_val, 1, 2)
-                time_val = transpose(time_val, 1, 2)
-                measurement_last_obsv_val = measurement_val
-            except StopIteration:
-                valid_dataloader_iter = iter(valid_dataloader)
-                X_val, labels_val = next(valid_dataloader_iter)
-                X_val = X_val.numpy()
-                mask_val        = from_numpy(X_val[:, np.arange(0, X_val.shape[1], 3), :].astype(np.float32))
-                measurement_val = from_numpy(X_val[:, np.arange(1, X_val.shape[1], 3), :].astype(np.float32))
-                time_val       = from_numpy(X_val[:, np.arange(2, X_val.shape[1], 3), :].astype(np.float32))
-            
-                mask_val = transpose(mask_val, 1, 2)
-                measurement_val = transpose(measurement_val, 1, 2)
-                time_val = transpose(time_val, 1, 2)
-                measurement_last_obsv_val = measurement_val
-            
-
-            X_val, X_last_obsv_val, Mask_val, Delta_val, labels_val = map(convert_to_device, 
-                                                                          [measurement_val, measurement_last_obsv_val, mask_val, time_val, labels_val])
-                
-            model.zero_grad()
-            
-#             outputs_val = model(inputs_val)
-            prediction_val = model(X_val, X_last_obsv_val, Mask_val, Delta_val)
-    
-#             print(labels.shape)
-#             print(prediction_val.shape)
-            
-            # if output_last:
-            loss_valid =loss_CEL(squeeze(prediction_val), squeeze(labels_val.long()))
-            # else:
-                # raise NotImplementedError("Should be output last!")
-                # full_labels_val = torch.cat((inputs_val[:,1:,:], labels_val), dim = 1)
-                # loss_valid = loss_MSE(outputs_val, full_labels_val)
-
-            losses_valid.append(loss_valid.data)
-            losses_epoch_valid.append(loss_valid.data)
-            
-#             print(sklearn.metrics.roc_auc_score(labels_val.detach().cpu().numpy(), prediction_val.detach().cpu().numpy()[:,1]))
-            
-            # output
-            trained_number += 1
-            
-        avg_losses_epoch_train = sum(losses_epoch_train).cpu().numpy() / float(len(losses_epoch_train))
-        avg_losses_epoch_valid = sum(losses_epoch_valid).cpu().numpy() / float(len(losses_epoch_valid))
-        losses_epochs_train.append(avg_losses_epoch_train)
-        losses_epochs_valid.append(avg_losses_epoch_valid)
-        
         
         # Early Stopping
         if epoch == 0:
             is_best_model = 1
-            best_model = model
             min_loss_epoch_valid = 10000.0
-            if avg_losses_epoch_valid < min_loss_epoch_valid:
-                min_loss_epoch_valid = avg_losses_epoch_valid
+            if test_loss < min_loss_epoch_valid:
+                min_loss_epoch_valid = test_loss
         else:
-            if min_loss_epoch_valid - avg_losses_epoch_valid > min_delta:
+            if min_loss_epoch_valid - test_loss > min_delta:
                 is_best_model = 1
-                best_model = model
-                min_loss_epoch_valid = avg_losses_epoch_valid 
+                min_loss_epoch_valid = test_loss 
                 patient_epoch = 0
             else:
                 is_best_model = 0
@@ -376,21 +358,78 @@ def gru_trained_model_and_metadata(model,
         cur_time = time.time()
         print('Epoch: {}, train_loss: {}, valid_loss: {}, time: {}, best model: {}'.format( \
                     epoch, \
-                    np.around(avg_losses_epoch_train, decimals=8),\
-                    np.around(avg_losses_epoch_valid, decimals=8),\
-                    np.around([cur_time - pre_time] , decimals=2),\
-                    is_best_model) )
+                    np.around(test_loss.cpu().item(), decimals=8),\
+                    np.around(test_loss.cpu().item(), decimals=8),\
+                    np.around(cur_time - pre_time, decimals=2),\
+                    is_best_model))
         pre_time = cur_time
-#         if epoch==1:
-#             break
     # Move the model back to the CPU
+    # Ensure the target directory exists
+    os.makedirs("target", exist_ok=True)
     model.to("cpu")
     with open("target/target_model.pkl", "wb") as f:
         save(model.state_dict(), f)
-                
-    return best_model, [losses_train, losses_valid, losses_epochs_train, losses_epochs_valid]
+
+     # Create metadata and store it
+    meta_data = {}
+    meta_data["train_indices"] = train_dataloader.dataset.indices
+    meta_data["test_indices"] = test_dataloader.dataset.indices
+    meta_data["num_train"] = len(meta_data["train_indices"])
+    
+    # Write init params
+    # meta_data["init_params"] = self.init_params
+
+    # Write init params
+    meta_data["init_params"] = {}
+    for key, value in model.init_params.items():
+        meta_data["init_params"][key] = value
+
+    # for key, value in model.init_params.items():
+    #     meta_data["init_params"][key] = value
+    
+    # read out optimizer parameters
+    meta_data["optimizer"] = {}
+    meta_data["optimizer"]["name"] = optimizer.__class__.__name__.lower()
+    meta_data["optimizer"]["lr"] = optimizer.param_groups[0].get("lr", 0)
+    meta_data["optimizer"]["weight_decay"] = optimizer.param_groups[0].get("weight_decay", 0)
+    meta_data["optimizer"]["momentum"] = optimizer.param_groups[0].get("momentum", 0)
+    meta_data["optimizer"]["dampening"] = optimizer.param_groups[0].get("dampening", 0)
+    meta_data["optimizer"]["nesterov"] = optimizer.param_groups[0].get("nesterov", False)
+
+    # read out criterion parameters
+    meta_data["loss"] = {}
+    meta_data["loss"]["name"] = criterion.__class__.__name__.lower()
+
+    meta_data["batch_size"] = train_dataloader.batch_size
+    meta_data["epochs"] = epochs
+    meta_data["train_acc"] = 0
+    meta_data["test_acc"] = 0
+    meta_data["train_loss"] = train_loss
+    meta_data["test_loss"] = test_loss
+    meta_data["dataset"] = "mimiciii"
+    
 
 
+    with open("target/model_metadata.pkl", "wb") as f:
+        pickle.dump(meta_data, f)
+
+
+    return  train_losses, test_losses
+
+def evaluate(model, loader, criterion, device):
+    model.eval()
+    loss, acc = 0, 0
+    with no_grad():
+        for data, target in loader:
+            data, target = data.to(device), target.to(device)
+            target = target.float().unsqueeze(1)
+            output = model(data)
+            loss += criterion(output, target).item()
+            pred = sigmoid(output) >= 0.5
+            acc += pred.eq(target.data.view_as(pred)).sum()
+        loss /= len(loader)
+        acc = float(acc) / len(loader.dataset)
+    return loss, acc
 
 
 
@@ -406,7 +445,7 @@ def Train_Model(
     
     print('Model Structure: ', model)
     print('Start Training ... ')
-    device = device("cuda" if cuda.is_available() else "cpu")
+    device_name = device("cuda" if cuda.is_available() else "cpu")
     
     model
     
@@ -423,7 +462,6 @@ def Train_Model(
     
 #     optimizer = optim.RMSprop(model.parameters(), lr = learning_rate, alpha=0.99)
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    use_gpu = cuda.is_available()
     
 
     losses_train = []
@@ -573,8 +611,7 @@ def Train_Model(
                     np.around([cur_time - pre_time] , decimals=2),\
                     is_best_model) )
         pre_time = cur_time
-#         if epoch==1:
-#             break
+
     # Move the model back to the CPU
     model.to("cpu")
     with open("target/target_model.pkl", "wb") as f:
@@ -582,38 +619,38 @@ def Train_Model(
                 
     return best_model, [losses_train, losses_valid, losses_epochs_train, losses_epochs_valid]
 
-def predict_proba(model, dataloader):
-    """
-    Input:
-        model: GRU-D model
-        test_dataloader: containing batches of measurement, measurement_last_obsv, mask, time_, labels
-    Returns:
-        predictions: size[num_samples, 2]
-        labels: size[num_samples]
-    """
-    model.eval()
+# def predict_proba(model, dataloader):
+#     """
+#     Input:
+#         model: GRU-D model
+#         test_dataloader: containing batches of measurement, measurement_last_obsv, mask, time_, labels
+#     Returns:
+#         predictions: size[num_samples, 2]
+#         labels: size[num_samples]
+#     """
+#     model.eval()
     
 
-    probabilities = []
-    labels        = []
-    for X, label in dataloader:
-        X = X.numpy()
-        mask        = from_numpy(X[:, np.arange(0, X.shape[1], 3), :].astype(np.float32))
-        measurement = from_numpy(X[:, np.arange(1, X.shape[1], 3), :].astype(np.float32))
-        time_       = from_numpy(X[:, np.arange(2, X.shape[1], 3), :].astype(np.float32))
+#     probabilities = []
+#     labels        = []
+#     for X, label in dataloader:
+#         X = X.numpy()
+#         mask        = from_numpy(X[:, np.arange(0, X.shape[1], 3), :].astype(np.float32))
+#         measurement = from_numpy(X[:, np.arange(1, X.shape[1], 3), :].astype(np.float32))
+#         time_       = from_numpy(X[:, np.arange(2, X.shape[1], 3), :].astype(np.float32))
 
-        mask = transpose(mask, 1, 2)
-        measurement = transpose(measurement, 1, 2)
-        time_ = transpose(time_, 1, 2)
-        measurement_last_obsv = measurement            
+#         mask = transpose(mask, 1, 2)
+#         measurement = transpose(measurement, 1, 2)
+#         time_ = transpose(time_, 1, 2)
+#         measurement_last_obsv = measurement            
 
     
 
-        X, X_last_obsv, Mask, Delta, label = map(convert_to_device, [measurement, measurement_last_obsv, mask, time_, label])
+#         X, X_last_obsv, Mask, Delta, label = map(convert_to_device, [measurement, measurement_last_obsv, mask, time_, label])
 
-        prob = model(X, X_last_obsv, Mask, Delta)
-        probabilities.append(prob.detach().cpu().data.numpy())
-        labels.append(label.detach().cpu().data.numpy())
+#         prob = model(X, X_last_obsv, Mask, Delta)
+#         probabilities.append(prob.detach().cpu().data.numpy())
+#         labels.append(label.detach().cpu().data.numpy())
 
-    return probabilities, labels
+#     return probabilities, labels
 
