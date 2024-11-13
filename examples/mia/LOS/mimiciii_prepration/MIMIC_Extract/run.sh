@@ -48,4 +48,4 @@ python3 mimic_direct_extract.py --resource_path resources/ --out_path output/ --
 
 # # Part 3: Copy the output to the data directory
 # echo 'Copying file to target directory'
-# cp ./output/all_hourly_data.h5 ../../data/
+cp ./output/all_hourly_data.h5 ../../data/
