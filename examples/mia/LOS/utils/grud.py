@@ -49,7 +49,8 @@ class FilterLinear(nn.Module):
     def reset_parameters(self):
         stdv = 1. / math.sqrt(self.weight.size(1))
         self.weight.data.uniform_(-stdv, stdv)
-        if self.bias is not None: self.bias.data.uniform_(-stdv, stdv)
+        if self.bias is not None: 
+            self.bias.data.uniform_(-stdv, stdv)
 
     def forward(self, x):
         return F.linear(
@@ -193,6 +194,7 @@ class GRUD(nn.Module):
             if outputs is None:
                 outputs = Hidden_State.unsqueeze(1)
             else:
+                #TODO: check the order. in the original git repo of GRU it is cat((outputs, Hidden_State.unsqueeze(1)), 1)
                 outputs = cat((Hidden_State.unsqueeze(1), outputs), 1)
                 
         # we want to predict a binary outcome
@@ -201,17 +203,12 @@ class GRUD(nn.Module):
         return self.drop(self.bn(self.fc(Hidden_State)))
                 
     def initHidden(self, batch_size):
-        use_gpu = cuda.is_available()
-        if use_gpu:
-            Hidden_State = Variable(zeros(batch_size, self.hidden_size).cuda())
-            return Hidden_State
-        else:
-            Hidden_State = Variable(zeros(batch_size, self.hidden_size))
-            return Hidden_State
+        Hidden_State = Variable(zeros(batch_size, self.hidden_size)).to(self.device)
+        return Hidden_State
 
-def convert_to_device(x):
-        device_name = device("cuda" if cuda.is_available() else "cpu")
-        return x.to(device_name)
+# def convert_to_device(x):
+#         device_name = device("cuda" if cuda.is_available() else "cpu")
+#         return x.to(device_name)
 
 
 # Focus on the audit 
@@ -231,14 +228,15 @@ def gru_trained_model_and_metadata(model,
     print('Start Training ... ')
     device_name = device("cuda" if cuda.is_available() else "cpu")
 
-    # if (type(model) == nn.modules.container.Sequential):
-    #     output_last = model[-1].output_last
-    #     print('Output type dermined by the last layer')
-    # else:
-    #     output_last = model.output_last
-    #     print('Output type dermined by the model')
+    if isinstance(model, nn.Sequential):
+        output_last = model[-1].output_last
+        print('Output type dermined by the last layer')
+    else:
+        output_last = model.output_last
+        print('Output type dermined by the model')
         
-    criterion = nn.CrossEntropyLoss()
+    criterion_CEL = nn.CrossEntropyLoss()
+    criterion_MSE = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     
 
@@ -278,14 +276,21 @@ def gru_trained_model_and_metadata(model,
             X_last_obsv = measurement_last_obsv.to(device_name)
             Mask = mask.to(device_name)
             Delta = time_.to(device_name)
-            labels = labels.to(device_name)
+            labels =labels.long().to(device_name)
+
 
 
             # X, X_last_obsv, Mask, Delta, labels = map(convert_to_device, [measurement, measurement_last_obsv, mask, time_, labels])
 
             model.zero_grad()
             prediction = model(X, X_last_obsv, Mask, Delta)
-            loss = criterion(squeeze(prediction), squeeze(labels).long())
+
+            output_last = True
+            if output_last:
+                loss = criterion_CEL(squeeze(prediction), squeeze(labels))
+            else:
+                full_labels = cat((X[:,1:,:], labels), dim = 1)
+                loss = criterion_MSE(prediction, full_labels)
 
 
             optimizer.zero_grad()
@@ -327,7 +332,7 @@ def gru_trained_model_and_metadata(model,
         X_last_obsv_test = measurement_last_obsv_test.to(device_name)
         Mask_test = mask_test.to(device_name)
         Delta_test = time_test.to(device_name)
-        labels_test = labels_test.to(device_name)
+        labels_test = labels_test.long().to(device_name)
 
         # X_test, X_last_obsv_test, Mask_test, Delta_test, labels_test = map(convert_to_device, 
         #                                                                 [measurement_test, measurement_last_obsv_test, mask_test, time_test, labels_test])
@@ -335,7 +340,12 @@ def gru_trained_model_and_metadata(model,
         model.zero_grad()
         prediction_val = model(X_test, X_last_obsv_test, Mask_test, Delta_test)
         
-        test_loss =criterion(squeeze(prediction_val), squeeze(labels_test.long()))
+        if output_last:
+            test_loss = criterion_CEL(squeeze(prediction_val), squeeze(labels_test))
+        else:
+            full_labels_val = cat((X_test[:,1:,:], labels_test), dim = 1)
+            test_loss = criterion_MSE(prediction_val, full_labels_val)
+
         test_losses.append(test_loss)
 
         # Early Stopping
@@ -395,7 +405,7 @@ def gru_trained_model_and_metadata(model,
 
     # read out criterion parameters
     meta_data["loss"] = {}
-    meta_data["loss"]["name"] = criterion.__class__.__name__.lower()
+    meta_data["loss"]["name"] = criterion_CEL.__class__.__name__.lower()
 
     meta_data["batch_size"] = train_dataloader.batch_size
     meta_data["epochs"] = epochs
