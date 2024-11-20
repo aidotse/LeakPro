@@ -189,7 +189,13 @@ def plot_ir_base_case(*, inf_res: InferenceResults, high_res_flag: bool = True) 
     plt.tight_layout()
     plt.show()
 
-def plot_singling_out(*, sin_out_res: SinglingOutResults, high_res_flag: bool = True) -> None:
+def plot_singling_out(*,
+            sin_out_res: SinglingOutResults,
+            high_res_flag: bool = True,
+            show: bool = True,
+            save: bool = False,
+            save_name: str = None
+    ) -> None:
     """Function to plot singling out given results.
 
     Note: function is not tested and is used in examples.
@@ -225,5 +231,11 @@ def plot_singling_out(*, sin_out_res: SinglingOutResults, high_res_flag: bool = 
     set_ticks(ax=ax, xlabels=set_n_cols)
     # Adding legend
     set_legend(ax=ax)
+
+    if save:
+        plt.savefig(fname=f"{save_name}.png", dpi=1000, bbox_inches="tight")
     # Show plot
-    plt.show()
+    if show:
+        plt.show()
+    else:
+        plt.clf()

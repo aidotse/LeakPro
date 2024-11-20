@@ -239,22 +239,30 @@ class MIAResult:
         self.tpr = self.tp / (self.tp + self.fn)
         self.roc_auc = auc(self.fpr, self.tpr)
 
-    def load(self:Self, data: dict) -> None:
+
+    @staticmethod
+    def load(data: dict) -> None:
         """Load the MIAResults to disk."""
 
-        self.resultname = data["resultname"]
-        self.resulttype = data["resulttype"]
-        self.tpr = data["tpr"]
-        self.fpr = data["fpr"]
-        self.roc_auc = data["roc_auc"]
-        self.config = data["config"]
-        self.fixed_fpr_table = data["fixed_fpr"]
-        self.audit_indices = data["audit_indices"]
-        self.signal_values = data["signal_values"]
-        self.true_labels = data["true_labels"]
-        self.threshold = data["threshold"]
+        miaresult = MIAResult(load=True)
 
-    def save(self:Self, path: str, name: str, config:dict = None) -> None:
+        miaresult.resultname = data["resultname"]
+        miaresult.resulttype = data["resulttype"]
+        miaresult.tpr = data["tpr"]
+        miaresult.fpr = data["fpr"]
+        miaresult.roc_auc = data["roc_auc"]
+        miaresult.config = data["config"]
+        miaresult.fixed_fpr_table = data["fixed_fpr"]
+        miaresult.audit_indices = data["audit_indices"]
+        miaresult.signal_values = data["signal_values"]
+        miaresult.true_labels = data["true_labels"]
+        miaresult.threshold = data["threshold"]
+
+        miaresult.id = data["id"]
+
+        return miaresult
+
+    def save(self:Self, path: str, name: str, config:dict = None, show_plot:bool = False) -> None:
         """Save the MIAResults to disk."""
 
         result_config = config["attack_list"][name]
@@ -297,7 +305,8 @@ class MIAResult:
         temp_res.fpr = self.fpr
         temp_res.id = self.id
         self.create_plot(results = [temp_res],
-                        filename = filename
+                        filename = filename,
+                        show_plot = show_plot
                         )
 
         # Create SignalHistogram plot for MIAResult
@@ -305,7 +314,8 @@ class MIAResult:
         self.create_signal_histogram(filename = filename,
                                     signal_values = self.signal_values,
                                     true_labels = self.true_labels,
-                                    threshold = self.threshold
+                                    threshold = self.threshold,
+                                    show_plot = show_plot,
                                     )
 
     @staticmethod
@@ -313,7 +323,13 @@ class MIAResult:
         """Method for selecting the strongest attack."""
         return max((res for res in results), key=lambda d: d.roc_auc)
 
-    def create_signal_histogram(self:Self, filename: str, signal_values: list, true_labels: list, threshold: float) -> None:
+    def create_signal_histogram(
+            self:Self, filename: str,
+            signal_values: list,
+            true_labels: list,
+            threshold: float,
+            show_plot: bool = False,
+            ) -> None:
         """Method to create Signal Histogram."""
 
         values = np.array(signal_values).ravel()
@@ -353,10 +369,18 @@ class MIAResult:
         plt.ylabel("Number of samples")
         plt.title("Signal histogram")
         plt.savefig(fname=filename, dpi=1000)
-        plt.clf()
+        if show_plot:
+            plt.show()
+        else:
+            plt.clf()
 
     @staticmethod
-    def create_plot(results: list, save_dir: str = "", save_name: str = "") -> None:
+    def create_plot(
+            results: list,
+            save_dir: str = "",
+            save_name: str = "",
+            show_plot: bool = False
+        ) -> None:
         """Plot method for MIAResult."""
 
         filename = f"{save_dir}/{save_name}"
@@ -385,34 +409,79 @@ class MIAResult:
         plt.ylabel("True positive rate (TPR)")
         plt.title(save_name+"ROC Curve")
         plt.savefig(fname=f"{filename}.png", dpi=1000, bbox_inches="tight")
-        plt.clf()
+
+        if show_plot:
+            plt.show()
+        else:
+            plt.clf()
+
+    @staticmethod
+    def _get_all_attacknames(
+            results: list
+            ) -> list:
+        attack_name_list = []
+        for result in results:
+            if result.resultname not in attack_name_list:
+                attack_name_list.append(result.resultname)
+        return attack_name_list
+
+    @staticmethod
+    def _get_results_of_name(
+            results: list,
+            resultname_value: str
+            ) -> list:
+        indices = [idx for (idx, result) in enumerate(results) if result.resultname == resultname_value]
+        return [results[idx] for idx in indices]
 
     @staticmethod
     def create_results(
             results: list,
             save_dir: str = "./",
             save_name: str = "foo",
+            show_plot: bool = False,
         ) -> str:
         """Result method for MIAResult."""
+        latex = ""
 
-        MIAResult.create_plot(results, save_dir, save_name)
+        # Create plot for all results
+        MIAResult.create_plot(results, save_dir, save_name="all_results", show_plot=show_plot)
+        latex += MIAResult._latex(results, save_dir, save_name="all_results")
 
-        return MIAResult._latex(results, save_dir, save_name)
+        # Create plot for results grouped by name
+        all_attack_names = MIAResult._get_all_attacknames(results)
+        for name in all_attack_names:
+            results_name_grouped = MIAResult._get_results_of_name(results, name)
+            MIAResult.create_plot(results_name_grouped, save_dir, save_name=name, show_plot=show_plot)
+            latex += MIAResult._latex(results_name_grouped, save_dir, save_name=name)
+
+        # Create plot for results grouped by name
+        grouped_results = [MIAResult._get_results_of_name(results, name) for name
+                           in all_attack_names]
+        strongest_results = [MIAResult.get_strongest(result) for result in grouped_results]
+        MIAResult.create_plot(strongest_results, save_dir, save_name="strongest", show_plot=show_plot)
+        latex += MIAResult._latex(strongest_results, save_dir, save_name="strongest")
+
+        return latex
 
     @staticmethod
-    def _latex(results: list, save_dir: str, save_name: str) -> str:
+    def _latex(
+            results: list,
+            save_dir: str,
+            save_name: str
+        ) -> str:
         """Latex method for MIAResult."""
 
         filename = f"{save_dir}/{save_name}"
 
-        latex_content = ""
-        latex_content += f"""
+        # Input mia results image
+        latex_content = f"""
         \\subsection{{{" ".join(save_name.split("_"))}}}
         \\begin{{figure}}[ht]
         \\includegraphics[width=0.8\\textwidth]{{{filename}.png}}
         \\end{{figure}}
         """
 
+        # Initialize latex table
         latex_content += """
         \\resizebox{\\linewidth}{!}{%
         \\begin{tabularx}{\\textwidth}{l c l l l l}
@@ -420,11 +489,13 @@ class MIAResult:
         \\hline
         """
 
+        # Convert config to latex table input
         def config_latex_style(config: str) -> str:
             config = " \\\\ ".join(config.split("-")[1:])
             config = "-".join(config.split("_"))
             return f"""\\shortstack{{{config}}}"""
 
+        # Append all mia results to table
         for res in results:
             config = config_latex_style(res.id)
             latex_content += f"""{"-".join(res.resultname.split("_"))} & {config} & {res.fixed_fpr_table["TPR@1.0%FPR"]} &
@@ -442,8 +513,16 @@ class MIAResult:
 class GIAResults:
     """Contains results for a GIA attack."""
 
-    def __init__(self: Self, original_data: DataLoader, recreated_data: DataLoader,
-                 psnr_score: float, data_mean: float, data_std: float, load: bool) -> None:
+    def __init__(
+            self: Self,
+            original_data: DataLoader,
+            recreated_data: DataLoader,
+            psnr_score: float,
+            data_mean: float,
+            data_std: float,
+            load: bool
+        ) -> None:
+
         self.original_data = original_data
         self.recreated_data = recreated_data
         self.PSNR_score = psnr_score
@@ -453,7 +532,10 @@ class GIAResults:
         if load:
             return
 
-    def load(self:Self, data: dict) -> None:
+    def load(
+            self:Self,
+            data: dict
+        ) -> None:
         """Load the GIAResults from disk."""
 
         self.original = data["original"]
@@ -461,7 +543,13 @@ class GIAResults:
         self.recreated = data["recreated"]
         self.id = data["id"]
 
-    def save(self: Self, save_path: str, name: str, config: dict) -> None:
+    def save(
+            self: Self,
+            save_path: str,
+            name: str,
+            config: dict,
+            show_plot: bool = False
+        ) -> None:
         """Save the GIAResults to disk."""
 
         result_config = config["attack_list"][name]
@@ -493,6 +581,15 @@ class GIAResults:
         original = os.path.join(save_path, "original_image.png")
         save_image(gt_denormalized, original)
 
+        if show_plot:
+            # Plot output
+            plt.plot(output_denormalized)
+            plt.show()
+
+            # Plot ground truth
+            plt.plot(gt_denormalized)
+            plt.show()
+
         # Data to be saved
         data = {
             "resulttype": self.__class__.__name__,
@@ -510,13 +607,21 @@ class GIAResults:
             json.dump(data, f)
 
     @staticmethod
-    def create_result(attack_name: str, save_path: str) -> None:
+    def create_results(
+            results: list,
+            save_dir: str = "./",
+            save_name: str = "foo",
+        ) -> str:
         """Result method for GIA."""
 
-        def _latex(attack_name: str, original: str, recreated: str) -> str:
+        def _latex(
+                save_name: str,
+                original: str,
+                recreated: str
+            ) -> str:
             """Latex method for GIAResults."""
             return f"""
-            \\subsection{{{" ".join(attack_name.split("_"))}}}
+            \\subsection{{{" ".join(save_name.split("_"))}}}
             \\begin{{figure}}[ht]
             \\includegraphics[width=0.8\\textwidth]{{{original}}}
             \\caption{{Original}}
@@ -527,63 +632,347 @@ class GIAResults:
             \\caption{{Original}}
             \\end{{figure}}
             """
-        return _latex(attack_name=attack_name, original=save_path+"recreated_image.png", recreated=save_path+"original_image.png")
+        return _latex(save_name=save_name, original=save_dir+"recreated_image.png", recreated=save_dir+"original_image.png")
 
-class SyntheticResult:
-    """Contains results related to the performance of the metric. It contains the results for multiple fpr."""
+# class SyntheticResult:
+#     """Contains results for SyntheticResult."""
 
-    def __init__(  # noqa: PLR0913
-        self:Self,
-        values: list,
-        load: bool = False,
-    ) -> None:
-        """Initalze Result method."""
+#     def __init__(  # noqa: PLR0913
+#             self:Self,
+#             SynRes: Union[SinglingOutResults, LinkabilityResults, InferenceResults],
+#             load: bool = False,
+#         ) -> None:
+#         """Initalze SyntheticResult method."""
 
-        # Initialize values to result object
-        self.values = values
+#         # Initialize values to result object
+#         self.SynRes = SynRes
 
-        # Have a method to return if the results are to be loaded
-        if load:
-            return
+#         # Have a method to return if the results are to be loaded
+#         if load:
+#             return
 
-        # Create some result
-        self.result_values = self.create_result(self.values)
+#         # Create some result
+#         self.result_values = self.create_result(self.values)
 
-    def load(self:Self, data: dict) -> None:
-        """Load the TEMPLATEResult class to disk."""
-        self.result_values = data["some_result"]
+#     def load(
+#             self:Self,
+#             data: dict
+#         ) -> None:
+#         """Load the SyntheticResult class to disk."""
+#         self.result_values = data["some_result"]
 
-    def save(self:Self, path: str, name: str, config:dict = None) -> None:
-        """Save the TEMPLATEResult class to disk."""
+#     def save(
+#             self:Self,
+#             save_path: str,
+#             save_name: str,
+#             config:dict = None
+#         ) -> None:
+#         """Save the SyntheticResult class to disk."""
 
-        result_config = config["attack_list"][name]
+#         result_config = config["attack_list"][name]
 
-        # Data to be saved
-        data = {
-            "some_result": self.result_values
-        }
+#         # Get the name for the attack configuration
+#         config_name = get_config_name(result_config)
+#         self.id = f"{name}{config_name}"
+#         save_path = f"{path}/{name}/{self.id}"
 
-        # Get the name for the attack configuration
-        config_name = get_config_name(result_config)
-        self.id = f"{name}{config_name}"
-        save_path = f"{path}/{name}/{self.id}"
+#         save_name = os.path.join(save_path, f"synthetic.png")
 
-        # Check if path exists, otherwise create it.
-        if not os.path.exists(f"{save_path}"):
-            os.makedirs(f"{save_path}")
+#         SyntheticResult.plot(
+#             res=self.SynRes,
+#             show=False,
+#             save=True,
+#             save_path=save_path,
+#             save_name=save_name,
+#         )
 
-        # Save the results to a file
-        with open(f"{save_path}/data.json", "w") as f:
-            json.dump(data, f)
+#         # Data to be saved
+#         data = {
+#             "synthetic_result_name": self.SynRes.__class__.__name__,
+#             "synthetic_result": self.SynRes,
+#             "image_path": save_name,
+#             "id": self.id
+#         }
+
+#         # Check if path exists, otherwise create it.
+#         if not os.path.exists(f"{save_path}"):
+#             os.makedirs(f"{save_path}")
+
+#         # Save the results to a file
+#         with open(f"{save_path}/data.json", "w") as f:
+#             json.dump(data, f)
+
+#     @staticmethod
+#     def create_results(
+#             results: list,
+#             save_dir: str = "./",
+#             save_name: str = "foo",
+#         ) -> str:
+#         """Result method for SyntheticResult."""
+
+#         def _latex(save_name: str, result_file: str) -> str:
+#             """Latex method for SyntheticResult."""
+#             return f"""
+#             \\subsection{{{" ".join(save_name.split("_"))}}}
+#             \\begin{{figure}}[ht]
+#             \\includegraphics[width=0.8\\textwidth]{{{result_file}}}
+#             \\caption{{Original}}
+#             \\end{{figure}}
+#             """
+#         return _latex(results=results, save_name=save_name, result_file=save_dir+"synthetic.png")
+
+#     @staticmethod
+#     def plot(
+#             res: Union[SinglingOutResults, LinkabilityResults, InferenceResults],
+#             high_res_flag: bool = True,
+#             case_flag: str = "base",
+#             show:bool = True,
+#             save:bool = False,
+#             save_path:str = "./",
+#             save_name:str = "fig.png",
+#         ) -> None:
+
+#         save_name = os.path.join(save_path, save_name)
+
+#         SyntheticResultName = res.__class__.__name__
+#         if SyntheticResultName == "SinglingOutResults":
+#             SyntheticResult.plot_singling_out(sin_out_res=res,
+#                                             high_res_flag = high_res_flag,
+#                                             show=show,
+#                                             save=save,
+#                                             save_name=save_name)
+
+#         elif SyntheticResultName == "LinkabilityResults":
+#             SyntheticResult.plot_linkability(link_res=res,
+#                                             high_res_flag = high_res_flag,
+#                                             show=show,
+#                                             save=save,
+#                                             save_name=save_name)
+
+#         elif SyntheticResultName == "InferenceResults":
+#             if case_flag == "base":
+#                 SyntheticResult.plot_ir_base_case(inf_res=res,
+#                                                 high_res_flag = high_res_flag,
+#                                                 show=show,
+#                                                 save=save,
+#                                                 save_name=save_name)
+#             elif case_flag == "worst":
+#                 SyntheticResult.plot_ir_worst_case(inf_res=res,
+#                                                 high_res_flag = high_res_flag,
+#                                                 show=show,
+#                                                 save=save,
+#                                                 save_name=save_name)
+#             else:
+#                 print("No such case")
+
+#     def plot_ir_base_case(
+#             *,
+#             inf_res: InferenceResults,
+#             high_res_flag: bool = True,
+#             show: bool = True,
+#             save: bool = False,
+#             save_name: str = None,
+#         ) -> None:
+#         """Function to plot inference results base case given results.
+
+#         Note: function is not tested and is used in examples.
+#         """
+#         #Set res, secrets, set_secrets and set_nr_aux_cols
+#         res = np.array(inf_res.res)
+#         secrets = np.array(inf_res.secrets)
+#         set_secrets = sorted(set(secrets))
+#         set_nr_aux_cols = np.unique(res[:,-1].astype(int))
+#         # High res flag
+#         if high_res_flag:
+#             plot_save_high_res()
+#         # Set up the figure and get axes
+#         fig_title = f"Inference risk, base case scenario, {conf_level} confidence, total attacks: {int(res[:,0].sum())}"
+#         axs = get_figure_axes(two_axes_flag=True, fig_title=fig_title)
+#         # Set plot variables
+#         titles = ["Risk per column", "Risk per Nr aux cols"]
+#         xlabels = ["Secret col", "Nr aux cols"]
+#         sets_values = [set_secrets, set_nr_aux_cols]
+#         valueses = [secrets, res[:,-1]]
+#         assert len(axs) == len(titles)
+#         assert len(axs) == len(xlabels)
+#         assert len(axs) == len(sets_values)
+#         assert len(axs) == len(valueses)
+#         #Plotting
+#         for ax, title, xlabel, set_values, values in zip(axs, titles, xlabels, sets_values, valueses):
+#             set_labels_and_title(
+#                 ax = ax,
+#                 xlabel = xlabel,
+#                 ylabel = "Risk",
+#                 title = title
+#             )
+#             # Iterate through values and plot bar charts
+#             iterate_values_plot_bar_charts(ax=ax, res=res, set_values=set_values, values=values)
+#             # Adding ticks
+#             set_ticks(ax=ax, xlabels=set_values)
+#             # Adding legend
+#             set_legend(ax=ax)
+#                 # Save plot
+#         if save:
+#             plt.savefig(fname=f"{save_name}.png", dpi=1000, bbox_inches="tight")
+#         # Show plot
+#         if show:
+#             plt.show()
+#         else:
+#             plt.clf()
+
+#     def plot_ir_worst_case(
+#             *,
+#             inf_res: InferenceResults,
+#             high_res_flag: bool = True,
+#             show: bool = True,
+#             save: bool = False,
+#             save_name: str = None,
+#         ) -> None:
+#         """Function to plot inference results worst case given results.
+
+#         Note: function is not tested and is used in examples.
+#         """
+#         #Set res, secrets and set_secrets
+#         res = np.array(inf_res.res)
+#         secrets = np.array(inf_res.secrets)
+#         set_secrets = sorted(set(secrets))
+#         # High res flag
+#         if high_res_flag:
+#             plot_save_high_res()
+#         # Set up the figure and get axes
+#         ax = get_figure_axes()
+#         # Iterate through secrets and plot bar charts
+#         iterate_values_plot_bar_charts(
+#             ax = ax,
+#             res = res,
+#             set_values = set_secrets,
+#             values = secrets,
+#             max_value_flag = True
+#         )
+#         # Adding labels and title
+#         set_labels_and_title(
+#             ax = ax,
+#             xlabel = "Secret col",
+#             ylabel = "Risk",
+#             title = f"Inference risk, worst case scenario, total attacks: {int(res[:,0].sum())}"
+#         )
+#         # Adding ticks
+#         set_ticks(ax=ax, xlabels=set_secrets)
+#         # Adding legend
+#         set_legend(ax=ax)
+#         # Save plot
+#         if save:
+#             plt.savefig(fname=f"{save_name}.png", dpi=1000, bbox_inches="tight")
+#         # Show plot
+#         if show:
+#             plt.show()
+#         else:
+#             plt.clf()
+
+#     @staticmethod
+#     def plot_linkability(
+#             *,
+#             link_res:LinkabilityResults,
+#             high_res_flag: bool = False,
+#             show: bool = True,
+#             save: bool = False,
+#             save_name: str = None,
+#         ) -> None:
+#         """Function to plot linkability results from given res.
+
+#         Note: function is not tested and is used in examples.
+#         """
+#         # Get res and aux_cols_nr
+#         res = np.array(link_res.res)
+#         set_nr_aux_cols = np.unique(res[:,-1].astype(int))
+#         # High res flag
+#         if high_res_flag:
+#             plot_save_high_res()
+#         # Set up the figure and get axes
+#         ax = get_figure_axes()
+#         # Iterate through nr of columns and plot bar charts
+#         iterate_values_plot_bar_charts(ax=ax, res=res, set_values=set_nr_aux_cols, values=res[:, -1])
+#         # Adding labels and title
+#         set_labels_and_title(
+#             ax = ax,
+#             xlabel = "Nr aux cols",
+#             ylabel = "Risk",
+#             title = f"Linkability risk {conf_level} confidence, total attacks: {int(res[:,0].sum())}"
+#         )
+#         # Adding ticks
+#         set_ticks(ax=ax, xlabels=set_nr_aux_cols)
+#         # Adding legend
+#         set_legend(ax=ax)
+#         # Save plot
+#         if save:
+#             plt.savefig(fname=f"{save_name}.png", dpi=1000, bbox_inches="tight")
+#         # Show plot
+#         if show:
+#             plt.show()
+#         else:
+#             plt.clf()
+
+#     @staticmethod
+#     def plot_singling_out(
+#             *,
+#             sin_out_res: SinglingOutResults,
+#             high_res_flag: bool = True,
+#             show: bool = True,
+#             save: bool = False,
+#             save_name: str = None,
+#         ) -> None:
+#         """Function to plot singling out given results.
+
+#         Note: function is not tested and is used in examples.
+#         """
+#         #Set res, n_cols and set_n_cols
+#         res = np.array(sin_out_res.res)
+#         n_cols = res[:,-1].astype(int).tolist()
+#         set_n_cols = np.unique(n_cols)
+#         # High res flag
+#         if high_res_flag:
+#             plot_save_high_res()
+#         # Set up the figure and get axes
+#         ax = get_figure_axes()
+#         # Iterate through values and plot bar charts
+#         iterate_values_plot_bar_charts(
+#             ax = ax,
+#             res = res,
+#             set_values = set_n_cols,
+#             values = n_cols,
+#             max_value_flag = True
+#         )
+#         # Adding labels and title
+#         fig_title = f"Singling out risk total attacks: {int(res[:,0].sum())}"
+#         if res.shape[0]==1:
+#             fig_title += f", n_cols={int(res[0,-1])}"
+#         set_labels_and_title(
+#             ax = ax,
+#             xlabel = "n_cols for predicates",
+#             ylabel = "Risk",
+#             title = fig_title
+#         )
+#         # Adding ticks
+#         set_ticks(ax=ax, xlabels=set_n_cols)
+#         # Adding legend
+#         if save:
+#             plt.savefig(fname=f"{save_name}.png", dpi=1000, bbox_inches="tight")
+#         # Show plot
+#         if show:
+#             plt.show()
+#         else:
+#             plt.clf()
+
+
 
 class TEMPLATEResult:
     """Contains results related to the performance of the metric. It contains the results for multiple fpr."""
 
     def __init__(  # noqa: PLR0913
-        self:Self,
-        values: list,
-        load: bool = False,
-    ) -> None:
+            self:Self,
+            values: list,
+            load: bool = False,
+        ) -> None:
         """Initalze Result method."""
 
         # Initialize values to result object
@@ -596,11 +985,19 @@ class TEMPLATEResult:
         # Create some result
         self.result_values = self.create_result(self.values)
 
-    def load(self:Self, data: dict) -> None:
+    def load(
+            self:Self,
+            data: dict
+        ) -> None:
         """Load the TEMPLATEResult class to disk."""
         self.result_values = data["some_result"]
 
-    def save(self:Self, path: str, name: str, config:dict = None) -> None:
+    def save(
+            self:Self,
+            path: str,
+            name: str,
+            config:dict = None
+        ) -> None:
         """Save the TEMPLATEResult class to disk."""
 
         result_config = config["attack_list"][name]
@@ -623,7 +1020,7 @@ class TEMPLATEResult:
             json.dump(data, f)
 
     @staticmethod
-    def create_result(results: list) -> str:
+    def create_results(results: list) -> str:
         """Method for results."""
         def _latex(results: list) -> str:
             """Latex method for TEMPLATEResult."""
