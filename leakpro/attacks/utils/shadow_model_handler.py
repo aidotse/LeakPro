@@ -134,7 +134,8 @@ class ShadowModelHandler(ModelHandler):
             training_results = self.handler.train(data_loader, model, criterion, optimizer, self.epochs)
             # Read out results
             shadow_model = training_results["model"]
-            train_acc = training_results["metrics"]["accuracy"]
+            # train_acc = training_results["metrics"]["accuracy"]
+            train_acc = 0
             train_loss = training_results["metrics"]["loss"]
 
             logger.info(f"Training shadow model {i} complete")
