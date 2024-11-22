@@ -37,7 +37,7 @@ Then to create and build a postgres database run the below command. The default 
 $ make mimic-build datadir=./data/ 
 ```
 Navigate back to the ```./MIMIC_Extract``` and run the follwoing command.
-The output files will be saved in the ```output``` folder. 
+The output files will be saved in the ```output``` folder. Note that this command may take a day or longer to complete.
 ```
 $ bash run.sh
 ```
