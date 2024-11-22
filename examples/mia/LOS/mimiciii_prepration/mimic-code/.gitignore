@@ -1,0 +1,5 @@
+# Ignore all contents of data
+/buildmimic/data/*
+
+# Exclude the folder itself so it stay in the repository
+!/buildmimic/data/.gitkeep
