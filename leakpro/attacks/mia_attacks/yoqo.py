@@ -1,6 +1,9 @@
 """Implementation of the LiRA attack."""
 
 import numpy as np
+import torch
+from torch import Tensor
+from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
@@ -10,9 +13,6 @@ from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
-import torch
-from torch import Tensor
-from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 
 class AttackYOQO(AbstractMIA):
     """Implementation of the You Only Query Once attack."""
@@ -37,11 +37,9 @@ class AttackYOQO(AbstractMIA):
         logits = self.target_model.get_logits(tmp_features)
         self.output_shape = logits.shape[1]
         if self.output_shape == 1:
-            self.loss = BCEWithLogitsLoss(reduction = 'none')
-            #self.loss = BCEWithLogitsLoss()
-        else: 
-            self.loss = CrossEntropyLoss(reduction = 'none')
-            #self.loss = CrossEntropyLoss()
+            self.loss = BCEWithLogitsLoss(reduction = "none")
+        else:
+            self.loss = CrossEntropyLoss(reduction = "none")
 
         self._configure_attack(configs)
 
@@ -70,7 +68,7 @@ class AttackYOQO(AbstractMIA):
             "num_shadow_models": (self.num_shadow_models, 1, None),
             "training_data_fraction": (self.training_data_fraction, 0, 1),
             "lr_xprime_optimization": (self.lr_xprime_optimization, 0, None),
-            #"max_iterations": (self.max_iterations, 1, None),
+            "max_iterations": (self.max_iterations, 0, None),
         }
 
         # Validate parameters
@@ -119,6 +117,10 @@ class AttackYOQO(AbstractMIA):
 
         self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)
 
+        self._prepare_audit_data()
+        self._prepare_optimization_objective()
+
+    def _prepare_audit_data(self:Self) -> None:
         logger.info("Create masks for all IN and OUT samples")
         self.in_indices_masks = ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"])
 
@@ -141,21 +143,10 @@ class AttackYOQO(AbstractMIA):
             if len(self.audit_data_indices) == 0:
                 raise ValueError("No points in the audit dataset are used for the shadow models")
 
-            if self.output_shape == 1:
-                self._optimization_objective = self._optimization_objective_online_binary
-            else:
-                self._optimization_objective = self._optimization_objective_online
         else:
             self.audit_data_indices = self.audit_dataset["data"]
             self.in_members = self.audit_dataset["in_members"]
             self.out_members = self.audit_dataset["out_members"]
-
-            self.mse = MSELoss()
-
-            if self.output_shape == 1:
-                self._optimization_objective = self._optimization_objective_offline_binary
-            else:
-                self._optimization_objective = self._optimization_objective_offline
 
         # Check offline attack for possible IN- sample(s)
         if not self.online:
@@ -172,7 +163,7 @@ class AttackYOQO(AbstractMIA):
             self.out_members = self.out_members[:(self.n_audits - len(self.in_members))]
             self.audit_data_indices = np.concatenate(
                 (
-                    self.audit_data_indices[self.in_members], 
+                    self.audit_data_indices[self.in_members],
                     self.audit_data_indices[self.out_members]
                 )
             )
@@ -184,55 +175,100 @@ class AttackYOQO(AbstractMIA):
                 axis = 0
             )
 
+    def _prepare_optimization_objective(self:Self) -> None:
+        if self.online:
+            if self.output_shape == 1:
+                self._optimization_objective = self._optimization_objective_online_binary
+            else:
+                self._optimization_objective = self._optimization_objective_online
+        else:
+            self.mse = MSELoss()
+
+            if self.output_shape == 1:
+                self._optimization_objective = self._optimization_objective_offline_binary
+            else:
+                self._optimization_objective = self._optimization_objective_offline
+
         self.weights = 1 + (self.alpha - 1) * self.in_indices_masks
         self.weights = Tensor(self.weights)
         self.batch_size = 5000
 
         data_loader = self.handler.get_dataloader(self.audit_data_indices, batch_size=self.batch_size)
         self.target_output = []
-        for i, (data, labels) in tqdm(enumerate(data_loader), desc=f"Calculating target labels", leave=False):
+        for i, (data, labels) in tqdm(enumerate(data_loader), desc="Calculating target labels", leave=False):
             if self.output_shape == 1:
-                batch_target_output = labels[:,np.newaxis] * self.in_indices_masks[(i * self.batch_size):((i + 1) * self.batch_size),:] + (1 - labels[:,np.newaxis]) * (1 - self.in_indices_masks[(i * self.batch_size):((i + 1) * self.batch_size),:])
+                batch_target_output = \
+                    labels[:,np.newaxis] * self.in_indices_masks[(i * self.batch_size):((i + 1) * self.batch_size),:] + \
+                    (1 - labels[:,np.newaxis]) * (1 - self.in_indices_masks[(i * self.batch_size):((i + 1) * self.batch_size),:])
                 self.target_output.extend(batch_target_output)
-            else: 
+            else:
                 labels_true = labels
                 labels_false = torch.stack([shadow_model.model_obj(data) for shadow_model in self.shadow_models])
                 labels_false[:,np.arange(labels_true.shape[0]),labels_true] = -1e10
                 labels_false = torch.argmax(labels_false, dim = 2)
-                batch_target_output = labels_true[:,np.newaxis] * self.in_indices_masks[(i * self.batch_size):((i + 1) * self.batch_size),:] + \
+                batch_target_output = \
+                    labels_true[:,np.newaxis] * self.in_indices_masks[(i * self.batch_size):((i + 1) * self.batch_size),:] + \
                     labels_false.T * (1 - self.in_indices_masks[(i * self.batch_size):((i + 1) * self.batch_size),:])
                 self.target_output.extend(batch_target_output)
         self.target_output = np.array(self.target_output)
         self.target_output = Tensor(self.target_output)
 
-    def _optimization_objective_online(self: Self, x0: Tensor, dx: Tensor, target_output: Tensor, weights: Tensor):
-        loss = self.loss(torch.stack([shadow_model.model_obj(x0 + dx) for shadow_model in self.shadow_models], dim = 2), target_output)
-        loss = (loss * weights).sum()
-        return loss
+    def _optimization_objective_online(
+        self: Self,
+        x0: Tensor,
+        dx: Tensor,
+        target_output: Tensor,
+        weights: Tensor
+    ) -> float:
+        loss = torch.stack([shadow_model.model_obj(x0 + dx) for shadow_model in self.shadow_models], dim = 2)
+        loss = self.loss(loss, target_output)
+        loss = loss * weights
+        return loss.sum()
 
-    def _optimization_objective_online_binary(self: Self, x0: Tensor, dx: Tensor, target_output: Tensor, weights: Tensor):
-        loss = self.loss(torch.cat([shadow_model.model_obj(x0 + dx) for shadow_model in self.shadow_models], dim = 1), target_output)
-        loss = (loss * weights).sum()
-        return loss
+    def _optimization_objective_online_binary(
+        self: Self,
+        x0: Tensor,
+        dx: Tensor,
+        target_output: Tensor,
+        weights: Tensor
+    ) -> float:
+        loss = torch.cat([shadow_model.model_obj(x0 + dx) for shadow_model in self.shadow_models], dim = 1)
+        loss = self.loss(loss, target_output)
+        loss = loss * weights
+        return loss.sum()
 
-    def _optimization_objective_offline(self: Self, x0: Tensor, dx: Tensor, target_output: Tensor, weights: Tensor):
-        loss = self.loss(torch.stack([shadow_model.model_obj(x0 + dx) for shadow_model in self.shadow_models], dim = 2),target_output) 
+    def _optimization_objective_offline(
+        self: Self,
+        x0: Tensor,
+        dx: Tensor,
+        target_output: Tensor,
+        weights: Tensor
+    ) -> float:
+        loss = torch.stack([shadow_model.model_obj(x0 + dx) for shadow_model in self.shadow_models], dim = 2)
+        loss = self.loss(loss,target_output)
         loss = (loss * weights).sum()
-        loss = loss + self.alpha * self.mse(dx, torch.zeros(dx.shape, device = dx.device))
-        return loss
+        norm = self.alpha * self.mse(dx, torch.zeros(dx.shape, device = dx.device))
+        return (loss + norm)
 
-    def _optimization_objective_offline_binary(self: Self, x0: Tensor, dx: Tensor, target_output: Tensor, weights: Tensor):
-        loss = self.loss(torch.cat([shadow_model.model_obj(x0 + dx) for shadow_model in self.shadow_models], dim = 1),target_output)
+    def _optimization_objective_offline_binary(
+        self: Self,
+        x0: Tensor,
+        dx: Tensor,
+        target_output: Tensor,
+        weights: Tensor
+    ) -> float:
+        loss = torch.cat([shadow_model.model_obj(x0 + dx) for shadow_model in self.shadow_models], dim = 1)
+        loss = self.loss(loss,target_output)
         loss = (loss * weights).sum()
-        loss = loss + self.alpha * self.mse(dx, torch.zeros(dx.shape, device = dx.device))
-        return loss
+        norm =  self.alpha * self.mse(dx, torch.zeros(dx.shape, device = dx.device))
+        return (loss + norm)
 
     def _optimize_xprime(self: Self, x0: Tensor, target_output: Tensor, weights: Tensor) -> Tensor:
         dx = torch.zeros(x0.shape, device = x0.device)
         dx.requires_grad = True
 
         optim = torch.optim.SGD([dx], lr = self.lr_xprime_optimization)
-        for i in range(self.max_iterations):
+        for _ in range(self.max_iterations):
             loss = self._optimization_objective(x0, dx, target_output, weights)
             if loss < self.stop_criterion:
                 break
@@ -267,8 +303,8 @@ class AttackYOQO(AbstractMIA):
             model.model_obj.eval()
             model.model_obj.to(device_name)
 
-        for i, (data, labels) in tqdm(enumerate(data_loader), desc=f"Optimizing queries", leave=False):
-            xprime = self._optimize_xprime(data.to(device_name), 
+        for i, (data, labels) in tqdm(enumerate(data_loader), desc="Optimizing queries", leave=False):
+            xprime = self._optimize_xprime(data.to(device_name),
                                            self.target_output[i:(i + 1)].to(device_name),
                                            self.weights[i:(i + 1), :].to(device_name))
 
