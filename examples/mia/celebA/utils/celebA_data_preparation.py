@@ -73,19 +73,18 @@ def get_celebA_dataloader(data_path, train_config):
     # Create the combined celebA dataset
     train_fraction = train_config["data"]["f_train"]
     test_fraction = train_config["data"]["f_test"]
-    cifar_type = train_config["data"]["dataset"]
     batch_size = train_config["train"]["batch_size"]
 
     transform = transforms.Compose([transforms.ToTensor(),
                                     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
-    population_dataset = celebADataset.from_cifar(config=train_config, download=True, transform=transform)
+    population_dataset = celebADataset.from_celebA(config=train_config, download=True, transform=transform)
 
-    file_path =  "data/"+ cifar_type + ".pkl"
+    file_path =  "data/celebA.pkl"
     if not os.path.exists(file_path):
         with open(file_path, "wb") as file:
             pickle.dump(population_dataset, file)
-            print(f"Save data to {file_path}.pkl")
+            print(f"Save data to {file_path}")
 
     dataset_size = len(population_dataset)
     train_size = int(train_fraction * dataset_size)
