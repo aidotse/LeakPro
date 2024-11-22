@@ -24,17 +24,19 @@ class MimicLR(nn.Module):
 
 def evaluate(model, loader, criterion, device):
     model.eval()
-    loss, acc = 0, 0
-    with no_grad():
-        for data, target in loader:
-            data, target = data.to(device), target.to(device)
-            target = target.float().unsqueeze(1)
+    loss, correct = 0, 0
+    for data, target in loader:
+        data, target = data.to(device), target.to(device)
+        target = target.float().unsqueeze(1)
+        
+        with no_grad():
             output = model(data)
             loss += criterion(output, target).item()
-            pred = sigmoid(output) >= 0.5
-            acc += pred.eq(target.data.view_as(pred)).sum()
-        loss /= len(loader)
-        acc = float(acc) / len(loader.dataset)
+            pred = output >= 0.5
+            correct += (pred == target).float().sum()
+    acc = float(correct)/ len(loader.dataset)
+    loss /= len(loader)
+    
     return loss, acc
 
 
@@ -50,7 +52,7 @@ def create_trained_model_and_metadata(model,
     model.to(device_name)
     model.train()
 
-    criterion = nn.BCELoss()
+    criterion = nn.BCELoss(reduction="mean")
     optimizer = optim.SGD(model.parameters(),
                           lr = lr,
                           weight_decay = weight_decay)
@@ -68,20 +70,21 @@ def create_trained_model_and_metadata(model,
             output = model(data)
 
             loss = criterion(output, target)
-            pred = sigmoid(output) >= 0.5
+            pred =output >= 0.5
             train_acc += pred.eq(target).sum().item()
             
             loss.backward()
             optimizer.step()
             train_loss += loss.item()
         
-        train_loss /= len(train_loader)
-        train_acc /= len(train_loader.dataset)
+        epoch_train_loss = train_loss / len(train_loader)
+        epoch_train_acc = train_acc / len(train_loader.dataset)
             
-        train_losses.append(train_loss)
-        train_accuracies.append(train_acc)
+        train_losses.append(epoch_train_loss)
+        train_accuracies.append(epoch_train_acc)
         
         test_loss, test_acc = evaluate(model, test_loader, criterion, device_name)
+        # _ , train_loss = evaluate(model, train_loader, criterion, device_name)
         test_losses.append(test_loss)
         test_accuracies.append(test_acc)
     
