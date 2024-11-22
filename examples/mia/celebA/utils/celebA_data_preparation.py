@@ -3,11 +3,11 @@ import pickle
 
 import numpy as np
 from sklearn.model_selection import train_test_split
-from torch import cat, float32, tensor
+from torch import cat, float32, tensor, stack
 from torch.utils.data import DataLoader, Dataset, Subset
-from torchvision import transforms
 from torchvision.datasets import CelebA
-
+from torchvision.transforms import ToTensor, Normalize, Compose
+from tqdm import tqdm
 
 class celebADataset(Dataset):
     def __init__(self, x, y, transform=None,  indices=None) -> None:
@@ -40,26 +40,31 @@ class celebADataset(Dataset):
 
     @classmethod
     def from_celebA(cls, config, download=True, transform=None):
-
         root = config["data"]["data_dir"]
-        # Load the celebA train and test datasets
-        if config["data"]["dataset"] == "celebA":
-            trainset = CelebA(root=root, train=True, download=download, transform=transforms.ToTensor())
-            testset = CelebA(root=root, train=False, download=download, transform=transforms.ToTensor())
-        else:
-            raise ValueError("The dataset type should be set to celebA")
+        split = config["data"].get("split", "all")  # Use 'all' as the default split
 
-        # Concatenate both datasets' data and labels
-        data = cat([tensor(trainset.data, dtype=float32),
-                          tensor(testset.data, dtype=float32)],
-                          dim=0)
-        # Rescale data from [0, 255] to [0, 1]
-        data /= 255.0
-        normalize = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-        data = data.permute(0, 3, 1, 2)
-        data = normalize(data)
+        # Define transformation if not provided
+        if transform is None:
+            transform = Compose([
+                ToTensor(),
+                Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+            ])
 
-        targets = cat([tensor(trainset.targets), tensor(testset.targets)], dim=0)
+        # Load CelebA dataset with the transformation
+        celebA_dataset = CelebA(root=root, split=split, download=download, transform=transform)
+
+        # Initialize lists to store data and targets
+        images = []
+        targets = []
+
+        # Process the dataset
+        for img, target in tqdm(celebA_dataset, desc="Processing CelebA data"):
+            images.append(img)  # img is already transformed
+            targets.append(target)
+
+        # Convert lists to tensors
+        data = stack(images, dim=0).type(float32)
+        targets = stack(targets, dim=0).type(float32)
 
         return cls(data, targets)
 
@@ -75,8 +80,7 @@ def get_celebA_dataloader(data_path, train_config):
     test_fraction = train_config["data"]["f_test"]
     batch_size = train_config["train"]["batch_size"]
 
-    transform = transforms.Compose([transforms.ToTensor(),
-                                    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+    transform =Compose([ToTensor(),Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
     population_dataset = celebADataset.from_celebA(config=train_config, download=True, transform=transform)
 
