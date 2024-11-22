@@ -13,7 +13,7 @@ from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.distillation_model_handler import DistillationModelHandler
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
-from leakpro.metrics.attack_result import CombinedMetricResult
+from leakpro.metrics.attack_result import MIAResult
 from leakpro.signals.signal import ModelLogits
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
@@ -402,7 +402,7 @@ class AttackLossTrajectory(AbstractMIA):
 
         return auc_ground_truth, member_preds
 
-    def run_attack(self:Self) -> CombinedMetricResult:
+    def run_attack(self:Self) -> MIAResult:
         """Run the attack and return the combined metric result.
 
         Returns
@@ -418,8 +418,8 @@ class AttackLossTrajectory(AbstractMIA):
         signals = np.random.rand(*true_labels.shape)
 
         # compute ROC, TP, TN etc
-        return CombinedMetricResult(
-            predicted_labels= predictions,
+        return MIAResult(
+            predicted_labels=predictions,
             true_labels=true_labels,
             predictions_proba=None,
             signal_values=signals,
