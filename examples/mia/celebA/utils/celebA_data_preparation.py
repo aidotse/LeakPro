@@ -10,7 +10,7 @@ from torchvision.transforms import ToTensor, Normalize, Compose
 from tqdm import tqdm
 
 class celebADataset(Dataset):
-    def __init__(self, x, y, transform=None,  indices=None) -> None:
+    def __init__(self,chunk_files, transform=None,  indices=None) -> None:
         """Custom dataset for celebA data.
 
         Args:
@@ -22,6 +22,19 @@ class celebADataset(Dataset):
         self.y = y
         self.transform = transform
         self.indices = indices
+       
+        print("Loading data from existing chunks...")
+        for chunk_path in chunk_files:
+            with open(chunk_path, "rb") as chunk_file:
+                images, labels = pickle.load(chunk_file)
+                self.image_tensors.append(images)
+                self.labels.append(labels)
+
+        # Combine tensors from all chunks
+        self.image_tensors = cat(self.image_tensors, dim=0)
+        self.labels = cat(self.labels, dim=0)
+
+
 
     def __len__(self):
         """Return the total number of samples."""
@@ -50,23 +63,37 @@ class celebADataset(Dataset):
                 Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
             ])
 
+
+        # celebA_train = CelebA(root=root, split="train", target_type= "identity" , download=True,  transform=transform)
+        # celebA_test = CelebA(root=root, split="test", target_type= "identity" , download=True,  transform=transform)
+        # celebA_val = CelebA(root=root, split="valid", target_type= "identity" , download=True,  transform=transform)
+
+
         # Load CelebA dataset with the transformation
         celebA_dataset = CelebA(root=root, split=split, download=download, transform=transform)
 
         # Initialize lists to store data and targets
         images = []
-        targets = []
+        labels = []
+        chunk_size = 20000
+        for idx, (img, target) in enumerate(tqdm(celebA_dataset, desc="Processing CelebA")):
+            # Ensure that the image is in tensor format
+            # img = transform(img) if not isinstance(img, tensor) else img
+            images.append(img)
+            labels.append(target)
 
-        # Process the dataset
-        for img, target in tqdm(celebA_dataset, desc="Processing CelebA data"):
-            images.append(img)  # img is already transformed
-            targets.append(target)
+            # Save in chunks to avoid memory overload
+            if (idx + 1) % chunk_size == 0 or idx == len(celebA_dataset) - 1:
+                chunk_path = f"data/celebA_chunk_{idx // chunk_size}.pkl"
+                with open(chunk_path, "wb") as chunk_file:
+                    # Stack images and convert labels to tensor before saving
+                    stacked_images = stack(images, dim=0).type(float32)
+                    label_tensor = stack(labels,  dim=0).type(float32)
+                    pickle.dump((stacked_images, label_tensor), chunk_file)
+                print(f"Saved chunk to {chunk_path}")
+                images, labels = [], []  # Reset lists to free memory
 
-        # Convert lists to tensors
-        data = stack(images, dim=0).type(float32)
-        targets = stack(targets, dim=0).type(float32)
-
-        return cls(data, targets)
+        return cls(None, None)  # Since we're saving the chunks, return an empty dataset
 
 
     def subset(self, indices):
@@ -82,13 +109,35 @@ def get_celebA_dataloader(data_path, train_config):
 
     transform =Compose([ToTensor(),Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
-    population_dataset = celebADataset.from_celebA(config=train_config, download=True, transform=transform)
+   # Check if chunk files exist
+    num_chunks = 10
+    chunk_files = [f"{data_path}/celebA_chunk_{i}.pkl" for i in range(num_chunks)]
+    all_images, all_labels = [], []
 
-    file_path =  "data/celebA.pkl"
-    if not os.path.exists(file_path):
-        with open(file_path, "wb") as file:
-            pickle.dump(population_dataset, file)
-            print(f"Save data to {file_path}")
+    if all(os.path.exists(chunk) for chunk in chunk_files):
+        # Load data from chunks
+        print("Loading data from existing chunks...")
+        # Create the dataset
+        dataset = celebADataset(chunk_files)
+        # for chunk_path in chunk_files:
+        #     with open(chunk_path, "rb") as chunk_file:
+        #         images, labels = pickle.load(chunk_file)
+        #         all_images.append(images)
+        #         all_labels.append(labels)
+        # # Concatenate all chunks
+        # all_images = cat(all_images, dim=0)
+        # all_labels = cat(all_labels, dim=0)
+        # population_dataset = celebADataset(all_images, all_labels, transform=transform)
+    else:
+        # Process and save the dataset into chunks
+        print("Processing and saving dataset into chunks...")
+        population_dataset = celebADataset.from_celebA(config=train_config, download=True, transform=transform)
+        for chunk_path in chunk_files:
+            with open(chunk_path, "rb") as chunk_file:
+                images, labels = pickle.load(chunk_file)
+                all_images.append(images)
+                all_labels.append(labels)
+
 
     dataset_size = len(population_dataset)
     train_size = int(train_fraction * dataset_size)
@@ -107,4 +156,12 @@ def get_celebA_dataloader(data_path, train_config):
     return train_loader, test_loader
 
 
-
+def load_chunk_files(data_dir):
+    """
+    Collects all chunk file paths from a given directory.
+    """
+    chunk_files = []
+    for file_name in os.listdir(data_dir):
+        if file_name.startswith("celebA_chunk") and file_name.endswith(".pkl"):
+            chunk_files.append(os.path.join(data_dir, file_name))
+    return chunk_files
