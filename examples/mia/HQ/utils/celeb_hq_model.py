@@ -1,15 +1,15 @@
 import pickle
 
 import torch.nn as nn
-from torch import cuda, device, no_grad, optim, save
 from torchvision import models
+from torch import cuda, device, no_grad, optim, save
 from tqdm import tqdm
 
 
-class ResNet50(nn.Module):
+class ResNet18(nn.Module):
     def __init__(self, num_classes):
-        super(ResNet50, self).__init__()
-        self.model = models.resnet50(pretrained=False)
+        super().__init__()
+        self.model = models.resnet18(pretrained=True)
         self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
         self.init_params = {"num_classes": num_classes}
 
@@ -22,10 +22,10 @@ def evaluate(model, loader, criterion, device):
     with no_grad():
         for data, target in loader:
             data, target = data.to(device), target.to(device)
-            target = target.view(-1)
+            target = target.view(-1) 
             output = model(data)
             loss += criterion(output, target).item()
-            pred = output.argmax(dim=1) 
+            pred = output.argmax(dim=1)
             acc += pred.eq(target).sum().item()
         loss /= len(loader)
         acc = float(acc) / len(loader.dataset)
