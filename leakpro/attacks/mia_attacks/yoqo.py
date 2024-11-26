@@ -36,7 +36,8 @@ class AttackYOQO(AbstractMIA):
         tmp_features, _ = next(iter(tmp))
         logits = self.target_model.get_logits(tmp_features)
         self.output_shape = logits.shape[1]
-        if self.output_shape == 1:
+        self.binary_output = (self.output_shape == 1)
+        if self.binary_output:
             self.loss = BCEWithLogitsLoss(reduction = "none")
         else:
             self.loss = CrossEntropyLoss(reduction = "none")
@@ -177,31 +178,28 @@ class AttackYOQO(AbstractMIA):
 
     def _prepare_optimization_objective(self:Self) -> None:
         if self.online:
-            if self.output_shape == 1:
-                self._optimization_objective = self._optimization_objective_online_binary
-            else:
-                self._optimization_objective = self._optimization_objective_online
+            self.weights = 1 * self.in_indices_masks + self.alpha * np.logical_not(self.in_indices_masks)
         else:
+            self.weights = np.ones(self.in_indices_masks.shape)
             self.mse = MSELoss()
-
-            if self.output_shape == 1:
-                self._optimization_objective = self._optimization_objective_offline_binary
-            else:
-                self._optimization_objective = self._optimization_objective_offline
-
-        self.weights = 1 + (self.alpha - 1) * self.in_indices_masks
         self.weights = Tensor(self.weights)
-        self.batch_size = 5000
+        self.batch_size = 32
 
-        data_loader = self.handler.get_dataloader(self.audit_data_indices, batch_size=self.batch_size)
+        data_loader = self.handler.get_dataloader(self.audit_data_indices, batch_size = self.batch_size)
         self.target_output = []
-        for i, (data, labels) in tqdm(enumerate(data_loader), desc="Calculating target labels", leave=False):
-            if self.output_shape == 1:
+        for i, (data, labels) in tqdm(enumerate(data_loader),
+                                      total = len(data_loader),
+                                      desc="Calculating target labels",
+                                      leave=False):
+            if self.binary_output:
+                # Associate true labels with in-models and false labels with out-models.
                 batch_target_output = \
                     labels[:,np.newaxis] * self.in_indices_masks[(i * self.batch_size):((i + 1) * self.batch_size),:] + \
                     (1 - labels[:,np.newaxis]) * (1 - self.in_indices_masks[(i * self.batch_size):((i + 1) * self.batch_size),:])
                 self.target_output.extend(batch_target_output)
             else:
+                # Associate true labels with in-models, and
+                # erroneous labels with largest logit score to out-models.
                 labels_true = labels
                 labels_false = torch.stack([shadow_model.model_obj(data) for shadow_model in self.shadow_models])
                 labels_false[:,np.arange(labels_true.shape[0]),labels_true] = -1e10
@@ -213,57 +211,29 @@ class AttackYOQO(AbstractMIA):
         self.target_output = np.array(self.target_output)
         self.target_output = Tensor(self.target_output)
 
-    def _optimization_objective_online(
+    def _optimization_objective(
         self: Self,
         x0: Tensor,
         dx: Tensor,
         target_output: Tensor,
         weights: Tensor
     ) -> float:
-        loss = torch.stack([shadow_model.model_obj(x0 + dx) for shadow_model in self.shadow_models], dim = 2)
+        if self.binary_output:
+            loss = torch.cat([shadow_model.model_obj(x0 + dx) for shadow_model in self.shadow_models], dim = 1)
+        else:
+            loss = torch.stack([shadow_model.model_obj(x0 + dx) for shadow_model in self.shadow_models], dim = 2)
         loss = self.loss(loss, target_output)
-        loss = loss * weights
-        return loss.sum()
-
-    def _optimization_objective_online_binary(
-        self: Self,
-        x0: Tensor,
-        dx: Tensor,
-        target_output: Tensor,
-        weights: Tensor
-    ) -> float:
-        loss = torch.cat([shadow_model.model_obj(x0 + dx) for shadow_model in self.shadow_models], dim = 1)
-        loss = self.loss(loss, target_output)
-        loss = loss * weights
-        return loss.sum()
-
-    def _optimization_objective_offline(
-        self: Self,
-        x0: Tensor,
-        dx: Tensor,
-        target_output: Tensor,
-        weights: Tensor
-    ) -> float:
-        loss = torch.stack([shadow_model.model_obj(x0 + dx) for shadow_model in self.shadow_models], dim = 2)
-        loss = self.loss(loss,target_output)
         loss = (loss * weights).sum()
-        norm = self.alpha * self.mse(dx, torch.zeros(dx.shape, device = dx.device))
-        return (loss + norm)
+        if not self.online:
+            loss = loss + self.alpha * self.mse(dx, torch.zeros(dx.shape, device = dx.device))
+        return loss
 
-    def _optimization_objective_offline_binary(
+    def _optimize_xprime(
         self: Self,
         x0: Tensor,
-        dx: Tensor,
         target_output: Tensor,
         weights: Tensor
-    ) -> float:
-        loss = torch.cat([shadow_model.model_obj(x0 + dx) for shadow_model in self.shadow_models], dim = 1)
-        loss = self.loss(loss,target_output)
-        loss = (loss * weights).sum()
-        norm =  self.alpha * self.mse(dx, torch.zeros(dx.shape, device = dx.device))
-        return (loss + norm)
-
-    def _optimize_xprime(self: Self, x0: Tensor, target_output: Tensor, weights: Tensor) -> Tensor:
+    ) -> Tensor:
         dx = torch.zeros(x0.shape, device = x0.device)
         dx.requires_grad = True
 
@@ -297,15 +267,18 @@ class AttackYOQO(AbstractMIA):
         predictions = []
         signal_values = []
 
-        device_name = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
+        device_name = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         for model in self.shadow_models:
             model.model_obj.eval()
             model.model_obj.to(device_name)
 
-        for i, (data, labels) in tqdm(enumerate(data_loader), desc="Optimizing queries", leave=False):
+        for i, (data, labels) in tqdm(enumerate(data_loader),
+                                      total = len(data_loader),
+                                      desc="Optimizing queries",
+                                      leave=False):
             xprime = self._optimize_xprime(data.to(device_name),
-                                           self.target_output[i:(i + 1)].to(device_name),
+                                           self.target_output[i:(i + 1)].to(device_name, dtype = torch.int64),
                                            self.weights[i:(i + 1), :].to(device_name))
 
             lprime = self.target_model.get_logits(xprime)
@@ -317,9 +290,6 @@ class AttackYOQO(AbstractMIA):
         predictions = np.array(predictions).reshape(1,-1)
         signal_values = predictions.copy().reshape(-1,1)
 
-        for model in self.shadow_models:
-            model.model_obj.train()
-
         # Prepare true labels array, marking 1 for training data and 0 for non-training data
         true_labels = np.concatenate(
             [np.ones(len(self.in_members)), np.zeros(len(self.out_members))]
@@ -327,6 +297,7 @@ class AttackYOQO(AbstractMIA):
 
         logger.info(f"Accuracy: {np.sum(predictions == true_labels)/predictions.size}")
 
+        # Output in a format that can be used to generate ROC curve.
         predictions = np.concatenate(
             [np.zeros((1,predictions.size)), predictions, np.ones((1,predictions.size))], axis = 0
         )
