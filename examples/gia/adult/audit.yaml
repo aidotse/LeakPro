@@ -1,0 +1,18 @@
+audit:  # Configurations for auditing
+  random_seed: 1234  # Integer specifying the random seed
+  attack_list:
+    tableak:
+      pool_size: 10
+
+
+  output_dir: "./leakpro_output"
+  attack_type: "gia" #mia, gia
+  modality: "tabular"
+
+target:
+  # Target model path
+  module_path: "utils/adult_model_preparation.py"
+  model_class: "AdultNet" 
+  # Data paths
+  target_folder: "./target"
+  data_path: "./data/adult_data.pkl"
