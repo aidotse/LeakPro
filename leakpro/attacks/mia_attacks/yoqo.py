@@ -1,4 +1,4 @@
-"""Implementation of the LiRA attack."""
+"""Implementation of the YOQO attack."""
 
 import numpy as np
 import torch
@@ -209,7 +209,7 @@ class AttackYOQO(AbstractMIA):
                     labels_false.T * (1 - self.in_indices_masks[(i * self.batch_size):((i + 1) * self.batch_size),:])
                 self.target_output.extend(batch_target_output)
         self.target_output = np.array(self.target_output)
-        self.target_output = Tensor(self.target_output)
+        self.target_output = torch.tensor(self.target_output)
 
     def _optimization_objective(
         self: Self,
@@ -278,7 +278,7 @@ class AttackYOQO(AbstractMIA):
                                       desc="Optimizing queries",
                                       leave=False):
             xprime = self._optimize_xprime(data.to(device_name),
-                                           self.target_output[i:(i + 1)].to(device_name, dtype = torch.int64),
+                                           self.target_output[i:(i + 1)].to(device_name),
                                            self.weights[i:(i + 1), :].to(device_name))
 
             lprime = self.target_model.get_logits(xprime)
