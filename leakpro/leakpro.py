@@ -6,7 +6,7 @@ from pathlib import Path
 import yaml
 
 from leakpro.attacks.attack_scheduler import AttackScheduler
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.abstract_input_handler import AbstractGIAInputHandler, AbstractInputHandler
 from leakpro.input_handler.handler_setup import (
     _load_model_class,
     _load_population,
@@ -46,7 +46,8 @@ class LeakPro:
 
     def __init__(self:Self, handler_class:AbstractInputHandler, configs_path:str) -> None:
 
-        assert issubclass(handler_class, AbstractInputHandler), "handler must be an instance of AbstractInputHandler"
+        handler_origin_check = issubclass(handler_class, AbstractInputHandler or AbstractGIAInputHandler)
+        assert handler_origin_check, "handler must be an instance of AbstractInputHandler"
 
         # Read configs
         try:
