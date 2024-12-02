@@ -86,7 +86,7 @@ class AttackP(AbstractMIA):
         logger.info("Computing signals for the Population attack")
         self.attack_signal = np.array(self.signal([self.target_model], self.handler, attack_data_indices)).squeeze()
 
-    def run_attack(self:Self) -> CombinedMetricResult:
+    def run_attack(self:Self) -> MIAResult:
         """Run the attack on the target model and dataset.
 
         Args:

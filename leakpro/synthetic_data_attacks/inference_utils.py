@@ -1,14 +1,16 @@
 """Inference risk util functions."""
 import itertools
+import json
 import math
+import os
 import random
-from typing import List, Union
 
 from pandas import DataFrame
 from pydantic import BaseModel
 
 from leakpro.synthetic_data_attacks.anonymeter.evaluators.inference_evaluator import InferenceEvaluator
 from leakpro.synthetic_data_attacks.utils import load_res_json_file, save_res_json_file
+from leakpro.utils.import_helper import List, Self, Union
 
 
 class InferenceResults(BaseModel):
@@ -31,6 +33,101 @@ class InferenceResults(BaseModel):
     res: List[List[Union[int,float]]]
     aux_cols: List[List[str]]
     secrets: List[str]
+    worst_case_flag: bool
+
+    def save(self:Self,
+            path: str = "../leakpro_output/results/",
+            name: str = "inference",
+            case_flag:str = "base", # noqa: ARG002
+            config: dict = None # noqa: ARG002
+        ) -> None:
+        """Save method for InferenceResults."""
+
+        # Data to be saved
+        data = {
+            "resulttype": self.__class__.__name__,
+            "resultname": name,
+            "res": self.model_dump(),
+        }
+
+        # Check if path exists, otherwise create it.
+        for _ in range(3):
+            if os.path.exists(path):
+                break
+            path = "../" + path
+
+        # If no result folder can be found
+        if not os.path.exists(path):
+            os.makedirs("../../leakpro_output/results/")
+
+        # Save the results to a file
+        if not os.path.exists(f"{path}/inference_risk/{name}"):
+            os.makedirs(f"{path}/inference_risk/{name}")
+
+        with open(f"{path}/inference_risk/{name}/data.json", "w") as f:
+            json.dump(data, f)
+
+
+        self.plot(worst_case_flag=self.worst_case_flag,
+                  show=False,
+                  save=True,
+                  save_path=f"{path}/inference_risk/{name}",
+                  save_name=name
+                  )
+
+    @staticmethod
+    def load(data: dict) -> "InferenceResults":
+        """Load method for InferenceResults."""
+        return InferenceResults(res=data["res"]["res"],
+                                res_cols=data["res"]["res_cols"],
+                                aux_cols=data["res"]["aux_cols"],
+                                secrets=data["res"]["secrets"],
+                                worst_case_flag=data["res"]["worst_case_flag"])
+
+    def plot(self:Self,
+            high_res_flag: bool = False,
+            worst_case_flag: bool = False,
+            show: bool = True,
+            save: bool = False,
+            save_path: str = "./",
+            save_name: str = "fig.png"
+        ) -> None:
+        """Plot method for InferenceResults."""
+        from leakpro.synthetic_data_attacks.plots import plot_ir_base_case, plot_ir_worst_case
+
+        plot_inference = plot_ir_worst_case if worst_case_flag else plot_ir_base_case
+        plot_inference(inf_res=InferenceResults(res=self.res,
+                                                res_cols=self.res_cols,
+                                                aux_cols=self.aux_cols,
+                                                secrets=self.secrets,
+                                                worst_case_flag=self.worst_case_flag),
+                       high_res_flag=high_res_flag,
+                       show=show,
+                       save=save,
+                       save_name=f"{save_path}/{save_name}")
+
+    @staticmethod
+    def create_results(results: list, save_dir: str = "./") -> str:
+        """Result method for InferenceResults."""
+        latex = ""
+
+        def _latex(save_dir: str, save_name: str) -> str:
+            """Latex method for InferenceResults."""
+            filename = f"{save_dir}/{save_name}.png"
+            return f"""
+            \\subsection{{{" ".join(save_name.split("_"))}}}
+            \\begin{{figure}}[ht]
+            \\includegraphics[width=0.8\\textwidth]{{{filename}}}
+            \\caption{{Original}}
+            \\end{{figure}}
+            """
+
+        for res in results:
+            name = "inference_"+("worst_case" if res.worst_case_flag else "base_case")
+
+            res.plot(show=False, save=True, save_path=save_dir, save_name=name)
+            latex += _latex(save_dir=save_dir, save_name=name)
+        return latex
 
 def get_inference_prefix(*, worst_case_flag: bool) -> str:
     """Auxiliary function to get inference prefix used in json results filename."""
@@ -166,7 +263,8 @@ def inference_risk_evaluation(
         res_cols = res_cols,
         res = res,
         aux_cols = aux_cols_all,
-        secrets = secrets
+        secrets = secrets,
+        worst_case_flag = worst_case_flag
     )
     #Save results to json
     if save_results_json:

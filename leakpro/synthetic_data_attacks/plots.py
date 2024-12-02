@@ -82,7 +82,13 @@ def iterate_values_plot_bar_charts(*,
         max_value = res[:, 4:7].max()
         ax.set_ylim(0, max_value * 1.05)
 
-def plot_linkability(*, link_res: LinkabilityResults, high_res_flag: bool = True) -> None:
+def plot_linkability(*,
+        link_res: LinkabilityResults,
+        high_res_flag: bool = True,
+        show: bool = True,
+        save: bool = False,
+        save_name: str = None
+    ) -> None:
     """Function to plot linkability results from given res.
 
     Note: function is not tested and is used in examples.
@@ -108,10 +114,22 @@ def plot_linkability(*, link_res: LinkabilityResults, high_res_flag: bool = True
     set_ticks(ax=ax, xlabels=set_nr_aux_cols)
     # Adding legend
     set_legend(ax=ax)
+    # Save and or show figure
+    if save:
+        plt.savefig(fname=f"{save_name}.png", dpi=1000, bbox_inches="tight")
     # Show plot
-    plt.show()
+    if show:
+        plt.show()
+    else:
+        plt.clf()
 
-def plot_ir_worst_case(*, inf_res: InferenceResults, high_res_flag: bool = True) -> None:
+def plot_ir_worst_case(*,
+        inf_res: InferenceResults,
+        high_res_flag: bool = True,
+        show: bool = True,
+        save: bool = False,
+        save_name: str = None
+    ) -> None:
     """Function to plot inference results worst case given results.
 
     Note: function is not tested and is used in examples.
@@ -144,10 +162,22 @@ def plot_ir_worst_case(*, inf_res: InferenceResults, high_res_flag: bool = True)
     set_ticks(ax=ax, xlabels=set_secrets)
     # Adding legend
     set_legend(ax=ax)
+    # Save and or show figure
+    if save:
+        plt.savefig(fname=f"{save_name}.png", dpi=1000, bbox_inches="tight")
     # Show plot
-    plt.show()
+    if show:
+        plt.show()
+    else:
+        plt.clf()
 
-def plot_ir_base_case(*, inf_res: InferenceResults, high_res_flag: bool = True) -> None:
+def plot_ir_base_case(*,
+        inf_res: InferenceResults,
+        high_res_flag: bool = True,
+        show: bool = True,
+        save: bool = False,
+        save_name: str = None
+    ) -> None:
     """Function to plot inference results base case given results.
 
     Note: function is not tested and is used in examples.
@@ -187,14 +217,21 @@ def plot_ir_base_case(*, inf_res: InferenceResults, high_res_flag: bool = True) 
         # Adding legend
         set_legend(ax=ax)
     plt.tight_layout()
-    plt.show()
+    # Save and or show figure
+    if save:
+        plt.savefig(fname=f"{save_name}.png", dpi=1000, bbox_inches="tight")
+    # Show plot
+    if show:
+        plt.show()
+    else:
+        plt.clf()
 
 def plot_singling_out(*,
-            sin_out_res: SinglingOutResults,
-            high_res_flag: bool = True,
-            show: bool = True,
-            save: bool = False,
-            save_name: str = None
+        sin_out_res: SinglingOutResults,
+        high_res_flag: bool = True,
+        show: bool = True,
+        save: bool = False,
+        save_name: str = None
     ) -> None:
     """Function to plot singling out given results.
 
@@ -231,7 +268,7 @@ def plot_singling_out(*,
     set_ticks(ax=ax, xlabels=set_n_cols)
     # Adding legend
     set_legend(ax=ax)
-
+    # Save and or show figure
     if save:
         plt.savefig(fname=f"{save_name}.png", dpi=1000, bbox_inches="tight")
     # Show plot

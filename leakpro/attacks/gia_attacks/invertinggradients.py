@@ -44,6 +44,7 @@ class InvertingGradients(AbstractGIA):
         self.train_fn = train_fn
         self.data_mean = data_mean
         self.data_std = data_std
+        self.configs = configs
         self.t_v_scale = configs.total_variation
         self.attack_lr = configs.attack_lr
         self.iterations = configs.at_iterations
@@ -123,7 +124,8 @@ class InvertingGradients(AbstractGIA):
                 pass
 
         return GIAResults(self.client_loader, self.best_reconstruction,
-                          dataloaders_psnr(self.client_loader, self.reconstruction_loader), self.data_mean, self.data_std)
+                          dataloaders_psnr(self.client_loader, self.reconstruction_loader), self.data_mean, self.data_std,
+                          self.configs)
 
 
     def gradient_closure(self: Self, optimizer: torch.optim.Optimizer) -> Callable:

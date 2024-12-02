@@ -15,7 +15,8 @@ def run_inverting(model: Module, client_data: DataLoader, train_fn: Callable,
     """Runs InvertingGradients."""
     attack = InvertingGradients(model, client_data, train_fn, data_mean, data_std, config)
     result = attack.run_attack()
-    result.prepare_privacy_risk_report(experiment_name, "./leakpro_output/results")
+    result.save(name=experiment_name, path="./leakpro_output/results")
+    return result
 
 def run_inverting_audit(model: Module, dataset: Dataset,
                         train_fn: Callable, data_mean: torch.Tensor, data_std: torch.Tensor

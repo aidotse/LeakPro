@@ -8,7 +8,7 @@ from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.boosting import Memorization
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
-from leakpro.metrics.attack_result import CombinedMetricResult, MIAResult
+from leakpro.metrics.attack_result import MIAResult
 from leakpro.signals.signal import ModelRescaledLogits
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
@@ -159,12 +159,12 @@ class AttackLiRA(AbstractMIA):
                 logger.info(f"Some shadow model(s) contains {count_in_samples} IN samples in total for the model(s)")
                 logger.info("This is not an offline attack!")
 
-        self.logger.info(f"Calculating the logits for all {self.num_shadow_models} shadow models")
+        logger.info(f"Calculating the logits for all {self.num_shadow_models} shadow models")
         self.shadow_models_logits = np.swapaxes(self.signal(self.shadow_models, self.handler, self.audit_dataset["data"],
                                                                                                 self.eval_batch_size), 0, 1)
 
         # Calculate logits for the target model
-        self.logger.info("Calculating the logits for the target model")
+        logger.info("Calculating the logits for the target model")
         self.target_logits = np.swapaxes(self.signal([self.target_model], self.handler, self.audit_dataset["data"],
                                                                                     self.eval_batch_size), 0, 1).squeeze()
 
@@ -246,7 +246,7 @@ class AttackLiRA(AbstractMIA):
             return self.fixed_in_std
         return self.fixed_out_std
 
-    def run_attack(self:Self) -> CombinedMetricResult:
+    def run_attack(self:Self) -> MIAResult:
         """Runs the attack on the target model and dataset and assess privacy risks or data leakage.
 
         This method evaluates how the target model's output (logits) for a specific dataset
