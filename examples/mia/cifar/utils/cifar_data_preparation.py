@@ -82,15 +82,15 @@ def get_cifar_dataloader(data_path, train_config):
 
     transform = transforms.Compose([transforms.ToTensor(),
                                     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-    
+
     population_dataset = CifarDataset.from_cifar(config=train_config, download=True, transform=transform)
 
     file_path =  "data/"+ cifar_type + ".pkl"
     if not os.path.exists(file_path):
         with open(file_path, "wb") as file:
             pickle.dump(population_dataset, file)
-            print(f"Save data to {file_path}.pkl")
-    
+            print(f"Save data to {file_path}")
+
     dataset_size = len(population_dataset)
     train_size = int(train_fraction * dataset_size)
     test_size = int(test_fraction * dataset_size)
