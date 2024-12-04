@@ -52,7 +52,8 @@ def get_mimic_dataset(path,
                       train_frac,
                       validation_frac,
                       test_frac,
-                      early_stop_frac):
+                      early_stop_frac,
+                      flatten=True):
     """Get the dataset, download it if necessary, and store it."""
     
     # Assert that the sum of all fractions is between 0 and 1
@@ -89,7 +90,6 @@ def get_mimic_dataset(path,
 
             
 
-            flatten = False
             if flatten:
                 # Apply pivot_table to flatten the data
                 flat_train, flat_holdout = [
@@ -187,20 +187,62 @@ def data_splitter(statics,
     
     # Randomly shuffle subjects and compute the sizes of the splits
     np.random.seed(SEED)
-    subjects = np.random.permutation(list(data_subjects))
+    # subjects = np.random.permutation(list(data_subjects))
+
+    # N = len(subjects)
+    # N_train = int(train_frac * N)
+
+    # # Ensure no overlap between train and test sets
+    # train_subj = subjects[:N_train]
+    # test_subj = subjects[N_train::]
+
+    # # Split the data according to the subjects
+    # (train_data, holdout_data), (y_train, y_holdout) = [
+    #     [df[df.index.get_level_values('subject_id').isin(s)] for s in (train_subj, test_subj)] 
+    #     for df in (lvl2, Ys)
+    # ]
+    # return train_data, holdout_data, y_train, y_holdout
+    # Shuffle the indices
+    # Convert the set to a list to make it indexable
+    # Convert the set to a list to make it indexable
+    data_subjects = list(data_subjects)
+
+    # Shuffle the indices
+    indices = np.arange(len(data_subjects))
+    shuffled_indices = np.random.permutation(indices)
+
+    # Map the values in data_subjects to their original indices
+    original_to_shuffled = {data_subjects[shuffled]: original for original, shuffled in enumerate(shuffled_indices)}
+
+    # Get the permuted subjects using the shuffled indices
+    subjects = [data_subjects[i] for i in shuffled_indices]
+
     N = len(subjects)
     N_train = int(train_frac * N)
 
     # Ensure no overlap between train and test sets
     train_subj = subjects[:N_train]
-    test_subj = subjects[N_train::]
+    test_subj = subjects[N_train:]
 
     # Split the data according to the subjects
     (train_data, holdout_data), (y_train, y_holdout) = [
         [df[df.index.get_level_values('subject_id').isin(s)] for s in (train_subj, test_subj)] 
         for df in (lvl2, Ys)
     ]
+
+    # Track original indices of the train subjects
+    # original_indices_train = [original_to_shuffled[subj] for subj in train_subj]
+    # Save the dictionary to a file
+    with open('original_to_shuffled.pkl', 'wb') as f:
+        pickle.dump(original_to_shuffled, f)
+
+    print("Dictionary saved to 'original_to_shuffled.pkl'")
+
+
     return train_data, holdout_data, y_train, y_holdout
+
+
+
 
 def simple_imputer(df,
                    ID_COLS):

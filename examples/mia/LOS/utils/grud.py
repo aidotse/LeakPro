@@ -1,5 +1,5 @@
 import  math, os, pickle, time, pandas as pd, numpy as np, scipy.stats as ss
-
+from sklearn.metrics import accuracy_score
 
 
 import torch.utils.data as utils, torch.nn as nn, torch.nn.functional as F, torch.optim as optim
@@ -242,6 +242,8 @@ def gru_trained_model_and_metadata(model,
 
     train_losses = []
     test_losses = []
+    test_acc = []
+    train_acc = []
 
     
     cur_time = time.time()
@@ -301,6 +303,14 @@ def gru_trained_model_and_metadata(model,
         train_loss /= len(train_dataloader)
         train_losses.append(train_loss)
 
+        # Convert predictions to class indices
+        binary_predictions = to_numpy(prediction).argmax(axis=1)
+
+        # Ensure labels are integer and 1D
+        binary_labels = to_numpy(labels).astype(int)
+        # Compute accuracy
+        train_acc.append(accuracy_score(binary_labels, binary_predictions))
+
         # test 
         model.eval()
         try: 
@@ -348,6 +358,15 @@ def gru_trained_model_and_metadata(model,
 
         test_losses.append(test_loss)
 
+        # Convert predictions to class indices
+        binary_predictions_val = to_numpy(prediction_val).argmax(axis=1)
+
+        # Ensure labels are integer and 1D
+        binary_labels_test = to_numpy(labels_test).astype(int)
+        # Compute accuracy
+        train_acc.append(accuracy_score(binary_labels_test, binary_predictions_val))
+
+
         # Early Stopping
         if epoch == 0:
             is_best_model = 1
@@ -375,7 +394,6 @@ def gru_trained_model_and_metadata(model,
                     np.around(cur_time - pre_time, decimals=2),\
                     is_best_model))
         pre_time = cur_time
-
     # Move the model back to the CPU
     # Ensure the target directory exists
     os.makedirs("target", exist_ok=True)
@@ -421,7 +439,7 @@ def gru_trained_model_and_metadata(model,
         pickle.dump(meta_data, f)
 
 
-    return  train_losses, test_losses
+    return  train_losses, test_losses, train_acc, test_acc
 
 def evaluate(model, loader, criterion, device):
     model.eval()
@@ -437,6 +455,26 @@ def evaluate(model, loader, criterion, device):
         loss /= len(loader)
         acc = float(acc) / len(loader.dataset)
     return loss, acc
+
+def accuracy(model, loader,  criterion, device):
+    model.eval()
+    loss, acc = 0, 0
+    acc_list = []
+    with no_grad():
+        for data, target in loader:
+            data, target = data.to(device), target.to(device)
+            target = target.float().unsqueeze(1)
+            output = model(data)
+            loss += criterion(output, target).item()
+            pred = sigmoid(output) >= 0.5
+            acc += pred.eq(target.data.view_as(pred)).sum()
+            acc = accuracy_score(target, pred)
+            acc_list.append(acc)
+    return acc_list
+
+def to_numpy(tensor):
+    return tensor.detach().cpu().numpy() if tensor.is_cuda else tensor.detach().numpy()
+
 
 
 
