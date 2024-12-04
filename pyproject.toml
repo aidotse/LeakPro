@@ -50,6 +50,7 @@ dependencies = [
   "pydantic",
   "joblib",
   "pytest",
+  "gdown",
 ]
 
 [tool.setuptools]

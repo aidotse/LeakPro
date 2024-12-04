@@ -31,16 +31,11 @@ def train(
     patched_model = MetaModule(model)
     outputs = None
     for _ in range(epochs):
-        train_loss, train_acc = 0, 0
         for inputs, labels in data:
-            labels = labels.long()
             inputs, labels = inputs.to(gpu_or_cpu, non_blocking=True), labels.to(gpu_or_cpu, non_blocking=True)
             outputs = patched_model(inputs, patched_model.parameters)
             loss = criterion(outputs, labels).sum()
-            pred = outputs.data.max(1, keepdim=True)[1]
             patched_model.parameters = optimizer.step(loss, patched_model.parameters)
-            train_acc += pred.eq(labels.data.view_as(pred)).sum()
-            train_loss += loss.item()
     model_delta = OrderedDict((name, param - param_origin)
                                             for ((name, param), (name_origin, param_origin))
                                             in zip(patched_model.parameters.items(),

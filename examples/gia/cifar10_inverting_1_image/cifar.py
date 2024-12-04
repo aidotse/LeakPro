@@ -1,13 +1,13 @@
 """Module with functions for preparing the dataset for training the target models."""
 import torchvision
-from torch import as_tensor, randperm
-from torch.utils.data import DataLoader, Subset, TensorDataset
+from torch import Tensor, as_tensor, randperm
+from torch.utils.data import DataLoader, Subset
 from torchvision import transforms
 
 from leakpro.fl_utils.data_utils import get_meanstd
 
 
-def get_cifar10_loader(num_images:int =1, batch_size:int = 1, num_workers:int = 2 ) -> TensorDataset:
+def get_cifar10_loader(num_images:int =1, batch_size:int = 1, num_workers:int = 2 ) -> tuple[DataLoader, Tensor, Tensor]:
     """Get the full dataset for CIFAR10."""
     trainset = torchvision.datasets.CIFAR10(root="./data", train=True, download=True, transform=transforms.ToTensor())
     data_mean, data_std = get_meanstd(trainset)
