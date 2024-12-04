@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
 from leakpro.fl_utils.data_utils import get_at_images
 from leakpro.fl_utils.gia_optimizers import MetaSGD
-from leakpro.fl_utils.img_utils import dataloaders_psnr, total_variation, MedianPool2d
+from leakpro.fl_utils.img_utils import MedianPool2d, dataloaders_psnr, total_variation
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.utils.import_helper import Callable, Self
 from leakpro.utils.logger import logger
