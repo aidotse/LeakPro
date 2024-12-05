@@ -11,7 +11,7 @@ from leakpro.utils.logger import logger
 
 
 def run_inverting(model: Module, client_data: DataLoader, train_fn: Callable,
-                data_mean:Tensor, data_std: Tensor, config: dict, experiment_name: str = "InvertingGradients", save:bool = False) -> None:
+                data_mean:Tensor, data_std: Tensor, config: dict, experiment_name: str = "InvertingGradients", save:bool = True) -> None:
     """Runs InvertingGradients."""
     attack = InvertingGradients(model, client_data, train_fn, data_mean, data_std, config)
     result = attack.run_attack()
