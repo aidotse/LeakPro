@@ -32,7 +32,6 @@ from leakpro.input_handler.handler_setup import (
     setup,
 )
 from leakpro.input_handler.modality_extensions.tabular_extension import TabularExtension
-from leakpro.reporting.utils import prepare_privacy_risk_report
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import add_file_handler, logger
 
@@ -126,17 +125,25 @@ class LeakPro:
 
         return handler
 
-    def run_audit(self:Self) -> None:
+    def run_audit(self:Self, return_results: bool = False) -> None:
         """Run the audit."""
         audit_results = self.attack_scheduler.run_attacks()
+        results = [] if return_results else None
 
         for attack_name in audit_results:
             logger.info(f"Preparing results for attack: {attack_name}")
 
-            prepare_privacy_risk_report(
-                audit_results[attack_name]["result_object"],
-                self.handler.configs["audit"],
-                save_path=f"{self.report_dir}/{attack_name}",
-            )
+            if return_results:
+
+                result = audit_results[attack_name]["result_object"]
+                result.attack_name = attack_name
+                result.configs = self.handler.configs["audit"]
+
+                # Append
+                results.append(result)
+            else:
+                result = audit_results[attack_name]["result_object"]
+                result.save(name=attack_name, path=self.report_dir, config=self.handler.configs["audit"])
 
         logger.info("Auditing completed")
+        return results

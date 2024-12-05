@@ -5,7 +5,7 @@ import numpy as np
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.threshold_computation import linear_itp_threshold_func
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
-from leakpro.metrics.attack_result import CombinedMetricResult
+from leakpro.metrics.attack_result import MIAResult
 from leakpro.signals.signal import ModelLoss
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
@@ -86,7 +86,7 @@ class AttackP(AbstractMIA):
         logger.info("Computing signals for the Population attack")
         self.attack_signal = np.array(self.signal([self.target_model], self.handler, attack_data_indices)).squeeze()
 
-    def run_attack(self:Self) -> CombinedMetricResult:
+    def run_attack(self:Self) -> MIAResult:
         """Run the attack on the target model and dataset.
 
         Args:
@@ -136,7 +136,7 @@ class AttackP(AbstractMIA):
         )
 
         # compute ROC, TP, TN etc
-        return CombinedMetricResult(
+        return MIAResult(
             predicted_labels=predictions,
             true_labels=true_labels,
             predictions_proba=None,

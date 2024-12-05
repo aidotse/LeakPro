@@ -1,7 +1,8 @@
 """Linkability risk util functions."""
 import itertools
+import json
 import math
-from typing import List, Union
+import os
 
 import numpy as np
 from pandas import DataFrame
@@ -9,6 +10,7 @@ from pydantic import BaseModel
 
 from leakpro.synthetic_data_attacks.anonymeter.evaluators.linkability_evaluator import LinkabilityEvaluator
 from leakpro.synthetic_data_attacks.utils import load_res_json_file, save_res_json_file
+from leakpro.utils.import_helper import List, Self, Union
 
 
 def aux_assert_input_values_get_combs_2_buckets(*, cols: List, buck1_nr: int, buck2_nr: int) -> None:
@@ -192,6 +194,81 @@ class LinkabilityResults(BaseModel):
     res_cols: List[str]
     res: List[List[Union[int,float]]]
     aux_cols: List[List[List[str]]]
+
+    def save(self:Self, path: str = "../leakpro_output/results/", name: str = "linkability", config: dict = None) -> None: # noqa: ARG002
+        """Save method for LinkabilityResults."""
+
+        id = "linkability"
+
+        # Data to be saved
+        data = {
+            "resulttype": self.__class__.__name__,
+            "resultname": name,
+            "res": self.model_dump(),
+            "id": id,
+        }
+
+        # Check if path exists, otherwise create it.
+        for _ in range(3):
+            if os.path.exists(path):
+                break
+            path = "../" + path
+
+        # If no result folder can be found
+        if not os.path.exists(path):
+            os.makedirs("../../leakpro_output/results/")
+
+        # Save the results to a file
+        if not os.path.exists(f"{path}/{name}/{id}"):
+            os.makedirs(f"{path}/{name}/{id}")
+
+        with open(f"{path}/{name}/{id}/data.json", "w") as f:
+            json.dump(data, f)
+
+        self.plot(show=False,
+                  save=True,
+                  save_path=f"{path}",
+                  save_name=f"{name}/{id}/{name}")
+
+    @staticmethod
+    def load(data: dict) -> "LinkabilityResults":
+        """Load method for LinkabilityResults."""
+        return LinkabilityResults(res=data["res"]["res"],
+                                  res_cols=data["res"]["res_cols"],
+                                  aux_cols=data["res"]["aux_cols"])
+
+    def plot(self:Self, high_res_flag: bool = False, show: bool = True, save: bool = False,
+             save_path: str = "./", save_name: str = "fig.png") -> None:
+        """Plot method for LinkabilityResults."""
+        from leakpro.synthetic_data_attacks.plots import plot_linkability
+        plot_linkability(link_res=LinkabilityResults(res=self.res,
+                                                     res_cols=self.res_cols,
+                                                     aux_cols=self.aux_cols),
+                         high_res_flag=high_res_flag,
+                         show=show,
+                         save=save,
+                         save_name=f"{save_path}/{save_name}")
+
+    @staticmethod
+    def create_results(results: list, save_dir: str = "./") -> str:
+        """Result method for LinkabilityResults."""
+        latex = ""
+
+        def _latex(save_dir: str, save_name: str) -> str:
+            """Latex method for LinkabilityResults."""
+            filename = f"{save_dir}/{save_name}.png"
+            return f"""
+            \\subsection{{{" ".join(save_name.split("_"))}}}
+            \\begin{{figure}}[ht]
+            \\includegraphics[width=0.8\\textwidth]{{{filename}}}
+            \\caption{{Original}}
+            \\end{{figure}}
+            """
+
+        for res in results:
+            res.plot(show=False, save=True, save_path=save_dir, save_name="linkability")
+            latex += _latex(save_dir=save_dir, save_name="linkability")
+        return latex
 
 def linkability_risk_evaluation(
     ori: DataFrame,
