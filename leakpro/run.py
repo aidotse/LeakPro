@@ -11,11 +11,12 @@ from leakpro.utils.logger import logger
 
 
 def run_inverting(model: Module, client_data: DataLoader, train_fn: Callable,
-                data_mean:Tensor, data_std: Tensor, config: dict, experiment_name: str = "InvertingGradients") -> None:
+                data_mean:Tensor, data_std: Tensor, config: dict, experiment_name: str = "InvertingGradients", save:bool = False) -> None:
     """Runs InvertingGradients."""
     attack = InvertingGradients(model, client_data, train_fn, data_mean, data_std, config)
     result = attack.run_attack()
-    result.save(name=experiment_name, path="./leakpro_output/results")
+    if save:
+        result.save(name=experiment_name, path="./leakpro_output/results", config=config)
     return result
 
 def run_inverting_audit(model: Module, dataset: Dataset,
