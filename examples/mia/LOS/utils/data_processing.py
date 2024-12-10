@@ -60,6 +60,10 @@ def get_mimic_dataset(path,
     total_frac = train_frac + validation_frac + test_frac + early_stop_frac
     assert 0 < total_frac <= 1, "The sum of dataset fractions must be between 0 and 1."
 
+    # if flatten:
+    #     path = data_path + "flattened/"
+    # else:
+    #     path = data_path + "unflattened/"
     dataset_path = os.path.join(path, "dataset.pkl")
     indices_path = os.path.join(path, "indices.pkl")
     
@@ -142,6 +146,7 @@ def get_mimic_dataset(path,
                                                                            test_frac,
                                                                            early_stop_frac)
             
+            # os.makedirs(os.path.dirname(dataset_path), exist_ok=True)
             # Save the dataset to dataset.pkl
             with open(dataset_path, "wb") as file:
                 pickle.dump(dataset, file)
@@ -187,59 +192,60 @@ def data_splitter(statics,
     
     # Randomly shuffle subjects and compute the sizes of the splits
     np.random.seed(SEED)
-    # subjects = np.random.permutation(list(data_subjects))
-
-    # N = len(subjects)
-    # N_train = int(train_frac * N)
-
-    # # Ensure no overlap between train and test sets
-    # train_subj = subjects[:N_train]
-    # test_subj = subjects[N_train::]
-
-    # # Split the data according to the subjects
-    # (train_data, holdout_data), (y_train, y_holdout) = [
-    #     [df[df.index.get_level_values('subject_id').isin(s)] for s in (train_subj, test_subj)] 
-    #     for df in (lvl2, Ys)
-    # ]
-    # return train_data, holdout_data, y_train, y_holdout
-    # Shuffle the indices
-    # Convert the set to a list to make it indexable
-    # Convert the set to a list to make it indexable
-    data_subjects = list(data_subjects)
-
-    # Shuffle the indices
-    indices = np.arange(len(data_subjects))
-    shuffled_indices = np.random.permutation(indices)
-
-    # Map the values in data_subjects to their original indices
-    original_to_shuffled = {data_subjects[shuffled]: original for original, shuffled in enumerate(shuffled_indices)}
-
-    # Get the permuted subjects using the shuffled indices
-    subjects = [data_subjects[i] for i in shuffled_indices]
+    subjects = np.random.permutation(list(data_subjects))
 
     N = len(subjects)
     N_train = int(train_frac * N)
 
     # Ensure no overlap between train and test sets
     train_subj = subjects[:N_train]
-    test_subj = subjects[N_train:]
+    test_subj = subjects[N_train::]
 
     # Split the data according to the subjects
     (train_data, holdout_data), (y_train, y_holdout) = [
         [df[df.index.get_level_values('subject_id').isin(s)] for s in (train_subj, test_subj)] 
         for df in (lvl2, Ys)
     ]
-
-    # Track original indices of the train subjects
-    # original_indices_train = [original_to_shuffled[subj] for subj in train_subj]
-    # Save the dictionary to a file
-    with open('original_to_shuffled.pkl', 'wb') as f:
-        pickle.dump(original_to_shuffled, f)
-
-    print("Dictionary saved to 'original_to_shuffled.pkl'")
-
-
     return train_data, holdout_data, y_train, y_holdout
+   
+    # # Shuffle the indices
+    # # Convert the set to a list to make it indexable
+    # # Convert the set to a list to make it indexable
+    # data_subjects = list(data_subjects)
+
+    # # Shuffle the indices
+    # indices = np.arange(len(data_subjects))
+    # shuffled_indices = np.random.permutation(indices)
+
+    # # Map the values in data_subjects to their original indices
+    # original_to_shuffled = {data_subjects[shuffled]: original for original, shuffled in enumerate(shuffled_indices)}
+
+    # # Get the permuted subjects using the shuffled indices
+    # subjects = [data_subjects[i] for i in shuffled_indices]
+
+    # N = len(subjects)
+    # N_train = int(train_frac * N)
+
+    # # Ensure no overlap between train and test sets
+    # train_subj = subjects[:N_train]
+    # test_subj = subjects[N_train:]
+
+    # # Split the data according to the subjects
+    # (train_data, holdout_data), (y_train, y_holdout) = [
+    #     [df[df.index.get_level_values('subject_id').isin(s)] for s in (train_subj, test_subj)] 
+    #     for df in (lvl2, Ys)
+    # ]
+
+    # # Track original indices of the train subjects
+    # # original_indices_train = [original_to_shuffled[subj] for subj in train_subj]
+    # # Save the dictionary to a file
+    # with open('original_to_shuffled.pkl', 'wb') as f:
+    #     pickle.dump(original_to_shuffled, f)
+
+    # print("Dictionary saved to 'original_to_shuffled.pkl'")
+
+
+    # return train_data, holdout_data, y_train, y_holdout
 
 
 

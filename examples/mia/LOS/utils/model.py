@@ -31,7 +31,7 @@ def evaluate(model, loader, criterion, device):
             target = target.float().unsqueeze(1)
             output = model(data)
             loss += criterion(output, target).item()
-            pred = sigmoid(output) >= 0.5
+            pred = (output) >= 0.5
             acc += pred.eq(target.data.view_as(pred)).sum()
         loss /= len(loader)
         acc = float(acc) / len(loader.dataset)
@@ -68,7 +68,7 @@ def create_trained_model_and_metadata(model,
             output = model(data)
 
             loss = criterion(output, target)
-            pred = sigmoid(output) >= 0.5
+            pred = (output) >= 0.5
             train_acc += pred.eq(target).sum().item()
             
             loss.backward()
