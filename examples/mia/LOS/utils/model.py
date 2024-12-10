@@ -1,4 +1,4 @@
-
+import os
 import tqdm as tqdm
 import pickle
 import torch.nn as nn
@@ -44,6 +44,7 @@ def create_trained_model_and_metadata(model,
                                       epochs , 
                                       lr ,
                                       weight_decay ,
+                                      flatten = False,
                                       metadata = None):
 
     device_name = device("cuda" if cuda.is_available() else "cpu")
@@ -87,8 +88,17 @@ def create_trained_model_and_metadata(model,
     
     # Move the model back to the CPU
     model.to("cpu")
-    with open("target/target_model.pkl", "wb") as f:
-        save(model.state_dict(), f)
+    
+    if flatten: # LR model
+        if not os.path.exists("target_LR"):
+            os.makedirs("target_LR")
+        with open("target_LR/target_model.pkl", "wb") as f:
+            save(model.state_dict(), f)
+    else: # GRUD model
+        if not os.path.exists("target_GRUD"):
+            os.makedirs("target_GRUD")
+        with open("target_GRUD/target_model.pkl", "wb") as f:
+            save(model.state_dict(), f)
 
     # Create metadata and store it
     meta_data = {}
@@ -122,7 +132,11 @@ def create_trained_model_and_metadata(model,
     meta_data["test_loss"] = test_loss
     meta_data["dataset"] = "mimiciii"
     
-    with open("target/model_metadata.pkl", "wb") as f:
-        pickle.dump(meta_data, f)
+    if flatten:
+        with open("target_LR/model_metadata.pkl", "wb") as f:
+            pickle.dump(meta_data, f)
+    else:
+        with open("target_GRUD/model_metadata.pkl", "wb") as f:
+            pickle.dump(meta_data, f)
     
     return train_accuracies, train_losses, test_accuracies, test_losses

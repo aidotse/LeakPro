@@ -48,7 +48,7 @@ class MimicDataset(Dataset):
         return MimicDataset(self.x[indices], self.y[indices])
     
 
-def get_mimic_dataset(path, 
+def get_mimic_dataset(data_path, 
                       train_frac,
                       validation_frac,
                       test_frac,
@@ -60,10 +60,10 @@ def get_mimic_dataset(path,
     total_frac = train_frac + validation_frac + test_frac + early_stop_frac
     assert 0 < total_frac <= 1, "The sum of dataset fractions must be between 0 and 1."
 
-    # if flatten:
-    #     path = data_path + "flattened/"
-    # else:
-    #     path = data_path + "unflattened/"
+    if flatten:
+        path = data_path + "flattened/"
+    else:
+        path = data_path + "unflattened/"
     dataset_path = os.path.join(path, "dataset.pkl")
     indices_path = os.path.join(path, "indices.pkl")
     
@@ -79,7 +79,7 @@ def get_mimic_dataset(path,
         return dataset, train_indices, validation_indices ,test_indices, early_stop_indices
 
     else:
-        data_file_path = os.path.join(path, "all_hourly_data.h5")
+        data_file_path = os.path.join(data_path, "all_hourly_data.h5")
         if os.path.exists(data_file_path):
             data = pd.read_hdf(data_file_path, 'vitals_labs')
             statics = pd.read_hdf(data_file_path, 'patients')
@@ -111,17 +111,6 @@ def get_mimic_dataset(path,
                 #TODO: rename flat_train, flat_holdout to train_data, holdout_data
                 flat_train, flat_holdout, y_flat_train, y_flat_holdout = train_data, holdout_data, y_train, y_holdout_data
 
-            # flat_train, flat_holdout = [df.pivot_table(index=['subject_id', 'hadm_id', 'icustay_id'], 
-            #                                                   columns=['hours_in']) for df in (train_data, holdout_data) ]
-            
-            # # Reset the index to flatten the multi-index structure
-            # flat_train, flat_holdout, y_flat_train, t_falt_houldout = [flatten_multi_index(df) 
-            #                                                       for df in (flat_train, 
-            #                                                                  flat_holdout, 
-            #                                                                  y_train, 
-            #                                                                  y_holdout_data)]
-            
-            # Check for missing values in all relevant DataFrames
             assert_no_missing_values(train_data, holdout_data, flat_train, flat_holdout)
 
             train_df, holdout_df = standard_scaler(flat_train, flat_holdout)
@@ -146,7 +135,7 @@ def get_mimic_dataset(path,
                                                                            test_frac,
                                                                            early_stop_frac)
             
-            # os.makedirs(os.path.dirname(dataset_path), exist_ok=True)
+            os.makedirs(os.path.dirname(dataset_path), exist_ok=True)
             # Save the dataset to dataset.pkl
             with open(dataset_path, "wb") as file:
                 pickle.dump(dataset, file)

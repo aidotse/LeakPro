@@ -7,7 +7,7 @@ audit:  # Configurations for auditing
       num_shadow_models: 8 # Number of shadow models to train
       online: True # perform online or offline attack
       temperature: 2
-      gamma: 2.0
+      gamma: 1.0
       offline_a: 0.33 # parameter from which we compute p(x) from p_OUT(x) such that p_IN(x) = a p_OUT(x) + b.
       offline_b: 0.66
     # qmia:
@@ -35,8 +35,8 @@ target:
   module_path: "utils/model.py" # Path to the target model so either grud.py or model.py for logestic regression
   model_class: "MimicLR" #  MimicLR/GRUD
   # Data paths
-  target_folder: "./target"
-  data_path: "./data/dataset.pkl"
+  target_folder: "./target_LR"
+  data_path: "./data/flattened/dataset.pkl"
 
 shadow_model:
   
