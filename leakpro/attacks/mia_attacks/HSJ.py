@@ -4,7 +4,7 @@ import numpy as np
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
-from leakpro.metrics.attack_result import CombinedMetricResult
+from leakpro.metrics.attack_result import MIAResult
 from leakpro.signals.signal import HopSkipJumpDistance
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
@@ -169,12 +169,12 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
 
 
 
-    def run_attack(self:Self) -> CombinedMetricResult:
+    def run_attack(self:Self) -> MIAResult:
         """Run the attack and return the combined metric result.
 
         Returns
         -------
-            CombinedMetricResult: The combined metric result containing predicted labels, true labels,
+            MIAResult: The Result containing predicted labels, true labels,
             predictions probabilities, and signal values.
 
         """
@@ -217,7 +217,7 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
         )
 
         # compute ROC, TP, TN etc
-        return CombinedMetricResult(
+        return MIAResult(
             predicted_labels=member_preds,
             true_labels=true_labels,
             predictions_proba=None,

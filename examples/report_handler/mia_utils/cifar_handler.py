@@ -1,34 +1,33 @@
-"""Module containing the class to handle the user input for the CIFAR10 dataset."""
+"""Module containing the class to handle the user input for the CIFAR100 dataset."""
 
 import torch
-from torch import cuda, device, optim
+from torch import cuda, device, optim, sigmoid
+from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
-from leakpro.utils.import_helper import Self
-from leakpro.utils.logger import logger
+from leakpro import AbstractInputHandler
 
+class CifarInputHandler(AbstractInputHandler):
+    """Class to handle the user input for the CIFAR100 dataset."""
 
-class ImageInputHandler(AbstractInputHandler):
-    """Class to handle the user input for the CIFAR10 dataset."""
-
-    def __init__(self:Self, configs: dict) -> None:
+    def __init__(self, configs: dict) -> None:
         super().__init__(configs = configs)
+        print(configs)
 
 
-    def get_criterion(self:Self)->None:
+    def get_criterion(self)->None:
         """Set the CrossEntropyLoss for the model."""
-        return torch.nn.CrossEntropyLoss()
+        return CrossEntropyLoss()
 
-    def get_optimizer(self: Self, model:torch.nn.Module) -> None:
+    def get_optimizer(self, model:torch.nn.Module) -> None:
         """Set the optimizer for the model."""
         learning_rate = 0.1
         momentum = 0.8
         return optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
 
     def train(
-        self: Self,
+        self,
         dataloader: DataLoader,
         model: torch.nn.Module = None,
         criterion: torch.nn.Module = None,
@@ -63,10 +62,6 @@ class ImageInputHandler(AbstractInputHandler):
                 train_acc += pred.eq(labels.data.view_as(pred)).sum()
                 train_loss += loss.item()
 
-            log_train_str = (
-                f"Epoch: {epoch+1}/{epochs} | Train Loss: {train_loss/len(dataloader):.8f} | "
-                f"Train Acc: {float(train_acc)/len(dataloader.dataset):.8f}")
-            logger.info(log_train_str)
         model.to("cpu")
 
         return {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}
