@@ -224,6 +224,8 @@ class ROCCurveReport(AuditReport):
             verticalalignment="center",
             bbox={"facecolor": "white", "alpha": 0.5},
         )
+        plt.xlim(left=1e-5)
+        plt.ylim(bottom=1e-5)
         if save:
             plt.savefig(fname=filename, dpi=1000)
         if show:
@@ -646,7 +648,7 @@ def read_and_parse_data(filename:str) -> dict:
     return data
 
 # Main logic to process and save results
-def fixed_fpr_results(fpr:np.ndarray, tpr:np.ndarray, configs:dict, filename:str) -> None:
+def fixed_fpr_results(fpr:np.ndarray, tpr:np.ndarray, configs:dict, filename:str = None) -> None:
     """Compute and save fixed FPR results.
 
     Args:

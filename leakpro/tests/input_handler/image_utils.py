@@ -10,9 +10,9 @@ from torch.nn import Module
 from torch.utils.data import TensorDataset
 from torchvision import transforms
 
+from leakpro.tests.constants import STORAGE_PATH, get_image_handler_config
 from leakpro.utils.import_helper import Self
 
-from leakpro.tests.constants import STORAGE_PATH, get_image_handler_config
 
 class ConvNet(Module):
     """Convolutional Neural Network model."""
@@ -128,10 +128,10 @@ def create_mock_image_dataset() -> str:
 def create_mock_model_and_metadata() -> str:
     """Creates a mock model and saves it to a file."""
     parameters = get_image_handler_config()
-    
+
     if not os.path.exists(parameters.target_folder):
         os.makedirs(parameters.target_folder)
-            
+
     # Create a mock model
     model = ConvNet()
     model_path = parameters.target_folder + "/target_model.pkl"
