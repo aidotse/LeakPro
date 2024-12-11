@@ -276,7 +276,7 @@ class MIAResult:
         # Get the name for the attack configuration
         config_name = get_config_name(result_config)
 
-        self.id = f"{name}{config_name}"
+        self.id = f"{name}{config_name}".replace("/", "__")
         save_path = f"{path}/{name}/{self.id}"
 
         # Data to be saved
