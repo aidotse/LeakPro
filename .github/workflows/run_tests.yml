@@ -37,11 +37,12 @@ jobs:
       
       - name: Install micromamba
         run: |
-          eval "$(micromamba shell hook --shell bash)"
           curl -L https://micromamba.snakepit.net/api/micromamba/linux-64/latest | tar -xvj -C /usr/local/bin/ --strip-components=1 bin/micromamba
-
+          eval "$(micromamba shell hook --shell bash)"
+          export MAMBA_ROOT_PREFIX=/home/runner/micromamba-root
       - name: Install dependencies with micromamba
         run: |
+          export MAMBA_ROOT_PREFIX=/home/runner/micromamba-root
           eval "$(micromamba shell hook --shell bash)"
           micromamba create --file environment.yml --name leakpro --root-prefix /home/runner/micromamba-root
 
@@ -51,6 +52,7 @@ jobs:
       - name: Install pytest and pytest-cov
         shell: bash -l {0}
         run: |
+          export MAMBA_ROOT_PREFIX=/home/runner/micromamba-root
           eval "$(micromamba shell hook --shell bash)"
           micromamba activate leakpro
           micromamba install pytest pytest-cov -y
@@ -58,6 +60,7 @@ jobs:
       - name: Run tests with pytest
         shell: bash -l {0}
         run: |
+          export MAMBA_ROOT_PREFIX=/home/runner/micromamba-root
           eval "$(micromamba shell hook --shell bash)"
           micromamba activate leakpro
           pytest --junitxml=pytest.xml --cov-report=term-missing:skip-covered --cov=leakpro leakpro/tests/ | tee pytest-coverage.txt
