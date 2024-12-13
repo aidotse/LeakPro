@@ -35,20 +35,16 @@ jobs:
 
       - name: Run tests with pytest
         run: |
-          pytest --junitxml=pytest.xml --cov-report=term-missing:skip-covered --cov=leakpro leakpro/tests/ | tee pytest-coverage.txt
-          cat ./pytest-coverage.txt
+          pytest --cov=leakpro --cov-report=term-missing:skip-covered --cov-report=xml --cov-report=html leakpro/tests/
+          cat ./coverage.xml
 
-      - name: Upload test coverage report
-        uses: actions/upload-artifact@v4
-        with:
-          name: pytest-coverage.txt
-          path: pytest-coverage.txt
+      - name: Create Coverage Badge
+        run: |
+          pip install coverage-badge
+          coverage-badge -o coverage.svg -f
 
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
+      - name: Deploy Coverage Badge to GitHub Pages
+        uses: JamesIves/github-pages-deploy-action@v4
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: pytest-coverage.txt
-          flags: unittests
-          name: codecov-coverage
-          fail_ci_if_error: true
+          branch: gh-pages
+          folder: .

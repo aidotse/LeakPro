@@ -6,7 +6,7 @@
 ![Open Issues](https://img.shields.io/github/issues/aidotse/LeakPro)
 ![Open PRs](https://img.shields.io/github/issues-pr/aidotse/LeakPro)
 ![Downloads](https://img.shields.io/github/downloads/aidotse/LeakPro/total)
-![Coverage](https://codecov.io/gh/aidotse/LeakPro/branch/main/graph/badge.svg)
+![Coverage](https://aidotse.github.io/LeakPro/coverage.svg)
 
 ## To install
 0. **Clone repository**
