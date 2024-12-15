@@ -102,6 +102,8 @@ lint.select = [
 exclude = [
   ".venv",
   "./tests",
+  "./leakpro/tests",
+  "./examples",
 ]
 
 lint.ignore = [

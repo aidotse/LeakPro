@@ -378,5 +378,6 @@
         "hr_per_week",
         "country",
         "income"
-    ]
+    ],
+    "worst_case_flag": true
 }

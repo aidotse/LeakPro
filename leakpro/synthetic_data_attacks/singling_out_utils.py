@@ -1,13 +1,15 @@
 """Singling-out risk util functions."""
+import json
 import multiprocessing as mp
+import os
 from itertools import repeat
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from pandas import DataFrame
 from pydantic import BaseModel
 
 from leakpro.synthetic_data_attacks.anonymeter.evaluators.singling_out_evaluator import SinglingOutEvaluator
 from leakpro.synthetic_data_attacks.utils import load_res_json_file, save_res_json_file
+from leakpro.utils.import_helper import Any, Callable, Dict, List, Optional, Self, Tuple, Union
 
 
 class SinglingOutResults(BaseModel):
@@ -24,6 +26,103 @@ class SinglingOutResults(BaseModel):
 
     res_cols: List[str]
     res: List[List[Union[int,float]]]
+    prefix: str
+    dataset: str
+
+    def save(self:Self, path:str = "../leakpro_output/results/", name: str = "singling_out", config:dict = None) -> None: # noqa: ARG002
+        """Save method for SinglingOutResults."""
+        from leakpro.synthetic_data_attacks.plots import plot_singling_out
+        id = f"{self.prefix}"+f"_{self.dataset}"
+        # Data to be saved
+        data = {
+            "resulttype": self.__class__.__name__,
+            "resultname": name,
+            "res": self.model_dump(),
+            "id": id,
+        }
+        # Check if path exists, otherwise create it.
+        for _ in range(3):
+            if os.path.exists(path):
+                break
+            path = "../" + path
+        # If no result folder can be found
+        if not os.path.exists(path):
+            os.makedirs("../../leakpro_output/results/")
+        # Save the results to a file
+        if not os.path.exists(f"{path}/{name}/{id}"):
+            os.makedirs(f"{path}/{name}/{id}")
+        with open(f"{path}/{name}/{id}/data.json", "w") as f:
+            json.dump(data, f)
+        plot_singling_out(
+            sin_out_res = SinglingOutResults(
+                res = self.res,
+                res_cols = self.res_cols,
+                prefix = self.prefix,
+                dataset = self.dataset
+            ),
+            show = False,
+            save = True,
+            save_name = f"{path}/{name}/{id}/{self.prefix}",
+        )
+
+    @staticmethod
+    def load(data: dict) -> None:
+        """Load method for SinglingOutResults."""
+        return SinglingOutResults(
+            res = data["res"]["res"],
+            res_cols = data["res"]["res_cols"],
+            dataset = data["res"]["dataset"],
+            prefix = data["res"]["prefix"]
+        )
+
+    def plot(self:Self,
+            high_res_flag:bool = False,
+            show:bool = True,
+            save:bool = False,
+            save_path:str = "./",
+            save_name:str = "fig.png",
+        ) -> None:
+        """Plot method for SinglingOutResults."""
+        from leakpro.synthetic_data_attacks.plots import plot_singling_out
+        plot_singling_out(
+            sin_out_res=SinglingOutResults(
+                res=self.res,
+                res_cols=self.res_cols,
+                prefix=self.prefix,
+                dataset=self.dataset
+            ),
+            high_res_flag=high_res_flag,
+            show = show,
+            save = save,
+            save_name = f"{save_path}/{save_name}",
+        )
+
+    @staticmethod
+    def create_results(
+            results: list,
+            save_dir: str = "./",
+        ) -> str:
+        """Result method for SinglingOutResults."""
+        latex = ""
+
+        def _latex(
+                save_dir: str,
+                save_name: str,
+            ) -> str:
+            """Latex method for SinglingOutResults."""
+
+            filename = f"{save_dir}/{save_name}.png"
+            return f"""
+            \\subsection{{{" ".join(save_name.split("_"))}}}
+            \\begin{{figure}}[ht]
+            \\includegraphics[width=0.8\\textwidth]{{{filename}}}
+            \\caption{{Original}}
+            \\end{{figure}}
+            """
+        for res in results:
+            res.plot(show=False, save=True, save_path=save_dir, save_name=res.prefix)
+            latex += _latex(save_dir=save_dir, save_name=res.prefix)
+        return latex
 
 def check_for_int_value(*, x: int) -> None:
     """Auxiliary function to check a given integer value."""
@@ -81,6 +180,7 @@ def singling_out_risk_evaluation(
     dataset: str = "test",
     verbose: bool = False,
     save_results_json: bool = False,
+    path: str = None,
     **kwargs: dict
 ) -> SinglingOutResults:
     """Perform an individual/full singling-out risk evaluation.
@@ -103,6 +203,8 @@ def singling_out_risk_evaluation(
         If True, prints progress of evaluation.
     save_results_json: bool, default is False
         If True, saves results and combinations to json file.
+    path: str, default is None
+        Path where to save json results file.
     kwargs: dict
         Other keyword arguments for SinglingOutEvaluator.
 
@@ -155,18 +257,21 @@ def singling_out_risk_evaluation(
     #Instantiate SinglingOutResults
     sin_out_res = SinglingOutResults(
         res_cols = res_cols,
-        res = res
+        res = res,
+        prefix = get_singling_out_prefix(n_cols=n_cols),
+        dataset = dataset,
     )
     #Save results to json
     if save_results_json:
         save_res_json_file(
             prefix = get_singling_out_prefix(n_cols=n_cols),
             dataset = dataset,
-            res = sin_out_res.model_dump()
+            res = sin_out_res.model_dump(),
+            path = path
         )
     return sin_out_res
 
-def load_singling_out_results(*, dataset: str, n_cols: Optional[int] = None) -> SinglingOutResults:
+def load_singling_out_results(*, dataset: str, n_cols: Optional[int] = None, path: str = None) -> SinglingOutResults:
     """Function to load and return singling-out results from given dataset."""
     prefix = get_singling_out_prefix(n_cols=n_cols)
-    return SinglingOutResults(**load_res_json_file(prefix=prefix, dataset=dataset))
+    return SinglingOutResults(**load_res_json_file(prefix=prefix, dataset=dataset, path=path))

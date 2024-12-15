@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
 from leakpro.fl_utils.data_utils import get_at_images
 from leakpro.fl_utils.gia_optimizers import MetaSGD
-from leakpro.fl_utils.img_utils import dataloaders_psnr, total_variation
+from leakpro.fl_utils.img_utils import MedianPool2d, dataloaders_psnr, total_variation
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.utils.import_helper import Callable, Self
 from leakpro.utils.logger import logger
@@ -32,6 +32,10 @@ class InvertingConfig:
     criterion: object = field(default_factory=lambda: CrossEntropyLoss())
     # Number of epochs for the client attack
     epochs: int = 1
+    # if to use median pool 2d on images, can improve attack on high higher resolution (100+)
+    median_pooling: bool = False
+    # if we compare difference only for top 10 layers with largest changes. Potentially good for larger models.
+    top10norms: bool = False
 
 class InvertingGradients(AbstractGIA):
     """Gradient inversion attack by Geiping et al."""
@@ -44,12 +48,15 @@ class InvertingGradients(AbstractGIA):
         self.train_fn = train_fn
         self.data_mean = data_mean
         self.data_std = data_std
+        self.configs = configs
         self.t_v_scale = configs.total_variation
         self.attack_lr = configs.attack_lr
         self.iterations = configs.at_iterations
         self.optimizer = configs.optimizer
         self.criterion = configs.criterion
         self.epochs = configs.epochs
+        self.median_pooling = configs.median_pooling
+        self.top10norms = configs.top10norms
         self.best_loss = float("inf")
         self.best_reconstruction = None
         self.best_reconstruction_round = None
@@ -111,19 +118,20 @@ class InvertingGradients(AbstractGIA):
                 self.reconstruction.data = torch.max(
                     torch.min(self.reconstruction, (1 - self.data_mean) / self.data_std), -self.data_mean / self.data_std
                     )
+                if (i +1) % 500 == 0 and self.median_pooling:
+                    self.reconstruction.data = MedianPool2d(kernel_size=3, stride=1, padding=1, same=False)(self.reconstruction)
             if i % 250 == 0:
                 logger.info(f"Iteration {i}, loss {loss}")
-                pass
-            # Compares with original image to find which recreation is most similar
+            # Chose image who has given least loss
             if loss < self.best_loss:
                 self.best_loss = loss
                 self.best_reconstruction = deepcopy(self.reconstruction_loader)
                 self.best_reconstruction_round = i
                 logger.info(f"New best loss: {loss} on round: {i}")
-                pass
 
         return GIAResults(self.client_loader, self.best_reconstruction,
-                          dataloaders_psnr(self.client_loader, self.reconstruction_loader), self.data_mean, self.data_std)
+                          dataloaders_psnr(self.client_loader, self.reconstruction_loader), self.data_mean, self.data_std,
+                          self.configs)
 
 
     def gradient_closure(self: Self, optimizer: torch.optim.Optimizer) -> Callable:
@@ -169,7 +177,10 @@ class InvertingGradients(AbstractGIA):
             torch.Tensor: The average reconstruction cost.
 
         """
-        indices = torch.arange(len(reconstruction_gradient))
+        if self.top10norms:
+            _, indices = torch.topk(torch.stack([p.norm() for p in reconstruction_gradient], dim=0), 10)
+        else:
+            indices = torch.arange(len(reconstruction_gradient))
         weights = reconstruction_gradient[0].new_ones(len(reconstruction_gradient))
         total_costs = 0
         pnorm = [0, 0]

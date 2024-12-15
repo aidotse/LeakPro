@@ -5,9 +5,10 @@ from torch import cuda, device, optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from leakpro.utils.import_helper import Self
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
+
 
 class ImageInputHandler(AbstractInputHandler):
     """Class to handle the user input for the CIFAR10 dataset."""
