@@ -219,6 +219,6 @@ class EvaluationResults(BaseModel):
         """Prints results."""
         def pprint(rate:float) -> str:
             return f"{(rate*100):.2f}%"
-        print(f"Success rate of main attack (and nr and total): {pprint(self.main_rate.rate)},{self.n_main_success}, {self.n_main_total}") # noqa: T201, E501
+        print(f"Success rate of main attack (and nr and total): {pprint(self.main_rate.rate)}, {self.n_main_success}, {self.n_main_total}") # noqa: T201, E501
         print(f"Success rate of naive attack (and nr and total): {pprint(self.naive_rate.rate)}, {self.n_naive_success}, {self.n_naive_total}") # noqa: T201, E501
         print(f"Residual rate: {pprint(self.residual_rate.rate)}") # noqa: T201
