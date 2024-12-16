@@ -190,18 +190,20 @@ def test_inference_evaluator(ori: List, syn: List, e_n_main: int) -> None:
     cols = ["c0", "c1"]
     ori = pd.DataFrame(ori, columns=cols)
     syn = pd.DataFrame(syn, columns=cols)
+    n_attacks = 2
     evaluator = InferenceEvaluator(
         ori = ori,
         syn = syn,
         aux_cols = [cols[0]],
         secret = cols[1],
-        n_attacks = 2,
+        n_attacks = n_attacks,
         n_jobs = 1
     )
     results = evaluator.evaluate()
     assert isinstance(results, EvaluationResults)
-    assert results.n_total == 2
-    assert results.n_main == e_n_main
+    assert results.n_main_total == n_attacks
+    assert results.n_naive_total == n_attacks
+    assert results.n_main_success == e_n_main
 
 @pytest.mark.parametrize(
     "aux_cols",
@@ -215,15 +217,17 @@ def test_inference_evaluator(ori: List, syn: List, e_n_main: int) -> None:
 def test_inference_evaluator_full_leak(aux_cols: List, secret: str) -> None:
     """Assert InferenceEvaluator results with a sample of adults dataset as both ori and syn."""
     ori = get_adult(return_ori=True, n_samples=10)
+    n_attacks = 10
     evaluator = InferenceEvaluator(
         ori = ori,
         syn = ori,
         aux_cols = aux_cols,
         secret = secret,
-        n_attacks = 10,
+        n_attacks = n_attacks,
         n_jobs = 1,
     )
     results = evaluator.evaluate()
     assert isinstance(results, EvaluationResults)
-    assert results.n_total == 10
-    assert results.n_main == 10
+    assert results.n_main_total == n_attacks
+    assert results.n_naive_total == n_attacks
+    assert results.n_main_success == n_attacks

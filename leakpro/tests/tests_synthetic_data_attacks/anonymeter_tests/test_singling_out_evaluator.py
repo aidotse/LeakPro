@@ -163,9 +163,10 @@ def test_UniqueSinglingOutQueries_init() -> None: # noqa: N802
     assert queries.queries == []
     assert queries.idxs == []
     assert queries.count == 0
+    assert queries.len_passed_queries == 0
 
 @pytest.mark.parametrize(
-    ("queries", "e_count", "e_m_queries", "e_idxs"),
+    ("passed_queries", "e_count", "e_m_queries", "e_idxs"),
     [
         (["c2=='fuffa'"], 0, [], []), #0 total matches
         (["c1==0 and c2=='a'"], 0, [], []), #2 total matches
@@ -175,16 +176,17 @@ def test_UniqueSinglingOutQueries_init() -> None: # noqa: N802
         (["c1==2 and c2=='c'", "c3==1", "c2=='fuffa'", "c1==1 and c3==4", "c2=='d'", "c2=='c'"], 3, ["c1==2 and c2=='c'", "c3==1", "c1==1 and c3==4"], [0, 2, 3]) # noqa: E501 #repeated matches
     ]
 )
-def test_evaluate_queries(queries: List[str], e_count: int, e_m_queries: List[str], e_idxs: List[int]) -> None:
+def test_evaluate_queries(passed_queries: List[str], e_count: int, e_m_queries: List[str], e_idxs: List[int]) -> None:
     """Assert results of UniqueSinglingOutQueries.evaluate_queries method with different input values."""
     df = pd.DataFrame({"c1": [0, 0, 2, 1], "c2": ["a", "a", "c", "d"], "c3": [1, 2, 4, 4]})
-    queries = singl_ev.UniqueSinglingOutQueries(df=df).evaluate_queries(queries=queries)
+    queries = singl_ev.UniqueSinglingOutQueries(df=df).evaluate_queries(queries=passed_queries)
     assert isinstance(queries, singl_ev.UniqueSinglingOutQueries)
     assert queries.count == e_count
     assert queries.queries == e_m_queries
     assert sorted(queries.idxs) == e_idxs
     assert e_count == len(queries.queries)
     assert e_count == len(queries.idxs)
+    assert queries.len_passed_queries == len(passed_queries)
 
 def test_check_and_append() -> None:
     """Assert results of UniqueSinglingOutQueries.check_and_append method with different input values."""

@@ -149,49 +149,66 @@ class EvaluationResults(BaseModel):
 
     Parameters
     ----------
-    n_total : int
-        Total number of guesses performed (for both main and naive attacks).
-    n_main : int
+    n_main_total : int
+        Total number of guesses performed for main attack.
+    n_main_success : int
         Number of successful guesses on main attack.
-    n_naive : int
+    n_naive_total : int
+        Total number of guesses performed for naive attack.
+    n_naive_success : int
         Number of successful guesses on naive attack. Serves as baseline (random-guessing).
     confidence_level : float, default is 0.95
         Desired confidence level for the different rates' confidence intervals.
 
     """
 
-    n_total: int
-    n_main: int
-    n_naive: int
+    n_main_total: int
+    n_main_success: int
+    n_naive_total: int
+    n_naive_success: int
     confidence_level: float = 0.95
     main_rate: Optional[SuccessRate] = None
     naive_rate: Optional[SuccessRate] = None
     residual_rate: Optional[SuccessRate] = None
     #Result columns
-    res_cols: List[str] = ["n_total", "n_main", "n_naive", "confidence_level", "main_rate", "naive_rate", "residual_rate"]
+    res_cols: List[str] = [
+        "n_main_total", "n_main_success", "n_naive_total", "n_naive_success",
+        "confidence_level", "main_rate", "naive_rate", "residual_rate"
+    ]
 
     def __init__(self: Self, **kwargs: Union[int, float, Optional[SuccessRate]]) -> Union[None, ValueError]:
         super().__init__(**kwargs)
         #Assert input values
-        if self.n_total <= 0:
-            raise ValueError("n_total must be greater than 0.")
-        if self.n_main < 0 or self.n_naive < 0:
-            raise ValueError("n_main and n_naive must be greater or equal to 0.")
-        if max(self.n_total, self.n_main, self.n_naive) != self.n_total:
-            raise ValueError("n_total must be greater or equal than n_main and n_naive.")
+        if self.n_main_total <= 0 or self.n_naive_total <= 0:
+            raise ValueError("n_main_total and n_naive_total must be greater than 0.")
+        if self.n_main_success < 0 or self.n_naive_success < 0:
+            raise ValueError("n_main_success and n_naive_success must be greater or equal to 0.")
+        if self.n_main_total < self.n_main_success:
+            raise ValueError("n_main_total must be greater or equal than n_main_success.")
+        if self.n_naive_total < self.n_naive_success:
+            raise ValueError("n_naive_total must be greater or equal than n_naive_success.")
         assert_x_in_bound(x=self.confidence_level, x_name="confidence_level")
         #Rates calculations
-        self.main_rate = success_rate(n_total=self.n_total, n_success=self.n_main, confidence_level=self.confidence_level)
-        self.naive_rate = success_rate(n_total=self.n_total, n_success=self.n_naive, confidence_level=self.confidence_level)
+        self.main_rate = success_rate(
+            n_total = self.n_main_total,
+            n_success = self.n_main_success,
+            confidence_level = self.confidence_level
+        )
+        self.naive_rate = success_rate(
+            n_total = self.n_naive_total,
+            n_success = self.n_naive_success,
+            confidence_level = self.confidence_level
+        )
         self.residual_rate = residual_rate(main_rate=self.main_rate, naive_rate=self.naive_rate)
 
     def pack_results(self: Self) -> List[Union[int,float]]:
         """Returns a list with results."""
         #Note: if return object is changed, change corresponding res_cols attribute!
         return [
-            self.n_total,
-            self.n_main,
-            self.n_naive,
+            self.n_main_total,
+            self.n_main_success,
+            self.n_naive_total,
+            self.n_naive_success,
             self.confidence_level,
             self.main_rate.rate,
             self.naive_rate.rate,
@@ -202,6 +219,6 @@ class EvaluationResults(BaseModel):
         """Prints results."""
         def pprint(rate:float) -> str:
             return f"{(rate*100):.2f}%"
-        print(f"Success rate of main attack (and nr and total): {pprint(self.main_rate.rate)}, {self.n_main}, {self.n_total}") # noqa: T201
-        print(f"Success rate of naive attack (and nr and total): {pprint(self.naive_rate.rate)}, {self.n_naive}, {self.n_total}") # noqa: T201
+        print(f"Success rate of main attack (and nr and total): {pprint(self.main_rate.rate)},{self.n_main_success}, {self.n_main_total}") # noqa: T201, E501
+        print(f"Success rate of naive attack (and nr and total): {pprint(self.naive_rate.rate)}, {self.n_naive_success}, {self.n_naive_total}") # noqa: T201, E501
         print(f"Residual rate: {pprint(self.residual_rate.rate)}") # noqa: T201
