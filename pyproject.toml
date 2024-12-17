@@ -83,7 +83,6 @@ dev = [
 ]
 >>>>>>> 401cb4b (toml apparently not supporting list concatenation)
 
-
 [tool.setuptools]
 include-package-data = true
 
