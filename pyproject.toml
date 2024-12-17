@@ -19,6 +19,7 @@ dependencies = [
   "tqdm",
   "joblib",
   "pyyaml",
+  "scikit-learn",
 ]
 
 [project.optional-dependencies]
@@ -36,7 +37,6 @@ dev = [
   "torchmetrics",  # from federated
   "numba",  # from synthetic
   "pydantic",  # from synthetic
-  "scikit-learn", # from synthetic
 ]
 
 [tool.setuptools]
