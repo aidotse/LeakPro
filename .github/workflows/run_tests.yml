@@ -28,7 +28,12 @@ jobs:
         run: |
           pip install ruff
           ruff check leakpro --exclude examples,leakpro/tests
-
+      
+      - name: Install dependencies from pyproject.toml
+        run: |
+          python -m pip install --upgrade pip
+          pip install .[dev]
+          
       - name: Install pytest and pytest-cov
         run: |
           pip install pytest pytest-cov pytest-mock coverage-badge
