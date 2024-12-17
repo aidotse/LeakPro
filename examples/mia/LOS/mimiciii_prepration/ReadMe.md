@@ -1,9 +1,9 @@
 
 ## MIMIC-III Data Preparation
-<br>This is an instriction for prepratin MIMIC-III for the lenght of stay preditcion example. 
+<br>This guide provides instructions for preparing the MIMIC-III dataset for a length of stay prediction example.
 
  ### Requirments
-Your system should have the following executables on the PATH:
+Ensure that your system has the following tools available in the PATH:
 
 * conda
 * [psql](https://www.postgresql.org/download/) (PostgreSQL 9.4 or higher)
@@ -12,21 +12,33 @@ Your system should have the following executables on the PATH:
 
  ### Steps
 
- #### Create Conda envrioment 
+ #### Create Conda envrioment
+ Navigate to ```MIMIC_Extract``` and create a Conda environment:
 ``` 
-conda env create --force -f ../mimic_extract_env_py36.yml
+conda env create --force -f mimic_extract_env_py36.yml
 conda activate mimic_data_extraction
  ```
 
 #### Compiling the data
-If you have MIMIC-III dataset downloaded put the zip files in ```./mimic-code/buildmimic/data ```. Otherwise the following scripts will download the files. Then it unzip the file, create a postgres database, build the database and then create the needed concspets. For that redirect to  ```./mimic-code/buildmimic ``` and run the following command:
+Navigate to ```mimic-code/buildmimic``` . <br>
+If you already have MIMIC-III dataset downloaded, place the unzipped CSV files in the  ```data ``` folder, and run the following check command:
 ``` bash
-$ make create-user mimic-build datadir=./data/ 
+$ make mimic-check-csv datadir=./data/ 
 ```
-Then redirect to ./MIMIC_Extract and run the follwoing command, and then you should find the output files in ```output ``` folder. 
 
+If you have not yet downloaded the dataset, use the following command to download it (replace [your_username] with your PhysioNet username):
+
+``` bash
+$ make  mimic_download_check datadir=./data/ physionetuser=[your_username]
+```
+
+Then to create and build a postgres database run the below command. The default value for the postgres password is 'postgres'.
+``` bash
+$ make mimic-build datadir=./data/ 
+```
+Navigate back to the ```./MIMIC_Extract``` and run the follwoing command.
+The output files will be saved in the ```output``` folder. Note that this command may take a day or longer to complete.
 ```
 $ bash run.sh
 ```
-<!-- /home/fazeleh/cleaning_data/mimic-code/mimic-iii/buildmimic/postgres
-``` -->
+

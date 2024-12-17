@@ -6,7 +6,7 @@ from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.attacks.utils.utils import softmax_logits
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
-from leakpro.metrics.attack_result import CombinedMetricResult
+from leakpro.metrics.attack_result import MIAResult
 from leakpro.signals.signal import ModelLogits
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
@@ -279,7 +279,7 @@ class AttackRMIA(AbstractMIA):
         self.in_member_signals = score[in_members].reshape(-1,1)
         self.out_member_signals = score[out_members].reshape(-1,1)
 
-    def run_attack(self:Self) -> CombinedMetricResult:
+    def run_attack(self:Self) -> MIAResult:
         """Run the attack on the target model and dataset.
 
         Returns
@@ -315,7 +315,7 @@ class AttackRMIA(AbstractMIA):
         )
 
         # compute ROC, TP, TN etc
-        return CombinedMetricResult(
+        return MIAResult(
             predicted_labels=predictions,
             true_labels=true_labels,
             predictions_proba=None,

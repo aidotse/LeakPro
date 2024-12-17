@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 import os
+=======
+
+>>>>>>> origin/main
 import tqdm as tqdm
 import pickle
 import torch.nn as nn
@@ -49,7 +53,8 @@ def create_trained_model_and_metadata(model,
     device_name = device("cuda" if cuda.is_available() else "cpu")
     model.to(device_name)
     model.train()
-
+    
+    #TODO: Reduction to mean?
     criterion = nn.BCELoss()
     optimizer = optim.SGD(model.parameters(),
                           lr = lr,

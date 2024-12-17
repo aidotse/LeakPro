@@ -8,7 +8,7 @@ from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.boosting import Memorization
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
-from leakpro.metrics.attack_result import CombinedMetricResult
+from leakpro.metrics.attack_result import MIAResult
 from leakpro.signals.signal import ModelRescaledLogits
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
@@ -49,6 +49,7 @@ class AttackLiRA(AbstractMIA):
         self.training_data_fraction = configs.get("training_data_fraction", 0.5)
         self.include_train_data = configs.get("include_train_data", self.online)
         self.include_test_data = configs.get("include_test_data", self.online)
+        self.eval_batch_size = configs.get("eval_batch_size", 32)
 
         # Memorization config
         # Activate memorization
@@ -70,6 +71,7 @@ class AttackLiRA(AbstractMIA):
         validation_dict = {
             "num_shadow_models": (self.num_shadow_models, 1, None),
             "training_data_fraction": (self.training_data_fraction, 0, 1),
+            "eval_batch_size": (self.eval_batch_size, 1, 1_000_000),
             "memorization_threshold": (self.memorization_threshold, 0, 1),
             "min_num_memorization_audit_points": (self.min_num_memorization_audit_points, 1, 1_000_000),
             "num_memorization_audit_points": (self.num_memorization_audit_points, 0, 1_000_000),
@@ -132,7 +134,7 @@ class AttackLiRA(AbstractMIA):
             mask = (num_shadow_models_seen_points > 0) & (num_shadow_models_seen_points < self.num_shadow_models)
 
             # Filter the audit data
-            audit_data_indices = self.audit_dataset["data"][mask]
+            self.audit_data_indices = self.audit_dataset["data"][mask]
             self.in_indices_masks = self.in_indices_masks[mask, :]
 
             # Filter IN and OUT members
@@ -140,13 +142,13 @@ class AttackLiRA(AbstractMIA):
             num_out_members = np.sum(mask[self.audit_dataset["out_members"]])
             self.out_members = np.arange(len(self.in_members), len(self.in_members) + num_out_members)
 
-            assert len(audit_data_indices) == len(self.in_members) + len(self.out_members)
+            assert len(self.audit_data_indices) == len(self.in_members) + len(self.out_members)
 
-            if len(audit_data_indices) == 0:
+            if len(self.audit_data_indices) == 0:
                 raise ValueError("No points in the audit dataset are used for the shadow models")
 
         else:
-            audit_data_indices = self.audit_dataset["data"]
+            self.audit_data_indices = self.audit_dataset["data"]
             self.in_members = self.audit_dataset["in_members"]
             self.out_members = self.audit_dataset["out_members"]
 
@@ -157,23 +159,25 @@ class AttackLiRA(AbstractMIA):
                 logger.info(f"Some shadow model(s) contains {count_in_samples} IN samples in total for the model(s)")
                 logger.info("This is not an offline attack!")
 
-        self.batch_size = len(audit_data_indices)
         logger.info(f"Calculating the logits for all {self.num_shadow_models} shadow models")
-        self.shadow_models_logits = np.swapaxes(self.signal(self.shadow_models, self.handler, audit_data_indices,\
-                                                            self.batch_size), 0, 1)
+        self.shadow_models_logits = np.swapaxes(self.signal(self.shadow_models,
+                                                            self.handler,
+                                                            self.audit_data_indices,
+                                                            self.eval_batch_size), 0, 1)
 
         # Calculate logits for the target model
         logger.info("Calculating the logits for the target model")
-        self.target_logits = np.swapaxes(self.signal([self.target_model], self.handler, audit_data_indices, self.batch_size),\
-                                        0, 1).squeeze()
+        self.target_logits = np.swapaxes(self.signal([self.target_model],
+                                                     self.handler,
+                                                     self.audit_data_indices,
+                                                     self.eval_batch_size), 0, 1).squeeze()
 
         # Using Memorizationg boosting
         if self.memorization:
 
             # Prepare for memorization
-            org_audit_data_length = self.audit_dataset["data"].size
-            audit_data_indices = self.audit_dataset["data"][mask] if self.online else self.audit_dataset["data"]
-            audit_data_labels = self.handler.get_labels(audit_data_indices)
+            org_audit_data_length = self.audit_data_indices.size
+            audit_data_labels = self.handler.get_labels(self.audit_data_indices)
 
             logger.info("Running memorization")
             memorization = Memorization(
@@ -184,12 +188,12 @@ class AttackLiRA(AbstractMIA):
                 self.in_indices_masks,
                 self.shadow_models,
                 self.target_model,
-                audit_data_indices,
+                self.audit_data_indices,
                 audit_data_labels,
                 org_audit_data_length,
                 self.handler,
                 self.online,
-                self.batch_size,
+                self.eval_batch_size,
             )
             memorization_mask, _, _ = memorization.run()
 
@@ -245,7 +249,7 @@ class AttackLiRA(AbstractMIA):
             return self.fixed_in_std
         return self.fixed_out_std
 
-    def run_attack(self:Self) -> CombinedMetricResult:
+    def run_attack(self:Self) -> MIAResult:
         """Runs the attack on the target model and dataset and assess privacy risks or data leakage.
 
         This method evaluates how the target model's output (logits) for a specific dataset
@@ -290,7 +294,7 @@ class AttackLiRA(AbstractMIA):
             score[i] = (pr_in - pr_out)  # Append the calculated probability density value to the score list
 
         # Generate thresholds based on the range of computed scores for decision boundaries
-        self.thresholds = np.linspace(np.min(score), np.max(score), 2000)
+        self.thresholds = np.linspace(np.min(score), np.max(score), 1000)
 
         # Split the score array into two parts based on membership: in (training) and out (non-training)
         self.in_member_signals = score[self.in_members].reshape(-1,1)  # Scores for known training data members
@@ -312,9 +316,10 @@ class AttackLiRA(AbstractMIA):
         signal_values = np.concatenate([self.in_member_signals, self.out_member_signals])
 
         # Return a result object containing predictions, true labels, and the signal values for further evaluation
-        return CombinedMetricResult(
+        return MIAResult(
             predicted_labels=predictions,
             true_labels=true_labels,
-            predictions_proba=None,  # Note: Direct probability predictions are not computed here
+            predictions_proba=None,
             signal_values=signal_values,
+            audit_indices=self.audit_data_indices,
         )

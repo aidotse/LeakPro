@@ -200,24 +200,25 @@ class LinkabilityEvaluator(BaseModel):
         """Run the linkability attacks (main and naive) and set and return results."""
         # Main linkability attack
         self.main_links = main_linkability_attack(
-            ori=self.ori,
-            syn=self.syn,
-            n_attacks=self.n_attacks,
-            aux_cols=self.aux_cols,
-            n_neighbors=self.n_neighbors,
-            n_jobs=self.n_jobs,
+            ori = self.ori,
+            syn = self.syn,
+            n_attacks = self.n_attacks,
+            aux_cols = self.aux_cols,
+            n_neighbors = self.n_neighbors,
+            n_jobs = self.n_jobs
         )
         # Naive linkability attack
         self.naive_links = naive_linkability_attack(
-            n_synthetic=self.syn.shape[0],
-            n_attacks=self.n_attacks,
-            n_neighbors=self.n_neighbors
+            n_synthetic = self.syn.shape[0],
+            n_attacks = self.n_attacks,
+            n_neighbors = self.n_neighbors
         )
         # Set results
         self.results = EvaluationResults(
-            n_total = self.n_attacks,
-            n_main = self.main_links.count,
-            n_naive = self.naive_links.count,
+            n_main_total = self.n_attacks,
+            n_main_success = self.main_links.count,
+            n_naive_total = self.n_attacks,
+            n_naive_success = self.naive_links.count,
             confidence_level = self.confidence_level
         )
         return self.results

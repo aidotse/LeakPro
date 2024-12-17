@@ -179,7 +179,6 @@ def data_splitter(statics,
     # Randomly shuffle subjects and compute the sizes of the splits
     np.random.seed(SEED)
     subjects = np.random.permutation(list(data_subjects))
-
     N = len(subjects)
     N_train = int(train_frac * N)
 

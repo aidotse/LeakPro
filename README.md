@@ -6,7 +6,15 @@
 ![Open Issues](https://img.shields.io/github/issues/aidotse/LeakPro)
 ![Open PRs](https://img.shields.io/github/issues-pr/aidotse/LeakPro)
 ![Downloads](https://img.shields.io/github/downloads/aidotse/LeakPro/total)
+![Coverage](https://github.com/aidotse/LeakPro/blob/gh-pages/coverage.svg)
 
+## To install
+0. **Clone repository**
+`git clone https://github.com/aidotse/LeakPro.git`
+1. **Navigate to the project repo**
+`cd Leakpro`
+2. **Install with pip**
+`pip install -e .`
 
 ## To Contribute
 0. **Ensure local repo is up-to-date:**

@@ -163,9 +163,14 @@ cython_debug/
 .DS_Store
 
 # Ignore data and model folders
+data
 data/cifar*
 data/CINIC*
 attack_objects/
 
 # Ignore outputs
 leakpro_output/*
+*.pth
+*.png
+nohup.out
+img_align_celeba

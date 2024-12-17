@@ -153,93 +153,121 @@ def test_residual_rate(main_rate: SuccessRate, naive_rate: SuccessRate, e_rate: 
 
 def test_EvaluationResults_init_error() -> None: # noqa: N802
     """Assert EvaluationResults.init method for different errors raised on different input values."""
-    #Case n_total <= 0
-    e_msg = "n_total must be greater than 0."
+    #Case n_main_total or n_naive_total <= 0
+    e_msg = "n_main_total and n_naive_total must be greater than 0."
     with pytest.raises(ValueError, match=e_msg) as e:
         EvaluationResults(
-            n_total=0,
-            n_main=0,
-            n_naive=0,
-            confidence_level=0,
-        )
-    assert e.type is ValueError
-    #Case n_naive or n_naive < 0
-    e_msg = "n_main and n_naive must be greater or equal to 0."
-    with pytest.raises(ValueError, match=e_msg) as e:
-        EvaluationResults(
-            n_total=1,
-            n_main=-1,
-            n_naive=0
+            n_main_total = 0,
+            n_main_success = 0,
+            n_naive_total = 1,
+            n_naive_success = 0,
+            confidence_level = 0,
         )
     assert e.type is ValueError
     with pytest.raises(ValueError, match=e_msg) as e:
         EvaluationResults(
-            n_total=1,
-            n_main=0,
-            n_naive=-1
+            n_main_total = 1,
+            n_main_success = 0,
+            n_naive_total = 0,
+            n_naive_success = 0,
+            confidence_level = 0,
         )
     assert e.type is ValueError
-    #Case n_total not max of n_main and n_naive
-    e_msg = "n_total must be greater or equal than n_main and n_naive."
+    #Case n_main_success or n_naive_success < 0
+    e_msg = "n_main_success and n_naive_success must be greater or equal to 0."
     with pytest.raises(ValueError, match=e_msg) as e:
         EvaluationResults(
-            n_total=1,
-            n_main=2,
-            n_naive=1
+            n_main_total = 1,
+            n_main_success = -1,
+            n_naive_total = 1,
+            n_naive_success = 0
         )
     assert e.type is ValueError
     with pytest.raises(ValueError, match=e_msg) as e:
         EvaluationResults(
-            n_total=1,
-            n_main=1,
-            n_naive=2
+            n_main_total = 1,
+            n_main_success = 1,
+            n_naive_total = 1,
+            n_naive_success = -1
+        )
+    assert e.type is ValueError
+    #Case n_main_total < n_main_success
+    e_msg = "n_main_total must be greater or equal than n_main_success."
+    with pytest.raises(ValueError, match=e_msg) as e:
+        EvaluationResults(
+            n_main_total = 1,
+            n_main_success = 2,
+            n_naive_total = 1,
+            n_naive_success = 0
+        )
+    assert e.type is ValueError
+    #Case n_naive_total < n_naive_success.
+    e_msg = "n_naive_total must be greater or equal than n_naive_success."
+    with pytest.raises(ValueError, match=e_msg) as e:
+        EvaluationResults(
+            n_main_total = 1,
+            n_main_success = 0,
+            n_naive_total = 1,
+            n_naive_success = 2
         )
     assert e.type is ValueError
     #Case confidence_level not in (0,1) interval
     e_msg = "Parameter `confidence_level` must be > 0.0 and < 1.0. Got 0.0 instead."
     with pytest.raises(ValueError, match=e_msg) as e:
         EvaluationResults(
-            n_total=1,
-            n_main=0,
-            n_naive=0,
-            confidence_level=0
+            n_main_total = 1,
+            n_main_success = 0,
+            n_naive_total = 1,
+            n_naive_success = 0,
+            confidence_level = 0
         )
     assert e.type is ValueError
     #Case no error on input
     EvaluationResults(
-        n_total=1,
-        n_main=0,
-        n_naive=0
+        n_main_total = 1,
+        n_main_success = 0,
+        n_naive_total = 1,
+        n_naive_success = 0
     )
 
 @pytest.mark.parametrize(
-    ("n_total", "n_main", "n_naive", "conf_level"),
+    ("n_main_total", "n_main_success", "n_naive_total", "n_naive_success", "conf_level"),
     [
-        (100, 100, 0, 0.95),
-        (100, 23, 11, 0.95),
-        (111, 84, 42, 0.95),
-        (100, 0, 100, 0.95),
-        (100, 100, 0, 0.8),
-        (100, 23, 11, 0.8),
-        (111, 84, 42, 0.8),
-        (100, 0, 100, 0.8),
+        (100, 100, 100, 0, 0.95),
+        (100, 23, 100, 11, 0.95),
+        (111, 84, 100, 42, 0.95),
+        (100, 0, 100, 100, 0.95),
+        (100, 100, 100, 0, 0.8),
+        (100, 23, 100, 11, 0.8),
+        (111, 84, 100, 42, 0.8),
+        (100, 0, 100, 100, 0.8),
     ],
 )
-def test_EvaluationResults(n_total: int, n_main: int, n_naive: int, conf_level: float) -> None: # noqa: N802
+def test_EvaluationResults( # noqa: N802
+    n_main_total: int,
+    n_main_success: int,
+    n_naive_total: int,
+    n_naive_success: int,
+    conf_level: float
+) -> None:
     """Assert EvaluationResults.init results for different input values.
 
     Test additionally tests pack_results method.
     """
-    e_main = success_rate(n_total=n_total, n_success=n_main, confidence_level=conf_level)
-    e_naive = success_rate(n_total=n_total, n_success=n_naive, confidence_level=conf_level)
+    e_main = success_rate(n_total=n_main_total, n_success=n_main_success, confidence_level=conf_level)
+    e_naive = success_rate(n_total=n_naive_total, n_success=n_naive_success, confidence_level=conf_level)
     e_residual = residual_rate(main_rate=e_main, naive_rate=e_naive)
     res = EvaluationResults(
-        n_total=n_total,
-        n_main=n_main,
-        n_naive=n_naive,
-        confidence_level=conf_level
+        n_main_total = n_main_total,
+        n_main_success = n_main_success,
+        n_naive_total = n_naive_total,
+        n_naive_success = n_naive_success,
+        confidence_level = conf_level
     )
-    e_res_cols = ["n_total", "n_main", "n_naive", "confidence_level", "main_rate", "naive_rate", "residual_rate"]
+    e_res_cols = [
+        "n_main_total", "n_main_success", "n_naive_total", "n_naive_success",
+        "confidence_level", "main_rate", "naive_rate", "residual_rate"
+    ]
     assert res.res_cols == e_res_cols
     assert_equal_SuccessRates(res.main_rate, e_main)
     assert_equal_SuccessRates(res.naive_rate, e_naive)
@@ -248,9 +276,10 @@ def test_EvaluationResults(n_total: int, n_main: int, n_naive: int, conf_level: 
     packed_res = res.pack_results()
     assert len(packed_res) == len(e_res_cols)
     assert packed_res == [
-        res.n_total,
-        res.n_main,
-        res.n_naive,
+        res.n_main_total,
+        res.n_main_success,
+        res.n_naive_total,
+        res.n_naive_success,
         res.confidence_level,
         res.main_rate.rate,
         res.naive_rate.rate,

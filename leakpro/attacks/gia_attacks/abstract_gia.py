@@ -2,7 +2,6 @@
 
 from abc import ABC, abstractmethod
 
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.utils.import_helper import Self
 
@@ -17,9 +16,8 @@ class AbstractGIA(ABC):
     This serves as a guideline for implementing a metric to be used for measuring the privacy leakage of a target model.
     """
 
-    def __init__(
+    def __init__(  # noqa: B027
         self:Self,
-        handler: AbstractInputHandler,
     )->None:
         """Initialize the AttackAbstract class.
 
@@ -28,11 +26,7 @@ class AbstractGIA(ABC):
             handler (AbstractInputHandler): The input handler object.
 
         """
-        # Add shared initialization between attacks here.. (model etc)
-        # Add similarity tracking here..
-        # Add image saving functions here..
-
-        self.handler = handler #TODO: update with what is necessary here.
+        pass
 
     @abstractmethod
     def _configure_attack(self:Self, configs:dict)->None:

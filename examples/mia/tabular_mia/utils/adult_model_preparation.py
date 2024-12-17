@@ -1,7 +1,8 @@
-import torch.nn as nn
-from torch import device, optim, cuda, no_grad, save, sigmoid
 import pickle
+
+from torch import cuda, device, nn, no_grad, optim, save, sigmoid
 from tqdm import tqdm
+
 
 class AdultNet(nn.Module):
     def __init__(self, input_size, hidden_size, num_classes):
@@ -13,7 +14,7 @@ class AdultNet(nn.Module):
         self.relu = nn.ReLU()
         self.fc2 = nn.Linear(hidden_size, hidden_size)
         self.fc3 = nn.Linear(hidden_size, num_classes)
-    
+
     def forward(self, x):
         out = self.fc1(x)
         out = self.relu(out)
@@ -47,11 +48,11 @@ def create_trained_model_and_metadata(model, train_loader, test_loader, epochs =
     optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.8)
     train_losses, train_accuracies = [], []
     test_losses, test_accuracies = [], []
-    
+
     for e in tqdm(range(epochs), desc="Training Progress"):
         model.train()
         train_acc, train_loss = 0.0, 0.0
-        
+
         for data, target in train_loader:
             target = target.float().unsqueeze(1)
             data, target = data.to(device_name, non_blocking=True), target.to(device_name, non_blocking=True)
@@ -61,17 +62,17 @@ def create_trained_model_and_metadata(model, train_loader, test_loader, epochs =
             loss = criterion(output, target)
             pred = sigmoid(output) >= 0.5
             train_acc += pred.eq(target).sum().item()
-            
+
             loss.backward()
             optimizer.step()
             train_loss += loss.item()
-        
+
         train_loss /= len(train_loader)
         train_acc /= len(train_loader.dataset)
-            
+
         train_losses.append(train_loss)
         train_accuracies.append(train_acc)
-        
+
         test_loss, test_acc = evaluate(model, test_loader, criterion, device_name)
         test_losses.append(test_loss)
         test_accuracies.append(test_acc)
@@ -86,12 +87,12 @@ def create_trained_model_and_metadata(model, train_loader, test_loader, epochs =
     meta_data["train_indices"] = train_loader.dataset.indices
     meta_data["test_indices"] = test_loader.dataset.indices
     meta_data["num_train"] = len(meta_data["train_indices"])
-    
+
     # Write init params
     meta_data["init_params"] = {}
     for key, value in model.init_params.items():
         meta_data["init_params"][key] = value
-    
+
     # read out optimizer parameters
     meta_data["optimizer"] = {}
     meta_data["optimizer"]["name"] = optimizer.__class__.__name__.lower()
@@ -112,8 +113,8 @@ def create_trained_model_and_metadata(model, train_loader, test_loader, epochs =
     meta_data["train_loss"] = train_loss
     meta_data["test_loss"] = test_loss
     meta_data["dataset"] = "adult"
-    
+
     with open("target/model_metadata.pkl", "wb") as f:
         pickle.dump(meta_data, f)
-    
+
     return train_accuracies, train_losses, test_accuracies, test_losses

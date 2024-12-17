@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 import leakpro.synthetic_data_attacks.inference_utils as iu
-from leakpro.synthetic_data_attacks.utils import aux_file_path
+from leakpro.synthetic_data_attacks import utils as u
 from leakpro.tests.tests_synthetic_data_attacks.anonymeter_tests.fixtures import get_adult
 
 
@@ -24,8 +24,11 @@ def test_get_inference_prefix() -> None:
     prefix = iu.get_inference_prefix(worst_case_flag=False)
     assert prefix == "inference_base_case"
 
-def test_inference_risk_evaluation() -> None:
-    """Assert results for inference_risk_evaluation function for simple input case."""
+def test_inference_risk_evaluation() -> None: # noqa: PLR0915
+    """Assert results for inference_risk_evaluation function for simple input case.
+
+    Test also tests function load_inference_results.
+    """
     #Prepare test variables
     ori = get_adult(return_ori=True, n_samples=10)
     syn = get_adult(return_ori=False, n_samples=10)
@@ -33,7 +36,7 @@ def test_inference_risk_evaluation() -> None:
     n_samples = 2
     adults_nr_cols = len(ori.columns)
     #Output nr columns from pack_results
-    pack_results_nr_cols = 7
+    pack_results_nr_cols = 8
     #Get expected len_all_samples
     e_base_case_len = 0
     for secret in ori.columns:
@@ -68,7 +71,7 @@ def test_inference_risk_evaluation() -> None:
             assert np.equal(set_secrets[1], e_counts).all()
         assert len(inf_res.res_cols) == pack_results_nr_cols+1
         e_res_cols = [
-            "n_total", "n_main", "n_naive", "confidence_level",
+            "n_main_total", "n_main_success", "n_naive_total", "n_naive_success", "confidence_level",
             "main_rate", "naive_rate", "residual_rate", "nr_aux_cols"
         ]
         assert inf_res.res_cols == e_res_cols
@@ -84,29 +87,30 @@ def test_inference_risk_evaluation() -> None:
         #Case save_results_json = True
         dataset = "test_ir_evaluation_adults"
         prefix = iu.get_inference_prefix(worst_case_flag=worst_case_flag)
-        _, file_path = aux_file_path(prefix=prefix, dataset=dataset)
-        assert not os.path.exists(file_path)
-        inf_res = iu.inference_risk_evaluation(
-            dataset = dataset,
-            ori = ori,
-            syn = syn,
-            worst_case_flag = worst_case_flag,
-            n_attacks = n_attacks,
-            n_samples = n_samples,
-            save_results_json = True
-        )
-        assert isinstance(inf_res, iu.InferenceResults)
-        assert os.path.exists(file_path)
-        #Remove results file
-        os.remove(file_path)
-        assert not os.path.exists(file_path)
-
-def test_load_inference_results() -> None:
-    """Assert results for load_inference_results function for dataset used in examples."""
-    inf_res = iu.load_inference_results(dataset="adults", worst_case_flag=True)
-    assert isinstance(inf_res, iu.InferenceResults)
-    inf_res = iu.load_inference_results(dataset="adults", worst_case_flag=False)
-    assert isinstance(inf_res, iu.InferenceResults)
+        for path in [None, "/tmp"]: # noqa: S108
+            file_path = u.aux_file_path(prefix=prefix, dataset=dataset, path=path)
+            assert not os.path.exists(file_path)
+            inf_res = iu.inference_risk_evaluation(
+                dataset = dataset,
+                ori = ori,
+                syn = syn,
+                worst_case_flag = worst_case_flag,
+                n_attacks = n_attacks,
+                n_samples = n_samples,
+                save_results_json = True,
+                path = path
+            )
+            if path is None:
+                path = u.DEFAULT_PATH_RESULTS[:-1]
+            assert os.path.dirname(file_path) == path
+            assert isinstance(inf_res, iu.InferenceResults)
+            assert os.path.exists(file_path)
+            #Test load_inference_results
+            res = iu.load_inference_results(dataset=dataset, worst_case_flag=worst_case_flag, path=path)
+            assert isinstance(res, iu.InferenceResults)
+            #Remove results file
+            os.remove(file_path)
+            assert not os.path.exists(file_path)
 
 @pytest.mark.parametrize(
     ("cols", "k", "n"),

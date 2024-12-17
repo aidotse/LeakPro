@@ -1,5 +1,9 @@
-# Output directory
-/output/
+# Ignore all contents of output
+/output/*
+
+# Exclude the folder itself so it stay in the repository
+!/output/.gitkeep
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
