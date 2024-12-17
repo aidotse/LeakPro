@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from copy import deepcopy
 
 import numpy as np
-from torch import IntTensor, Tensor, cat, cuda, exp, flatten, log, max, nn, no_grad, sigmoid, sum, from_numpy, transpose
+from torch import IntTensor, Tensor, cat, cuda, exp, flatten, log, max, nn, no_grad, sigmoid, sum
 from torch.utils.data import DataLoader
 
 from leakpro.signals.utils.HopSkipJumpDistance import HopSkipJumpDistance
