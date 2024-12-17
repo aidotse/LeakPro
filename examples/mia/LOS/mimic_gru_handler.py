@@ -51,20 +51,7 @@ class MimicInputHandlerGRU(AbstractInputHandler):
             train_loss = 0.0
             for _, (X, labels) in enumerate(tqdm(dataloader, desc="Training Batches")):
 
-                # X = X.numpy()
-                # mask        = from_numpy(X[:, np.arange(0, X.shape[1], 3), :].astype(np.float32))
-                # measurement = from_numpy(X[:, np.arange(1, X.shape[1], 3), :].astype(np.float32))
-                # time_       = from_numpy(X[:, np.arange(2, X.shape[1], 3), :].astype(np.float32))
-                
-                # mask = transpose(mask, 1, 2)
-                # measurement = transpose(measurement, 1, 2)
-                # time_ = transpose(time_, 1, 2)
-                # measurement_last_obsv = measurement
-
-                # X, X_last_obsv, Mask, Delta, labels = map(self.convert_to_device, [measurement, measurement_last_obsv, mask, time_, labels])
-
                 model.zero_grad()
-                # prediction = model(X, X_last_obsv, Mask, Delta)
                 X = self.convert_to_device(X)
                 labels = self.convert_to_device(labels)
                 labels = labels.long()

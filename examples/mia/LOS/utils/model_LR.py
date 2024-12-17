@@ -1,8 +1,4 @@
-<<<<<<< HEAD
 import os
-=======
-
->>>>>>> origin/main
 import tqdm as tqdm
 import pickle
 import torch.nn as nn

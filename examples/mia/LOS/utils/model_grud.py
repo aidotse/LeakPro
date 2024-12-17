@@ -1,3 +1,7 @@
+# This file is part of celevrhans and is released under MIT License.  # noqa: D100
+# Copyright (c) 2019 Google Inc., OpenAI and Pennsylvania State University
+# See https://github.com/cleverhans-lab/cleverhans?tab=MIT-1-ov-file#readme for details.
+
 import  math, os, pickle, time, pandas as pd, numpy as np, scipy.stats as ss
 from sklearn.metrics import accuracy_score
 import warnings
@@ -223,7 +227,6 @@ class GRUD(nn.Module):
         # Step 4: Predict a binary outcome using FC, BatchNorm, and Dropout layers
         return self.drop(self.bn(self.fc(Hidden_State)))
 
-
                 
     def initHidden(self, batch_size):
         Hidden_State = Variable(zeros(batch_size, self.hidden_size)).to(self.device)
@@ -250,8 +253,6 @@ def gru_trained_model_and_metadata(model,
     # The input tensor should have the shape (num_datapoints, num_features, num_timepoints)
     if train_dataloader.dataset.dataset.x.ndimension() != 3:
         warnings.warn("Input tensor is not 3D. There might be a mismatch between .", UserWarning)
-        
-        
 
     # Early Stopping
     min_loss_epoch_valid = float('inf')  # Initialize to infinity for comparison
@@ -420,37 +421,4 @@ def gru_trained_model_and_metadata(model,
     return  train_losses, test_losses, train_acc, test_acc
 
 
-def early_stopping(validation_losses, min_delta=0.01, patience=5):
-    """
-    Implements early stopping based on validation loss.
-
-    Args:
-        validation_losses (list): List of validation losses for each epoch.
-        min_delta (float): Minimum improvement in loss to qualify as significant.
-        patience (int): Number of epochs to wait for improvement before stopping.
-
-    Returns:
-        int: The epoch where early stopping occurred, or -1 if it did not occur.
-    """
-    min_loss_epoch_valid = float('inf')  # Best loss so far
-    patient_epoch = 0  # Counter for patience
-
-    for epoch, test_loss in enumerate(validation_losses):
-        if test_loss < min_loss_epoch_valid - min_delta:
-            # Improvement condition
-            min_loss_epoch_valid = test_loss
-            patient_epoch = 0
-            print(f"Epoch {epoch}: Validation loss improved to {test_loss:.4f}")
-        else:
-            patient_epoch += 1
-            print(f"Epoch {epoch}: No improvement. Patience counter: {patient_epoch}/{patience}")
-
-            if patient_epoch >= patience:
-                print(f"Early stopping at epoch {epoch}. Best validation loss: {min_loss_epoch_valid:.4f}")
-                return epoch
-
-    return -1  # No early stopping occurred
-
-# Example usage:
-validation_losses = [0.5, 0.45, 0.42, 0.43, 0.43, 0.44, 0.45]
 
