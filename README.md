@@ -6,7 +6,7 @@
 ![Open Issues](https://img.shields.io/github/issues/aidotse/LeakPro)
 ![Open PRs](https://img.shields.io/github/issues-pr/aidotse/LeakPro)
 ![Downloads](https://img.shields.io/github/downloads/aidotse/LeakPro/total)
-![Coverage](https://aidotse.github.io/LeakPro/coverage.svg)
+![Coverage](https://github.com/aidotse/LeakPro/tree/gh-pages)
 
 ## To install
 0. **Clone repository**
