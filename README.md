@@ -32,7 +32,7 @@ Moreover ach use case
 
 <table>
   <tr>
-    <td align="center" width="200" height="200">
+    <td align="center" width="400" height="200">
       <strong>Length-of-stay Prediction</strong><br>
       <img src="./resources/los.png" alt="LOS" style="width:150px; height:150px;">
       <br>
@@ -43,7 +43,7 @@ Moreover ach use case
         <li>Synthetic data: ✅</li>
       </ul>
     </td>
-    <td align="center" width="200" height="200">
+    <td align="center" width="400" height="200">
       <strong>Text Masking</strong><br>
       <img src="./resources/NER.png" alt="NER" style="width:150px; height:150px;">
       <br>
@@ -56,7 +56,7 @@ Moreover ach use case
     </td>
   </tr>
   <tr>
-    <td align="center" width="200" height="200">
+    <td align="center" width="400" height="200">
       <strong>Camera Surveillance</strong><br>
       <img src="./resources/surveillance.png" alt="Surveillance" style="width:150px; height:150px;">
       <br>
@@ -67,7 +67,7 @@ Moreover ach use case
         <li>Synthetic data: ❌</li>
       </ul>
     </td>
-    <td align="center" width="200" height="200">
+    <td align="center" width="400" height="200">
       <strong>Molecule Property Prediction</strong><br>
       <img src="./resources/graph.png" alt="Graph" style="width:150px; height:150px;">
       <br>
