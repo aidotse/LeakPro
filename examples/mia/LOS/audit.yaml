@@ -32,11 +32,11 @@ audit:  # Configurations for auditing
 
 target:
   # Target model path
-  module_path: "utils/model.py" # Path to the target model so either grud.py or model.py for logestic regression
-  model_class: "MimicLR" #  MimicLR/GRUD
+  module_path: "utils/grud.py" # Path to the target model so either grud.py or model.py for logestic regression
+  model_class: "GRUD" #  MimicLR/GRUD
   # Data paths
-  target_folder: "./target_LR"
-  data_path: "./data/flattened/dataset.pkl"
+  target_folder: "./target_GRUD"
+  data_path: "./data/unflattened/dataset.pkl"
 
 shadow_model:
   

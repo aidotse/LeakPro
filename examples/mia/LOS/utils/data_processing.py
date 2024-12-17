@@ -21,7 +21,7 @@ import pickle
 from torch import from_numpy, Tensor
 from torch.utils.data import Dataset, Subset, DataLoader
 from sklearn.preprocessing import StandardScaler
-from utils.grud import *
+from utils.grud import to_3D_tensor
 
 
 class MimicDataset(Dataset):
@@ -92,8 +92,6 @@ def get_mimic_dataset(data_path,
             train_data , holdout_data = data_normalization(train_data, holdout_data)
             train_data, holdout_data = [simple_imputer(df, ID_COLS) for df in (train_data, holdout_data)]
 
-            
-
             if flatten:
                 # Apply pivot_table to flatten the data
                 flat_train, flat_holdout = [
@@ -151,7 +149,6 @@ def get_mimic_dataset(data_path,
             with open(indices_path, "wb") as file:
                 pickle.dump(indices_to_save, file)
                 print(f"Saved train and test indices to {indices_path}")
-
         else: 
             msg = "Please download the MIMIC-III dataset from https://physionet.org/content/mimiciii/1.4/ and save it in the specified path."
             raise FileNotFoundError(msg)
@@ -196,48 +193,6 @@ def data_splitter(statics,
         for df in (lvl2, Ys)
     ]
     return train_data, holdout_data, y_train, y_holdout
-   
-    # # Shuffle the indices
-    # # Convert the set to a list to make it indexable
-    # # Convert the set to a list to make it indexable
-    # data_subjects = list(data_subjects)
-
-    # # Shuffle the indices
-    # indices = np.arange(len(data_subjects))
-    # shuffled_indices = np.random.permutation(indices)
-
-    # # Map the values in data_subjects to their original indices
-    # original_to_shuffled = {data_subjects[shuffled]: original for original, shuffled in enumerate(shuffled_indices)}
-
-    # # Get the permuted subjects using the shuffled indices
-    # subjects = [data_subjects[i] for i in shuffled_indices]
-
-    # N = len(subjects)
-    # N_train = int(train_frac * N)
-
-    # # Ensure no overlap between train and test sets
-    # train_subj = subjects[:N_train]
-    # test_subj = subjects[N_train:]
-
-    # # Split the data according to the subjects
-    # (train_data, holdout_data), (y_train, y_holdout) = [
-    #     [df[df.index.get_level_values('subject_id').isin(s)] for s in (train_subj, test_subj)] 
-    #     for df in (lvl2, Ys)
-    # ]
-
-    # # Track original indices of the train subjects
-    # # original_indices_train = [original_to_shuffled[subj] for subj in train_subj]
-    # # Save the dictionary to a file
-    # with open('original_to_shuffled.pkl', 'wb') as f:
-    #     pickle.dump(original_to_shuffled, f)
-
-    # print("Dictionary saved to 'original_to_shuffled.pkl'")
-
-
-    # return train_data, holdout_data, y_train, y_holdout
-
-
-
 
 def simple_imputer(df,
                    ID_COLS):

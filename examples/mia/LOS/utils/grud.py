@@ -1,5 +1,6 @@
 import  math, os, pickle, time, pandas as pd, numpy as np, scipy.stats as ss
 from sklearn.metrics import accuracy_score
+import warnings
 
 
 import torch.utils.data as utils, torch.nn as nn, torch.nn.functional as F, torch.optim as optim
@@ -174,58 +175,88 @@ class GRUD(nn.Module):
         
         return h
     
-    def forward(self, X, X_last_obsv, Mask, Delta):
-       
+
+    def forward(self, X):
+        """
+        X: Input tensor of shape (batch_size, time_steps * 3, features)
+        The tensor includes Mask, Measurement, and Delta sequentially for each time step.
+        """
+
+        # Step 1: Split the input tensor into Mask, Measurement, and Delta
         batch_size = X.size(0)
-        step_size = X.size(1) # num timepoints
+        time_steps = X.size(1) // 3  # Since every 3 consecutive steps represent Mask, Measurement, and Delta
+
+        # Reshape X into 3 separate tensors for Mask, Measurement, and Delta
+        Mask = X[:, np.arange(0, X.size(1), 3), :]       # Extract Mask
+        Measurement = X[:, np.arange(1, X.size(1), 3), :]  # Extract Measurement
+        Delta = X[:, np.arange(2, X.size(1), 3), :]       # Extract Delta
+
+        # Transpose tensors to match (batch_size, time_steps, features)
+        Mask = Mask.transpose(1, 2)
+        Measurement = Measurement.transpose(1, 2)
+        Delta = Delta.transpose(1, 2)
+
+        # X_last_obsv is initialized to Measurement at the starting point
+        X_last_obsv = Measurement
+
+        # Step 2: Initialize hidden state
+        step_size = Measurement.size(1)  # Number of time points
         Hidden_State = self.initHidden(batch_size)
 
-        
+        # Step 3: Iterate through time steps and update the GRU hidden state
         outputs = None
         for i in range(step_size):
             Hidden_State = self.step(
-                squeeze(X[:,i,:], 1),
-                squeeze(X_last_obsv[:,i,:], 1), # At the starting point, this is the same as X
-                squeeze(self.X_mean[:,i,:], 1), 
+                squeeze(Measurement[:, i, :], 1),
+                squeeze(X_last_obsv[:, i, :], 1),
+                squeeze(self.X_mean[:, i, :], 1),
                 Hidden_State,
-                squeeze(Mask[:,i,:], 1),
-                squeeze(Delta[:,i,:], 1), # time of measurment 
+                squeeze(Mask[:, i, :], 1),
+                squeeze(Delta[:, i, :], 1),
             )
+            # Collect hidden states
             if outputs is None:
                 outputs = Hidden_State.unsqueeze(1)
             else:
-                #TODO: check the order. in the original git repo of GRU it is cat((outputs, Hidden_State.unsqueeze(1)), 1)
                 outputs = cat((Hidden_State.unsqueeze(1), outputs), 1)
-                
-        # we want to predict a binary outcome
-        #Apply 50% dropout and batch norm here
-        self.drop(self.bn(self.fc(Hidden_State)))
+
+        # Step 4: Predict a binary outcome using FC, BatchNorm, and Dropout layers
         return self.drop(self.bn(self.fc(Hidden_State)))
+
+
                 
     def initHidden(self, batch_size):
         Hidden_State = Variable(zeros(batch_size, self.hidden_size)).to(self.device)
         return Hidden_State
 
-# def convert_to_device(x):
-#         device_name = device("cuda" if cuda.is_available() else "cpu")
-#         return x.to(device_name)
+def to_numpy(tensor):
+    return tensor.detach().cpu().numpy() if tensor.is_cuda else tensor.detach().numpy()
 
-
-# Focus on the audit 
 def gru_trained_model_and_metadata(model,
                                    train_dataloader,
                                    test_dataloader, 
                                    epochs,
                                    patience,
-                                   min_delta = 1e-5, 
+                                   min_delta = 1e-3, 
                                    learning_rate=1e-3,
                                     batch_size=None,
                                     metadata = None):
-    
 
-    
     print('Model Structure: ', model)
     print('Start Training ... ')
+
+    # Check if the input tensor is 3D
+    # This check is nessary because the GRU-D model expects a 3D tensor, meaning the input data should not be flattened
+    # The input tensor should have the shape (num_datapoints, num_features, num_timepoints)
+    if train_dataloader.dataset.dataset.x.ndimension() != 3:
+        warnings.warn("Input tensor is not 3D. There might be a mismatch between .", UserWarning)
+        
+        
+
+    # Early Stopping
+    min_loss_epoch_valid = float('inf')  # Initialize to infinity for comparison
+    patient_epoch = 0  # Initialize patient counter
+
     device_name = device("cuda" if cuda.is_available() else "cpu")
 
     if isinstance(model, nn.Sequential):
@@ -249,9 +280,6 @@ def gru_trained_model_and_metadata(model,
     cur_time = time.time()
     pre_time = time.time()
     
-    # Variables for Early Stopping
-    is_best_model = 0
-    patient_epoch = 0
 
     model.to(device_name)
 
@@ -264,25 +292,10 @@ def gru_trained_model_and_metadata(model,
 
         for _, (X, labels) in enumerate(tqdm(train_dataloader, desc="Training Batches")):
 
-            X = X.numpy()
-            mask        = from_numpy(X[:, np.arange(0, X.shape[1], 3), :].astype(np.float32))
-            measurement = from_numpy(X[:, np.arange(1, X.shape[1], 3), :].astype(np.float32))
-            time_       = from_numpy(X[:, np.arange(2, X.shape[1], 3), :].astype(np.float32))
-            
-            mask = transpose(mask, 1, 2)
-            measurement = transpose(measurement, 1, 2)
-            time_ = transpose(time_, 1, 2)
-            measurement_last_obsv = measurement
-            
-            X = measurement.to(device_name)
-            X_last_obsv = measurement_last_obsv.to(device_name)
-            Mask = mask.to(device_name)
-            Delta = time_.to(device_name)
-            labels =labels.long().to(device_name)
-
-
-            model.zero_grad()
-            prediction = model(X, X_last_obsv, Mask, Delta)
+            X = X.to(device_name)
+            labels = labels.to(device_name)
+            labels = labels.long()
+            prediction = model(X)
 
             output_last = True
             if output_last:
@@ -312,37 +325,18 @@ def gru_trained_model_and_metadata(model,
         model.eval()
         try: 
             X_test, labels_test = next(test_dataloader_iter)
-            X_test = X_test.numpy()
-            mask_test        = from_numpy(X_test[:, np.arange(0, X_test.shape[1], 3), :].astype(np.float32))
-            measurement_test = from_numpy(X_test[:, np.arange(1, X_test.shape[1], 3), :].astype(np.float32))
-            time_test       = from_numpy(X_test[:, np.arange(2, X_test.shape[1], 3), :].astype(np.float32))
-        
-            mask_test = transpose(mask_test, 1, 2)
-            measurement_test = transpose(measurement_test, 1, 2)
-            time_test = transpose(time_test, 1, 2)
-            measurement_last_obsv_test = measurement_test
         except StopIteration:
             valid_dataloader_iter = iter(test_dataloader)
             X_test, labels_test = next(valid_dataloader_iter)
-            X_test = X_test.numpy()
-            mask_test        = from_numpy(X_test[:, np.arange(0, X_test.shape[1], 3), :].astype(np.float32))
-            measurement_test = from_numpy(X_test[:, np.arange(1, X_test.shape[1], 3), :].astype(np.float32))
-            time_test       = from_numpy(X_test[:, np.arange(2, X_test.shape[1], 3), :].astype(np.float32))
-        
-            mask_test = transpose(mask_test, 1, 2)
-            measurement_test = transpose(measurement_test, 1, 2)
-            time_test = transpose(time_test, 1, 2)
-            measurement_last_obsv_test = measurement_test
-        
 
-        X_test = measurement_test.to(device_name)
-        X_last_obsv_test = measurement_last_obsv_test.to(device_name)
-        Mask_test = mask_test.to(device_name)
-        Delta_test = time_test.to(device_name)
-        labels_test = labels_test.long().to(device_name)
 
         model.zero_grad()
-        prediction_val = model(X_test, X_last_obsv_test, Mask_test, Delta_test)
+        X_test = X_test.to(device_name)
+        labels_test = labels_test.to(device_name)
+        labels_test = labels_test.long()
+        
+        prediction_val = model(X_test)
+        
         
         if output_last:
             test_loss = criterion_CEL(squeeze(prediction_val), squeeze(labels_test))
@@ -350,6 +344,7 @@ def gru_trained_model_and_metadata(model,
             full_labels_val = cat((X_test[:,1:,:], labels_test), dim = 1)
             test_loss = criterion_MSE(prediction_val, full_labels_val)
 
+        test_loss = test_loss.cpu().item()
         test_losses.append(test_loss)
 
         # Convert predictions to class indices
@@ -360,39 +355,33 @@ def gru_trained_model_and_metadata(model,
         # Compute accuracy
         test_acc.append(accuracy_score(binary_labels_test, binary_predictions_val))
 
-
-        # Early Stopping
-        if epoch == 0:
-            is_best_model = 1
-            min_loss_epoch_valid = 10000.0
-            if test_loss < min_loss_epoch_valid:
-                min_loss_epoch_valid = test_loss
+        # Early stopping
+        # Assume test_loss is computed for validation set
+        if test_loss < min_loss_epoch_valid - min_delta:  # Improvement condition
+            min_loss_epoch_valid = test_loss
+            patient_epoch = 0
+            print(f'Epoch {epoch}: Validation loss improved to {test_loss:.4f}')
         else:
-            if min_loss_epoch_valid - test_loss > min_delta:
-                is_best_model = 1
-                min_loss_epoch_valid = test_loss 
-                patient_epoch = 0
-            else:
-                is_best_model = 0
-                patient_epoch += 1
-                if patient_epoch >= patience:
-                    print('Early Stopped at Epoch:', epoch)
-                    break
+            patient_epoch += 1
+            print(f'Epoch {epoch}: No improvement. Patience counter: {patient_epoch}/{patience}')
+            
+            if patient_epoch >= patience:
+                print(f'Early stopping at epoch {epoch}. Best validation loss: {min_loss_epoch_valid:.4f}')
+                break
         
         # Print training parameters
         cur_time = time.time()
-        print('Epoch: {}, train_loss: {}, valid_loss: {}, time: {}, best model: {}'.format( \
+        print('Epoch: {}, train_loss: {}, valid_loss: {}, time: {}'.format( \
                     epoch, \
-                    np.around(test_loss.cpu().item(), decimals=8),\
-                    np.around(test_loss.cpu().item(), decimals=8),\
-                    np.around(cur_time - pre_time, decimals=2),\
-                    is_best_model))
+                    np.around(train_loss, decimals=8),\
+                    np.around(test_loss, decimals=8),\
+                    np.around(cur_time - pre_time, decimals=2)))
         pre_time = cur_time
     # Move the model back to the CPU
     # Ensure the target directory exists
-    os.makedirs("target", exist_ok=True)
+    os.makedirs("target_GRUD", exist_ok=True)
     model.to("cpu")
-    with open("target/target_model.pkl", "wb") as f:
+    with open("target_GRUD/target_model.pkl", "wb") as f:
         save(model.state_dict(), f)
 
      # Create metadata and store it
@@ -426,48 +415,42 @@ def gru_trained_model_and_metadata(model,
     meta_data["train_loss"] = train_loss
     meta_data["test_loss"] = test_loss
     meta_data["dataset"] = "mimiciii"
-    
-
-
-    with open("target/model_metadata.pkl", "wb") as f:
+    with open("target_GRUD/model_metadata.pkl", "wb") as f:
         pickle.dump(meta_data, f)
-
-
     return  train_losses, test_losses, train_acc, test_acc
 
-def evaluate(model, loader, criterion, device):
-    model.eval()
-    loss, acc = 0, 0
-    with no_grad():
-        for data, target in loader:
-            data, target = data.to(device), target.to(device)
-            target = target.float().unsqueeze(1)
-            output = model(data)
-            loss += criterion(output, target).item()
-            pred = sigmoid(output) >= 0.5
-            acc += pred.eq(target.data.view_as(pred)).sum()
-        loss /= len(loader)
-        acc = float(acc) / len(loader.dataset)
-    return loss, acc
 
-def accuracy(model, loader,  criterion, device):
-    model.eval()
-    loss, acc = 0, 0
-    acc_list = []
-    with no_grad():
-        for data, target in loader:
-            data, target = data.to(device), target.to(device)
-            target = target.float().unsqueeze(1)
-            output = model(data)
-            loss += criterion(output, target).item()
-            pred = sigmoid(output) >= 0.5
-            acc += pred.eq(target.data.view_as(pred)).sum()
-            acc = accuracy_score(target, pred)
-            acc_list.append(acc)
-    return acc_list
+def early_stopping(validation_losses, min_delta=0.01, patience=5):
+    """
+    Implements early stopping based on validation loss.
 
-def to_numpy(tensor):
-    return tensor.detach().cpu().numpy() if tensor.is_cuda else tensor.detach().numpy()
+    Args:
+        validation_losses (list): List of validation losses for each epoch.
+        min_delta (float): Minimum improvement in loss to qualify as significant.
+        patience (int): Number of epochs to wait for improvement before stopping.
 
+    Returns:
+        int: The epoch where early stopping occurred, or -1 if it did not occur.
+    """
+    min_loss_epoch_valid = float('inf')  # Best loss so far
+    patient_epoch = 0  # Counter for patience
 
+    for epoch, test_loss in enumerate(validation_losses):
+        if test_loss < min_loss_epoch_valid - min_delta:
+            # Improvement condition
+            min_loss_epoch_valid = test_loss
+            patient_epoch = 0
+            print(f"Epoch {epoch}: Validation loss improved to {test_loss:.4f}")
+        else:
+            patient_epoch += 1
+            print(f"Epoch {epoch}: No improvement. Patience counter: {patient_epoch}/{patience}")
+
+            if patient_epoch >= patience:
+                print(f"Early stopping at epoch {epoch}. Best validation loss: {min_loss_epoch_valid:.4f}")
+                return epoch
+
+    return -1  # No early stopping occurred
+
+# Example usage:
+validation_losses = [0.5, 0.45, 0.42, 0.43, 0.43, 0.44, 0.45]
 

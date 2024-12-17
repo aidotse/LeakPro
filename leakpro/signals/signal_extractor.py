@@ -142,41 +142,8 @@ class PytorchModel(Model):
         self.model_obj.to(device)
         self.model_obj.eval()
 
-        if self.model_obj.__class__.__name__ == "GRUD":
-            try:
-                x_test = batch_samples.cpu().numpy()
-                mask_test        = from_numpy(x_test[:, np.arange(0, x_test.shape[1], 3), :].astype(np.float32))
-                measurement_test = from_numpy(x_test[:, np.arange(1, x_test.shape[1], 3), :].astype(np.float32))
-                time_test       = from_numpy(x_test[:, np.arange(2, x_test.shape[1], 3), :].astype(np.float32))
-
-                mask_test = transpose(mask_test, 1, 2)
-                measurement_test = transpose(measurement_test, 1, 2)
-                time_test = transpose(time_test, 1, 2)
-                measurement_last_obsv_test = measurement_test
-            except StopIteration:
-                x_test = batch_samples.cpu().numpy()
-                mask_test        = from_numpy(x_test[:, np.arange(0, x_test.shape[1], 3), :].astype(np.float32))
-                measurement_test = from_numpy(x_test[:, np.arange(1, x_test.shape[1], 3), :].astype(np.float32))
-                time_test       = from_numpy(x_test[:, np.arange(2, x_test.shape[1], 3), :].astype(np.float32))
-
-                mask_test = transpose(mask_test, 1, 2)
-                measurement_test = transpose(measurement_test, 1, 2)
-                time_test = transpose(time_test, 1, 2)
-                measurement_last_obsv_test = measurement_test
-
-
-            X_test = measurement_test.to(device)
-            X_last_obsv_test = measurement_last_obsv_test.to(device)
-            Mask_test = mask_test.to(device)
-            Delta_test = time_test.to(device)
-
-
-            with no_grad():
-                logits = self.model_obj(X_test, X_last_obsv_test, Mask_test, Delta_test)
-
-        else:
-            with no_grad():
-                logits = self.model_obj(batch_samples.to(device))
+        with no_grad():
+            logits = self.model_obj(batch_samples.to(device))
 
         self.model_obj.to("cpu")
         return logits.cpu().numpy()
@@ -304,41 +271,7 @@ class PytorchModel(Model):
 
                 x = batch_samples.to(device)
                 y = batch_labels.to(device)
-
-                if self.model_obj.__class__.__name__ == "GRUD":
-                    try:
-                        x_test = x.cpu().numpy()
-                        mask_test        = from_numpy(x_test[:, np.arange(0, x_test.shape[1], 3), :].astype(np.float32))
-                        measurement_test = from_numpy(x_test[:, np.arange(1, x_test.shape[1], 3), :].astype(np.float32))
-                        time_test       = from_numpy(x_test[:, np.arange(2, x_test.shape[1], 3), :].astype(np.float32))
-
-                        mask_test = transpose(mask_test, 1, 2)
-                        measurement_test = transpose(measurement_test, 1, 2)
-                        time_test = transpose(time_test, 1, 2)
-                        measurement_last_obsv_test = measurement_test
-                    except StopIteration:
-                        x_test = x.cpu().numpy()
-                        mask_test        = from_numpy(x_test[:, np.arange(0, x_test.shape[1], 3), :].astype(np.float32))
-                        measurement_test = from_numpy(x_test[:, np.arange(1, x_test.shape[1], 3), :].astype(np.float32))
-                        time_test       = from_numpy(x_test[:, np.arange(2, x_test.shape[1], 3), :].astype(np.float32))
-
-                        mask_test = transpose(mask_test, 1, 2)
-                        measurement_test = transpose(measurement_test, 1, 2)
-                        time_test = transpose(time_test, 1, 2)
-                        measurement_last_obsv_test = measurement_test
-
-
-                    X_test = measurement_test.to(device)
-                    X_last_obsv_test = measurement_last_obsv_test.to(device)
-                    Mask_test = mask_test.to(device)
-                    Delta_test = time_test.to(device)
-
-
-                    # model.zero_grad()
-                    all_logits = self.model_obj(X_test, X_last_obsv_test, Mask_test, Delta_test)
-
-                else:
-                    all_logits = self.model_obj(x)
+                all_logits = self.model_obj(x)
 
                 if all_logits.shape[1] == 1:
                     positive_class_prob = sigmoid(all_logits)
