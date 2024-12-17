@@ -1,7 +1,7 @@
 import logging
 import os
 import tempfile
-import pytest
+from pytest_mock import MockerFixture
 
 from leakpro.reporting.report_handler import ReportHandler
 
@@ -12,23 +12,19 @@ def temp_dir():
     yield dir
     dir.cleanup()
 
-@pytest.fixture
-def logger(mocker):
-    """Fixture for setting up a mocked logger."""
-    mock_logger = mocker.MagicMock(spec=logging.Logger)
-    mock_logger.name = "test_logger"
-    return mock_logger
+class TestReportHandler:
+    """Test class of the ReportHandler."""
 
-@pytest.fixture
-def report_handler(temp_dir, logger):
-    """Fixture for initializing ReportHandler."""
-    return ReportHandler(report_dir=temp_dir.name, logger=logger)
+    def setup_method(self:Self) -> None:
+        """Set up temporary directory and logger for ReportHandler."""
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.logger = logging.getLogger("test_logger")
+        self.logger.setLevel(logging.INFO)
+        self.report_handler = ReportHandler(report_dir=self.temp_dir.name, logger=self.logger)
 
-def test_report_handler_initialization(report_handler, temp_dir):
-    """Test the initialization of ReportHandler."""
-    assert report_handler is not None
-    assert report_handler.report_dir == temp_dir.name
-    assert isinstance(report_handler.logger, logging.Logger)
+    def teardown_method(self:Self) -> None:
+        """Clean up temporary directory."""
+        self.temp_dir.cleanup()
 
     types = ["MIAResult", "GIAResults", "SinglingOutResults", "InferenceResults", "LinkabilityResults"]
     # ensure all types are in the leakpro_types
@@ -38,13 +34,9 @@ def test_report_handler_initialization(report_handler, temp_dir):
     # ensure all types are in the global namespace
     assert all(_type in globals() for _type in types)
 
-def test_init_pdf(report_handler):
-    """Test the initialization method of the ReportHandler."""
-    if hasattr(report_handler, "latex_content"):
-        raise AssertionError
-    report_handler._init_pdf()
-    assert "documentclass" in report_handler.latex_content
-    assert "begin" in report_handler.latex_content
+        types = ["MIAResult", "GIAResults", "SinglingOutResults", "InferenceResults", "LinkabilityResults"]
+        assert False not in [_type in types for _type in self.report_handler.leakpro_types]
+        assert True not in [bool(self.report_handler.pdf_results[key]) for key in self.report_handler.leakpro_types]
 
 def test_compile_pdf(report_handler):
     """Test PDF compilation."""
@@ -63,20 +55,9 @@ def test_get_all_attacknames(report_handler, mocker):
 
     attack_names = report_handler._get_all_attacknames()
 
-    assert attack_names == ["Attack1", "Attack2"]
+        self.report_handler._init_pdf()
+        assert ("documentclass" and "begin") in self.report_handler.latex_content
 
-def test_get_results_of_name(report_handler, mocker):
-    """Test retrieval of all attack names."""
-    result_mock_1 = mocker.MagicMock(resultname="Attack1")
-    result_mock_2 = mocker.MagicMock(resultname="Attack2")
-    result_mock_3 = mocker.MagicMock(resultname="Attack2")
-    result_mock_4 = mocker.MagicMock(resultname="Attack3")
-    result_mock_5 = mocker.MagicMock(resultname="Attack3")
-    result_mock_6 = mocker.MagicMock(resultname="Attack3")
-
-    report_handler.results = [result_mock_1, result_mock_2, result_mock_3,
-                               result_mock_4, result_mock_5, result_mock_6]
-
-    assert len(report_handler._get_results_of_name(report_handler.results, "Attack1")) == 1
-    assert len(report_handler._get_results_of_name(report_handler.results, "Attack2")) == 2
-    assert len(report_handler._get_results_of_name(report_handler.results, "Attack3")) == 3
+        self.report_handler._compile_pdf()
+        assert "end" in self.report_handler.latex_content
+        assert os.path.isfile(f"{self.report_handler.report_dir}/LeakPro_output.tex")

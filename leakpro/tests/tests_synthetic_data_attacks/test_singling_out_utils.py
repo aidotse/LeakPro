@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 import leakpro.synthetic_data_attacks.singling_out_utils as sou
-from leakpro.synthetic_data_attacks.utils import aux_file_path
+from leakpro.synthetic_data_attacks import utils as u
 from leakpro.tests.tests_synthetic_data_attacks.anonymeter_tests.fixtures import get_adult
 
 
@@ -40,7 +40,10 @@ def test_get_singling_out_prefix() -> None:
     assert prefix == "singling_out_n_cols_3"
 
 def test_singling_out_risk_evaluation() -> None:
-    """Assert results for singling_out_risk_evaluation function for simple input case."""
+    """Assert results for singling_out_risk_evaluation function for simple input case.
+
+    Test also tests function load_singling_out_results.
+    """
     #Prepare test variables
     ori = get_adult(return_ori=True, n_samples=10)
     syn = get_adult(return_ori=False, n_samples=10)
@@ -106,25 +109,26 @@ def test_singling_out_risk_evaluation() -> None:
     #Case save_results_json = True
     dataset = "test_sor_evaluation_adults"
     prefix = sou.get_singling_out_prefix(n_cols=1)
-    _, file_path = aux_file_path(prefix=prefix, dataset=dataset)
-    assert not os.path.exists(file_path)
-    sin_out_res = sou.singling_out_risk_evaluation(
-        dataset = dataset,
-        ori = ori,
-        syn = syn,
-        n_cols = 1,
-        n_attacks = 2,
-        save_results_json = True
-    )
-    assert isinstance(sin_out_res, sou.SinglingOutResults)
-    assert os.path.exists(file_path)
-    #Remove results file
-    os.remove(file_path)
-    assert not os.path.exists(file_path)
-
-def test_load_singling_out_results() -> None:
-    """Assert results for load_singling_out_results function for dataset used in examples."""
-    inf_res = sou.load_singling_out_results(dataset="adults", n_cols=1)
-    assert isinstance(inf_res, sou.SinglingOutResults)
-    inf_res = sou.load_singling_out_results(dataset="adults", n_cols=None)
-    assert isinstance(inf_res, sou.SinglingOutResults)
+    for path in [None, "/tmp"]: # noqa: S108
+        file_path = u.aux_file_path(prefix=prefix, dataset=dataset, path=path)
+        assert not os.path.exists(file_path)
+        sin_out_res = sou.singling_out_risk_evaluation(
+            dataset = dataset,
+            ori = ori,
+            syn = syn,
+            n_cols = 1,
+            n_attacks = 2,
+            save_results_json = True,
+            path = path
+        )
+        if path is None:
+            path = u.DEFAULT_PATH_RESULTS[:-1]
+        assert os.path.dirname(file_path) == path
+        assert isinstance(sin_out_res, sou.SinglingOutResults)
+        assert os.path.exists(file_path)
+        #Test load_singling_out_results
+        res = sou.load_singling_out_results(dataset=dataset, n_cols=1, path=path)
+        assert isinstance(res, sou.SinglingOutResults)
+        #Remove results file
+        os.remove(file_path)
+        assert not os.path.exists(file_path)

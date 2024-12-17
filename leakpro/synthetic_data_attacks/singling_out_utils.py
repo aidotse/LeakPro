@@ -31,9 +31,8 @@ class SinglingOutResults(BaseModel):
 
     def save(self:Self, path:str = "../leakpro_output/results/", name: str = "singling_out", config:dict = None) -> None: # noqa: ARG002
         """Save method for SinglingOutResults."""
-
+        from leakpro.synthetic_data_attacks.plots import plot_singling_out
         id = f"{self.prefix}"+f"_{self.dataset}"
-
         # Data to be saved
         data = {
             "resulttype": self.__class__.__name__,
@@ -41,42 +40,40 @@ class SinglingOutResults(BaseModel):
             "res": self.model_dump(),
             "id": id,
         }
-
         # Check if path exists, otherwise create it.
         for _ in range(3):
             if os.path.exists(path):
                 break
-            path = "../"+path
-
+            path = "../" + path
         # If no result folder can be found
         if not os.path.exists(path):
             os.makedirs("../../leakpro_output/results/")
-
         # Save the results to a file
         if not os.path.exists(f"{path}/{name}/{id}"):
             os.makedirs(f"{path}/{name}/{id}")
-
         with open(f"{path}/{name}/{id}/data.json", "w") as f:
             json.dump(data, f)
-
-        from leakpro.synthetic_data_attacks.plots import plot_singling_out
-        plot_singling_out(sin_out_res=SinglingOutResults(res=self.res,
-                                                         res_cols=self.res_cols,
-                                                         prefix=self.prefix,
-                                                         dataset=self.dataset),
-                          show=False,
-                          save=True,
-                          save_name=f"{path}/{name}/{id}/{self.prefix}",
-                        )
+        plot_singling_out(
+            sin_out_res = SinglingOutResults(
+                res = self.res,
+                res_cols = self.res_cols,
+                prefix = self.prefix,
+                dataset = self.dataset
+            ),
+            show = False,
+            save = True,
+            save_name = f"{path}/{name}/{id}/{self.prefix}",
+        )
 
     @staticmethod
     def load(data: dict) -> None:
         """Load method for SinglingOutResults."""
-        return SinglingOutResults(res=data["res"]["res"],
-                                  res_cols=data["res"]["res_cols"],
-                                  dataset=data["res"]["dataset"],
-                                  prefix=data["res"]["prefix"]
-                                  )
+        return SinglingOutResults(
+            res = data["res"]["res"],
+            res_cols = data["res"]["res_cols"],
+            dataset = data["res"]["dataset"],
+            prefix = data["res"]["prefix"]
+        )
 
     def plot(self:Self,
             high_res_flag:bool = False,
@@ -87,15 +84,18 @@ class SinglingOutResults(BaseModel):
         ) -> None:
         """Plot method for SinglingOutResults."""
         from leakpro.synthetic_data_attacks.plots import plot_singling_out
-        plot_singling_out(sin_out_res=SinglingOutResults(res=self.res,
-                                                         res_cols=self.res_cols,
-                                                         prefix=self.prefix,
-                                                         dataset=self.dataset),
-                        high_res_flag=high_res_flag,
-                        show = show,
-                        save = save,
-                        save_name = f"{save_path}/{save_name}",
-                        )
+        plot_singling_out(
+            sin_out_res=SinglingOutResults(
+                res=self.res,
+                res_cols=self.res_cols,
+                prefix=self.prefix,
+                dataset=self.dataset
+            ),
+            high_res_flag=high_res_flag,
+            show = show,
+            save = save,
+            save_name = f"{save_path}/{save_name}",
+        )
 
     @staticmethod
     def create_results(
@@ -147,7 +147,7 @@ def aux_singling_out_risk_evaluation(**kwargs: Any) -> Tuple[Optional[Union[int,
     verbose = kwargs.pop("verbose")
     #Get n_cols
     n_cols = kwargs["n_cols"]
-    #Return non if n'_cols==2
+    #Return non if n_cols==2
     #Note: this is because n_cols==2 takes A LOT of time. Seems algorithm is not good for predicates with len==2
     if n_cols == 2:
         return None, None
@@ -180,6 +180,7 @@ def singling_out_risk_evaluation(
     dataset: str = "test",
     verbose: bool = False,
     save_results_json: bool = False,
+    path: str = None,
     **kwargs: dict
 ) -> SinglingOutResults:
     """Perform an individual/full singling-out risk evaluation.
@@ -202,6 +203,8 @@ def singling_out_risk_evaluation(
         If True, prints progress of evaluation.
     save_results_json: bool, default is False
         If True, saves results and combinations to json file.
+    path: str, default is None
+        Path where to save json results file.
     kwargs: dict
         Other keyword arguments for SinglingOutEvaluator.
 
@@ -263,11 +266,12 @@ def singling_out_risk_evaluation(
         save_res_json_file(
             prefix = get_singling_out_prefix(n_cols=n_cols),
             dataset = dataset,
-            res = sin_out_res.model_dump()
+            res = sin_out_res.model_dump(),
+            path = path
         )
     return sin_out_res
 
-def load_singling_out_results(*, dataset: str, n_cols: Optional[int] = None) -> SinglingOutResults:
+def load_singling_out_results(*, dataset: str, n_cols: Optional[int] = None, path: str = None) -> SinglingOutResults:
     """Function to load and return singling-out results from given dataset."""
     prefix = get_singling_out_prefix(n_cols=n_cols)
-    return SinglingOutResults(**load_res_json_file(prefix=prefix, dataset=dataset))
+    return SinglingOutResults(**load_res_json_file(prefix=prefix, dataset=dataset, path=path))
