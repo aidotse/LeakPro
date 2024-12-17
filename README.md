@@ -37,22 +37,22 @@ Moreover ach use case
       <img src="./resources/los.png" alt="LOS" style="width:150px; height:150px;">
       <br>
       <a href="length-of-stay.md">length-of-stay.md</a>
-      <ul style="list-style:none; padding:0;">
-        <li>Membership Inference: ✅</li>
-        <li>Federated learning: ✅</li>
-        <li>Synthetic data: ✅</li>
-      </ul>
+      <div style="text-align: left;">
+        Membership Inference: ✅<br>
+        Federated learning: ✅</br>
+        Synthetic data: ✅
+      </div>
     </td>
     <td align="center" width="400" height="200">
       <strong>Text Masking</strong><br>
       <img src="./resources/NER.png" alt="NER" style="width:150px; height:150px;">
       <br>
       <a href="text-masking.md">text-masking.md</a>
-      <ul style="list-style:none; padding:0;">
-        <li>Membership Inference: ✅</li>
-        <li>Federated learning: ✅</li>
-        <li>Synthetic data: ✅</li>
-      </ul>
+      <div style="text-align: left;">
+        Membership Inference: ✅<br>
+        Federated learning: ✅</br>
+        Synthetic data: ✅
+      </div>
     </td>
   </tr>
   <tr>
@@ -61,22 +61,22 @@ Moreover ach use case
       <img src="./resources/surveillance.png" alt="Surveillance" style="width:150px; height:150px;">
       <br>
       <a href="surveillance.md">surveillance.md</a>
-      <ul style="list-style:none; padding:0;">
-        <li>Membership Inference: ✅</li>
-        <li>Federated learning: ✅</li>
-        <li>Synthetic data: ❌</li>
-      </ul>
+      <div style="text-align: left;">
+        Membership Inference: ✅<br>
+        Federated learning: ✅</br>
+        Synthetic data: ❌
+      </div>
     </td>
     <td align="center" width="400" height="200">
       <strong>Molecule Property Prediction</strong><br>
       <img src="./resources/graph.png" alt="Graph" style="width:150px; height:150px;">
       <br>
       <a href="molecule-property.md">molecule-property.md</a>
-      <ul style="list-style:none; padding:0;">
-        <li>Membership Inference: ✅</li>
-        <li>Federated learning: ❌</li>
-        <li>Synthetic data: ❌</li>
-      </ul>
+      <div style="text-align: left;">
+        Membership Inference: ✅<br>
+        Federated learning: ❌</br>
+        Synthetic data: ❌
+      </div>
     </td>
   </tr>
 </table>
