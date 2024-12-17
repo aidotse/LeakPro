@@ -31,7 +31,7 @@ jobs:
 
       - name: Install pytest and pytest-cov
         run: |
-          pip install pytest pytest-cov pytest-mock
+          pip install pytest pytest-cov pytest-mock coverage-badge
 
       - name: Run tests with pytest
         run: |
@@ -40,11 +40,11 @@ jobs:
 
       - name: Create Coverage Badge
         run: |
-          pip install coverage-badge
-          coverage-badge -o coverage.svg -f
+          mkdir -p badges
+          coverage-badge -o badges/coverage.svg -f
 
       - name: Deploy Coverage Badge to GitHub Pages
         uses: JamesIves/github-pages-deploy-action@v4
         with:
           branch: gh-pages
-          folder: .
+          folder: badges
