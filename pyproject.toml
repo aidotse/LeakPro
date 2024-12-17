@@ -62,11 +62,26 @@ mia = ["torch", "torchvision"]
 synthetic = ["numba", "pydantic"]
 federated = ["torch", "torchvision", "torchmetrics",]
 <<<<<<< HEAD
+<<<<<<< HEAD
 dev = ["torch", "torchvision", "torchmetrics", "numba", "pydantic", "pytest", "pytest-cov", "ruff"]
 >>>>>>> 6175f08 (updated factory + toml)
 =======
 dev = ["pytest", "pytest-cov", "pytest-mock", "coverage-badge", "ruff"] + mia + synthetic + federated
 >>>>>>> 3a3fd6d (use toml for installation in CICD)
+=======
+dev = [
+  "pytest",
+  "pytest-cov",
+  "pytest-mock",
+  "coverage-badge",
+  "ruff",
+  "torch",  # from mia & federated
+  "torchvision",  # from mia & federated
+  "torchmetrics",  # from federated
+  "numba",  # from synthetic
+  "pydantic"  # from synthetic
+]
+>>>>>>> 401cb4b (toml apparently not supporting list concatenation)
 
 
 [tool.setuptools]
