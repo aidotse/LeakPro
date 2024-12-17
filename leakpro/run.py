@@ -6,9 +6,20 @@ from torch import Tensor
 from torch.nn import Module
 from torch.utils.data import DataLoader, Dataset, random_split
 
+from leakpro.attacks.gia_attacks.gradinversion import GradInversion
 from leakpro.attacks.gia_attacks.invertinggradients import InvertingConfig, InvertingGradients
 from leakpro.utils.logger import logger
 
+
+def run_gravinversion(model: Module, client_data: DataLoader, train_fn: Callable,
+                data_mean:Tensor, data_std: Tensor, config: dict, experiment_name: str = "InvertingGradients",
+                path:str = "./leakpro_output/results", save:bool = True) -> None:
+    """Runs InvertingGradients."""
+    attack = GradInversion(model, client_data, train_fn, data_mean, data_std, config)
+    result = attack.run_attack()
+    if save:
+        result.save(name=experiment_name, path=path, config=config)
+    return result
 
 def run_inverting(model: Module, client_data: DataLoader, train_fn: Callable,
                 data_mean:Tensor, data_std: Tensor, config: dict, experiment_name: str = "InvertingGradients",
