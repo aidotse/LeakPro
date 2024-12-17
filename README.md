@@ -40,8 +40,8 @@ Additionally, along with the target model, the user should provide the following
 
 - **Step 4:** The relevant attacks are prepared within LeakPro, utilizing different tools based on the specific attacks being performed. For instance, some attacks rely on shadow models, while others leverage techniques such as model distillation or quantile regression.
 These tools are built using the auxiliary data, which is assumed to be accessible to the adversary, along with the training loop provided by the user.
-
 Additionally, certain attacks feature both online and offline versions:
+
     - Offline attacks: The adversary can only sample from the provided auxiliary dataset, limiting access to other data sources.
     - Online attacks: The adversary can also sample from the training and test datasets, though without knowing whether specific samples were used during the training of the target model.
 
