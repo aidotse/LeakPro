@@ -80,7 +80,7 @@ dev = [
   "torchmetrics",  # from federated
   "numba",  # from synthetic
   "pydantic",  # from synthetic
-  "sklearn", # from synthetic
+  "scikit-learn", # from synthetic
 ]
 >>>>>>> 401cb4b (toml apparently not supporting list concatenation)
 
