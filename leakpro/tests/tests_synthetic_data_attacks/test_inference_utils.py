@@ -36,7 +36,7 @@ def test_inference_risk_evaluation() -> None: # noqa: PLR0915
     n_samples = 2
     adults_nr_cols = len(ori.columns)
     #Output nr columns from pack_results
-    pack_results_nr_cols = 7
+    pack_results_nr_cols = 8
     #Get expected len_all_samples
     e_base_case_len = 0
     for secret in ori.columns:
@@ -71,7 +71,7 @@ def test_inference_risk_evaluation() -> None: # noqa: PLR0915
             assert np.equal(set_secrets[1], e_counts).all()
         assert len(inf_res.res_cols) == pack_results_nr_cols+1
         e_res_cols = [
-            "n_total", "n_main", "n_naive", "confidence_level",
+            "n_main_total", "n_main_success", "n_naive_total", "n_naive_success", "confidence_level",
             "main_rate", "naive_rate", "residual_rate", "nr_aux_cols"
         ]
         assert inf_res.res_cols == e_res_cols
