@@ -19,6 +19,7 @@ dependencies:
   # Deep Learning
   - pytorch
   - torchvision
+  - torchmetrics
 
   # Utilities
   - dotmap
