@@ -212,9 +212,10 @@ class InferenceEvaluator(BaseModel):
         self.naive_guesses = self.inference_attack(naive=True)
         # Set results
         self.results = EvaluationResults(
-            n_total = self.n_attacks,
-            n_main = self.main_guesses.count,
-            n_naive = self.naive_guesses.count,
+            n_main_total = self.n_attacks,
+            n_main_success = self.main_guesses.count,
+            n_naive_total = self.n_attacks,
+            n_naive_success = self.naive_guesses.count,
             confidence_level = self.confidence_level
         )
         return self.results

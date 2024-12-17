@@ -102,6 +102,7 @@ class UniqueSinglingOutQueries(BaseModel):
     queries: List[str] = []
     idxs: List[int] = []
     count: int = 0
+    len_passed_queries: int = 0
 
     def evaluate_queries(self: Self, *, queries: List[str]) -> Self:
         """Evaluate queries on self.df.
@@ -113,6 +114,7 @@ class UniqueSinglingOutQueries(BaseModel):
         self.queries = []
         self.idxs = []
         self.count = 0
+        self.len_passed_queries = len(queries)
         #Iterate through queries
         for query in queries:
             self.check_and_append(query=query)
@@ -406,9 +408,10 @@ class SinglingOutEvaluator(BaseModel):
         )
         # Set results
         self.results = EvaluationResults(
-            n_total = self.n_attacks,
-            n_main = self.main_queries.count,
-            n_naive = self.naive_queries.count,
+            n_main_total = self.main_queries.len_passed_queries,
+            n_main_success = self.main_queries.count,
+            n_naive_total = self.naive_queries.len_passed_queries,
+            n_naive_success = self.naive_queries.count,
             confidence_level = self.confidence_level
         )
         return self.results
