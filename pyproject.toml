@@ -25,7 +25,7 @@ dependencies = [
 mia = ["torch", "torchvision"]
 synthetic = ["numba", "pydantic"]
 federated = ["torch", "torchvision", "torchmetrics",]
-dev = ["torch", "torchvision", "torchmetrics", "numba", "pydantic", "pytest", "pytest-cov", "ruff"]
+dev = ["pytest", "pytest-cov", "pytest-mock", "coverage-badge", "ruff"] + mia + synthetic + federated
 
 
 [tool.setuptools]
