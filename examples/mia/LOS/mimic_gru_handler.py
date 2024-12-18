@@ -1,8 +1,9 @@
 
-from torch import cuda, device, nn, optim, squeeze
+from torch import cuda, device, nn, optim, squeeze,sigmoid
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from sklearn.metrics import accuracy_score
 
 # from examples.mia.LOS.utils.grud import convert_to_device
 from leakpro import AbstractInputHandler
@@ -28,6 +29,9 @@ class MimicInputHandlerGRU(AbstractInputHandler):
         device_name = device("cuda" if cuda.is_available() else "cpu")
         return x.to(device_name)
 
+    def to_numpy(self, tensor):
+        return tensor.detach().cpu().numpy() if tensor.is_cuda else tensor.detach().numpy()
+
     def train(
         self,
         dataloader: DataLoader,
@@ -47,25 +51,36 @@ class MimicInputHandlerGRU(AbstractInputHandler):
 
         for e in tqdm(range(epochs), desc="Training Progress"):
             model.train()
-            train_loss = 0.0
-            for _, (x, labels) in enumerate(tqdm(dataloader, desc="Training Batches")):
+            train_acc, train_loss = 0.0, 0.0
 
-                model.zero_grad()
+            for _, (x, labels) in enumerate(tqdm(dataloader, desc="Training Batches")):
                 x = self.convert_to_device(x)
                 labels = self.convert_to_device(labels)
                 labels = labels.long()
-                prediction = model(x)
-                loss = criterion(squeeze(prediction), squeeze(labels).long())
 
                 optimizer.zero_grad()
+                output = model(x)
+
+                loss = criterion(squeeze(output), squeeze(labels).long())
                 loss.backward()
                 optimizer.step()
                 train_loss += loss.item()
 
-            train_loss /= len(dataloader)
+            train_loss = train_loss/len(dataloader)
+            
+            binary_predictions = self.to_numpy(output).argmax(axis=1)
+
+            # Ensure labels are integer and 1D
+            binary_labels = self.to_numpy(labels).astype(int)
+            # Compute accuracy
+            train_acc = accuracy_score(binary_labels, binary_predictions)
+
+        return {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}
 
 
-        return {"model": model, "metrics": { "loss": train_loss}}
+
+
+
 
 
 

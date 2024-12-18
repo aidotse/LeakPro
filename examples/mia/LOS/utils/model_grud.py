@@ -282,8 +282,8 @@ def gru_trained_model_and_metadata(model,
 
     train_losses = []
     test_losses = []
-    test_acc = []
-    train_acc = []
+    test_acces = []
+    train_acces = []
 
 
     cur_time = time.time()
@@ -328,7 +328,8 @@ def gru_trained_model_and_metadata(model,
         # Ensure labels are integer and 1D
         binary_labels = to_numpy(labels).astype(int)
         # Compute accuracy
-        train_acc.append(accuracy_score(binary_labels, binary_predictions))
+        train_acc = accuracy_score(binary_labels, binary_predictions)
+        train_acces.append(train_acc)
 
         # test
         model.eval()
@@ -344,25 +345,26 @@ def gru_trained_model_and_metadata(model,
         labels_test = labels_test.to(device_name)
         labels_test = labels_test.long()
 
-        prediction_val = model(X_test)
+        prediction_test = model(X_test)
 
 
         if output_last:
-            test_loss = criterion_CEL(squeeze(prediction_val), squeeze(labels_test))
+            test_loss = criterion_CEL(squeeze(prediction_test), squeeze(labels_test))
         else:
             full_labels_val = cat((X_test[:,1:,:], labels_test), dim = 1)
-            test_loss = criterion_MSE(prediction_val, full_labels_val)
+            test_loss = criterion_MSE(prediction_test, full_labels_val)
 
         test_loss = test_loss.cpu().item()
         test_losses.append(test_loss)
 
         # Convert predictions to class indices
-        binary_predictions_val = to_numpy(prediction_val).argmax(axis=1)
+        binary_predictions_test = to_numpy(prediction_test).argmax(axis=1)
 
         # Ensure labels are integer and 1D
         binary_labels_test = to_numpy(labels_test).astype(int)
         # Compute accuracy
-        test_acc.append(accuracy_score(binary_labels_test, binary_predictions_val))
+        test_acc = accuracy_score(binary_labels_test, binary_predictions_test)
+        test_acces.append(test_acc)
 
         # Early stopping
         # Assume test_loss is computed for validation set
@@ -432,14 +434,14 @@ def gru_trained_model_and_metadata(model,
 
     meta_data["batch_size"] = train_dataloader.batch_size
     meta_data["epochs"] = epochs
-    meta_data["train_acc"] = 0
-    meta_data["test_acc"] = 0
+    meta_data["train_acc"] = train_acc
+    meta_data["test_acc"] = test_acc
     meta_data["train_loss"] = train_loss
     meta_data["test_loss"] = test_loss
     meta_data["dataset"] = "mimiciii"
     with open("target_GRUD/model_metadata.pkl", "wb") as f:
         pickle.dump(meta_data, f)
-    return  train_losses, test_losses, train_acc, test_acc
+    return  train_losses, test_losses, train_acces, test_acces
 
 
 
