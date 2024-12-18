@@ -1,13 +1,12 @@
 
-import torch.nn as nn
-from torch import cuda, device, optim, from_numpy, transpose, squeeze
+from torch import cuda, device, nn, optim, squeeze
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-import numpy as np
 
 # from examples.mia.LOS.utils.grud import convert_to_device
 from leakpro import AbstractInputHandler
+
 
 class MimicInputHandlerGRU(AbstractInputHandler):
     """Class to handle the user input for the CIFAR10 dataset."""
@@ -28,7 +27,7 @@ class MimicInputHandlerGRU(AbstractInputHandler):
     def convert_to_device(self, x):
         device_name = device("cuda" if cuda.is_available() else "cpu")
         return x.to(device_name)
-    
+
     def train(
         self,
         dataloader: DataLoader,
@@ -45,19 +44,18 @@ class MimicInputHandlerGRU(AbstractInputHandler):
 
         criterion = self.get_criterion()
         optimizer = self.get_optimizer(model)
-        
+
         for e in tqdm(range(epochs), desc="Training Progress"):
             model.train()
             train_loss = 0.0
-            for _, (X, labels) in enumerate(tqdm(dataloader, desc="Training Batches")):
+            for _, (x, labels) in enumerate(tqdm(dataloader, desc="Training Batches")):
 
                 model.zero_grad()
-                X = self.convert_to_device(X)
+                x = self.convert_to_device(x)
                 labels = self.convert_to_device(labels)
                 labels = labels.long()
-                prediction = model(X)
+                prediction = model(x)
                 loss = criterion(squeeze(prediction), squeeze(labels).long())
-
 
                 optimizer.zero_grad()
                 loss.backward()
@@ -68,6 +66,6 @@ class MimicInputHandlerGRU(AbstractInputHandler):
 
 
         return {"model": model, "metrics": { "loss": train_loss}}
-    
+
 
 

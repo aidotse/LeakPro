@@ -1,26 +1,33 @@
-# This file is part of celevrhans and is released under MIT License.  # noqa: D100
-# Copyright (c) 2019 Google Inc., OpenAI and Pennsylvania State University
-# See https://github.com/cleverhans-lab/cleverhans?tab=MIT-1-ov-file#readme for details.
-
-import  math, os, pickle, time, pandas as pd, numpy as np, scipy.stats as ss
-from sklearn.metrics import accuracy_score
+"""
+This file is inspired by https://github.com/MLforHealth/MIMIC_Extract 
+MIT License
+Copyright (c) 2019 MIT Laboratory for Computational Physiology
+"""
+import math
+import os
+import pickle
+import time
 import warnings
 
-
-import torch.utils.data as utils, torch.nn as nn, torch.nn.functional as F, torch.optim as optim
+import numpy as np
+import pandas as pd
+import torch.nn.functional as F
+import torch.utils.data as utils
+from sklearn.metrics import accuracy_score
+from torch import Tensor, cat, cuda, device, exp, eye, from_numpy, isnan, max, nn, optim, save, sigmoid, squeeze, tanh, zeros
 from torch.autograd import Variable
 from torch.nn.parameter import Parameter
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
-from torch import save, device, cuda, Tensor, eye, transpose, nn, optim, save, sigmoid, no_grad, from_numpy, cat, zeros, ones, exp, tanh, zeros, ones, max, squeeze, isnan
+
 
 def to_3D_tensor(df):
     idx = pd.IndexSlice
-    np_3D = np.dstack([df.loc[idx[:, :, :, i], :].values for i in sorted(set(df.index.get_level_values('hours_in')))])
+    np_3D = np.dstack([df.loc[idx[:, :, :, i], :].values for i in sorted(set(df.index.get_level_values("hours_in")))])
     return from_numpy(np_3D)
 
 def prepare_dataloader(df, Ys, batch_size, shuffle=True):
-    """
-    dfs = (df_train, df_dev, df_test).
+    """Dfs = (df_train, df_dev, df_test).
     df_* = (subject, hadm, icustay, hours_in) X (level2, agg fn \ni {mask, mean, time})
     Ys_series = (subject, hadm, icustay) => label.
     """
@@ -31,30 +38,29 @@ def prepare_dataloader(df, Ys, batch_size, shuffle=True):
 
 class FilterLinear(nn.Module):
     def __init__(self, in_features, out_features, filter_square_matrix, device, bias=True):
-        '''
-        filter_square_matrix : filter square matrix, whose each elements is 0 or 1.
-        '''
+        """filter_square_matrix : filter square matrix, whose each elements is 0 or 1.
+        """
         super(FilterLinear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
-        
+
         assert in_features > 1 and out_features > 1, "Passing in nonsense sizes"
-        
+
         self.filter_square_matrix = None
         self.filter_square_matrix = Variable(filter_square_matrix.to(device), requires_grad=False)
-        
+
         self.weight = Parameter(Tensor(out_features, in_features)).to(device)
 
-        if bias: 
+        if bias:
             self.bias = Parameter(Tensor(out_features)).to(device)
-        else:    
-            self.register_parameter('bias', None)
+        else:
+            self.register_parameter("bias", None)
         self.reset_parameters()
 
     def reset_parameters(self):
         stdv = 1. / math.sqrt(self.weight.size(1))
         self.weight.data.uniform_(-stdv, stdv)
-        if self.bias is not None: 
+        if self.bias is not None:
             self.bias.data.uniform_(-stdv, stdv)
 
     def forward(self, x):
@@ -65,15 +71,14 @@ class FilterLinear(nn.Module):
         )
 
     def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + 'in_features=' + str(self.in_features) \
-            + ', out_features=' + str(self.out_features) \
-            + ', bias=' + str(self.bias is not None) + ')'
-        
+        return self.__class__.__name__ + "(" \
+            + "in_features=" + str(self.in_features) \
+            + ", out_features=" + str(self.out_features) \
+            + ", bias=" + str(self.bias is not None) + ")"
+
 class GRUD(nn.Module):
     def __init__(self, input_size, cell_size, hidden_size, X_mean, batch_size = 0, output_last = False):
-        """
-        With minor modifications from https://github.com/zhiyongc/GRU-D/
+        """With minor modifications from https://github.com/zhiyongc/GRU-D/
 
         Recurrent Neural Networks for Multivariate Times Series with Missing Values
         GRU-D: GRU exploit two representations of informative missingness patterns, i.e., masking and time interval.
@@ -97,10 +102,10 @@ class GRUD(nn.Module):
             mask_size: dimension of masking vector
             X_mean: the mean of the historical input data
         """
-        
+
         super(GRUD, self).__init__()
 
-        # Save init params to a dictionary 
+        # Save init params to a dictionary
         self.init_params = {
             "input_size": input_size,
             "cell_size": cell_size,
@@ -109,7 +114,7 @@ class GRUD(nn.Module):
             "batch_size": batch_size,
             "output_last": output_last
         }
-        
+
         self.hidden_size = hidden_size
         self.delta_size = input_size
         self.mask_size = input_size
@@ -117,25 +122,27 @@ class GRUD(nn.Module):
         self.device = device("cuda" if cuda.is_available() else "cpu")
         self.identity = eye(input_size).to(self.device)
         self.X_mean = Variable(Tensor(X_mean).to(self.device))
-        
-        self.zl = nn.Linear(input_size + hidden_size + self.mask_size, hidden_size).to(self.device) # Wz, Uz are part of the same network. the bias is bz
-        self.rl = nn.Linear(input_size + hidden_size + self.mask_size, hidden_size).to(self.device) # Wr, Ur are part of the same network. the bias is br
-        self.hl = nn.Linear(input_size + hidden_size + self.mask_size, hidden_size).to(self.device) # W, U are part of the same network. the bias is b
-        
+
+        # Wz, Uz are part of the same network. the bias is bz
+        self.zl = nn.Linear(input_size + hidden_size + self.mask_size, hidden_size).to(self.device)
+
+        # Wr, Ur are part of the same network. the bias is br
+        self.rl = nn.Linear(input_size + hidden_size + self.mask_size, hidden_size).to(self.device)
+
+        # W, U are part of the same network. the bias is b
+        self.hl = nn.Linear(input_size + hidden_size + self.mask_size, hidden_size).to(self.device)
+
         self.gamma_x_l = FilterLinear(self.delta_size, self.delta_size, self.identity, self.device)
-        
-        self.gamma_h_l = nn.Linear(self.delta_size, self.hidden_size).to(self.device) # this was wrong in available version. remember to raise the issue
-        
+        self.gamma_h_l = nn.Linear(self.delta_size, self.hidden_size).to(self.device)
         self.output_last = output_last
-        
+
         self.fc = nn.Linear(self.hidden_size, 2).to(self.device)
         self.bn= nn.BatchNorm1d(2, eps=1e-05, momentum=0.1, affine=True).to(self.device)
-        self.drop=nn.Dropout(p=0.5, inplace=False)
-        
+        self.drop=nn.Dropout(p=0.7, inplace=False)
+
 
     def step(self, x, x_last_obsv, x_mean, h, mask, delta):
-        """
-        Inputs:
+        """Inputs:
             x: input tensor
             x_last_obsv: input tensor with forward fill applied
             x_mean: the mean of each feature
@@ -145,8 +152,9 @@ class GRUD(nn.Module):
             
         Returns:
             h: the updated hidden state of the network
+
         """
-        
+
         # Assert to check for NaNs in x_mean
         assert not isnan(x_mean).any(), "NaN values found in x_mean"
 
@@ -155,34 +163,33 @@ class GRUD(nn.Module):
         zero_x = zeros(batch_size, feature_size).to(self.device)
         zero_h = zeros(batch_size, self.hidden_size).to(self.device)
 
-        
+
         gamma_x_l_delta = self.gamma_x_l(delta)
         delta_x = exp(-max(zero_x, gamma_x_l_delta))
-        
+
         gamma_h_l_delta = self.gamma_h_l(delta)
         delta_h = exp(-max(zero_h, gamma_h_l_delta))
-        
+
         x_mean = x_mean.repeat(batch_size, 1)
 
         x = mask * x + (1 - mask) * (delta_x * x_last_obsv + (1 - delta_x) * x_mean)
         h = delta_h * h
-        
+
         combined = cat((x, h, mask), 1)
         # Assert to check for NaNs in combined
         assert not isnan(combined).any(), "NaN values found in combined"
-        
+
         z = sigmoid(self.zl(combined)) #sigmoid(W_z*x_t + U_z*h_{t-1} + V_z*m_t + bz)
         r = sigmoid(self.rl(combined)) #sigmoid(W_r*x_t + U_r*h_{t-1} + V_r*m_t + br)
         combined_new = cat((x, r*h, mask), 1)
         h_tilde = tanh(self.hl(combined_new)) #tanh(W*x_t +U(r_t*h_{t-1}) + V*m_t) + b
         h = (1 - z) * h + z * h_tilde
-        
+
         return h
-    
+
 
     def forward(self, X):
-        """
-        X: Input tensor of shape (batch_size, time_steps * 3, features)
+        """X: Input tensor of shape (batch_size, time_steps * 3, features)
         The tensor includes Mask, Measurement, and Delta sequentially for each time step.
         """
 
@@ -227,7 +234,6 @@ class GRUD(nn.Module):
         # Step 4: Predict a binary outcome using FC, BatchNorm, and Dropout layers
         return self.drop(self.bn(self.fc(Hidden_State)))
 
-                
     def initHidden(self, batch_size):
         Hidden_State = Variable(zeros(batch_size, self.hidden_size)).to(self.device)
         return Hidden_State
@@ -237,16 +243,15 @@ def to_numpy(tensor):
 
 def gru_trained_model_and_metadata(model,
                                    train_dataloader,
-                                   test_dataloader, 
+                                   test_dataloader,
                                    epochs,
-                                   patience,
-                                   min_delta = 1e-3, 
-                                   learning_rate=1e-3,
-                                    batch_size=None,
-                                    metadata = None):
+                                   patience_early_stopping,
+                                   patience_lr,
+                                   min_delta,
+                                   learning_rate):
 
-    print('Model Structure: ', model)
-    print('Start Training ... ')
+    print("Model Structure: ", model)
+    print("Start Training ... ")
 
     # Check if the input tensor is 3D
     # This check is nessary because the GRU-D model expects a 3D tensor, meaning the input data should not be flattened
@@ -255,40 +260,43 @@ def gru_trained_model_and_metadata(model,
         warnings.warn("Input tensor is not 3D. There might be a mismatch between .", UserWarning)
 
     # Early Stopping
-    min_loss_epoch_valid = float('inf')  # Initialize to infinity for comparison
+    min_loss_epoch_valid = float("inf")  # Initialize to infinity for comparison
     patient_epoch = 0  # Initialize patient counter
 
     device_name = device("cuda" if cuda.is_available() else "cpu")
 
     if isinstance(model, nn.Sequential):
         output_last = model[-1].output_last
-        print('Output type dermined by the last layer')
+        print("Output type dermined by the last layer")
     else:
         output_last = model.output_last
-        print('Output type dermined by the model')
-        
+        print("Output type dermined by the model")
+
     criterion_CEL = nn.CrossEntropyLoss()
     criterion_MSE = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    
+
+    # Reduce learning rate when a metric has stopped improving
+    scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience = patience_lr, verbose=True)
+
 
     train_losses = []
     test_losses = []
     test_acc = []
     train_acc = []
 
-    
+
     cur_time = time.time()
     pre_time = time.time()
-    
+
 
     model.to(device_name)
 
     for epoch in tqdm(range(epochs), desc="Training Progress"):
-        
+
         model.train()
         train_loss = 0.0
-        
+
         test_dataloader_iter = iter(test_dataloader)
 
         for _, (X, labels) in enumerate(tqdm(train_dataloader, desc="Training Batches")):
@@ -322,9 +330,9 @@ def gru_trained_model_and_metadata(model,
         # Compute accuracy
         train_acc.append(accuracy_score(binary_labels, binary_predictions))
 
-        # test 
+        # test
         model.eval()
-        try: 
+        try:
             X_test, labels_test = next(test_dataloader_iter)
         except StopIteration:
             valid_dataloader_iter = iter(test_dataloader)
@@ -335,10 +343,10 @@ def gru_trained_model_and_metadata(model,
         X_test = X_test.to(device_name)
         labels_test = labels_test.to(device_name)
         labels_test = labels_test.long()
-        
+
         prediction_val = model(X_test)
-        
-        
+
+
         if output_last:
             test_loss = criterion_CEL(squeeze(prediction_val), squeeze(labels_test))
         else:
@@ -361,18 +369,31 @@ def gru_trained_model_and_metadata(model,
         if test_loss < min_loss_epoch_valid - min_delta:  # Improvement condition
             min_loss_epoch_valid = test_loss
             patient_epoch = 0
-            print(f'Epoch {epoch}: Validation loss improved to {test_loss:.4f}')
+            print(f"Epoch {epoch}: Validation loss improved to {test_loss:.4f}")
         else:
             patient_epoch += 1
-            print(f'Epoch {epoch}: No improvement. Patience counter: {patient_epoch}/{patience}')
-            
-            if patient_epoch >= patience:
-                print(f'Early stopping at epoch {epoch}. Best validation loss: {min_loss_epoch_valid:.4f}')
+            print(f"Epoch {epoch}: No improvement. Patience counter: {patient_epoch}/{patience_early_stopping}")
+
+            if patient_epoch >= patience_early_stopping:
+                print(f"Early stopping at epoch {epoch}. Best validation loss: {min_loss_epoch_valid:.4f}")
                 break
-        
+
+        # Step the scheduler
+        scheduler.step(test_loss)
+
+        # Check the learning rate
+        current_lr = optimizer.param_groups[0]["lr"]
+        print(f"Learning Rate: {current_lr:.6f}")
+
+        # Stop if learning rate becomes too small
+        if current_lr < 1e-6:
+            print("Learning rate too small, stopping training.")
+            break
+
+
         # Print training parameters
         cur_time = time.time()
-        print('Epoch: {}, train_loss: {}, valid_loss: {}, time: {}'.format( \
+        print("Epoch: {}, train_loss: {}, valid_loss: {}, time: {}".format( \
                     epoch, \
                     np.around(train_loss, decimals=8),\
                     np.around(test_loss, decimals=8),\
