@@ -133,16 +133,16 @@ class TestMIAResult:
                      fixed_fpr_table={"TPR@1.0%FPR": 0.90, "TPR@0.1%FPR": 0.80, "TPR@0.01%FPR": 0.70, "TPR@0.0%FPR": 0.60},
                      config={"training_data_fraction": 0.5, "num_shadow_models": 3, "online": True})]
 
-        subsection = "attack_comparison"
-        filename = f"{self.temp_dir}/{subsection}"
+        name = "attack_comparison"
+        filename = f"{self.temp_dir}/{name}"
 
-        latex_content = MIAResult()._latex(result, save_dir=self.temp_dir, save_name=subsection)
+        latex_content = MIAResult()._latex(result, save_dir=self.temp_dir, save_name=name)
 
         # Check that the subsection is correctly included
         assert "\\subsection{attack comparison}" in latex_content
 
         # Check that the figure is correctly included
-        assert f"\\includegraphics[width=0.8\\textwidth]{{{subsection}.png}}" in latex_content
+        assert f"\\includegraphics[width=0.8\\textwidth]{{{name}.png}}" in latex_content
 
         # Check that the table header is correct
         assert "Attack name & attack config & TPR: 1.0\\%FPR & 0.1\\%FPR & 0.01\\%FPR & 0.0\\%FPR" in latex_content
