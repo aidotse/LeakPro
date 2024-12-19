@@ -90,22 +90,21 @@ def get_mimic_dataset(data_path,
             ]
 
             # Flatten multi-index structure if pivot_table was used
-            flat_train, flat_holdout, y_flat_train, y_flat_holdout = [
+            train, holdout, label_train, label_holdout = [
                 flatten_multi_index(df)
                 for df in (flat_train, flat_holdout, y_train, y_holdout_data)
             ]
         else:
             # Skip pivot_table if flatten is False
-            #TODO: rename flat_train, flat_holdout to train_data, holdout_data
-            flat_train, flat_holdout, y_flat_train, y_flat_holdout = train_data, holdout_data, y_train, y_holdout_data
+            train, holdout, label_train, label_holdout = train_data, holdout_data, y_train, y_holdout_data
 
-        assert_no_missing_values(train_data, holdout_data, flat_train, flat_holdout)
+        assert_no_missing_values(train_data, holdout_data, train, holdout)
 
-        train_df, holdout_df = standard_scaler(flat_train, flat_holdout)
+        train_df, holdout_df = standard_scaler(train, holdout)
 
         # Creating the dataset
         data_x = pd.concat((train_df, holdout_df), axis=0)
-        data_y = pd.concat((y_flat_train, y_flat_holdout), axis=0)
+        data_y = pd.concat((label_train, label_holdout), axis=0)
 
         assert np.issubdtype(data_x.values.dtype, np.number), "Non-numeric data found in features."
         assert np.issubdtype(data_y.values.dtype, np.number), "Non-numeric data found in labels."
@@ -223,9 +222,13 @@ def data_indices(dataset,
     N_early_stop = int(early_stop_frac * N)
 
     # Generate sequential indices for training and testing
-    train_indices = list(range(N_train))  # Indices from 0 to N_train-1
-    validation_indices = list(range(N_train, N_train + N_validation))  # Indices from N_train to N_train + N_validation-1
-    test_indices = list(range(N_train + N_validation, N_train + N_validation + N_test))  # Indices for test set
+    # Indices from 0 to N_train-1
+    train_indices = list(range(N_train))
+    # Indices from N_train to N_train + N_validation-1
+    validation_indices = list(range(N_train, N_train + N_validation))
+    # Indices for test set
+    test_indices = list(range(N_train + N_validation, N_train + N_validation + N_test))
+    # Indices for early stopping
     early_stop_indices = list(range(N_train + N_validation + N_test, N_train + N_validation + N_test + N_early_stop))
     return train_indices, validation_indices, test_indices, early_stop_indices
 

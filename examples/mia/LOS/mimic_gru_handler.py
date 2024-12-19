@@ -1,20 +1,17 @@
 
-from torch import cuda, device, nn, optim, squeeze,sigmoid
+from torch import cuda, device, nn, optim, squeeze
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from sklearn.metrics import accuracy_score
-
-# from examples.mia.LOS.utils.grud import convert_to_device
 from leakpro import AbstractInputHandler
 
 
 class MimicInputHandlerGRU(AbstractInputHandler):
-    """Class to handle the user input for the CIFAR10 dataset."""
+    """Class to handle the user input for the MIMICIII dataset."""
 
     def __init__(self, configs: dict) -> None:
         super().__init__(configs = configs)
-
 
     def get_criterion(self)->None:
         """Set the CrossEntropyLoss for the model."""
@@ -40,8 +37,8 @@ class MimicInputHandlerGRU(AbstractInputHandler):
         optimizer: optim.Optimizer = None,
         epochs: int = None,
     ) -> dict:
+        
         """Model training procedure."""
-
         device_name = device("cuda" if cuda.is_available() else "cpu")
         model.to(device_name)
         model.train()
@@ -67,7 +64,6 @@ class MimicInputHandlerGRU(AbstractInputHandler):
                 train_loss += loss.item()
 
             train_loss = train_loss/len(dataloader)
-            
             binary_predictions = self.to_numpy(output).argmax(axis=1)
 
             # Ensure labels are integer and 1D
