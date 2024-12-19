@@ -9,7 +9,7 @@ from leakpro import AbstractInputHandler
 
 
 class MimicInputHandler(AbstractInputHandler):
-    """Class to handle the user input for the CIFAR10 dataset."""
+    """Class to handle the user input for the MIMICIII dataset."""
 
     def __init__(self, configs: dict) -> None:
         super().__init__(configs = configs)
