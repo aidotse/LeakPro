@@ -8,8 +8,8 @@ from tqdm import tqdm
 
 class ResNet18(nn.Module):
     def __init__(self, num_classes):
-        super(ResNet18, self).__init__()
-        self.model = models.resnet18(pretrained=False)
+        super().__init__()
+        self.model = models.resnet18(pretrained=True)
         self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
         self.init_params = {"num_classes": num_classes}
 
@@ -25,7 +25,7 @@ def evaluate(model, loader, criterion, device):
             target = target.view(-1) 
             output = model(data)
             loss += criterion(output, target).item()
-            pred = output.argmax(dim=1) 
+            pred = output.argmax(dim=1)
             acc += pred.eq(target).sum().item()
         loss /= len(loader)
         acc = float(acc) / len(loader.dataset)
