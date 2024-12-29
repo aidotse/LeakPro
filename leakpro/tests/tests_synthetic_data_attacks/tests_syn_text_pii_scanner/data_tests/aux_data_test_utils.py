@@ -1,5 +1,6 @@
 """Auxiliary data for test_utils.py suite of tests."""
 from typing import Any, Dict, List
+import os
 
 from numpy import array
 from transformers import PreTrainedTokenizerFast
@@ -7,11 +8,13 @@ from transformers import PreTrainedTokenizerFast
 from leakpro.synthetic_data_attacks.syn_text_pii_scanner import utils
 from leakpro.synthetic_data_attacks.syn_text_pii_scanner.data_handling import LabelSet
 
+# Get the full path of the current file
+current_file_path = os.path.dirname(os.path.abspath(__file__))
 
 def data_factory() -> utils.Data: # noqa: D103
     return utils.Data(
         ori = utils.SubData(
-            path = "./data_tests/text_data.json",
+            path = current_file_path + "/text_data.json",
             label_set = LabelSet(labels=["MASK"], IOB2_FORMAT=False),
             label_key = "label",
             batch_size = 2,
@@ -19,7 +22,7 @@ def data_factory() -> utils.Data: # noqa: D103
             num_workers = 0
         ),
         syn = utils.SubData(
-            path = "./data_tests/text_syn_data.json",
+            path = current_file_path + "/text_syn_data.json",
             batch_size = 3,
             shuffle = True,
             num_workers = 0
