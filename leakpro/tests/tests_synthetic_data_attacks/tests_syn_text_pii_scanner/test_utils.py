@@ -247,7 +247,7 @@ def test_count_sort_similar_items() -> None:
     assert sorted_sim_items == e_sorted_sim_items
 
 @pytest.mark.parametrize(
-    ("verbose"), [True]#False, True]
+    ("verbose"), [False, True]
 )
 def test_compare_piis_lists(*, verbose: bool) -> None:
     """Test compare_piis_lists function with simple input."""
@@ -268,4 +268,6 @@ def test_compare_piis_lists(*, verbose: bool) -> None:
     assert tot == 72
     e_items = aux.e_items_test_compare_piis_lists_fact()
     assert sorted_sim_items == e_items["e_sorted_sim_items"]
-    assert distr == e_items["e_distr"]
+    assert distr.keys() == e_items["e_distr"].keys()
+    for k in distr.keys():
+        assert abs(distr[k] - e_items["e_distr"][k])<0.000001
