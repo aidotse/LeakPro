@@ -18,3 +18,4 @@ pydantic
 joblib
 pytest
 pytest-mock
+transformers
