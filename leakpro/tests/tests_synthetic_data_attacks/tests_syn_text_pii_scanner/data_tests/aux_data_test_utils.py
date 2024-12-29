@@ -1,6 +1,6 @@
 """Auxiliary data for test_utils.py suite of tests."""
-from typing import Any, Dict, List
 import os
+from typing import Any, Dict, List
 
 from numpy import array
 from transformers import PreTrainedTokenizerFast

@@ -269,5 +269,5 @@ def test_compare_piis_lists(*, verbose: bool) -> None:
     e_items = aux.e_items_test_compare_piis_lists_fact()
     assert sorted_sim_items == e_items["e_sorted_sim_items"]
     assert distr.keys() == e_items["e_distr"].keys()
-    for k in distr.keys():
+    for k in distr:
         assert abs(distr[k] - e_items["e_distr"][k])<0.000001
