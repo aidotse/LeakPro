@@ -19,3 +19,4 @@ joblib
 pytest
 pytest-mock
 transformers
+sentence-transformers
