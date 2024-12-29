@@ -16,3 +16,4 @@ numba
 pydantic
 joblib
 pytest
+transformers
