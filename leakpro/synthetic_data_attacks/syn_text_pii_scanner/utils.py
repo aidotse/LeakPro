@@ -1,6 +1,6 @@
 """Module with utility functions and classes used in synthetic text PII scanner."""
 import json
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -47,7 +47,7 @@ class SubData(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed = True)
     model_config["protected_namespaces"] = ()
-    path: str
+    path_or_data: Union[str, List[Dict[str, Any]]]
     label_set: Optional[dh.LabelSet] = None
     label_key: Optional[str] = None
     batch_size: int
@@ -87,8 +87,12 @@ def load_data(*,
     #Load original and synthetic data
     for attr in ["ori", "syn"]:
         sd = getattr(data, attr)
-        #Load json raw data
-        raw_data = load_json_data(file_path=sd.path)
+        #Set raw data depending on path_or_data
+        if isinstance(sd.path_or_data, str):
+            #Load json raw data
+            raw_data = load_json_data(file_path=sd.path_or_data)
+        else:
+            raw_data = sd.path_or_data
         #Get dataset
         dataset = dh.NERDataset(
             input_data = raw_data,

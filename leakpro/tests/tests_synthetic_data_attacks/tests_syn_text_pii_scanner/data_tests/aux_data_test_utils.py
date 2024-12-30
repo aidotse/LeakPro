@@ -14,7 +14,7 @@ current_file_path = os.path.dirname(os.path.abspath(__file__))
 def data_factory() -> utils.Data: # noqa: D103
     return utils.Data(
         ori = utils.SubData(
-            path = current_file_path + "/text_data.json",
+            path_or_data = current_file_path + "/text_data.json",
             label_set = LabelSet(labels=["MASK"], IOB2_FORMAT=False),
             label_key = "label",
             batch_size = 2,
@@ -22,7 +22,7 @@ def data_factory() -> utils.Data: # noqa: D103
             num_workers = 0
         ),
         syn = utils.SubData(
-            path = current_file_path + "/text_syn_data.json",
+            path_or_data = utils.load_json_data(file_path=current_file_path + "/text_syn_data.json"), #Passing object directly
             batch_size = 3,
             shuffle = True,
             num_workers = 0
