@@ -88,7 +88,7 @@ def load_data(*,
     for attr in ["ori", "syn"]:
         sd = getattr(data, attr)
         #Set raw data depending on path_or_data
-        if isinstance(sd.path_or_data, str):
+        if isinstance(sd.path_or_data, str): # noqa: SIM108
             #Load json raw data
             raw_data = load_json_data(file_path=sd.path_or_data)
         else:
