@@ -150,6 +150,7 @@ def forward_pass(*, # noqa: C901
     data: Data,
     num_labels: int,
     model: lgfm.NERLongformerModel,
+    model_max_len: int = 4096,
     verbose: bool = False
 ) -> None:
     """Function to do a forward pass on original and synthetic data.
@@ -161,6 +162,8 @@ def forward_pass(*, # noqa: C901
             Input and output of model will be appended to model_input_output.
         num_labels (int): The number of labels.
         model (lgfm.NERLongformerModel): Model to perform forward pass with.
+        model_max_len (int): The max sequence length the model permits.
+            Defaults to 4096 because of Longformer model's limit.
         verbose: bool, default is False
             If True, prints progress of forward pass.
 
@@ -178,10 +181,8 @@ def forward_pass(*, # noqa: C901
         with_labels_flag = True
         if sd.label_set is None:
             with_labels_flag = False
-        #Set model_limit
-        model_limit = 4096 #Longformer model has 4096 limit
         #Get max_length and len_dataset
-        max_length = min(sd.dataset.max_length, model_limit)
+        max_length = min(sd.dataset.max_length, model_max_len)
         len_dataset = len(sd.dataset)
         #Placeholders
         logits = torch.full((len_dataset, max_length, num_labels), -10000.0, dtype=torch.float32, device=device)
@@ -234,7 +235,6 @@ def forward_pass(*, # noqa: C901
         )
         if verbose:
             print(f"Ending forward_pass with {attr}.") # noqa: T201
-
 
 class PII(BaseModel):
     """PII object holding document number, start and end token indexes, the tokens and text of the PII."""
