@@ -1,5 +1,5 @@
 """Module with function to modify TAB dataset to be used with synthetic text PII scanner."""
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 
 from leakpro.synthetic_data_attacks.syn_text_pii_scanner import utils
 
@@ -122,7 +122,7 @@ def print_ori_syn_cases_fact(*,
     syn_piis: List[utils.PII],
     sorted_sim_items: List[Dict],
     data: utils.Data
-) -> None:
+) -> Callable:
     """Auxiliary factory function that returns a function to print original and syn cases."""
     def print_ori_syn_cases_fun(i: int) -> None:
         pii = sorted_sim_items[i]["ori_text"]
