@@ -87,3 +87,54 @@ def tab_data_treatment(*,
             dct["annotations"] = annotations
             modified_data.append(dct)
     return modified_data
+
+#Predefined ignore PIIs list
+tab_predefined_ignore_piis_list = [
+    "576", "119",
+    "Governor", "Minister", "Mary", "wife",
+    "İ.Y.", "İ.Y", "İ.G.", "C.", "W.S", "Mr R.", "Ms S.", "C.K", "M.W.", "M.W", "N.B", "Mr R.G", "D. R.",
+    "N.B.", "N. B.", "Z.O.", "R.H", "R.O.", "R.O",
+    "A.S.K.", "W.B.", "S.Y", "S.Y.", "Mr M.Y.", "M.Y.", "M.Y", "Ü.K", "Ms L.", "Mr E", "Z.Z",
+    "O. M. U", "O. M. U.", "E.P.", "E.P",
+    "C.R", "J.L.", "A. J.", "N.C.", "N.C", "Mrs P", "Mr T", "Mr H", "H.Y.", "H.Y",
+    "R.P", "R.P.", "Mr A.Ç.", "Mr A. Ç", "Dr M.", "Dr M", "Dr G", "Dr. G.",
+    "P. O.", "I", "I.C", "Mrs K", "M.A.Z", "J.W.", "S.S.", "Mr J.C.", "İ.G", "I.",
+    "Mr J", "J.B", "Dr. S", "Mrs K.", "J.B.", "W.P.", "W.P", "Mrs Z.", "Mr F", "M.A.Z.", "D.B", "M.U.", "Mr B.Z",
+    "J.T.", "Mr H.P", "L.H.", "F.I", "Dr O.", "I.A.", "İ.B", "İ.B.", "Mr Y.I.", "L.H", "İ.D.", "Mr Z.K", "Y.C",
+    "Ö.D.", "Mrs M", "Mrs M.", "Ms S.G", "Mr H.K", "Lutz", "Ms B.", "M.N.A", "Mr J.B.", "C.P", "R.B",
+    "Dr. P.", "Mr O", "Mr Z.K.", "Dr. L.-K.",
+    "K. Ch.", "K.Ch", "K. Ch",
+    "Mr Perrin",
+    "Mr Gölcüklü",
+    "Ms K. Jones",
+    "Mrs S. Jaczewska",
+    "Lord Justice Aldous",
+    "Judge Borrego Borrego",
+    "Mr. Durmaz",
+    "Mr McGrath",
+    "Mr. Lutz",
+    "Mr Justice Potts",
+    "Mr Justice Barron",
+]
+assert len(tab_predefined_ignore_piis_list) == len(set(tab_predefined_ignore_piis_list))
+
+def print_ori_syn_cases_fact(*,
+    syn_piis: List[utils.PII],
+    sorted_sim_items: List[Dict],
+    data: utils.Data
+) -> None:
+    """Auxiliary factory function that returns a function to print original and syn cases."""
+    def print_ori_syn_cases_fun(i: int) -> None:
+        pii = sorted_sim_items[i]["ori_text"]
+        ori_doc_nr = sorted_sim_items[i]["ori_doc_nr"]
+        syn_items = sorted_sim_items[i]["syn_items"]
+        print("\n### PII", pii,"\n") # noqa: T201
+        print("Original court case:") # noqa: T201
+        print(data.ori.raw_data[ori_doc_nr]["text"]) # noqa: T201
+        for j, syn_item in enumerate(syn_items[0:3]):
+            syn_text = syn_piis[syn_item].text
+            syn_doc_nr = syn_piis[syn_item].doc_nr
+            print("\n########") # noqa: T201
+            print(f"Synthetic case {j}, pii: {syn_text}") # noqa: T201
+            print(data.syn.raw_data[syn_doc_nr]["text"]) # noqa: T201
+    return print_ori_syn_cases_fun
