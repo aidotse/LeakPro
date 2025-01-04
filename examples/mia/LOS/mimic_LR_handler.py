@@ -24,6 +24,10 @@ class MimicInputHandler(AbstractInputHandler):
         learning_rate = 0.1
         momentum = 0.8
         return optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
+    
+    def get_shadow_model_type(self)->str:
+        """Get the type of shadow model to be used in the attack."""
+        return "LogisticRegression"
 
     def train(
         self,

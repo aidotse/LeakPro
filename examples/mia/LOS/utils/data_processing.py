@@ -13,6 +13,7 @@ from sklearn.preprocessing import StandardScaler
 from torch import Tensor, from_numpy
 from torch.utils.data import DataLoader, Dataset, Subset
 from utils.model_grud import to_3D_tensor
+from tqdm import tqdm
 
 
 class MimicDataset(Dataset):
@@ -44,14 +45,14 @@ def get_mimic_dataset(data_path,
                       validation_frac,
                       test_frac,
                       early_stop_frac,
-                      flatten=True):
+                      use_LR = True):
     """Get the dataset, download it if necessary, and store it."""
 
     # Assert that the sum of all fractions is between 0 and 1
     total_frac = train_frac + validation_frac + test_frac + early_stop_frac
     assert 0 < total_frac <= 1, "The sum of dataset fractions must be between 0 and 1."
 
-    if flatten:
+    if use_LR:
         path = data_path + "flattened/"
     else:
         path = data_path + "unflattened/"
@@ -59,6 +60,7 @@ def get_mimic_dataset(data_path,
     indices_path = os.path.join(path, "indices.pkl")
 
     if os.path.exists(dataset_path) and os.path.exists(indices_path):
+        print("Loading dataset...")
         with open(dataset_path, "rb") as f:
             dataset = pickle.load(f)  # Load the dataset
         with open(indices_path, "rb") as f:
@@ -67,32 +69,40 @@ def get_mimic_dataset(data_path,
             validation_indices = indices_dict["validation_indices"]  # Get the actual validation indices
             test_indices = indices_dict["test_indices"]    # Get the actual test indices
             early_stop_indices = indices_dict["early_stop_indices"]  # Get the actual early stop indices
+        print(f"Loaded dataset from {dataset_path}")
         return dataset, train_indices, validation_indices ,test_indices, early_stop_indices
 
     data_file_path = os.path.join(data_path, "all_hourly_data.h5")
     if os.path.exists(data_file_path):
+        print("Loading data...")
         data = pd.read_hdf(data_file_path, "vitals_labs")
         statics = pd.read_hdf(data_file_path, "patients")
 
         ID_COLS = ["subject_id", "hadm_id", "icustay_id"]
+
+        print("Splitting data...")
         train_data, holdout_data, y_train, y_holdout_data = data_splitter(statics,
                                                                  data,
                                                                  train_frac)
-
+        
+        print("Normalizing data...")
         train_data , holdout_data = data_normalization(train_data, holdout_data)
-        train_data, holdout_data = [simple_imputer(df, ID_COLS) for df in (train_data, holdout_data)]
 
-        if flatten:
+        print("Imputing missing values...")
+        train_data, holdout_data = [
+        simple_imputer(df, ID_COLS) for df in tqdm((train_data, holdout_data), desc="Imputation")]
+
+        if use_LR:
             # Apply pivot_table to flatten the data
+            print("Flattening data for LR...")
             flat_train, flat_holdout = [
                 df.pivot_table(index=ID_COLS, columns=["hours_in"])
-                for df in (train_data, holdout_data)
+                for df in tqdm((train_data, holdout_data), desc="Flattening")
             ]
-
-            # Flatten multi-index structure if pivot_table was used
+            print("Flattening data...")
             train, holdout, label_train, label_holdout = [
                 flatten_multi_index(df)
-                for df in (flat_train, flat_holdout, y_train, y_holdout_data)
+                for df in tqdm((flat_train, flat_holdout, y_train, y_holdout_data), desc="Flattening Index")
             ]
         else:
             # Skip pivot_table if flatten is False
@@ -109,7 +119,8 @@ def get_mimic_dataset(data_path,
         assert np.issubdtype(data_x.values.dtype, np.number), "Non-numeric data found in features."
         assert np.issubdtype(data_y.values.dtype, np.number), "Non-numeric data found in labels."
 
-        if flatten:
+        print("Creating dataset...")
+        if use_LR:
             dataset = MimicDataset(data_x.values, data_y.values)
         else:
             data_x = to_3D_tensor(data_x)
@@ -124,6 +135,7 @@ def get_mimic_dataset(data_path,
 
         os.makedirs(os.path.dirname(dataset_path), exist_ok=True)
         # Save the dataset to dataset.pkl
+        print("Saving dataset and indices...")
         with open(dataset_path, "wb") as file:
             pickle.dump(dataset, file)
             print(f"Saved dataset to {dataset_path}")
@@ -182,32 +194,88 @@ def data_splitter(statics,
     ]
     return train_data, holdout_data, y_train, y_holdout
 
-def simple_imputer(df,
-                   ID_COLS):
+# def simple_imputer(dataframe,
+#                    ID_COLS):
+#     idx = pd.IndexSlice
+#     df = dataframe.copy()
+#     if len(df.columns.names) > 2: df.columns = df.columns.droplevel(("label", "LEVEL1", "LEVEL2"))
+
+#     df_out = df.loc[:, idx[:, ["mean", "count"]]]
+#     icustay_means = df_out.loc[:, idx[:, "mean"]].groupby(ID_COLS).mean()
+
+#     df_out.loc[:, idx[:, "mean"]] = (
+#             df_out.loc[:, idx[:, "mean"]]
+#             .groupby(ID_COLS)
+#             .ffill()  # Replace forward fill method
+#             .groupby(ID_COLS)
+#             .fillna(icustay_means)  # Fill remaining NaNs with icustay_means
+#             .fillna(0)  # Fill any remaining NaNs with 0
+#         ) 
+
+#     # df_out.loc[:,idx[:,"mean"]] = df_out.loc[:,idx[:,"mean"]].groupby(ID_COLS).fillna(
+#     #     method="ffill"
+#     # ).groupby(ID_COLS).fillna(icustay_means).fillna(0)
+
+#     df_out.loc[:, idx[:, "count"]] = (df.loc[:, idx[:, "count"]] > 0).astype(float)
+#     df_out.rename(columns={"count": "mask"}, level="Aggregation Function", inplace=True)
+
+#     is_absent = (1 - df_out.loc[:, idx[:, "mask"]])
+#     hours_of_absence = is_absent.cumsum()
+#     time_since_measured = hours_of_absence - hours_of_absence[is_absent==0].fillna(method="ffill")
+#     time_since_measured.rename(columns={"mask": "time_since_measured"}, level="Aggregation Function", inplace=True)
+
+#     df_out = pd.concat((df_out, time_since_measured), axis=1)
+#     df_out.loc[:, idx[:, "time_since_measured"]] = df_out.loc[:, idx[:, "time_since_measured"]].fillna(100)
+
+#     df_out.sort_index(axis=1, inplace=True)
+#     return df_out
+
+def simple_imputer(dataframe, ID_COLS):
     idx = pd.IndexSlice
-    df = df.copy()
-    if len(df.columns.names) > 2: df.columns = df.columns.droplevel(("label", "LEVEL1", "LEVEL2"))
+    df = dataframe.copy()
 
-    df_out = df.loc[:, idx[:, ["mean", "count"]]]
-    icustay_means = df_out.loc[:, idx[:, "mean"]].groupby(ID_COLS).mean()
+    # Adjust column levels if necessary
+    if len(df.columns.names) > 2:
+        df.columns = df.columns.droplevel(("label", "LEVEL1", "LEVEL2"))
 
-    df_out.loc[:,idx[:,"mean"]] = df_out.loc[:,idx[:,"mean"]].groupby(ID_COLS).fillna(
-        method="ffill"
-    ).groupby(ID_COLS).fillna(icustay_means).fillna(0)
+    # Select mean and count columns
+    df_out = df.loc[:, idx[:, ["mean", "count"]]].copy()  # Explicit deep copy
 
+    # Compute group-level means
+    icustay_means = df_out.loc[:, idx[:, "mean"]].groupby(ID_COLS).transform("mean")
+
+    # Forward fill and fill NaNs with icustay_means
+    df_out.loc[:, idx[:, "mean"]] = (
+        df_out.loc[:, idx[:, "mean"]]
+        .groupby(ID_COLS)
+        .ffill()  # Forward fill within groups
+    )
+    df_out.loc[:, idx[:, "mean"]] = df_out.loc[:, idx[:, "mean"]].fillna(icustay_means)
+
+    # Fill remaining NaNs with 0
+    df_out.loc[:, idx[:, "mean"]] = df_out.loc[:, idx[:, "mean"]].fillna(0)
+
+    # Binary mask for count columns
     df_out.loc[:, idx[:, "count"]] = (df.loc[:, idx[:, "count"]] > 0).astype(float)
-    df_out.rename(columns={"count": "mask"}, level="Aggregation Function", inplace=True)
+    df_out = df_out.rename(columns={"count": "mask"}, level="Aggregation Function")  # Avoid inplace=True
 
+    # Calculate time since last measurement
     is_absent = (1 - df_out.loc[:, idx[:, "mask"]])
     hours_of_absence = is_absent.cumsum()
-    time_since_measured = hours_of_absence - hours_of_absence[is_absent==0].fillna(method="ffill")
+    time_since_measured = hours_of_absence - hours_of_absence[is_absent == 0].ffill()
     time_since_measured.rename(columns={"mask": "time_since_measured"}, level="Aggregation Function", inplace=True)
 
+    # Add time_since_measured to the output
     df_out = pd.concat((df_out, time_since_measured), axis=1)
     df_out.loc[:, idx[:, "time_since_measured"]] = df_out.loc[:, idx[:, "time_since_measured"]].fillna(100)
 
+    # Sort columns by index
     df_out.sort_index(axis=1, inplace=True)
+    
     return df_out
+
+
+
 
 
 def data_indices(dataset,

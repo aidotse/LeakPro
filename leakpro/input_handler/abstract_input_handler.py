@@ -26,6 +26,11 @@ class AbstractInputHandler(ABC):
         pass
 
     @abstractmethod
+    def get_shadow_model_type(self:Self) -> str:
+        """Get the type of shadow model to be used in the attack."""
+        pass
+
+    @abstractmethod
     def train(
         self: Self,
         dataloader: DataLoader,

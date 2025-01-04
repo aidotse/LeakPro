@@ -21,6 +21,10 @@ class MimicInputHandlerGRU(AbstractInputHandler):
         """Set the optimizer for the model."""
         learning_rate = 0.01
         return optim.Adam(model.parameters(), lr=learning_rate)
+    
+    def get_shadow_model_type(self)->str:
+        """Get the type of shadow model to be used in the attack."""
+        return "GRUD"
 
     def convert_to_device(self, x):
         device_name = device("cuda" if cuda.is_available() else "cpu")

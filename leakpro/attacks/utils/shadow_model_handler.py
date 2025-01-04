@@ -60,24 +60,38 @@ class ShadowModelHandler(ModelHandler):
         caller = "shadow_model"
         super().__init__(handler, caller)
         self.configs = handler.configs.get("shadow_model", None)
+        self.shadow_model_type = handler.get_shadow_model_type()
 
         # Set up the names of the shadow model
         self.model_storage_name = "shadow_model"
         self.metadata_storage_name = "metadata"
 
-    def _filter(self:Self, data_size:int, online:bool)->list[int]:
+    def _filter(self:Self, data_size:int, online:bool, model_type: str)->list[int]:
         # Get the metadata for the shadow models
         entries = os.listdir(self.storage_path)
         pattern = re.compile(rf"^{self.metadata_storage_name}_\d+\.pkl$")
         files = [f for f in entries if pattern.match(f)]
         # Extract the index of the metadata
         all_indices = [int(re.search(r"\d+", f).group()) for f in files]
+
         # Filter out indices to only keep the ones with the same data size
         filtered_indices = []
+        mismatched_model_types = []
+
         for i in all_indices:
             metadata = self._load_shadow_metadata(i)
             if metadata["num_train"] == data_size and metadata["online"] == online:
-                filtered_indices.append(i)
+                if metadata.get("model_type") == model_type:
+                    filtered_indices.append(i)
+                else:
+                    mismatched_model_types.append((i, metadata.get("model_type", "Unknown")))
+
+        # Warn about mismatched model types
+        if mismatched_model_types:
+            logger.warning(
+                f"Mismatched model types found in saved shadow models: {mismatched_model_types}. "
+                f"Expected model type: {model_type}."
+            )
         return all_indices, filtered_indices
 
     def create_shadow_models(
@@ -106,7 +120,7 @@ class ShadowModelHandler(ModelHandler):
 
         # Get the size of the dataset
         data_size = int(len(shadow_population)*training_fraction)
-        all_indices, filtered_indices = self._filter(data_size, online)
+        all_indices, filtered_indices = self._filter(data_size, online, self.handler.get_shadow_model_type())
 
         # Create a list of indices to use for the new shadow models
         n_existing_models = len(filtered_indices)
@@ -143,18 +157,19 @@ class ShadowModelHandler(ModelHandler):
                 logger.info(f"Saved shadow model {i} to {self.storage_path}")
 
             logger.info(f"Storing metadata for shadow model {i}")
-            meta_data = {}
-            meta_data["init_params"] = self.init_params
-            meta_data["train_indices"] = data_indices
-            meta_data["num_train"] = len(data_indices)
-            meta_data["optimizer"] = optimizer.__class__.__name__
-            meta_data["criterion"] = criterion.__class__.__name__
-            meta_data["batch_size"] = self.batch_size
-            meta_data["epochs"] = self.epochs
-            meta_data["train_acc"] = train_acc
-            meta_data["train_loss"] = train_loss
-            meta_data["online"] = online
-
+            meta_data = {
+                "init_params": self.init_params,
+                "train_indices": data_indices,
+                "num_train": len(data_indices),
+                "optimizer": optimizer.__class__.__name__,
+                "criterion": criterion.__class__.__name__,
+                "batch_size": self.batch_size,
+                "epochs": self.epochs,
+                "train_acc": train_acc,
+                "train_loss": train_loss,
+                "online": online,
+                "model_type": self.handler.get_shadow_model_type(),
+            }
             with open(f"{self.storage_path}/{self.metadata_storage_name}_{i}.pkl", "wb") as f:
                 pickle.dump(meta_data, f)
 
