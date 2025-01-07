@@ -277,7 +277,7 @@ def gru_trained_model_and_metadata(model,
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
     # Reduce learning rate when a metric has stopped improving
-    scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience = patience_lr, verbose=True)
+    scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience = patience_lr)
 
 
     train_losses = []
@@ -384,7 +384,7 @@ def gru_trained_model_and_metadata(model,
         scheduler.step(test_loss)
 
         # Check the learning rate
-        current_lr = optimizer.param_groups[0]["lr"]
+        current_lr =  optimizer.param_groups[0]["lr"]
         print(f"Learning Rate: {current_lr:.6f}")
 
         # Stop if learning rate becomes too small
