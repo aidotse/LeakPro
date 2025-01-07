@@ -13,24 +13,20 @@ class MimicInputHandlerGRU(AbstractInputHandler):
     def __init__(self, configs: dict) -> None:
         super().__init__(configs = configs)
 
-    def get_criterion(self)->None:
+    def get_criterion(self)->CrossEntropyLoss:
         """Set the CrossEntropyLoss for the model."""
         return CrossEntropyLoss()
 
-    def get_optimizer(self, model:nn.Module) -> None:
+    def get_optimizer(self, model:nn.Module) -> optim.Optimizer:
         """Set the optimizer for the model."""
         learning_rate = 0.01
         return optim.Adam(model.parameters(), lr=learning_rate)
-    
-    def get_shadow_model_type(self)->str:
-        """Get the type of shadow model to be used in the attack."""
-        return "GRUD"
 
     def convert_to_device(self, x):
         device_name = device("cuda" if cuda.is_available() else "cpu")
         return x.to(device_name)
 
-    def to_numpy(self, tensor):
+    def to_numpy(self, tensor) :
         return tensor.detach().cpu().numpy() if tensor.is_cuda else tensor.detach().numpy()
 
     def train(

@@ -60,7 +60,6 @@ class ShadowModelHandler(ModelHandler):
         caller = "shadow_model"
         super().__init__(handler, caller)
         self.configs = handler.configs.get("shadow_model", None)
-        self.shadow_model_type = handler.get_shadow_model_type()
 
         # Set up the names of the shadow model
         self.model_storage_name = "shadow_model"
@@ -118,9 +117,18 @@ class ShadowModelHandler(ModelHandler):
         if num_models < 0:
             raise ValueError("Number of models cannot be negative")
 
+        # Get shadow model class
+        if self.handler.configs["target"]["model_class"] is None:
+            logger.warning(
+                "Using the same model class for shadow models as the target model."
+            )
+            shadow_model_type = self.handler.configs["target"]["model_class"]
+        else:
+            shadow_model_type = self.handler.configs["shadow_model"]["model_class"]
+
         # Get the size of the dataset
         data_size = int(len(shadow_population)*training_fraction)
-        all_indices, filtered_indices = self._filter(data_size, online, self.handler.get_shadow_model_type())
+        all_indices, filtered_indices = self._filter(data_size, online, shadow_model_type)
 
         # Create a list of indices to use for the new shadow models
         n_existing_models = len(filtered_indices)
@@ -168,7 +176,7 @@ class ShadowModelHandler(ModelHandler):
                 "train_acc": train_acc,
                 "train_loss": train_loss,
                 "online": online,
-                "model_type": self.handler.get_shadow_model_type(),
+                "model_type": shadow_model_type,
             }
             with open(f"{self.storage_path}/{self.metadata_storage_name}_{i}.pkl", "wb") as f:
                 pickle.dump(meta_data, f)
