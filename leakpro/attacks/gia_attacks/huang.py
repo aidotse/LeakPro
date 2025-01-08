@@ -1,6 +1,8 @@
-"""Geiping, Jonas, et al. "Inverting gradients-how easy is it to break privacy in federated learning?."."""
+"""Huang, Yangisibo, et al. "Evaluating Gradient Inversion Attacks and Defenses in Federated Learning."."""
+from collections.abc import Generator
 from copy import deepcopy
 from dataclasses import dataclass, field
+from typing import Union
 
 import torch
 from torch import Tensor
@@ -10,7 +12,7 @@ from torch.utils.data import DataLoader
 from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
 from leakpro.fl_utils.data_utils import get_at_images
 from leakpro.fl_utils.gia_optimizers import MetaSGD
-from leakpro.fl_utils.img_utils import MedianPool2d, dataloaders_psnr, total_variation
+from leakpro.fl_utils.img_utils import MedianPool2d, dataloaders_ssim_ignite, l2_norm, total_variation
 from leakpro.fl_utils.model_utils import BNFeatureHook
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.utils.import_helper import Callable, Self
@@ -18,33 +20,34 @@ from leakpro.utils.logger import logger
 
 
 @dataclass
-class GradInversionConfig:
+class HuangConfig:
     """Possible configs for the Inverting Gradients attack."""
 
     # total variation scale for smoothing the reconstructions after each iteration
-    total_variation: float = 1.0e-06
+    total_variation: float = 0.052
     # learning rate on the attack optimizer
     attack_lr: float = 0.1
     # iterations for the attack steps
-    at_iterations: int = 8000
+    at_iterations: int = 10000
     # MetaOptimizer, see MetaSGD for implementation
     optimizer: object = field(default_factory=lambda: MetaSGD())
     # Client loss function
-    criterion: object = field(default_factory=lambda: CrossEntropyLoss())
+    criterion: object = field(default_factory=lambda: CrossEntropyLoss(reduction="mean"))
     # Number of epochs for the client attack
     epochs: int = 1
     # if to use median pool 2d on images, can improve attack on high higher resolution (100+)
     median_pooling: bool = False
-    # if we compare difference only for top 10 layers with largest changes. Potentially good for larger models.
-    top10norms: bool = False
     # bn regulizer
-    bn_reg: float = 0.001
+    bn_reg: float = 0.00016
+    # l2 scale for discouraging high overall pixel intensity
+    l2_scale: float = 0
 
-class GradInversion(AbstractGIA):
-    """Gradient inversion attack by Geiping et al."""
+
+class Huang(AbstractGIA):
+    """Gradient inversion attack by Huang et al."""
 
     def __init__(self: Self, model: Module, client_loader: DataLoader, train_fn: Callable,
-                 data_mean: Tensor, data_std: Tensor, configs: GradInversionConfig) -> None:
+                 data_mean: Tensor, data_std: Tensor, configs: HuangConfig) -> None:
         super().__init__()
         self.model = model
         self.client_loader = client_loader
@@ -58,20 +61,20 @@ class GradInversion(AbstractGIA):
         self.criterion = configs.criterion
         self.epochs = configs.epochs
         self.median_pooling = configs.median_pooling
-        self.top10norms = configs.top10norms
         self.bn_reg = configs.bn_reg
+        self.l2_scale = configs.l2_scale
 
         self.best_loss = float("inf")
         self.best_reconstruction = None
         self.best_reconstruction_round = None
-        logger.info("Inverting gradient initialized.")
+        logger.info("Evaluating with Huang. et al initialized.")
         self.prepare_attack()
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
         title_str = "Inverting gradients"
-        reference_str = """Geiping, Jonas, et al. Inverting gradients-how easy is it to
-            break privacy in federated learning? Neurips, 2020."""
+        reference_str = """Huang, Yangisibo, et al. "Evaluating Gradient Inversion Attacks and Defenses in \
+            Federated Learning. Neurips, 2021."""
         summary_str = ""
         detailed_str = ""
         return {
@@ -98,25 +101,22 @@ class GradInversion(AbstractGIA):
 
         for module in self.model.modules():
             if isinstance(module, torch.nn.BatchNorm2d):
-                module.reset_running_stats()
                 self.loss_r_feature_layers.append(BNFeatureHook(module))
+        # calculate running bn statistics
+        _ = self.train_fn(self.model, self.client_loader, self.optimizer, self.criterion, self.epochs)
+
+        # Stop updating running statistics
+        for module in self.model.modules():
+            if isinstance(module, torch.nn.BatchNorm2d):
+                module.momentum = 0
 
         self.reconstruction, self.reconstruction_loader = get_at_images(self.client_loader)
         self.reconstruction.requires_grad = True
         client_gradient = self.train_fn(self.model, self.client_loader, self.optimizer, self.criterion, self.epochs)
         self.client_gradient = [p.detach() for p in client_gradient]
 
-        # Make feature hook ready for attacks
-        for module in self.model.modules():
-            if isinstance(module, torch.nn.BatchNorm2d):
-                module.momentum = 0
-                # self.training = False
-                if hasattr(module, "weight"):
-                    module.weight.requires_grad_(True)
-                if hasattr(module, "bias"):
-                    module.bias.requires_grad_(True)
 
-    def run_attack(self:Self) -> GIAResults:
+    def run_attack(self:Self) -> Union[GIAResults, Generator[tuple[int, Tensor]]]:
         """Run the attack and return the combined metric result.
 
         Returns
@@ -143,6 +143,7 @@ class GradInversion(AbstractGIA):
                     self.reconstruction.data = MedianPool2d(kernel_size=3, stride=1, padding=1, same=False)(self.reconstruction)
             if i % 250 == 0:
                 logger.info(f"Iteration {i}, loss {loss}")
+                yield i, dataloaders_ssim_ignite(self.client_loader, self.reconstruction_loader)
             # Chose image who has given least loss
             if loss < self.best_loss:
                 self.best_loss = loss
@@ -151,7 +152,7 @@ class GradInversion(AbstractGIA):
                 logger.info(f"New best loss: {loss} on round: {i}")
 
         return GIAResults(self.client_loader, self.best_reconstruction,
-                          dataloaders_psnr(self.client_loader, self.reconstruction_loader), self.data_mean, self.data_std)
+                          dataloaders_ssim_ignite(self.client_loader, self.reconstruction_loader), self.data_mean, self.data_std)
 
 
     def gradient_closure(self: Self, optimizer: torch.optim.Optimizer) -> Callable:
@@ -175,7 +176,6 @@ class GradInversion(AbstractGIA):
             """
             optimizer.zero_grad()
             self.model.zero_grad()
-
             gradient = self.train_fn(self.model, self.reconstruction_loader, self.optimizer, self.criterion, self.epochs)
             rec_loss = self.reconstruction_costs(gradient, self.client_gradient)
 
@@ -184,9 +184,10 @@ class GradInversion(AbstractGIA):
                 for (idx, mod) in enumerate(self.loss_r_feature_layers)
             ])
 
-            rec_loss += self.bn_reg * loss_r_feature
             # Add the TV loss term to penalize large variations between pixels, encouraging smoother images.
-            rec_loss += (self.t_v_scale * total_variation(self.reconstruction))
+            rec_loss += self.t_v_scale * total_variation(self.reconstruction)
+            rec_loss += self.bn_reg * loss_r_feature
+            rec_loss += self.l2_scale * l2_norm(self.reconstruction)
             rec_loss.backward()
             self.reconstruction.grad.sign_()
             return rec_loss
@@ -203,22 +204,18 @@ class GradInversion(AbstractGIA):
             torch.Tensor: The average reconstruction cost.
 
         """
-        if self.top10norms:
-            _, indices = torch.topk(torch.stack([p.norm() for p in reconstruction_gradient], dim=0), 10)
-        else:
+        with torch.no_grad():
             indices = torch.arange(len(reconstruction_gradient))
-        weights = reconstruction_gradient[0].new_ones(len(reconstruction_gradient))
-        total_costs = 0
-        pnorm = [0, 0]
-        costs = 0
-        for i in indices:
-            costs -= (client_gradient[i] * reconstruction_gradient[i]).sum() * weights[i]
-            pnorm[0] += client_gradient[i].pow(2).sum() * weights[i]
-            pnorm[1] += reconstruction_gradient[i].pow(2).sum() * weights[i]
-        costs = 1 + costs / pnorm[0].sqrt() / pnorm[1].sqrt()
+            filtered_trial_gradients = [reconstruction_gradient[i] for i in indices]
+            filtered_input_gradients = [client_gradient[i] for i in indices]
+        costs = sum((x * y).sum() for x, y in zip(filtered_input_gradients,
+                                                  filtered_trial_gradients))
 
-        total_costs += costs
-        return total_costs / len(client_gradient)
+        trial_norm = sum(x.pow(2).sum()
+                         for x in filtered_trial_gradients).sqrt()
+        input_norm = sum(y.pow(2).sum()
+                         for y in filtered_input_gradients).sqrt()
+        return 1 - (costs / trial_norm / input_norm)
 
     def _configure_attack(self: Self, configs: dict) -> None:
         pass

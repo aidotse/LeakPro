@@ -556,7 +556,7 @@ class GIAResults:
             self: Self,
             name: str,
             path: str,
-            config: dict, # noqa: ARG002
+            config: dict,
             show_plot: bool = False # noqa: ARG002
         ) -> None:
         """Save the GIAResults to disk."""
@@ -573,7 +573,7 @@ class GIAResults:
                 if var not in skip_keys  # Exclude skipped keys
             }
 
-        result_config = get_gia_config(self.config, skip_keys=["optimizer", "criterion"])
+        result_config = get_gia_config(config, skip_keys=["optimizer", "criterion"])
 
         # Get the name for the attack configuration
         config_name = get_config_name(result_config)
