@@ -19,6 +19,7 @@ dependencies:
   # Deep Learning
   - pytorch
   - torchvision
+  - torchmetrics
 
   # Utilities
   - dotmap
@@ -32,5 +33,6 @@ dependencies:
 
   # Development and Testing
   - pytest
+  - pytest-mock
   
 

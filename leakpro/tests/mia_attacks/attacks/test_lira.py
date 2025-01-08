@@ -124,7 +124,7 @@ def test_lira_online_attack(image_handler:ImageInputHandler):
     assert any(isnan(x) for x in lira_obj.in_member_signals) == False
     assert any(isnan(x) for x in lira_obj.out_member_signals) == False
 
-def test_lira_online_attack(image_handler:ImageInputHandler):
+def test_lira_offline_attack(image_handler:ImageInputHandler):
     # Set up for testing
     audit_config = get_audit_config()
     lira_params = audit_config.attack_list.lira

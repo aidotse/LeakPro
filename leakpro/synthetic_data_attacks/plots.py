@@ -66,7 +66,7 @@ def iterate_values_plot_bar_charts(*,
         # Get idx of data
         idx = np.where(values==value)[0]
         # Set data
-        data = res[idx, 4:7]
+        data = res[idx, 5:8]
         if data.shape[0]>0:
             # Iterate through risks
             for r in range(3):
@@ -79,7 +79,7 @@ def iterate_values_plot_bar_charts(*,
                 ax.bar(x_idx+r*bar_width, up-down, alpha=alpha, width=conf_bar_width, color="black", align="center", bottom=down)
     # Add extra space between the plot box and the highest value
     if max_value_flag:
-        max_value = res[:, 4:7].max()
+        max_value = res[:, 5:8].max()
         ax.set_ylim(0, max_value * 1.05)
 
 def plot_linkability(*,
@@ -108,7 +108,7 @@ def plot_linkability(*,
         ax = ax,
         xlabel = "Nr aux cols",
         ylabel = "Risk",
-        title = f"Linkability risk {conf_level} confidence, total attacks: {int(res[:,0].sum())}"
+        title = f"Linkability risk {conf_level} confidence, total main attacks: {int(res[:,0].sum()):,}"
     )
     # Adding ticks
     set_ticks(ax=ax, xlabels=set_nr_aux_cols)
@@ -156,7 +156,7 @@ def plot_ir_worst_case(*,
         ax = ax,
         xlabel = "Secret col",
         ylabel = "Risk",
-        title = f"Inference risk, worst case scenario, total attacks: {int(res[:,0].sum())}"
+        title = f"Inference risk, worst case scenario, total main attacks: {int(res[:,0].sum()):,}"
     )
     # Adding ticks
     set_ticks(ax=ax, xlabels=set_secrets)
@@ -191,7 +191,7 @@ def plot_ir_base_case(*,
     if high_res_flag:
         plot_save_high_res()
     # Set up the figure and get axes
-    fig_title = f"Inference risk, base case scenario, {conf_level} confidence, total attacks: {int(res[:,0].sum())}"
+    fig_title = f"Inference risk, base case scenario, {conf_level} confidence, total main attacks: {int(res[:,0].sum()):,}"
     axs = get_figure_axes(two_axes_flag=True, fig_title=fig_title)
     # Set plot variables
     titles = ["Risk per column", "Risk per Nr aux cols"]
@@ -255,7 +255,7 @@ def plot_singling_out(*,
         max_value_flag = True
     )
     # Adding labels and title
-    fig_title = f"Singling out risk total attacks: {int(res[:,0].sum())}"
+    fig_title = f"Singling out risk total main attacks: {int(res[:,0].sum()):,}"
     if res.shape[0]==1:
         fig_title += f", n_cols={int(res[0,-1])}"
     set_labels_and_title(

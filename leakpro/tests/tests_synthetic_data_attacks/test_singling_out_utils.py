@@ -76,14 +76,14 @@ def test_singling_out_risk_evaluation() -> None:
         n_attacks = 2
     )
     #Output nr columns from pack_results
-    pack_results_nr_cols = 7
+    pack_results_nr_cols = 8
     assert isinstance(sin_out_res, sou.SinglingOutResults)
     #Assert results
     res = np.array(sin_out_res.res)
     assert res.shape == (1, pack_results_nr_cols+1)
     assert len(sin_out_res.res_cols) == pack_results_nr_cols+1
     e_res_cols = [
-        "n_total", "n_main", "n_naive", "confidence_level",
+        "n_main_total", "n_main_success", "n_naive_total", "n_naive_success", "confidence_level",
         "main_rate", "naive_rate", "residual_rate", "n_cols"
     ]
     assert sin_out_res.res_cols == e_res_cols
@@ -94,7 +94,7 @@ def test_singling_out_risk_evaluation() -> None:
         n_attacks = 2
     )
     #Output nr columns from pack_results
-    pack_results_nr_cols = 7
+    pack_results_nr_cols = 8
     assert isinstance(sin_out_res, sou.SinglingOutResults)
     #Assert results
     res = np.array(sin_out_res.res)
@@ -102,7 +102,7 @@ def test_singling_out_risk_evaluation() -> None:
     assert res.shape == (e_rows, pack_results_nr_cols+1)
     assert len(sin_out_res.res_cols) == pack_results_nr_cols+1
     e_res_cols = [
-        "n_total", "n_main", "n_naive", "confidence_level",
+        "n_main_total", "n_main_success", "n_naive_total", "n_naive_success", "confidence_level",
         "main_rate", "naive_rate", "residual_rate", "n_cols"
     ]
     assert sin_out_res.res_cols == e_res_cols
