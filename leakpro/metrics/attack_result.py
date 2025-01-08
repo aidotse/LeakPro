@@ -519,6 +519,7 @@ class GIAResults:
             original_data: DataLoader = None,
             recreated_data: DataLoader = None,
             psnr_score: float = None,
+            ssim_score: float = None,
             data_mean: float = None,
             data_std: float = None,
             config: dict = None,
@@ -527,6 +528,7 @@ class GIAResults:
         self.original_data = original_data
         self.recreated_data = recreated_data
         self.PSNR_score = psnr_score
+        self.SSIM_score = ssim_score
         self.data_mean = data_mean
         self.data_std = data_std
         self.config = config

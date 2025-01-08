@@ -1,6 +1,5 @@
 """Utils used for GIA training."""
 from collections import OrderedDict
-from copy import deepcopy
 from functools import partial
 
 import torch

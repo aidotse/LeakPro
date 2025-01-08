@@ -1,10 +1,10 @@
 """Diverse util functions."""
 import torch.nn.functional as f
+from ignite.metrics import SSIM
 from torch import Tensor, abs, cuda, mean, nn, no_grad, norm
 from torch.nn.modules.utils import _pair, _quadruple
 from torch.utils.data import DataLoader
 from torchmetrics.functional import peak_signal_noise_ratio
-from ignite.metrics import SSIM
 
 from leakpro.utils.import_helper import Self
 
@@ -54,8 +54,7 @@ def dataloaders_psnr(original_dataloader: DataLoader, recreated_dataloader: Data
 
 
 def dataloaders_ssim_ignite(original_dataloader: DataLoader, recreated_dataloader: DataLoader) -> float:
-    """
-    Calculate the average SSIM between images from two dataloaders (original and recreated).
+    """Calculate the average SSIM between images from two dataloaders (original and recreated).
 
     Args:
     ----
@@ -65,10 +64,11 @@ def dataloaders_ssim_ignite(original_dataloader: DataLoader, recreated_dataloade
     Returns:
     -------
         avg_ssim (float): Average SSIM value over the dataset.
+
     """
     device = "cuda" if cuda.is_available() else "cpu"
     ssim_metric = SSIM(data_range=1.0, device=device)
-    
+
     ssim_metric.reset()
     total_images = 0
 
@@ -83,13 +83,13 @@ def dataloaders_ssim_ignite(original_dataloader: DataLoader, recreated_dataloade
             total_images += orig_images.size(0)
 
     # Compute average SSIM
-    avg_ssim = ssim_metric.compute()
-    return avg_ssim
+    return ssim_metric.compute()
 
 class MedianPool2d(nn.Module):
     """Median pool (usable as median filter when stride=1) module.
 
     Args:
+    ----
          kernel_size: size of pooling kernel, int or 2-tuple
          stride: pool stride, int or 2-tuple
          padding: pool padding, int or 4-tuple (l, r, t, b) as in pytorch F.pad
@@ -109,9 +109,11 @@ class MedianPool2d(nn.Module):
         """Calculate the padding needed for a tensor based on the specified mode and kernel size.
 
         Args:
+        ----
                 x (Tensor): Input tensor with shape (batch_size, channels, height, width).
 
         Returns:
+        -------
                 Tuple[int, int, int, int]: The calculated padding as (left, right, top, bottom).
 
         """
@@ -132,9 +134,11 @@ class MedianPool2d(nn.Module):
         """Apply a padded unfolding operation to the input and compute the median value across each kernel's unfolded region.
 
         Args:
+        ----
             x (Tensor): Input tensor with shape (batch_size, channels, height, width).
 
         Returns:
+        -------
             Tensor: A tensor containing the median values for each
               patch, with shape (batch_size, channels, new_height, new_width).
 

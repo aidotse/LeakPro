@@ -152,7 +152,8 @@ class Huang(AbstractGIA):
                 logger.info(f"New best loss: {loss} on round: {i}")
 
         return GIAResults(self.client_loader, self.best_reconstruction,
-                          dataloaders_ssim_ignite(self.client_loader, self.reconstruction_loader), self.data_mean, self.data_std)
+                          ssim_score=dataloaders_ssim_ignite(self.client_loader, self.reconstruction_loader),
+                          data_mean=self.data_mean, data_std=self.data_std)
 
 
     def gradient_closure(self: Self, optimizer: torch.optim.Optimizer) -> Callable:

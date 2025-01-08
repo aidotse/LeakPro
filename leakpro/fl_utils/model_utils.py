@@ -1,6 +1,7 @@
 """Utils used for model functionality in GIAs."""
 
 import random
+
 import numpy as np
 import torch
 
@@ -16,7 +17,7 @@ class BNFeatureHook:
     def __init__(self: Self, module: torch.nn.modules.BatchNorm2d) -> None:
         self.hook = module.register_forward_hook(self.hook_fn)
 
-    def hook_fn(self: Self, module: torch.nn.modules.BatchNorm2d, input: torch.Tensor, output: torch.Tensor) -> None:  # noqa: ARG002
+    def hook_fn(self: Self, module: torch.nn.modules.BatchNorm2d, input: torch.Tensor, _: torch.Tensor) -> None:
         """Hook to compute deepinversion's feature distribution regularization."""
         nch = input[0].shape[1]
         mean = input[0].mean([0, 2, 3])
