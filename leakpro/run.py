@@ -1,4 +1,5 @@
 """Run script."""
+import copy
 from typing import Callable
 
 import torch
@@ -6,20 +7,81 @@ from torch import Tensor
 from torch.nn import Module
 from torch.utils.data import DataLoader, Dataset, random_split
 
-from leakpro.attacks.gia_attacks.gradinversion import GradInversion
+from leakpro.attacks.gia_attacks.huang import Huang, HuangConfig
 from leakpro.attacks.gia_attacks.invertinggradients import InvertingConfig, InvertingGradients
+from leakpro.fl_utils.model_utils import seed_everything
 from leakpro.utils.logger import logger
+import optuna
 
 
-def run_gravinversion(model: Module, client_data: DataLoader, train_fn: Callable,
-                data_mean:Tensor, data_std: Tensor, config: dict, experiment_name: str = "InvertingGradients",
+def run_huang(model: Module, client_data: DataLoader, train_fn: Callable,
+                data_mean:Tensor, data_std: Tensor, config: dict, experiment_name: str = "Huang",
                 path:str = "./leakpro_output/results", save:bool = True) -> None:
-    """Runs InvertingGradients."""
-    attack = GradInversion(model, client_data, train_fn, data_mean, data_std, config)
-    result = attack.run_attack()
+    """Runs Huang."""
+    attack = Huang(model, client_data, train_fn, data_mean, data_std, config)
+    gen = attack.run_attack()
+    try:
+        while True:
+            _, _ = next(gen)
+    except StopIteration as e:
+        result = e.value
     if save:
         result.save(name=experiment_name, path=path, config=config)
     return result
+
+def huang_optuna(model, client_dataloader, train_fn, data_mean, data_std, seed=1234):
+    def objective(trial):
+        total_variation = trial.suggest_loguniform("total_variation", 1e-6, 1e-1)
+        bn_reg = trial.suggest_loguniform("bn_reg", 1e-4, 1e-1)
+
+        # Reproducibility
+        seed_everything(seed)
+
+        # Deepcopy the model for this trial
+        trial_model = copy.deepcopy(model)
+
+        # Configurations for the attack
+        configs = HuangConfig()
+        configs.total_variation = total_variation
+        configs.bn_reg = bn_reg
+
+        # Create the attack instance
+        attack = Huang(trial_model, client_dataloader, train_fn, data_mean, data_std, configs)
+
+        # Run the attack
+        gen = attack.run_attack()
+        try:
+            while True:
+                step, psnr = next(gen)
+                trial.report(psnr, step)
+
+                if trial.should_prune():
+                    raise optuna.exceptions.TrialPruned()
+        except StopIteration as e:
+            gia_result = e.value
+
+        # Save final results if the trial isn't pruned
+        gia_result.save(name="Huang_Optuna", path="./leakpro_output/results", config=configs)
+        return gia_result.PSNR_score
+
+    # Define the pruner and study
+    pruner = optuna.pruners.MedianPruner(n_warmup_steps=5)
+    study = optuna.create_study(direction="maximize", pruner=pruner)
+
+    # Run optimization
+    study.optimize(objective, n_trials=50)
+
+    # Display and save the results
+    print("Best hyperparameters:", study.best_params)
+    print("Best PSNR:", study.best_value)
+
+    results_file = "optuna_results.txt"
+    with open(results_file, "w") as f:
+        f.write("Best hyperparameters:\n")
+        for key, value in study.best_params.items():
+            f.write(f"{key}: {value}\n")
+
+    print(f"Results saved to {results_file}")
 
 def run_inverting(model: Module, client_data: DataLoader, train_fn: Callable,
                 data_mean:Tensor, data_std: Tensor, config: dict, experiment_name: str = "InvertingGradients",
