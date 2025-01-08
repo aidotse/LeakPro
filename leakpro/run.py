@@ -64,7 +64,7 @@ def huang_optuna(model: Module, client_dataloader: DataLoader, train_fn: Callabl
 
         # Save final results if the trial isn't pruned
         gia_result.save(name="Huang_Optuna", path="./leakpro_output/results", config=configs)
-        return gia_result.PSNR_score
+        return gia_result.SSIM_score
 
     # Define the pruner and study
     pruner = optuna.pruners.MedianPruner(n_warmup_steps=5)
