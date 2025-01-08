@@ -50,6 +50,7 @@ dependencies = [
   "pydantic",
   "joblib",
   "pytest",
+  "pytest-mock",
   "gdown",
   "optuna",
   "pytorch-ignite",
