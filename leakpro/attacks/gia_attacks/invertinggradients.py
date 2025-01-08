@@ -130,8 +130,8 @@ class InvertingGradients(AbstractGIA):
                 logger.info(f"New best loss: {loss} on round: {i}")
 
         return GIAResults(self.client_loader, self.best_reconstruction,
-                          dataloaders_psnr(self.client_loader, self.reconstruction_loader), self.data_mean, self.data_std,
-                          self.configs)
+                          dataloaders_psnr(self.client_loader, self.reconstruction_loader), data_mean=self.data_mean, data_std=self.data_std,
+                          config=self.configs)
 
 
     def gradient_closure(self: Self, optimizer: torch.optim.Optimizer) -> Callable:

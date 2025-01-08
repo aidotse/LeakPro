@@ -2,6 +2,7 @@
 import copy
 from typing import Callable
 
+import optuna
 import torch
 from torch import Tensor
 from torch.nn import Module
@@ -11,7 +12,6 @@ from leakpro.attacks.gia_attacks.huang import Huang, HuangConfig
 from leakpro.attacks.gia_attacks.invertinggradients import InvertingConfig, InvertingGradients
 from leakpro.fl_utils.model_utils import seed_everything
 from leakpro.utils.logger import logger
-import optuna
 
 
 def run_huang(model: Module, client_data: DataLoader, train_fn: Callable,
@@ -29,8 +29,10 @@ def run_huang(model: Module, client_data: DataLoader, train_fn: Callable,
         result.save(name=experiment_name, path=path, config=config)
     return result
 
-def huang_optuna(model, client_dataloader, train_fn, data_mean, data_std, seed=1234):
-    def objective(trial):
+def huang_optuna(model: Module, client_dataloader: DataLoader, train_fn: Callable,
+                 data_mean: Tensor, data_std:Tensor, seed:int =1234) -> None:
+    """Runs Evaluating with Huang et al., using optuna for finding optimal hyperparameters."""
+    def objective(trial: optuna) -> Tensor:
         total_variation = trial.suggest_loguniform("total_variation", 1e-6, 1e-1)
         bn_reg = trial.suggest_loguniform("bn_reg", 1e-4, 1e-1)
 
@@ -72,8 +74,8 @@ def huang_optuna(model, client_dataloader, train_fn, data_mean, data_std, seed=1
     study.optimize(objective, n_trials=50)
 
     # Display and save the results
-    print("Best hyperparameters:", study.best_params)
-    print("Best PSNR:", study.best_value)
+    logger.info("Best hyperparameters:", study.best_params)
+    logger.info("Best PSNR:", study.best_value)
 
     results_file = "optuna_results.txt"
     with open(results_file, "w") as f:
@@ -81,7 +83,7 @@ def huang_optuna(model, client_dataloader, train_fn, data_mean, data_std, seed=1
         for key, value in study.best_params.items():
             f.write(f"{key}: {value}\n")
 
-    print(f"Results saved to {results_file}")
+    logger.info(f"Results saved to {results_file}")
 
 def run_inverting(model: Module, client_data: DataLoader, train_fn: Callable,
                 data_mean:Tensor, data_std: Tensor, config: dict, experiment_name: str = "InvertingGradients",
