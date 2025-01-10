@@ -59,7 +59,11 @@ class ShadowModelHandler(ModelHandler):
         """
         caller = "shadow_model"
         super().__init__(handler, caller)
-        self.configs = handler.configs.get("shadow_model", None)
+        self.shadow_model_type = self.handler.configs.get("shadow_model", {}).get("model_class", None)
+        self.target_model_type = self.handler.configs.get("target", {}).get("model_class", None)
+
+        if self.target_model_type is None:
+            raise ValueError("Target model type is not specified")
 
         # Set up the names of the shadow model
         self.model_storage_name = "shadow_model"
@@ -118,13 +122,13 @@ class ShadowModelHandler(ModelHandler):
             raise ValueError("Number of models cannot be negative")
 
         # Get shadow model class
-        if self.handler.configs["shadow_model"]["model_class"] is None:
+        if self.shadow_model_type is None:
             logger.warning(
                 "Using the same model class for shadow models as the target model."
             )
-            shadow_model_type = self.handler.configs["target"]["model_class"]
+            shadow_model_type = self.target_model_type
         else:
-            shadow_model_type = self.handler.configs["shadow_model"]["model_class"]
+            shadow_model_type = self.shadow_model_type
 
         # Get the size of the dataset
         data_size = int(len(shadow_population)*training_fraction)
