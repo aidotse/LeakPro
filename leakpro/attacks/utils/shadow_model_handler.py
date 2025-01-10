@@ -125,14 +125,11 @@ class ShadowModelHandler(ModelHandler):
 
         # Get shadow model class
         if self.shadow_model_type is None:
-        if self.shadow_model_type is None:
             logger.warning(
                 "Using the same model class for shadow models as the target model."
             )
             shadow_model_type = self.target_model_type
-            shadow_model_type = self.target_model_type
         else:
-            shadow_model_type = self.shadow_model_type
             shadow_model_type = self.shadow_model_type
 
         # Get the size of the dataset
