@@ -118,7 +118,7 @@ class ShadowModelHandler(ModelHandler):
             raise ValueError("Number of models cannot be negative")
 
         # Get shadow model class
-        if self.handler.configs["target"]["model_class"] is None:
+        if self.handler.configs["shadow_model"]["model_class"] is None:
             logger.warning(
                 "Using the same model class for shadow models as the target model."
             )

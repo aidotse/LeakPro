@@ -39,6 +39,6 @@ target:
   data_path: "./data/flattened/dataset.pkl" #unflattened dataset for GRUD and flattened dataset for LR
 
 shadow_model:
-  model_class: "LR" # LR/GRUD
+  model_class: # LR/GRUD
   
 distillation_model:
