@@ -23,7 +23,7 @@ jobs:
       - name: Install dependencies from pyproject.toml
         run: |
           python -m pip install --upgrade pip
-          pip install .[dev]
+          pip install -e .[dev]
 
 <<<<<<< HEAD
       - name: Install dependencies
