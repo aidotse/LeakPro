@@ -7,16 +7,15 @@ from tqdm import tqdm
 
 from leakpro import AbstractInputHandler
 
-
 class MimicInputHandler(AbstractInputHandler):
-    """Class to handle the user input for the MIMICIII dataset."""
+    """Class to handle the user input for the CIFAR10 dataset."""
 
     def __init__(self, configs: dict) -> None:
         super().__init__(configs = configs)
 
 
     def get_criterion(self)->None:
-        """Set the Binary Cross Entropy Loss for the model."""
+        """Set the CrossEntropyLoss for the model."""
         return BCELoss()
 
     def get_optimizer(self, model:torch.nn.Module) -> None:
@@ -41,11 +40,11 @@ class MimicInputHandler(AbstractInputHandler):
 
         criterion = self.get_criterion()
         optimizer = self.get_optimizer(model)
-
+        
         for e in tqdm(range(epochs), desc="Training Progress"):
             model.train()
             train_acc, train_loss = 0.0, 0.0
-
+            
             for data, target in dataloader:
                 target = target.float().unsqueeze(1)
                 data, target = data.to(compute_device, non_blocking=True), target.to(compute_device, non_blocking=True)
@@ -55,11 +54,11 @@ class MimicInputHandler(AbstractInputHandler):
                 loss = criterion(output, target)
                 pred = sigmoid(output) >= 0.5
                 train_acc += pred.eq(target).sum().item()
-
+                
                 loss.backward()
                 optimizer.step()
                 train_loss += loss.item()
-
+        
         train_acc = train_acc/len(dataloader.dataset)
         train_loss = train_loss/len(dataloader)
 

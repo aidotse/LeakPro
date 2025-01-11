@@ -1,15 +1,15 @@
 audit:  # Configurations for auditing
   random_seed: 1234  # Integer specifying the random seed
   attack_list:
-    rmia:
-      training_data_fraction: 0.5  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
-      attack_data_fraction: 0.5 # Fraction of auxiliary dataset to sample from during attack
-      num_shadow_models: 8 # Number of shadow models to train
-      online: True # perform online or offline attack
-      temperature: 2
-      gamma: 1.0
-      offline_a: 0.33 # parameter from which we compute p(x) from p_OUT(x) such that p_IN(x) = a p_OUT(x) + b.
-      offline_b: 0.66
+    # rmia:
+    #   training_data_fraction: 0.5  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
+    #   attack_data_fraction: 0.5 # Fraction of auxiliary dataset to sample from during attack
+    #   num_shadow_models: 8 # Number of shadow models to train
+    #   online: True # perform online or offline attack
+    #   temperature: 2
+    #   gamma: 1.0
+    #   offline_a: 0.33 # parameter from which we compute p(x) from p_OUT(x) such that p_IN(x) = a p_OUT(x) + b.
+    #   offline_b: 0.66
     # qmia:
     #   training_data_fraction: 1.0  # Fraction of the auxilary dataset (data without train and test indices) to use for training the quantile regressor
     #   epochs: 5  # Number of training epochs for quantile regression
@@ -32,13 +32,12 @@ audit:  # Configurations for auditing
 
 target:
   # Target model path
-  module_path: "utils/model_LR.py" # either model_grud.py or model_LR.py for logestic regression
-  model_class: "LR" #  LR/GRUD
+  module_path: "utils/model.py"
+  model_class: "MimicLR" 
   # Data paths
-  target_folder: "./target_LR" # either target_GRUD or target_LR
-  data_path: "./data/flattened/dataset.pkl" #unflattened dataset for GRUD and flattened dataset for LR
+  target_folder: "./target"
+  data_path: "./data/dataset.pkl"
 
 shadow_model:
-  model_class: # LR/GRUD
   
 distillation_model:
