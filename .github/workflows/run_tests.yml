@@ -11,18 +11,6 @@ jobs:
   code-checks-and-tests:
     runs-on: ubuntu-latest
 
-    strategy:
-      matrix:
-        include:
-          - test-folder: tests_synthetic_data_attacks
-            extras: syn
-          - test-folder: tests_mia
-            extras: mia
-          - test-folder: test_attack_result
-            extras: dev
-          - test-folder: test_report_handler
-            extras: dev
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -35,7 +23,7 @@ jobs:
       - name: Install dependencies from pyproject.toml
         run: |
           python -m pip install --upgrade pip
-          pip install .[${{ matrix.extras }}]
+          pip install .[dev]
 
 <<<<<<< HEAD
       - name: Install dependencies
@@ -57,19 +45,12 @@ jobs:
       - name: Run Tests
         run: |
           pytest --cov=leakpro --cov-report=term-missing:skip-covered \
-          --cov-report=xml --cov-report=html leakpro/tests/${{ matrix.test-folder }}
-  
-      - name: Upload Coverage Report
-        if: always()
-        uses: actions/upload-artifact@v3
-        with:
-          name: coverage-${{ matrix.test-folder }}
-          path: ./coverage.xml
+          --cov-report=xml --cov-report=html leakpro/tests/ cat ./coverage.xml
 
       - name: Create Coverage Badge
         run: |
           mkdir -p badges
-          coverage-badge -o badges/coverage-${{ matrix.test-folder }}.svg -f
+          coverage-badge -o badges/coverage.svg -f
 
       - name: Deploy Coverage Badge to GitHub Pages
         uses: JamesIves/github-pages-deploy-action@v4
