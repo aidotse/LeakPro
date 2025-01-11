@@ -99,7 +99,7 @@ class TestMIAResult:
 
         assert os.path.isdir(save_path)
         assert os.path.exists(f"{save_path}/data.json")
-        assert os.path.exists(f"{save_path}/{name}.png")
+        assert os.path.exists(f"{save_path}/ROC.png")
         assert os.path.exists(f"{save_path}/SignalHistogram.png")
 
         # Test loading
@@ -130,19 +130,18 @@ class TestMIAResult:
         """Test if the LaTeX content is generated correctly."""
 
         result = [mocker.Mock(id="attack-config-1", resultname="test_attack_1",\
-                     fixed_fpr_table={"TPR@1.0%FPR": 0.90, "TPR@0.1%FPR": 0.80, "TPR@0.01%FPR": 0.70, "TPR@0.0%FPR": 0.60},
-                     config={"training_data_fraction": 0.5, "num_shadow_models": 3, "online": True})]
+                     fixed_fpr_table={"TPR@1.0%FPR": 0.90, "TPR@0.1%FPR": 0.80, "TPR@0.01%FPR": 0.70, "TPR@0.0%FPR": 0.60})]
 
-        name = "attack_comparison"
-        filename = f"{self.temp_dir}/{name}"
+        subsection = "attack_comparison"
+        filename = f"{self.temp_dir}/{subsection}"
 
-        latex_content = MIAResult()._latex(result, save_dir=self.temp_dir, save_name=name)
-
+        latex_content = MIAResult()._latex(result, save_dir=self.temp_dir, save_name=subsection)
+        print(latex_content)
         # Check that the subsection is correctly included
         assert "\\subsection{attack comparison}" in latex_content
 
         # Check that the figure is correctly included
-        assert f"\\includegraphics[width=0.8\\textwidth]{{{name}.png}}" in latex_content
+        assert f"\\includegraphics[width=0.8\\textwidth]{{{filename}.png}}" in latex_content
 
         # Check that the table header is correct
         assert "Attack name & attack config & TPR: 1.0\\%FPR & 0.1\\%FPR & 0.01\\%FPR & 0.0\\%FPR" in latex_content
