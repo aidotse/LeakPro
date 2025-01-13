@@ -70,7 +70,6 @@ def dataloaders_ssim_ignite(original_dataloader: DataLoader, recreated_dataloade
     ssim_metric = SSIM(data_range=1.0, device=device)
 
     ssim_metric.reset()
-    total_images = 0
 
     with no_grad():
         # Zip through both dataloaders
@@ -80,7 +79,6 @@ def dataloaders_ssim_ignite(original_dataloader: DataLoader, recreated_dataloade
 
             # Update SSIM metric
             ssim_metric.update((rec_images, orig_images))
-            total_images += orig_images.size(0)
 
     # Compute average SSIM
     return ssim_metric.compute()
