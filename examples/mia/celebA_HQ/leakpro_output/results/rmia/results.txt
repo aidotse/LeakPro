@@ -1,3 +1,0 @@
-{"attack_data_fraction": 0.5, "gamma": 2.0, "num_shadow_models": 3, "offline_a": 0.33, "offline_b": 0.66, "online": true, "temperature": 2, "training_data_fraction": 0.5}
-TPR@1.0%FPR: 0.0000%%, TPR@0.1%FPR: 0.0000%%, TPR@0.01%FPR: 0.0000%%, TPR@0.0%FPR: 0.0000%%
-
