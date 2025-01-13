@@ -1,3 +1,0 @@
-{"boosting": true, "fixed_variance": true, "num_shadow_models": 2, "online": false, "training_data_fraction": 0.3}
-TPR@1.0%FPR: 0.0000%%, TPR@0.1%FPR: 0.0000%%, TPR@0.01%FPR: 0.0000%%, TPR@0.0%FPR: 0.0000%%
-

@@ -1,15 +1,18 @@
+# This code is inspired by the following repository:
+# https://github.com/ndb796/CelebA-HQ-Face-Identity-and-Attributes-Recognition-PyTorch/blob/main/Facial_Identity_Classification_Test_with_CelebA_HQ.ipynb
+
+import os
 import pickle
 
-import torch.nn as nn
-from torchvision import models
-from torch import cuda, device, no_grad, optim, save
+from torch import cuda, device, nn, no_grad, optim, save
+from torchvision.models import ResNet18_Weights, resnet18
 from tqdm import tqdm
 
 
 class ResNet18(nn.Module):
     def __init__(self, num_classes):
         super().__init__()
-        self.model = models.resnet18(pretrained=True)
+        self.model = resnet18(weights = ResNet18_Weights.IMAGENET1K_V1)
         self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
         self.init_params = {"num_classes": num_classes}
 
@@ -78,6 +81,8 @@ def create_trained_model_and_metadata(model,
 
     # Move the model back to the CPU
     model.to("cpu")
+
+    os.makedirs(train_config["run"]["log_dir"], exist_ok=True)
     with open( train_config["run"]["log_dir"]+"/target_model.pkl", "wb") as f:
         save(model.state_dict(), f)
 
