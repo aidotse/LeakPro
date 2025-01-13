@@ -1,5 +1,8 @@
 """Module that contains the AttackScheduler class, which is responsible for creating and executing attacks."""
 
+from leakpro.attacks.gia_attacks.attack_factory_gia import AttackFactoryGIA
+from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
+from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.utils.import_helper import Any, Dict, Self
 from leakpro.utils.logger import logger
@@ -8,7 +11,8 @@ from leakpro.utils.logger import logger
 class AttackScheduler:
     """Class responsible for creating and executing attacks."""
 
-    attack_type_to_factory = {}
+    attack_type_to_factory = {"mia": AttackFactoryMIA,
+                              "gia": AttackFactoryGIA}
 
     def __init__(
         self:Self,
@@ -22,48 +26,28 @@ class AttackScheduler:
 
         """
         configs = handler.configs
+        if configs["audit"]["attack_type"] not in list(self.attack_type_to_factory.keys()):
+            raise ValueError(
+                f"Unknown attack type: {configs['audit']['attack_type']}. "
+                f"Supported attack types: {self.attack_type_to_factory.keys()}"
+            )
 
-        # Create factory
-        attack_type = configs["audit"]["attack_type"].lower()
-        self._initialize_factory(attack_type)
+        # Prepare factory
+        factory = self.attack_type_to_factory[configs["audit"]["attack_type"]]
 
         # Create the attacks
         self.attack_list = list(configs["audit"]["attack_list"].keys())
         self.attacks = []
         for attack_name in self.attack_list:
             try:
-                attack = self.attack_factory.create_attack(attack_name, handler)
+                attack = factory.create_attack(attack_name, handler)
                 self.add_attack(attack)
                 logger.info(f"Added attack: {attack_name}")
             except ValueError as e:
                 logger.info(e)
-                logger.info(f"Failed to create attack: {attack_name}, supported attacks: {self.attack_factory.attack_classes.keys()}")  # noqa: E501
+                logger.info(f"Failed to create attack: {attack_name}, supported attacks: {factory.attack_classes.keys()}")
 
-    def _initialize_factory(self:Self, attack_type:str) -> None:
-        """Conditionally import attack factories based on attack."""
-        if attack_type == "mia":
-            try:
-                from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
-                self.attack_factory = AttackFactoryMIA
-                logger.info("MIA attack factory loaded.")
-            except ImportError as e:
-                logger.error("Failed to import MIA attack module.")
-                raise ImportError("MIA attack module is not available.") from e
-
-        elif attack_type == "gia":
-            try:
-                from leakpro.attacks.gia_attacks.attack_factory_gia import AttackFactoryGIA
-                self.attack_factory = AttackFactoryGIA
-                logger.info("GIA attack factory loaded.")
-            except ImportError as e:
-                logger.error("Failed to import GIA attack module.")
-                raise ImportError("GIA attack module is not available.") from e
-
-        else:
-            logger.error(f"Unsupported attack type: {self.attack_type}")
-            raise ValueError(f"Unsupported attack type: {self.attack_type}. Must be 'mia' or 'gia'.")
-
-    def add_attack(self:Self, attack: Any) -> None:
+    def add_attack(self:Self, attack: AbstractMIA) -> None:
         """Add an attack to the list of attacks."""
         self.attacks.append(attack)
 
