@@ -37,7 +37,7 @@ class HuangConfig:
     epochs: int = 1
     # if to use median pool 2d on images, can improve attack on high higher resolution (100+)
     median_pooling: bool = False
-    # bn regulizer
+    # bn regularizer
     bn_reg: float = 0.00016
     # l2 scale for discouraging high overall pixel intensity
     l2_scale: float = 0
@@ -96,14 +96,14 @@ class Huang(AbstractGIA):
             None
 
         """
-        # add feature hook
+        # add BN feature hook
         self.loss_r_feature_layers = []
 
         for module in self.model.modules():
             if isinstance(module, torch.nn.BatchNorm2d):
                 self.loss_r_feature_layers.append(BNFeatureHook(module))
-        # calculate running bn statistics
-        _ = self.train_fn(self.model, self.client_loader, self.optimizer, self.criterion, self.epochs)
+        # calculate running bn statistics and get client gradient
+        client_gradient = self.train_fn(self.model, self.client_loader, self.optimizer, self.criterion, self.epochs)
 
         # Stop updating running statistics
         for module in self.model.modules():
@@ -112,7 +112,6 @@ class Huang(AbstractGIA):
 
         self.reconstruction, self.reconstruction_loader = get_at_images(self.client_loader)
         self.reconstruction.requires_grad = True
-        client_gradient = self.train_fn(self.model, self.client_loader, self.optimizer, self.criterion, self.epochs)
         self.client_gradient = [p.detach() for p in client_gradient]
 
 
@@ -136,6 +135,7 @@ class Huang(AbstractGIA):
             loss = optimizer.step(closure)
             scheduler.step()
             with torch.no_grad():
+                # force pixels to be in reasonable ranges
                 self.reconstruction.data = torch.max(
                     torch.min(self.reconstruction, (1 - self.data_mean) / self.data_std), -self.data_mean / self.data_std
                     )
@@ -157,18 +157,13 @@ class Huang(AbstractGIA):
 
 
     def gradient_closure(self: Self, optimizer: torch.optim.Optimizer) -> Callable:
-        """Returns a closure function that performs a gradient descent step.
-
-        The closure function computes the gradients, calculates the reconstruction loss,
-        adds a total variation regularization term, and then performs backpropagation.
-        """
+        """Returns a closure function that calculates loss and gradients."""
         def closure() -> torch.Tensor:
             """Computes the reconstruction loss and performs backpropagation.
 
-            This function zeroes out the gradients of the optimizer and the model,
-            computes the gradient and reconstruction loss, logs the reconstruction loss,
-            optionally adds a total variation term, performs backpropagation, and optionally
-            modifies the gradient of the input image.
+            This function computes the gradient and reconstruction loss using cosine similarity between
+            original gradients and gradients from reconstruction images. Total variation, BN update distance
+            to running statistics, and L2 norm are added to the loss based on scalars.
 
             Returns
             -------

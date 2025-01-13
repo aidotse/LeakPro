@@ -115,6 +115,7 @@ class InvertingGradients(AbstractGIA):
             loss = optimizer.step(closure)
             scheduler.step()
             with torch.no_grad():
+                # force pixels to be in reasonable ranges
                 self.reconstruction.data = torch.max(
                     torch.min(self.reconstruction, (1 - self.data_mean) / self.data_std), -self.data_mean / self.data_std
                     )
@@ -177,22 +178,21 @@ class InvertingGradients(AbstractGIA):
             torch.Tensor: The average reconstruction cost.
 
         """
-        if self.top10norms:
-            _, indices = torch.topk(torch.stack([p.norm() for p in reconstruction_gradient], dim=0), 10)
-        else:
-            indices = torch.arange(len(reconstruction_gradient))
-        weights = reconstruction_gradient[0].new_ones(len(reconstruction_gradient))
-        total_costs = 0
-        pnorm = [0, 0]
-        costs = 0
-        for i in indices:
-            costs -= (client_gradient[i] * reconstruction_gradient[i]).sum() * weights[i]
-            pnorm[0] += client_gradient[i].pow(2).sum() * weights[i]
-            pnorm[1] += reconstruction_gradient[i].pow(2).sum() * weights[i]
-        costs = 1 + costs / pnorm[0].sqrt() / pnorm[1].sqrt()
+        with torch.no_grad():
+            if self.top10norms:
+                _, indices = torch.topk(torch.stack([p.norm() for p in reconstruction_gradient], dim=0), 10)
+            else:
+                indices = torch.arange(len(reconstruction_gradient))
+            filtered_trial_gradients = [reconstruction_gradient[i] for i in indices]
+            filtered_input_gradients = [client_gradient[i] for i in indices]
+        costs = sum((x * y).sum() for x, y in zip(filtered_input_gradients,
+                                                  filtered_trial_gradients))
 
-        total_costs += costs
-        return total_costs / len(client_gradient)
+        trial_norm = sum(x.pow(2).sum()
+                         for x in filtered_trial_gradients).sqrt()
+        input_norm = sum(y.pow(2).sum()
+                         for y in filtered_input_gradients).sqrt()
+        return 1 - (costs / trial_norm / input_norm)
 
     def _configure_attack(self: Self, configs: dict) -> None:
         pass

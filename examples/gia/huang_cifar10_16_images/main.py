@@ -8,8 +8,8 @@ import random
 
 from leakpro.attacks.gia_attacks.huang import HuangConfig
 from leakpro.fl_utils.gia_train import train
-from leakpro.fl_utils.model_utils import seed_everything
 from leakpro.run import run_huang
+from leakpro.utils.seed import seed_everything
 from model import ResNet, PreActBlock
 
 if __name__ == "__main__":
