@@ -1,6 +1,5 @@
 """Utils used for GIA training."""
 from collections import OrderedDict
-from copy import deepcopy
 from functools import partial
 
 import torch
@@ -43,7 +42,7 @@ class MetaModule(nn.Module):
         """Init with network."""
         gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
         super().__init__()
-        self.net = deepcopy(net)
+        self.net = net
         self.net.to(gpu_or_cpu)
         self.parameters = OrderedDict(self.net.named_parameters())
         self.original_forwards = {}  # Store original forward methods here

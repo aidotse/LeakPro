@@ -169,8 +169,9 @@ data/CINIC*
 attack_objects/
 
 # Ignore outputs
-leakpro_output/*
+leakpro_output
 *.pth
 *.png
 nohup.out
 img_align_celeba
+optuna_results.txt
