@@ -25,6 +25,11 @@ class AbstractInputHandler(ABC):
         """Get the optimizer used for the target model to be used in model training."""
         pass
 
+    # @abstractmethod
+    # def get_shadow_model_type(self:Self) -> str:
+    #     """Get the type of shadow model to be used in the attack."""
+    #     pass
+
     @abstractmethod
     def train(
         self: Self,
