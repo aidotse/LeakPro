@@ -1,59 +1,45 @@
-lint = ["ruff>=0.0.220"] # MIT License (MIT)
-
-[build-system]
-requires = ["setuptools>=42", "wheel"]
-build-backend = "setuptools.build_meta"
 
 [project]
 name = "leakpro"
-version = "0.1"
+version = "0.1.0"
 description = "A package for privacy risk analysis"
-authors = [{ name = "LeakPro team", email = "johan.ostman@ai.se" }]
+authors = [{name = "LeakPro team", email = "johan.ostman@ai.se"}]
 readme = "README.md"
 license = {file="LICENSE"}
-keywords = [
-    "Privacy",
-    "Risk analysis",
-    "Centralized learning",
-    "Federated learning",
-    "Synthethic data",
-    "Machine learning",
-]
-classifiers = [
-    "Natural Language :: English",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-]
-
 requires-python = '>=3.8,<3.13'
 
 dependencies = [
   "numpy",
   "pandas",
   "scipy",
-  "scikit-learn",
   "matplotlib",
   "seaborn",
-  "pillow",
-  "torch",
-  "torchvision",
-  "torchmetrics",
   "dotmap",
-  "loguru",
   "jinja2",
   "tqdm",
-  "pyyaml",
-  "numba",
-  "pydantic",
   "joblib",
+  "pyyaml",
+  "scikit-learn",
+]
+
+[project.optional-dependencies]
+mia = ["torch", "torchvision"]
+synthetic = ["numba", "pydantic"]
+federated = ["torch", "torchvision", "torchmetrics",]
+dev = [
   "pytest",
-  "pytest-mock",
+  "pytest-cov",
+  "pytorch-ignite",
   "gdown",
   "optuna",
-  "pytorch-ignite",
+  "pytest-mock",
+  "coverage-badge",
+  "ruff",
+  "torch",  # from mia & federated
+  "torchvision",  # from mia & federated
+  "torchmetrics",  # from federated
+  "numba",  # from synthetic
+  "pydantic",  # from synthetic
 ]
 
 [tool.setuptools]
@@ -67,33 +53,9 @@ include = ["leakpro*"]
 line-length = 130
 target-version = "py39"
 
-lint.select = [
-  "ANN", # flake8-annotations
-  "ARG", # flake8-unused-arguments
-  "B",   # flake8-bugbear
-  "C4",  # flake8-comprehensions
-  "C90", # mccabe
-  "D",   # pydocstyle
-  "DTZ", # flake8-datetimez
-  "E",   # pycodestyle
-  "ERA", # eradicate
-  "F",   # Pyflakes
-  "I",   # isort
-  "N",   # pep8-naming
-  "PD",  # pandas-vet
-  "PGH", # pygrep-hooks
-  "PLC", # Pylint
-  "PLE", # Pylint
-  "PLR", # Pylint
-  "PLW", # Pylint
-  "PT",  # flake8-pytest-style
-  "Q",   # flake8-quotes
-  "RET", # flake8-return
-  "S",   # flake8-bandit
-  "SIM", # flake8-simplify
-  "T20", # flake8-print
-  "TID", # flake8-tidy-imports
-  "W",   # pycodestyle
+select = [
+  "ANN", "ARG", "B", "C4", "C90", "D", "DTZ", "E", "ERA", "F", "I", "N", "PD", "PGH", "PLC",
+  "PLE", "PLR", "PLW", "PT", "Q", "RET", "S", "SIM", "T20", "TID", "W",
 ]
 
 exclude = [
