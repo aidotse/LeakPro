@@ -2,7 +2,6 @@
 import copy
 from typing import Callable
 
-from leakpro.utils.seed import seed_everything
 import optuna
 import torch
 from torch import Tensor
@@ -12,6 +11,7 @@ from torch.utils.data import DataLoader, Dataset, random_split
 from leakpro.attacks.gia_attacks.huang import Huang, HuangConfig
 from leakpro.attacks.gia_attacks.invertinggradients import InvertingConfig, InvertingGradients
 from leakpro.utils.logger import logger
+from leakpro.utils.seed import seed_everything
 
 
 def run_huang(model: Module, client_data: DataLoader, train_fn: Callable,

@@ -1,8 +1,6 @@
 """Utils used for model functionality in GIAs."""
 
-import random
 
-import numpy as np
 import torch
 
 from leakpro.utils.import_helper import Self
