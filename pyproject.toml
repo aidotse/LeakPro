@@ -20,6 +20,9 @@ dependencies = [
   "joblib",
   "pyyaml",
   "scikit-learn",
+  "pytorch-ignite",
+  "gdown",
+  "optuna",
 ]
 
 [project.optional-dependencies]
@@ -29,9 +32,6 @@ federated = ["torch", "torchvision", "torchmetrics",]
 dev = [
   "pytest",
   "pytest-cov",
-  "pytorch-ignite",
-  "gdown",
-  "optuna",
   "pytest-mock",
   "coverage-badge",
   "ruff",

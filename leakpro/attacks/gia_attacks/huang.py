@@ -4,6 +4,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Union
 
+import optuna
 import torch
 from torch import Tensor
 from torch.nn import CrossEntropyLoss, Module
@@ -49,26 +50,21 @@ class Huang(AbstractGIA):
     def __init__(self: Self, model: Module, client_loader: DataLoader, train_fn: Callable,
                  data_mean: Tensor, data_std: Tensor, configs: HuangConfig) -> None:
         super().__init__()
-        self.model = model
+        self.original_model = model
+        self.model = deepcopy(self.original_model)
+        self.best_loss = float("inf")
+        self.best_reconstruction = None
+        self.best_reconstruction_round = None
+
+        self.configs = configs
+
         self.client_loader = client_loader
         self.train_fn = train_fn
         self.data_mean = data_mean
         self.data_std = data_std
-        self.t_v_scale = configs.total_variation
-        self.attack_lr = configs.attack_lr
-        self.iterations = configs.at_iterations
-        self.optimizer = configs.optimizer
-        self.criterion = configs.criterion
-        self.epochs = configs.epochs
-        self.median_pooling = configs.median_pooling
-        self.bn_reg = configs.bn_reg
-        self.l2_scale = configs.l2_scale
 
-        self.best_loss = float("inf")
-        self.best_reconstruction = None
-        self.best_reconstruction_round = None
-        logger.info("Evaluating with Huang. et al initialized.")
         self.prepare_attack()
+        logger.info("Evaluating with Huang. et al initialized.")
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
@@ -103,7 +99,8 @@ class Huang(AbstractGIA):
             if isinstance(module, torch.nn.BatchNorm2d):
                 self.loss_r_feature_layers.append(BNFeatureHook(module))
         # calculate running bn statistics and get client gradient
-        client_gradient = self.train_fn(self.model, self.client_loader, self.optimizer, self.criterion, self.epochs)
+        client_gradient = self.train_fn(self.model, self.client_loader,
+                                        self.configs.optimizer, self.configs.criterion, self.configs.epochs)
 
         # Stop updating running statistics
         for module in self.model.modules():
@@ -123,12 +120,12 @@ class Huang(AbstractGIA):
             GIAResults: Container for results on GIA attacks.
 
         """
-        optimizer = torch.optim.Adam([self.reconstruction], lr=self.attack_lr)
+        optimizer = torch.optim.Adam([self.reconstruction], lr=self.configs.attack_lr)
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
-                                                            milestones=[self.iterations // 2.667, self.iterations // 1.6,
-
-                                                                        self.iterations // 1.142], gamma=0.1)
-        for i in range(self.iterations):
+                                                            milestones=[self.configs.at_iterations // 2.667,
+                                                                        self.configs.at_iterations // 1.6,
+                                                                        self.configs.at_iterations // 1.142], gamma=0.1)
+        for i in range(self.configs.at_iterations):
             # loss function which does training and compares distance from reconstruction training to the real training.
             closure = self.gradient_closure(optimizer)
 
@@ -139,21 +136,22 @@ class Huang(AbstractGIA):
                 self.reconstruction.data = torch.max(
                     torch.min(self.reconstruction, (1 - self.data_mean) / self.data_std), -self.data_mean / self.data_std
                     )
-                if (i +1) % 500 == 0 and self.median_pooling:
+                if (i +1) % 500 == 0 and self.configs.median_pooling:
                     self.reconstruction.data = MedianPool2d(kernel_size=3, stride=1, padding=1, same=False)(self.reconstruction)
             if i % 250 == 0:
                 logger.info(f"Iteration {i}, loss {loss}")
-                yield i, dataloaders_ssim_ignite(self.client_loader, self.reconstruction_loader)
+                yield i, dataloaders_ssim_ignite(self.client_loader, self.reconstruction_loader), None
             # Chose image who has given least loss
             if loss < self.best_loss:
                 self.best_loss = loss
                 self.best_reconstruction = deepcopy(self.reconstruction_loader)
                 self.best_reconstruction_round = i
                 logger.info(f"New best loss: {loss} on round: {i}")
-
-        return GIAResults(self.client_loader, self.best_reconstruction,
-                          ssim_score=dataloaders_ssim_ignite(self.client_loader, self.reconstruction_loader),
+        ssim_score = dataloaders_ssim_ignite(self.client_loader, self.reconstruction_loader)
+        gia_result = GIAResults(self.client_loader, self.best_reconstruction,
+                          ssim_score=ssim_score,
                           data_mean=self.data_mean, data_std=self.data_std)
+        yield i, ssim_score, gia_result
 
 
     def gradient_closure(self: Self, optimizer: torch.optim.Optimizer) -> Callable:
@@ -172,7 +170,8 @@ class Huang(AbstractGIA):
             """
             optimizer.zero_grad()
             self.model.zero_grad()
-            gradient = self.train_fn(self.model, self.reconstruction_loader, self.optimizer, self.criterion, self.epochs)
+            gradient = self.train_fn(self.model, self.reconstruction_loader, self.configs.optimizer,
+                                     self.configs.criterion, self.configs.epochs)
             rec_loss = self.reconstruction_costs(gradient, self.client_gradient)
 
             loss_r_feature = sum([
@@ -181,9 +180,9 @@ class Huang(AbstractGIA):
             ])
 
             # Add the TV loss term to penalize large variations between pixels, encouraging smoother images.
-            rec_loss += self.t_v_scale * total_variation(self.reconstruction)
-            rec_loss += self.bn_reg * loss_r_feature
-            rec_loss += self.l2_scale * l2_norm(self.reconstruction)
+            rec_loss += self.configs.total_variation * total_variation(self.reconstruction)
+            rec_loss += self.configs.bn_reg * loss_r_feature
+            rec_loss += self.configs.l2_scale * l2_norm(self.reconstruction)
             rec_loss.backward()
             self.reconstruction.grad.sign_()
             return rec_loss
@@ -215,3 +214,23 @@ class Huang(AbstractGIA):
 
     def _configure_attack(self: Self, configs: dict) -> None:
         pass
+
+    def suggest_parameters(self: Self, trial: optuna.trial.Trial) -> None:
+        """Suggest parameters to chose and range for optimization for the Huang attack."""
+        total_variation = trial.suggest_loguniform("total_variation", 1e-6, 1e-1)
+        bn_reg = trial.suggest_loguniform("bn_reg", 1e-4, 1e-1)
+        self.configs.total_variation = total_variation
+        self.configs.bn_reg = bn_reg
+
+    def reset_attack(self: Self) -> None:
+        """Reset attack to initial state."""
+        self.best_loss = float("inf")
+        self.best_reconstruction = None
+        self.best_reconstruction_round = None
+        self.model = deepcopy(self.original_model)
+        self.prepare_attack()
+        logger.info("Huang attack reset to initial state.")
+
+    def get_configs(self: Self) -> dict:
+        """Return configs used for attack."""
+        return self.configs

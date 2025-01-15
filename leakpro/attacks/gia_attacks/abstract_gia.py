@@ -2,6 +2,8 @@
 
 from abc import ABC, abstractmethod
 
+import optuna
+
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.utils.import_helper import Self
 
@@ -70,4 +72,19 @@ class AbstractGIA(ABC):
             Result(s) of the metric.
 
         """
+        pass
+
+    @abstractmethod
+    def reset_attack(self: Self) -> None:
+        """Reset attack to its initial state."""
+        pass
+
+    @abstractmethod
+    def suggest_parameters(self: Self, trial: optuna.trial.Trial) -> None:
+        """Apply and suggest new hyperparameters for the attack using optuna trial."""
+        pass
+
+    @abstractmethod
+    def get_configs(self:Self) -> dict:
+        """Get the configs used for the attack."""
         pass
