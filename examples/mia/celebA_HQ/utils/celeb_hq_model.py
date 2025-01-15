@@ -41,13 +41,14 @@ def create_trained_model_and_metadata(model,
     lr = train_config["train"]["learning_rate"]
     momentum = train_config["train"]["momentum"]
     epochs = train_config["train"]["epochs"]
+    weight_decay = train_config["train"]["weight_decay"]
 
     device_name = device("cuda" if cuda.is_available() else "cpu")
     model.to(device_name)
     model.train()
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum)
+    optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay)
     train_losses, train_accuracies = [], []
     test_losses, test_accuracies = [], []
 
