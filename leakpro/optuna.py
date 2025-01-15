@@ -28,7 +28,7 @@ def optuna_optimal_hyperparameters(attack_object: Union[AbstractGIA, AbstractMIA
                     break
                 # save results if not pruned
                 if result_object is not None:
-                    result.save(name="optuna", path="./leakpro_output/results", config=attack_object.get_configs())
+                    result_object.save(name="optuna", path="./leakpro_output/results", config=attack_object.get_configs())
                     return intermediary_results
         elif isinstance(result, MIAResult):
             return result.accuracy # add something reasonable to optimize toward here
