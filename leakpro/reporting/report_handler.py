@@ -175,7 +175,7 @@ class ReportHandler():
         # Compile the PDF
         self._compile_pdf()
 
-        # Empty result variables
+        # Reset result variables
         self._reset_result()
 
     def _init_pdf(self:Self) -> None:
@@ -213,6 +213,6 @@ class ReportHandler():
             self.logger.info("Make sure to install pdflatex with apt install texlive-latex-base")
 
     def _reset_result(self:Self) -> None:
-        self.results = []
+        del self.results
         for key in self.pdf_results:
             self.pdf_results[key] = []
