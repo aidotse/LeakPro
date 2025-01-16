@@ -118,7 +118,7 @@ class SinglingOutResults(BaseModel):
             """
         for res in results:
             res.plot(show=False, save=True, save_path=save_dir, save_name=res.prefix)
-            latex += _latex(save_dir=save_dir, save_name=res.prefix)
+            latex += _latex(save_name=res.prefix)
         return latex
 
 def check_for_int_value(*, x: int) -> None:

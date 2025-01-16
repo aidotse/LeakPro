@@ -274,7 +274,7 @@ class LinkabilityResults(BaseModel):
             """
         for res in results:
             res.plot(show=False, save=True, save_path=save_dir, save_name="linkability")
-            latex += _latex(save_dir=save_dir, save_name="linkability")
+            latex += _latex(save_name="linkability")
         return latex
 
 def linkability_risk_evaluation(

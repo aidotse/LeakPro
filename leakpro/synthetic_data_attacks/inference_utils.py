@@ -122,7 +122,7 @@ class InferenceResults(BaseModel):
         for res in results:
             name = "inference_"+("worst_case" if res.worst_case_flag else "base_case")
             res.plot(show=False, save=True, save_path=save_dir, save_name=name)
-            latex += _latex(save_dir=save_dir, save_name=name)
+            latex += _latex(save_name=name)
         return latex
 
 def get_inference_prefix(*, worst_case_flag: bool) -> str:
