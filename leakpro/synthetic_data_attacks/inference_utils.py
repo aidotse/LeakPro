@@ -110,9 +110,8 @@ class InferenceResults(BaseModel):
     def create_results(results: list, save_dir: str = "./") -> str:
         """Result method for InferenceResults."""
         latex = ""
-        def _latex(save_dir: str, save_name: str) -> str:
+        def _latex(save_name: str) -> str:
             """Latex method for InferenceResults."""
-            # filename = f"{save_dir}/{save_name}.png"
             return f"""
             \\subsection{{{" ".join(save_name.split("_"))}}}
             \\begin{{figure}}[ht]

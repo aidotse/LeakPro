@@ -106,12 +106,9 @@ class SinglingOutResults(BaseModel):
         latex = ""
 
         def _latex(
-                save_dir: str,
                 save_name: str,
             ) -> str:
             """Latex method for SinglingOutResults."""
-
-            # filename = f"{save_dir}/{save_name}.png"
             return f"""
             \\subsection{{{" ".join(save_name.split("_"))}}}
             \\begin{{figure}}[ht]
