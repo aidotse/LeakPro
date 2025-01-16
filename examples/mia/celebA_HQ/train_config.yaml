@@ -8,7 +8,7 @@ train: # Configuration for training
   optimizer: SGD # String which indicates the optimizer. We support Adam and SGD. For speedyresnet, it uses its own optimizer.
   learning_rate: 0.001 # Float number for indicating learning rate for training the target model. For speedyresnet, it uses its own learning_rate.
   momentum: 0.9
-  weight_decay: 0.1 # Float number for indicating weight decay for training the target model. For speedyresnet, it uses its own weight_decay.
+  weight_decay: 0.001 # Float number for indicating weight decay for training the target model. For speedyresnet, it uses its own weight_decay.
 
 data: # Configuration for data
   dataset: celebA_HQ # String indicates the name of the dataset
