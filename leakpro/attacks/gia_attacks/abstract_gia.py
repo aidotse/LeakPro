@@ -112,17 +112,18 @@ class AbstractGIA(ABC):
                     )
                 if (i +1) % 500 == 0 and median_pooling:
                     reconstruction.data = MedianPool2d(kernel_size=3, stride=1, padding=1, same=False)(reconstruction)
-            if i % 250 == 0:
-                logger.info(f"Iteration {i}, loss {loss}")
-                yield i, dataloaders_ssim_ignite(client_loader, reconstruction_loader), None
             # Chose image who has given least loss
             if loss < self.best_loss:
                 self.best_loss = loss
                 self.best_reconstruction = deepcopy(reconstruction_loader)
                 self.best_reconstruction_round = i
                 logger.info(f"New best loss: {loss} on round: {i}")
-        ssim_score = dataloaders_ssim_ignite(client_loader, reconstruction_loader)
+            if i % 250 == 0:
+                logger.info(f"Iteration {i}, loss {loss}")
+                yield i, dataloaders_ssim_ignite(client_loader, self.best_reconstruction), None
+
+        ssim_score = dataloaders_ssim_ignite(client_loader, self.best_reconstruction)
         gia_result = GIAResults(client_loader, self.best_reconstruction,
-                          dataloaders_psnr(client_loader, reconstruction_loader), ssim_score=ssim_score,
+                          dataloaders_psnr(client_loader, self.best_reconstruction), ssim_score=ssim_score,
                           data_mean=data_mean, data_std=data_std, config=configs)
         yield i, ssim_score, gia_result

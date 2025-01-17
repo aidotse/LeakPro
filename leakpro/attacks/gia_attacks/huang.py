@@ -166,8 +166,8 @@ class Huang(AbstractGIA):
 
     def suggest_parameters(self: Self, trial: optuna.trial.Trial) -> None:
         """Suggest parameters to chose and range for optimization for the Huang attack."""
-        total_variation = trial.suggest_loguniform("total_variation", 1e-6, 1e-1)
-        bn_reg = trial.suggest_loguniform("bn_reg", 1e-4, 1e-1)
+        total_variation = trial.suggest_float("total_variation", 1e-6, 1e-1, log=True)
+        bn_reg = trial.suggest_float("bn_reg", 1e-4, 1e-1, log=True)
         self.configs.total_variation = total_variation
         self.configs.bn_reg = bn_reg
 

@@ -142,7 +142,7 @@ class InvertingGradients(AbstractGIA):
 
     def suggest_parameters(self: Self, trial: optuna.trial.Trial) -> None:
         """Suggest parameters to chose and range for optimization for the Huang attack."""
-        total_variation = trial.suggest_loguniform("total_variation", 1e-6, 1e-1)
+        total_variation = trial.suggest_float("total_variation", 1e-6, 1e-1, log=True)
         self.configs.total_variation = total_variation
 
     def reset_attack(self: Self) -> None:
@@ -152,7 +152,7 @@ class InvertingGradients(AbstractGIA):
         self.best_reconstruction_round = None
         self.model = deepcopy(self.original_model)
         self.prepare_attack()
-        logger.info("Huang attack reset to initial state.")
+        logger.info("Inverting attack reset to initial state.")
 
     def get_configs(self: Self) -> dict:
         """Return configs used for attack."""
