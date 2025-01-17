@@ -9,16 +9,17 @@ from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.metrics.attack_result import MIAResult
 from leakpro.utils.logger import logger
+from leakpro.utils.seed import seed_everything
 
 
 def optuna_optimal_hyperparameters(attack_object: Union[AbstractGIA, AbstractMIA], n_warmup_steps:int= 5,
-                                   n_trials:int=50, direction:str="maximize"
+                                   n_trials:int=50, direction:str="maximize", seed:int = 1234
                                    ) -> optuna.study.Study:
     """Find optimal hyperparameters for an attack object."""
     def objective(trial: optuna.trial.Trial) -> Tensor:
         attack_object.reset_attack()
         attack_object.suggest_parameters(trial)
-
+        seed_everything(seed)
         result = attack_object.run_attack()
         if isinstance(result, Generator):
             for step, intermediary_results, result_object in result:
