@@ -42,8 +42,8 @@ def optuna_optimal_hyperparameters(attack_object: Union[AbstractGIA, AbstractMIA
     study.optimize(objective, n_trials=n_trials)
 
     # Display and save the results
-    logger.info("Best hyperparameters:", study.best_params)
-    logger.info("Best optimized value:", study.best_value)
+    logger.info(f"Best hyperparameters: {study.best_params}")
+    logger.info(f"Best optimized value: {study.best_value}")
 
     results_file = "optuna_results.txt"
     with open(results_file, "w") as f:
