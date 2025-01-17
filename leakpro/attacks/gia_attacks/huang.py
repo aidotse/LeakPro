@@ -2,7 +2,6 @@
 from collections.abc import Generator
 from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Union
 
 import optuna
 import torch

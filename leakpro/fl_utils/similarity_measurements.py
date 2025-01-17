@@ -1,13 +1,9 @@
 """Diverse util functions."""
 import torch
-import torch.nn.functional as f
 from ignite.metrics import SSIM
-from torch import Tensor, abs, cuda, mean, nn, no_grad, norm
-from torch.nn.modules.utils import _pair, _quadruple
+from torch import Tensor, abs, cuda, mean, no_grad, norm
 from torch.utils.data import DataLoader
 from torchmetrics.functional import peak_signal_noise_ratio
-
-from leakpro.utils.import_helper import Self
 
 
 def cosine_similarity_weights(client_gradient: torch.Tensor, reconstruction_gradient: torch.Tensor,
