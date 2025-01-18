@@ -19,10 +19,7 @@ class CelebAHQInputHandler(AbstractInputHandler):
 
     def get_optimizer(self, model: torch.nn.Module) -> optim.Optimizer:
         """Set the optimizer for the model."""
-        learning_rate =0.01  # Default learning rate
-        momentum =  0.9  # Default momentum
-        weight_decay = 0.0001  # Default weight decay
-        return optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum, weight_decay=weight_decay)
+        return optim.SGD(model.parameters())
 
     def train(
         self,
