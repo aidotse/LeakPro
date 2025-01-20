@@ -23,7 +23,7 @@ class InvertingConfig:
     """Possible configs for the Inverting Gradients attack."""
 
     # total variation scale for smoothing the reconstructions after each iteration
-    total_variation: float = 1.0e-06
+    tv_reg: float = 1.0e-06
     # learning rate on the attack optimizer
     attack_lr: float = 0.1
     # iterations for the attack steps
@@ -131,7 +131,7 @@ class InvertingGradients(AbstractGIA):
             rec_loss = cosine_similarity_weights(gradient, self.client_gradient, self.configs.top10norms)
 
             # Add the TV loss term to penalize large variations between pixels, encouraging smoother images.
-            rec_loss += (self.configs.total_variation * total_variation(self.reconstruction))
+            rec_loss += (self.configs.tv_reg * total_variation(self.reconstruction))
             rec_loss.backward()
             self.reconstruction.grad.sign_()
             return rec_loss
@@ -141,9 +141,9 @@ class InvertingGradients(AbstractGIA):
         pass
 
     def suggest_parameters(self: Self, trial: optuna.trial.Trial) -> None:
-        """Suggest parameters to chose and range for optimization for the Huang attack."""
+        """Suggest parameters to chose and range for optimization for the Inverting Gradient attack."""
         total_variation = trial.suggest_float("total_variation", 1e-6, 1e-1, log=True)
-        self.configs.total_variation = total_variation
+        self.configs.tv_reg = total_variation
 
     def reset_attack(self: Self) -> None:
         """Reset attack to initial state."""

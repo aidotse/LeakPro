@@ -12,10 +12,26 @@ from leakpro.utils.logger import logger
 from leakpro.utils.seed import seed_everything
 
 
-def optuna_optimal_hyperparameters(attack_object: Union[AbstractGIA, AbstractMIA], n_warmup_steps:int= 5,
+def optuna_optimal_hyperparameters(attack_object: Union["AbstractGIA", "AbstractMIA"], n_warmup_steps:int= 5,
                                    n_trials:int=50, direction:str="maximize", seed:int = 1234
                                    ) -> optuna.study.Study:
-    """Find optimal hyperparameters for an attack object."""
+    """Find optimal hyperparameters for an attack object.
+
+    Args:
+    ----
+            attack_object (Union[AbstractGIA, AbstractMIA]): Attack object to find optimal hyperparameters for.
+            n_warmup_steps (int): Number of steps before pruning of experiments will be available.
+            n_trials (int): Number of trials to find the optimal hyperparameters.
+            direction (str): Direction of the optimization, minimize or maximize, depending on the optuna objective.
+            seed (int): Random seed to run the attack from.
+
+    """
+    # ensure correct attack object type
+    if not isinstance(attack_object, (AbstractGIA, AbstractMIA)):
+        raise TypeError(
+            f"Expected attack_object to be of type AbstractGIA or AbstractMIA, "
+            f"but got {type(attack_object).__name__} instead."
+        )
     def objective(trial: optuna.trial.Trial) -> Tensor:
         attack_object.reset_attack()
         attack_object.suggest_parameters(trial)

@@ -69,7 +69,8 @@ class AbstractGIA(ABC):
 
         Returns
         -------
-            Generator with intermediary results and final GiaResults.
+            Generator with intermediary results to allow for lazy evaluation during
+            hyperparameter turning, and final GiaResults.
 
         """
         pass
@@ -95,6 +96,7 @@ class AbstractGIA(ABC):
                             ) -> Generator[tuple[int, Tensor, GIAResults]]:
         """Generic attack loop for GIA's."""
         optimizer = torch.optim.Adam([reconstruction], lr=attack_lr)
+        # reduce LR every 1/3 of total iterations
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
                                                             milestones=[at_iterations // 2.667,
                                                                         at_iterations // 1.6,
@@ -123,7 +125,8 @@ class AbstractGIA(ABC):
                 yield i, dataloaders_ssim_ignite(client_loader, self.best_reconstruction), None
 
         ssim_score = dataloaders_ssim_ignite(client_loader, self.best_reconstruction)
+        psnr_score = dataloaders_psnr(client_loader, self.best_reconstruction)
         gia_result = GIAResults(client_loader, self.best_reconstruction,
-                          dataloaders_psnr(client_loader, self.best_reconstruction), ssim_score=ssim_score,
+                          psnr_score=psnr_score, ssim_score=ssim_score,
                           data_mean=data_mean, data_std=data_std, config=configs)
         yield i, ssim_score, gia_result

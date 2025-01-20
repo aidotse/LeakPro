@@ -77,7 +77,7 @@ def run_inverting_audit(model: Module, dataset: Dataset,
         client_data, _ = random_split(dataset, [num_batches * batch_size, total_images - num_batches * batch_size])
         client_loader = DataLoader(client_data, batch_size=batch_size, shuffle=False)
         for tv in total_variations:
-            config.total_variation = tv
+            config.tv_reg = tv
             for epochs in epochs_config:
                 config.epochs = epochs
                 # Run the inverting attack with current client_loader and config

@@ -4,7 +4,7 @@ from cifar import get_cifar10_loader
 
 from leakpro.attacks.gia_attacks.huang import Huang, HuangConfig
 from leakpro.fl_utils.gia_train import train
-from leakpro.optuna import optuna_optimal_hyperparameters
+from leakpro.hyperparameter_tuning.optuna import optuna_optimal_hyperparameters
 from model import ResNet, PreActBlock
 
 if __name__ == "__main__":
