@@ -49,6 +49,23 @@ class TestReportHandler:
         self.report_handler._init_pdf()
         assert ("documentclass" and "begin") in self.report_handler.latex_content
 
+        # Add body to latex content        
+        self.report_handler.latex_content += "body text example"
+
         self.report_handler._compile_pdf()
         assert "end" in self.report_handler.latex_content
         assert os.path.isfile(f"{self.report_handler.report_dir}/LeakPro_output.tex")
+        assert os.path.isfile(f"{self.report_handler.report_dir}/LeakPro_output.pdf")
+
+    def test_create_pdf(self:Self) -> None:
+        
+        report_handler = ReportHandler(report_dir=self.temp_dir.name, logger=self.logger)
+
+        # Load results
+        report_handler.pdf_results["MIAResult"] = "test_result"
+
+        # Create pdf report
+        report_handler.create_report()
+
+        assert os.path.isfile(f"{self.report_handler.report_dir}/LeakPro_output.pdf")
+        
