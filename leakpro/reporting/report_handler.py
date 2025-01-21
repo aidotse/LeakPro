@@ -190,6 +190,12 @@ class ReportHandler():
     def _compile_pdf(self:Self) -> None:
         """Method to compile PDF."""
 
+        # Support for an empty pdf to compile
+        if self.latex_content.strip()[-16:] == "\\begin{document}":
+            self.latex_content += "\\null"
+            self.logger.info("Warning! You are about to compile an empty pdf.")
+            self.logger.info("Please ensure that you append your results!")
+
         self.latex_content += """
         \\end{document}
         """

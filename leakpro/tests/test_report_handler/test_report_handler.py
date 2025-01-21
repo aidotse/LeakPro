@@ -58,7 +58,6 @@ class TestReportHandler:
         assert os.path.isfile(f"{self.report_handler.report_dir}/LeakPro_output.pdf")
 
     def test_create_pdf(self:Self) -> None:
-        
         report_handler = ReportHandler(report_dir=self.temp_dir.name, logger=self.logger)
 
         # Load results
@@ -68,4 +67,11 @@ class TestReportHandler:
         report_handler.create_report()
 
         assert os.path.isfile(f"{self.report_handler.report_dir}/LeakPro_output.pdf")
-        
+
+    def test_create_empty_pdf(self:Self) -> None:
+        report_handler = ReportHandler(report_dir=self.temp_dir.name, logger=self.logger)
+
+        report_handler._init_pdf()
+        report_handler._compile_pdf()
+
+        assert os.path.isfile(f"{self.report_handler.report_dir}/LeakPro_output.pdf")
