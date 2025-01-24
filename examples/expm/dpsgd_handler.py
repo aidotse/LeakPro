@@ -5,6 +5,10 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from sklearn.metrics import accuracy_score
 from leakpro import AbstractInputHandler
+import os
+import pickle
+from opacus.accountants.utils import get_noise_multiplier
+from opacus import PrivacyEngine, GradSampleModule
 
 
 class MimicInputHandlerGRU(AbstractInputHandler):
@@ -37,8 +41,52 @@ class MimicInputHandlerGRU(AbstractInputHandler):
         optimizer: optim.Optimizer = None,
         epochs: int = None,
     ) -> dict:
-        
-        """Model training procedure."""
+
+        if self.configs['audit']['dpsgd']:
+            print("Training shadow models with DP-SGD")
+            dpsgd_path = self.configs['audit']['dpsgd']['dpsgd_path']
+
+            sample_rate = 1/len(dataloader) 
+            # Check if the file exists
+            if os.path.exists(dpsgd_path):
+                # Open and read the pickle file
+                with open(dpsgd_path, "rb") as file:
+                    data = pickle.load(file)
+                print("Pickle file loaded successfully!")
+                print("Data:", data)
+            else:
+                print(f"File not found at: {dpsgd_path}")
+            try:
+                noise_multiplier = get_noise_multiplier(target_epsilon = 2,
+                                                    target_delta = data['delta'],
+                                                    sample_rate = data['sample_rate'],
+                                                    epochs = 21,
+                                                    epsilon_tolerance = data['epsilon_tolerance'],
+                                                    accountant = 'prv',
+                                                    eps_error = data['eps_error'])
+            except:
+                # the prv accountant is not robust to large epsilon (even epsilon = 10)
+                # so we will use rdp when it fails, so the actual epsilon may be slightly off
+                # see https://github.com/pytorch/opacus/issues/604
+                noise_multiplier = get_noise_multiplier(target_epsilon = 2,
+                                                        target_delta = data['delta'],
+                                                        sample_rate = sample_rate,
+                                                        epochs = 21,
+                                                        epsilon_tolerance = 0.01,
+                                                        accountant = 'rdp')
+            # make the model private
+            privacy_engine = PrivacyEngine(accountant = 'prv')
+            model, optimizer, dataloader = privacy_engine.make_private(
+                module=model,
+                optimizer=optimizer,
+                data_loader=dataloader,
+                noise_multiplier=noise_multiplier,
+                max_grad_norm=1,
+            )
+
+
+
+
         device_name = device("cuda" if cuda.is_available() else "cpu")
         model.to(device_name)
         model.train()

@@ -2,7 +2,7 @@ import os
 import sys
 
 from torch import zeros
-from utils.data_handler import get_mimic_dataloaders, get_mimic_dataset
+from examples.expm.utils.data_preparation import get_mimic_dataloaders, get_mimic_dataset
 from opacus.accountants.utils import get_noise_multiplier
 from utils.gru_model_handler import *
 
