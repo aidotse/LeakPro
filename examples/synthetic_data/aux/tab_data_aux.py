@@ -1,11 +1,18 @@
 """Module with function to modify TAB dataset to be used with synthetic text PII scanner."""
 from typing import Any, Callable, Dict, List
+import json
+import requests
 
 from leakpro.synthetic_data_attacks.syn_text_pii_scanner import utils
 
+def get_json_from_url(*, url: str) -> Any:
+    response = requests.get(url)
+    if response.status_code != 200:
+        raise Exception(f'Could not get url: {url}')
+    return json.loads(response.text)
 
 def tab_data_treatment(*,
-    tab_path: str,
+    data: List[Dict],
     only_first_annotator_flag: bool,
     include_tasks_flag: bool = False
 ) -> List[Dict[str, Any]]:
@@ -24,8 +31,6 @@ def tab_data_treatment(*,
         List[Dict[str, Any]]: A list of documents with text and annotations entries.
 
     """
-    # Load the JSON data from the file
-    data = utils.load_json_data(file_path=tab_path)
     # Initialize modified_data to return
     modified_data: List[Dict[str, Any]] = []
     # Process each document in the data
