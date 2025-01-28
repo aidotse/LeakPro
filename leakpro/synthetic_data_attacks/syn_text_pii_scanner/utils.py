@@ -116,36 +116,6 @@ def load_data(*,
         sd.dataset = dataset
         sd.dataloader = dataloader
 
-def load_model(*,
-    num_labels: int,
-    non_0_label_weight: int = 3,
-    crossentropy_ignore_index: int = -100,
-    path: Optional[str] = None
-) -> lgfm.NERLongformerModel:
-    """Function to load NERLongformerModel with specific num_labels.
-
-    Arguments:
-        num_labels (int): The number of labels.
-        non_0_label_weight (int): Weight for non 0 labels. Defaults to 3.
-        crossentropy_ignore_index(int): Ignore index for cross entropy loss. Defaults to -100.
-        path (Optional[str]): The path of the model weights.
-            If not provided (None), no weights are loaded.
-
-    """
-    # Set weights_crossentropy
-    weights_crossentropy = torch.tensor(
-        [1.0] + [non_0_label_weight*1.0 for _ in range(num_labels-1)],
-        device = device,
-        dtype = torch.float32
-    )
-    return lgfm.load_model(
-        num_labels = num_labels,
-        weights_crossentropy = weights_crossentropy,
-        crossentropy_ignore_index = crossentropy_ignore_index,
-        device = device,
-        path = path
-    )
-
 def forward_pass(*, # noqa: C901
     data: Data,
     num_labels: int,

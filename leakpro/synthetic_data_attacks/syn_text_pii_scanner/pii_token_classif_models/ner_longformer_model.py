@@ -1,8 +1,8 @@
 """Module containing tokenizer and modified LongFormer model to be used for NER/PII/token classification tasks."""
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import torch
-from safetensors.torch import load_file
+from huggingface_hub import PyTorchModelHubMixin
 from transformers import LongformerModel, LongformerTokenizerFast
 from transformers.modeling_outputs import TokenClassifierOutput
 
@@ -21,7 +21,7 @@ def get_tokenizer() -> LongformerTokenizerFast:
         clean_up_tokenization_spaces = True
     )
 
-class NERLongformerModel(torch.nn.Module):
+class NERLongformerModel(torch.nn.Module, PyTorchModelHubMixin):
     """Longformer based Name Entity recognition model.
 
     Model uses Longformer's architecture and adds a linear
@@ -31,8 +31,7 @@ class NERLongformerModel(torch.nn.Module):
     def __init__(self, *,
         num_labels: int,
         weights_crossentropy: Optional[torch.Tensor] = None,
-        crossentropy_ignore_index: int = -100,
-        device: Optional[torch.device] = None
+        crossentropy_ignore_index: int = -100
     ) -> None:
         """Initialize the Model.
 
@@ -40,12 +39,13 @@ class NERLongformerModel(torch.nn.Module):
             num_labels (int): The number of label classes for classification.
             weights_crossentropy (Optional[torch.Tensor]): Weights tensor for cross-entropy loss. Defaults to None.
             crossentropy_ignore_index (int): Ignore index for cross-entropy loss. Defaults to -100.
-            device (Optional[torch.device]): torch.device to move cross-entropy loss to. Defaults to None.
 
         """
         super().__init__()
         # Validate weights_crossentropy
-        if weights_crossentropy is not None:
+        if weights_crossentropy is None:
+            weights_crossentropy = torch.ones(num_labels, dtype=torch.float32)
+        else:
             assert weights_crossentropy.dim() == 1, "weights_crossentropy.dim must be 1 in ner_longformer_model.py"
             assert weights_crossentropy.numel() == num_labels, "weights_crossentropy.numel and num_labels do not match in ner_longformer_model.py" # noqa: E501
         # Set longformer model
@@ -59,32 +59,6 @@ class NERLongformerModel(torch.nn.Module):
         self.classifier: torch.nn.Linear = torch.nn.Linear(self.longformer.config.hidden_size, num_labels)
         # Set loss_fun
         self.loss_fun = torch.nn.CrossEntropyLoss(ignore_index=crossentropy_ignore_index, weight=weights_crossentropy)
-        if device is not None and device.type == "cuda":
-            self.loss_fun  = self.loss_fun.cuda()
-
-    def state_dict(self, *args, **kwargs) -> Dict: # noqa: ANN002, ANN003
-        """Modified state_dict fun for extra attributes."""
-        # Get the original state_dict
-        state = super().state_dict(*args, **kwargs)
-        # Add num_labels and loss_fun.ignore index
-        state["num_labels"] = torch.tensor(self.num_labels)
-        state["loss_fun.ignore_index"] = torch.tensor(self.loss_fun.ignore_index)
-        return state
-
-    def load_state_dict(self, state_dict: Dict, strict: bool = True) -> None:
-        """Modified load_state_dict fun for extra attributes."""
-        #Get device
-        device = self.loss_fun.weight.device
-        #Restore num_labels and loss_fun.ignore index
-        self.num_labels = int(state_dict.pop("num_labels").item())
-        self.loss_fun.ignore_index = int(state_dict.pop("loss_fun.ignore_index").item())
-        #Restore other weights shapes
-        self.loss_fun.weight = torch.rand(self.num_labels, dtype=torch.float32).to(device)
-        cfw1 = state_dict["classifier.weight"].shape[1]
-        self.classifier.weight = torch.nn.Parameter(torch.rand((self.num_labels, cfw1), dtype=torch.float32).to(device))
-        self.classifier.bias = torch.nn.Parameter(torch.rand(self.num_labels, dtype=torch.float32).to(device))
-        # Load the rest of the state_dict as usual
-        super().load_state_dict(state_dict, strict=strict)
 
     def forward(
         self,
@@ -124,36 +98,3 @@ class NERLongformerModel(torch.nn.Module):
             hidden_states = None,
             attentions = None,
         )
-
-def load_model(*,
-    num_labels: int,
-    weights_crossentropy: Optional[torch.Tensor] = None,
-    crossentropy_ignore_index: int = -100,
-    device: Optional[torch.device] = None,
-    path: Optional[str] = None
-) -> NERLongformerModel:
-    """Inits and returns a NERLongformerModel on specified device.
-
-    If path is provided, weights will be loaded to returned model.
-    Note: path must point to a safetensors file.
-
-    Args:
-        num_labels (int): The number of label classes for classification.
-        weights_crossentropy (Optional[torch.Tensor]): Weights tensor for cross-entropy loss. Defaults to None.
-        crossentropy_ignore_index (int): Ignore index for cross-entropy loss. Defaults to -100.
-        device (Optional[torch.device]): torch.device to move model and cross-entropy loss to. Defaults to None.
-        path (Optinal[str]): if provided, weights will be loaded from safetensors file. Defaults to None.
-
-    """
-    # Instantiate model
-    model = NERLongformerModel(
-        num_labels = num_labels,
-        weights_crossentropy = weights_crossentropy,
-        crossentropy_ignore_index = crossentropy_ignore_index,
-        device = device
-    ).to(device)
-    # Load weights
-    if path is not None:
-        state_dict = load_file(path)
-        model.load_state_dict(state_dict)
-    return model

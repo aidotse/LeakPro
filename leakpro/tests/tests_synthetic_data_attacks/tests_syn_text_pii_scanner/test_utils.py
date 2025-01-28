@@ -5,7 +5,6 @@ from typing import List
 
 import numpy as np
 import pytest
-import torch
 
 import leakpro.tests.tests_synthetic_data_attacks.tests_syn_text_pii_scanner.data_tests.aux_data_test_utils as aux
 from leakpro.synthetic_data_attacks.syn_text_pii_scanner import utils
@@ -59,17 +58,6 @@ def test_load_data() -> None:
             assert first_batch["input_ids"].shape[0] == 3
             assert first_batch.get("labels") is None
 
-def test_load_model() -> None:
-    """Assert results for load_model function with simple input."""
-    model = utils.load_model(
-        num_labels = 3,
-        non_0_label_weight = 5
-    )
-    assert isinstance(model, lgfm.NERLongformerModel)
-    assert model.num_labels == 3
-    e_loss_fun_weight = torch.tensor([1.0, 5.0, 5.0], device=utils.device)
-    assert torch.equal(model.loss_fun.weight, e_loss_fun_weight)
-
 @pytest.mark.parametrize(
     ("verbose"), [False, True]
 )
@@ -84,9 +72,7 @@ def test_forward_pass(*, verbose: bool) -> None:
     with pytest.raises(Exception, match="Model must be of type NERLongformerModel."):
         utils.forward_pass(data=data, num_labels=num_labels, model="not model", verbose=verbose)
     #Case load_data not run before forward apss
-    model = utils.load_model(
-        num_labels = num_labels
-    )
+    model = lgfm.NERLongformerModel(num_labels = num_labels).to(utils.device)
     with pytest.raises(Exception, match="Load data must be run before forward pass."):
         utils.forward_pass(data=data, num_labels=num_labels, model=model, verbose=verbose)
     #Case no errors on input
