@@ -29,6 +29,10 @@ jobs:
           pip install ruff
           ruff check leakpro --exclude examples,leakpro/tests
 
+      - name: Install PDF compiling tool
+        run: |
+          sudo apt update ; sudo apt install -y texlive-latex-base
+
       - name: Install pytest and pytest-cov
         run: |
           pip install pytest pytest-cov pytest-mock coverage-badge
