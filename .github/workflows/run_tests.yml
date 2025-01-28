@@ -31,7 +31,7 @@ jobs:
 
       - name: Install PDF compiling tool
         run: |
-          apt update ; apt install texlive-latex-base
+          sudo apt update ; sudo apt install -y texlive-latex-base
 
       - name: Install pytest and pytest-cov
         run: |
