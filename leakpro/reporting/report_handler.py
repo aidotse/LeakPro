@@ -156,6 +156,12 @@ class ReportHandler():
     def create_report(self:Self) -> None:
         """Method to create PDF report."""
 
+        # Make sure results have been read and created
+        if not hasattr(self, "results"):
+            self.load_results()
+        if self.pdf_results and all(not value for value in self.pdf_results.values()):
+            self.create_results_all()
+
         # Create initial part of the document.
         self._init_pdf()
 
@@ -168,6 +174,9 @@ class ReportHandler():
 
         # Compile the PDF
         self._compile_pdf()
+
+        # Reset result variables
+        self._reset_result()
 
     def _init_pdf(self:Self) -> None:
         self.latex_content = """
@@ -202,3 +211,8 @@ class ReportHandler():
         except Exception as e:
             self.logger.info(f"Could not compile PDF: {e}")
             self.logger.info("Make sure to install pdflatex with apt install texlive-latex-base")
+
+    def _reset_result(self:Self) -> None:
+        del self.results
+        for key in self.pdf_results:
+            self.pdf_results[key] = []

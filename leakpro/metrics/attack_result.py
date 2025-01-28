@@ -286,7 +286,7 @@ class MIAResult:
             "tpr": self.tpr.tolist(),
             "fpr": self.fpr.tolist(),
             "roc_auc": self.roc_auc,
-            "config": config,
+            "config": result_config,
             "fixed_fpr": fixed_fpr_table,
             "audit_indices": self.audit_indices.tolist() if self.audit_indices is not None else None,
             "signal_values": self.signal_values.tolist() if self.signal_values is not None else None,
@@ -310,7 +310,7 @@ class MIAResult:
         temp_res.id = self.id
         self.create_plot(results = [temp_res],
                         save_dir = save_path,
-                        save_name = "ROC",
+                        save_name = name,
                         show_plot = show_plot
                         )
 
@@ -415,7 +415,7 @@ class MIAResult:
 
         plt.xlabel("False positive rate (FPR)")
         plt.ylabel("True positive rate (TPR)")
-        plt.title(save_name+"ROC Curve")
+        plt.title(save_name+" ROC Curve")
         plt.savefig(fname=f"{filename}.png", dpi=1000, bbox_inches="tight")
 
         if show_plot:
@@ -474,18 +474,16 @@ class MIAResult:
     @staticmethod
     def _latex(
             results: list,
-            save_dir: str,
+            save_dir: str, # noqa: ARG004
             save_name: str
         ) -> str:
         """Latex method for MIAResult."""
-
-        filename = f"{save_dir}/{save_name}"
 
         # Input mia results image
         latex_content = f"""
         \\subsection{{{" ".join(save_name.split("_"))}}}
         \\begin{{figure}}[ht]
-        \\includegraphics[width=0.8\\textwidth]{{{filename}.png}}
+        \\includegraphics[width=0.8\\textwidth]{{{save_name}.png}}
         \\end{{figure}}
         """
 
@@ -493,9 +491,7 @@ class MIAResult:
         latex_content += """
         \\resizebox{\\linewidth}{!}{%
         \\begin{tabularx}{\\textwidth}{l c l l l l}
-        Attack name & attack config & TPR: 1.0\\%FPR & 0.1\\%FPR & 0.01\\%FPR & 0.0\\%FPR \\\\
-        \\hline
-        """
+        Attack name & attack config & TPR: 1.0\\%FPR & 0.1\\%FPR & 0.01\\%FPR & 0.0\\%FPR \\\\ \\hline """ # noqa: W291
 
         # Convert config to latex table input
         def config_latex_style(config: str) -> str:
@@ -505,10 +501,9 @@ class MIAResult:
 
         # Append all mia results to table
         for res in results:
-            config = config_latex_style(res.id)
-            latex_content += f"""{"-".join(res.resultname.split("_"))} & {config} & {res.fixed_fpr_table["TPR@1.0%FPR"]} &
-                                {res.fixed_fpr_table["TPR@0.1%FPR"]} & {res.fixed_fpr_table["TPR@0.01%FPR"]} &
-                                {res.fixed_fpr_table["TPR@0.0%FPR"]} \\\\ \\hline"""
+            config = config_latex_style(get_config_name(res.config))
+            latex_content += f"""
+            {"-".join(res.resultname.split("_"))} & {config} & {res.fixed_fpr_table["TPR@1.0%FPR"]} & {res.fixed_fpr_table["TPR@0.1%FPR"]} & {res.fixed_fpr_table["TPR@0.01%FPR"]} & {res.fixed_fpr_table["TPR@0.0%FPR"]} \\\\ \\hline """ # noqa: E501
         latex_content += """
         \\end{tabularx}
         }
@@ -524,6 +519,7 @@ class GIAResults:
             original_data: DataLoader = None,
             recreated_data: DataLoader = None,
             psnr_score: float = None,
+            ssim_score: float = None,
             data_mean: float = None,
             data_std: float = None,
             config: dict = None,
@@ -532,6 +528,7 @@ class GIAResults:
         self.original_data = original_data
         self.recreated_data = recreated_data
         self.PSNR_score = psnr_score
+        self.SSIM_score = ssim_score
         self.data_mean = data_mean
         self.data_std = data_std
         self.config = config
@@ -556,7 +553,7 @@ class GIAResults:
             self: Self,
             name: str,
             path: str,
-            config: dict, # noqa: ARG002
+            config: dict,
             show_plot: bool = False # noqa: ARG002
         ) -> None:
         """Save the GIAResults to disk."""
@@ -573,7 +570,7 @@ class GIAResults:
                 if var not in skip_keys  # Exclude skipped keys
             }
 
-        result_config = get_gia_config(self.config, skip_keys=["optimizer", "criterion"])
+        result_config = get_gia_config(config, skip_keys=["optimizer", "criterion"])
 
         # Get the name for the attack configuration
         config_name = get_config_name(result_config)
