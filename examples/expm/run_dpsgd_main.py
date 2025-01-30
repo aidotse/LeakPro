@@ -3,21 +3,23 @@ import sys
 
 from torch import zeros
 from utils.data_handler import get_mimic_dataloaders, get_mimic_dataset
-from opacus.accountants.utils import get_noise_multiplier
-from utils.dpsgd_model import *
 
+from utils.dpsgd_model import *
+# Import and initialize ReportHandler
+from leakpro.reporting.report_handler import ReportHandler
 
 # Generate the dataset and dataloaders
 path = os.path.join(os.getcwd(), "examples/expm/data/mimic/")
+target_model_dir = "./examples/expm/target_dpsgd"
 epsilons = [.0001, .001, .01, .1, .5, 1, 2, 3.5, 5, 7, 10] # epsilons to run over
 delta = 1e-5
-target_epsilon = 2
+target_epsilon = 3.5
 
 train_frac = 0.4
 valid_frac = 0.0
 test_frac = 0.0
 early_stop_frac = 0.4
-batch_size = 59
+batch_size = 55
 use_LR = False # True if you want to use the LR model, False if you want to use the GRUD model
 
 dataset, train_indices, validation_indices, test_indices, early_stop_indices= get_mimic_dataset(path,
@@ -47,25 +49,7 @@ noise_multiplier_dict = {
     "max_grad_norm": 1,
 }
 
-try:
-    noise_multiplier = get_noise_multiplier(target_epsilon = target_epsilon,
-                                        target_delta = delta,
-                                        sample_rate = sample_rate,
-                                        epochs = 21,
-                                        epsilon_tolerance = 0.01,
-                                        accountant = 'prv',
-                                        eps_error = 0.01)
-except:
-    # the prv accountant is not robust to large epsilon (even epsilon = 10)
-    # so we will use rdp when it fails, so the actual epsilon may be slightly off
-    # see https://github.com/pytorch/opacus/issues/604
-    noise_multiplier = get_noise_multiplier(target_epsilon = 2,
-                                            target_delta = delta,
-                                            sample_rate = sample_rate,
-                                            epochs = 21,
-                                            epsilon_tolerance = 0.01,
-                                            accountant = 'rdp')
-    
+
 
 
 
@@ -73,13 +57,13 @@ optimized_hyperparams ={
     "cell_size": 58,
     "hidden_size": 78,
     "learning_rate": 0.0004738759319792616,
-    "num_epochs":1,
+    "num_epochs":50,
     "patience_early_stopping": 20,
     "patience_lr_scheduler": 5,
     "batch_size": 59,
     "seed": 4410,
     "min_delta": 0.00001,
-    "epsilon": 10,
+    "epsilon": 3.5,
     "max_grad_norm": 1, 
     }
 n_features = int(dataset.x.shape[1]/3)
@@ -93,7 +77,7 @@ model_params.update({
     "X_mean": X_mean,
     "output_last": False,
     "bn_flag": False,
-    "droupout": 0.1,
+    # "droupout": 0.33,
 })
 
 
@@ -104,13 +88,13 @@ results= dpsgd_gru_trained_model_and_metadata(
                                             model, 
                                             train_loader,
                                             early_stop_loader, 
-                                            noise_multiplier,
-                                            max_grad_norm = optimized_hyperparams['max_grad_norm'],
+                                            noise_multiplier_dict,
                                             epochs=optimized_hyperparams['num_epochs'],
                                             patience_early_stopping = optimized_hyperparams["patience_early_stopping"],
                                             patience_lr= optimized_hyperparams["patience_lr_scheduler"],
                                             min_delta = optimized_hyperparams["min_delta"],
-                                            learning_rate = optimized_hyperparams["learning_rate"])
+                                            learning_rate = optimized_hyperparams["learning_rate"],
+                                            target_model_dir = target_model_dir,)
 train_losses, test_losses , train_acc, test_acc, best_model,niter_per_epoch, privacy_engine  = results
 
 
@@ -158,4 +142,13 @@ leakpro = LeakPro(MimicInputHandlerGRU, config_path)
 
 # Run the audit
 mia_results = leakpro.run_audit(return_results=True)
+
+
+
+# report_handler = ReportHandler()
+report_handler = ReportHandler(report_dir="./examples/expm/leakpro_output/results")
+
+# Save MIA resuls using report handler
+for res in mia_results:
+    report_handler.save_results(attack_name=res.attack_name, result_data=res, config=res.configs)
 

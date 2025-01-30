@@ -31,7 +31,7 @@ audit:  # Configurations for auditing
   attack_type: "mia" #mia, gia
   dpsgd:
     dpsgd_use: True
-    dpsgd_path: "./examples/expm/target_GRUD/dpsgd_dic.pkl"
+    dpsgd_path: "./examples/expm/target_dpsgd/dpsgd_dic.pkl"
   
   
 
@@ -40,10 +40,10 @@ target:
   module_path: "examples/expm/utils/dpsgd_model.py" # either model_grud.py or model_LR.py for logestic regression
   model_class: "GRUD_DPSGD" #  LR/GRUD
   # Data paths
-  target_folder: "./target_dpsgd" # either target_GRUD or target_LR
+  target_folder: "./examples/expm/target_dpsgd" # either target_GRUD or target_LR
   data_path: "./examples/expm/data/mimic/dataset.pkl" #unflattened dataset for GRUD and flattened dataset for LR
 
 shadow_model:
   model_class: dpsgd_model_handler # LR/GRUD
   
-distillation_model: "GRUD_DPSGD"
+distillation_model:
