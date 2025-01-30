@@ -1,41 +1,44 @@
 """Run optuna to find best hyperparameters."""
 from collections.abc import Generator
-from typing import Union
+from dataclasses import dataclass, field
+from typing import Optional
 
 import optuna
 from torch import Tensor
 
-from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
-from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
+from leakpro.attacks.attack_base import AbstractAttack
 from leakpro.metrics.attack_result import MIAResult
 from leakpro.utils.logger import logger
 from leakpro.utils.seed import seed_everything
 
 
-def optuna_optimal_hyperparameters(attack_object: Union["AbstractGIA", "AbstractMIA"], n_warmup_steps:int= 5,
-                                   n_trials:int=50, direction:str="maximize", seed:int = 1234
+@dataclass
+class OptunaConfig:
+    """Config for configurable stuff in optuna."""
+
+    # pruner (optuna.pruners.BasePruner): Number of steps before pruning of experiments will be available.
+    pruner: optuna.pruners.BasePruner = field(default_factory=lambda: optuna.pruners.MedianPruner(n_warmup_steps=5))
+    # n_trials (int): Number of trials to find the optimal hyperparameters.
+    n_trials: int = 50
+    # direction (str): Direction of the optimization, minimize or maximize, depending on the optuna objective.
+    direction: str = "maximize"
+    # seed (int): Random seed to run the attack from.
+    seed:int = 1234
+
+def optuna_optimal_hyperparameters(attack_object: AbstractAttack, optuna_config: OptunaConfig
                                    ) -> optuna.study.Study:
     """Find optimal hyperparameters for an attack object.
 
     Args:
     ----
             attack_object (Union[AbstractGIA, AbstractMIA]): Attack object to find optimal hyperparameters for.
-            n_warmup_steps (int): Number of steps before pruning of experiments will be available.
-            n_trials (int): Number of trials to find the optimal hyperparameters.
-            direction (str): Direction of the optimization, minimize or maximize, depending on the optuna objective.
-            seed (int): Random seed to run the attack from.
+            optuna_config (OptunaConfig): configureable settings for optuna
 
     """
-    # ensure correct attack object type
-    if not isinstance(attack_object, (AbstractGIA, AbstractMIA)):
-        raise TypeError(
-            f"Expected attack_object to be of type AbstractGIA or AbstractMIA, "
-            f"but got {type(attack_object).__name__} instead."
-        )
     def objective(trial: optuna.trial.Trial) -> Tensor:
         attack_object.reset_attack()
         attack_object.suggest_parameters(trial)
-        seed_everything(seed)
+        seed_everything(optuna_config.seed)
         result = attack_object.run_attack()
         if isinstance(result, Generator):
             for step, intermediary_results, result_object in result:
@@ -52,11 +55,11 @@ def optuna_optimal_hyperparameters(attack_object: Union["AbstractGIA", "Abstract
         return None
 
     # Define the pruner and study
-    pruner = optuna.pruners.MedianPruner(n_warmup_steps=n_warmup_steps)
-    study = optuna.create_study(direction=direction, pruner=pruner)
+    pruner = optuna_config.pruner
+    study = optuna.create_study(direction=optuna_config.direction, pruner=pruner)
 
     # Run optimization
-    study.optimize(objective, n_trials=n_trials)
+    study.optimize(objective, n_trials=optuna_config.n_trials)
 
     # Display and save the results
     logger.info(f"Best hyperparameters: {study.best_params}")

@@ -2,6 +2,7 @@
 from collections.abc import Generator
 from copy import deepcopy
 from dataclasses import dataclass, field
+from typing import Optional
 
 import optuna
 import torch
@@ -12,6 +13,7 @@ from torch.utils.data import DataLoader
 from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
 from leakpro.fl_utils.data_utils import get_at_images
 from leakpro.fl_utils.gia_optimizers import MetaSGD
+from leakpro.fl_utils.gia_train import train
 from leakpro.fl_utils.model_utils import BNFeatureHook
 from leakpro.fl_utils.similarity_measurements import cosine_similarity_weights, l2_norm, total_variation
 from leakpro.metrics.attack_result import GIAResults
@@ -48,8 +50,8 @@ class HuangConfig:
 class Huang(AbstractGIA):
     """Gradient inversion attack by Huang et al."""
 
-    def __init__(self: Self, model: Module, client_loader: DataLoader, train_fn: Callable,
-                 data_mean: Tensor, data_std: Tensor, configs: HuangConfig) -> None:
+    def __init__(self: Self, model: Module, client_loader: DataLoader, data_mean: Tensor, data_std: Tensor,
+                train_fn: Optional[Callable] = None, configs: Optional[HuangConfig] = None) -> None:
         super().__init__()
         self.original_model = model
         self.model = deepcopy(self.original_model)
@@ -57,10 +59,10 @@ class Huang(AbstractGIA):
         self.best_reconstruction = None
         self.best_reconstruction_round = None
 
-        self.configs = configs
+        self.configs = configs if configs is not None else HuangConfig()
 
         self.client_loader = client_loader
-        self.train_fn = train_fn
+        self.train_fn = train_fn if train_fn is not None else train
         self.data_mean = data_mean
         self.data_std = data_std
 
