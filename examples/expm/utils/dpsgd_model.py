@@ -20,6 +20,7 @@ from torch.nn.parameter import Parameter
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
 from opacus import PrivacyEngine, GradSampleModule
+from opacus.accountants.utils import get_noise_multiplier
 
 def to_3D_tensor(df):
     idx = pd.IndexSlice
@@ -77,8 +78,8 @@ class FilterLinear(nn.Module):
             + ", bias=" + str(self.bias is not None) + ")"
 
 class GRUD_DPSGD(nn.Module):
-    def __init__(self, input_size, cell_size, hidden_size, X_mean, batch_size = 0,
-                 droupout=0, bn_flag = True, output_last = False):
+    def __init__(self, input_size, cell_size, hidden_size, X_mean, batch_size,
+                  bn_flag = True, output_last = False):
         """With minor modifications from https://github.com/zhiyongc/GRU-D/
 
         Recurrent Neural Networks for Multivariate Times Series with Missing Values
@@ -104,7 +105,7 @@ class GRUD_DPSGD(nn.Module):
             X_mean: the mean of the historical input data
         """
 
-        super(GRUD, self).__init__()
+        super(GRUD_DPSGD, self).__init__()
 
         # Save init params to a dictionary
         self.init_params = {
@@ -114,7 +115,6 @@ class GRUD_DPSGD(nn.Module):
             "X_mean": X_mean,
             "batch_size": batch_size,
             "output_last": output_last,
-            "dropout":droupout,
             "bn_flag":bn_flag,
         }
 
@@ -145,7 +145,7 @@ class GRUD_DPSGD(nn.Module):
         # self.bn= nn.BatchNorm1d(2, eps=1e-05, momentum=0.1, affine=True).to(self.device)
         # self.drop=nn.Dropout(p=0.7, inplace=False)
         self.fc = nn.Linear(self.hidden_size, 1) # a probability score
-        self.drop=nn.Dropout(p=0.48, inplace=False)
+        self.drop=nn.Dropout(p=0.33, inplace=False)
         if self.bn_flag:
             self.bn= nn.BatchNorm1d(self.hidden_size, eps=1e-05, momentum=0.1, affine=True)
 
@@ -258,13 +258,13 @@ def to_numpy(tensor):
 def dpsgd_gru_trained_model_and_metadata(model,
                                    train_dataloader,
                                    test_dataloader,
-                                   noise_multiplier,
-                                    max_grad_norm,
+                                   privacy_engine_dict,
                                    epochs,
                                    patience_early_stopping,
                                    patience_lr,
                                    min_delta,
-                                   learning_rate):
+                                   learning_rate,
+                                   target_model_dir):
 
     print("Model Structure: ", model)
     print("Start Training ... ")
@@ -289,10 +289,31 @@ def dpsgd_gru_trained_model_and_metadata(model,
         print("Output type dermined by the model")
 
     criterion_BCE = nn.BCEWithLogitsLoss()
-    criterion_CEL = nn.CrossEntropyLoss()
+    # criterion_CEL = nn.CrossEntropyLoss()
     criterion_MSE = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
+
+    sample_rate = 1 / len(train_dataloader)
+    try:
+        noise_multiplier = get_noise_multiplier(target_epsilon = privacy_engine_dict["target_epsilon"],
+                                        target_delta = privacy_engine_dict["target_delta"],
+                                        sample_rate = sample_rate ,
+                                        epochs = privacy_engine_dict["epochs"],
+                                        epsilon_tolerance = privacy_engine_dict["epsilon_tolerance"],
+                                        accountant = 'prv',
+                                        eps_error = privacy_engine_dict["eps_error"],)
+    except:
+        # the prv accountant is not robust to large epsilon (even epsilon = 10)
+        # so we will use rdp when it fails, so the actual epsilon may be slightly off
+        # see https://github.com/pytorch/opacus/issues/604
+        noise_multiplier = get_noise_multiplier(target_epsilon = 2,
+                                                target_delta = privacy_engine_dict["target_delta"],
+                                                sample_rate = sample_rate,
+                                                epochs = privacy_engine_dict["epochs"],
+                                                epsilon_tolerance = privacy_engine_dict["epsilon_tolerance"],
+                                                accountant = 'rdp')
+    
 
     # make the model private
     privacy_engine = PrivacyEngine(accountant = 'prv')
@@ -301,7 +322,7 @@ def dpsgd_gru_trained_model_and_metadata(model,
         optimizer=optimizer,
         data_loader=train_dataloader,
         noise_multiplier=noise_multiplier,
-        max_grad_norm=max_grad_norm,
+        max_grad_norm= privacy_engine_dict["max_grad_norm"],
     )
 
     # Reduce learning rate when a metric has stopped improving
@@ -330,6 +351,9 @@ def dpsgd_gru_trained_model_and_metadata(model,
 
         for _, (X, labels) in enumerate(tqdm(priv_train_dataloader, desc="Training Batches")):
 
+            if X.numel() == 0:  # Skip empty batches
+                continue
+            
             if epoch == 0:
                 niter_per_epoch += 1
 
@@ -371,8 +395,6 @@ def dpsgd_gru_trained_model_and_metadata(model,
         except StopIteration:
             valid_dataloader_iter = iter(test_dataloader)
             X_test, labels_test = next(valid_dataloader_iter)
-
-
 
         X_test = X_test.to(device_name)
         labels_test = labels_test.to(device_name)
@@ -439,10 +461,21 @@ def dpsgd_gru_trained_model_and_metadata(model,
         pre_time = cur_time
     # Move the model back to the CPU
     # Ensure the target directory exists
-    os.makedirs("target_GRUD", exist_ok=True)
+    os.makedirs(target_model_dir, exist_ok=True)
+    # Access the raw model if it's wrapped in DataParallel
+
+    state_dict = priv_model.state_dict()
+    cleaned_state_dict = {key.replace("_module.", "").replace("module.", ""): value
+                      for key, value in state_dict.items()}
+
+    # Save the state_dict to a file
     priv_model.to("cpu")
-    with open("target_GRUD/target_model.pkl", "wb") as f:
-        save(priv_model.state_dict(), f)
+    with open(f"{target_model_dir}/target_model.pkl", "wb") as f:
+        save(cleaned_state_dict, f)
+
+    # Create metadata for privacy engine
+    with open(f"{target_model_dir}/dpsgd_dic.pkl", "wb") as f:
+        pickle.dump(privacy_engine_dict, f)
 
      # Create metadata and store it
     meta_data = {}
@@ -457,24 +490,25 @@ def dpsgd_gru_trained_model_and_metadata(model,
 
     # read out optimizer parameters
     meta_data["optimizer"] = {}
-    meta_data["optimizer"]["name"] = priv_opt.__class__.__name__.lower()
-    meta_data["optimizer"]["lr"] = priv_opt.param_groups[0].get("lr", 0)
-    meta_data["optimizer"]["weight_decay"] = priv_opt.param_groups[0].get("weight_decay", 0)
-    meta_data["optimizer"]["momentum"] = priv_opt.param_groups[0].get("momentum", 0)
-    meta_data["optimizer"]["dampening"] = priv_opt.param_groups[0].get("dampening", 0)
-    meta_data["optimizer"]["nesterov"] = priv_opt.param_groups[0].get("nesterov", False)
+    meta_data["optimizer"]["name"] = optimizer.__class__.__name__.lower()
+    meta_data["optimizer"]["lr"] = optimizer.param_groups[0].get("lr", 0)
+    meta_data["optimizer"]["weight_decay"] = optimizer.param_groups[0].get("weight_decay", 0)
+    meta_data["optimizer"]["momentum"] = optimizer.param_groups[0].get("momentum", 0)
+    meta_data["optimizer"]["dampening"] = optimizer.param_groups[0].get("dampening", 0)
+    meta_data["optimizer"]["nesterov"] = optimizer.param_groups[0].get("nesterov", False)
 
     # read out criterion parameters
     meta_data["loss"] = {}
-    meta_data["loss"]["name"] = criterion_CEL.__class__.__name__.lower()
+    meta_data["loss"]["name"] = criterion_BCE.__class__.__name__.lower()
 
-    meta_data["batch_size"] = priv_train_dataloader.batch_size
+    #priv_train_dataloader.batch_size is dynamic. Therefore, we use the original batch size
+    meta_data["batch_size"] = train_dataloader.batch_size 
     meta_data["epochs"] = epochs
     meta_data["train_acc"] = train_acc
     meta_data["test_acc"] = test_acc
     meta_data["train_loss"] = train_loss
     meta_data["test_loss"] = test_loss
     meta_data["dataset"] = "mimiciii"
-    with open("target_GRUD/priv_model_metadata.pkl", "wb") as f:
+    with open(f"{target_model_dir}/model_metadata.pkl", "wb") as f:
         pickle.dump(meta_data, f)
     return  [train_losses, test_losses, train_acces, test_acces, priv_model, niter_per_epoch, privacy_engine]
