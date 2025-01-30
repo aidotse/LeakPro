@@ -1,6 +1,6 @@
 """Module that contains the abstract class for constructing and performing a membership inference attack on a target."""
 
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from collections.abc import Generator
 from copy import deepcopy
 from typing import Callable, Optional

@@ -1,7 +1,6 @@
 """Run optuna to find best hyperparameters."""
 from collections.abc import Generator
 from dataclasses import dataclass, field
-from typing import Optional
 
 import optuna
 from torch import Tensor
