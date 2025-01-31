@@ -1,0 +1,38 @@
+name: Generate and Commit Changelog
+
+on:
+  push:
+    branches:
+      - main # Trigger the workflow on pushes to the main branch
+
+jobs:
+  changelog:
+    name: Generate Changelog
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Allows pushing changes to the repository
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Ensure the full Git history is available for git-cliff
+
+      - name: Generate changelog
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml # Path to your git-cliff configuration file
+          args: --verbose    # Optional: add verbose logging for debugging
+        env:
+          OUTPUT: CHANGELOG.md # Optional: specify the output file name
+          GITHUB_REPO: ${{ github.repository }}
+
+      - name: Commit Changelog
+        run: |
+          git checkout main # Replace 'main' with your target branch name
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          set +e # Ignore errors if there are no changes to commit
+          git add CHANGELOG.md
+          git commit -m "chore: update changelog"
+          git push https://${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git main
