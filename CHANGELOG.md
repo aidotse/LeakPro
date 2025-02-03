@@ -9,6 +9,7 @@ All notable changes to this project will be documented in this file.
 - Add interfacing for model inversion attacks
 - Create generate_changelog.yml
 - Create minv files
+- Create minv main
 
 ### 💼 Other
 
@@ -50,6 +51,7 @@ All notable changes to this project will be documented in this file.
 
 ### ⚙️ Miscellaneous Tasks
 
+- Update changelog
 - Update changelog
 - Update changelog
 
