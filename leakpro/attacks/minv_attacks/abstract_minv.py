@@ -20,10 +20,6 @@ class AbstractMINV(ABC):
     This serves as a guideline for implementing a metric to be used for measuring the privacy leakage of a target model.
     """
 
-    # TODO: Class attributes
-
-
-
     def __init__(
         self:Self,
     )->None:
@@ -34,9 +30,6 @@ class AbstractMINV(ABC):
             handler (AbstractInputHandler): The input handler object.
 
         """
-
-
-        # TODO: Class attributes initialized checks
 
     @abstractmethod
     def _configure_attack(self:Self, configs:dict)->None:
