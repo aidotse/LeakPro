@@ -31,12 +31,12 @@ from leakpro.input_handler.handler_setup import (
     set_train_indices,
     setup,
 )
-from leakpro.input_handler.modality_extensions.tabular_extension import TabularExtension
+from leakpro.input_handler.modality_extensions.tabular_extension import TabularExtension, ImageExtension
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import add_file_handler, logger
 
 modality_extensions = {"tabular": TabularExtension,
-                       "image":None,
+                       "image": ImageExtension,
                        "text":None,
                        "graph":None}
 

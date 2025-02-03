@@ -796,4 +796,8 @@ def reduce_to_unique_labels(results: list) -> list:
 
     return result
 
+class MINVResult:
+    # TODO: Setup class
+    pass
+
 

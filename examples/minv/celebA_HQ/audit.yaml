@@ -1,0 +1,26 @@
+audit:  # Configurations for auditing
+  random_seed: 1234  # Integer specifying the random seed
+  attack_list:
+    plgmi:
+
+  output_dir: "./leakpro_output"
+  attack_type: "minv" #mia, gia, minv
+  modality: "image" #image, tabular
+
+# Example of a target
+target:
+  # Target model path
+  module_path: "./utils/celeb_hq_model.py"
+  model_class: "ResNet18" 
+  # Data paths
+  target_folder: "./target"
+  data_path: "./data/celeba_hq_data.pkl"
+
+# Example of a generator
+generator:
+  # Generator model path
+  module_path: "./utils/celeb_hq_generator.py"
+  model_class: "Generator"
+  # Data paths
+  generator_folder: "./generator"
+  data_path: "./data/celeba_hq_data.pkl"
