@@ -1,7 +1,7 @@
 """Module that contains the AttackFactory class which is responsible for creating the attack objects."""
 
 from leakpro.attacks.minv_attacks.abstract_minv import AbstractMINV
-# from leakpro.attacks.minv_attacks.plgmi import PLGMI
+from leakpro.attacks.minv_attacks.plgmi import PLGMI
 # from leakpro.attacks.minv_attacks.ifgmi import IFGMI
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 
@@ -10,7 +10,6 @@ class AttackFactoryGIA:
 
     attack_classes = {
         "plg": PLGMI,
-        "ifg": IFGMI,
     }
 
     @classmethod
