@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - Create generate_changelog.yml
 - Create minv files
 - Create minv main
+- Add more model inversion framework
 
 ### 💼 Other
 
@@ -51,6 +52,7 @@ All notable changes to this project will be documented in this file.
 
 ### ⚙️ Miscellaneous Tasks
 
+- Update changelog
 - Update changelog
 - Update changelog
 - Update changelog
