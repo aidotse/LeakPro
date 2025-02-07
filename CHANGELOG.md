@@ -10,6 +10,7 @@ All notable changes to this project will be documented in this file.
 - Create generate_changelog.yml
 - Create minv files
 - Create minv main
+- Add minv example up to target model trained
 - Add more model inversion framework
 
 ### 💼 Other
@@ -49,9 +50,11 @@ All notable changes to this project will be documented in this file.
 - Fixing plots and rerunning synthetic data examples
 - Merging from main
 - Oscarwernqvist <oscarwernqvist@users.noreply.github.com>
+- Oscarwernqvist <oscarwernqvist@users.noreply.github.com>
 
 ### ⚙️ Miscellaneous Tasks
 
+- Update changelog
 - Update changelog
 - Update changelog
 - Update changelog
