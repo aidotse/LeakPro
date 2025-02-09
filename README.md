@@ -17,16 +17,15 @@
     <td>
       LeakPro was created to enable seamless risk assessment of leaking sensitive data when sharing machine learning models or synthetic datasets.  
       To achieve this, it consolidates state-of-the-art privacy attacks into a unified and user-friendly tool, designed with a focus on realistic threat models and practical applicability.
-
-      When running LeakPro, results are automatically collected, summarized, and presented in a comprehensive PDF report. This report is designed for easy sharing with stakeholders and to provide a solid foundation for risk assessment, compliance documentation, and decision-making around data sharing and model deployment.
-
-      The recent [opinion from the EDPB](https://www.edpb.europa.eu/system/files/2024-12/edpb_opinion_202428_ai-models_en.pdf) has further underscored the necessity of a tool like LeakPro, emphasizing that to argue about model anonymity, a released model must have undergone stress-testing with “all means reasonably likely to be used” by an adversary.
     </td>
   </tr>
 </table>
 
 
 
+      When running LeakPro, results are automatically collected, summarized, and presented in a comprehensive PDF report. This report is designed for easy sharing with stakeholders and to provide a solid foundation for risk assessment, compliance documentation, and decision-making around data sharing and model deployment.
+
+      The recent [opinion from the EDPB](https://www.edpb.europa.eu/system/files/2024-12/edpb_opinion_202428_ai-models_en.pdf) has further underscored the necessity of a tool like LeakPro, emphasizing that to argue about model anonymity, a released model must have undergone stress-testing with “all means reasonably likely to be used” by an adversary.
 
 ## Philosophy behind LeakPro
 
