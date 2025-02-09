@@ -9,56 +9,45 @@
 ![Coverage](https://github.com/aidotse/LeakPro/blob/gh-pages/coverage.svg)
 
 ## About the project
-LeakPro was created to enable seamless risk assessment of leaking sensitive data when sharing machine learning models or synthetic datasets. 
-To achieve this, it consolidates state-of-the-art privacy attacks into a unified and user-friendly tool, designed with a focus on realistic threat models and practical applicability.
-LeakPro is also model agnostic (currently limited to uni-modal classification models) and currently supports four different data modalities (image, tabular, text, and graph).
-There are four types of attacks supported, each attempting to answer a specific question:
-- Membership Inference Attacks (MIA): "Is this datapoint part of the training data"?
-- Model Inversion Attacks (MINVA): "What are the training data?" 
-- Gradient Inversion Attacks (GIA): "In a federated learning scenario, given the global model and a local update, what was the training data used in the local update?"
-- Synthetic Data (SynA): "Given a synthetic dataset, can sensitive information in the original data be inferred?"
+<p align="left">
+  <img src="https://github.com/aidotse/LeakPro/blob/readme/resources/logo.png" alt="LeakPro Logo" width="120" style="vertical-align:middle; margin-right:10px;">
+  <span>
+    LeakPro was created to enable seamless risk assessment of leaking sensitive data when sharing machine learning models or synthetic datasets.  
+    To achieve this, it consolidates state-of-the-art privacy attacks into a unified and user-friendly tool, designed with a focus on realistic threat models and practical applicability.
+  </span>
+</p>
 
 When running LeakPro, results are automatically collected, summarized, and presented in a comprehensive PDF report. This report is designed for easy sharing with stakeholders and to provide a solid foundation for risk assessment, compliance documentation, and decision-making around data sharing and model deployment.
-The recent [opinion from the EDPB](https://www.edpb.europa.eu/system/files/2024-12/edpb_opinion_202428_ai-models_en.pdf) has further underscored the necessity of a tool like LeakPro, emphasizing that to argue about model anonimity, a released model must have undergone stress-testing with “all means reasonably likely to be used” by an adversary.
 
-### Philosophy behind LeakPro
+The recent [opinion from the EDPB](https://www.edpb.europa.eu/system/files/2024-12/edpb_opinion_202428_ai-models_en.pdf) has further underscored the necessity of a tool like LeakPro, emphasizing that to argue about model anonymity, a released model must have undergone stress-testing with “all means reasonably likely to be used” by an adversary.
 
-Inspired by recent research [1], LeakPro conceptualizes privacy as a game between a **challenger** and an **attacker**. In this framework, the attacker attempts to infer sensitive information from the challenger. By controlling what is revealed to the attacker, different threat models can be explored.  
 
-*A common concern is that future attacks may be stronger than those considered in LeakPro. To address this, we equip adversaries with more side information than what would typically be available in reality, while ensuring that the assumptions remain reasonable and contextually relevant to the scenario under consideration.*  
+## Philosophy behind LeakPro
 
-LeakPro is designed to **minimize user burden**, requiring minimal manual input and featuring **automated hyperparameter tuning** for relevant attacks. The development is organized into **four parallel work packages (WPs)** with a shared architectural backbone:  
 
+LeakPro is built on the idea that privacy risks in machine learning can be framed as an [adversarial game](https://arxiv.org/abs/2212.10986) between a challenger and an attacker. In this framework, the attacker attempts to infer sensitive information from the challenger, while the challenger controls what information is exposed. By adjusting these controls, LeakPro allows users to explore different threat models, simulating various real-world attack scenarios.  
+
+One common concern is that future attacks may surpass those currently known. To address this, LeakPro adopts a proactive approach, equipping adversaries with more side information than they would typically have in reality. This ensures that LeakPro does not just evaluate existing risks but also anticipates and tests against stronger, future threats, all while keeping assumptions realistic and relevant to practical scenarios. By integrating these principles, LeakPro serves as a flexible and robust tool for assessing privacy risks in machine learning models, helping researchers and practitioners stress-test their systems before real-world vulnerabilities emerge.  
+
+LeakPro is designed to minimize user burden, requiring minimal manual input and featuring automated hyperparameter tuning** for relevant attacks. The development is organized into four parallel legs with a shared architectural backbone:  
 - **Membership Inference Attacks (MIA):**  
-  This WP focuses on attacks that determine whether a specific data point was used in training. Adversaries in this setting have **black-box access** to the model, motivated by findings in the literature that **black-box attacks can be as effective as white-box attacks**.  
+  This WP focuses on attacks that determine whether a specific data point was used in training. Adversaries in this setting have black-box access to the model, motivated by findings in the literature that black-box attacks can be as effective as white-box attacks.  
 
-- **Model Inversion Attacks (MINVA):**  
-  This recently initiated WP explores attacks that aim to **reconstruct sensitive training data**. In this case, the adversary is assumed to have **white-box access** to the model.  
+- **Model Inversion Attacks (MInvA):**  
+  This recently initiated WP explores attacks that aim to reconstruct sensitive training data. In this case, the adversary is assumed to have white-box access to the model.  
 
 - **Gradient Inversion Attacks (GIA):**  
-  This WP targets **federated learning**, investigating the risk of an adversary **reconstructing client data at the server** by leveraging the global model and client updates.  
+  This WP targets federated learning, investigating the risk of an adversary reconstructing client data at the server by leveraging the global model and client updates.  
 
 - **Synthetic Data Attacks:**  
-  In this WP, adversaries only have access to a **synthetic dataset** generated from sensitive data. The goal is to **infer information about the original dataset** using only interactions with the synthetic data.  
+  In this WP, adversaries only have access to a synthetic dataset generated from sensitive data. The goal is to infer information about the original dataset using only interactions with the synthetic data.  
 
-Each WP follows core design principles: **easy integration of new attacks, model agnosticism, and support for diverse data modalities**. Currently, it supports **tabular, image, text, and graph data**, with **time series integration underway**.  
-
-Phase one focuses on **classification models** (ranging from **decision trees to deep neural networks**), with an **expansion to generative models** planned for **phase two in 2026**.  
-
-Although LeakPro primarily focuses on **building a compliance tool**, its development has also advanced research, leading to **two publications in its first year** [2,3].  
-
----
-
-**References**  
-[1] Salem et al., 2023. *SOK: Privacy Attacks on Machine Learning Models.*  
-[2] Krüger et al., 2024. *Publishing Neural Networks for Drug Discovery: Privacy Considerations.*  
-[3] Brännvall et al., 2025. *Technical Report on the Forgotten by Design Project.*  
-
+Each leg follows core design principles: easy integration of new attacks, model agnosticism, and support for diverse data modalities. Currently, it supports tabular, image, text, and graph data, with time series integration underway.  
 
 
 ## Real world examples
 
-Our industry use cases cover four distinct data modalities: tabular, image, text, and graphs. Each use case supports various types of privacy attacks, providing a comprehensive evaluation framework.
+Our [example portfolio](https://github.com/aidotse/LeakPro/tree/readme/examples) of real industry use cases cover four distinct data modalities: tabular, image, text, and graphs. The example portfolio is continuously improved and extended.
 
 <div align="center">
 
