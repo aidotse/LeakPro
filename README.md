@@ -9,49 +9,52 @@
 ![Coverage](https://github.com/aidotse/LeakPro/blob/gh-pages/coverage.svg)
 
 ## About the project
-The goal of LeakPro is to enable practitioners to seamlessly estimate the risk of leaking sensitive data when sharing machine learning models or synthetic datasets. 
-LeakPro was created to bridge the gap between technical risk and legal risk, a challenge faced by many organizations today.
-To achieve this, LeakPro provides tools to stress-test machine learning models and synthetic data by performing state-of-the-art privacy attacks. These include membership inference attacks, reconstruction attacks, and other advanced methods that assess the potential for sensitive information leakage.
+LeakPro was created to enable seamless risk assessment of leaking sensitive data when sharing machine learning models or synthetic datasets. 
+To achieve this, it consolidates state-of-the-art privacy attacks into a unified and user-friendly tool, designed with a focus on realistic threat models and practical applicability.
+LeakPro is also model agnostic (currently limited to uni-modal classification models) and currently supports four different data modalities (image, tabular, text, and graph).
+There are four types of attacks supported, each attempting to answer a specific question:
+- Membership Inference Attacks (MIA): "Is this datapoint part of the training data"?
+- Model Inversion Attacks (MINVA): "What are the training data?" 
+- Gradient Inversion Attacks (GIA): "In a federated learning scenario, given the global model and a local update, what was the training data used in the local update?"
+- Synthetic Data (SynA): "Given a synthetic dataset, can sensitive information in the original data be inferred?"
 
-The results are automatically collected, summarized, and presented in a comprehensive PDF report. This report is designed for easy sharing with stakeholders and to provide a solid foundation for risk assessment, compliance documentation, and decision-making around data sharing and model deployment.
+When running LeakPro, results are automatically collected, summarized, and presented in a comprehensive PDF report. This report is designed for easy sharing with stakeholders and to provide a solid foundation for risk assessment, compliance documentation, and decision-making around data sharing and model deployment.
+The recent [opinion from the EDPB](https://www.edpb.europa.eu/system/files/2024-12/edpb_opinion_202428_ai-models_en.pdf) has further underscored the necessity of a tool like LeakPro, emphasizing that to argue about model anonimity, a released model must have undergone stress-testing with “all means reasonably likely to be used” by an adversary.
 
-## Privacy auditing
+### Philosophy behind LeakPro
 
-### Membership Inference Attacks (MIA)
-![mia_flow](./resources/mia_flow.png) 
+Inspired by recent research [1], LeakPro conceptualizes privacy as a game between a **challenger** and an **attacker**. In this framework, the attacker attempts to infer sensitive information from the challenger. By controlling what is revealed to the attacker, different threat models can be explored.  
 
-In the figure above, the MIA workflow is outlined. The upper part of the image (above the dashed line) shows user-controlled inputs, while the lower part illustrates the inner workings of LeakPro.
-To evaluate MIAs using LeakPro, the following steps are necessary:
+*A common concern is that future attacks may be stronger than those considered in LeakPro. To address this, we equip adversaries with more side information than what would typically be available in reality, while ensuring that the assumptions remain reasonable and contextually relevant to the scenario under consideration.*  
 
-- **Step 1:**  Ensure access to an auxiliary dataset, which may originate from the same distribution as the training dataset or a different one. The figure above illustrates the former case.
-Additionally, the user must split the dataset into a training set and a test set. The training set is used for model training, while the test set is used to assess the generalization gap. During evaluation, the attack will be tested on both training samples (in-members) and testing samples (out-members).
-The complete dataset (including the training, test, and auxiliary sets) will be provided to LeakPro and referred to as the population data.
-Importantly, the population dataset must be indexable.
+LeakPro is designed to **minimize user burden**, requiring minimal manual input and featuring **automated hyperparameter tuning** for relevant attacks. The development is organized into **four parallel work packages (WPs)** with a shared architectural backbone:  
 
-- **Step 2:** The user must provide a function to train a model using the training set. This function can either be used to train a target model or be bypassed if a pre-trained target model is provided. Regardless, the user must supply training functionality to enable the adversary to train shadow models during the evaluation process.
-It is important to note that this training functionality can be designed to limit the adversary's knowledge, as the training process may differ from the actual model training used in practice.
-Additionally, along with the target model, the user should provide the following metadata:
-    - Training and testing indices within the population data.
-    - The optimizer function used during training.
-    - The loss function applied during model evaluation.
+- **Membership Inference Attacks (MIA):**  
+  This WP focuses on attacks that determine whether a specific data point was used in training. Adversaries in this setting have **black-box access** to the model, motivated by findings in the literature that **black-box attacks can be as effective as white-box attacks**.  
+
+- **Model Inversion Attacks (MINVA):**  
+  This recently initiated WP explores attacks that aim to **reconstruct sensitive training data**. In this case, the adversary is assumed to have **white-box access** to the model.  
+
+- **Gradient Inversion Attacks (GIA):**  
+  This WP targets **federated learning**, investigating the risk of an adversary **reconstructing client data at the server** by leveraging the global model and client updates.  
+
+- **Synthetic Data Attacks:**  
+  In this WP, adversaries only have access to a **synthetic dataset** generated from sensitive data. The goal is to **infer information about the original dataset** using only interactions with the synthetic data.  
+
+Each WP follows core design principles: **easy integration of new attacks, model agnosticism, and support for diverse data modalities**. Currently, it supports **tabular, image, text, and graph data**, with **time series integration underway**.  
+
+Phase one focuses on **classification models** (ranging from **decision trees to deep neural networks**), with an **expansion to generative models** planned for **phase two in 2026**.  
+
+Although LeakPro primarily focuses on **building a compliance tool**, its development has also advanced research, leading to **two publications in its first year** [2,3].  
+
+---
+
+**References**  
+[1] Salem et al., 2023. *SOK: Privacy Attacks on Machine Learning Models.*  
+[2] Krüger et al., 2024. *Publishing Neural Networks for Drug Discovery: Privacy Considerations.*  
+[3] Brännvall et al., 2025. *Technical Report on the Forgotten by Design Project.*  
 
 
-- **Step 3:** The user-provided inputs–population data, target model, target model metadata, and the training function–are supplied to LeakPro when the LeakPro object is created. This information is stored within the Handler object, which acts as an interface between the user and the various attacks performed by LeakPro.
-
-- **Step 4:** The relevant attacks are prepared within LeakPro, utilizing different tools based on the specific attacks being performed. For instance, some attacks rely on shadow models, while others leverage techniques such as model distillation or quantile regression.
-These tools are built using the auxiliary data, which is assumed to be accessible to the adversary, along with the training loop provided by the user.
-Additionally, certain attacks feature both online and offline versions:
-
-    - Offline attacks: The adversary can only sample from the provided auxiliary dataset, limiting access to other data sources.
-    - Online attacks: The adversary can also sample from the training and test datasets, though without knowing whether specific samples were used during the training of the target model.
-
-- **Step 5:** The attack tools are utilized during attack execution to generate signals for membership inference. The membership inference attacks are evaluated on both the training and test datasets. The adversary's objective is twofold:
-
-    - Correctly infer that the training data samples are in-members (part of the training set).
-    - Accurately detect that the test data samples are out-members (not part of the training set).
-
-- **Step 6:** The signals generated by each attack, along with the corresponding decisions, are passed to LeakPro's report module for summarization. The report module compiles the results into a comprehensive PDF report for easy sharing while also storing the individual data outputs produced by the attacks for further analysis.
-Once the results have been generated and stored, the auditing process is considered complete.
 
 ## Real world examples
 
@@ -67,9 +70,10 @@ Our industry use cases cover four distinct data modalities: tabular, image, text
       <br>
       <a href="length-of-stay.md">length-of-stay.md</a>
       <div style="text-align: left;">
-        Membership Inference: ✅<br>
-        Federated learning: ✅</br>
-        Synthetic data: ✅
+        MIA: ✅<br>
+        MInvA: ❌<br>
+        GIA: ✅</br>
+        SynA: ✅
       </div>
     </td>
     <td align="center" width="400" height="200">
@@ -78,9 +82,10 @@ Our industry use cases cover four distinct data modalities: tabular, image, text
       <br>
       <a href="text-masking.md">text-masking.md</a>
       <div style="text-align: left;">
-        Membership Inference: ✅<br>
-        Federated learning: ✅</br>
-        Synthetic data: ✅
+        MIA: ✅<br>
+        MInvA: ❌<br>
+        GIA: ✅</br>
+        SynA: ✅
       </div>
     </td>
   </tr>
@@ -91,9 +96,10 @@ Our industry use cases cover four distinct data modalities: tabular, image, text
       <br>
       <a href="surveillance.md">surveillance.md</a>
       <div style="text-align: left;">
-        Membership Inference: ✅<br>
-        Federated learning: ✅</br>
-        Synthetic data: ❌
+        MIA: ✅<br>
+        MInvA: ❌<br>
+        GIA: ✅</br>
+        SynA: ❌
       </div>
     </td>
     <td align="center" width="400" height="200">
@@ -102,9 +108,10 @@ Our industry use cases cover four distinct data modalities: tabular, image, text
       <br>
       <a href="molecule-property.md">molecule-property.md</a>
       <div style="text-align: left;">
-        Membership Inference: ✅<br>
-        Federated learning: ❌</br>
-        Synthetic data: ❌
+        MIA: ✅<br>
+        MInvA: ❌<br>
+        GIA: ❌</br>
+        SynA: ❌
       </div>
     </td>
   </tr>
@@ -121,7 +128,7 @@ Our industry use cases cover four distinct data modalities: tabular, image, text
 1. **Navigate to the project repo**
 `cd Leakpro`
 2. **Install with pip**
-`pip install -e .`
+`pip install -e .[dev]`
 
 ## To Contribute
 0. **Ensure local repo is up-to-date:**
