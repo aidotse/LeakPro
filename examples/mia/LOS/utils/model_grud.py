@@ -1,12 +1,10 @@
-"""
-This file is inspired by https://github.com/MLforHealth/MIMIC_Extract 
+"""This file is inspired by https://github.com/MLforHealth/MIMIC_Extract
 MIT License
 Copyright (c) 2019 MIT Laboratory for Computational Physiology
 """
 import math
 import os
 import pickle
-import time
 import warnings
 
 import numpy as np
@@ -14,7 +12,25 @@ import pandas as pd
 import torch.nn.functional as F
 import torch.utils.data as utils
 from sklearn.metrics import accuracy_score
-from torch import Tensor, cat, cuda, device, exp, eye, from_numpy, isnan, max, nn, optim, save, sigmoid, squeeze, tanh, zeros
+from torch import (
+    Tensor,
+    cat,
+    cuda,
+    device,
+    exp,
+    eye,
+    from_numpy,
+    isnan,
+    max,
+    nn,
+    no_grad,
+    optim,
+    save,
+    sigmoid,
+    squeeze,
+    tanh,
+    zeros,
+)
 from torch.autograd import Variable
 from torch.nn.parameter import Parameter
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -77,12 +93,11 @@ class FilterLinear(nn.Module):
             + ", bias=" + str(self.bias is not None) + ")"
 
 class GRUD(nn.Module):
-    def __init__(self, input_size, cell_size, hidden_size, X_mean, batch_size = 0, output_last = False):
+    def __init__(self, input_size, hidden_size, X_mean, batch_size = 0, output_last = False):
         """With minor modifications from https://github.com/zhiyongc/GRU-D/
 
         Recurrent Neural Networks for Multivariate Times Series with Missing Values
         GRU-D: GRU exploit two representations of informative missingness patterns, i.e., masking and time interval.
-        cell_size is the size of cell_state.
         
         Implemented based on the paper: 
         @article{che2018recurrent,
@@ -108,7 +123,6 @@ class GRUD(nn.Module):
         # Save init params to a dictionary
         self.init_params = {
             "input_size": input_size,
-            "cell_size": cell_size,
             "hidden_size": hidden_size,
             "X_mean": X_mean,
             "batch_size": batch_size,
@@ -138,7 +152,7 @@ class GRUD(nn.Module):
 
         self.fc = nn.Linear(self.hidden_size, 2).to(self.device)
         self.bn= nn.BatchNorm1d(2, eps=1e-05, momentum=0.1, affine=True).to(self.device)
-        self.drop=nn.Dropout(p=0.7, inplace=False)
+        self.drop=nn.Dropout(p=0.2, inplace=False)
 
 
     def step(self, x, x_last_obsv, x_mean, h, mask, delta):
@@ -150,7 +164,8 @@ class GRUD(nn.Module):
             mask: the mask of whether or not the current value is observed
             delta: the tensor indicating the number of steps since the last time a feature was observed.
             
-        Returns:
+        Returns
+        -------
             h: the updated hidden state of the network
 
         """
@@ -233,6 +248,7 @@ class GRUD(nn.Module):
 
         # Step 4: Predict a binary outcome using FC, BatchNorm, and Dropout layers
         return self.drop(self.bn(self.fc(Hidden_State)))
+        #return self.drop(self.fc(self.bn(Hidden_State)))
 
     def initHidden(self, batch_size):
         Hidden_State = Variable(zeros(batch_size, self.hidden_size)).to(self.device)
@@ -240,6 +256,48 @@ class GRUD(nn.Module):
 
 def to_numpy(tensor):
     return tensor.detach().cpu().numpy() if tensor.is_cuda else tensor.detach().numpy()
+
+def model_test(model, test_dataloader, criterion_CEL, criterion_MSE):
+    device_name = device("cuda" if cuda.is_available() else "cpu")
+
+    model.eval()
+    test_loss = 0.0
+    all_test_labels = []
+    all_test_predictions = []
+
+    with no_grad():
+        for _, (X, labels) in enumerate(tqdm(test_dataloader, desc="Test Batches")):
+
+            X = X.to(device_name)
+            labels = labels.to(device_name)
+            labels = labels.long()
+            prediction = model(X)
+
+            all_test_labels.append(to_numpy(labels))
+            all_test_predictions.append(to_numpy(prediction))
+
+            output_last = True
+            if output_last:
+                loss = criterion_CEL(squeeze(prediction), squeeze(labels))
+            else:
+                full_labels = cat((X[:,1:,:], labels), dim = 1)
+                loss = criterion_MSE(prediction, full_labels)
+
+            test_loss += loss.item()
+
+        test_loss /= len(test_dataloader)
+
+    # Concatenate all accumulated predictions and labels
+    all_test_predictions = np.concatenate(all_test_predictions, axis=0).argmax(axis=1)
+    all_test_labels = np.concatenate(all_test_labels, axis=0).astype(int)
+
+    # Compute accuracy
+    test_acc = accuracy_score(all_test_labels, all_test_predictions)
+
+    return test_loss, test_acc
+
+
+
 
 def gru_trained_model_and_metadata(model,
                                    train_dataloader,
@@ -263,8 +321,6 @@ def gru_trained_model_and_metadata(model,
     min_loss_epoch_valid = float("inf")  # Initialize to infinity for comparison
     patient_epoch = 0  # Initialize patient counter
 
-    device_name = device("cuda" if cuda.is_available() else "cpu")
-
     if isinstance(model, nn.Sequential):
         output_last = model[-1].output_last
         print("Output type dermined by the last layer")
@@ -277,7 +333,7 @@ def gru_trained_model_and_metadata(model,
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
     # Reduce learning rate when a metric has stopped improving
-    scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience = patience_lr)
+    scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.2, patience = patience_lr)
 
 
     train_losses = []
@@ -285,19 +341,15 @@ def gru_trained_model_and_metadata(model,
     test_acces = []
     train_acces = []
 
-
-    cur_time = time.time()
-    pre_time = time.time()
-
-
+    device_name = device("cuda" if cuda.is_available() else "cpu")
     model.to(device_name)
 
     for epoch in tqdm(range(epochs), desc="Training Progress"):
 
         model.train()
         train_loss = 0.0
-
-        test_dataloader_iter = iter(test_dataloader)
+        all_labels = []
+        all_predictions = []
 
         for _, (X, labels) in enumerate(tqdm(train_dataloader, desc="Training Batches")):
 
@@ -306,13 +358,15 @@ def gru_trained_model_and_metadata(model,
             labels = labels.long()
             prediction = model(X)
 
+            all_labels.append(to_numpy(labels))
+            all_predictions.append(to_numpy(prediction))
+
             output_last = True
             if output_last:
                 loss = criterion_CEL(squeeze(prediction), squeeze(labels))
             else:
                 full_labels = cat((X[:,1:,:], labels), dim = 1)
                 loss = criterion_MSE(prediction, full_labels)
-
 
             optimizer.zero_grad()
             loss.backward()
@@ -322,48 +376,18 @@ def gru_trained_model_and_metadata(model,
         train_loss /= len(train_dataloader)
         train_losses.append(train_loss)
 
-        # Convert predictions to class indices
-        binary_predictions = to_numpy(prediction).argmax(axis=1)
+        # Concatenate all accumulated predictions and labels
+        all_predictions = np.concatenate(all_predictions, axis=0).argmax(axis=1)
+        all_labels = np.concatenate(all_labels, axis=0).astype(int)
 
-        # Ensure labels are integer and 1D
-        binary_labels = to_numpy(labels).astype(int)
         # Compute accuracy
-        train_acc = accuracy_score(binary_labels, binary_predictions)
+        train_acc = accuracy_score(all_labels, all_predictions)
         train_acces.append(train_acc)
 
-        # test
-        model.eval()
-        try:
-            X_test, labels_test = next(test_dataloader_iter)
-        except StopIteration:
-            valid_dataloader_iter = iter(test_dataloader)
-            X_test, labels_test = next(valid_dataloader_iter)
+        # Test the model
+        test_loss, test_acc = model_test(model, test_dataloader, criterion_CEL, criterion_MSE)
 
-
-        model.zero_grad()
-        X_test = X_test.to(device_name)
-        labels_test = labels_test.to(device_name)
-        labels_test = labels_test.long()
-
-        prediction_test = model(X_test)
-
-
-        if output_last:
-            test_loss = criterion_CEL(squeeze(prediction_test), squeeze(labels_test))
-        else:
-            full_labels_val = cat((X_test[:,1:,:], labels_test), dim = 1)
-            test_loss = criterion_MSE(prediction_test, full_labels_val)
-
-        test_loss = test_loss.cpu().item()
         test_losses.append(test_loss)
-
-        # Convert predictions to class indices
-        binary_predictions_test = to_numpy(prediction_test).argmax(axis=1)
-
-        # Ensure labels are integer and 1D
-        binary_labels_test = to_numpy(labels_test).astype(int)
-        # Compute accuracy
-        test_acc = accuracy_score(binary_labels_test, binary_predictions_test)
         test_acces.append(test_acc)
 
         # Early stopping
@@ -385,22 +409,19 @@ def gru_trained_model_and_metadata(model,
 
         # Check the learning rate
         current_lr =  optimizer.param_groups[0]["lr"]
-        print(f"Learning Rate: {current_lr:.6f}")
+        print(f"Learning Rate: {current_lr:.12f}")
 
         # Stop if learning rate becomes too small
-        if current_lr < 1e-6:
+        if current_lr < 1e-12:
             print("Learning rate too small, stopping training.")
             break
 
-
         # Print training parameters
-        cur_time = time.time()
-        print("Epoch: {}, train_loss: {}, valid_loss: {}, time: {}".format( \
+        print("Epoch: {}, train_loss: {}, valid_loss: {}".format( \
                     epoch, \
                     np.around(train_loss, decimals=8),\
-                    np.around(test_loss, decimals=8),\
-                    np.around(cur_time - pre_time, decimals=2)))
-        pre_time = cur_time
+                    np.around(test_loss, decimals=8) ))
+
     # Move the model back to the CPU
     # Ensure the target directory exists
     os.makedirs("target_GRUD", exist_ok=True)

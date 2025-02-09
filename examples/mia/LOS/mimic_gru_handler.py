@@ -1,9 +1,10 @@
 
+from sklearn.metrics import accuracy_score
 from torch import cuda, device, nn, optim, squeeze
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from sklearn.metrics import accuracy_score
+
 from leakpro import AbstractInputHandler
 
 
@@ -37,7 +38,6 @@ class MimicInputHandlerGRU(AbstractInputHandler):
         optimizer: optim.Optimizer = None,
         epochs: int = None,
     ) -> dict:
-        
         """Model training procedure."""
         device_name = device("cuda" if cuda.is_available() else "cpu")
         model.to(device_name)
