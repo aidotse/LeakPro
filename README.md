@@ -9,13 +9,17 @@
 ![Coverage](https://github.com/aidotse/LeakPro/blob/gh-pages/coverage.svg)
 
 ## About the project
-<p align="left">
-  <img src="https://github.com/aidotse/LeakPro/blob/readme/resources/logo.png" alt="LeakPro Logo" width="120" style="vertical-align:middle; margin-right:10px;">
-  <span>
-    LeakPro was created to enable seamless risk assessment of leaking sensitive data when sharing machine learning models or synthetic datasets.  
-    To achieve this, it consolidates state-of-the-art privacy attacks into a unified and user-friendly tool, designed with a focus on realistic threat models and practical applicability.
-  </span>
-</p>
+<table>
+  <tr>
+    <td width="120">
+      <img src="https://github.com/aidotse/LeakPro/blob/readme/resources/logo.png" alt="LeakPro Logo" width="120">
+    </td>
+    <td>
+      LeakPro was created to enable seamless risk assessment of leaking sensitive data when sharing machine learning models or synthetic datasets.  
+      To achieve this, it consolidates state-of-the-art privacy attacks into a unified and user-friendly tool, designed with a focus on realistic threat models and practical applicability.
+    </td>
+  </tr>
+</table>
 
 When running LeakPro, results are automatically collected, summarized, and presented in a comprehensive PDF report. This report is designed for easy sharing with stakeholders and to provide a solid foundation for risk assessment, compliance documentation, and decision-making around data sharing and model deployment.
 
