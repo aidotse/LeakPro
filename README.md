@@ -12,7 +12,7 @@
 <table>
   <tr>
     <td width="120">
-      <img src="https://github.com/aidotse/LeakPro/blob/readme/resources/logo.png" alt="LeakPro Logo" width="120">
+      <img src="https://github.com/aidotse/LeakPro/blob/readme/resources/logo.jpg" alt="LeakPro Logo" width="120">
     </td>
     <td>
       LeakPro was created to enable seamless risk assessment of leaking sensitive data when sharing machine learning models or synthetic datasets.  
