@@ -23,56 +23,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-<<<<<<< HEAD
-mia = [
-  "torch", 
-  "torchvision", 
-<<<<<<< HEAD
-  "torchmetrics",
-<<<<<<< HEAD
-  "dotmap",
-  "loguru",
-  "jinja2",
-  "tqdm",
-  "pyyaml",
-  "numba",
-  "pydantic",
-  "joblib",
-  "pytest",
-  "pytest-mock",
-  "gdown",
-  "optuna",
-  "pytorch-ignite",
-=======
->>>>>>> 44b435d (added dependencies for each subpackage)
-=======
->>>>>>> bad23c7 (started subpackages)
-]
-synthetic = [
-  "numba", 
-  "pydantic"
-]
-federated = [
-  "torch", 
-  "torchvision", 
-  "torchmetrics",
-]
-
-=======
 mia = ["torch", "torchvision"]
 synthetic = ["numba", "pydantic"]
 federated = ["torch", "torchvision", "torchmetrics",]
-<<<<<<< HEAD
-<<<<<<< HEAD
-dev = ["torch", "torchvision", "torchmetrics", "numba", "pydantic", "pytest", "pytest-cov", "ruff"]
->>>>>>> 6175f08 (updated factory + toml)
-=======
-dev = ["pytest", "pytest-cov", "pytest-mock", "coverage-badge", "ruff"] + mia + synthetic + federated
->>>>>>> 3a3fd6d (use toml for installation in CICD)
-=======
 dev = [
   "pytest",
   "pytest-cov",
+  "pytorch-ignite",
+  "gdown",
+  "optuna",
   "pytest-mock",
   "coverage-badge",
   "ruff",
@@ -82,7 +41,6 @@ dev = [
   "numba",  # from synthetic
   "pydantic",  # from synthetic
 ]
->>>>>>> 401cb4b (toml apparently not supporting list concatenation)
 
 [tool.setuptools]
 include-package-data = true
