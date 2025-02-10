@@ -60,10 +60,10 @@ class ShadowModelHandler(ModelHandler):
         caller = "shadow_model"
         super().__init__(handler, caller)
 
-        shadow_model = self.handler.configs.get("shadow_model", None)
-        self.shadow_model_type = shadow_model.get("model_class", None) if isinstance(shadow_model, dict) else None
+        shadow_model = self.handler.configs.shadow_model
+        self.shadow_model_type = shadow_model.model_class if isinstance(shadow_model, dict) else None
 
-        self.target_model_type = self.handler.configs.get("target", {}).get("model_class", None)
+        self.target_model_type = self.handler.configs.target.model_class
         if self.target_model_type is None:
             raise ValueError("Target model type is not specified")
 
@@ -85,11 +85,11 @@ class ShadowModelHandler(ModelHandler):
 
         for i in all_indices:
             metadata = self._load_shadow_metadata(i)
-            if metadata["num_train"] == data_size and metadata["online"] == online:
-                if metadata.get("model_type") == model_type:
+            if metadata.num_train == data_size and metadata.online == online:
+                if metadata.model_type == model_type:
                     filtered_indices.append(i)
                 else:
-                    mismatched_model_types.append((i, metadata.get("model_type", "Unknown")))
+                    mismatched_model_types.append((i, metadata.model_type))
 
         # Warn about mismatched model types
         if mismatched_model_types:
@@ -161,9 +161,9 @@ class ShadowModelHandler(ModelHandler):
             logger.info(f"Training shadow model {i} on {len(data_loader)* data_loader.batch_size} points")
             training_results = self.handler.train(data_loader, model, criterion, optimizer, self.epochs)
             # Read out results
-            shadow_model = training_results["model"]
-            train_acc = training_results["metrics"]["accuracy"]
-            train_loss = training_results["metrics"]["loss"]
+            shadow_model = training_results.model
+            train_acc = training_results.metrics.accuracy
+            train_loss = training_results.metrics.loss
 
             logger.info(f"Training shadow model {i} complete")
             with open(f"{self.storage_path}/{self.model_storage_name}_{i}.pkl", "wb") as f:
@@ -268,7 +268,7 @@ class ShadowModelHandler(ModelHandler):
         metadata = self.get_shadow_model_metadata(shadow_model_indices)
 
         # Extract training indices for each shadow model
-        models_in_indices = [data["train_indices"] for data in metadata]
+        models_in_indices = [data.train_indices for data in metadata]
 
         # Convert to numpy array for easier manipulation
         models_in_indices = np.asarray(models_in_indices)

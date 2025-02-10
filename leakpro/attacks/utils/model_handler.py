@@ -30,12 +30,12 @@ class ModelHandler():
 
         self.handler = handler
 
-        caller_configs =  handler.configs.get(caller, None)
+        caller_configs =  handler.configs.caller
         if caller_configs is None:
             caller_configs = {}
 
-        self.model_path = caller_configs.get("module_path", None)
-        self.model_class = caller_configs.get("model_class", None)
+        self.model_path = caller_configs.module_path
+        self.model_class = caller_configs.model_class
 
         self.use_target_model_setup = self.model_path is None or self.model_class is None
 
@@ -48,10 +48,10 @@ class ModelHandler():
         # Pick either target config or caller config
         setup_config = deepcopy(handler.target_model_metadata) if self.use_target_model_setup else caller_configs
 
-        self.init_params = setup_config.get("init_params", {})
+        self.init_params = setup_config.init_params
 
         # Get optimizer class
-        self.optimizer_config = setup_config["optimizer"]
+        self.optimizer_config = setup_config.optimizer
         optimizer_name = self.optimizer_config.pop("name").lower() # pop to only have input parameters left
         self.optimizer_class = self._get_optimizer_class(optimizer_name)
 

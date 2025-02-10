@@ -1,6 +1,7 @@
 """Implementation of the RMIA attack."""
 
 import numpy as np
+from pydantic import BaseModel, Field
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
@@ -12,8 +13,23 @@ from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 
+class RMIAConfig(BaseModel):
+    """Configuration for the RMIA attack."""
+
+    num_shadow_models: int = Field(default=1, ge=1, description="Number of shadow models")
+    offline_a: str = Field(default=0.33, ge=0.0, le=1.0, description="Parameter to estimate the marginal p(x)")
+    offline_b: str = Field(default=0.66, ge=0.0, le=1.0, description="Parameter to estimate the marginal p(x)")
+    gamma: float = Field(default=2.0, ge=0.0, description="Parameter to threshold LLRs")
+    temperature: float = Field(default=2.0, ge=0.0, description="Softmax temperature")
+    training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow models")  # noqa: E501
+    attack_data_fraction: float = Field(default=0.1, ge=0.0, le=1.0, description="Part of available attack data to use for attack")  # noqa: E501
+    online: bool = Field(default=False, description="Online vs offline attack")
+
+
 class AttackRMIA(AbstractMIA):
     """Implementation of the RMIA attack."""
+
+    AttackConfig = RMIAConfig # required config for attack
 
     def __init__(self:Self,
                  handler: AbstractInputHandler,
@@ -36,40 +52,7 @@ class AttackRMIA(AbstractMIA):
         self.shadow_model_indices = None
 
         logger.info("Configuring RMIA attack")
-        self._configure_attack(configs)
-
-
-    def _configure_attack(self:Self, configs: dict) -> None:
-        """Configure the RMIA attack.
-
-        Args:
-        ----
-            configs (dict): Configuration parameters for the attack.
-
-        """
-        self.num_shadow_models = configs.get("num_shadow_models", 4)
-        self.offline_a = configs.get("data_fraction", 0.33)
-        self.offline_b = configs.get("offline_b", 0.66)
-        self.gamma = configs.get("gamma", 2.0)
-        self.temperature = configs.get("temperature", 2.0)
-        self.training_data_fraction = configs.get("training_data_fraction", 0.5)
-        self.online = configs.get("online", False)
-        self.attack_data_fraction = configs.get("attack_data_fraction", 0.1)
-
-        # Define the validation dictionary as: {parameter_name: (parameter, min_value, max_value)}
-        validation_dict = {
-            "num_shadow_models": (self.num_shadow_models, 1, None),
-            "offline_a": (self.offline_a, 0, 1),
-            "offline_b": (self.offline_b, 0, 1),
-            "gamma": (self.gamma, 0, None),
-            "temperature": (self.temperature, 0, None),
-            "training_data_fraction": (self.training_data_fraction, 0, 1),
-            "attack_data_fraction": (self.attack_data_fraction, 0, 1),
-        }
-
-        # Validate parameters
-        for param_name, (param_value, min_val, max_val) in validation_dict.items():
-            self._validate_config(param_name, param_value, min_val, max_val)
+        self.configs = RMIAConfig(**configs)
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""

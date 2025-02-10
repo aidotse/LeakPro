@@ -3,6 +3,7 @@
 from abc import ABC, abstractmethod
 
 import numpy as np
+from pydantic import BaseModel
 from torch.utils.data import DataLoader
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
@@ -29,6 +30,8 @@ class AbstractMIA(ABC):
     handler=None
     _initialized = False
 
+    AttackConfig: type[BaseModel]  # Subclasses must define an attack config
+
     def __init__(
         self:Self,
         handler: AbstractInputHandler,
@@ -40,6 +43,11 @@ class AbstractMIA(ABC):
             handler (AbstractInputHandler): The input handler object.
 
         """
+        if not hasattr(self, "AttackConfig"):
+            raise NotImplementedError(f"{self.__class__.__name__} must define an AttackConfig.")
+        if not issubclass(self.ConfigModel, BaseModel):
+            raise TypeError(f"{self.__class__.__name__}.AttackConfig must be a subclass of Pydantic's BaseModel.")
+
         # These objects are shared and should be initialized only once
         if not AbstractMIA._initialized:
             AbstractMIA.population = handler.population

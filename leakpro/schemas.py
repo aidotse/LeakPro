@@ -1,0 +1,122 @@
+"""Module that contains the schema definitions for the input handler."""
+
+from typing import Annotated, Any, Dict, List, Literal, Optional
+
+from pydantic import BaseModel, Field, field_validator
+from torch.nn import Module
+
+
+class AuditConfig(BaseModel):
+    """Configuration for the audit process."""
+
+    random_seed: int = Field(default=42, description="Random seed for reproducibility")
+    attack_type: Literal["mia", "gia", "minva", "synthetic"] = Field(..., description="Type of attack: must be one of ['mia', 'gia', 'minva', 'synthetic]")  # noqa: E501
+    attack_list: Dict[str, Any] = Field(..., min_length=1, description="Must have at least one attack")
+    hyper_param_search: bool = Field(default=False, description="Whether to perform hyperparameter search")
+    data_modality: Literal["image", "tabular", "text", "graph", "timeseries"] = Field(..., description="Type of data modality: must be one of ['image', 'tabular', 'text', 'graph', 'timeseries']")  # noqa: E501
+    output_dir: str = Field(..., description="Output directory for audit results")
+
+    # turn some of the fields to lowercase
+    @field_validator("attack_type", "data_modality", "attack_list", mode="before")
+    @classmethod
+    def lowercase_attack_type(cls, v: str) -> str:
+        """Convert attack type to lowercase."""
+        return v.lower() if isinstance(v, str) else v
+
+class TargetConfig(BaseModel):
+    """Configuration for the target model."""
+
+    module_path: Annotated[str, Field(pattern=r".*\.py$", description="Path to the target model module")]
+    model_class: str = Field(..., description="Class name of the model")
+    target_folder: str = Field(..., description="Directory where target model data is stored")
+    data_path: str = Field(..., description="Path to dataset file")
+
+
+class ShadowModelConfig(BaseModel):
+    """Configuration for the Shadow models."""
+
+    model_class: Optional[str] = None
+
+
+class DistillationModelConfig(BaseModel):
+    """Configuration for the distillation models."""
+
+    pass  # Add fields when necessary
+
+
+class LeakProConfig(BaseModel):
+    """Configuration for the LeakPro framework."""
+
+    audit: AuditConfig
+    target: TargetConfig
+    shadow_model: Optional[ShadowModelConfig] = None
+    distillation_model: Optional[DistillationModelConfig] = None
+
+class TrainingOutput(BaseModel):
+    """Output of the training procedure."""
+
+    model: Module
+    metrics: Dict[str, Any] = Field(default_factory=dict)
+
+    # Validate that the model is an instance of torch.nn.Module
+    @field_validator("model", mode="before")
+    @classmethod
+    def validate_model(cls, v:Module) -> Module:
+        """Validate that the model is an instance of torch.nn.Module."""
+        if not isinstance(v, Module):
+            raise ValueError("model must be an instance of torch.nn.Module")
+        return v
+
+    class Config:
+        """Configuration for TrainingOutput to enable arbitrary type handling."""
+
+        arbitrary_types_allowed = True
+
+
+
+class OptimizerConfig(BaseModel):
+    """Schema for optimizer parameters."""
+
+    name: str = Field(..., description="Optimizer name")
+    lr: float = Field(default=1e-3, ge=0, description="Learning rate")
+    weight_decay: float = Field(default=0.0, ge=0, description="Weight decay parameter")
+    momentum: float = Field(default=0.0, ge=0, description="Momentum parameter")
+    dampening: float = Field(default=0.0, ge=0, description="Dampening parameter")
+    nesterov: bool = Field(default=False, description="Whether Nesterov momentum is used")
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def lowercase_attack_type(cls, v: str) -> str:
+        """Convert optimizer name type to lowercase."""
+        return v.lower() if isinstance(v, str) else v
+
+
+class LossConfig(BaseModel):
+    """Schema for loss function parameters."""
+
+    name: str = Field(..., description="Loss function name")
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def lowercase_attack_type(cls, v: str) -> str:
+        """Convert loss name type to lowercase."""
+        return v.lower() if isinstance(v, str) else v
+
+
+class MIAMetaDataSchema(BaseModel):
+    """Schema for training metadata."""
+
+    train_indices: List[int] = Field(..., min_length=1, description="Indices of training samples")
+    test_indices: List[int] = Field(..., min_length=1, description="Indices of testing samples")
+    num_train: int = Field(ge=0, description="Number of training samples")
+    init_params: Dict[str, Any] = Field(default_factory=dict, description="Model initialization parameters")
+    optimizer: OptimizerConfig = Field(..., description="Optimizer configuration")
+    loss: LossConfig = Field(..., description="Loss function configuration")
+    batch_size: int = Field(ge=1, description="Batch size used during training")
+    epochs: int = Field(ge=1, description="Number of training epochs")
+    train_acc: float = Field(ge=0, le=1, description="Training accuracy (0-1 scale)")
+    test_acc: float = Field(ge=0, le=1, description="Test accuracy (0-1 scale)")
+    train_loss: float = Field(..., description="Training loss")
+    test_loss: float = Field(..., description="Test loss")
+    dataset: str = Field(..., description="Dataset name")
+

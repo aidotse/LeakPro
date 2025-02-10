@@ -47,7 +47,7 @@ audit:  # Configurations for auditing
 
   output_dir: "./leakpro_output"
   attack_type: "mia" #mia, gia
-  modality: "image" #image, tabular
+  data_modality: "image" #image, tabular
 
 target:
   # Target model path
