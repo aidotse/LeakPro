@@ -1,10 +1,9 @@
 import os
-import sys
 
 from torch import zeros
 from utils.data_handler import get_mimic_dataloaders, get_mimic_dataset
-
 from utils.dpsgd_model import *
+
 # Import and initialize ReportHandler
 from leakpro.reporting.report_handler import ReportHandler
 
@@ -44,8 +43,8 @@ noise_multiplier_dict = {
     "sample_rate": sample_rate,
     "epochs": 21,
     "epsilon_tolerance": 0.01,
-    "accountant": 'prv',
-    "eps_error": 0.01, 
+    "accountant": "prv",
+    "eps_error": 0.01,
     "max_grad_norm": 1,
 }
 
@@ -64,7 +63,7 @@ optimized_hyperparams ={
     "seed": 4410,
     "min_delta": 0.00001,
     "epsilon": 3.5,
-    "max_grad_norm": 1, 
+    "max_grad_norm": 1,
     }
 n_features = int(dataset.x.shape[1]/3)
 X_mean = zeros(1,dataset.x.shape[2],n_features)
@@ -85,11 +84,11 @@ model_params.update({
 model = GRUD_DPSGD(**model_params)
 # Train the model
 results= dpsgd_gru_trained_model_and_metadata(
-                                            model, 
+                                            model,
                                             train_loader,
-                                            early_stop_loader, 
+                                            early_stop_loader,
                                             noise_multiplier_dict,
-                                            epochs=optimized_hyperparams['num_epochs'],
+                                            epochs=optimized_hyperparams["num_epochs"],
                                             patience_early_stopping = optimized_hyperparams["patience_early_stopping"],
                                             patience_lr= optimized_hyperparams["patience_lr_scheduler"],
                                             min_delta = optimized_hyperparams["min_delta"],

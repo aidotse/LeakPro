@@ -12,25 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# file is from MIMIC Extract Paper
+import os
+from pathlib import Path
 from typing import Optional
 
+import numpy as np
+import pandas as pd
+import torch
+from opacus import PrivacyEngine
 from opacus.accountants import create_accountant
-# file is from MIMIC Extract Paper 
-import copy, math, os, pickle, time, pandas as pd, numpy as np, scipy.stats as ss
-
-from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import average_precision_score, roc_auc_score, accuracy_score, f1_score
-
-from opacus import PrivacyEngine, GradSampleModule
-import torch, torch.utils.data as utils, torch.nn as nn, torch.nn.functional as F, torch.optim as optim
-from torch.autograd import Variable
-from torch.nn.parameter import Parameter
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-
-
-from pathlib import Path
-
 
 MAX_SIGMA = 1e6
 
@@ -46,11 +38,11 @@ def get_noise_multiplier(
     epsilon_tolerance: float = 0.01,
     **kwargs,
 ) -> float:
-    r"""
-    Computes the noise level sigma to reach a total budget of (target_epsilon, target_delta)
+    r"""Computes the noise level sigma to reach a total budget of (target_epsilon, target_delta)
     at the end of epochs, with a given sample_rate
 
     Args:
+    ----
         target_epsilon: the privacy budget's epsilon
         target_delta: the privacy budget's delta
         sample_rate: the sampling rate (usually batch_size / n_data)
@@ -60,6 +52,7 @@ def get_noise_multiplier(
         epsilon_tolerance: precision for the binary search
     Returns:
         The noise level sigma to ensure privacy budget of (target_epsilon, target_delta)
+
     """
     if (steps is None) == (epochs is None):
         raise ValueError(
@@ -93,11 +86,10 @@ def get_noise_multiplier(
     return sigma_high
 
 
-def Train_Model_DPSGD(pre_model, loss_fn, pre_train_dataloader, noise_multiplier, 
-                      max_grad_norm = 1, num_epochs = 300, patience = 1000, 
+def Train_Model_DPSGD(pre_model, loss_fn, pre_train_dataloader, noise_multiplier,
+                      max_grad_norm = 1, num_epochs = 300, patience = 1000,
                       learning_rate=1e-3, batch_size=None):
-    """
-    Inputs:
+    """Inputs:
         pre_model: a GRUD model
         loss_fn: the loss function to use
         pre_train_dataloader: training data
@@ -108,15 +100,17 @@ def Train_Model_DPSGD(pre_model, loss_fn, pre_train_dataloader, noise_multiplier
         min_delta: if the loss stays within this value on the next step stop early
         batch_size: size of a batch
         
-    Returns:
+    Returns
+    -------
         best_model
         losses_train 
         losses_epochs_train
+
     """
     pre_opt = torch.optim.Adam(pre_model.parameters(), lr = learning_rate)
 
     # make private
-    privacy_engine = PrivacyEngine(accountant = 'prv')
+    privacy_engine = PrivacyEngine(accountant = "prv")
     priv_model, priv_opt, priv_train_dataloader = privacy_engine.make_private(
         module=pre_model,
         optimizer=pre_opt,
@@ -124,7 +118,7 @@ def Train_Model_DPSGD(pre_model, loss_fn, pre_train_dataloader, noise_multiplier
         noise_multiplier=noise_multiplier,
         max_grad_norm=max_grad_norm,
     )
-    scheduler = ReduceLROnPlateau(priv_opt, 'min', patience=patience, verbose = True) 
+    scheduler = ReduceLROnPlateau(priv_opt, "min", patience=patience, verbose = True)
 
 #    losses_train = []
 #    losses_epochs_train = []
@@ -149,17 +143,17 @@ def Train_Model_DPSGD(pre_model, loss_fn, pre_train_dataloader, noise_multiplier
             m_shape = measurement.shape[0]
             # we delete last column and prepend mean so that the last observed is used
             measurement_last_obsv = measurement[:, 0:measurement.shape[1]-1, :]
-            measurement_last_obsv = torch.cat((torch.stack([X_mean[:, 0, :]]*m_shape), 
+            measurement_last_obsv = torch.cat((torch.stack([X_mean[:, 0, :]]*m_shape),
                                                measurement_last_obsv), dim = 1)
 
             convert_to_tensor = lambda x: torch.autograd.Variable(x)
-            X, X_last_obsv, Mask, Delta, labels = map(convert_to_tensor, 
-                                                 [measurement, 
+            X, X_last_obsv, Mask, Delta, labels = map(convert_to_tensor,
+                                                 [measurement,
                                                   measurement_last_obsv,
                                                   mask,
                                                   time_,
                                                   labels])
-        
+
             priv_model.zero_grad()
 
             prediction = priv_model(X, X_last_obsv, Mask, Delta)
@@ -183,15 +177,15 @@ def get_results_df(RESULTS_FOLDER, h_pass, run, task, verbose = False):
     task_d = {}
     i = 0
     folder = Path(RESULTS_FOLDER, f"{h_pass}{run}")
-    for filename in folder.glob('*'):
+    for filename in folder.glob("*"):
         if os.path.isdir(filename):
-            for subfilename in filename.glob('*'):
-                if task in str(filename) and 'json' in str(subfilename) and 'results' in str(subfilename):
+            for subfilename in filename.glob("*"):
+                if task in str(filename) and "json" in str(subfilename) and "results" in str(subfilename):
                     task_d[i] = unjsonify(subfilename)
                     i += 1
-        if task in str(filename) and 'json' in str(filename):
+        if task in str(filename) and "json" in str(filename):
             task_d[i] = unjsonify(filename)
             i += 1
-    if verbose: print(f'---Processing {h_pass}{run} run for {task} ICU hyperparameter results -----')
+    if verbose: print(f"---Processing {h_pass}{run} run for {task} ICU hyperparameter results -----")
     task_df = pd.concat([pd.json_normalize(task_d[j]) for j in range(0,i)])
     return task_df

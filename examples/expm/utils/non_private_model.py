@@ -1,5 +1,4 @@
-"""
-This file is inspired by https://github.com/MLforHealth/MIMIC_Extract 
+"""This file is inspired by https://github.com/MLforHealth/MIMIC_Extract
 MIT License
 Copyright (c) 2019 MIT Laboratory for Computational Physiology
 """
@@ -14,11 +13,29 @@ import pandas as pd
 import torch.nn.functional as F
 import torch.utils.data as utils
 from sklearn.metrics import accuracy_score
-from torch import Tensor, cat, cuda, device, exp, eye, from_numpy, isnan, max, nn, optim, save, sigmoid, squeeze, tanh, zeros, no_grad
+from torch import (
+    Tensor,
+    cat,
+    cuda,
+    device,
+    exp,
+    eye,
+    from_numpy,
+    isnan,
+    max,
+    nn,
+    optim,
+    save,
+    sigmoid,
+    squeeze,
+    tanh,
+    zeros,
+)
 from torch.autograd import Variable
 from torch.nn.parameter import Parameter
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
+
 
 def to_3D_tensor(df):
     idx = pd.IndexSlice
@@ -157,7 +174,8 @@ class GRUD(nn.Module):
             mask: the mask of whether or not the current value is observed
             delta: the tensor indicating the number of steps since the last time a feature was observed.
             
-        Returns:
+        Returns
+        -------
             h: the updated hidden state of the network
 
         """
@@ -359,7 +377,7 @@ def gru_trained_model_and_metadata(model,
         labels_test = labels_test.long()
 
         prediction_test = model(X_test)
-        
+
 
 
         if output_last:

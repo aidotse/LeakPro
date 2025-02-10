@@ -1,5 +1,4 @@
-"""
-This file is inspired by https://github.com/MLforHealth/MIMIC_Extract 
+"""This file is inspired by https://github.com/MLforHealth/MIMIC_Extract
 MIT License
 Copyright (c) 2019 MIT Laboratory for Computational Physiology
 """
@@ -13,14 +12,33 @@ import numpy as np
 import pandas as pd
 import torch.nn.functional as F
 import torch.utils.data as utils
+from opacus import PrivacyEngine
+from opacus.accountants.utils import get_noise_multiplier
 from sklearn.metrics import accuracy_score
-from torch import Tensor, cat, cuda, device, exp, eye, from_numpy, isnan, max, nn, optim, save, sigmoid, squeeze, tanh, zeros, no_grad
+from torch import (
+    Tensor,
+    cat,
+    cuda,
+    device,
+    exp,
+    eye,
+    from_numpy,
+    isnan,
+    max,
+    nn,
+    no_grad,
+    optim,
+    save,
+    sigmoid,
+    squeeze,
+    tanh,
+    zeros,
+)
 from torch.autograd import Variable
 from torch.nn.parameter import Parameter
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
-from opacus import PrivacyEngine, GradSampleModule
-from opacus.accountants.utils import get_noise_multiplier
+
 
 def to_3D_tensor(df):
     idx = pd.IndexSlice
@@ -158,7 +176,8 @@ class GRUD_DPSGD(nn.Module):
             mask: the mask of whether or not the current value is observed
             delta: the tensor indicating the number of steps since the last time a feature was observed.
             
-        Returns:
+        Returns
+        -------
             h: the updated hidden state of the network
 
         """
@@ -301,7 +320,7 @@ def dpsgd_gru_trained_model_and_metadata(model,
                                         sample_rate = sample_rate ,
                                         epochs = privacy_engine_dict["epochs"],
                                         epsilon_tolerance = privacy_engine_dict["epsilon_tolerance"],
-                                        accountant = 'prv',
+                                        accountant = "prv",
                                         eps_error = privacy_engine_dict["eps_error"],)
     except:
         # the prv accountant is not robust to large epsilon (even epsilon = 10)
@@ -312,11 +331,11 @@ def dpsgd_gru_trained_model_and_metadata(model,
                                                 sample_rate = sample_rate,
                                                 epochs = privacy_engine_dict["epochs"],
                                                 epsilon_tolerance = privacy_engine_dict["epsilon_tolerance"],
-                                                accountant = 'rdp')
-    
+                                                accountant = "rdp")
+
 
     # make the model private
-    privacy_engine = PrivacyEngine(accountant = 'prv')
+    privacy_engine = PrivacyEngine(accountant = "prv")
     priv_model, priv_opt, priv_train_dataloader = privacy_engine.make_private(
         module=model,
         optimizer=optimizer,
@@ -353,7 +372,7 @@ def dpsgd_gru_trained_model_and_metadata(model,
 
             if X.numel() == 0:  # Skip empty batches
                 continue
-            
+
             if epoch == 0:
                 niter_per_epoch += 1
 
@@ -361,7 +380,7 @@ def dpsgd_gru_trained_model_and_metadata(model,
             labels = labels.to(device_name)
             labels = labels.long().float()
             prediction = priv_model(X)
-            prediction = prediction.squeeze(dim=1) 
+            prediction = prediction.squeeze(dim=1)
 
             output_last = True
             if output_last:
@@ -399,11 +418,11 @@ def dpsgd_gru_trained_model_and_metadata(model,
         X_test = X_test.to(device_name)
         labels_test = labels_test.to(device_name)
         labels_test = labels_test.long().float()
-       
 
-        with no_grad(): 
+
+        with no_grad():
             prediction_test = priv_model(X_test)
-            prediction_test = prediction_test.squeeze(dim=1) 
+            prediction_test = prediction_test.squeeze(dim=1)
 
 
         if output_last:
@@ -502,7 +521,7 @@ def dpsgd_gru_trained_model_and_metadata(model,
     meta_data["loss"]["name"] = criterion_BCE.__class__.__name__.lower()
 
     #priv_train_dataloader.batch_size is dynamic. Therefore, we use the original batch size
-    meta_data["batch_size"] = train_dataloader.batch_size 
+    meta_data["batch_size"] = train_dataloader.batch_size
     meta_data["epochs"] = epochs
     meta_data["train_acc"] = train_acc
     meta_data["test_acc"] = test_acc
