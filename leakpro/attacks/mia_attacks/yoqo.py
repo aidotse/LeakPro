@@ -43,9 +43,9 @@ class AttackYOQO(AbstractMIA):
 
         """
         self.configs = YOQOConfig(**configs)
-        
+
         super().__init__(handler)
-        
+
         # Assign the configuration parameters to the object
         for key, value in self.configs.model_dump().items():
             setattr(self, key, value)

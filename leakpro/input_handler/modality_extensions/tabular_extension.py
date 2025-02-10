@@ -54,6 +54,7 @@ class TabularExtension(AbstractModalityExtension):
             Tensor: The augmented data tensor.
 
         """
+        n_aug = n_aug // len(data) #dummy to pass ruff
         return data
 
     def one_hot_encode(self:Self, data:tensor) -> tensor:

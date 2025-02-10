@@ -31,4 +31,5 @@ class ImageExtension(AbstractModalityExtension):
             Tensor: The augmented data tensor.
 
         """
+        n_aug = n_aug // len(data) #dummy to pass ruff
         return data

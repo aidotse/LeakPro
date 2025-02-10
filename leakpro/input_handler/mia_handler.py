@@ -3,6 +3,7 @@
 import joblib
 import numpy as np
 import torch
+from pydantic import BaseModel
 from torch import nn
 from torch.utils.data import DataLoader
 
@@ -10,7 +11,7 @@ from leakpro.input_handler.user_imports import get_class_from_module, import_mod
 from leakpro.schemas import MIAMetaDataSchema
 from leakpro.utils.import_helper import Any, Self, Tuple
 from leakpro.utils.logger import logger
-from pydantic import BaseModel
+
 
 class MIAHandler:
     """Parent class for user inputs."""

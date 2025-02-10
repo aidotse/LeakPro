@@ -1,5 +1,7 @@
 """Implementation of the LiRA attack."""
 
+from typing import Literal
+
 import numpy as np
 from pydantic import BaseModel, Field
 from scipy.stats import norm
@@ -13,7 +15,7 @@ from leakpro.metrics.attack_result import MIAResult
 from leakpro.signals.signal import ModelRescaledLogits
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
-from typing import Annotated, Any, Dict, List, Literal, Optional
+
 
 class LiRAConfig(BaseModel):
     """Configuration for the LiRA attack."""

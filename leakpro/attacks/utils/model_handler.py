@@ -1,7 +1,6 @@
 """Abstract class for the model handler."""
 
 import os
-from copy import deepcopy
 
 import joblib
 from torch import load
