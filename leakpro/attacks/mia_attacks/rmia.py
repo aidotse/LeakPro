@@ -17,8 +17,8 @@ class RMIAConfig(BaseModel):
     """Configuration for the RMIA attack."""
 
     num_shadow_models: int = Field(default=1, ge=1, description="Number of shadow models")
-    offline_a: str = Field(default=0.33, ge=0.0, le=1.0, description="Parameter to estimate the marginal p(x)")
-    offline_b: str = Field(default=0.66, ge=0.0, le=1.0, description="Parameter to estimate the marginal p(x)")
+    offline_a: float = Field(default=0.33, ge=0.0, le=1.0, description="Parameter to estimate the marginal p(x)")
+    offline_b: float = Field(default=0.66, ge=0.0, le=1.0, description="Parameter to estimate the marginal p(x)")
     gamma: float = Field(default=2.0, ge=0.0, description="Parameter to threshold LLRs")
     temperature: float = Field(default=2.0, ge=0.0, description="Softmax temperature")
     training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow models")  # noqa: E501
@@ -43,8 +43,17 @@ class AttackRMIA(AbstractMIA):
             configs (dict): Configuration parameters for the attack.
 
         """
-        # Initializes the parent metric
+        # Initializes the pydantic object using the user-provided configs
+        # This will ensure that the user-provided configs are valid
+        self.configs = RMIAConfig(**configs)
+
+        # Call the parent class constructor. It will check the configs.
         super().__init__(handler)
+
+        # Assign the configuration parameters to the object
+        for key, value in self.configs.model_dump().items():
+            setattr(self, key, value)
+
         self.shadow_models = []
         self.signal = ModelLogits()
         self.epsilon = 1e-6
@@ -52,7 +61,7 @@ class AttackRMIA(AbstractMIA):
         self.shadow_model_indices = None
 
         logger.info("Configuring RMIA attack")
-        self.configs = RMIAConfig(**configs)
+
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""

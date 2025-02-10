@@ -11,6 +11,7 @@ from torch.nn import Module
 
 from leakpro.attacks.utils.model_handler import ModelHandler
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.schemas import ShadowModelTrainingSchema
 from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import Self, Tuple
 from leakpro.utils.logger import logger
@@ -161,9 +162,9 @@ class ShadowModelHandler(ModelHandler):
             logger.info(f"Training shadow model {i} on {len(data_loader)* data_loader.batch_size} points")
             training_results = self.handler.train(data_loader, model, criterion, optimizer, self.epochs)
             # Read out results
-            shadow_model = training_results.model
-            train_acc = training_results.metrics.accuracy
-            train_loss = training_results.metrics.loss
+            shadow_model = training_results.get("model")
+            train_acc = training_results["metrics"].get("accuracy")
+            train_loss = training_results["metrics"].get("loss")
 
             logger.info(f"Training shadow model {i} complete")
             with open(f"{self.storage_path}/{self.model_storage_name}_{i}.pkl", "wb") as f:
@@ -184,8 +185,9 @@ class ShadowModelHandler(ModelHandler):
                 "online": online,
                 "model_type": shadow_model_type,
             }
+            validated_meta = ShadowModelTrainingSchema(**meta_data)
             with open(f"{self.storage_path}/{self.metadata_storage_name}_{i}.pkl", "wb") as f:
-                pickle.dump(meta_data, f)
+                pickle.dump(validated_meta, f)
 
             logger.info(f"Metadata for shadow model {i} stored in {self.storage_path}")
         return filtered_indices + indices_to_use

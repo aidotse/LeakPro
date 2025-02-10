@@ -11,10 +11,6 @@ from leakpro.metrics.attack_result import AttackResult
 from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import List, Self, Union
 
-########################################################################################################################
-# METRIC CLASS
-########################################################################################################################
-
 
 class AbstractMIA(ABC):
     """Interface to construct and perform a membership inference attack on a target model and dataset.
@@ -45,8 +41,8 @@ class AbstractMIA(ABC):
         """
         if not hasattr(self, "AttackConfig"):
             raise NotImplementedError(f"{self.__class__.__name__} must define an AttackConfig.")
-        if not issubclass(self.ConfigModel, BaseModel):
-            raise TypeError(f"{self.__class__.__name__}.AttackConfig must be a subclass of Pydantic's BaseModel.")
+        if not isinstance(self.configs, BaseModel):
+            raise TypeError(f"{self.__class__.__name__}.configs must be a subclass of Pydantic's BaseModel.")
 
         # These objects are shared and should be initialized only once
         if not AbstractMIA._initialized:
@@ -218,17 +214,6 @@ class AbstractMIA(ABC):
 
         """
         return AbstractMIA.audit_dataset["out_members"]
-
-    @abstractmethod
-    def _configure_attack(self:Self, configs:dict)->None:
-        """Configure the attack.
-
-        Args:
-        ----
-            configs (dict): The configurations for the attack.
-
-        """
-        pass
 
     def _validate_config(self: Self, name: str, value: float, min_val: float, max_val: float) -> None:
         if not (min_val <= value <= (max_val if max_val is not None else value)):

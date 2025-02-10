@@ -2,7 +2,7 @@
 
 import inspect
 from pathlib import Path
-
+import types
 import yaml
 
 from leakpro.attacks.attack_scheduler import AttackScheduler
@@ -54,8 +54,11 @@ class LeakPro:
 
             # Attach methods to Handler explicitly defined in AbstractInputHandler from user_input_handler
             for name, _ in inspect.getmembers(AbstractInputHandler, predicate=inspect.isfunction):
-                if hasattr(user_input_handler, name):
-                    setattr(handler, name, getattr(user_input_handler, name))
+                if hasattr(user_input_handler, name) and not name.startswith("__"):
+                    attr = getattr(user_input_handler, name)
+                    if callable(attr):
+                        attr = types.MethodType(attr, handler) # ensure to properly bind methods to handler
+                    setattr(handler, name, attr)
 
         elif configs.audit.attack_type == "minva":
             return NotImplementedError("MINVA attack is not yet implemented")
@@ -77,13 +80,13 @@ class LeakPro:
 
                 result = audit_results[attack_name]["result_object"]
                 result.attack_name = attack_name
-                result.configs = self.handler.configs["audit"]
+                result.configs = self.handler.configs.audit.dict()
 
                 # Append
                 results.append(result)
             else:
                 result = audit_results[attack_name]["result_object"]
-                result.save(name=attack_name, path=self.report_dir, config=self.handler.configs["audit"])
+                result.save(name=attack_name, path=self.report_dir, config=self.handler.configs.audit.dict())
 
         logger.info("Auditing completed")
         return results

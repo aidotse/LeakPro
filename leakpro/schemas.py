@@ -49,8 +49,9 @@ class LeakProConfig(BaseModel):
 
     audit: AuditConfig
     target: TargetConfig
-    shadow_model: Optional[ShadowModelConfig] = None
-    distillation_model: Optional[DistillationModelConfig] = None
+    shadow_model: Optional[ShadowModelConfig] = Field(None, description="Shadow model config")
+    distillation_model: Optional[DistillationModelConfig] = Field(None, description="Distillation model config")
+
 
 class TrainingOutput(BaseModel):
     """Output of the training procedure."""
@@ -119,4 +120,30 @@ class MIAMetaDataSchema(BaseModel):
     train_loss: float = Field(..., description="Training loss")
     test_loss: float = Field(..., description="Test loss")
     dataset: str = Field(..., description="Dataset name")
+
+class ShadowModelTrainingSchema(BaseModel):
+    """Schema for Shadow model metadata storage."""
+
+    init_params: Dict[str, Any] = Field(..., description="Model initialization parameters")
+    train_indices: List[int] = Field(..., description="Indices of training samples")
+    num_train: int = Field(..., ge=0, description="Number of training samples")
+    optimizer: str = Field(..., description="Optimizer name")
+    criterion: str = Field(..., description="Criterion (loss function) name")
+    batch_size: int = Field(..., ge=1, description="Batch size used during training")
+    epochs: int = Field(..., ge=1, description="Number of training epochs")
+    train_acc: float = Field(..., ge=0.0, le=1.0, description="Training accuracy (0 to 1)")
+    train_loss: float = Field(..., ge=0.0, description="Training loss")
+    online: bool = Field(..., description="Online vs. offline training")
+    model_type: str = Field(..., description="Type of shadow model")
+
+class DistillationModelTrainingSchema(BaseModel):
+    """Schema for metadata storage for distillation."""
+
+    init_params: Dict[str, Any] = Field(..., description="Model initialization parameters")
+    train_indices: List[int] = Field(..., description="Indices of training samples used for distillation")
+    num_train: int = Field(..., ge=0, description="Number of training samples used for distillation")
+    optimizer: str = Field(..., description="Optimizer name")
+    batch_size: int = Field(..., ge=1, description="Batch size used during training")
+    epochs: int = Field(..., ge=1, description="Number of training epochs")
+    label_only: bool = Field(..., description="Whether the distillation process is label-only")
 
