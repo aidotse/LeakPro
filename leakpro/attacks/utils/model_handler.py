@@ -56,11 +56,13 @@ class ModelHandler():
         optimizer_name = setup_config.optimizer.name
         self.optimizer_class = self._get_optimizer_class(optimizer_name)
         # copy to only have parameters left
-        self.optimizer_config = setup_config.optimizer.model_copy(update={"name": None})
+        self.optimizer_config = setup_config.optimizer.model_copy().model_dump(exclude={"name"})
 
         # Get criterion class
         criterion_class = setup_config.loss.name
         self.criterion_class = self._get_criterion_class(criterion_class)
+        # copy to only have parameters left
+        self.loss_config = setup_config.loss.model_copy().model_dump(exclude={"name"})
 
         self.batch_size = setup_config.batch_size
         self.epochs = setup_config.epochs

@@ -215,10 +215,6 @@ class AbstractMIA(ABC):
         """
         return AbstractMIA.audit_dataset["out_members"]
 
-    def _validate_config(self: Self, name: str, value: float, min_val: float, max_val: float) -> None:
-        if not (min_val <= value <= (max_val if max_val is not None else value)):
-            raise ValueError(f"{name} must be between {min_val} and {max_val}")
-
     @abstractmethod
     def description(self:Self) -> dict:
         """Return a description of the attack.

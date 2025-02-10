@@ -43,6 +43,7 @@ class AttackRMIA(AbstractMIA):
             configs (dict): Configuration parameters for the attack.
 
         """
+        logger.info("Configuring the RMIA attack")
         # Initializes the pydantic object using the user-provided configs
         # This will ensure that the user-provided configs are valid
         self.configs = RMIAConfig(**configs)
@@ -59,8 +60,6 @@ class AttackRMIA(AbstractMIA):
         self.epsilon = 1e-6
         self.shadow_models = None
         self.shadow_model_indices = None
-
-        logger.info("Configuring RMIA attack")
 
 
     def description(self:Self) -> dict:

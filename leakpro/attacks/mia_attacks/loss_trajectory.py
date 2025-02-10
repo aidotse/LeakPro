@@ -5,6 +5,7 @@ import pickle
 
 import numpy as np
 import torch.nn.functional as F  # noqa: N812
+from pydantic import BaseModel, Field
 from torch import cuda, device, load, nn, no_grad, optim, save, tensor
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
@@ -19,8 +20,20 @@ from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 
+class LossTrajectoryConfig(BaseModel):
+    """Configuration for the RMIA attack."""
+
+    distillation_data_fraction: float = Field(default = 0.5, ge = 0.0, le=1.0, description="Fraction of auxiliary data used for distillation")  # noqa: E501
+    train_mia_batch_size: int = Field(default=64, ge=1, description="Batch size for training the MIA classifier")
+    number_of_traj: int = Field(default=10, ge=1, description="Number of trajectories to consider")
+    mia_classifier_epochs: int = Field(default=100, ge=1, description="Number of epochs for training the MIA classifier")
+    label_only: bool = Field(False, description="Whether to use only the labels for the attack")
+    temperature: float = Field(default=2.0, ge=0.0, description="Temperature for the softmax")
+
 class AttackLossTrajectory(AbstractMIA):
     """Implementation of the loss trajectory attack."""
+
+    AttackConfig = LossTrajectoryConfig
 
     def __init__(self: Self,
                  handler: AbstractInputHandler,
@@ -34,29 +47,22 @@ class AttackLossTrajectory(AbstractMIA):
             configs (dict): A dictionary containing the attack loss_traj configurations.
 
         """
+        logger.info("Configuring Loss trajectory attack")
+        self.configs = LossTrajectoryConfig(**configs)
         super().__init__(handler)
 
-        logger.info("Configuring Loss trajecatory attack")
-        self._configure_attack(configs)
+        # Assign the configuration parameters to the object
+        for key, value in self.configs.model_dump().items():
+            setattr(self, key, value)
 
-        output_dir = self.handler.configs["audit"]["output_dir"]
-        self.storage_dir = f"{output_dir}/attack_objects/loss_traj"
-
-
-    def _configure_attack(self: Self, configs: dict) -> None:
         self.num_shadow_models = 1
-        self.distillation_data_fraction = configs.get("training_distill_data_fraction", 0.5)
         self.shadow_data_fraction = 1 - self.distillation_data_fraction
 
-        self.configs = configs
-        self.train_mia_batch_size = configs.get("mia_batch_size", 64)
-        self.number_of_traj = configs.get("number_of_traj", 10)
-        self.mia_classifier_epoch = configs.get("mia_classifier_epochs", 100)
-        self.label_only = configs.get("label_only", False)
-        assert isinstance(self.label_only, bool), "Expected 'self.label_only' to be of type bool"
+        output_dir = self.handler.configs.audit.output_dir
+        self.storage_dir = f"{output_dir}/attack_objects/loss_traj"
 
+        # set up mia classifier
         self.read_from_file = False
-        self.temperature = 2.0 # temperature for the softmax
         self.signal = ModelLogits()
         self.mia_train_data_loader = None
         self.mia_test_data_loader = None
@@ -329,7 +335,7 @@ class AttackLossTrajectory(AbstractMIA):
         num_correct = 0
         mia_train_loader = self.mia_train_data_loader
         gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
-        for _ in  tqdm(range(self.mia_classifier_epoch), total=self.mia_classifier_epoch):
+        for _ in  tqdm(range(self.mia_classifier_epochs), total=self.mia_classifier_epochs):
             for _batch_idx, (data, label) in enumerate(mia_train_loader):
                 data = data.to(gpu_or_cpu) # noqa: PLW2901
                 label = label.to(gpu_or_cpu).long() # noqa: PLW2901

@@ -153,14 +153,15 @@ class DistillationModelHandler(ModelHandler):
             distillation_checkpoints.append(student_model)
 
             logger.info("Storing metadata for distillation model")
-            meta_data = {}
-            meta_data.init_params = self.init_params
-            meta_data.train_indices = distillation_data_indices
-            meta_data.num_train = len(distillation_data_indices)
-            meta_data.optimizer = optimizer.__class__.__name__
-            meta_data.batch_size = self.batch_size
-            meta_data.epochs = self.epochs
-            meta_data.label_only = label_only
+            meta_data = {
+                "init_params" : self.init_params,
+                "train_indices" : distillation_data_indices,
+                "num_train" : len(distillation_data_indices),
+                "optimizer" : optimizer.__class__.__name__,
+                "batch_size" : self.batch_size,
+                "epochs" : self.epochs,
+                "label_only" : label_only
+            }
 
             validated_meta_data = DistillationModelTrainingSchema(**meta_data)
 

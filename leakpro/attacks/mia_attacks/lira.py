@@ -1,6 +1,7 @@
 """Implementation of the LiRA attack."""
 
 import numpy as np
+from pydantic import BaseModel, Field
 from scipy.stats import norm
 from tqdm import tqdm
 
@@ -12,10 +13,28 @@ from leakpro.metrics.attack_result import MIAResult
 from leakpro.signals.signal import ModelRescaledLogits
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
+from typing import Annotated, Any, Dict, List, Literal, Optional
+
+class LiRAConfig(BaseModel):
+    """Configuration for the LiRA attack."""
+
+    num_shadow_models: int = Field(default=1, ge=1, description="Number of shadow models")
+    training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow models")  # noqa: E501
+    online: bool = Field(default=False, description="Online vs offline attack")
+    eval_batch_size: int = Field(default=32, ge=1, description="Batch size for evaluation")
+    var_calculation: Literal["carlini", "individual_carlini", "fixed"] = Field(default="carlini", description="Variance estimation method to use [carlini, individual_carlini, fixed]")  # noqa: E501
+    # memorization boosting
+    memorization: bool = Field(default=False, description="Activate memorization boosting")
+    use_privacy_score: bool = Field(default=False, description="Filter based on privacy score aswell as memorization score")
+    memorization_threshold: float = Field(default=0.8, ge=0.0, le=1.0, description="Set percentile for most vulnerable data points, use 0.0 for paper thresholds")  # noqa: E501
+    min_num_memorization_audit_points: int = Field(default=10, ge=1, description="Set minimum allowed audit points after memorization")  # noqa: E501
+    num_memorization_audit_points: int = Field(default=0, ge=0, description="Directly set number of most vulnerable audit data points (Overrides 'memorization_threshold')")  # noqa: E501
 
 
 class AttackLiRA(AbstractMIA):
     """Implementation of the LiRA attack."""
+
+    AttackConfig = LiRAConfig # required config for attack
 
     def __init__(self:Self,
                  handler: AbstractInputHandler,
@@ -29,57 +48,16 @@ class AttackLiRA(AbstractMIA):
             configs (dict): Configuration parameters for the attack.
 
         """
+        self.configs = LiRAConfig(**configs)
         # Initializes the parent metric
         super().__init__(handler)
 
-        self.signal = ModelRescaledLogits()
-        self._configure_attack(configs)
+        # Assign the configuration parameters to the object
+        for key, value in self.configs.model_dump().items():
+            setattr(self, key, value)
 
-    def _configure_attack(self:Self, configs: dict) -> None:
-        """Configure the RMIA attack.
-
-        Args:
-        ----
-            configs (dict): Configuration parameters for the attack.
-
-        """
         self.shadow_models = []
-        self.num_shadow_models = configs.get("num_shadow_models", 64)
-        self.online = configs.get("online", False)
-        self.training_data_fraction = configs.get("training_data_fraction", 0.5)
-        self.include_train_data = configs.get("include_train_data", self.online)
-        self.include_test_data = configs.get("include_test_data", self.online)
-        self.eval_batch_size = configs.get("eval_batch_size", 32)
-
-        # Memorization config
-        # Activate memorization
-        self.memorization = configs.get("memorization", False)
-        # Set True to filter based on privacy score aswell as memorization score
-        self.use_privacy_score = configs.get("use_privacy_score", False)
-        # Set percentile for most vulnerable data points, use 0.0 for paper thresholds
-        self.memorization_threshold = configs.get("memorization_threshold", 0.8)
-        # Set minimum allowed audit points after memorization
-        self.min_num_memorization_audit_points = configs.get("min_num_memorization_audit_points", 10)
-        # Directly set number of most vulnerable audit data points (Overrides "memorization_threshold" )
-        self.num_memorization_audit_points = configs.get("num_memorization_audit_points", 0)
-
-        # LiRA specific
-        # Determine which variance estimation method to use [carlini, individual_carlini]
-        self.var_calculation = configs.get("var_calculation", "carlini")
-
-        # Define the validation dictionary as: {parameter_name: (parameter, min_value, max_value)}
-        validation_dict = {
-            "num_shadow_models": (self.num_shadow_models, 1, None),
-            "training_data_fraction": (self.training_data_fraction, 0, 1),
-            "eval_batch_size": (self.eval_batch_size, 1, 1_000_000),
-            "memorization_threshold": (self.memorization_threshold, 0, 1),
-            "min_num_memorization_audit_points": (self.min_num_memorization_audit_points, 1, 1_000_000),
-            "num_memorization_audit_points": (self.num_memorization_audit_points, 0, 1_000_000),
-        }
-
-        # Validate parameters
-        for param_name, (param_value, min_val, max_val) in validation_dict.items():
-            self._validate_config(param_name, param_value, min_val, max_val)
+        self.signal = ModelRescaledLogits()
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""

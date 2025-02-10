@@ -1,8 +1,9 @@
 """Main class for LeakPro."""
 
 import inspect
-from pathlib import Path
 import types
+from pathlib import Path
+
 import yaml
 
 from leakpro.attacks.attack_scheduler import AttackScheduler
