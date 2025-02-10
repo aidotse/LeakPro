@@ -28,7 +28,7 @@ LeakPro is built on the idea that privacy risks in machine learning can be frame
 
 One common concern is that future attacks may surpass those currently known. To address this, LeakPro adopts a proactive approach, equipping adversaries with more side information than they would typically have in reality. This ensures that LeakPro does not just evaluate existing risks but also anticipates and tests against stronger, future threats, all while keeping assumptions realistic and relevant to practical scenarios. By integrating these principles, LeakPro serves as a flexible and robust tool for assessing privacy risks in machine learning models, helping researchers and practitioners stress-test their systems before real-world vulnerabilities emerge.  
 
-LeakPro is designed to minimize user burden, requiring minimal manual input and featuring automated hyperparameter tuning** for relevant attacks. The development is organized into four parallel legs with a shared architectural backbone:  
+LeakPro is designed to minimize user burden, requiring minimal manual input and featuring automated hyperparameter tuning for relevant attacks. The development is organized into four parallel legs with a shared architectural backbone:  
 - **Membership Inference Attacks (MIA):**  
   This WP focuses on attacks that determine whether a specific data point was used in training. Adversaries in this setting have black-box access to the model, motivated by findings in the literature that black-box attacks can be as effective as white-box attacks.  
 
