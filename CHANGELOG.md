@@ -52,8 +52,13 @@ All notable changes to this project will be documented in this file.
 - Oscarwernqvist <oscarwernqvist@users.noreply.github.com>
 - Oscarwernqvist <oscarwernqvist@users.noreply.github.com>
 
+### 🧪 Testing
+
+- Run on VM jupyter outputs
+
 ### ⚙️ Miscellaneous Tasks
 
+- Update changelog
 - Update changelog
 - Update changelog
 - Update changelog
