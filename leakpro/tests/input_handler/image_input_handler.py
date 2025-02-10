@@ -8,6 +8,7 @@ from tqdm import tqdm
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
+from leakpro.schemas import TrainingOutput
 
 
 class ImageInputHandler(AbstractInputHandler):
@@ -34,7 +35,7 @@ class ImageInputHandler(AbstractInputHandler):
         criterion: torch.nn.Module = None,
         optimizer: optim.Optimizer = None,
         epochs: int = None,
-    ) -> dict:
+    ) -> TrainingOutput:
         """Model training procedure."""
 
         # read hyperparams for training (the parameters for the dataloader are defined in get_dataloader):
@@ -47,7 +48,7 @@ class ImageInputHandler(AbstractInputHandler):
 
         # training loop
         for epoch in range(epochs):
-            train_loss, train_acc = 0, 0
+            train_loss, train_acc, total_samples = 0, 0, 0
             model.train()
             for inputs, labels in tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}"):
                 labels = labels.long()
@@ -62,10 +63,12 @@ class ImageInputHandler(AbstractInputHandler):
                 # Accumulate performance of shadow model
                 train_acc += pred.eq(labels.data.view_as(pred)).sum()
                 train_loss += loss.item()
+                total_samples += len(labels)
+                
+            train_loss /= len(dataloader)
+            train_acc = train_acc / total_samples
 
-            log_train_str = (
-                f"Epoch: {epoch+1}/{epochs} | Train Loss: {train_loss/len(dataloader):.8f} | "
-                f"Train Acc: {float(train_acc)/len(dataloader.dataset):.8f}")
+            log_train_str = (f"Epoch: {epoch+1}/{epochs} | Train Loss: {train_loss} | "f"Train Acc: {train_acc}")
             logger.info(log_train_str)
         model.to("cpu")
 

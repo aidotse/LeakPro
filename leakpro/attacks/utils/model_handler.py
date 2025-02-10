@@ -29,7 +29,7 @@ class ModelHandler():
 
         self.handler = handler
 
-        caller_configs = getattr(handler.configs, caller)
+        caller_configs = getattr(handler.configs, caller) if caller is not None else None
         if caller_configs is None:
             caller_configs = {}
             self.model_path = None

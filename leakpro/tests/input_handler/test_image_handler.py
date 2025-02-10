@@ -8,13 +8,14 @@ from torch.utils.data import SequentialSampler
 
 from leakpro.tests.constants import get_image_handler_config
 from leakpro.tests.input_handler.image_input_handler import ImageInputHandler
+from leakpro.input_handler.mia_handler import MIAHandler
 
 
 def test_abstract_handler_setup(image_handler:ImageInputHandler) -> None:
     """Test the initialization of the image handler."""
     parameters = get_image_handler_config()
     assert image_handler is not None
-    assert isinstance(image_handler, ImageInputHandler)
+    assert isinstance(image_handler, MIAHandler)
 
     # Check that correct model is instantiated
     assert image_handler.configs.target.model_class == image_handler.target_model.__class__.__name__
@@ -27,15 +28,15 @@ def test_abstract_handler_setup(image_handler:ImageInputHandler) -> None:
     assert len(image_handler.test_indices) == parameters.test_data_points
     assert len(image_handler.train_indices) + len(image_handler.test_indices) < parameters.data_points
 
-    assert image_handler.target_model_metadata["optimizer"] is not None
-    assert image_handler.target_model_metadata["optimizer"]["name"] == parameters.optimizer
-    assert image_handler.target_model_metadata["optimizer"]["lr"] == parameters.learning_rate
+    assert image_handler.target_model_metadata.optimizer is not None
+    assert image_handler.target_model_metadata.optimizer.name == parameters.optimizer
+    assert image_handler.target_model_metadata.optimizer.lr == parameters.learning_rate
 
-    assert image_handler.target_model_metadata["loss"] is not None
-    assert image_handler.target_model_metadata["loss"]["name"] == parameters.loss
+    assert image_handler.target_model_metadata.loss is not None
+    assert image_handler.target_model_metadata.loss.name == parameters.loss
 
-    assert image_handler.target_model_metadata["epochs"] == parameters.epochs
-    assert image_handler.target_model_metadata["batch_size"] == parameters.batch_size
+    assert image_handler.target_model_metadata.epochs == parameters.epochs
+    assert image_handler.target_model_metadata.batch_size == parameters.batch_size
     assert image_handler.population is not None
 
     # Check data-related methods

@@ -22,12 +22,12 @@ class TabularExtension(AbstractModalityExtension):
         super().__init__(handler)
         logger.info("Image extension initialized.")
 
-        x,y = next(iter(self.get_dataloader(0)))
+        x,y = next(iter(self.handler.get_dataloader(0)))
         if not isinstance(x, (Tensor, ndarray)) or not isinstance(y, (Tensor,ndarray)):
             raise ValueError("Data must be a tensor or nparray.")
 
-        if hasattr(self.population, "dec_to_onehot"):
-            self.dec_to_onehot = self.population.dec_to_onehot
+        if hasattr(self.handler.population, "dec_to_onehot"):
+            self.dec_to_onehot = self.handler.population.dec_to_onehot
 
             # Check number of continuous and categorical columns
             n_dec_cols = len(self.dec_to_onehot)

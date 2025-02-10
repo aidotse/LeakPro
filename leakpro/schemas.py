@@ -6,6 +6,34 @@ from pydantic import BaseModel, Field, field_validator
 from torch.nn import Module
 
 
+class OptimizerConfig(BaseModel):
+    """Schema for optimizer parameters."""
+
+    name: str = Field(..., description="Optimizer name")
+    lr: float = Field(default=1e-3, ge=0, description="Learning rate")
+    weight_decay: float = Field(default=0.0, ge=0, description="Weight decay parameter")
+    momentum: float = Field(default=0.0, ge=0, description="Momentum parameter")
+    dampening: float = Field(default=0.0, ge=0, description="Dampening parameter")
+    nesterov: bool = Field(default=False, description="Whether Nesterov momentum is used")
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def lowercase_attack_type(cls, v: str) -> str:
+        """Convert optimizer name type to lowercase."""
+        return v.lower() if isinstance(v, str) else v
+
+
+class LossConfig(BaseModel):
+    """Schema for loss function parameters."""
+
+    name: str = Field(..., description="Loss function name")
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def lowercase_attack_type(cls, v: str) -> str:
+        """Convert loss name type to lowercase."""
+        return v.lower() if isinstance(v, str) else v
+
 class AuditConfig(BaseModel):
     """Configuration for the audit process."""
 
@@ -31,12 +59,16 @@ class TargetConfig(BaseModel):
     target_folder: str = Field(..., description="Directory where target model data is stored")
     data_path: str = Field(..., description="Path to dataset file")
 
-
 class ShadowModelConfig(BaseModel):
     """Configuration for the Shadow models."""
 
     model_class: Optional[str] = None
-
+    module_path: Optional[str] = None
+    init_params: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Model initialization parameters")
+    optimizer: Optional[OptimizerConfig] = Field(..., description="Optimizer configuration")
+    loss: Optional[LossConfig] = Field(..., description="Loss function configuration")
+    batch_size: Optional[int] = Field(..., ge=1, description="Batch size used during training")
+    epochs: Optional[int] = Field(..., ge=1, description="Number of training epochs")
 
 class DistillationModelConfig(BaseModel):
     """Configuration for the distillation models."""
@@ -72,37 +104,6 @@ class TrainingOutput(BaseModel):
         """Configuration for TrainingOutput to enable arbitrary type handling."""
 
         arbitrary_types_allowed = True
-
-
-
-class OptimizerConfig(BaseModel):
-    """Schema for optimizer parameters."""
-
-    name: str = Field(..., description="Optimizer name")
-    lr: float = Field(default=1e-3, ge=0, description="Learning rate")
-    weight_decay: float = Field(default=0.0, ge=0, description="Weight decay parameter")
-    momentum: float = Field(default=0.0, ge=0, description="Momentum parameter")
-    dampening: float = Field(default=0.0, ge=0, description="Dampening parameter")
-    nesterov: bool = Field(default=False, description="Whether Nesterov momentum is used")
-
-    @field_validator("name", mode="before")
-    @classmethod
-    def lowercase_attack_type(cls, v: str) -> str:
-        """Convert optimizer name type to lowercase."""
-        return v.lower() if isinstance(v, str) else v
-
-
-class LossConfig(BaseModel):
-    """Schema for loss function parameters."""
-
-    name: str = Field(..., description="Loss function name")
-
-    @field_validator("name", mode="before")
-    @classmethod
-    def lowercase_attack_type(cls, v: str) -> str:
-        """Convert loss name type to lowercase."""
-        return v.lower() if isinstance(v, str) else v
-
 
 class MIAMetaDataSchema(BaseModel):
     """Schema for training metadata."""
@@ -146,4 +147,5 @@ class DistillationModelTrainingSchema(BaseModel):
     batch_size: int = Field(..., ge=1, description="Batch size used during training")
     epochs: int = Field(..., ge=1, description="Number of training epochs")
     label_only: bool = Field(..., description="Whether the distillation process is label-only")
+
 
