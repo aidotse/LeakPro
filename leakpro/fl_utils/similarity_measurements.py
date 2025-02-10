@@ -1,13 +1,38 @@
 """Diverse util functions."""
-import torch.nn.functional as f
+import torch
 from ignite.metrics import SSIM
-from torch import Tensor, abs, cuda, mean, nn, no_grad, norm
-from torch.nn.modules.utils import _pair, _quadruple
+from torch import Tensor, abs, cuda, mean, no_grad, norm
 from torch.utils.data import DataLoader
 from torchmetrics.functional import peak_signal_noise_ratio
 
-from leakpro.utils.import_helper import Self
 
+def cosine_similarity_weights(client_gradient: torch.Tensor, reconstruction_gradient: torch.Tensor,
+                                top10norms: bool) -> torch.Tensor:
+    """Computes the reconstruction costs between client gradients and the reconstruction gradient.
+
+    This function calculates the pairwise costs between each client gradient and the reconstruction gradient
+    using the cosine similarity measure. The costs are accumulated and averaged over all client gradients.
+
+    Returns
+    -------
+        torch.Tensor: The average reconstruction cost.
+
+    """
+    with torch.no_grad():
+        if top10norms:
+            _, indices = torch.topk(torch.stack([p.norm() for p in reconstruction_gradient], dim=0), 10)
+        else:
+            indices = torch.arange(len(reconstruction_gradient))
+        filtered_trial_gradients = [reconstruction_gradient[i] for i in indices]
+        filtered_input_gradients = [client_gradient[i] for i in indices]
+    costs = sum((x * y).sum() for x, y in zip(filtered_input_gradients,
+                                                filtered_trial_gradients))
+
+    trial_norm = sum(x.pow(2).sum()
+                        for x in filtered_trial_gradients).sqrt()
+    input_norm = sum(y.pow(2).sum()
+                        for y in filtered_input_gradients).sqrt()
+    return 1 - (costs / trial_norm / input_norm)
 
 def total_variation(x: Tensor) -> Tensor:
         """Anisotropic TV."""
@@ -82,65 +107,3 @@ def dataloaders_ssim_ignite(original_dataloader: DataLoader, recreated_dataloade
 
     # Compute average SSIM
     return ssim_metric.compute()
-
-class MedianPool2d(nn.Module):
-    """Median pool (usable as median filter when stride=1) module.
-
-    Args:
-    ----
-         kernel_size: size of pooling kernel, int or 2-tuple
-         stride: pool stride, int or 2-tuple
-         padding: pool padding, int or 4-tuple (l, r, t, b) as in pytorch F.pad
-         same: override padding and enforce same padding, boolean
-
-    """
-
-    def __init__(self: Self, kernel_size: int=3, stride: int=1, padding: int=0, same:bool=True) -> None:
-        """Initialize with kernel_size, stride, padding."""
-        super().__init__()
-        self.k = _pair(kernel_size)
-        self.stride = _pair(stride)
-        self.padding = _quadruple(padding)  # convert to l, r, t, b
-        self.same = same
-
-    def _padding(self: Self, x: Tensor) -> tuple[int,int,int]:
-        """Calculate the padding needed for a tensor based on the specified mode and kernel size.
-
-        Args:
-        ----
-                x (Tensor): Input tensor with shape (batch_size, channels, height, width).
-
-        Returns:
-        -------
-                Tuple[int, int, int, int]: The calculated padding as (left, right, top, bottom).
-
-        """
-        if self.same:
-            ih, iw = x.size()[2:]
-            ph = max(self.k[0] - self.stride[0], 0) if ih % self.stride[0] == 0 else max(self.k[0] - ih % self.stride[0], 0)
-            pw = max(self.k[1] - self.stride[1], 0) if iw % self.stride[1] == 0 else max(self.k[1] - iw % self.stride[1], 0)
-            pl = pw // 2
-            pr = pw - pl
-            pt = ph // 2
-            pb = ph - pt
-            padding = (pl, pr, pt, pb)
-        else:
-            padding = self.padding
-        return padding
-
-    def forward(self: Self, x: Tensor) -> Tensor:
-        """Apply a padded unfolding operation to the input and compute the median value across each kernel's unfolded region.
-
-        Args:
-        ----
-            x (Tensor): Input tensor with shape (batch_size, channels, height, width).
-
-        Returns:
-        -------
-            Tensor: A tensor containing the median values for each
-              patch, with shape (batch_size, channels, new_height, new_width).
-
-        """
-        x = f.pad(x, self._padding(x), mode="reflect")
-        x = x.unfold(2, self.k[0], self.stride[0]).unfold(3, self.k[1], self.stride[1])
-        return x.contiguous().view(x.size()[:4] + (-1,)).median(dim=-1)[0]

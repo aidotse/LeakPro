@@ -23,9 +23,3 @@ def get_at_images(client_loader: DataLoader) -> DataLoader:
     reconstruction_dataset = TensorDataset(reconstruction, labels)
     reconstruction_loader = DataLoader(reconstruction_dataset, batch_size=32, shuffle=True)
     return reconstruction, reconstruction_loader
-
-# make a copy of document with random letters on "blurred" words
-#  - set requires_grad = True on blurred words
-
-# starting point could be whole text blurred with "fixed length"
-#  - set requires_grad = True on all words
