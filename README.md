@@ -9,7 +9,7 @@
 ![Coverage](https://github.com/aidotse/LeakPro/blob/gh-pages/coverage.svg)
 
 ## About the project
-<img align="left" width="250" height="250" src="https://github.com/aidotse/LeakPro/blob/readme/resources/logo.png">
+<img align="left" width="250" height="250" src="https://github.com/aidotse/LeakPro/blob/readme/resources/logo.jpg">
 
 
 LeakPro was created to enable seamless risk assessment of leaking sensitive data when sharing machine learning models or synthetic datasets.  
