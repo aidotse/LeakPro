@@ -1,11 +1,10 @@
 import os
-import sys
 
-from torch import zeros
-from examples.expm.utils.data_preparation import get_mimic_dataloaders, get_mimic_dataset
 from opacus.accountants.utils import get_noise_multiplier
+from torch import zeros
 from utils.gru_model_handler import *
 
+from examples.expm.utils.data_preparation import get_mimic_dataloaders, get_mimic_dataset
 
 # Generate the dataset and dataloaders
 path = os.path.join(os.getcwd(), "examples/expm/data/mimic/")
@@ -42,7 +41,7 @@ try:
                                         sample_rate = sample_rate,
                                         epochs = 21,
                                         epsilon_tolerance = 0.01,
-                                        accountant = 'prv',
+                                        accountant = "prv",
                                         eps_error = 0.01)
 except:
     # the prv accountant is not robust to large epsilon (even epsilon = 10)
@@ -53,19 +52,19 @@ except:
                                             sample_rate = sample_rate,
                                             epochs = 21,
                                             epsilon_tolerance = 0.01,
-                                            accountant = 'rdp')
-    
+                                            accountant = "rdp")
+
 
 # Initialize model with the best hyperparameters
 model_params = {
-    'X_mean': X_mean, 
-    'input_size': X_mean.shape[2], 
-    'device_id': device,
-    'cell_size': h['cell_size'],
-    'hidden_size': h['hidden_size'],
-    'batch_size': h['batch_size'],
-    'apply_sigmoid': h['loss'] == 'l2',  # Only add apply_sigmoid for 'l2' loss
-    'use_bn': h["use_bn"] != "nobn",  # Use batch norm unless 'nobn' specified
+    "X_mean": X_mean,
+    "input_size": X_mean.shape[2],
+    "device_id": device,
+    "cell_size": h["cell_size"],
+    "hidden_size": h["hidden_size"],
+    "batch_size": h["batch_size"],
+    "apply_sigmoid": h["loss"] == "l2",  # Only add apply_sigmoid for 'l2' loss
+    "use_bn": h["use_bn"] != "nobn",  # Use batch norm unless 'nobn' specified
 }
 
 
@@ -80,7 +79,7 @@ optimized_hyperparams ={
     "seed": 4410,
     "min_delta": 0.00001,
     "epsilon": 10,
-    "max_grad_norm": 1, 
+    "max_grad_norm": 1,
     }
 n_features = int(dataset.x.shape[1]/3)
 X_mean = zeros(1,dataset.x.shape[2],n_features)
@@ -106,12 +105,12 @@ model_params.update({
 model = GRUD(**model_params)
 # Train the model
 results= dpsgd_gru_trained_model_and_metadata(
-                                            model, 
+                                            model,
                                             train_loader,
-                                            early_stop_loader, 
+                                            early_stop_loader,
                                             noise_multiplier,
-                                            max_grad_norm = optimized_hyperparams['max_grad_norm'],
-                                            epochs=optimized_hyperparams['num_epochs'],
+                                            max_grad_norm = optimized_hyperparams["max_grad_norm"],
+                                            epochs=optimized_hyperparams["num_epochs"],
                                             patience_early_stopping = optimized_hyperparams["patience_early_stopping"],
                                             patience_lr= optimized_hyperparams["patience_lr_scheduler"],
                                             min_delta = optimized_hyperparams["min_delta"],

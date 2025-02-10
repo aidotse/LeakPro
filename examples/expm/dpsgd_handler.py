@@ -1,14 +1,16 @@
 
-from torch import cuda, device, nn, optim, squeeze
+import os
+import pickle
+
+from opacus import PrivacyEngine
+from opacus.accountants.utils import get_noise_multiplier
+from sklearn.metrics import accuracy_score
+from torch import cuda, device, nn, optim
 from torch.nn import BCEWithLogitsLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from sklearn.metrics import accuracy_score
+
 from leakpro import AbstractInputHandler
-import os
-import pickle
-from opacus.accountants.utils import get_noise_multiplier
-from opacus import PrivacyEngine, GradSampleModule
 
 
 class MimicInputHandlerGRU(AbstractInputHandler):
@@ -44,9 +46,9 @@ class MimicInputHandlerGRU(AbstractInputHandler):
 
 
         print("Training shadow models with DP-SGD")
-        dpsgd_path = self.configs['audit']['dpsgd']['dpsgd_path']
+        dpsgd_path = self.configs["audit"]["dpsgd"]["dpsgd_path"]
 
-        sample_rate = 1/len(dataloader) 
+        sample_rate = 1/len(dataloader)
         # Check if the file exists
         if os.path.exists(dpsgd_path):
             # Open and read the pickle file
@@ -56,14 +58,14 @@ class MimicInputHandlerGRU(AbstractInputHandler):
             print("Data:", privacy_engine_dict)
         else:
             raise Exception(f"File not found at: {dpsgd_path}")
-                
+
         try:
             noise_multiplier = get_noise_multiplier(target_epsilon = privacy_engine_dict["target_epsilon"],
                                             target_delta = privacy_engine_dict["target_delta"],
                                             sample_rate = sample_rate ,
                                             epochs = privacy_engine_dict["epochs"],
                                             epsilon_tolerance = privacy_engine_dict["epsilon_tolerance"],
-                                            accountant = 'prv',
+                                            accountant = "prv",
                                             eps_error = privacy_engine_dict["eps_error"],)
         except:
             # the prv accountant is not robust to large epsilon (even epsilon = 10)
@@ -74,10 +76,10 @@ class MimicInputHandlerGRU(AbstractInputHandler):
                                                     sample_rate = sample_rate,
                                                     epochs = privacy_engine_dict["epochs"],
                                                     epsilon_tolerance = privacy_engine_dict["epsilon_tolerance"],
-                                                    accountant = 'rdp')
+                                                    accountant = "rdp")
 
         # make the model private
-        privacy_engine = PrivacyEngine(accountant = 'prv')
+        privacy_engine = PrivacyEngine(accountant = "prv")
         model, optimizer, dataloader = privacy_engine.make_private(
             module=model,
             optimizer=optimizer,
@@ -105,12 +107,12 @@ class MimicInputHandlerGRU(AbstractInputHandler):
                 labels = labels.float()
 
                 optimizer.zero_grad()
-                output = model(x).squeeze(dim=1) 
+                output = model(x).squeeze(dim=1)
 
                 loss = criterion(output, labels)
                 loss.backward()
                 optimizer.step()
-                
+
                 train_loss += loss.item()
 
             train_loss = train_loss/len(dataloader)
