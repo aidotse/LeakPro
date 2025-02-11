@@ -23,7 +23,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-mia = ["torch", "torchvision", "optuna"]
+mia = ["torch", "torchvision", "optuna", "pydantic"]
 synthetic = ["numba", "pydantic"]
 federated = ["torch", "torchvision", "torchmetrics","pytorch-ignite","optuna"]
 dev = [
