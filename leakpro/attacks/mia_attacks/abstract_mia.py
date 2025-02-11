@@ -23,7 +23,7 @@ class AbstractMIA(ABC):
     population_size = None
     target_model = None
     audit_dataset = None
-    handler=None
+    handler = None
     _initialized = False
 
     AttackConfig: type[BaseModel]  # Subclasses must define an attack config
