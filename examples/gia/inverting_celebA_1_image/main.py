@@ -20,7 +20,7 @@ if __name__ == "__main__":
 
     configs = InvertingConfig()
     configs.at_iterations = 24000
-    configs.total_variation = 1.0e-06
+    configs.tv_reg = 1.0e-06
     configs.attack_lr = 0.1
     configs.criterion = BCEWithLogitsLoss() #CrossEntropyLoss()
     configs.epochs = 1
