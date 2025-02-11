@@ -1,3 +1,5 @@
+"""Implementation of the PLGMI attack."""
+
 from leakpro.attacks.minv_attacks.abstract_minv import AbstractMINV
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.metrics.attack_result import MinvResult
