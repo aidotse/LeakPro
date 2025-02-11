@@ -12,6 +12,7 @@ from transformers import PreTrainedTokenizerFast
 import leakpro.synthetic_data_attacks.syn_text_pii_scanner.data_handling as dh
 from leakpro.synthetic_data_attacks.syn_text_pii_scanner.pii_token_classif_models import ner_longformer_model as lgfm
 from leakpro.synthetic_data_attacks.syn_text_pii_scanner.sentence_transformers_models.model import model_sen_trans
+from leakpro.utils.logger import logger
 
 
 def get_device() -> str:
@@ -144,8 +145,7 @@ def forward_pass(*, # noqa: C901
     assert data.ori.raw_data is not None, "Load data must be run before forward pass."
     #Forward pass for original and synthetic input
     for attr in ["ori", "syn"]:
-        if verbose:
-            print(f"Starting forward_pass with {attr}.") # noqa: T201
+        logger.info(f"Starting forward_pass with {attr}.")
         sd = getattr(data, attr)
         #Set with_labels_flag
         with_labels_flag = True
@@ -203,8 +203,7 @@ def forward_pass(*, # noqa: C901
             labels = labels,
             attention_mask_start = attention_mask_start
         )
-        if verbose:
-            print(f"Ending forward_pass with {attr}.") # noqa: T201
+        logger.info(f"Ending forward_pass with {attr}.")
 
 class PII(BaseModel):
     """PII object holding document number, start and end token indexes, the tokens and text of the PII."""
@@ -395,17 +394,17 @@ def calc_distribution(*,
     distr["100"] = round_to_6(array.max())
     return distr
 
-def print_distribution(*,
+def log_distribution(*,
     distr: dict
 ) -> None:
-    """Auxiliary function to print passed distribution."""
-    print("Start print_distribution") # noqa: T201
+    """Auxiliary function to log passed distribution."""
+    logger.info("Start log_distribution")
     keys = sorted(distr.keys())
     keys.remove("mean")
-    print(f"Mean: {distr['mean']}") # noqa: T201
+    logger.info(f"Mean: {distr['mean']}")
     for k in keys:
-        print(f"{k}th Percentile: {distr[k]}") # noqa: T201
-    print("End print_distribution") # noqa: T201
+        logger.info(f"{k}th Percentile: {distr[k]}")
+    logger.info("End log_distribution")
 
 def count_sort_similar_items(*,
     similar_items: Tuple[np.ndarray, np.ndarray],
@@ -437,8 +436,7 @@ def compare_piis_lists(*,
     ori_piis: List[PII],
     syn_piis: List[PII],
     similarity_threshold: float,
-    ignore_list: List[str] = [], # noqa: B006
-    verbose: bool = False
+    ignore_list: List[str] = [] # noqa: B006
 ) -> Tuple[int, int, List[Dict], Dict]:
     """Function to compare original and synthetic list of PIIs for similarities.
 
@@ -450,8 +448,6 @@ def compare_piis_lists(*,
         syn_piis (List[PII]): List of synthetic PIIs.
         similarity_threshold (float): Cosine similarity threshold to consider PIIs as similar.
         ignore_list (List[str]): List of text PIIs to ignore from original list.
-        verbose: bool, default is False
-            If True, prints distribution of similarities.
 
     Returns:
         int: Similar number of items.
@@ -460,8 +456,7 @@ def compare_piis_lists(*,
         Dict: Distribution of similarities.
 
     """
-    if verbose:
-        print("\nStart compare_piis_lists") # noqa: T201
+    logger.info("Start compare_piis_lists")
     #Filter ori_piis with ignore list
     ori_piis = [pii for pii in ori_piis if pii.text not in ignore_list]
     #Get embeddings
@@ -483,10 +478,9 @@ def compare_piis_lists(*,
     #Get similar and total items
     sit = similar_items[0].size
     tot = similarities.size
-    if verbose:
-        print_distribution(distr=distr)
-        print(f"Nr. Similar Items: {sit:,}") # noqa: T201
-        print(f"Total Items: {tot:,}") # noqa: T201
-        print(f"Percentage: {round_to_6(sit/tot*100)}%") # noqa: T201
-        print("End compare_piis_lists") # noqa: T201
+    log_distribution(distr=distr)
+    logger.info(f"Nr. Similar Items: {sit:,}")
+    logger.info(f"Total Items: {tot:,}")
+    logger.info(f"Percentage: {round_to_6(sit/tot*100)}%")
+    logger.info("End compare_piis_lists")
     return sit, tot, sorted_sim_items, distr

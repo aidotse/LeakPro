@@ -6,6 +6,8 @@ from huggingface_hub import PyTorchModelHubMixin
 from transformers import LongformerModel, LongformerTokenizerFast
 from transformers.modeling_outputs import TokenClassifierOutput
 
+from leakpro.utils.logger import logger
+
 # Longformer base model name
 longformer_base_model_name: str = "allenai/longformer-base-4096"
 
@@ -78,6 +80,8 @@ class NERLongformerModel(torch.nn.Module, PyTorchModelHubMixin):
 
         """
         #Longformer model cannot manage more than 4096 tokens
+        if input_ids.shape[1] > 4096:
+            logger.warning("Longformer model cannot handle more than 4096 tokens as input. Trunctating sequences to max 4096.")
         input_ids = input_ids[:, 0:4096].clone()
         attention_mask = attention_mask[:, 0:4096].clone()
         #Get logits

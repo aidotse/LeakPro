@@ -1,14 +1,16 @@
 """Module with function to modify TAB dataset to be used with synthetic text PII scanner."""
-from typing import Any, Callable, Dict, List
 import json
+from typing import Any, Callable, Dict, List
+
 import requests
 
 from leakpro.synthetic_data_attacks.syn_text_pii_scanner import utils
 
+
 def get_json_from_url(*, url: str) -> Any:
     response = requests.get(url)
     if response.status_code != 200:
-        raise Exception(f'Could not get url: {url}')
+        raise Exception(f"Could not get url: {url}")
     return json.loads(response.text)
 
 def tab_data_treatment(*,

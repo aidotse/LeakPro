@@ -198,13 +198,13 @@ def test_round_to_6() -> None:
     str_num = f"{y:.16f}".rstrip("0")  # Avoid floating-point inaccuracies
     assert len(str_num.split(".")[-1]) == 6
 
-def test_calc_print_distribution() -> None:
-    """Test calc_distribution and print_distribution functions with simple input."""
+def test_calc_log_distribution() -> None:
+    """Test calc_distribution and log_distribution functions with simple input."""
     array = np.arange(100)
     e_distr = {"mean": 49.5, "0": 0.0, "10": 10.0, "25": 25.0, "50": 50.0, "75": 75.0, "90": 90.0, "99": 99.0, "100": 99.0}
     distr = utils.calc_distribution(array=array)
     assert distr == e_distr
-    utils.print_distribution(distr=distr)
+    utils.log_distribution(distr=distr)
 
 def test_count_sort_similar_items() -> None:
     """Test count_sort_similar_items function with simple input."""
@@ -232,10 +232,7 @@ def test_count_sort_similar_items() -> None:
     ]
     assert sorted_sim_items == e_sorted_sim_items
 
-@pytest.mark.parametrize(
-    ("verbose"), [False, True]
-)
-def test_compare_piis_lists(*, verbose: bool) -> None:
+def test_compare_piis_lists() -> None:
     """Test compare_piis_lists function with simple input."""
     #Get tokenizer
     tokenizer = lgfm.get_tokenizer()
@@ -247,8 +244,7 @@ def test_compare_piis_lists(*, verbose: bool) -> None:
         ori_piis = ori_piis,
         syn_piis = syn_piis,
         similarity_threshold = 0.95,
-        ignore_list = ["a in-"],
-        verbose = verbose
+        ignore_list = ["a in-"]
     )
     assert sit == 14
     assert tot == 72
