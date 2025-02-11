@@ -1,7 +1,7 @@
 """Module containing the class to handle the user input for the CIFAR100 dataset."""
 
 import torch
-from torch import cuda, device, optim, sigmoid
+from torch import cuda, device, optim
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -46,7 +46,7 @@ class CifarInputHandler(AbstractInputHandler):
 
         # training loop
         for epoch in range(epochs):
-            train_loss, train_acc = 0, 0
+            train_loss, train_acc, total_samples = 0, 0, 0
             model.train()
             for inputs, labels in tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}"):
                 labels = labels.long()
@@ -60,8 +60,13 @@ class CifarInputHandler(AbstractInputHandler):
 
                 # Accumulate performance of shadow model
                 train_acc += pred.eq(labels.data.view_as(pred)).sum()
+                total_samples += labels.size(0)
                 train_loss += loss.item()
+
+        avg_train_loss = train_loss / total_samples
+        train_accuracy = train_acc / total_samples  
 
         model.to("cpu")
 
-        return {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}
+        return {"model": model, "metrics": {"accuracy": train_accuracy, "loss": avg_train_loss}}
+

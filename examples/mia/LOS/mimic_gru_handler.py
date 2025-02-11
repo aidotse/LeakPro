@@ -48,7 +48,7 @@ class MimicInputHandlerGRU(AbstractInputHandler):
 
         for e in tqdm(range(epochs), desc="Training Progress"):
             model.train()
-            train_acc, train_loss = 0.0, 0.0
+            train_acc, train_loss, total_samples = 0.0, 0.0, 0
 
             for _, (x, labels) in enumerate(tqdm(dataloader, desc="Training Batches")):
                 x = self.convert_to_device(x)
@@ -62,14 +62,14 @@ class MimicInputHandlerGRU(AbstractInputHandler):
                 loss.backward()
                 optimizer.step()
                 train_loss += loss.item()
+                total_samples += labels.size(0)
+                
+                binary_predictions = self.to_numpy(output).argmax(axis=1)
+                binary_labels = self.to_numpy(labels).astype(int)
+                train_acc += accuracy_score(binary_labels, binary_predictions)
 
-            train_loss = train_loss/len(dataloader)
-            binary_predictions = self.to_numpy(output).argmax(axis=1)
-
-            # Ensure labels are integer and 1D
-            binary_labels = self.to_numpy(labels).astype(int)
-            # Compute accuracy
-            train_acc = accuracy_score(binary_labels, binary_predictions)
+            train_loss = train_loss/total_samples
+            train_acc = train_acc/total_samples
 
         return {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}
 
