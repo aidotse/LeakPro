@@ -63,7 +63,7 @@ class CifarInputHandler(AbstractInputHandler):
                 total_samples += labels.size(0)
                 train_loss += loss.item()
                 
-        avg_train_loss = train_loss / total_samples
+        avg_train_loss = train_loss / len(dataloader)
         train_accuracy = train_acc / total_samples  
         
         model.to("cpu")
