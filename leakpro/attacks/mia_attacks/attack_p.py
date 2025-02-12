@@ -15,7 +15,7 @@ from leakpro.utils.logger import logger
 class PAConfig(BaseModel):
     """Configuration for the RMIA attack."""
 
-    attack_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Fraction of the population to use for the attack")
+    attack_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Fraction of population to use for the attack")
 
 
 class AttackP(AbstractMIA):
@@ -37,7 +37,7 @@ class AttackP(AbstractMIA):
 
         """
         logger.info("Configuring the Population attack")
-        self.configs = PAConfig(**configs)
+        self.configs = PAConfig() if configs is None else PAConfig(**configs)
 
         # Initializes the parent
         super().__init__(handler)

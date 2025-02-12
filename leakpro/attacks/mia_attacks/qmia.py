@@ -180,7 +180,8 @@ class AttackQMIA(AbstractMIA):
         """
         logger.info("Configuring the QMIA attack")
 
-        self.configs = QMIAConfig(**configs)
+        self.configs = QMIAConfig() if configs is None else QMIAConfig(**configs)
+
         # Initializes the parent metric
         super().__init__(handler)
 

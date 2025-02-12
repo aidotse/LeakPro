@@ -42,7 +42,7 @@ class AttackYOQO(AbstractMIA):
             configs (dict): Configuration parameters for the attack.
 
         """
-        self.configs = YOQOConfig(**configs)
+        self.configs = YOQOConfig() if configs is None else YOQOConfig(**configs)
 
         super().__init__(handler)
 
@@ -61,7 +61,7 @@ class AttackYOQO(AbstractMIA):
             self.loss = CrossEntropyLoss(reduction = "none")
 
         # YOQO specific
-        self.alpha = configs.get("alpha", 2)
+        self.alpha = 2.0
         self.n_audits = -1
         self.stop_criterion = self.num_shadow_models / 8
 

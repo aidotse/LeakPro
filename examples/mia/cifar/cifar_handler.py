@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from leakpro import AbstractInputHandler
+from leakpro.schemas import TrainingOutput
 
 class CifarInputHandler(AbstractInputHandler):
     """Class to handle the user input for the CIFAR100 dataset."""
@@ -33,7 +34,7 @@ class CifarInputHandler(AbstractInputHandler):
         criterion: torch.nn.Module = None,
         optimizer: optim.Optimizer = None,
         epochs: int = None,
-    ) -> dict:
+    ) -> TrainingOutput:
         """Model training procedure."""
 
         # read hyperparams for training (the parameters for the dataloader are defined in get_dataloader):
@@ -68,4 +69,7 @@ class CifarInputHandler(AbstractInputHandler):
         
         model.to("cpu")
 
-        return {"model": model, "metrics": {"accuracy": train_accuracy, "loss": avg_train_loss}}
+        output_dict = {"model": model, "metrics": {"accuracy": train_accuracy, "loss": avg_train_loss}}
+        output = TrainingOutput(**output_dict)
+        
+        return output

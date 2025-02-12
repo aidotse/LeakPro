@@ -46,7 +46,7 @@ class AttackRMIA(AbstractMIA):
         logger.info("Configuring the RMIA attack")
         # Initializes the pydantic object using the user-provided configs
         # This will ensure that the user-provided configs are valid
-        self.configs = RMIAConfig(**configs)
+        self.configs = RMIAConfig() if configs is None else RMIAConfig(**configs)
 
         # Call the parent class constructor. It will check the configs.
         super().__init__(handler)

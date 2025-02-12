@@ -73,7 +73,8 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
 
         """
         logger.info("Configuring label only attack")
-        self.configs = HSJConfig(**configs)
+        self.configs = HSJConfig() if configs is None else HSJConfig(**configs)
+
         super().__init__(handler)
 
         # Assign the configuration parameters to the object
@@ -84,7 +85,7 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
 
         self.y_target = None
         self.image_target = None
-        self.verbose = configs.get("verbose", True)
+        self.verbose = configs.get("verbose", True) if configs is not None else True
         self.stepsize_search = "geometric_progression"
 
     def description(self:Self) -> dict:

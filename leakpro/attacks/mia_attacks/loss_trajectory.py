@@ -48,7 +48,8 @@ class AttackLossTrajectory(AbstractMIA):
 
         """
         logger.info("Configuring Loss trajectory attack")
-        self.configs = LossTrajectoryConfig(**configs)
+        self.configs = LossTrajectoryConfig() if configs is None else LossTrajectoryConfig(**configs)
+
         super().__init__(handler)
 
         # Assign the configuration parameters to the object

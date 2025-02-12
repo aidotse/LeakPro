@@ -50,7 +50,8 @@ class AttackLiRA(AbstractMIA):
             configs (dict): Configuration parameters for the attack.
 
         """
-        self.configs = LiRAConfig(**configs)
+        self.configs = LiRAConfig() if configs is None else LiRAConfig(**configs)
+
         # Initializes the parent metric
         super().__init__(handler)
 
