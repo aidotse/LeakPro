@@ -129,6 +129,28 @@ class celebADataset(Dataset):
 
         return cls(data, targets)
     
+    @classmethod # TODO: Combine this with above
+    def from_celebA_pseudo(cls, config):
+        data_dir = config["data"]["data_dir"]
+        train_dataset = datasets.ImageFolder(os.path.join(data_dir, 'pseudo'), allow_empty=True, transform=transforms.ToTensor())
+
+        train_dataset.class_to_idx = {cls_name: int(cls_name) for cls_name in train_dataset.class_to_idx.keys()}
+
+        # Prepare data loader to iterate over combined_dataset
+        loader = DataLoader(train_dataset, batch_size=1, shuffle=False)
+
+        # Collect all data and targets
+        data_list = []
+        target_list = []
+        for data, target in loader:
+            data_list.append(data)  # Remove batch dimension
+            target_list.append(target)
+
+        # Concatenate data and targets into large tensors
+        data = cat(data_list, dim=0)  # Shape: (N, C, H, W)
+        targets = cat(target_list, dim=0)  # Shape: (N,)
+
+        return cls(data, targets)
 
 
 
@@ -186,9 +208,28 @@ def get_celebA_auxloader(data_path, train_config):
             population_dataset = pickle.load(file)
             print(f"Load data from {data_dir}")
 
-    aux_loader = DataLoader(population_dataset, batch_size =batch_size, shuffle=True)
+    aux_loader = DataLoader(population_dataset, batch_size =batch_size, shuffle=False)
 
     return aux_loader
+
+def get_celebA_pseudoloader(data_path, train_config):
+    # Here, we want to do as above, but only return one loader with all the data
+    batch_size = train_config["train"]["batch_size"]
+    data_dir =  train_config["data"]["data_dir"] + "/celebaA_pseudo_data.pkl"
+
+    if not os.path.exists(data_dir):
+        population_dataset = celebADataset.from_celebA_pseudo(config=train_config)
+        with open(data_dir, "wb") as file:
+            pickle.dump(population_dataset, file)
+            print(f"Save data to {data_dir}")
+    else:
+        with open(data_dir, "rb") as file:
+            population_dataset = pickle.load(file)
+            print(f"Load data from {data_dir}")
+
+    pseudo_loader = DataLoader(population_dataset, batch_size =batch_size, shuffle=False)
+
+    return pseudo_loader
 
 
 
