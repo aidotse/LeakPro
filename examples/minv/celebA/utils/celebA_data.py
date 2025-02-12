@@ -86,6 +86,52 @@ class celebADataset(Dataset):
 
         return cls(data, targets)
     
+    @classmethod # TODO: Combine this with above
+    def from_celebA_aux(cls, config):
+        re_size = 64
+        crop_size = 108
+        offset_height = (218 - crop_size) // 2
+        offset_width = (178 - crop_size) // 2
+        crop = lambda x: x[:, offset_height:offset_height + crop_size, offset_width:offset_width + crop_size]
+
+
+        data_dir = config["data"]["data_dir"]
+        train_transform = transforms.Compose([
+           transforms.ToTensor(),
+           transforms.Lambda(crop),
+           transforms.ToPILImage(),
+           transforms.Resize((re_size, re_size)),
+           transforms.ToTensor(),
+        ])
+
+        test_transform = train_transform
+
+        train_dataset = datasets.ImageFolder(os.path.join(data_dir, 'test'), train_transform)
+        #test_dataset = datasets.ImageFolder(os.path.join(data_dir, 'test'), test_transform)
+        #combined_dataset = ConcatDataset([train_dataset, test_dataset])
+
+        train_dataset.class_to_idx = {cls_name: int(cls_name) for cls_name in train_dataset.class_to_idx.keys()}
+
+        # Prepare data loader to iterate over combined_dataset
+        loader = DataLoader(train_dataset, batch_size=1, shuffle=False)
+
+        # Collect all data and targets
+        data_list = []
+        target_list = []
+        for data, target in loader:
+            data_list.append(data)  # Remove batch dimension
+            target_list.append(target)
+
+        # Concatenate data and targets into large tensors
+        data = cat(data_list, dim=0)  # Shape: (N, C, H, W)
+        targets = cat(target_list, dim=0)  # Shape: (N,)
+
+
+        return cls(data, targets)
+    
+
+
+
 
     def subset(self, indices):
         """Return a subset of the dataset based on the given indices."""
@@ -123,3 +169,26 @@ def get_celebA_dataloader(data_path, train_config):
     test_loader = DataLoader(test_subset, batch_size= batch_size, shuffle=False)
 
     return train_loader, test_loader
+
+
+def get_celebA_auxloader(data_path, train_config):
+    # Here, we want to do as above, but only return one loader with all the data
+    batch_size = train_config["train"]["batch_size"]
+    data_dir =  train_config["data"]["data_dir"] + "/celebaA_aux_data.pkl"
+
+    if not os.path.exists(data_dir):
+        population_dataset = celebADataset.from_celebA_aux(config=train_config)
+        with open(data_dir, "wb") as file:
+            pickle.dump(population_dataset, file)
+            print(f"Save data to {data_dir}")
+    else:
+        with open(data_dir, "rb") as file:
+            population_dataset = pickle.load(file)
+            print(f"Load data from {data_dir}")
+
+    aux_loader = DataLoader(population_dataset, batch_size =batch_size, shuffle=True)
+
+    return aux_loader
+
+
+
