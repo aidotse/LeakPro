@@ -263,19 +263,18 @@ class LinkabilityResults(BaseModel):
     def create_results(results: list, save_dir: str = "./") -> str:
         """Result method for LinkabilityResults."""
         latex = ""
-        def _latex(save_dir: str, save_name: str) -> str:
+        def _latex(save_name: str) -> str:
             """Latex method for LinkabilityResults."""
-            filename = f"{save_dir}/{save_name}.png"
             return f"""
             \\subsection{{{" ".join(save_name.split("_"))}}}
             \\begin{{figure}}[ht]
-            \\includegraphics[width=0.8\\textwidth]{{{filename}}}
+            \\includegraphics[width=0.8\\textwidth]{{{save_name}}}
             \\caption{{Original}}
             \\end{{figure}}
             """
         for res in results:
             res.plot(show=False, save=True, save_path=save_dir, save_name="linkability")
-            latex += _latex(save_dir=save_dir, save_name="linkability")
+            latex += _latex(save_name="linkability")
         return latex
 
 def linkability_risk_evaluation(

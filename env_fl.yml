@@ -1,0 +1,42 @@
+name: leakpro_mia
+channels:
+  - conda-forge
+dependencies:
+  # Core Python
+  - python=3.9.0 
+
+  # Numerical and Data Analysis
+  - numpy  
+  - pandas  
+  - scipy
+
+  # Visualization
+  - matplotlib  
+  - seaborn
+<<<<<<< HEAD:environment.yml
+  - pillow
+
+  # Deep Learning
+  - pytorch
+  - torchvision
+  - torchmetrics
+=======
+>>>>>>> bad23c7 (started subpackages):env_fl.yml
+
+  # Utilities
+  - dotmap
+  - jinja2
+  - tqdm
+  - joblib
+
+  # Development and Testing
+  - pytest
+<<<<<<< HEAD:environment.yml
+  - pytest-mock
+  
+
+=======
+  - pip
+  - pip:
+    - leakpro[federated] 
+>>>>>>> bad23c7 (started subpackages):env_fl.yml

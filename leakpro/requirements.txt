@@ -16,3 +16,5 @@ numba
 pydantic
 joblib
 pytest
+transformers
+sentence-transformers
