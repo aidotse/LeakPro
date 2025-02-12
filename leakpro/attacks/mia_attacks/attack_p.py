@@ -15,7 +15,7 @@ from leakpro.utils.logger import logger
 class PAConfig(BaseModel):
     """Configuration for the RMIA attack."""
 
-    attack_data_fraction: float = Field(..., ge=0.0, le=1.0, description="Fraction of the population to use for the attack")
+    attack_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Fraction of the population to use for the attack")
 
 
 class AttackP(AbstractMIA):

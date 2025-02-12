@@ -1,0 +1,68 @@
+Skip to content
+Navigation Menu
+aidotse
+LeakPro
+
+Type / to search
+Code
+Issues
+49
+Pull requests
+6
+Discussions
+Actions
+Projects
+Wiki
+Security
+Insights
+Settings
+Schemas + Handler #220
+ Open
+johanos1 wants to merge 8 commits into main from schemas  
++887 −607 
+ Conversation 12
+ Commits 8
+ Checks 0
+ Files changed 34
+ Open
+Schemas + Handler
+#220
+File filter 
+ 
+Delete examples/mia/cifar/audit.yaml
+removed cifar/audit.yaml
+ schemas (#220)
+@johanos1
+johanos1 authored 12 hours ago 
+commit 43fb74782f131be43e1dc20aed44d5d0d973984e
+ 62 changes: 0 additions & 62 deletions62  
+examples/mia/cifar/audit.yaml
+Copied! 
+Original file line number	Diff line number	Diff line change
+@@ -1,62 +0,0 @@
+audit:  # Configurations for auditing
+  random_seed: 1234  # Integer specifying the random seed
+  attack_list:
+    rmia:
+    qmia:
+    population:
+    lira:
+    loss_traj:
+    HSJ:
+    yoqo:
+
+  output_dir: "./leakpro_output"
+  attack_type: "mia" #mia, gia
+  data_modality: "image" #image, tabular
+
+target:
+  # Target model path
+  module_path: "./utils/cifar_model_preparation.py"
+  model_class: "ResNet18" 
+  # Data paths
+  target_folder: "./target"
+  data_path: "./data/cifar10.pkl"
+
+shadow_model:
+
+distillation_model:

@@ -27,7 +27,7 @@ class LossTrajectoryConfig(BaseModel):
     train_mia_batch_size: int = Field(default=64, ge=1, description="Batch size for training the MIA classifier")
     number_of_traj: int = Field(default=10, ge=1, description="Number of trajectories to consider")
     mia_classifier_epochs: int = Field(default=100, ge=1, description="Number of epochs for training the MIA classifier")
-    label_only: bool = Field(False, description="Whether to use only the labels for the attack")
+    label_only: bool = Field(default=False, description="Whether to use only the labels for the attack")
     temperature: float = Field(default=2.0, ge=0.0, description="Temperature for the softmax")
 
 class AttackLossTrajectory(AbstractMIA):
