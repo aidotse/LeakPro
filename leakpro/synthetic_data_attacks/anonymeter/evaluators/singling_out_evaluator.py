@@ -304,56 +304,110 @@ def multivariate_singling_out_queries(
     df: pd.DataFrame,
     n_queries: int,
     n_cols: int,
-    max_attempts: Optional[int]
+    max_per_combo: int = 5,
+    max_attempts: Optional[int] = 10_000,
+    sample_size_per_combo: int = 2,
+    max_rounds_no_progress: int = 10,
+    use_medians: bool = True
 ) -> List[str]:
-    """Function that generates singling out queries from a combination of attributes.
-
-    Parameters
-    ----------
-    df: pd.DataFrame
-        Input dataframe from which queries will be generated.
-    n_queries: int
-        Number of queries to generate.
-    n_cols: int
-        Number of columns that the attacker uses to create the
-        singling out queries.
-    max_attempts: int, optional.
-        Maximum number of attempts that the attacker can make to generate
-        the requested `n_queries` singling out queries. Parameter
-        caps the total number of query generation attempts.
-        If `max_attempts` is None, no limit will be imposed.
-
-    Returns
-    -------
-    List[str]
-        The singling out queries.
-
     """
-    #Set medians and n_attemps
-    medians = df.median(numeric_only=True)
-    n_attempts = 0
-    #Instantiate queries
-    queries = UniqueSinglingOutQueries(df=df)
-    #Construct queries
-    while queries.count < n_queries:
-        #Reached max attemps
-        if max_attempts is not None and n_attempts >= max_attempts:
-            print( # noqa: T201
-                f"Reached maximum number of attempts ({max_attempts}) when generating singling out queries. "
-                f"Returning {queries.count} instead of the requested {n_queries} queries. "
-                "To avoid this, increase max_attempts or set it to `None` to disable limit."
-            )
-            return queries.queries
-        #Choose record and columns
-        record = df.iloc[rng.integers(df.shape[0])]
-        columns = rng.choice(df.columns, size=n_cols, replace=False).tolist()
-        #Construct query
-        query = query_from_record(record=record, dtypes=df.dtypes, columns=columns, medians=medians)
-        #Check query and append
-        queries.check_and_append(query=query)
-        #Add to n_attempts
-        n_attempts += 1
-    return queries.queries
+    Generate diverse singling-out queries for a given dataframe.
+
+    Parameters:
+        df (pd.DataFrame): The dataframe containing the dataset to generate queries from.
+        n_queries (int): The total number of queries to generate.
+        n_cols (int): The number of columns to use in each query combination.
+        max_per_combo (int): Maximum allowed queries per column combination.
+        max_attempts (Optional[int]): Maximum number of attempts to generate queries before stopping.
+        sample_size_per_combo (int): Number of unique records to sample from each combination per iteration.
+        max_rounds_no_progress (int): Number of rounds with no progress before stopping.
+        use_medians (int): whether to use the medians in the query construction or not
+
+    Returns:
+        List[str]: A list of generated queries.
+    """
+
+    medians: pd.Series = df.median(numeric_only=True)
+    all_combos: List[tuple] = list(combinations(df.columns, n_cols))
+    random.shuffle(all_combos)
+
+    combo_usage_count: dict = {combo: 0 for combo in all_combos}
+    queries: List[str] = []
+    used_record_indexes: set = set()
+
+    attempts: int = 0
+    rounds_no_progress: int = 0
+
+    while len(queries) < n_queries:
+        if max_attempts is not None and attempts >= max_attempts:
+            print(f"Reached maximum number of attempts ({max_attempts}). Returning {len(queries)} queries out of requested {n_queries}.")
+            break
+
+        random.shuffle(all_combos)
+        queries_before_this_round: int = len(queries)
+
+        for combo in all_combos:
+            if len(queries) >= n_queries:
+                break
+
+            if combo_usage_count[combo] >= max_per_combo:
+                continue
+
+            groups: pd.Series = df.groupby(list(combo)).size()
+            unique_groups: pd.Series = groups[groups == 1]
+            if unique_groups.empty:
+                continue
+
+            unique_indices: List[tuple] = list(unique_groups.index)
+            random.shuffle(unique_indices)
+            unique_indices = unique_indices[:sample_size_per_combo]
+
+            for idx in unique_indices:
+                if len(queries) >= n_queries or (max_attempts is not None and attempts >= max_attempts):
+                    break
+
+                mask: pd.Series = (df[list(combo)] == idx).all(axis=1)
+                record: pd.Series = df.loc[mask].iloc[0]
+
+                query: str = query_from_record(
+                    df=df,
+                    columns=combo,
+                    dtypes=df.dtypes,
+                    record=record,
+                    medians=medians,
+                    use_medians=use_medians
+                )
+
+                try:
+                    result: pd.DataFrame = df.query(query)
+                    if len(result) == 1:
+                        r_idx: int = result.index[0]
+                        if r_idx not in used_record_indexes:
+                            queries.append(query)
+                            used_record_indexes.add(r_idx)
+                            combo_usage_count[combo] += 1
+                except Exception:
+                    pass
+
+                attempts += 1
+                if max_attempts is not None and attempts >= max_attempts:
+                    print(f"Reached maximum number of attempts ({max_attempts}). Returning {len(queries)} queries.")
+                    break
+
+        current_query_count: int = len(queries)
+        if current_query_count == queries_before_this_round:
+            rounds_no_progress += 1
+        else:
+            rounds_no_progress = 0
+
+        if rounds_no_progress >= max_rounds_no_progress:
+            print("No progress for several rounds. Stopping to prevent infinite loop.")
+            break
+
+    if len(queries) < n_queries:
+        print(f"Generated only {len(queries)} queries out of requested {n_queries}.")
+
+    return queries[:n_queries]
 
 def main_singling_out_attack(
     ori: pd.DataFrame,
