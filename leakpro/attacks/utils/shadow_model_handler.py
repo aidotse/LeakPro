@@ -11,7 +11,7 @@ from torch.nn import Module
 
 from leakpro.attacks.utils.model_handler import ModelHandler
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
-from leakpro.schemas import ShadowModelTrainingSchema
+from leakpro.schemas import ShadowModelTrainingSchema, TrainingOutput
 from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import Self, Tuple
 from leakpro.utils.logger import logger
@@ -162,9 +162,10 @@ class ShadowModelHandler(ModelHandler):
             logger.info(f"Training shadow model {i} on {len(data_loader)* data_loader.batch_size} points")
             training_results = self.handler.train(data_loader, model, criterion, optimizer, self.epochs)
             # Read out results
-            shadow_model = training_results.get("model")
-            train_acc = training_results["metrics"].get("accuracy")
-            train_loss = training_results["metrics"].get("loss")
+            assert isinstance(training_results, TrainingOutput)
+            shadow_model = training_results.model
+            train_acc = training_results.metrics.get("accuracy", 0)
+            train_loss = training_results.metrics.get("loss", 0)
 
             logger.info(f"Training shadow model {i} complete")
             with open(f"{self.storage_path}/{self.model_storage_name}_{i}.pkl", "wb") as f:
