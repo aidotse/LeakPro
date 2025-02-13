@@ -81,6 +81,6 @@ def test_cifar10_input_handler(image_handler:ImageInputHandler) -> None:
                                       image_handler.get_criterion(),
                                       image_handler.get_optimizer(image_handler.target_model),
                                       parameters.epochs)
-    after_weights = train_dict["model"].state_dict()
+    after_weights = train_dict.model.state_dict()
     weights_changed = [equal(before_weights[key], after_weights[key]) for key in before_weights]
     assert any(weights_changed) is False

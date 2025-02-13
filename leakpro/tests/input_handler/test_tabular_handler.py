@@ -85,6 +85,6 @@ def test_tabular_input_handler(tabular_handler:TabularInputHandler) -> None:
                                       tabular_handler.get_optimizer(tabular_handler.target_model),
                                       parameters.epochs)
     # move back to cpu
-    after_weights = train_dict["model"].to("cpu").state_dict()
+    after_weights = train_dict.model.to("cpu").state_dict()
     weights_changed = [equal(before_weights[key], after_weights[key]) for key in before_weights]
     assert any(weights_changed) is False
