@@ -159,7 +159,7 @@ def aux_singling_out_risk_evaluation(**kwargs: Any) -> Tuple[Optional[Union[int,
     res_cols.append("n_cols")
     if verbose:
         print(f"Finished aux_singling_out_risk_evaluation for n_cols: {n_cols}") # noqa: T201
-    return res, res_cols
+    return res, res_cols, evaluator.main_queries
 
 def aux_apply_kwargs_to_fun(fun: Callable, kwargs: Dict) -> Any: # noqa: ANN401
     """Auxiliary function that executes passed fun with given kwargs."""
@@ -254,6 +254,7 @@ def singling_out_risk_evaluation(
         # Repack res and res_cols
         res = [i[0] for i in res_ if i[0] is not None]
         res_cols = res_[0][1]
+        queries = [i[2] for i in res_ if i[2] is not None]
     #Instantiate SinglingOutResults
     sin_out_res = SinglingOutResults(
         res_cols = res_cols,
@@ -269,7 +270,7 @@ def singling_out_risk_evaluation(
             res = sin_out_res.model_dump(),
             path = path
         )
-    return sin_out_res
+    return sin_out_res, queries
 
 def load_singling_out_results(*, dataset: str, n_cols: Optional[int] = None, path: str = None) -> SinglingOutResults:
     """Function to load and return singling-out results from given dataset."""
