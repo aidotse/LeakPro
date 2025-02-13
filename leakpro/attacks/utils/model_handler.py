@@ -1,7 +1,6 @@
 """Abstract class for the model handler."""
 
 import os
-from copy import deepcopy
 
 import joblib
 from torch import load
@@ -30,12 +29,14 @@ class ModelHandler():
 
         self.handler = handler
 
-        caller_configs =  handler.configs.get(caller, None)
+        caller_configs = getattr(handler.configs, caller) if caller is not None else None
         if caller_configs is None:
             caller_configs = {}
-
-        self.model_path = caller_configs.get("module_path", None)
-        self.model_class = caller_configs.get("model_class", None)
+            self.model_path = None
+            self.model_class = None
+        else:
+            self.model_path = caller_configs.module_path
+            self.model_class = caller_configs.model_class
 
         self.use_target_model_setup = self.model_path is None or self.model_class is None
 
@@ -46,28 +47,27 @@ class ModelHandler():
             self.model_blueprint = self._import_model_from_path(self.model_path, self.model_class)
 
         # Pick either target config or caller config
-        setup_config = deepcopy(handler.target_model_metadata) if self.use_target_model_setup else caller_configs
+        setup_config = (handler.target_model_metadata) if self.use_target_model_setup else caller_configs
 
-        self.init_params = setup_config.get("init_params", {})
+        self.init_params = setup_config.init_params
 
         # Get optimizer class
-        self.optimizer_config = setup_config["optimizer"]
-        optimizer_name = self.optimizer_config.pop("name").lower() # pop to only have input parameters left
+        optimizer_name = setup_config.optimizer.name
         self.optimizer_class = self._get_optimizer_class(optimizer_name)
+        # copy to only have parameters left
+        self.optimizer_config = setup_config.optimizer.model_copy().model_dump(exclude={"name"})
 
         # Get criterion class
-        self.loss_config = setup_config["loss"]
-        criterion_class = self.loss_config.pop("name").lower() # pop to only have input parameters left
+        criterion_class = setup_config.loss.name
         self.criterion_class = self._get_criterion_class(criterion_class)
+        # copy to only have parameters left
+        self.loss_config = setup_config.loss.model_copy().model_dump(exclude={"name"})
 
-        self.batch_size = setup_config.get("batch_size", 32)
-        assert self.batch_size > 0, "Batch size must be greater than 0"
-
-        self.epochs = setup_config.get("epochs", 40)
-        assert self.epochs > 0, "Epochs must be greater than 0"
+        self.batch_size = setup_config.batch_size
+        self.epochs = setup_config.epochs
 
         # Set the storage paths for objects created by the handler
-        storage_path = handler.configs["audit"].get("output_dir", None)
+        storage_path = handler.configs.audit.output_dir
         if storage_path is not None:
             self.storage_path = f"{storage_path}/attack_objects/{caller}"
             if not os.path.exists(self.storage_path):

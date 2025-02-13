@@ -35,7 +35,7 @@ def image_handler(manage_storage_directory) -> ImageInputHandler:
     config = DotMap()
     config.target = setup_image_test()
     config.audit = get_audit_config()
-    config.audit.modality = "image"
+    config.audit.data_modality = "image"
     #save config to file
     config_path = f"{STORAGE_PATH}/image_test_config.yaml"
     with open(config_path, "w") as f:
@@ -55,7 +55,7 @@ def tabular_handler(manage_storage_directory) -> TabularInputHandler:
     config = DotMap()
     config.target = setup_tabular_test()
     config.audit = get_audit_config()
-    config.audit.modality = "tabular"
+    config.audit.data_modality = "tabular"
     #save config to file
     config_path = f"{STORAGE_PATH}/tabular_test_config.yaml"
     with open(config_path, "w") as f:

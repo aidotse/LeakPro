@@ -12,7 +12,7 @@ from torchvision import transforms
 
 from leakpro.tests.constants import STORAGE_PATH, get_image_handler_config
 from leakpro.utils.import_helper import Self
-
+from leakpro.schemas import MIAMetaDataSchema
 
 class ConvNet(Module):
     """Convolutional Neural Network model."""
@@ -152,10 +152,16 @@ def create_mock_model_and_metadata() -> str:
         "loss": {"name": parameters.loss},
         "batch_size": parameters.batch_size,
         "epochs": parameters.epochs,
+        "train_acc": 0.9,
+        "test_acc": 0.8,
+        "train_loss": 0.1,
+        "test_loss": 0.2,
+        "dataset": "CIFAR-10",
     }
+    validated_metadata = MIAMetaDataSchema(**metadata)
     metadata_path = parameters.target_folder + "/model_metadata.pkl"
 
     with open(metadata_path, "wb") as f:
-        pickle.dump(metadata, f)
+        pickle.dump(validated_metadata, f)
 
     return model_path, metadata_path

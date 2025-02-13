@@ -8,7 +8,7 @@ from tqdm import tqdm
 
 from leakpro import AbstractInputHandler
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
-
+from leakpro.schemas import TrainingOutput
 
 class TabularInputHandler(AbstractInputHandler):
     """Class to handle the user input for the CIFAR10 dataset."""
@@ -64,5 +64,8 @@ class TabularInputHandler(AbstractInputHandler):
 
         train_acc = train_acc/len(dataloader.dataset)
         train_loss = train_loss/len(dataloader)
+        
+        output_dict = {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}
+        training_output = TrainingOutput(**output_dict)
+        return training_output
 
-        return {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}

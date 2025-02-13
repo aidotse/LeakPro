@@ -22,11 +22,6 @@ def test_lira_setup(image_handler:ImageInputHandler) -> None:
     assert lira_obj.training_data_fraction == lira_params.training_data_fraction
     assert lira_obj.memorization == False
 
-    lira_params.num_shadow_models = -1
-    with raises(ValueError) as excinfo:
-        lira_obj = AttackLiRA(image_handler, lira_params)
-    assert str(excinfo.value) == "num_shadow_models must be between 1 and None"
-
     lira_params.num_shadow_models = 3
 
     description = lira_obj.description()

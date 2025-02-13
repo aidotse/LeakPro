@@ -10,7 +10,7 @@ from leakpro.attacks.mia_attacks.rmia import AttackRMIA
 from leakpro.attacks.mia_attacks.yoqo import AttackYOQO
 from leakpro.attacks.utils.distillation_model_handler import DistillationModelHandler
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.utils.logger import logger
 
 
@@ -32,13 +32,13 @@ class AttackFactoryMIA:
     distillation_model_handler = None
 
     @classmethod
-    def create_attack(cls, name: str, handler: AbstractInputHandler) -> AbstractMIA:  # noqa: ANN102
+    def create_attack(cls, name: str, handler: MIAHandler) -> AbstractMIA:  # noqa: ANN102
         """Create the attack object.
 
         Args:
         ----
             name (str): The name of the attack.
-            handler (AbstractInputHandler): The input handler object.
+            handler (MIAHandler): The input handler object.
 
         Returns:
         -------
@@ -59,5 +59,5 @@ class AttackFactoryMIA:
             AttackFactoryMIA.distillation_model_handler = DistillationModelHandler(handler)
 
         if name in cls.attack_classes:
-            return cls.attack_classes[name](handler, handler.configs["audit"]["attack_list"][name])
+            return cls.attack_classes[name](handler, handler.configs.audit.attack_list.get(name))
         raise ValueError(f"Unknown attack type: {name}")

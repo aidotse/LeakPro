@@ -8,13 +8,13 @@ from torch.utils.data import SequentialSampler
 
 from leakpro.tests.constants import get_tabular_handler_config
 from leakpro.tests.input_handler.tabular_input_handler import TabularInputHandler
-
+from leakpro.input_handler.mia_handler import MIAHandler
 
 def test_abstract_handler_setup_tabular(tabular_handler:TabularInputHandler) -> None:
     """Test the initialization of the abstract tabular handler."""
     parameters = get_tabular_handler_config()
     assert tabular_handler is not None
-    assert isinstance(tabular_handler, TabularInputHandler)
+    assert isinstance(tabular_handler, MIAHandler)
 
     # Check that correct model is instantiated
     assert tabular_handler.configs.target.model_class == tabular_handler.target_model.__class__.__name__
@@ -27,15 +27,15 @@ def test_abstract_handler_setup_tabular(tabular_handler:TabularInputHandler) -> 
     assert len(tabular_handler.test_indices) == parameters.test_data_points
     assert len(tabular_handler.train_indices) + len(tabular_handler.test_indices) < parameters.data_points
 
-    assert tabular_handler.target_model_metadata["optimizer"] is not None
-    assert tabular_handler.target_model_metadata["optimizer"]["name"] == parameters.optimizer
-    assert tabular_handler.target_model_metadata["optimizer"]["lr"] == parameters.learning_rate
+    assert tabular_handler.target_model_metadata.optimizer is not None
+    assert tabular_handler.target_model_metadata.optimizer.name == parameters.optimizer
+    assert tabular_handler.target_model_metadata.optimizer.lr == parameters.learning_rate
 
-    assert tabular_handler.target_model_metadata["loss"] is not None
-    assert tabular_handler.target_model_metadata["loss"]["name"] == parameters.loss
+    assert tabular_handler.target_model_metadata.loss is not None
+    assert tabular_handler.target_model_metadata.loss.name == parameters.loss.lower()
 
-    assert tabular_handler.target_model_metadata["epochs"] == parameters.epochs
-    assert tabular_handler.target_model_metadata["batch_size"] == parameters.batch_size
+    assert tabular_handler.target_model_metadata.epochs == parameters.epochs
+    assert tabular_handler.target_model_metadata.batch_size == parameters.batch_size
     assert tabular_handler.population is not None
 
     # Check data-related methods
@@ -54,12 +54,12 @@ def test_tabular_extension_class(tabular_handler:TabularInputHandler) -> None:
 
     assert data is not None
 
-    if not tabular_handler.one_hot_encoded:
-        data = tabular_handler.one_hot_encode(data)
+    if not tabular_handler.modality_extension.one_hot_encoded:
+        data = tabular_handler.modality_extension.one_hot_encode(data)
 
-    data2 = tabular_handler.one_hot_to_categorical(data)
+    data2 = tabular_handler.modality_extension.one_hot_to_categorical(data)
     assert data2 is not None
-    data3 = tabular_handler.one_hot_encode(data2)
+    data3 = tabular_handler.modality_extension.one_hot_encode(data2)
     assert data3 is not None
 
     assert equal(data, data3)
@@ -85,6 +85,6 @@ def test_tabular_input_handler(tabular_handler:TabularInputHandler) -> None:
                                       tabular_handler.get_optimizer(tabular_handler.target_model),
                                       parameters.epochs)
     # move back to cpu
-    after_weights = train_dict["model"].to("cpu").state_dict()
+    after_weights = train_dict.model.to("cpu").state_dict()
     weights_changed = [equal(before_weights[key], after_weights[key]) for key in before_weights]
     assert any(weights_changed) is False

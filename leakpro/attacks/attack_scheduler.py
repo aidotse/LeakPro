@@ -24,11 +24,11 @@ class AttackScheduler:
         configs = handler.configs
 
         # Create factory
-        attack_type = configs["audit"]["attack_type"].lower()
+        attack_type = configs.audit.attack_type
         self._initialize_factory(attack_type)
 
         # Create the attacks
-        self.attack_list = list(configs["audit"]["attack_list"].keys())
+        self.attack_list = list(configs.audit.attack_list.keys())
         self.attacks = []
         for attack_name in self.attack_list:
             try:
