@@ -144,10 +144,10 @@ def aux_singling_out_risk_evaluation(**kwargs: Any) -> Tuple[Optional[Union[int,
     verbose = kwargs.pop("verbose")
     #Get n_cols
     n_cols = kwargs["n_cols"]
-    #Return non if n_cols==2
-    #Note: this is because n_cols==2 takes A LOT of time. Seems algorithm is not good for predicates with len==2
-    if n_cols == 2:
-        return None, None
+    #No need toReturn non if n_cols==2
+    #Note: this is because the imporved version is capabale of handling the columns equals 2
+    # if n_cols == 2:
+    #     return None, None
     #Instantiate singling-out evaluator and evaluate
     evaluator = SinglingOutEvaluator(**kwargs)
     evaluator.evaluate()
