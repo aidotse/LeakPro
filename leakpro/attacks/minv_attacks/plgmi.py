@@ -47,6 +47,22 @@ class AttackPLGMI(AbstractMINV):
 
     def prepare_attack(self:Self) -> None:
         """Prepare the attack."""
+
+        # load generator
+        g = self.handler.get_generator()
+
+        # load discriminator
+        d = self.handler.get_discriminator()
+
+        # load target
+        t = self.handler.get_target()
+
+        # check if pre-trained models are available
+        # if not, train the models
+        if g is None:
+            logger.info("Training generator model")
+
+
         pass
 
     def run_attack(self:Self) -> MinvResult:
