@@ -3,6 +3,8 @@
 # See https://github.com/statice/anonymeter/blob/main/LICENSE.md for details.
 """Privacy evaluator that measures the singling out risk."""
 from typing import Any, Dict, List, Optional, Set
+from itertools import combinations
+import random
 
 import numpy as np
 import pandas as pd
@@ -414,7 +416,11 @@ def main_singling_out_attack(
     syn: pd.DataFrame,
     n_attacks: int,
     n_cols: int,
-    max_attempts: Optional[int]
+    max_per_combo: int = 5,
+    max_attempts: Optional[int] = 10_000,
+    sample_size_per_combo: int = 2,
+    max_rounds_no_progress: int = 10,
+    use_medians: bool = True
 ) -> UniqueSinglingOutQueries:
     """Main singling-out attack function.
 
@@ -428,7 +434,11 @@ def main_singling_out_attack(
             df = syn,
             n_queries = n_attacks,
             n_cols = n_cols,
-            max_attempts = max_attempts
+            max_attempts = max_attempts,
+            max_per_combo = max_per_combo,
+            sample_size_per_combo = sample_size_per_combo,
+            max_rounds_no_progress = max_rounds_no_progress,
+            use_medians = use_medians
         )
     #Warning message
     if len(queries) < n_attacks:
@@ -488,6 +498,10 @@ class SinglingOutEvaluator(BaseModel):
     n_attacks: int = 2_000
     confidence_level: float = 0.95
     max_attempts: Optional[int] = 10_000_000
+    max_per_combo: int = 5,
+    sample_size_per_combo: int = 2,
+    max_rounds_no_progress: int = 10,
+    use_medians: bool = True
     #Following parameters are set in evaluate method
     main_queries: Optional[UniqueSinglingOutQueries] = None
     naive_queries: Optional[UniqueSinglingOutQueries] = None
@@ -506,7 +520,11 @@ class SinglingOutEvaluator(BaseModel):
             syn = self.syn,
             n_attacks = self.n_attacks,
             n_cols = self.n_cols,
-            max_attempts = self.max_attempts
+            max_attempts = self.max_attempts,
+            max_per_combo = self.max_per_combo,
+            sample_size_per_combo = self.sample_size_per_combo,
+            max_rounds_no_progress = self.max_rounds_no_progress,
+            use_medians = self.use_medians
         )
         # Naive singling-out attack
         self.naive_queries = naive_singling_out_attack(
