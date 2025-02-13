@@ -230,40 +230,74 @@ def univariate_singling_out_queries(*, df: pd.DataFrame, n_queries: int) -> List
             break
     return queries.queries
 
-def query_from_record(*,
+
+def query_from_record(
+    *,
+    df: pd.DataFrame,
     record: pd.Series,
     dtypes: pd.Series,
     columns: List[str],
-    medians: Optional[pd.Series]
+    medians: Optional[pd.Series] = None,
+    use_medians: bool = True
 ) -> str:
-    """Function that constructs and returns a query from the attributes in a record."""
-    #Placeholder query
-    query = []
-    #Iterate through columns
+    """
+    Construct a query using either a median-based (multivariate) or univariate approach.
+
+    Parameters:
+        df (pd.DataFrame): The dataframe containing the dataset.
+        record (pd.Series): The specific record to generate a query for.
+        dtypes (pd.Series): Data types of the columns in the dataframe.
+        columns (List[str]): Columns to include in the query.
+        medians (Optional[pd.Series]): Precomputed medians for numeric columns, if applicable.
+        use_medians (bool): Flag to determine whether to use the median-based approach or not.
+
+    Returns:
+        str: The constructed query string.
+    """
+    query: List[str] = []
+
     for col in columns:
         #NaN
         if pd.isna(record[col]):
-            item = ".isna()"
-        #Boolean
-        elif is_bool_dtype(dtypes[col]):
-            item = f"== {record[col]}"
-        #Numeric
-        elif is_numeric_dtype(dtypes[col]):
-            if medians is None:
-                operator = rng.choice([">=", "<="])
-            elif record[col] > medians[col]:
-                operator = ">="
+            query.append(f"{col}.isna()")
+            continue
+
+        if is_bool_dtype(dtypes[col]):
+            query.append(f"{col} == {record[col]}")
+            continue
+
+        if is_numeric_dtype(dtypes[col]):
+            if use_medians:
+                if medians is None:
+                    operator: str = np.random.choice([">=", "<="])
+                elif record[col] > medians[col]:
+                    operator = ">="
+                else:
+                    operator = "<="
+                query.append(f"{col} {operator} {record[col]}")
             else:
-                operator = "<="
-            item = f"{operator} {record[col]}"
-        #Categorical
-        elif isinstance(dtypes[col], pd.CategoricalDtype) and is_numeric_dtype(dtypes[col].categories.dtype):
-            item = f"== {record[col]}"
-        elif isinstance(record[col], str):
-            item = f"== '{escape_quotes(input=record[col])}'"
+                values: pd.Series = df[col].dropna().sort_values()
+                if len(values) > 0:
+                    if record[col] <= values.iloc[0]:
+                        query.append(f"{col} <= {values.iloc[0]}")
+                    elif record[col] >= values.iloc[-1]:
+                        query.append(f"{col} >= {values.iloc[-1]}")
+                    else:
+                        value_counts: pd.Series = df[col].value_counts()
+                        if value_counts.get(record[col], 0) == 1:
+                            query.append(f"{col} == {record[col]}")
+            continue
+
+        if isinstance(dtypes[col], pd.CategoricalDtype) and is_numeric_dtype(dtypes[col].categories.dtype):
+            query.append(f"{col} == {record[col]}")
         else:
-            item = f'== "{record[col]}"'
-        query.append(f"{col} {item}")
+            if not use_medians:
+                value_counts: pd.Series = df[col].value_counts()
+                if value_counts.get(record[col], 0) == 1:
+                    query.append(query_equality_expression(col=col, val=record[col], dtype=dtypes[col]))
+            else:
+                query.append(query_equality_expression(col=col, val=record[col], dtype=dtypes[col]))
+
     return " & ".join(query)
 
 def multivariate_singling_out_queries(
