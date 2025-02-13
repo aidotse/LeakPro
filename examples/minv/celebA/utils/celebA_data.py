@@ -5,8 +5,13 @@ from sklearn.model_selection import train_test_split
 from torch.utils.data import ConcatDataset, DataLoader, Subset, Dataset
 from torchvision import datasets, transforms
 from torchvision.datasets import ImageFolder
+import torch
 import pickle
 from torch import cat, float32, tensor
+
+def _noise_adder(img):
+            return torch.empty_like(img, dtype=img.dtype).uniform_(0.0, 1 / 256.0) + img
+
 
 
 class celebADataset(Dataset):
@@ -41,7 +46,8 @@ class celebADataset(Dataset):
     
     def get_classes(self):
         return len(self.y.unique())
-
+    
+    
 
     @classmethod
     def from_celebA(cls, config):
@@ -51,7 +57,8 @@ class celebADataset(Dataset):
         offset_width = (178 - crop_size) // 2
         crop = lambda x: x[:, offset_height:offset_height + crop_size, offset_width:offset_width + crop_size]
 
-
+        
+        
         data_dir = config["data"]["data_dir"]
         train_transform = transforms.Compose([
            transforms.ToTensor(),
@@ -59,6 +66,7 @@ class celebADataset(Dataset):
            transforms.ToPILImage(),
            transforms.Resize((re_size, re_size)),
            transforms.ToTensor(),
+           _noise_adder
         ])
 
         test_transform = train_transform
@@ -102,6 +110,7 @@ class celebADataset(Dataset):
            transforms.ToPILImage(),
            transforms.Resize((re_size, re_size)),
            transforms.ToTensor(),
+           _noise_adder
         ])
 
         test_transform = train_transform
@@ -132,7 +141,13 @@ class celebADataset(Dataset):
     @classmethod # TODO: Combine this with above
     def from_celebA_pseudo(cls, config):
         data_dir = config["data"]["data_dir"]
-        train_dataset = datasets.ImageFolder(os.path.join(data_dir, 'pseudo'), allow_empty=True, transform=transforms.ToTensor())
+        
+        train_transform = transforms.Compose([
+           transforms.ToTensor(),
+           _noise_adder
+        ])
+        
+        train_dataset = datasets.ImageFolder(os.path.join(data_dir, 'pseudo'), allow_empty=True, transform=train_transform)
 
         train_dataset.class_to_idx = {cls_name: int(cls_name) for cls_name in train_dataset.class_to_idx.keys()}
 

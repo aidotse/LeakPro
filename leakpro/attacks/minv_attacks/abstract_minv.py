@@ -22,6 +22,14 @@ class AbstractMINV(ABC):
 
     # TODO: Class attributes
 
+    # Class attributes for sharing between the different attacks
+    public_population = None
+    public_population_size = None
+    target_model = None
+    target_dataset = None
+    handler=None
+    _initialized = False
+
 
 
     def __init__(
@@ -37,22 +45,91 @@ class AbstractMINV(ABC):
         """
         # These objects are shared and should be initialized only once
         if not AbstractMINV._initialized:
-            AbstractMINV.population = handler.population
-            AbstractMINV.population_size = handler.population_size
+            AbstractMINV.public_data = handler.population
+            AbstractMINV.public_size = handler.population_size
             AbstractMINV.target_model = PytorchModel(handler.target_model, handler.get_criterion())
-            AbstractMINV.audit_dataset = {
-                # Assuming train_indices and test_indices are arrays of indices, not the actual data
-                "data": np.concatenate((handler.train_indices, handler.test_indices)),
-                # in_members will be an array from 0 to the number of training indices - 1
-                "in_members": np.arange(len(handler.train_indices)),
-                # out_members will start after the last training index and go up to the number of test indices - 1
-                "out_members": np.arange(len(handler.train_indices),len(handler.train_indices)+len(handler.test_indices)),
-            }
+            AbstractMINV.target_dataset = handler.audit_dataset
             AbstractMINV.handler = handler
-            self._validate_shared_quantities()
             AbstractMINV._initialized = True
 
         # TODO: Class attributes initialized checks
+
+
+    def get_public_dataloader(self:Self, data:np.ndarray, batch_size:int=None)->DataLoader:
+        """Function to get a dataloader from the public dataset.
+
+        Args:
+        ----
+            data (np.ndarray): The dataset indices to sample from.
+            batch_size (int): batch size.
+
+        Returns:
+        -------
+            Dataloader: The sampled data.
+
+        """
+        return self.handler.get_public_dataloader(data) if batch_size is None else self.handler.get_public_dataloader(data, batch_size)
+
+    def get_target_dataloader(self:Self, data:np.ndarray, batch_size:int=None)->DataLoader:
+        """Function to get a dataloader from the target dataset.
+
+        Args:
+        ----
+            data (np.ndarray): The dataset indices to sample from.
+            batch_size (int): batch size.
+
+        Returns:
+        -------
+            Dataloader: The sampled data.
+
+        """
+        return self.handler.get_target_dataloader(data) if batch_size is None else self.handler.get_target_dataloader(data, batch_size)
+
+    @property
+    def public_population(self:Self)-> List:
+        """Get the public population used for the attack.
+
+        Returns
+        -------
+        List: The public population used for the attack.
+
+        """
+        return AbstractMINV.public_population
+
+    @property
+    def public_population_size(self:Self)-> int:
+        """Get the size of the public population used for the attack.
+
+        Returns
+        -------
+        int: The size of the public population used for the attack.
+
+        """
+        return AbstractMINV.public_population_size
+
+    @property
+    def target_model(self:Self)-> Union[Self, List[Self] ]:
+        """Get the target model used for the attack.
+
+        Returns
+        -------
+        Union[Self, List[Self]]: The target model used for the attack.
+
+        """
+        return AbstractMINV.target_model
+
+    @property
+    def target_dataset(self:Self)-> Union[Self, List[Self] ]:
+        """Get the target dataset used for the attack.
+
+        Returns
+        -------
+        Union[Self, List[Self]]: The target dataset used for the attack.
+
+        """
+        return AbstractMINV.target_dataset
+
+
 
     @abstractmethod
     def _configure_attack(self:Self, configs:dict)->None:
