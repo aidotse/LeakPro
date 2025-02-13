@@ -216,8 +216,11 @@ def singling_out_risk_evaluation(
         print(f"\nRunning singling out risk evaluation for `{dataset}` with n_cols {suffix}") # noqa: T201
     if n_cols is not None:
         check_for_int_value(x=n_cols)
-        if n_cols == 2:
-            raise ValueError("Parameter `n_cols` must be different than 2.")
+        # no need for this checking, since the modifications has better heurestics 
+
+        # if n_cols == 2:
+        #     raise ValueError("Parameter `n_cols` must be different than 2.")
+
         #Run individual aux_singling_out_risk_evaluation
         res, res_cols = aux_singling_out_risk_evaluation(
             ori = ori,
