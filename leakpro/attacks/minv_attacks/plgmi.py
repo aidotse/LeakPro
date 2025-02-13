@@ -52,10 +52,10 @@ class AttackPLGMI(AbstractMINV):
         g = self.handler.get_generator()
 
         # load discriminator
-        d = self.handler.get_discriminator()
+        d = self.disc
 
         # load target
-        t = self.handler.get_target()
+        target = self.target_model
 
         # check if pre-trained models are available
         # if not, train the models
