@@ -20,6 +20,11 @@ class AttackPLGMI(AbstractMINV):
             configs (dict): Configuration parameters for the attack.
 
         """
+
+        self.n_dis = None
+        self.gen_lr = None
+        self.dis_lr = None
+        
         logger.info("Configuring PLG-MI attack")
         self._configure_attack(configs)
 
@@ -31,6 +36,10 @@ class AttackPLGMI(AbstractMINV):
             configs (dict): Configuration parameters for the attack.
 
         """
+        self.n_dis = configs.get("n_dis", 5)
+        self.gen_lr = configs.get("gen_lr", 0.0002)
+        self.dis_lr = configs.get("dis_lr", 0.0002)
+
 
     def description(self:Self) -> dict:
         """Return the description of the attack."""
@@ -49,17 +58,18 @@ class AttackPLGMI(AbstractMINV):
         """Prepare the attack."""
 
         # load generator
-        g = self.handler.get_generator()
+        self.gen = self.handler.get_generator()
 
         # load discriminator
-        d = self.disc
+        self.dis = self.handler.get_discriminator()
 
-        # load target
-        target = self.target_model
+        self.dis_opt = self.dis.get_optimizer(self.dis_lr)
+        self.gen_opt = self.gen.get_optimizer(self.gen_lr)
+
 
         # check if pre-trained models are available
         # if not, train the models
-        if g is None:
+        if self.gen is None:
             logger.info("Training generator model")
 
 
