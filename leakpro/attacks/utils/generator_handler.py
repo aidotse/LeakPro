@@ -11,7 +11,7 @@ from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 
-class GenHandler(ModelHandler):
+class GeneratorHandler(ModelHandler):
     """Class for handling Generators."""
 
     def __init__(self:Self, handler: AbstractInputHandler) -> None:
