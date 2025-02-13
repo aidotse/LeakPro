@@ -72,4 +72,6 @@ class ImageInputHandler(AbstractInputHandler):
             logger.info(log_train_str)
         model.to("cpu")
 
-        return {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}
+        output_dict = {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}
+        training_output = TrainingOutput(**output_dict)
+        return training_output
