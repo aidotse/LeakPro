@@ -81,13 +81,13 @@ class LeakPro:
 
                 result = audit_results[attack_name]["result_object"]
                 result.attack_name = attack_name
-                result.configs = self.handler.configs.audit.dict()
+                result.configs = self.handler.configs.audit
 
                 # Append
                 results.append(result)
             else:
                 result = audit_results[attack_name]["result_object"]
-                result.save(name=attack_name, path=self.report_dir, config=self.handler.configs.audit.dict())
+                result.save(name=attack_name, path=self.report_dir, config=self.handler.configs.audit)
 
         logger.info("Auditing completed")
         return results

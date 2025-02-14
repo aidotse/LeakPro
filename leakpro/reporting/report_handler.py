@@ -5,6 +5,9 @@ import logging
 import os
 import subprocess
 
+from pydantic import BaseModel
+
+from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
 from leakpro.metrics.attack_result import GIAResults, MIAResult
 from leakpro.synthetic_data_attacks.inference_utils import InferenceResults
 from leakpro.synthetic_data_attacks.linkability_utils import LinkabilityResults
@@ -58,10 +61,12 @@ class ReportHandler():
                                        InferenceResults,
                                        LinkabilityResults,
                                        SinglingOutResults] = None,
-                    config: dict = None) -> None:
+                    config: BaseModel = None) -> None:
         """Save method for results."""
 
         self.logger.info(f"Saving results for {attack_name}")
+        config = AttackFactoryMIA.get_default_attack_config(attack_name) if config is None else config
+        
         result_data.save(path=self.report_dir, name=attack_name, config=config)
 
     def load_results(self:Self) -> None:

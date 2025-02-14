@@ -2,11 +2,11 @@ audit:  # Configurations for auditing
   random_seed: 1234  # Integer specifying the random seed
   attack_list:
     rmia:
-    population:
-    lira:
-    loss_traj:
-    HSJ:
-    yoqo:
+    # population:
+    # lira:
+    # loss_traj:
+    # HSJ:
+    # yoqo:
 
   output_dir: "./leakpro_output"
   attack_type: "mia" #mia, gia
