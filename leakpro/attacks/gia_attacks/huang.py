@@ -11,7 +11,7 @@ from torch.nn import CrossEntropyLoss, Module
 from torch.utils.data import DataLoader
 
 from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
-from leakpro.fl_utils.data_utils import get_at_images
+from leakpro.fl_utils.data_utils import GiaDataModalityExtension, GiaImageClassifictaionExtension
 from leakpro.fl_utils.gia_optimizers import MetaSGD
 from leakpro.fl_utils.gia_train import train
 from leakpro.fl_utils.model_utils import BNFeatureHook
@@ -35,6 +35,8 @@ class HuangConfig:
     optimizer: object = field(default_factory=lambda: MetaSGD())
     # Client loss function
     criterion: object = field(default_factory=lambda: CrossEntropyLoss(reduction="mean"))
+    # Data modality extension
+    data_extension: GiaDataModalityExtension = field(default_factory=lambda: GiaImageClassifictaionExtension())
     # Number of epochs for the client attack
     epochs: int = 1
     # if to use median pool 2d on images, can improve attack on high higher resolution (100+)
@@ -110,7 +112,7 @@ class Huang(AbstractGIA):
             if isinstance(module, torch.nn.BatchNorm2d):
                 module.momentum = 0
 
-        self.reconstruction, self.reconstruction_loader = get_at_images(self.client_loader)
+        self.reconstruction, self.reconstruction_loader = self.configs.data_extension.get_at_data(self.client_loader)
         self.reconstruction.requires_grad = True
         self.client_gradient = [p.detach() for p in client_gradient]
 

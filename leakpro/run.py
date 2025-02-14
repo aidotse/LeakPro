@@ -29,10 +29,15 @@ def run_inverting(model: Module, client_data: DataLoader, train_fn: Callable,
                 path:str = "./leakpro_output/results", save:bool = True) -> None:
     """Runs InvertingGradients."""
     attack = InvertingGradients(model, client_data, train_fn, data_mean, data_std, config)
-    result = attack.run_attack()
+    result_gen = attack.run_attack()
+    for _, _, result_object in result_gen:
+        if result_object is not None:
+            break
     if save:
-        result.save(name=experiment_name, path=path, config=config)
-    return result
+        result_object.save(name=experiment_name, path=path, config=config)
+    if save:
+        result_object.save(name=experiment_name, path=path, config=config)
+    return result_object
 
 def run_inverting_audit(model: Module, dataset: Dataset,
                         train_fn: Callable, data_mean: torch.Tensor, data_std: torch.Tensor
