@@ -1,5 +1,6 @@
 """Code from repository: https://github.com/jahongir7174/YOLOv8-pt, reference to Ultralytics"""
 import math
+import time
 import torch
 from torch.nn.functional import cross_entropy, one_hot
 
@@ -239,7 +240,7 @@ class YOLO(torch.nn.Module):
         return self
 
 
-def yolo_v8_n(num_classes: int = 80):
+def yolo_v8_n(num_classes: int = 90):
     depth = [1, 2, 2]
     width = [3, 16, 32, 64, 128, 256]
     return YOLO(width, depth, num_classes)
@@ -319,21 +320,21 @@ class ComputeLoss:
 
         anchor_points, stride_tensor = make_anchors(x, self.stride, 0.5)
 
-        # targets
-        if targets.shape[0] == 0:
+        # Process targets from list of dictionaries
+        gt_list = []
+        for img_idx, annotations in enumerate(targets):
+            bbox = torch.tensor(annotations["bbox"], dtype=torch.float32, device=self.device)
+            category_id = torch.tensor([annotations["category_id"]], dtype=torch.float32, device=self.device)
+            xyxy_bbox = wh2xy(bbox)  # Convert COCO format (x, y, w, h) to (x1, y1, x2, y2)
+            gt_list.append(torch.cat((category_id, xyxy_bbox)))
+        
+        if len(gt_list) == 0:
             gt = torch.zeros(pred_scores.shape[0], 0, 5, device=self.device)
         else:
-            i = targets[:, 0]  # image index
-            _, counts = i.unique(return_counts=True)
-            gt = torch.zeros(pred_scores.shape[0], counts.max(), 5, device=self.device)
-            for j in range(pred_scores.shape[0]):
-                matches = i == j
-                n = matches.sum()
-                if n:
-                    gt[j, :n] = targets[matches, 1:]
-            gt[..., 1:5] = wh2xy(gt[..., 1:5].mul_(size[[1, 0, 1, 0]]))
-
-        gt_labels, gt_bboxes = gt.split((1, 4), 2)  # cls, xyxy
+            gt = torch.stack(gt_list).view(-1, 5)
+        
+        gt_labels, gt_bboxes = gt.split((1, 4), 1)  # cls, xyxy
+        gt_labels, gt_bboxes = gt_labels.unsqueeze(0), gt_bboxes.unsqueeze(0)
         mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0)
 
         # boxes
@@ -384,7 +385,6 @@ class ComputeLoss:
         """
         self.bs = pred_scores.size(0)
         self.num_max_boxes = true_bboxes.size(1)
-
         if self.num_max_boxes == 0:
             device = true_bboxes.device
             return (torch.full_like(pred_scores[..., 0], self.nc).to(device),
