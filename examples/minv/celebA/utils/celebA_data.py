@@ -227,7 +227,7 @@ def get_celebA_auxloader(data_path, train_config):
 
     return aux_loader
 
-def get_celebA_pseudoloader(data_path, train_config):
+def get_celebA_pseudoloader(data_path, train_config, shuffle=False):
     # Here, we want to do as above, but only return one loader with all the data
     batch_size = train_config["train"]["batch_size"]
     data_dir =  train_config["data"]["data_dir"] + "/celebaA_pseudo_data.pkl"
@@ -242,7 +242,7 @@ def get_celebA_pseudoloader(data_path, train_config):
             population_dataset = pickle.load(file)
             print(f"Load data from {data_dir}")
 
-    pseudo_loader = DataLoader(population_dataset, batch_size =batch_size, shuffle=False)
+    pseudo_loader = DataLoader(population_dataset, batch_size =batch_size, shuffle=shuffle)
 
     return pseudo_loader
 
