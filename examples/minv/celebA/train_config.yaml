@@ -15,3 +15,14 @@ data: # Configuration for data
   f_train: 0.7 # Float number from 0 to 1 indicating the fraction of the train dataset
   f_test: 0.3 # Float number from 0 to 1 indicating the size of the test set
   data_dir: ./data # String about where to save the data.
+
+gan:
+  n_dis: 3 # Integer number for indicating the number of discriminator updates per generator update
+  iterations: 3000 # Integer number for indicating the iterations for training the GAN
+  batch_size: 128 # Integer number for indicating batch size for training the GAN
+  gen_lr: 0.0002 # Float number for indicating learning rate for training the generator
+  dis_lr: 0.0002 # Float number for indicating learning rate for training the discriminator
+  beta1: 0.0 # Float number for indicating beta1 for Adam optimizer
+  beta2: 0.9 # Float number for indicating beta2 for Adam optimizer
+  dim_z: 256 # Integer number for indicating the dimension of the latent space
+  alpha: 0.2 # Float number for indicating the weight of the gradient penalty

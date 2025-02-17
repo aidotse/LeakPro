@@ -36,7 +36,7 @@ model.eval()
 
 from examples.minv.celebA.utils.celebA_data import get_celebA_pseudoloader
 
-pseudo_loader = get_celebA_pseudoloader(path, train_config)
+pseudo_loader = get_celebA_pseudoloader(path, train_config, shuffle=True)
 
 # GAN training
 from examples.minv.celebA.utils.generator import ResNetGenerator
@@ -48,15 +48,23 @@ import torch.nn.functional as F
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-dim_z = 128
+dim_z = train_config["gan"]["dim_z"]
+n_iter = train_config["gan"]["iterations"]
+n_dis = train_config["gan"]["n_dis"]
+gen_lr = train_config["gan"]["gen_lr"]
+dis_lr = train_config["gan"]["dis_lr"]
+beta1 = train_config["gan"]["beta1"]
+beta2 = train_config["gan"]["beta2"]
+batch_size = train_config["gan"]["batch_size"]
+alpha = train_config["gan"]["alpha"]
 
 # Initialize the generator and discriminator
 gen = ResNetGenerator(num_classes=num_classes, dim_z=dim_z, activation=F.relu, bottom_width=4).to(device)
 dis = SNResNetProjectionDiscriminator(num_classes=num_classes, activation=F.relu).to(device)
 
 # Load optimizers
-opt_gen = torch.optim.Adam(gen.parameters(), 0.001, (0.0, 0.9))
-opt_dis = torch.optim.Adam(dis.parameters(), 0.001, (0.0, 0.9))
+opt_gen = torch.optim.Adam(gen.parameters(), gen_lr, (beta1, beta2))
+opt_dis = torch.optim.Adam(dis.parameters(), dis_lr, (beta1, beta2))
 
 # Adversarial losses
 gen_criterion = losses.GenLoss(loss_type='hinge', is_relativistic=False)
@@ -71,11 +79,7 @@ aug_list = kornia.augmentation.container.ImageSequential(
     ).to(device)
 
 # Training loop
-n_iter = 500
-n_dis = 5
-alpha = 0.15
 log_interval = 10
-batch_size = 128
 
 model.to(device)
 model.eval()
@@ -135,7 +139,7 @@ for i in range(n_iter):
 
         loss_dis = dis_criterion(dis_fake, dis_real)
     
-        if loss_dis.item() > 0.25*_l_g:
+        if loss_dis.item() > 0.2*_l_g:
         
             dis.zero_grad()
         
