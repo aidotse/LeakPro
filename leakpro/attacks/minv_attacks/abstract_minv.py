@@ -45,10 +45,10 @@ class AbstractMINV(ABC):
         """
         # These objects are shared and should be initialized only once
         if not AbstractMINV._initialized:
-            AbstractMINV.public_data = handler.population
-            AbstractMINV.public_size = handler.population_size
+            AbstractMINV.target_dataset = handler.population
+            AbstractMINV.target_size = handler.population_size
             AbstractMINV.target_model = PytorchModel(handler.target_model, handler.get_criterion())
-            AbstractMINV.target_dataset = handler.audit_dataset
+            #AbstractMINV.public_population =
             AbstractMINV.handler = handler
             AbstractMINV._initialized = True
 

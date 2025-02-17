@@ -1,4 +1,5 @@
 """Module for handling GANs."""
+import torch
 from torch.nn import Module
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
@@ -36,7 +37,9 @@ class GANHandler(GeneratorHandler):
         logger.info("Training GAN...")
         # GAN-specific training logic would be implemented here.
 
-    def generate_samples(self) -> None:
-        """Generate samples using the trained generator."""
-        logger.info("Generating samples using GAN...")
-        # GAN-specific sample generation logic would be implemented here.
+    def sample_from_generator(self, gen: Module, n_classes: int, batch_size: int, device: torch.device, dim_z: int) -> tuple:
+        """Sample random z and y from the generator."""
+        z = torch.empty(batch_size, dim_z, dtype=torch.float32, device=device).normal_()
+        y = torch.randint(0, n_classes, (batch_size,)).to(device)
+        return gen(z, y), y, z
+
