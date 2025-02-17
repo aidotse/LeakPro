@@ -12,7 +12,7 @@ from leakpro.utils.logger import logger
 
 
 class GeneratorHandler(ModelHandler):
-    """Class for handling Generators."""
+    """Base class for handling generative models like GANs, diffusion models etc..."""
 
     def __init__(self:Self, handler: AbstractInputHandler) -> None:
         """Initialize the Generator handler.

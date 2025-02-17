@@ -1,7 +1,7 @@
 """Implementation of the PLGMI attack."""
 
 from leakpro.attacks.minv_attacks.abstract_minv import AbstractMINV
-from leakpro.attacks.utils.GANHandler import GANHandler
+from leakpro.attacks.utils.gan_handler_2 import GANHandler
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.metrics.attack_result import MinvResult
 from leakpro.utils.import_helper import Self
@@ -69,13 +69,12 @@ class AttackPLGMI(AbstractMINV):
 
     def prepare_attack(self:Self) -> None:
         """Prepare the attack."""
-        # Load a generator, or train one if not given.
-        # load generator
-        self.gen , self.dis = GANHandler().create_gan()
+        logger.info("Preparing attack")
+        self.gan_handler = GANHandler(self.handler)
+        self.generator = self.gan_handler.get_generator()
+        self.discriminator = self.gan_handler.get_discriminator()
 
-
-
-
+        
         pass
 
     def run_attack(self:Self) -> MinvResult:
