@@ -57,6 +57,7 @@ beta1 = train_config["gan"]["beta1"]
 beta2 = train_config["gan"]["beta2"]
 batch_size = train_config["gan"]["batch_size"]
 alpha = train_config["gan"]["alpha"]
+log_interval = train_config["gan"]["log_interval"]
 
 # Initialize the generator and discriminator
 gen = ResNetGenerator(num_classes=num_classes, dim_z=dim_z, activation=F.relu, bottom_width=4).to(device)
@@ -78,8 +79,7 @@ aug_list = kornia.augmentation.container.ImageSequential(
         kornia.augmentation.RandomRotation(5),
     ).to(device)
 
-# Training loop
-log_interval = 10
+
 
 model.to(device)
 model.eval()
@@ -87,6 +87,7 @@ model.eval()
 
 torch.backends.cudnn.benchmark = True
 
+#######
 def sample_from_generator(gen, n_classes, batch_size, device):
     """Sample random z and y from the generator"""
     
@@ -139,7 +140,7 @@ for i in range(n_iter):
 
         loss_dis = dis_criterion(dis_fake, dis_real)
     
-        if loss_dis.item() > 0.2*_l_g:
+        if loss_dis.item() > max(0.2*_l_g, 0.05):
         
             dis.zero_grad()
         
@@ -166,5 +167,5 @@ for i in range(n_iter):
             break
 
 # Save the generator and discriminator
-torch.save(gen.state_dict(), 'generator_1.pth')
-torch.save(dis.state_dict(), 'discriminator_1.pth')
+torch.save(gen.state_dict(), 'generator_2.pth')
+torch.save(dis.state_dict(), 'discriminator_2.pth')
