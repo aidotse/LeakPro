@@ -36,8 +36,8 @@ def poincare_loss(outputs, targets, xi=1e-4):
 
 
 def dis_hinge(dis_fake, dis_real):
-    loss = torch.mean(torch.relu(1. - dis_real)) + \
-           torch.mean(torch.relu(1. + dis_fake))
+    loss = torch.mean(F.relu(1. - dis_real)) + \
+           torch.mean(F.relu(1. + dis_fake))
     return loss
 
 
