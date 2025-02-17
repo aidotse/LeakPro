@@ -33,9 +33,25 @@ class AttackPLGMI(AbstractMINV):
             configs (dict): Configuration parameters for the attack.
 
         """
-        self.n_dis = configs.get("n_dis", 5)
-        self.gen_lr = configs.get("gen_lr", 0.0002)
+        # TODO: There are some optimizer specific parameters that need to be set here.
+        # General parameters
+        self.alpha = configs.get("alpha", 0.1)
+        # Generator parameters
+        self.gen_lr = configs.get("gen_lr", 0.0002) # Learning rate of the generator
+        # Discriminator parameters
+        self.n_dis = configs.get("n_dis", 5) # Number of discriminator updates per generator update
         self.dis_lr = configs.get("dis_lr", 0.0002)
+
+        # Define the validation dictionary as: {parameter_name: (parameter, min_value, max_value)}
+        validation_dict = {
+            # alpha, 0 to inf
+            "alpha": (self.alpha, 0, 1000), # 0 to inf
+            "n_dis": (self.n_dis, 1, 1000), # 1 to inf
+        }
+
+        # Validate parameters
+        for param_name, (param_value, min_val, max_val) in validation_dict.items():
+            self._validate_config(param_name, param_value, min_val, max_val)
 
 
     def description(self:Self) -> dict:
@@ -53,7 +69,7 @@ class AttackPLGMI(AbstractMINV):
 
     def prepare_attack(self:Self) -> None:
         """Prepare the attack."""
-
+        # Load a generator, or train one if not given.
         # load generator
         self.gen , self.dis = GANHandler().create_gan()
 
@@ -64,4 +80,5 @@ class AttackPLGMI(AbstractMINV):
 
     def run_attack(self:Self) -> MinvResult:
         """Run the attack."""
+        # Use trained generator to generate samples and evaluate
         pass
