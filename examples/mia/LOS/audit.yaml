@@ -32,11 +32,11 @@ audit:  # Configurations for auditing
 
 target:
   # Target model path
-  module_path: "utils/model_LR.py" # either model_grud.py or model_LR.py for logestic regression
-  model_class: "LR" #  LR/GRUD
+  module_path: "utils/model_GRUD.py" # either model_GRUD.py or model_LR.py for logestic regression
+  model_class: "GRUD" #  LR/GRUD
   # Data paths
-  target_folder: "./target_LR" # either target_GRUD or target_LR
-  data_path: "./data/LR_data/dataset.pkl" #unflattened dataset for GRUD in GRUD_data direcotry and flattened dataset for LR in LR_data directory
+  target_folder: "./target_GRUD" # either target_GRUD or target_LR
+  data_path: "./data/GRUD_data/dataset.pkl" #unflattened dataset for GRUD in GRUD_data direcotry and flattened dataset for LR in LR_data directory
 
 shadow_model:
   model_class: # LR/GRUD

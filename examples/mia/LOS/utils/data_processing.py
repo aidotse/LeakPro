@@ -12,7 +12,7 @@ from sklearn.preprocessing import StandardScaler
 from torch import Tensor, from_numpy
 from torch.utils.data import DataLoader, Dataset, Subset
 from tqdm import tqdm
-from utils.model_grud import to_3D_tensor
+from utils.model_GRUD import to_3D_tensor
 
 
 class MimicDataset(Dataset):

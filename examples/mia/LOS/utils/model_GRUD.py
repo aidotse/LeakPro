@@ -93,7 +93,8 @@ class FilterLinear(nn.Module):
             + ", bias=" + str(self.bias is not None) + ")"
 
 class GRUD(nn.Module):
-    def __init__(self, input_size, hidden_size, X_mean, batch_size = 0, output_last = False):
+    def __init__(self, input_size, hidden_size, X_mean, batch_size,
+                 bn_flag = True, output_last = False):
         """With minor modifications from https://github.com/zhiyongc/GRU-D/
 
         Recurrent Neural Networks for Multivariate Times Series with Missing Values
@@ -127,11 +128,13 @@ class GRUD(nn.Module):
             "X_mean": X_mean,
             "batch_size": batch_size,
             "output_last": output_last,
+            "bn_flag": bn_flag,
         }
 
         self.hidden_size = hidden_size
         self.delta_size = input_size
         self.mask_size = input_size
+        self.bn_flag = bn_flag
 
         self.device = device("cuda" if cuda.is_available() else "cpu")
         self.identity = eye(input_size).to(self.device)
@@ -150,9 +153,11 @@ class GRUD(nn.Module):
         self.gamma_h_l = nn.Linear(self.delta_size, self.hidden_size).to(self.device)
         self.output_last = output_last
 
-        self.fc = nn.Linear(self.hidden_size, 2).to(self.device)
-        self.bn= nn.BatchNorm1d(2, eps=1e-05, momentum=0.1, affine=True).to(self.device)
-        self.drop=nn.Dropout(p=0.2, inplace=False)
+        #TODO: this part differs from the cited code
+        self.fc = nn.Linear(self.hidden_size, 1) # a probability score
+        self.drop=nn.Dropout(p=0.57, inplace=False)
+        if self.bn_flag:
+            self.bn= nn.BatchNorm1d(self.hidden_size, eps=1e-05, momentum=0.1, affine=True)
 
 
     def step(self, x, x_last_obsv, x_mean, h, mask, delta):
@@ -178,7 +183,6 @@ class GRUD(nn.Module):
         zero_x = zeros(batch_size, feature_size).to(self.device)
         zero_h = zeros(batch_size, self.hidden_size).to(self.device)
 
-
         gamma_x_l_delta = self.gamma_x_l(delta)
         delta_x = exp(-max(zero_x, gamma_x_l_delta))
 
@@ -199,7 +203,6 @@ class GRUD(nn.Module):
         combined_new = cat((x, r*h, mask), 1)
         h_tilde = tanh(self.hl(combined_new)) #tanh(W*x_t +U(r_t*h_{t-1}) + V*m_t) + b
         h = (1 - z) * h + z * h_tilde
-
         return h
 
 
@@ -247,8 +250,10 @@ class GRUD(nn.Module):
                 outputs = cat((Hidden_State.unsqueeze(1), outputs), 1)
 
         # Step 4: Predict a binary outcome using FC, BatchNorm, and Dropout layers
-        return self.drop(self.bn(self.fc(Hidden_State)))
-        #return self.drop(self.fc(self.bn(Hidden_State)))
+        if self.bn_flag:
+            return self.fc(self.bn(self.drop(Hidden_State)))
+        else:
+            return self.fc(self.drop(Hidden_State))
 
     def initHidden(self, batch_size):
         Hidden_State = Variable(zeros(batch_size, self.hidden_size)).to(self.device)
@@ -257,10 +262,10 @@ class GRUD(nn.Module):
 def to_numpy(tensor):
     return tensor.detach().cpu().numpy() if tensor.is_cuda else tensor.detach().numpy()
 
-def model_test(model, test_dataloader, criterion_CEL, criterion_MSE):
+def model_test(model, test_dataloader, criterion_BCE, criterion_MSE):
     device_name = device("cuda" if cuda.is_available() else "cpu")
-
     model.eval()
+    
     test_loss = 0.0
     all_test_labels = []
     all_test_predictions = []
@@ -270,15 +275,16 @@ def model_test(model, test_dataloader, criterion_CEL, criterion_MSE):
 
             X = X.to(device_name)
             labels = labels.to(device_name)
-            labels = labels.long()
+            labels = labels.long().float()
             prediction = model(X)
+            prediction = prediction.squeeze(dim =1)
 
             all_test_labels.append(to_numpy(labels))
             all_test_predictions.append(to_numpy(prediction))
 
             output_last = True
             if output_last:
-                loss = criterion_CEL(squeeze(prediction), squeeze(labels))
+                loss = criterion_BCE(prediction, labels)
             else:
                 full_labels = cat((X[:,1:,:], labels), dim = 1)
                 loss = criterion_MSE(prediction, full_labels)
@@ -288,15 +294,15 @@ def model_test(model, test_dataloader, criterion_CEL, criterion_MSE):
         test_loss /= len(test_dataloader)
 
     # Concatenate all accumulated predictions and labels
-    all_test_predictions = np.concatenate(all_test_predictions, axis=0).argmax(axis=1)
+    all_test_predictions = np.concatenate(all_test_predictions, axis=0)
+    # Convert predictions to class indices
+    all_test_predictions = (all_test_predictions > 0)
     all_test_labels = np.concatenate(all_test_labels, axis=0).astype(int)
 
     # Compute accuracy
     test_acc = accuracy_score(all_test_labels, all_test_predictions)
 
     return test_loss, test_acc
-
-
 
 
 def gru_trained_model_and_metadata(model,
@@ -328,13 +334,10 @@ def gru_trained_model_and_metadata(model,
         output_last = model.output_last
         print("Output type dermined by the model")
 
-    criterion_CEL = nn.CrossEntropyLoss()
+    criterion_BCE = nn.BCEWithLogitsLoss()
     criterion_MSE = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-
-    # Reduce learning rate when a metric has stopped improving
     scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.2, patience = patience_lr)
-
 
     train_losses = []
     test_losses = []
@@ -355,15 +358,16 @@ def gru_trained_model_and_metadata(model,
 
             X = X.to(device_name)
             labels = labels.to(device_name)
-            labels = labels.long()
+            labels = labels.long().float()
             prediction = model(X)
+            prediction = prediction.squeeze(dim =1)
 
             all_labels.append(to_numpy(labels))
             all_predictions.append(to_numpy(prediction))
 
             output_last = True
             if output_last:
-                loss = criterion_CEL(squeeze(prediction), squeeze(labels))
+                loss = criterion_BCE(prediction, labels)
             else:
                 full_labels = cat((X[:,1:,:], labels), dim = 1)
                 loss = criterion_MSE(prediction, full_labels)
@@ -377,7 +381,9 @@ def gru_trained_model_and_metadata(model,
         train_losses.append(train_loss)
 
         # Concatenate all accumulated predictions and labels
-        all_predictions = np.concatenate(all_predictions, axis=0).argmax(axis=1)
+        all_predictions = np.concatenate(all_predictions, axis=0)
+        # Convert predictions to class indices
+        all_predictions = (all_predictions > 0)
         all_labels = np.concatenate(all_labels, axis=0).astype(int)
 
         # Compute accuracy
@@ -385,7 +391,7 @@ def gru_trained_model_and_metadata(model,
         train_acces.append(train_acc)
 
         # Test the model
-        test_loss, test_acc = model_test(model, test_dataloader, criterion_CEL, criterion_MSE)
+        test_loss, test_acc = model_test(model, test_dataloader, criterion_BCE, criterion_MSE)
 
         test_losses.append(test_loss)
         test_acces.append(test_acc)
@@ -451,7 +457,7 @@ def gru_trained_model_and_metadata(model,
 
     # read out criterion parameters
     meta_data["loss"] = {}
-    meta_data["loss"]["name"] = criterion_CEL.__class__.__name__.lower()
+    meta_data["loss"]["name"] = criterion_BCE.__class__.__name__.lower()
 
     meta_data["batch_size"] = train_dataloader.batch_size
     meta_data["epochs"] = epochs

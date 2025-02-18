@@ -1,7 +1,7 @@
 
 from sklearn.metrics import accuracy_score
 from torch import cuda, device, nn, optim, squeeze, sigmoid
-from torch.nn import CrossEntropyLoss
+from torch.nn import BCEWithLogitsLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -14,13 +14,9 @@ class MimicInputHandlerGRU(AbstractInputHandler):
     def __init__(self, configs: dict) -> None:
         super().__init__(configs = configs)
 
-    def get_criterion(self)->CrossEntropyLoss:
+    def get_criterion(self)->BCEWithLogitsLoss:
         """Set the CrossEntropyLoss for the model."""
-        return CrossEntropyLoss()
-    
-        # def get_criterion(self)->BCEWithLogitsLoss:
-        # """Set the CrossEntropyLoss for the model."""
-        # return BCEWithLogitsLoss()
+        return BCEWithLogitsLoss()
 
     def get_optimizer(self, model:nn.Module) -> optim.Optimizer:
         """Set the optimizer for the model."""
@@ -57,26 +53,21 @@ class MimicInputHandlerGRU(AbstractInputHandler):
             for _, (x, labels) in enumerate(tqdm(dataloader, desc="Training Batches")):
                 x = self.convert_to_device(x)
                 labels = self.convert_to_device(labels)
-                labels = labels.long()
-                # labels = labels.float()
+                labels = labels.float()
 
                 optimizer.zero_grad()
                 output = model(x)
 
-                loss = criterion(squeeze(output), squeeze(labels).long())
-                # loss = criterion(output.squeeze(), labels.squeeze())
+                loss = criterion(output.squeeze(), labels.squeeze())
                 loss.backward()
                 optimizer.step()
                 train_loss += loss.item()
 
             train_loss = train_loss/len(dataloader)
-            binary_predictions = self.to_numpy(output).argmax(axis=1)
-            # binary_predictions = sigmoid(output).squeeze().round().cpu().detach().numpy()
+            binary_predictions = sigmoid(output).squeeze().round().cpu().detach().numpy()
 
             # Ensure labels are integer and 1D
-            binary_labels = self.to_numpy(labels).astype(int)
-            # binary_labels = labels.squeeze().cpu().numpy().astype(int)
-            # Compute accuracy
+            binary_labels = labels.squeeze().cpu().numpy().astype(int)
             train_acc = accuracy_score(binary_labels, binary_predictions)
 
         return {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}
