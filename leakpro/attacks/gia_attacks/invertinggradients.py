@@ -10,7 +10,7 @@ from torch.nn import CrossEntropyLoss, Module
 from torch.utils.data import DataLoader
 
 from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
-from leakpro.fl_utils.data_utils import get_at_images
+from leakpro.fl_utils.data_utils import GiaImageClassifictaionExtension
 from leakpro.fl_utils.gia_optimizers import MetaSGD
 from leakpro.fl_utils.similarity_measurements import cosine_similarity_weights, total_variation
 from leakpro.metrics.attack_result import GIAResults
@@ -32,6 +32,8 @@ class InvertingConfig:
     optimizer: object = field(default_factory=lambda: MetaSGD())
     # Client loss function
     criterion: object = field(default_factory=lambda: CrossEntropyLoss())
+    # Data modality extension
+    data_extension: object = field(default_factory=lambda: GiaImageClassifictaionExtension())
     # Number of epochs for the client attack
     epochs: int = 1
     # if to use median pool 2d on images, can improve attack on high higher resolution (100+)
@@ -85,7 +87,7 @@ class InvertingGradients(AbstractGIA):
 
         """
         self.model.eval()
-        self.reconstruction, self.reconstruction_loader = get_at_images(self.client_loader)
+        self.reconstruction, self.reconstruction_loader = self.configs.data_extension.get_at_data(self.client_loader)
         self.reconstruction.requires_grad = True
         client_gradient = self.train_fn(self.model, self.client_loader, self.configs.optimizer,
                                         self.configs.criterion, self.configs.epochs)
