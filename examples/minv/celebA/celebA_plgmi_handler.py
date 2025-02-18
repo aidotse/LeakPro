@@ -96,17 +96,18 @@ class CelebA_InputHandler(AbstractInputHandler):
                     device: torch.device,
                     aug_list: list,
                     alpha: float,
-                    log_interval: int
+                    log_interval: int,
+                    sample_from_generator: callable
                   ) -> None:
         """Train the GAN model. Copied from https://github.com/LetheSec/PLG-MI-Attack."""
-        torch.set_default_tensor_type('torch.cuda.FloatTensor')
+        torch.set_default_device(device)
         torch.backends.cudnn.benchmark = True
         gen_losses = []
         dis_losses = []
         inv_losses = []
 
         # Training loop
-        for i in range(self.n_iter):
+        for i in range(n_iter):
             _l_g = .0
             cumulative_inv_loss = 0.
             cumulative_loss_dis = .0
@@ -114,14 +115,17 @@ class CelebA_InputHandler(AbstractInputHandler):
             cumulative_target_acc = .0
             target_correct = 0
             count = 0
-            for j in range(self.n_dis):
+            for j in range(n_dis):
                 if j == 0:
-                    fake, fake_labels, _ = self.sample_from_generator(gen, num_classes, 128, device)
+                    fake, fake_labels, _ = sample_from_generator(gen, num_classes, 128, device, gen.dim_z)
+                    print("Sampled from generator")
                     fake_aug = aug_list(fake)
+                    print("Augmented fake images")
                     dis_fake = dis(fake_aug, fake_labels)
-
+                    print("Discriminator fake images")
                     inv_loss = losses.max_margin_loss(model(fake_aug), fake_labels)
-
+                    print("Calculated max margin loss")
+                    
                     inv_losses.append(inv_loss.item())
                     dis_real = None
 
@@ -135,7 +139,7 @@ class CelebA_InputHandler(AbstractInputHandler):
                     _l_g += loss_gen.item()
                     cumulative_inv_loss += inv_loss.item()
 
-                fake, fake_labels, _ = self.sample_from_generator(gen, num_classes, 128, device)
+                fake, fake_labels, _ = sample_from_generator(gen, num_classes, 128, device, gen.dim_z)
 
                 real, real_labels = next(iter(pseudo_loader))
                 real, real_labels = real.to(device), real_labels.to(device)

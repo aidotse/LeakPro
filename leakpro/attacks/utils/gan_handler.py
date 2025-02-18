@@ -21,6 +21,7 @@ class GANHandler(GeneratorHandler):
 
     def _setup_discriminator_configs(self) -> None:
         """Load discriminator-specific configurations (e.g., discriminator path, params)."""
+        logger.info("Setting up discriminator configurations")
         self.discriminator_path = self.handler.configs.get("discriminator", {}).get("module_path")
         self.discriminator_class = self.handler.configs.get("discriminator", {}).get("model_class")
         self.disc_init_params = self.handler.configs.get("discriminator", {}).get("init_params", {})

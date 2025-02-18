@@ -88,6 +88,9 @@ class AttackPLGMI(AbstractMINV):
         """"Top n selection of pseudo labels."""
         # TODO: This does not scale well. Consider creating a class for the dataloader and implementing the __getitem__ method.
         # TODO: Does this go into modality extension; image?
+        logger.info("Performing top-n selection for pseudo labels")
+        self.target_model = self.handler.target_model
+
         self.target_model.eval()
         all_confidences = []
         for images, _ in self.public_dataloader:
@@ -97,6 +100,8 @@ class AttackPLGMI(AbstractMINV):
                 all_confidences.append(confidences)
         # Concatenate all confidences
         self.confidences = torch.cat(all_confidences)
+
+        logger.info("Retrieved confidences from the target model")
         # Get the pseudo labels
         pseudo_labels = torch.max(self.confidences, dim=1)
 
@@ -118,12 +123,16 @@ class AttackPLGMI(AbstractMINV):
         for i in range(self.num_classes):
             for index, _ in pseudo_map[i]:
                 pseudo_data.append((self.public_dataloader.dataset[index][0], i))
+
+        logger.info("Created pseudo dataloader")
+
         return DataLoader(pseudo_data, batch_size=self.batch_size, shuffle=True)
 
 
     def prepare_attack(self:Self) -> None:
         """Prepare the attack."""
         logger.info("Preparing attack")
+
         self.gan_handler = GANHandler(self.handler)
         # TODO: Change structure of how we load data, handler should do this, not gan_handler
         # Get public dataloader
@@ -138,13 +147,14 @@ class AttackPLGMI(AbstractMINV):
         # Get generator
         self.generator = self.gan_handler.get_generator()
 
+        self.generator.to(self.device)
+        self.discriminator.to(self.device)
+
         # Set Adam optimizer for both generator and discriminator
         self.gen_optimizer = torch.optim.Adam(self.generator.parameters(), lr=self.gen_lr,
                                               betas=(self.gen_beta1, self.gen_beta2))
         self.dis_optimizer = torch.optim.Adam(self.discriminator.parameters(), lr=self.dis_lr,
                                                betas=(self.dis_beta1, self.dis_beta2))
-
-        self.target_model = self.handler.get_target_model()
 
         # Augmentations for generated images. TODO: Move this to a image modality extension
         self.aug_list = kornia.augmentation.container.ImageSequential(
@@ -155,23 +165,29 @@ class AttackPLGMI(AbstractMINV):
 
         # Train the GAN
 
-        self.handler.train_gan(pseudo_loader = self.pseudo_loader,
-                                    gen = self.generator,
-                                    dis = self.discriminator,
-                                    gen_criterion = losses.GenLoss(loss_type="hinge", is_relativistic=False),
-                                    dis_criterion = losses.DisLoss(loss_type="hinge", is_relativistic=False),
-                                    model = self.target_model,
-                                    opt_gen = self.gen_optimizer,
-                                    opt_dis = self.dis_optimizer,
-                                    n_iter = self.n_iter,
-                                    n_dis  = self.n_dis,
-                                    num_classes = self.num_classes,
-                                    device = self.device,
-                                    aug_list = self.aug_list,
-                                    alpha = self.alpha,
-                                    log_interval = self.log_interval)
+        if not self.gan_handler.trained_bool:
+            logger.info("Training the GAN")
 
-        self.gan_handler.trained_bool = True
+            self.handler.train_gan(pseudo_loader = self.pseudo_loader,
+                                        gen = self.generator,
+                                        dis = self.discriminator,
+                                        gen_criterion = losses.GenLoss(loss_type="hinge", is_relativistic=False),
+                                        dis_criterion = losses.DisLoss(loss_type="hinge", is_relativistic=False),
+                                        model = self.target_model,
+                                        opt_gen = self.gen_optimizer,
+                                        opt_dis = self.dis_optimizer,
+                                        n_iter = self.n_iter,
+                                        n_dis  = self.n_dis,
+                                        num_classes = self.num_classes,
+                                        device = self.device,
+                                        aug_list = self.aug_list,
+                                        alpha = self.alpha,
+                                        log_interval = self.log_interval,
+                                        sample_from_generator = self.gan_handler.sample_from_generator)
+
+            self.gan_handler.trained_bool = True
+        else:
+            logger.info("GAN already trained, skipping training")
 
     def run_attack(self:Self) -> MinvResult:
         """Run the attack."""

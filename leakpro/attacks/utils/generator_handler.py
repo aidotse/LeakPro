@@ -25,10 +25,12 @@ class GeneratorHandler(ModelHandler):
 
     def _setup_generator_configs(self) -> None:
         """Load generator-specific configurations (e.g., generator path, params)."""
+        logger.info("Setting up generator configurations")
         self.generator_path = self.handler.configs.get("generator", {}).get("module_path")
         self.generator_class = self.handler.configs.get("generator", {}).get("model_class")
         self.gen_init_params = self.handler.configs.get("generator", {}).get("init_params", {})
         self.generator_checkpoint = self.handler.configs.get("generator", {}).get("checkpoint_path", None)
+        logger.info(f"Generator path: {self.generator_path}, Generator class: {self.generator_class}")
         if self.generator_path and self.generator_class:
             self.generator_blueprint = self._import_model_from_path(self.generator_path, self.generator_class)
         else:
@@ -36,6 +38,7 @@ class GeneratorHandler(ModelHandler):
 
     def get_generator(self) -> Module:
         """Instantiate and return a generator model."""
+        logger.info("Getting generator model with init params: %s", self.gen_init_params)
         generator = self.generator_blueprint(**self.gen_init_params)
         if self.generator_checkpoint and os.path.exists(self.generator_checkpoint):
             generator.load_state_dict(torch.load(self.generator_checkpoint))
@@ -56,7 +59,7 @@ class GeneratorHandler(ModelHandler):
     def get_public_data(self, batch_size: int) -> DataLoader:
         """Return data loader for the public dataset."""
         # Get public dataloader
-        self.public_path = self.handler.configs.get("public_data_path")
+        self.public_path = self.handler.configs.get("public_dataset", {}).get("public_data_path")
         # Load pickle file
         try:
             with open(self.public_path, "rb") as f:
