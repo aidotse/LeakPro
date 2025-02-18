@@ -608,7 +608,8 @@ class GIAResults:
             "resulttype": self.__class__.__name__,
             "original": original,
             "recreated": recreated,
-            "result_config": result_config,
+            # Can not save config anymore since it contains objects. Need workaround.
+            # "result_config": result_config,
             "id": self.id,
         }
 

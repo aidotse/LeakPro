@@ -6,11 +6,11 @@ from torchvision.datasets import CocoDetection
 from leakpro.fl_utils.data_utils import get_meanstd
 from random import sample
 
-def get_coco_detection_loader(num_images: int = 1000, batch_size: int = 1, num_workers: int = 2, root: str = './coco2017', ann_file: str = 'annotations/instances_train2017.json') -> tuple[DataLoader, Tensor, Tensor]:
+def get_coco_detection_loader(num_images: int = 1, batch_size: int = 1, num_workers: int = 2, root: str = './coco2017', ann_file: str = 'annotations/instances_train2017.json') -> tuple[DataLoader, Tensor, Tensor]:
     """Get a dataloader for COCO detection."""
     ann_file = f"{root}/annotations/instances_train2017.json"
     img_dir = f"{root}/train2017"
-    dataset = CocoDetection(root=img_dir, annFile=ann_file, transform=transforms.Compose([transforms.Resize((224,224)), transforms.ToTensor()]))
+    dataset = CocoDetection(root=img_dir, annFile=ann_file, transform=transforms.Compose([transforms.Resize((256,256)), transforms.ToTensor()]))
     subset_indices = sample(range(len(dataset)), min(len(dataset), 200))
     data_mean, data_std = get_meanstd(Subset(dataset, subset_indices))
     transform = transforms.Compose([

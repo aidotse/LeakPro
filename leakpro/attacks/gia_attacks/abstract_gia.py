@@ -130,7 +130,7 @@ class AbstractGIA(AbstractAttack):
                 logger.info(f"New best loss: {loss} on round: {i}")
             if i % 250 == 0:
                 logger.info(f"Iteration {i}, loss {loss}")
-                yield i, dataloaders_ssim_ignite(client_loader, self.best_reconstruction), None
+                yield i, i, None#dataloaders_ssim_ignite(client_loader, self.best_reconstruction), None
 
         ssim_score = dataloaders_ssim_ignite(client_loader, self.best_reconstruction)
         psnr_score = dataloaders_psnr(client_loader, self.best_reconstruction)

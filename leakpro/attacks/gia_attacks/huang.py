@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader
 from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
 from leakpro.fl_utils.data_utils import GiaDataModalityExtension, GiaImageClassifictaionExtension
 from leakpro.fl_utils.gia_optimizers import MetaSGD
-from leakpro.fl_utils.gia_train import train
+from leakpro.fl_utils.gia_train import train, train3
 from leakpro.fl_utils.model_utils import BNFeatureHook
 from leakpro.fl_utils.similarity_measurements import cosine_similarity_weights, l2_norm, total_variation
 from leakpro.metrics.attack_result import GIAResults
@@ -112,7 +112,8 @@ class Huang(AbstractGIA):
             if isinstance(module, torch.nn.BatchNorm2d):
                 module.momentum = 0
 
-        self.reconstruction, self.reconstruction_loader = self.configs.data_extension.get_at_data(self.client_loader)
+        self.reconstruction, self.reconstruction_labels, self.reconstruction_loader = self.configs.data_extension.get_at_data(
+            self.client_loader)
         self.reconstruction.requires_grad = True
         self.client_gradient = [p.detach() for p in client_gradient]
 
@@ -148,6 +149,8 @@ class Huang(AbstractGIA):
             self.model.zero_grad()
             gradient = self.train_fn(self.model, self.reconstruction_loader, self.configs.optimizer,
                                      self.configs.criterion, self.configs.epochs)
+            # gradient = train3(self.model, self.reconstruction, self.reconstruction_labels, self.configs.optimizer,
+            #                 self.configs.criterion, self.configs.epochs)
             rec_loss = cosine_similarity_weights(gradient, self.client_gradient, self.configs.top10norms)
 
             loss_r_feature = sum([

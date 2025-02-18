@@ -25,23 +25,33 @@ class GiaImageClassifictaionExtension(GiaDataModalityExtension):
         reconstruction_loader = DataLoader(reconstruction_dataset, batch_size=32, shuffle=True)
         return reconstruction, reconstruction_loader
 
+class ReconstructionDataset(Dataset):
+    def __init__(self, reconstruction: torch.Tensor, labels: list):
+        # Save the global tensor and labels.
+        self.reconstruction = reconstruction
+        self.labels = labels
+
+    def __len__(self):
+        return self.reconstruction.size(0)
+
+    def __getitem__(self, index):
+        # Return just the index (and corresponding label)
+        return index, self.labels[index]
+
 class GiaImageDetectionExtension(GiaDataModalityExtension):
 
     def get_at_data(self, client_loader: DataLoader) -> DataLoader:
         """DataLoader with random noise images of the same shape as the client_loader's dataset, using the same COCO labels."""
         img_shape = client_loader.dataset[0][0].shape
         num_images = len(client_loader.dataset)
-        reconstruction = torch.randn((num_images, *img_shape))  # Random noise images
-
+        reconstruction = randn((num_images, *img_shape))  # Random noise images
         labels = []
         for _, label in client_loader:
-            for label_dict in label:
-                labels.append(label_dict)  # Store the dictionary as is
-
-        reconstruction_dataset = list(zip(reconstruction, labels))
+            labels.append(label)
+        reconstruction_dataset = ReconstructionDataset(reconstruction, labels) #list(zip(reconstruction, labels))
         reconstruction_loader = DataLoader(reconstruction_dataset, batch_size=32, shuffle=True)
-        
-        return reconstruction, reconstruction_loader
+
+        return reconstruction, labels, reconstruction_loader
 
 class GiaTextMaskingExtension(GiaDataModalityExtension):
     def get_at_data():

@@ -1,4 +1,4 @@
-"""Code from repository: https://github.com/jahongir7174/YOLOv8-pt, reference to Ultralytics"""
+"""Re-implemented code to fit new standard COCO structure and GIA, from repository: https://github.com/jahongir7174/YOLOv8-pt, reference to Ultralytics"""
 import math
 import time
 import torch
