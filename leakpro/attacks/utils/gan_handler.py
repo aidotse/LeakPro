@@ -1,53 +1,52 @@
 """Module for handling GANs."""
+import os
 
-import numpy as np
 import torch
-from torch.utils.data import DataLoader
+from torch.nn import Module
 
-from leakpro.attacks.utils.model_handler import GeneratorHandler
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
-from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
+from .generator_handler import GeneratorHandler
+
 
 class GANHandler(GeneratorHandler):
-    """Class for handling GANs."""
+    """Handler for training and managing GANs."""
 
-    def __init__(self:Self, handler: AbstractInputHandler) -> None:
-        """Initialize the GAN handler.
+    def __init__(self: Self, handler: AbstractInputHandler) -> None:
+        """Initialize the GANHandler class."""
+        super().__init__(handler, caller="gan_handler")
+        self._setup_discriminator_configs()
 
-        Args:
-        ----
-            handler (AbstractInputHandler): The input handler object.
+    def _setup_discriminator_configs(self) -> None:
+        """Load discriminator-specific configurations (e.g., discriminator path, params)."""
+        self.discriminator_path = self.handler.configs.get("discriminator", {}).get("module_path")
+        self.discriminator_class = self.handler.configs.get("discriminator", {}).get("model_class")
+        self.disc_init_params = self.handler.configs.get("discriminator", {}).get("init_params", {})
+        self.discriminator_checkpoint = self.handler.configs.get("discriminator", {}).get("checkpoint_path", None)
+        # Check that discriminator class is provided, else raise an error
+        if self.discriminator_path and self.discriminator_class:
+            self.discriminator_blueprint = self._import_model_from_path(self.discriminator_path, self.discriminator_class)
+        else:
+            raise ValueError("Discriminator path and class must be specified in the config.")
 
-        """
-        super().__init__(handler)
+    def get_discriminator(self) -> Module:
+        """Instantiate and return a discriminator model."""
+        discriminator = self.discriminator_blueprint(**self.disc_init_params)
+        if self.discriminator_checkpoint and os.path.exists(self.discriminator_checkpoint):
+            discriminator.load_state_dict(torch.load(self.discriminator_checkpoint))
+        return discriminator
 
-    def create_gan(self:Self, public_dataset:DataLoader) -> tuple:
-        """Create the GAN models.
+    def train(self) -> None:
+        """Train the GAN model (generator and discriminator)."""
+        logger.info("Training GAN...")
+        # GAN-specific training logic would be implemented here.
+        self.handler.train_gan(self)
 
-        Returns
-        -------
-            tuple: The Generator and Discriminator models.
-
-        """
-        logger.info("Creating the GAN models")
-
-
-
-        return self.generator, self.discriminator
-
-
-    def get_generator(self:Self) -> PytorchModel:
-        """Get the Generator model.
-
-        Returns
-        -------
-            PytorchModel: The Generator model.
-
-        """
-        logger.info("Getting the Generator model")
-
-        return PytorchModel(self.generator.model)
+    def sample_from_generator(self, gen: Module, n_classes: int, batch_size: int, device: torch.device, dim_z: int) -> tuple:
+        """Sample random z and y from the generator."""
+        z = torch.empty(batch_size, dim_z, dtype=torch.float32, device=device).normal_()
+        y = torch.randint(0, n_classes, (batch_size,)).to(device)
+        return gen(z, y), y, z
 

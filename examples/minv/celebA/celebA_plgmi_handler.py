@@ -79,3 +79,94 @@ class CelebA_InputHandler(AbstractInputHandler):
         model.to("cpu")
 
         return {"accuracy": test_acc / len(dataloader.dataset), "loss": test_loss}
+
+    def train_gan(self,
+                    pseudo_loader: DataLoader,
+                    gen: torch.nn.Module,
+                    dis: torch.nn.Module,
+                    gen_criterion: torch.nn.Module,
+                    dis_criterion: torch.nn.Module,
+                    model: torch.nn.Module,
+                    opt_gen: optim.Optimizer,
+                    opt_dis: optim.Optimizer,
+                    n_iter: int,
+                    n_dis: int,
+                    num_classes: int,
+                    device: torch.device,
+                    aug_list: list,
+                    losses: torch.nn.Module,
+                    alpha: float,
+                    log_interval: int
+                  ) -> None:
+        """Train the GAN model. Copied from https://github.com/LetheSec/PLG-MI-Attack."""
+        torch.set_default_tensor_type('torch.cuda.FloatTensor')
+        torch.backends.cudnn.benchmark = True
+        gen_losses = []
+        dis_losses = []
+        inv_losses = []
+
+        # Training loop
+        for i in range(self.n_iter):
+            _l_g = .0
+            cumulative_inv_loss = 0.
+            cumulative_loss_dis = .0
+
+            cumulative_target_acc = .0
+            target_correct = 0
+            count = 0
+            for j in range(self.n_dis):
+                if j == 0:
+                    fake, fake_labels, _ = sample_from_generator(gen, num_classes, 128, device)
+                    fake_aug = aug_list(fake)
+                    dis_fake = dis(fake_aug, fake_labels)
+
+                    inv_loss = losses.max_margin_loss(model(fake_aug), fake_labels)
+
+                    inv_losses.append(inv_loss.item())
+                    dis_real = None
+
+                    loss_gen = gen_criterion(dis_fake, dis_real)
+                    gen_losses.append(loss_gen.item())
+                    loss_all = loss_gen + inv_loss*alpha
+
+                    gen.zero_grad()
+                    loss_all.backward()
+                    opt_gen.step()
+                    _l_g += loss_gen.item()
+                    cumulative_inv_loss += inv_loss.item()
+
+                fake, fake_labels, _ = sample_from_generator(gen, num_classes, 128, device)
+
+                real, real_labels = next(iter(pseudo_loader))
+                real, real_labels = real.to(device), real_labels.to(device)
+
+                dis_fake = dis(fake, fake_labels)
+                dis_real = dis(real, real_labels)
+
+                loss_dis = dis_criterion(dis_fake, dis_real)
+            
+                if loss_dis.item() > 0.1:
+                
+                    dis.zero_grad()
+                
+                    loss_dis.backward()
+                    opt_dis.step()
+
+                cumulative_loss_dis += loss_dis.item()
+                dis_losses.append(cumulative_loss_dis/n_dis)
+                
+                with torch.no_grad():
+                    count += fake.shape[0]
+                    T_logits = model(fake)
+                    T_preds = T_logits.max(1, keepdim=True)[1]
+                    target_correct += T_preds.eq(fake_labels.view_as(T_preds)).sum().item()
+                    cumulative_target_acc += round(target_correct / count, 4)
+
+            if i % log_interval == 0:
+                print(
+                        'iteration: {:05d}/{:05d}, loss gen: {:05f}, loss dis {:05f}, inv loss {:05f}, target acc {:04f}'.format(
+                            i, n_iter, _l_g, cumulative_loss_dis, cumulative_inv_loss,
+                            cumulative_target_acc, ))
+                
+                if cumulative_target_acc > 0.2:
+                    break

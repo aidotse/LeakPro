@@ -1,10 +1,12 @@
 """Implementation of the PLGMI attack."""
+import kornia
 import torch
 from torch.nn import functional as F
-from torch.utils.data import DataLoader, Subset, TensorDataset
+from torch.utils.data import DataLoader
 
 from leakpro.attacks.minv_attacks.abstract_minv import AbstractMINV
-from leakpro.attacks.utils.gan_handler_2 import GANHandler
+from leakpro.attacks.utils import losses
+from leakpro.attacks.utils.gan_handler import GANHandler
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.metrics.attack_result import MinvResult
 from leakpro.utils.import_helper import Self
@@ -44,11 +46,15 @@ class AttackPLGMI(AbstractMINV):
         self.alpha = configs.get("alpha", 0.1)
         # Generator parameters
         self.gen_lr = configs.get("gen_lr", 0.0002) # Learning rate of the generator
+        self.gen_beta1 = configs.get("gen_beta1", 0.0) # Beta1 parameter of the generator
+        self.gen_beta2 = configs.get("gen_beta2", 0.9) # Beta2 parameter of the generator
         # Discriminator parameters
         self.n_dis = configs.get("n_dis", 5) # Number of discriminator updates per generator update
         self.dis_lr = configs.get("dis_lr", 0.0002)
+        self.dis_beta1 = configs.get("dis_beta1", 0.0)
+        self.dis_beta2 = configs.get("dis_beta2", 0.9)
+        # Paths
         self.pseudo_label_path = configs.get("pseudo_label_path")
-
         # Define the validation dictionary as: {parameter_name: (parameter, min_value, max_value)}
         validation_dict = {
             # alpha, 0 to inf
@@ -77,6 +83,8 @@ class AttackPLGMI(AbstractMINV):
 
     def top_n_selection(self:Self) -> DataLoader:
         """"Top n selection of pseudo labels."""
+        # TODO: This does not scale well. Consider creating a class for the dataloader and implementing the __getitem__ method.
+        # TODO: Does this go into modality extension; image?
         self.target_model.eval()
         all_confidences = []
         for images, _ in self.public_dataloader:
@@ -102,31 +110,12 @@ class AttackPLGMI(AbstractMINV):
         # keep only top_n entries in each element of pseudo_map
         pseudo_map = [pseudo_map[i][:self.top_n] for i in range(self.num_classes)]
 
-        # Collect indices and pseudo-labels
-        selected_indices = []
-        pseudo_labels = []
-
-        for pseudo_label, entries in enumerate(pseudo_map):
-            for index, _ in entries:  # Ignore confidence scores
-                selected_indices.append(index)
-                pseudo_labels.append(pseudo_label)
-
-        # Convert pseudo labels to tensor
-        pseudo_labels = torch.tensor(pseudo_labels, dtype=torch.long)
-
-        # Fetch data from public dataset using selected indices
-        selected_images = [self.public_dataloader.dataset[i][0] for i in selected_indices]
-        selected_images = torch.stack(selected_images)
-
-        # Combine images and pseudo labels into a TensorDataset
-        pseudo_dataset = TensorDataset(selected_images, pseudo_labels)
-
-        # Create DataLoader #TODO: High risk, check if this is correct
-        return DataLoader(
-            pseudo_dataset,
-            batch_size=self.batch_size,
-            shuffle=True,
-        )
+        # Create pseudo dataloader from pseudo_map
+        pseudo_data = []
+        for i in range(self.num_classes):
+            for index, _ in pseudo_map[i]:
+                pseudo_data.append((self.public_dataloader.dataset[index][0], i))
+        return DataLoader(pseudo_data, batch_size=self.batch_size, shuffle=True)
 
 
     def prepare_attack(self:Self) -> None:
@@ -135,14 +124,26 @@ class AttackPLGMI(AbstractMINV):
         self.gan_handler = GANHandler(self.handler)
         self.generator = self.gan_handler.get_generator()
         self.discriminator = self.gan_handler.get_discriminator()
-
+        # TODO: Change structure of how we load data, handler should do this, not gan_handler
         # Get public dataloader
         self.public_dataloader = self.gan_handler.get_public_data(self.batch_size)
 
-        # Get pseudo_loader
+        # Top-n-selection to get pseudo labels
         self.pseudo_loader = self.top_n_selection()
 
-        
+        # Get discriminator
+        self.discriminator = self.gan_handler.get_discriminator()
+
+        # Get generator
+        self.generator = self.gan_handler.get_generator()
+
+        # Set Adam optimizer for both generator and discriminator
+        self.gen_optimizer = torch.optim.Adam(self.generator.parameters(), lr=self.gen_lr,
+                                              betas=(self.gen_beta1, self.gen_beta2))
+        self.dis_optimizer = torch.optim.Adam(self.discriminator.parameters(), lr=self.dis_lr,
+                                               betas=(self.dis_beta1, self.dis_beta2))
+
+        self.gan_handler.train()
 
     def run_attack(self:Self) -> MinvResult:
         """Run the attack."""

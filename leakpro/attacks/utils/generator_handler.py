@@ -1,77 +1,67 @@
-"""Module for handling Generators."""
+"""Module for handling generators."""
+import os
 
-
-import numpy as np
+import joblib
 import torch
+from torch.nn import Module
+from torch.utils.data import DataLoader
 
 from leakpro.attacks.utils.model_handler import ModelHandler
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
-from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 
 class GeneratorHandler(ModelHandler):
-    """Base class for handling generative models like GANs, diffusion models etc..."""
+    """Base class for generator models like GANs, diffusion models, etc."""
 
-    def __init__(self:Self, handler: AbstractInputHandler) -> None:
-        """Initialize the Generator handler.
+    def __init__(self: Self, handler: AbstractInputHandler, caller: str = "generator") -> None:
+        """Initialize the GeneratorHandler base class."""
+        super().__init__(handler, caller)
+        self._setup_generator_configs()
+        self.trained_bool = False
+        logger.info(f"Initialized GeneratorHandler with caller: {caller}")
 
-        Args:
-        ----
-            handler (AbstractInputHandler): The input handler object.
 
-        """
-        super().__init__(handler)
+    def _setup_generator_configs(self) -> None:
+        """Load generator-specific configurations (e.g., generator path, params)."""
+        self.generator_path = self.handler.configs.get("generator", {}).get("module_path")
+        self.generator_class = self.handler.configs.get("generator", {}).get("model_class")
+        self.gen_init_params = self.handler.configs.get("generator", {}).get("init_params", {})
+        self.generator_checkpoint = self.handler.configs.get("generator", {}).get("checkpoint_path", None)
+        if self.generator_path and self.generator_class:
+            self.generator_blueprint = self._import_model_from_path(self.generator_path, self.generator_class)
+        else:
+            raise ValueError("Generator path and class must be specified in the config.")
 
-        self.generator = self._get_generator()
+    def get_generator(self) -> Module:
+        """Instantiate and return a generator model."""
+        generator = self.generator_blueprint(**self.gen_init_params)
+        if self.generator_checkpoint and os.path.exists(self.generator_checkpoint):
+            generator.load_state_dict(torch.load(self.generator_checkpoint))
+            self.trained_bool = True
+        return generator
 
-    def _get_generator(self:Self) -> PytorchModel:
-        """Get the Generator model.
+    def train(self) -> None:
+        """Abstract training method for generator models. To be implemented by subclasses."""
+        if self.trained_bool:
+            logger.info("Generator has already been trained, skipping training.")
+            return
+        raise NotImplementedError("Subclasses must implement the train method")
 
-        Returns
-        -------
-            PytorchModel: The Generator model.
+    def generate_samples(self) -> None:
+        """Abstract sample generation method for generator models. To be implemented by subclasses."""
+        raise NotImplementedError("Subclasses must implement the generate_samples method")
 
-        """
-        logger.info("Getting the Generator model")
-        return PytorchModel(self.model_blueprint, self.handler.get_criterion())
-
-    def save_generator(self:Self, path:str) -> None:
-        """Save the Generator model to a file.
-
-        Args:
-        ----
-            path (str): The path to save the Generator model.
-
-        """
-        logger.info("Saving the Generator model")
-        torch.save(self.generator.model.state_dict(), path)
-
-    def load_generator(self:Self, path:str) -> None:
-        """Load the Generator model from a file.
-
-        Args:
-        ----
-            path (str): The path to load the Generator model.
-
-        """
-        logger.info("Loading the Generator model")
-        self.generator.model.load_state_dict(torch.load(path))
-
-    def sample_data(self:Self, num_samples:int) -> np.ndarray:
-        """Sample data from the Generator model.
-
-        Args:
-        ----
-            num_samples (int): The number of samples to generate.
-
-        Returns:
-        -------
-            np.ndarray: The generated data.
-
-        """
-        logger.info("Sampling data from the Generator model")
-        self.generator.model.eval()
-        with torch.no_grad():
-            return self.generator.model(num_samples).device().numpy()
+    def get_public_data(self, batch_size: int) -> DataLoader:
+        """Return data loader for the public dataset."""
+        # Get public dataloader
+        self.public_path = self.handler.configs.get("public_data_path")
+        # Load pickle file
+        try:
+            with open(self.public_path, "rb") as f:
+                self.public_dataset = joblib.load(f)
+            logger.info(f"Loaded public data from {self.public_path}")
+        except FileNotFoundError as e:
+            raise FileNotFoundError(f"Could not find the public data at {self.public_path}") from e
+        return DataLoader(self.public_dataset, batch_size = batch_size, shuffle=False)
