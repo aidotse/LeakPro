@@ -4,7 +4,8 @@ from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 from torchvision import transforms, datasets
 from tqdm import tqdm
-from leakpro import AbstractInputHandler 
+from leakpro import AbstractInputHandler
+from leakpro.attacks.utils import losses
 
 class CelebA_InputHandler(AbstractInputHandler):
     """Class to handle the user input for the CelebA dataset for plgmi attack."""
@@ -94,7 +95,6 @@ class CelebA_InputHandler(AbstractInputHandler):
                     num_classes: int,
                     device: torch.device,
                     aug_list: list,
-                    losses: torch.nn.Module,
                     alpha: float,
                     log_interval: int
                   ) -> None:
@@ -116,7 +116,7 @@ class CelebA_InputHandler(AbstractInputHandler):
             count = 0
             for j in range(self.n_dis):
                 if j == 0:
-                    fake, fake_labels, _ = sample_from_generator(gen, num_classes, 128, device)
+                    fake, fake_labels, _ = self.sample_from_generator(gen, num_classes, 128, device)
                     fake_aug = aug_list(fake)
                     dis_fake = dis(fake_aug, fake_labels)
 
@@ -135,7 +135,7 @@ class CelebA_InputHandler(AbstractInputHandler):
                     _l_g += loss_gen.item()
                     cumulative_inv_loss += inv_loss.item()
 
-                fake, fake_labels, _ = sample_from_generator(gen, num_classes, 128, device)
+                fake, fake_labels, _ = self.sample_from_generator(gen, num_classes, 128, device)
 
                 real, real_labels = next(iter(pseudo_loader))
                 real, real_labels = real.to(device), real_labels.to(device)
@@ -145,12 +145,10 @@ class CelebA_InputHandler(AbstractInputHandler):
 
                 loss_dis = dis_criterion(dis_fake, dis_real)
             
-                if loss_dis.item() > 0.1:
-                
-                    dis.zero_grad()
-                
-                    loss_dis.backward()
-                    opt_dis.step()
+                dis.zero_grad()
+            
+                loss_dis.backward()
+                opt_dis.step()
 
                 cumulative_loss_dis += loss_dis.item()
                 dis_losses.append(cumulative_loss_dis/n_dis)

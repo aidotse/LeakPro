@@ -44,6 +44,9 @@ class AttackPLGMI(AbstractMINV):
         self.top_n = configs.get("top_n", 10)
         # General parameters
         self.alpha = configs.get("alpha", 0.1)
+        self.n_iter = configs.get("n_iter", 1000)
+        self.log_interval = configs.get("log_interval", 100)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # Generator parameters
         self.gen_lr = configs.get("gen_lr", 0.0002) # Learning rate of the generator
         self.gen_beta1 = configs.get("gen_beta1", 0.0) # Beta1 parameter of the generator
@@ -141,7 +144,34 @@ class AttackPLGMI(AbstractMINV):
         self.dis_optimizer = torch.optim.Adam(self.discriminator.parameters(), lr=self.dis_lr,
                                                betas=(self.dis_beta1, self.dis_beta2))
 
-        self.gan_handler.train()
+        self.target_model = self.handler.get_target_model()
+
+        # Augmentations for generated images. TODO: Move this to a image modality extension
+        self.aug_list = kornia.augmentation.container.ImageSequential(
+            kornia.augmentation.ColorJitter(brightness=0.2, contrast=0.2, p=0.5),
+            kornia.augmentation.RandomHorizontalFlip(),
+            kornia.augmentation.RandomRotation(5),
+        ).to(self.device)
+
+        # Train the GAN
+
+        self.handler.train_gan(pseudo_loader = self.pseudo_loader,
+                                    gen = self.generator,
+                                    dis = self.discriminator,
+                                    gen_criterion = losses.GenLoss(loss_type="hinge", is_relativistic=False),
+                                    dis_criterion = losses.DisLoss(loss_type="hinge", is_relativistic=False),
+                                    model = self.target_model,
+                                    opt_gen = self.gen_optimizer,
+                                    opt_dis = self.dis_optimizer,
+                                    n_iter = self.n_iter,
+                                    n_dis  = self.n_dis,
+                                    num_classes = self.num_classes,
+                                    device = self.device,
+                                    aug_list = self.aug_list,
+                                    alpha = self.alpha,
+                                    log_interval = self.log_interval)
+
+        self.gan_handler.trained_bool = True
 
     def run_attack(self:Self) -> MinvResult:
         """Run the attack."""
