@@ -158,7 +158,7 @@ class GRUD(nn.Module):
         # self.bn= nn.BatchNorm1d(2, eps=1e-05, momentum=0.1, affine=True).to(self.device)
         # self.drop=nn.Dropout(p=0.7, inplace=False)
         self.fc = nn.Linear(self.hidden_size, 1) # a probability score
-        self.drop=nn.Dropout(p=0.5, inplace=False)
+        self.drop=nn.Dropout(p=0.57, inplace=False)
         if self.bn_flag:
             self.bn= nn.BatchNorm1d(self.hidden_size, eps=1e-05, momentum=0.1, affine=True)
 

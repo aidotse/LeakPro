@@ -126,7 +126,7 @@ class GRUD(nn.Module):
             "hidden_size": hidden_size,
             "X_mean": X_mean,
             "batch_size": batch_size,
-            "output_last": output_last
+            "output_last": output_last,
         }
 
         self.hidden_size = hidden_size

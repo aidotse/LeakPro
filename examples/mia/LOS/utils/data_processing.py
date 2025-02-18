@@ -52,9 +52,9 @@ def get_mimic_dataset(data_path,
     assert 0 < total_frac <= 1, "The sum of dataset fractions must be between 0 and 1."
 
     if use_LR:
-        path = data_path + "flattened/"
+        path = data_path + "LR_data/"
     else:
-        path = data_path + "unflattened/"
+        path = data_path + "GRUD_data/"
     dataset_path = os.path.join(path, "dataset.pkl")
     indices_path = os.path.join(path, "indices.pkl")
 

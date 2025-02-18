@@ -33,9 +33,9 @@ def evaluate(model, loader, criterion, device):
             output = model(data)
             loss += criterion(output, target).item()
             pred = (output) >= 0.5
-            acc += pred.eq(target.data.view_as(pred)).sum()
+            acc += pred.eq(target).float().mean().item()
         loss /= len(loader)
-        acc = float(acc) / len(loader.dataset)
+        acc = float(acc) / len(loader)
     return loss, acc
 
 
@@ -70,14 +70,14 @@ def create_trained_model_and_metadata(model,
 
             loss = criterion(output, target)
             pred = (output) >= 0.5
-            train_acc += pred.eq(target).sum().item()
+            train_acc += pred.eq(target).float().mean().item()
 
             loss.backward()
             optimizer.step()
             train_loss += loss.item()
 
         train_loss /= len(train_loader)
-        train_acc /= len(train_loader.dataset)
+        train_acc /= len(train_loader)
 
         train_losses.append(train_loss)
         train_accuracies.append(train_acc)
