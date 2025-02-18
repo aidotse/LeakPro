@@ -122,8 +122,6 @@ class AttackPLGMI(AbstractMINV):
         """Prepare the attack."""
         logger.info("Preparing attack")
         self.gan_handler = GANHandler(self.handler)
-        self.generator = self.gan_handler.get_generator()
-        self.discriminator = self.gan_handler.get_discriminator()
         # TODO: Change structure of how we load data, handler should do this, not gan_handler
         # Get public dataloader
         self.public_dataloader = self.gan_handler.get_public_data(self.batch_size)
