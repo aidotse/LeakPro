@@ -1,20 +1,21 @@
 # Original source taken from https://github.com/wboag/mimic-tokenize/blob/master/heuristic-tokenize.py at
 # commit e953d271bbb4c53aee5cc9a7b8be870a6b007604
 
-import re, nltk
+import re
+
 
 def is_inline_title(text):
-    m = re.search('^([a-zA-Z ]+:) ', text)
+    m = re.search("^([a-zA-Z ]+:) ", text)
     if not m: return False
     return is_title(m.groups()[0])
 
-stopwords = set(['of', 'on', 'or'])
+stopwords = set(["of", "on", "or"])
 def is_title(text):
-    if not text.endswith(':'): return False
+    if not text.endswith(":"): return False
     text = text[:-1]
 
     # be a little loose here... can tighten if it causes errors
-    text = re.sub('(\([^\)]*?\))', '', text)
+    text = re.sub(r"(\([^\)]*?\))", "", text)
 
     # Are all non-stopwords capitalized?
     for word in text.split():
@@ -22,7 +23,7 @@ def is_title(text):
         if not word[0].isupper(): return False
 
     # I noticed this is a common issue (non-title aapears at beginning of line)
-    if text == 'Disp': return False
+    if text == "Disp": return False
 
     # optionally: could assert that it is less than 6 tokens
     return True
@@ -31,11 +32,11 @@ def is_title(text):
 def sent_tokenize_rules(text):
 
     # long sections are OBVIOUSLY different sentences
-    text = re.sub('---+', '\n\n-----\n\n', text)
-    text = re.sub('___+', '\n\n_____\n\n', text)
-    text = re.sub('\n\n+', '\n\n', text)
+    text = re.sub("---+", "\n\n-----\n\n", text)
+    text = re.sub("___+", "\n\n_____\n\n", text)
+    text = re.sub("\n\n+", "\n\n", text)
 
-    segments = text.split('\n\n')
+    segments = text.split("\n\n")
 
     # strategy: break down segments and chip away structure until just prose.
     #           once you have prose, use nltk.sent_tokenize()
@@ -44,19 +45,19 @@ def sent_tokenize_rules(text):
     new_segments = []
 
     # deal with this one edge case (multiple headers per line) up front
-    m1 = re.match('(Admission Date:) (.*) (Discharge Date:) (.*)', segments[0])
+    m1 = re.match("(Admission Date:) (.*) (Discharge Date:) (.*)", segments[0])
     if m1:
         new_segments += list(map(lambda s: s.strip(), m1.groups()))
         segments = segments[1:]
 
-    m2 = re.match('(Date of Birth:) (.*) (Sex:) (.*)'            , segments[0])
+    m2 = re.match("(Date of Birth:) (.*) (Sex:) (.*)"            , segments[0])
     if m2:
         new_segments += list(map(lambda s: s.strip(), m2.groups()))
         segments = segments[1:]
 
     for segment in segments:
         # find all section headers
-        possible_headers  = re.findall('\n([A-Z][^\n:]+:)', '\n'+segment)
+        possible_headers  = re.findall("\n([A-Z][^\n:]+:)", "\n"+segment)
         #assert len(possible_headers) < 2, str(possible_headers)
         headers = []
         for h in possible_headers:
@@ -95,10 +96,10 @@ def sent_tokenize_rules(text):
 
     ### Low-hanging fruit: "_____" is a delimiter
     for segment in segments:
-        subsections = segment.split('\n_____\n')
+        subsections = segment.split("\n_____\n")
         new_segments.append(subsections[0])
         for ss in subsections[1:]:
-            new_segments.append('_____')
+            new_segments.append("_____")
             new_segments.append(ss)
 
     segments = list(new_segments)
@@ -107,28 +108,28 @@ def sent_tokenize_rules(text):
 
     ### Low-hanging fruit: "-----" is a delimiter
     for segment in segments:
-        subsections = segment.split('\n-----\n')
+        subsections = segment.split("\n-----\n")
         new_segments.append(subsections[0])
         for ss in subsections[1:]:
-            new_segments.append('-----')
+            new_segments.append("-----")
             new_segments.append(ss)
 
     segments = list(new_segments)
     new_segments = []
 
-    '''
+    """
     for segment in segments:
         print '------------START------------'
         print segment
         print '-------------END-------------'
         print
     exit()
-    '''
+    """
 
     ### Separate enumerated lists ###
     for segment in segments:
         old_len = len(new_segments)
-        if not re.search('\n\s*\d+\.', '\n'+segment): 
+        if not re.search("\n\\s*\\d+\\.", "\n"+segment):
             new_segments.append(segment)
             continue
 
@@ -138,12 +139,12 @@ def sent_tokenize_rules(text):
         #print
 
         # generalizes in case the list STARTS this section
-        segment = '\n'+segment
+        segment = "\n"+segment
 
         # determine whether this segment contains a bulleted list (assumes i,i+1,...,n)
-        start = int(re.search('\n\s*(\d+)\.', segment).groups()[0])
+        start = int(re.search("\n\\s*(\\d+)\\.", segment).groups()[0])
         n = start
-        while re.search('\n\s*%d\.'%n,segment):
+        while re.search("\n\\s*%d\\."%n,segment):
             n += 1
         n -= 1
 
@@ -156,12 +157,12 @@ def sent_tokenize_rules(text):
         #print segment
         #print '-------------END-------------'
         #print start,n
-        #print 
+        #print
 
         # break each list into its own line
         # challenge: not clear how to tell when the list ends if more text happens next
         for i in range(start,n+1):
-            matching_text = re.search('(\n\s*\d+\.)',segment).groups()[0]
+            matching_text = re.search("(\n\\s*\\d+\\.)",segment).groups()[0]
             prefix  = segment[:segment.index(matching_text) ].strip()
             segment = segment[ segment.index(matching_text):].strip()
 
@@ -182,7 +183,7 @@ def sent_tokenize_rules(text):
     segments = list(new_segments)
     new_segments = []
 
-    '''
+    """
         TODO: Big Challenge
         There is so much variation in what makes a list. Intuitively, I can tell it's a
         list because it shows repeated structure (often following a header)
@@ -221,31 +222,31 @@ def sent_tokenize_rules(text):
             Metoprolol 12.5mg TID
             Prilosec OTC 20 mg once a day
             Verapamil 120 mg SR DAILY
-    '''
+    """
 
     ### Remove lines with inline titles from larger segments (clearly nonprose)
     for segment in segments:
-        '''
+        """
         With: __PHI_6__, MD __PHI_5__
         Building: De __PHI_45__ Building (__PHI_32__ Complex) __PHI_87__
         Campus: WEST
-        '''
+        """
 
-        lines = segment.split('\n')
+        lines = segment.split("\n")
 
         buf = []
         for line in lines:
             if is_inline_title(line):
-                if len(buf) > 0: new_segments.append('\n'.join(buf))
+                if len(buf) > 0: new_segments.append("\n".join(buf))
                 buf = []
             buf.append(line)
         if len(buf) > 0:
-            new_segments.append('\n'.join(buf))
+            new_segments.append("\n".join(buf))
 
     segments = list(new_segments)
     new_segments = []
 
-    # Going to put one-liner answers with their sections 
+    # Going to put one-liner answers with their sections
     # (aka A A' B B' C D D' -->  AA' BB' C DD' )
     N = len(segments)
     for i in range(N):
@@ -253,10 +254,10 @@ def sent_tokenize_rules(text):
         if i==0:
             new_segments.append(segments[i])
             continue
-        if segments[i].count('\n') == 0 and is_title(segments[i-1]) and not is_title(segments[i]):
+        if segments[i].count("\n") == 0 and is_title(segments[i-1]) and not is_title(segments[i]):
             if (i == N-1) or is_title(segments[i+1]):
                 new_segments = new_segments[:-1]
-                new_segments.append(segments[i-1] + ' ' + segments[i])
+                new_segments.append(segments[i-1] + " " + segments[i])
             else: new_segments.append(segments[i])
         else:
             new_segments.append(segments[i])
@@ -264,29 +265,29 @@ def sent_tokenize_rules(text):
     segments = list(new_segments)
     new_segments = []
 
-    '''
+    """
         Should do some kind of regex to find "TEST: value" in segments?
             Indication: Source of embolism.
             BP (mm Hg): 145/89
             HR (bpm): 80
         Note: I made a temporary hack that fixes this particular problem. 
               We'll see how it shakes out
-    '''
+    """
 
 
-    '''
+    """
         Separate ALL CAPS lines (Warning... is there ever prose that can be all caps?)
-    '''
+    """
 
 
 
-    '''
+    """
     for segment in segments:
         print '------------START------------'
         print segment
         print '-------------END-------------'
         print
     exit()
-    '''
+    """
 
     return segments

@@ -1,5 +1,4 @@
-"""
-This file is inspired by https://github.com/MLforHealth/MIMIC_Extract 
+"""This file is inspired by https://github.com/MLforHealth/MIMIC_Extract
 MIT License
 Copyright (c) 2019 MIT Laboratory for Computational Physiology
 """
@@ -12,8 +11,8 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from torch import Tensor, from_numpy
 from torch.utils.data import DataLoader, Dataset, Subset
-from utils.model_grud import to_3D_tensor
 from tqdm import tqdm
+from utils.model_GRUD import to_3D_tensor
 
 
 class MimicDataset(Dataset):
@@ -53,9 +52,9 @@ def get_mimic_dataset(data_path,
     assert 0 < total_frac <= 1, "The sum of dataset fractions must be between 0 and 1."
 
     if use_LR:
-        path = data_path + "flattened/"
+        path = data_path + "LR_data/"
     else:
-        path = data_path + "unflattened/"
+        path = data_path + "GRUD_data/"
     dataset_path = os.path.join(path, "dataset.pkl")
     indices_path = os.path.join(path, "indices.pkl")
 
@@ -84,7 +83,7 @@ def get_mimic_dataset(data_path,
         train_data, holdout_data, y_train, y_holdout_data = data_splitter(statics,
                                                                  data,
                                                                  train_frac)
-        
+
         print("Normalizing data...")
         train_data , holdout_data = data_normalization(train_data, holdout_data)
 
@@ -210,7 +209,7 @@ def data_splitter(statics,
 #             .groupby(ID_COLS)
 #             .fillna(icustay_means)  # Fill remaining NaNs with icustay_means
 #             .fillna(0)  # Fill any remaining NaNs with 0
-#         ) 
+#         )
 
 #     # df_out.loc[:,idx[:,"mean"]] = df_out.loc[:,idx[:,"mean"]].groupby(ID_COLS).fillna(
 #     #     method="ffill"
@@ -271,7 +270,7 @@ def simple_imputer(dataframe, ID_COLS):
 
     # Sort columns by index
     df_out.sort_index(axis=1, inplace=True)
-    
+
     return df_out
 
 

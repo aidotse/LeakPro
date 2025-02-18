@@ -1,10 +1,9 @@
-import torch
-from torch import cuda, device, optim
-from torch.nn import CrossEntropyLoss
+from torch import cuda, device, nn, no_grad, optim
 from torch.utils.data import DataLoader
-from torchvision import transforms, datasets
 from tqdm import tqdm
-from leakpro import AbstractInputHandler 
+
+from leakpro import AbstractInputHandler
+
 
 class CelebAHQInputHandler(AbstractInputHandler):
     """Class to handle the user input for the CelebA_HQ dataset."""
@@ -13,19 +12,19 @@ class CelebAHQInputHandler(AbstractInputHandler):
         super().__init__(configs=configs)
         print("Configurations:", configs)
 
-    def get_criterion(self) -> torch.nn.Module:
+    def get_criterion(self) -> nn.Module:
         """Set the CrossEntropyLoss for the model."""
-        return CrossEntropyLoss()
+        return nn.CrossEntropyLoss()
 
-    def get_optimizer(self, model: torch.nn.Module) -> optim.Optimizer:
+    def get_optimizer(self, model: nn.Module) -> optim.Optimizer:
         """Set the optimizer for the model."""
         return optim.SGD(model.parameters())
 
     def train(
         self,
         dataloader: DataLoader,
-        model: torch.nn.Module,
-        criterion: torch.nn.Module,
+        model: nn.Module,
+        criterion: nn.Module,
         optimizer: optim.Optimizer,
         epochs: int,
     ) -> dict:
@@ -58,14 +57,14 @@ class CelebAHQInputHandler(AbstractInputHandler):
 
         return {"model": model, "metrics": {"accuracy": train_acc / len(dataloader.dataset), "loss": train_loss}}
 
-    def evaluate(self, dataloader: DataLoader, model: torch.nn.Module, criterion: torch.nn.Module) -> dict:
+    def evaluate(self, dataloader: DataLoader, model: nn.Module, criterion: nn.Module) -> dict:
         """Evaluate the model."""
         gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
         model.to(gpu_or_cpu)
         model.eval()
 
         test_loss, test_acc = 0.0, 0
-        with torch.no_grad():
+        with no_grad():
             for inputs, labels in tqdm(dataloader, desc="Evaluating"):
                 inputs, labels = inputs.to(gpu_or_cpu), labels.to(gpu_or_cpu)
                 outputs = model(inputs)
