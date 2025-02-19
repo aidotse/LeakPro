@@ -30,7 +30,7 @@ audit:  # Configurations for auditing
   output_dir: "./examples/expm/leakpro_output"
   attack_type: "mia" #mia, gia
   dpsgd:
-    dpsgd_use: True
+    dpsgd_use: False
     dpsgd_path: "./examples/expm/target_dpsgd/dpsgd_dic.pkl"
   
   
