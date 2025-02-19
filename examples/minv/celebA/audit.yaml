@@ -3,15 +3,21 @@ audit:  # Configurations for auditing
   random_seed: 1234  # Integer specifying the random seed
   attack_list:
     plgmi:
-      training_data_fraction: 0.5  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
-      attack_data_fraction: 0.5 # Fraction of auxiliary dataset to sample from during attack
-      num_classes: 500
-      log_interval: 10
-      
+      n_dis: 2 # Integer number for indicating the number of discriminator updates per generator update
+      iterations: 5000 # Integer number for indicating the iterations for training the GAN
+      batch_size: 128 # Integer number for indicating batch size for training the GAN
+      gen_lr: 0.0005 # Float number for indicating learning rate for training the generator
+      dis_lr: 0.0002 # Float number for indicating learning rate for training the discriminator
+      gen_beta1: 0.0 # Float number for indicating beta1 for Adam optimizer
+      gen_beta2: 0.9 # Float number for indicating beta2 for Adam optimizer
+      dis_beta1: 0.0 # Float number for indicating beta1 for Adam optimizer
+      dis_beta2: 0.9 # Float number for indicating beta2 for Adam optimizer
+      dim_z: &dim_z 256 # Integer number for indicating the dimension of the latent space
+      alpha: 0.2 # Float number for indicating the weight of the gradient penalty
+      log_interval: 10 # Integer number for indicating the interval for logging the information
+      num_classes: &n_cls 500
       
 
-
-  
   output_dir: "./leakpro_output"
   attack_type: "minv" #mia, gia
   modality: "image" #image, tabular
@@ -34,8 +40,8 @@ generator:
   model_class: "ResNetGenerator"
   checkpoint_path: "generator.pth"
   init_params:
-    dim_z: 128
-    num_classes: 500
+    dim_z: *dim_z
+    num_classes: *n_cls
     bottom_width: 4
    
 discriminator:
@@ -43,7 +49,7 @@ discriminator:
   model_class: "SNResNetProjectionDiscriminator"
   checkpoint_path: "discriminator.pth"
   init_params:
-    num_classes: 500
+    num_classes: *n_cls
 
 public_dataset:
   # path to public dataset
