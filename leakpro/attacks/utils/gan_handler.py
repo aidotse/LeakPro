@@ -51,3 +51,6 @@ class GANHandler(GeneratorHandler):
         y = torch.randint(0, n_classes, (batch_size,)).to(device)
         return gen(z, y), y, z
 
+    def save_discriminator(self, discriminator: Module, path: str) -> None:
+        """Save the discriminator model."""
+        torch.save(discriminator.state_dict(), path)

@@ -68,3 +68,8 @@ class GeneratorHandler(ModelHandler):
         except FileNotFoundError as e:
             raise FileNotFoundError(f"Could not find the public data at {self.public_path}") from e
         return DataLoader(self.public_dataset, batch_size = batch_size, shuffle=False)
+
+    def save_generator(self, generator: Module, path: str) -> None:
+        """Save the generator model."""
+        torch.save(generator.state_dict(), path)
+        logger.info(f"Saved generator model to {path}")

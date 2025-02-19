@@ -159,7 +159,6 @@ class AttackPLGMI(AbstractMINV):
             # Top-n-selection to get pseudo labels
             self.pseudo_loader = self.top_n_selection()
             logger.info("Training the GAN")
-
             self.handler.train_gan(pseudo_loader = self.pseudo_loader,
                                         gen = self.generator,
                                         dis = self.discriminator,
@@ -179,6 +178,9 @@ class AttackPLGMI(AbstractMINV):
             self.gan_handler.trained_bool = True
         else:
             logger.info("GAN already trained, skipping training")
+
+        # Save the trained generator
+
 
     def run_attack(self:Self) -> MinvResult:
         """Run the attack."""
