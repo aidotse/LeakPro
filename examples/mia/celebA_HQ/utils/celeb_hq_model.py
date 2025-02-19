@@ -25,7 +25,7 @@ def evaluate(model, loader, criterion, device):
     with no_grad():
         for data, target in loader:
             data, target = data.to(device), target.to(device)
-            target = target.view(-1)
+            target = target.view(-1) 
             output = model(data)
             loss += criterion(output, target).item()
             pred = output.argmax(dim=1)
