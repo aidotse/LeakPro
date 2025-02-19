@@ -139,17 +139,11 @@ class AttackPLGMI(AbstractMINV):
         # Get public dataloader
         self.public_dataloader = self.gan_handler.get_public_data(self.batch_size)
 
-        # Top-n-selection to get pseudo labels
-        self.pseudo_loader = self.top_n_selection()
-
         # Get discriminator
         self.discriminator = self.gan_handler.get_discriminator()
 
         # Get generator
         self.generator = self.gan_handler.get_generator()
-
-        self.generator.to(self.device)
-        self.discriminator.to(self.device)
 
         # Set Adam optimizer for both generator and discriminator
         self.gen_optimizer = torch.optim.Adam(self.generator.parameters(), lr=self.gen_lr,
@@ -161,6 +155,9 @@ class AttackPLGMI(AbstractMINV):
         # Train the GAN
 
         if not self.gan_handler.trained_bool:
+            logger.info("GAN not trained, getting psuedo labels")
+            # Top-n-selection to get pseudo labels
+            self.pseudo_loader = self.top_n_selection()
             logger.info("Training the GAN")
 
             self.handler.train_gan(pseudo_loader = self.pseudo_loader,
@@ -185,5 +182,6 @@ class AttackPLGMI(AbstractMINV):
 
     def run_attack(self:Self) -> MinvResult:
         """Run the attack."""
+        logger.info("Running the PLG-MI attack")
         # Use trained generator to generate samples and evaluate
         pass
