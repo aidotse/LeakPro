@@ -95,7 +95,6 @@ class CelebA_InputHandler(AbstractInputHandler):
                     n_dis: int,
                     num_classes: int,
                     device: torch.device,
-                    aug_list: kornia.augmentation.container.ImageSequential,
                     alpha: float,
                     log_interval: int,
                     sample_from_generator: callable
@@ -106,10 +105,17 @@ class CelebA_InputHandler(AbstractInputHandler):
         gen_losses = []
         dis_losses = []
         inv_losses = []
-        aug_list = aug_list.to(device)
+        
+        # Augmentations for generated images. TODO: Move this to a image modality extension
+        aug_list = kornia.augmentation.container.ImageSequential(
+            kornia.augmentation.ColorJitter(brightness=0.2, contrast=0.2, p=0.5),
+            kornia.augmentation.RandomHorizontalFlip(),
+            kornia.augmentation.RandomRotation(5),
+        ).to(device)
 
-        print(device)
-
+        model.to(device)
+        gen.to(device)
+        dis.to(device)
         # Training loop
         for i in range(n_iter):
             _l_g = .0
@@ -122,16 +128,10 @@ class CelebA_InputHandler(AbstractInputHandler):
             for j in range(n_dis):
                 if j == 0:
                     fake, fake_labels, _ = sample_from_generator(gen, num_classes, 128, device, gen.dim_z)
-                    print("Sampled from generator")
-                    print(aug_list)
-                    print(next(iter(aug_list.buffers()), None))
                     fake_aug = aug_list(fake).to(device)
-                    print("Augmented fake images")
                     dis_fake = dis(fake_aug, fake_labels)
-                    print("Discriminator fake images")
                     inv_loss = losses.max_margin_loss(model(fake_aug), fake_labels)
-                    print("Calculated max margin loss")
-                    
+
                     inv_losses.append(inv_loss.item())
                     dis_real = None
 

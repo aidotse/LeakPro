@@ -125,8 +125,9 @@ class AttackPLGMI(AbstractMINV):
                 pseudo_data.append((self.public_dataloader.dataset[index][0], i))
 
         logger.info("Created pseudo dataloader")
+        # We want to set the default device to the sampler in the returned dataloader to be on device
 
-        return DataLoader(pseudo_data, batch_size=self.batch_size, shuffle=True)
+        return DataLoader(pseudo_data, batch_size=self.batch_size, shuffle=True, generator=torch.Generator(device=self.device))
 
 
     def prepare_attack(self:Self) -> None:
@@ -156,12 +157,6 @@ class AttackPLGMI(AbstractMINV):
         self.dis_optimizer = torch.optim.Adam(self.discriminator.parameters(), lr=self.dis_lr,
                                                betas=(self.dis_beta1, self.dis_beta2))
 
-        # Augmentations for generated images. TODO: Move this to a image modality extension
-        self.aug_list = kornia.augmentation.container.ImageSequential(
-            kornia.augmentation.ColorJitter(brightness=0.2, contrast=0.2, p=0.5),
-            kornia.augmentation.RandomHorizontalFlip(),
-            kornia.augmentation.RandomRotation(5),
-        ).to(self.device)
 
         # Train the GAN
 
@@ -180,7 +175,6 @@ class AttackPLGMI(AbstractMINV):
                                         n_dis  = self.n_dis,
                                         num_classes = self.num_classes,
                                         device = self.device,
-                                        aug_list = self.aug_list,
                                         alpha = self.alpha,
                                         log_interval = self.log_interval,
                                         sample_from_generator = self.gan_handler.sample_from_generator)

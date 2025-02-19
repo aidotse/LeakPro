@@ -11,7 +11,7 @@ audit:  # Configurations for auditing
       gamma: 2.0
       offline_a: 0.33 # parameter from which we compute p(x) from p_OUT(x) such that p_IN(x) = a p_OUT(x) + b.
       offline_b: 0.66
-      num_classes: 2500
+      num_classes: 500
       
       
 
@@ -39,12 +39,14 @@ generator:
   model_class: "ResNetGenerator"
   init_params:
     dim_z: 256
-    num_classes: 2500
+    num_classes: 500
     bottom_width: 4
    
 discriminator:
   module_path: "./utils/discriminator.py"
   model_class: "SNResNetProjectionDiscriminator"
+  init_params:
+    num_classes: 500
 
 public_dataset:
   # path to public dataset
