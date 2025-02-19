@@ -38,7 +38,6 @@ class AttackPLGMI(AbstractMINV):
 
         """
         self.configs = configs
-        # TODO: There are some optimizer specific parameters that need to be set here.
         self.num_classes = configs.get("num_classes") # TODO: fail check
         self.batch_size = configs.get("batch_size", 32)
         self.top_n = configs.get("top_n", 10)
