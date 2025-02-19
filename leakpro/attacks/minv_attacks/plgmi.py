@@ -1,7 +1,6 @@
 """Implementation of the PLGMI attack."""
-import kornia
 import torch
-from torch.nn import functional as F
+from torch.nn import functional as F  # noqa: N812
 from torch.utils.data import DataLoader
 
 from leakpro.attacks.minv_attacks.abstract_minv import AbstractMINV
@@ -38,6 +37,7 @@ class AttackPLGMI(AbstractMINV):
             configs (dict): Configuration parameters for the attack.
 
         """
+        self.configs = configs
         # TODO: There are some optimizer specific parameters that need to be set here.
         self.num_classes = configs.get("num_classes") # TODO: fail check
         self.batch_size = configs.get("batch_size", 32)
@@ -58,6 +58,7 @@ class AttackPLGMI(AbstractMINV):
         self.dis_beta2 = configs.get("dis_beta2", 0.9)
         # Paths
         self.pseudo_label_path = configs.get("pseudo_label_path")
+        self.output_dir = configs.get("output_dir")
         # Define the validation dictionary as: {parameter_name: (parameter, min_value, max_value)}
         validation_dict = {
             # alpha, 0 to inf
@@ -90,7 +91,6 @@ class AttackPLGMI(AbstractMINV):
         # TODO: Does this go into modality extension; image?
         logger.info("Performing top-n selection for pseudo labels")
         self.target_model = self.handler.target_model
-
         self.target_model.eval()
         all_confidences = []
         for images, _ in self.public_dataloader:
@@ -115,7 +115,7 @@ class AttackPLGMI(AbstractMINV):
         for i in range(self.num_classes):
             pseudo_map[i] = sorted(pseudo_map[i], key=lambda x: x[1], reverse=True)
 
-        # keep only top_n entries in each element of pseudo_map
+        # Keep only top_n entries in each element of pseudo_map
         pseudo_map = [pseudo_map[i][:self.top_n] for i in range(self.num_classes)]
 
         # Create pseudo dataloader from pseudo_map
@@ -126,7 +126,6 @@ class AttackPLGMI(AbstractMINV):
 
         logger.info("Created pseudo dataloader")
         # We want to set the default device to the sampler in the returned dataloader to be on device
-
         return DataLoader(pseudo_data, batch_size=self.batch_size, shuffle=True, generator=torch.Generator(device=self.device))
 
 
@@ -134,7 +133,7 @@ class AttackPLGMI(AbstractMINV):
         """Prepare the attack."""
         logger.info("Preparing attack")
 
-        self.gan_handler = GANHandler(self.handler)
+        self.gan_handler = GANHandler(self.handler, configs=self.configs)
         # TODO: Change structure of how we load data, handler should do this, not gan_handler
         # Get public dataloader
         self.public_dataloader = self.gan_handler.get_public_data(self.batch_size)
@@ -151,9 +150,7 @@ class AttackPLGMI(AbstractMINV):
         self.dis_optimizer = torch.optim.Adam(self.discriminator.parameters(), lr=self.dis_lr,
                                                betas=(self.dis_beta1, self.dis_beta2))
 
-
         # Train the GAN
-
         if not self.gan_handler.trained_bool:
             logger.info("GAN not trained, getting psuedo labels")
             # Top-n-selection to get pseudo labels
@@ -174,7 +171,8 @@ class AttackPLGMI(AbstractMINV):
                                         alpha = self.alpha,
                                         log_interval = self.log_interval,
                                         sample_from_generator = self.gan_handler.sample_from_generator)
-
+            # Save generator
+            # self.gan_handler.save_generator(self.generator, self.output_dir + "/trained_models/plgmi_generator.pth")
             self.gan_handler.trained_bool = True
         else:
             logger.info("GAN already trained, skipping training")
@@ -186,4 +184,34 @@ class AttackPLGMI(AbstractMINV):
         """Run the attack."""
         logger.info("Running the PLG-MI attack")
         # Use trained generator to generate samples and evaluate
-        pass
+        # Use generator to generate samples for each class
+        self.generator.eval()
+        self.evaluation_model = self.handler.target_model # TODO: Change to evaluation model
+        self.evaluation_model.eval()
+        generated_samples = []
+
+        # Send generator to device
+        self.generator.to(self.device)
+        self.evaluation_model.to(self.device)
+        logger.info("Generating samples for each class")
+        # Generate samples of each class
+        for i in range(self.num_classes):
+            generated_samples.append(self.gan_handler.sample_from_generator(self.generator, self.num_classes,
+                                                                            1, self.device,
+                                                                            self.generator.dim_z, label=i))
+        logger.info("Evaluating generated samples")
+        # Evaluate the generated samples by using the evaluation model
+        results = []
+        for i in range(self.num_classes):
+            #print(generated_samples[i])
+            predictions = self.evaluation_model(generated_samples[i][0])
+            # Make predictions into predicted label
+            predicted_label = torch.argmax(predictions, dim=1)
+            results.append(predicted_label == i)
+        # Compute accuracy
+        accuracy = sum(results) / len(results)
+        logger.info(f"Accuracy: {accuracy.item()}")
+        # Return the results
+        leakpro_results = []
+        leakpro_results.append(accuracy.item())
+        return leakpro_results
