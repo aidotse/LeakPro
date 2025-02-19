@@ -16,6 +16,22 @@ audit:  # Configurations for auditing
       alpha: 0.2 # Float number for indicating the weight of the gradient penalty
       log_interval: 10 # Integer number for indicating the interval for logging the information
       num_classes: &n_cls 500
+      generator:
+      module_path: "./utils/generator.py"
+      model_class: "ResNetGenerator"
+      checkpoint_path: "generator.pth"
+      init_params:
+        dim_z: *dim_z
+        num_classes: *n_cls
+        bottom_width: 4
+      
+    discriminator:
+      module_path: "./utils/discriminator.py"
+      model_class: "SNResNetProjectionDiscriminator"
+      checkpoint_path: "discriminator.pth"
+      init_params:
+        num_classes: *n_cls
+
       
 
   output_dir: "./leakpro_output"
@@ -30,30 +46,7 @@ target:
   target_folder: "./target"
   data_path: "./data/celebaA_data.pkl"
 
-shadow_model:
-  
-distillation_model:
-
-## TODO: Put under plgmi instead of here
-generator:
-  module_path: "./utils/generator.py"
-  model_class: "ResNetGenerator"
-  checkpoint_path: "generator.pth"
-  init_params:
-    dim_z: *dim_z
-    num_classes: *n_cls
-    bottom_width: 4
-   
-discriminator:
-  module_path: "./utils/discriminator.py"
-  model_class: "SNResNetProjectionDiscriminator"
-  checkpoint_path: "discriminator.pth"
-  init_params:
-    num_classes: *n_cls
-
 public_dataset:
   # path to public dataset
   public_data_path: "./data/celebaA_aux_data.pkl"
 
-  
-  # TODO: Move num_classes to somewhere so we only have to load it from one place
