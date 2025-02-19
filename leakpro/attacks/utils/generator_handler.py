@@ -22,14 +22,14 @@ class GeneratorHandler(ModelHandler):
         self.trained_bool = False
         logger.info(f"Initialized GeneratorHandler with caller: {caller}")
 
-
     def _setup_generator_configs(self) -> None:
-        """Load generator-specific configurations (e.g., generator path, params)."""
+        # Redo as above, however now "generator" and "module_path" is under plgmi too, so we need to get it from there
+        # TODO: Fix this, not correct. We want to set the configs to default to the current attack, as done previsouly. More general this way.
         logger.info("Setting up generator configurations")
-        self.generator_path = self.handler.configs.get("generator", {}).get("module_path")
-        self.generator_class = self.handler.configs.get("generator", {}).get("model_class")
-        self.gen_init_params = self.handler.configs.get("generator", {}).get("init_params", {})
-        self.generator_checkpoint = self.handler.configs.get("generator", {}).get("checkpoint_path", None)
+        self.generator_path = self.handler.configs.get("plgmi", {}).get("generator", {}).get("module_path")
+        self.generator_class = self.handler.configs.get("plgmi", {}).get("generator", {}).get("model_class")
+        self.gen_init_params = self.handler.configs.get("plgmi", {}).get("generator", {}).get("init_params", {})
+        self.generator_checkpoint = self.handler.configs.get("plgmi", {}).get("generator", {}).get("checkpoint_path", None)
         logger.info(f"Generator path: {self.generator_path}, Generator class: {self.generator_class}")
         if self.generator_path and self.generator_class:
             self.generator_blueprint = self._import_model_from_path(self.generator_path, self.generator_class)

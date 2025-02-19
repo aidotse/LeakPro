@@ -21,11 +21,13 @@ class GANHandler(GeneratorHandler):
 
     def _setup_discriminator_configs(self) -> None:
         """Load discriminator-specific configurations (e.g., discriminator path, params)."""
+        # TODO: Fix this, not correct. We want to set the configs to default to the current attack, as done previsouly. More general this way.
         logger.info("Setting up discriminator configurations")
-        self.discriminator_path = self.handler.configs.get("discriminator", {}).get("module_path")
-        self.discriminator_class = self.handler.configs.get("discriminator", {}).get("model_class")
-        self.disc_init_params = self.handler.configs.get("discriminator", {}).get("init_params", {})
-        self.discriminator_checkpoint = self.handler.configs.get("discriminator", {}).get("checkpoint_path", None)
+        self.discriminator_path = self.handler.configs.get("plgmi", {}).get("discriminator", {}).get("module_path")
+        self.discriminator_class = self.handler.configs.get("plgmi", {}).get("discriminator", {}).get("model_class")
+        self.disc_init_params = self.handler.configs.get("plgmi", {}).get("discriminator", {}).get("init_params", {})
+        self.discriminator_checkpoint = self.handler.configs.get("plgmi", {}).get("discriminator", {}).get("checkpoint_path", None)
+        logger.info(f"Discriminator path: {self.discriminator_path}, Discriminator class: {self.discriminator_class}")
         # Check that discriminator class is provided, else raise an error
         if self.discriminator_path and self.discriminator_class:
             self.discriminator_blueprint = self._import_model_from_path(self.discriminator_path, self.discriminator_class)
