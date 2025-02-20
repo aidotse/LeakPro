@@ -183,6 +183,7 @@ class AttackPLGMI(AbstractMINV):
         """Run the attack."""
         logger.info("Running the PLG-MI attack")
         # Define image metrics class
-        image_metrics = ImageMetrics(self.handler, self.gan_handler, self.configs)
+        image_metrics = ImageMetrics(self.handler, self.gan_handler, 
+                                     self.handler.configs.get("audit", {}).get("reconstruction", {}))
         logger.info(image_metrics.results)
         return image_metrics.results

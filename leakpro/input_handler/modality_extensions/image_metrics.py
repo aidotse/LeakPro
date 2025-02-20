@@ -1,7 +1,6 @@
 """ImageMetrics class for computing image metrics."""
 import numpy as np
 import torch
-from torch.nn import Module
 from torch.utils.data import DataLoader
 
 from leakpro.attacks.utils.generator_handler import GeneratorHandler
@@ -14,7 +13,7 @@ class ImageMetrics:
 
     def __init__(self,  handler: AbstractInputHandler, generator_handler: GeneratorHandler, configs: dict) -> None:
         """Initialize the ImageMetrics class."""
-        super().__init__(handler)
+        self.handler = handler
         self.generator_handler = generator_handler
         self.generator = self.generator_handler.get_generator()
         self.evaluation_model = self.handler.target_model # TODO: Change to evaluation model from configs
@@ -25,15 +24,11 @@ class ImageMetrics:
         self._configure_metrics(configs)
         # Compute desired metrics from configs
         self.test_dict = {
-            "accuracy": self.compute_accuracy(),
+            "accuracy": self.compute_accuracy,
         }
-
+        logger.info(configs)
         self.results = {}
-
         self.metric_scheduler()
-
-
-
 
     def _configure_metrics(self, configs: dict) -> None:
         """Configure the metrics parameters.
@@ -52,45 +47,40 @@ class ImageMetrics:
 
     def metric_scheduler(self) -> None:
         """Schedule the metrics to be computed."""
-        tests = self.configs.get("tests", [])
+        tests = self.configs.get("metrics", [])
         # If tests empty, return
         if not tests:
             logger.warning("No tests specified in the config.")
             return
 
-        self.generate_samples()
         for test in tests:
             if test in self.test_dict:
                 self.test_dict[test]()
             else:
                 logger.warning(f"Test {test} not found in the test dictionary.")
 
-    def generate_samples(self) -> None:
-        """Generate samples from the generator."""
-        logger.info("Generating samples for the audited classes.")
-        self.generator.eval()
-        self.generated_samples = []
-        for i in range(self.num_audited_classes):
-            self.generated_samples.append(self.generator_handler.sample_from_generator(self.generator,
-                                                                                       self.num_audited_classes,
-                                                                                       self.num_class_samples,
-                                                                                       self.device,
-                                                                                       self.generator.dim_z,
-                                                                                       label=i))
-
     def compute_accuracy(self) -> None:
         """Compute accuracy for generated samples."""
         logger.info("Computing accuracy for generated samples.")
         self.evaluation_model.eval()
+        self.evaluation_model.to(self.device)
+        self.generator.eval()
+        self.generator.to(self.device)
         correct_predictions = []
         for i in range(self.num_audited_classes):
+            generated_sample = self.generator_handler.sample_from_generator(self.generator,
+                                                                            self.num_audited_classes,
+                                                                            self.num_class_samples,
+                                                                            self.device,
+                                                                            self.generator.dim_z,
+                                                                            label=i)
             for j in range(self.num_class_samples):
                 with torch.no_grad():
-                    output = self.evaluation_model(self.generated_samples[i][j])
+                    output = self.evaluation_model(generated_sample[j])
                     prediction = torch.argmax(output, dim=1)
                     correct_predictions.append(prediction == i)
-        self.accuracy = np.mean(correct_predictions)
-        self.accuracy_std = np.std(correct_predictions)
+        self.accuracy = torch.mean(torch.cat(correct_predictions).float())
+        self.accuracy_std = torch.std(torch.cat(correct_predictions).float())
         logger.info(f"Accuracy: {self.accuracy.item()}")
 
         self.results["accuracy"] = self.accuracy.item()
