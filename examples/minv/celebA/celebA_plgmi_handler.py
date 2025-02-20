@@ -7,6 +7,7 @@ from tqdm import tqdm
 from leakpro import AbstractInputHandler
 from leakpro.attacks.utils import losses
 import kornia
+import time
 
 class CelebA_InputHandler(AbstractInputHandler):
     """Class to handle the user input for the CelebA dataset for plgmi attack."""
@@ -172,7 +173,9 @@ class CelebA_InputHandler(AbstractInputHandler):
 
             if i % log_interval == 0:
                 print(
-                        'iteration: {:05d}/{:05d}, loss gen: {:05f}, loss dis {:05f}, inv loss {:05f}, target acc {:04f}'.format(
+                        'iteration: {:05d}/{:05d}, loss gen: {:05f}, loss dis {:05f}, inv loss {:05f}, target acc {:04f}, time {}'.format(
                             i, n_iter, _l_g, cumulative_loss_dis, cumulative_inv_loss,
-                            cumulative_target_acc, ))
+                            cumulative_target_acc, time.strftime("%H:%M:%S")))
                 
+        torch.save(gen.state_dict(), './gen.pth')
+        torch.save(dis.state_dict(), './dis.pth')
