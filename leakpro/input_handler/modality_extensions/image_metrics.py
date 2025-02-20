@@ -19,8 +19,6 @@ class ImageMetrics:
         self.generator = self.generator_handler.get_generator()
         self.evaluation_model = self.handler.target_model # TODO: Change to evaluation model from configs
         self.target_model = self.handler.target_model
-        logger.info(f"Target model: {self.target_model}")
-        logger.info(f"Evaluation model: {self.evaluation_model}")
         logger.info("Configuring ImageMetrics")
         self._configure_metrics(configs)
         self.test_dict = {
@@ -83,8 +81,9 @@ class ImageMetrics:
                     output = self.evaluation_model(generated_sample[j])
                     prediction = torch.argmax(output, dim=1)
                     correct_predictions.append(prediction == i)
-        self.accuracy = torch.mean(torch.cat(correct_predictions).float())
-        self.accuracy_std = torch.std(torch.cat(correct_predictions).float())
+        correct_predictions = torch.cat(correct_predictions).float()
+        self.accuracy = correct_predictions.mean()
+        self.accuracy_std = correct_predictions.std() / torch.sqrt(torch.tensor(len(correct_predictions), dtype=torch.float))
         logger.info(f"Accuracy: {self.accuracy.item()}")
 
         self.results["accuracy"] = self.accuracy.item()
