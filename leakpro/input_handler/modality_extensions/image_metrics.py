@@ -108,12 +108,12 @@ class ImageMetrics:
             transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
         ])
 
-        def tensor_to_pil(tensor):
+        def tensor_to_pil(tensor):  # noqa: ANN001, ANN202
             """Convert tensor image (C, H, W) -> PIL Image."""
             tensor = tensor.detach().cpu().clamp(0, 1)  # Ensure values are in [0, 1]
             return transforms.ToPILImage()(tensor)
 
-        def get_features(dataloader, model):
+        def get_features(dataloader, model):  # noqa: ANN001, ANN202
             """Extract features from images using InceptionV3."""
             features = []
             with torch.no_grad():
@@ -126,7 +126,7 @@ class ImageMetrics:
                     features.append(feats)
             return torch.cat(features, dim=0).cpu().numpy()
 
-        def get_generated_features():
+        def get_generated_features():  # noqa: ANN202
             """Generate fake images and extract features."""
             self.generator.eval()
             features = []
