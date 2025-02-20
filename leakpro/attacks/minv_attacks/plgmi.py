@@ -37,15 +37,16 @@ class AttackPLGMI(AbstractMINV):
             configs (dict): Configuration parameters for the attack.
 
         """
+        # General parameters
         self.configs = configs
         self.num_classes = configs.get("num_classes") # TODO: fail check
         self.batch_size = configs.get("batch_size", 32)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # PLG-MI parameters
         self.top_n = configs.get("top_n", 10)
-        # General parameters
         self.alpha = configs.get("alpha", 0.1)
         self.n_iter = configs.get("n_iter", 1000)
         self.log_interval = configs.get("log_interval", 100)
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # Generator parameters
         self.gen_lr = configs.get("gen_lr", 0.0002) # Learning rate of the generator
         self.gen_beta1 = configs.get("gen_beta1", 0.0) # Beta1 parameter of the generator
@@ -63,6 +64,7 @@ class AttackPLGMI(AbstractMINV):
             # alpha, 0 to inf
             "alpha": (self.alpha, 0, 1000), # 0 to inf
             "n_dis": (self.n_dis, 1, 1000), # 1 to inf
+            # TODO: Add
         }
 
         # Validate parameters
@@ -171,7 +173,8 @@ class AttackPLGMI(AbstractMINV):
                                         log_interval = self.log_interval,
                                         sample_from_generator = self.gan_handler.sample_from_generator)
             # Save generator
-            # self.gan_handler.save_generator(self.generator, self.output_dir + "/trained_models/plgmi_generator.pth")
+            # self.gan_handler.save_generator(self.generator,
+            #                                 self.output_dir + "/trained_models/plgmi_generator.pth")  # noqa: ERA001
             self.gan_handler.trained_bool = True
         else:
             logger.info("GAN already trained, skipping training")
@@ -183,7 +186,8 @@ class AttackPLGMI(AbstractMINV):
         """Run the attack."""
         logger.info("Running the PLG-MI attack")
         # Define image metrics class
-        image_metrics = ImageMetrics(self.handler, self.gan_handler, 
+        image_metrics = ImageMetrics(self.handler, self.gan_handler,
                                      self.handler.configs.get("audit", {}).get("reconstruction", {}))
         logger.info(image_metrics.results)
+        # TODO: Implement a class with a .save function.
         return image_metrics.results

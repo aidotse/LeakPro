@@ -1,7 +1,8 @@
 """ImageMetrics class for computing image metrics."""
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
+from scipy.linalg import sqrtm
+from torchvision import models, transforms
 
 from leakpro.attacks.utils.generator_handler import GeneratorHandler
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
@@ -24,9 +25,12 @@ class ImageMetrics:
         self._configure_metrics(configs)
         self.test_dict = {
             "accuracy": self.compute_accuracy,
+            "fid" : self.compute_fid,
         }
         logger.info(configs)
         self.results = {}
+        # TODO: This loading functionality should not be in generator_handler
+        self.private_dataloader = self.generator_handler.get_private_data(self.batch_size)
         # Compute desired metrics from configs
         self.metric_scheduler()
 
@@ -86,11 +90,81 @@ class ImageMetrics:
         self.results["accuracy"] = self.accuracy.item()
         self.results["accuracy_std"] = self.accuracy_std.item()
 
+
     def compute_fid(self) -> None:
-        """Compute the Frechet Inception Distance."""
-        pass
+        """Compute the Frechet Inception Distance (FID) between real and generated images."""
+        logger.info("Computing FID between real and generated samples.")
+
+        # Load InceptionV3 model for feature extraction
+        inception_model = models.inception_v3(weights=models.Inception_V3_Weights.DEFAULT, transform_input=False)
+        inception_model.fc = torch.nn.Identity()  # Remove final classification layer
+        inception_model.eval()
+        inception_model.to(self.device)
+
+        # Image transformation for InceptionV3 input
+        transform = transforms.Compose([
+            transforms.Resize((299, 299)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+        ])
+
+        def tensor_to_pil(tensor):  # noqa: ANN001, ANN202
+            """Convert tensor image (C, H, W) -> PIL Image."""
+            tensor = tensor.detach().cpu().clamp(0, 1)  # Ensure values are in [0, 1]
+            return transforms.ToPILImage()(tensor)
+
+        def get_features(dataloader, model):  # noqa: ANN001, ANN202
+            """Extract features from images using InceptionV3."""
+            features = []
+            with torch.no_grad():
+                for images, _ in dataloader:
+                    images = images.to(self.device)
+                    pil_images = [tensor_to_pil(img) for img in images]  # Convert each tensor to PIL
+                    transformed_images = torch.stack([transform(img) for img in pil_images]).to(self.device)
+
+                    feats = model(transformed_images)
+                    features.append(feats)
+            return torch.cat(features, dim=0).cpu().numpy()
+
+        def get_generated_features():  # noqa: ANN202
+            """Generate fake images and extract features."""
+            self.generator.eval()
+            features = []
+            with torch.no_grad():
+                for _ in range(len(self.private_dataloader)):  # Match number of batches
+                    z = torch.randn(self.batch_size, self.generator.dim_z, device=self.device)
+                    fake_images = self.generator(z)
+
+                    pil_images = [tensor_to_pil(img) for img in fake_images]
+                    transformed_images = torch.stack([transform(img) for img in pil_images]).to(self.device)
+
+                    feats = inception_model(transformed_images)
+                    features.append(feats)
+            return torch.cat(features, dim=0).cpu().numpy()
+
+        # Extract features from real and generated images
+        real_features = get_features(self.private_dataloader, inception_model)
+        fake_features = get_generated_features()
+
+        # Compute mean and covariance of features
+        mu_real, sigma_real = real_features.mean(axis=0), np.cov(real_features, rowvar=False)
+        mu_fake, sigma_fake = fake_features.mean(axis=0), np.cov(fake_features, rowvar=False)
+
+        # Calculate FID score
+        diff = mu_real - mu_fake
+        covmean, _ = sqrtm(sigma_real @ sigma_fake, disp=False)
+        if np.iscomplexobj(covmean):
+            covmean = covmean.real
+
+        fid_score = diff.dot(diff) + np.trace(sigma_real + sigma_fake - 2 * covmean)
+
+        # Store results
+        self.results["fid"] = fid_score
+        logger.info(f"FID score: {fid_score}")
+
+
 
     def compute_knn_dist(self) -> None:
-        """Compute the k-nearest neighbors."""
-        self.private_population = self.generator_handler
-        pass
+        """Compute the k-NN distance."""
+    pass
+
