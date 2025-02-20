@@ -7,6 +7,7 @@ from leakpro.attacks.minv_attacks.abstract_minv import AbstractMINV
 from leakpro.attacks.utils import losses
 from leakpro.attacks.utils.gan_handler import GANHandler
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.modality_extensions.image_metrics import ImageMetrics
 from leakpro.metrics.attack_result import MinvResult
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
@@ -16,7 +17,6 @@ class AttackPLGMI(AbstractMINV):
     """Class that implements the PLGMI attack."""
 
     def __init__(self: Self, handler: AbstractInputHandler, configs: dict) -> None:
-        super().__init__(handler)
         """Initialize the PLG-MI attack.
 
         Args:
@@ -25,7 +25,7 @@ class AttackPLGMI(AbstractMINV):
             configs (dict): Configuration parameters for the attack.
 
         """
-
+        super().__init__(handler)
         logger.info("Configuring PLG-MI attack")
         self._configure_attack(configs)
 
@@ -182,35 +182,8 @@ class AttackPLGMI(AbstractMINV):
     def run_attack(self:Self) -> MinvResult:
         """Run the attack."""
         logger.info("Running the PLG-MI attack")
-        # Use trained generator to generate samples and evaluate
-        # Use generator to generate samples for each class
-        self.generator.eval()
-        self.evaluation_model = self.handler.target_model # TODO: Change to evaluation model
-        self.evaluation_model.eval()
-        generated_samples = []
-
-        # Send generator to device
-        self.generator.to(self.device)
-        self.evaluation_model.to(self.device)
-        logger.info("Generating samples for each class")
-        # Generate samples of each class
-        for i in range(self.num_classes):
-            generated_samples.append(self.gan_handler.sample_from_generator(self.generator, self.num_classes,
-                                                                            1, self.device,
-                                                                            self.generator.dim_z, label=i))
-        logger.info("Evaluating generated samples")
-        # Evaluate the generated samples by using the evaluation model
-        results = []
-        for i in range(self.num_classes):
-            #print(generated_samples[i])
-            predictions = self.evaluation_model(generated_samples[i][0])
-            # Make predictions into predicted label
-            predicted_label = torch.argmax(predictions, dim=1)
-            results.append(predicted_label == i)
-        # Compute accuracy
-        accuracy = sum(results) / len(results)
-        logger.info(f"Accuracy: {accuracy.item()}")
-        # Return the results
-        leakpro_results = []
-        leakpro_results.append(accuracy.item())
-        return leakpro_results
+        # Define image metrics class
+        image_metrics = ImageMetrics(self.handler, self.gan_handler, 
+                                     self.handler.configs.get("audit", {}).get("reconstruction", {}))
+        logger.info(image_metrics.results)
+        return image_metrics.results

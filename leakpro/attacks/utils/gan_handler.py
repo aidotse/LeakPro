@@ -33,12 +33,19 @@ class GANHandler(GeneratorHandler):
         else:
             raise ValueError("Discriminator path and class must be specified in the config.")
 
-    def get_discriminator(self) -> Module:
+    def load_discriminator(self) -> Module:
         """Instantiate and return a discriminator model."""
-        discriminator = self.discriminator_blueprint(**self.disc_init_params)
+        self.discriminator = self.discriminator_blueprint(**self.disc_init_params)
         if self.discriminator_checkpoint and os.path.exists(self.discriminator_checkpoint):
-            discriminator.load_state_dict(torch.load(self.discriminator_checkpoint))
-        return discriminator
+            logger.info(f"Loading discriminator model from {self.discriminator_checkpoint}")
+            self.discriminator.load_state_dict(torch.load(self.discriminator_checkpoint))
+        return self.discriminator
+
+    def get_discriminator(self) -> Module:
+        """Return the discriminator model."""
+        if not hasattr(self, "discriminator"):
+            self.discriminator = self.load_discriminator()
+        return self.discriminator
 
     def train(self) -> None:
         """Train the GAN model (generator and discriminator)."""

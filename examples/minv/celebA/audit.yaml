@@ -1,25 +1,26 @@
 
 audit:  # Configurations for auditing
+  
   random_seed: 1234  # Integer specifying the random seed
   attack_list:
     plgmi:
       n_dis: 2 # Integer number for indicating the number of discriminator updates per generator update
       n_iter: 10000 # Integer number for indicating the iterations for training the GAN
-      batch_size: 128 # Integer number for indicating batch size for training the GAN
+      batch_size: 32 # Integer number for indicating batch size for training the GAN
       gen_lr: 0.0005 # Float number for indicating learning rate for training the generator
       dis_lr: 0.0002 # Float number for indicating learning rate for training the discriminator
       gen_beta1: 0.0 # Float number for indicating beta1 for Adam optimizer
       gen_beta2: 0.9 # Float number for indicating beta2 for Adam optimizer
       dis_beta1: 0.0 # Float number for indicating beta1 for Adam optimizer
       dis_beta2: 0.9 # Float number for indicating beta2 for Adam optimizer
-      dim_z: &dim_z 256 # Integer number for indicating the dimension of the latent space
+      dim_z: &dim_z 128 # Integer number for indicating the dimension of the latent space
       alpha: 0.2 # Float number for indicating the weight of the gradient penalty
       log_interval: 10 # Integer number for indicating the interval for logging the information
-      num_classes: &n_cls 2500
+      num_classes: &n_cls 500
       generator:
         module_path: "./utils/generator.py"
         model_class: "ResNetGenerator"
-        checkpoint_path: #"generator.pth"
+        checkpoint_path: "generator.pth"
         init_params:
           dim_z: *dim_z
           num_classes: *n_cls
@@ -27,9 +28,17 @@ audit:  # Configurations for auditing
       discriminator:
         module_path: "./utils/discriminator.py"
         model_class: "SNResNetProjectionDiscriminator"
-        checkpoint_path: #"discriminator.pth"
+        checkpoint_path: "discriminator.pth"
         init_params:
           num_classes: *n_cls
+  reconstruction:
+    num_class_samples: 1 # Number of samples to generate for each class
+    num_audited_classes: *n_cls # Number of classes to audit
+    metrics:
+      accuracy:
+
+
+
       
 
   output_dir: "./leakpro_output"
