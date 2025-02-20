@@ -178,6 +178,4 @@ class AbstractMINV(ABC):
             Result(s) of the metric.
 
         """
-
-        # TODO: Think about args and return type
         pass
