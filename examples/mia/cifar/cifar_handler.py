@@ -51,6 +51,7 @@ class CifarInputHandler(AbstractInputHandler):
             for inputs, labels in tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}"):
                 labels = labels.long()
                 inputs, labels = inputs.to(gpu_or_cpu, non_blocking=True), labels.to(gpu_or_cpu, non_blocking=True)
+                
                 optimizer.zero_grad()
                 outputs = model(inputs)
                 loss = criterion(outputs, labels)
@@ -59,9 +60,9 @@ class CifarInputHandler(AbstractInputHandler):
                 optimizer.step()
 
                 # Accumulate performance of shadow model
-                train_acc += pred.eq(labels.data.view_as(pred)).sum()
+                train_acc += pred.eq(labels.data.view_as(pred)).sum().item()
                 total_samples += labels.size(0)
-                train_loss += loss.item()
+                train_loss += loss.item() * labels.size(0) 
 
         avg_train_loss = train_loss / total_samples
         train_accuracy = train_acc / total_samples  

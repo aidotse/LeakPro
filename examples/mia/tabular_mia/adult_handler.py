@@ -54,12 +54,12 @@ class AdultInputHandler(AbstractInputHandler):
                 output = model(data)
 
                 loss = criterion(output, target)
-                pred = sigmoid(output) >= 0.5
+                pred = output >= 0.5
                 train_acc += pred.eq(target).sum().item()
 
                 loss.backward()
                 optimizer.step()
-                train_loss += loss.item()
+                train_loss += loss.item() * target.size(0)
                 total_samples += target.size(0)
 
         train_acc = train_acc/total_samples

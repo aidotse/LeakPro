@@ -39,7 +39,7 @@ class CelebAHQInputHandler(AbstractInputHandler):
         for epoch in range(epochs):
             train_loss, train_acc , total_samples= 0.0, 0, 0
             model.train()
-            for inputs, labels in tqdm(dataloader, desc="Training Progress"):
+            for inputs, labels in tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}"):
                 inputs, labels = inputs.to(gpu_or_cpu), labels.to(gpu_or_cpu)
                 optimizer.zero_grad()
 
@@ -51,9 +51,9 @@ class CelebAHQInputHandler(AbstractInputHandler):
                 # Performance metrics
                 preds = outputs.argmax(dim=1)
                 train_acc += (preds == labels).sum().item()
-                train_loss += labels.size(0)
+                train_loss += loss.item()* labels.size(0)
 
-        avg_train_loss = train_loss / total_samples
+        avg_train_loss = train_loss / len(dataloader)
         train_accuracy = train_acc / total_samples  
         model.to("cpu")
 
