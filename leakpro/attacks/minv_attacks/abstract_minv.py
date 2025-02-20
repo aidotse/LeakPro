@@ -68,7 +68,8 @@ class AbstractMINV(ABC):
             Dataloader: The sampled data.
 
         """
-        return self.handler.get_public_dataloader(data) if batch_size is None else self.handler.get_public_dataloader(data, batch_size)
+        return self.handler.get_public_dataloader(data) if batch_size is None \
+            else self.handler.get_public_dataloader(data, batch_size)
 
     def get_target_dataloader(self:Self, data:np.ndarray, batch_size:int=None)->DataLoader:
         """Function to get a dataloader from the target dataset.
@@ -83,7 +84,8 @@ class AbstractMINV(ABC):
             Dataloader: The sampled data.
 
         """
-        return self.handler.get_target_dataloader(data) if batch_size is None else self.handler.get_target_dataloader(data, batch_size)
+        return self.handler.get_target_dataloader(data) if batch_size is None \
+            else self.handler.get_target_dataloader(data, batch_size)
 
     @property
     def public_population(self:Self)-> List:
