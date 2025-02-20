@@ -68,7 +68,7 @@ class GANHandler(GeneratorHandler):
             batch_size (int): The number of samples to generate.
             device (torch.device): The device to perform the computation on.
             dim_z (int): The dimensionality of the latent space.
-            label (int): The optional class label to generate samples for.
+            label (int): The optional class label to generate samples for, otherwise random.
 
         Returns:
             tuple: A tuple containing the generated samples, the class labels, and the latent vectors.
