@@ -1,6 +1,5 @@
 
 audit:  # Configurations for auditing
-  
   random_seed: 1234  # Integer specifying the random seed
   attack_list:
     plgmi:

@@ -1,3 +1,4 @@
+"""Module for handling image data with preprocessing and normalization."""
 import numpy as np
 import torch
 from PIL import Image
@@ -34,7 +35,3 @@ class ImageExtension:
         """Preprocess a batch of images."""
         return torch.stack([self.preprocess_image(img) for img in images])
 
-    def get_dataloader(self: Self, batch_size: int):
-        """Placeholder method for getting a dataloader."""
-        # Implement this method to return a dataloader for your dataset
-        pass
