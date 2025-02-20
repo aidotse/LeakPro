@@ -22,12 +22,12 @@ class ImageMetrics:
         logger.info(f"Evaluation model: {self.evaluation_model}")
         logger.info("Configuring ImageMetrics")
         self._configure_metrics(configs)
-        # Compute desired metrics from configs
         self.test_dict = {
             "accuracy": self.compute_accuracy,
         }
         logger.info(configs)
         self.results = {}
+        # Compute desired metrics from configs
         self.metric_scheduler()
 
     def _configure_metrics(self, configs: dict) -> None:
@@ -85,3 +85,12 @@ class ImageMetrics:
 
         self.results["accuracy"] = self.accuracy.item()
         self.results["accuracy_std"] = self.accuracy_std.item()
+
+    def compute_fid(self) -> None:
+        """Compute the Frechet Inception Distance."""
+        pass
+
+    def compute_knn_dist(self) -> None:
+        """Compute the k-nearest neighbors."""
+        self.private_population = self.generator_handler
+        pass
