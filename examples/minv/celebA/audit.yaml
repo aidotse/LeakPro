@@ -36,10 +36,6 @@ audit:  # Configurations for auditing
     metrics:
       accuracy:
 
-
-
-      
-
   output_dir: "./leakpro_output"
   attack_type: "minv" #mia, gia
   modality: "image" #image, tabular
