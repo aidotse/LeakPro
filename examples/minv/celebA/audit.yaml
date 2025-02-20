@@ -1,5 +1,6 @@
 
 audit:  # Configurations for auditing
+  
   random_seed: 1234  # Integer specifying the random seed
   attack_list:
     plgmi:
@@ -30,6 +31,14 @@ audit:  # Configurations for auditing
         checkpoint_path: "discriminator.pth"
         init_params:
           num_classes: *n_cls
+  reconstruction:
+    num_class_samples: 1 # Number of samples to generate for each class
+    num_audited_classes: *n_cls # Number of classes to audit
+    metrics:
+      accuracy:
+      
+
+
       
 
   output_dir: "./leakpro_output"

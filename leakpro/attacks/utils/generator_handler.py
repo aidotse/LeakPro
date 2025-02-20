@@ -36,14 +36,21 @@ class GeneratorHandler(ModelHandler):
         else:
             raise ValueError("Generator path and class must be specified in the config.")
 
-    def get_generator(self) -> Module:
+    def load_generator(self) -> Module:
         """Instantiate and return a generator model."""
         logger.info("Getting generator model with init params: %s", self.gen_init_params)
-        generator = self.generator_blueprint(**self.gen_init_params)
+        self.generator = self.generator_blueprint(**self.gen_init_params)
         if self.generator_checkpoint and os.path.exists(self.generator_checkpoint):
-            generator.load_state_dict(torch.load(self.generator_checkpoint))
+            self.generator.load_state_dict(torch.load(self.generator_checkpoint))
+            logger.info(f"Loaded generator model from {self.generator_checkpoint}")
             self.trained_bool = True
-        return generator
+        return self.generator
+
+    def get_generator(self) -> Module:
+        """Return the generator model."""
+        if not hasattr(self, "generator"):
+            self.load_generator()
+        return self.generator
 
     def train(self) -> None:
         """Abstract training method for generator models. To be implemented by subclasses."""
@@ -52,7 +59,7 @@ class GeneratorHandler(ModelHandler):
             return
         raise NotImplementedError("Subclasses must implement the train method")
 
-    def generate_samples(self) -> None:
+    def sample_from_generator(self) -> None:
         """Abstract sample generation method for generator models. To be implemented by subclasses."""
         raise NotImplementedError("Subclasses must implement the generate_samples method")
 
