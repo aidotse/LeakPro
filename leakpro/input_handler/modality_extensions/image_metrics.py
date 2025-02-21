@@ -133,7 +133,7 @@ class ImageMetrics:
                 for _ in range(len(self.private_dataloader)):  # Match number of batches
                     fake_images = self.generator_handler.sample_from_generator(self.generator,
                                                                             self.num_audited_classes,
-                                                                            self.batch_size // self.num_audited_classes,
+                                                                            self.num_class_samples,
                                                                             self.device,
                                                                             self.generator.dim_z
                                                                             )[0]
@@ -162,10 +162,8 @@ class ImageMetrics:
         fid_score = diff.dot(diff) + np.trace(sigma_real + sigma_fake - 2 * covmean)
 
         # Store results
-        self.results["fid"] = fid_score
-        logger.info(f"FID score: {fid_score}")
-
-
+        self.results["fid"] = fid_score.item()
+        logger.info(f"FID: {fid_score}")
 
     def compute_knn_dist(self) -> None:
         """Compute the k-NN distance."""
