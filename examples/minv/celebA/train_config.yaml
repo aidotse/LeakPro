@@ -12,8 +12,8 @@ train: # Configuration for training
 
 data: # Configuration for data
   dataset: celebA # String indicates the name of the dataset
-  f_train: 0.7 # Float number from 0 to 1 indicating the fraction of the train dataset
-  f_test: 0.3 # Float number from 0 to 1 indicating the size of the test set
+  f_train: 1.0 # Float number from 0 to 1 indicating the fraction of the train dataset
+  f_test: 0.0 # Float number from 0 to 1 indicating the size of the test set
   data_dir: ./data # String about where to save the data.
 
 gan:
