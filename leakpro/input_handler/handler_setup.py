@@ -160,7 +160,7 @@ def get_labels(self:Self, dataset_indices: np.ndarray, batch_size: int = 32) -> 
 
     # Iterate over the DataLoader to extract the labels
     for _, labels in dataloader:
-        all_labels.append(labels.numpy())  # Convert labels from tensors to NumPy arrays
+        all_labels.append(labels.numpy().astype(int)) # Convert labels from tensors to NumPy arrays
 
     return np.concatenate(all_labels)
 

@@ -1,14 +1,19 @@
-import copy, psycopg2, pandas as pd
+import copy
+
+import pandas as pd
+import psycopg2
+
 
 # TODO(mmd): Where should this go?
 # TODO(mmd): Rename
 # TODO(mmd): eliminate try/except. Just use conditionals.
 def get_values_by_name_from_df_column_or_index(data_df, colname):
-    """ Easily get values for named field, whether a column or an index
+    """Easily get values for named field, whether a column or an index
 
     Returns
     -------
     values : 1D array
+
     """
     try:
         values = data_df[colname]
@@ -25,9 +30,9 @@ class MIMIC_Querier():
         self,
         exclusion_criteria_template_vars={},
         query_args={}, # passed wholesale to psycopg2.connect
-        schema_name='mimiciii'
+        schema_name="mimiciii"
     ):
-        """ A class to facilitate repeated Queries to a MIMIC psql database """
+        """A class to facilitate repeated Queries to a MIMIC psql database"""
         self.exclusion_criteria_template_vars = {}
         self.query_args  = query_args
         self.schema_name = schema_name
@@ -54,7 +59,7 @@ class MIMIC_Querier():
         self.close()
         self.connection = psycopg2.connect(**self.query_args)
         self.cursor     = self.connection.cursor()
-        self.cursor.execute('SET search_path TO %s' % self.schema_name)
+        self.cursor.execute("SET search_path TO %s" % self.schema_name)
         self.connected = True
 
     def query(self, query_string=None, query_file=None, extra_template_vars={}):
@@ -64,7 +69,7 @@ class MIMIC_Querier():
         self.connect()
 
         if query_string is None:
-            with open(query_file, mode='r') as f: query_string = f.read()
+            with open(query_file, mode="r") as f: query_string = f.read()
 
         template_vars = copy.copy(self.exclusion_criteria_template_vars)
         template_vars.update(extra_template_vars)

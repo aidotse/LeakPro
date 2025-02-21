@@ -45,7 +45,7 @@ class AdultInputHandler(AbstractInputHandler):
 
         for e in tqdm(range(epochs), desc="Training Progress"):
             model.train()
-            train_acc, train_loss = 0.0, 0.0
+            train_acc, train_loss, total_samples = 0.0, 0.0, 0
 
             for data, target in dataloader:
                 target = target.float().unsqueeze(1)
@@ -54,14 +54,15 @@ class AdultInputHandler(AbstractInputHandler):
                 output = model(data)
 
                 loss = criterion(output, target)
-                pred = sigmoid(output) >= 0.5
+                pred = output >= 0.5
                 train_acc += pred.eq(target).sum().item()
 
                 loss.backward()
                 optimizer.step()
-                train_loss += loss.item()
+                train_loss += loss.item() * target.size(0)
+                total_samples += target.size(0)
 
-        train_acc = train_acc/len(dataloader.dataset)
-        train_loss = train_loss/len(dataloader)
+        train_acc = train_acc/total_samples
+        train_loss = train_loss/total_samples
 
         return {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}
