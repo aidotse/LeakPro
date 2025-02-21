@@ -1,7 +1,19 @@
+""" This script is used to separately train a GAN model on the CelebA dataset. 
+    Requres the following files:
+    - train_config.yaml: Configuration file for training the GAN, 
+    including generated .pkl files from main_celebA_minv.ipynb
+    - target_model.pkl: The target model
+    - model_metadata.pkl: Metadata for the target model
+    - data: Folder containing the CelebA dataset
+    
+"""
+
 import os
 import sys
 import yaml
-
+import torch
+from torch.nn import functional as F
+import kornia
 
 # Path to the dataset zip file
 data_folder = "./data"
@@ -11,12 +23,11 @@ project_root = os.path.abspath(os.path.join(os.getcwd(), "../../.."))
 sys.path.append(project_root)
 
 from examples.minv.celebA.utils.celebA_data import get_celebA_dataloader
-
-import torch
-from torch.nn import functional as F
-import numpy as np
 from examples.mia.celebA_HQ.utils.celeb_hq_model import ResNet18
-
+from examples.minv.celebA.utils.generator import ResNetGenerator
+from examples.minv.celebA.utils.discriminator import SNResNetProjectionDiscriminator
+import leakpro.attacks.utils.gan_losses as losses 
+from examples.minv.celebA.utils.celebA_data import get_celebA_pseudoloader
 
 # Load the config.yaml file
 with open('train_config.yaml', 'r') as file:
@@ -34,17 +45,9 @@ model = ResNet18(num_classes=num_classes)
 model.load_state_dict(torch.load('./target/target_model.pkl'))
 model.eval()
 
-from examples.minv.celebA.utils.celebA_data import get_celebA_pseudoloader
-
 pseudo_loader = get_celebA_pseudoloader(path, train_config, shuffle=True)
 
 # GAN training
-from examples.minv.celebA.utils.generator import ResNetGenerator
-from examples.minv.celebA.utils.discriminator import SNResNetProjectionDiscriminator
-import examples.minv.celebA.utils.losses as losses 
-import kornia
-import torch
-import torch.nn.functional as F
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -78,8 +81,6 @@ aug_list = kornia.augmentation.container.ImageSequential(
         kornia.augmentation.RandomHorizontalFlip(),
         kornia.augmentation.RandomRotation(5),
     ).to(device)
-
-
 
 model.to(device)
 model.eval()
@@ -140,12 +141,11 @@ for i in range(n_iter):
 
         loss_dis = dis_criterion(dis_fake, dis_real)
     
-        if loss_dis.item() > max(0.2*_l_g, 0.05):
         
-            dis.zero_grad()
-        
-            loss_dis.backward()
-            opt_dis.step()
+        dis.zero_grad()
+    
+        loss_dis.backward()
+        opt_dis.step()
 
         cumulative_loss_dis += loss_dis.item()
         dis_losses.append(cumulative_loss_dis/n_dis)

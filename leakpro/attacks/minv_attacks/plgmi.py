@@ -164,6 +164,7 @@ class AttackPLGMI(AbstractMINV):
             # Top-n-selection to get pseudo labels
             self.pseudo_loader = self.top_n_selection()
             logger.info("Training the GAN")
+            # TODO: Change this input structure to just pass the attack class
             self.handler.train_gan(pseudo_loader = self.pseudo_loader,
                                         gen = self.generator,
                                         dis = self.discriminator,
