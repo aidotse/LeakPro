@@ -65,9 +65,12 @@ class ReportHandler():
         """Save method for results."""
 
         self.logger.info(f"Saving results for {attack_name}")
-        config = AttackFactoryMIA.get_default_attack_config(attack_name) if config is None else config
+        attack_config = config.attack_list.get(attack_name, None)
         
-        result_data.save(path=self.report_dir, name=attack_name, config=config)
+        if attack_config is None:
+            attack_config = AttackFactoryMIA.attack_classes[attack_name].get_default_attack_config()
+            config.attack_list[attack_name] = attack_config
+        result_data.save(path=self.report_dir, name=attack_name, config=config.model_dump())
 
     def load_results(self:Self) -> None:
         """Load method for results."""

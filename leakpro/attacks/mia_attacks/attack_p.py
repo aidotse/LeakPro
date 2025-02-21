@@ -12,16 +12,15 @@ from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 
-class PAConfig(BaseModel):
-    """Configuration for the RMIA attack."""
-
-    attack_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Fraction of population to use for the attack")
 
 
 class AttackP(AbstractMIA):
     """Implementation of the P-attack."""
 
-    AttackConfig = PAConfig # required config for attack
+    class Config(BaseModel):
+        """Configuration for the RMIA attack."""
+
+        attack_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Fraction of population to use for the attack")
 
     def __init__(
         self:Self,
@@ -37,7 +36,7 @@ class AttackP(AbstractMIA):
 
         """
         logger.info("Configuring the Population attack")
-        self.configs = PAConfig() if configs is None else PAConfig(**configs)
+        self.configs = self.Config() if configs is None else self.Config(**configs)
 
         # Initializes the parent
         super().__init__(handler)

@@ -20,21 +20,21 @@ from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 
-class LossTrajectoryConfig(BaseModel):
-    """Configuration for the RMIA attack."""
 
-    distillation_data_fraction: float = Field(default = 0.5, ge = 0.0, le=1.0, description="Fraction of auxiliary data used for distillation")  # noqa: E501
-    train_mia_batch_size: int = Field(default=64, ge=1, description="Batch size for training the MIA classifier")
-    number_of_traj: int = Field(default=10, ge=1, description="Number of trajectories to consider")
-    mia_classifier_epochs: int = Field(default=100, ge=1, description="Number of epochs for training the MIA classifier")
-    label_only: bool = Field(default=False, description="Whether to use only the labels for the attack")
-    temperature: float = Field(default=2.0, ge=0.0, description="Temperature for the softmax")
 
 class AttackLossTrajectory(AbstractMIA):
     """Implementation of the loss trajectory attack."""
 
-    AttackConfig = LossTrajectoryConfig
+    class Config(BaseModel):
+        """Configuration for the RMIA attack."""
 
+        distillation_data_fraction: float = Field(default = 0.5, ge = 0.0, le=1.0, description="Fraction of auxiliary data used for distillation")  # noqa: E501
+        train_mia_batch_size: int = Field(default=64, ge=1, description="Batch size for training the MIA classifier")
+        number_of_traj: int = Field(default=10, ge=1, description="Number of trajectories to consider")
+        mia_classifier_epochs: int = Field(default=100, ge=1, description="Number of epochs for training the MIA classifier")
+        label_only: bool = Field(default=False, description="Whether to use only the labels for the attack")
+        temperature: float = Field(default=2.0, ge=0.0, description="Temperature for the softmax")
+        
     def __init__(self: Self,
                  handler: AbstractInputHandler,
                  configs: dict
@@ -48,7 +48,7 @@ class AttackLossTrajectory(AbstractMIA):
 
         """
         logger.info("Configuring Loss trajectory attack")
-        self.configs = LossTrajectoryConfig() if configs is None else LossTrajectoryConfig(**configs)
+        self.configs = self.Config() if configs is None else self.Config(**configs)
 
         super().__init__(handler)
 

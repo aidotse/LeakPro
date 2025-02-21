@@ -15,20 +15,18 @@ from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 
-class YOQOConfig(BaseModel):
-    """Configuration for the RMIA attack."""
-
-    training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Fraction of auxilary dataset to use for each shadow model training")  # noqa: E501
-    num_shadow_models: int = Field(default=8, ge=1, description="Number of shadow models to train")
-    online: bool = Field(default=False, description="Perform online or offline attack")
-    lr_xprime_optimization: float = Field(default=1e-3, ge=0.0, description="Learning rate for optimization of xprime")
-    max_iterations: int = Field(default=35, ge=1, description="Maximum number of iterations for optimization of xprime")
-
 
 class AttackYOQO(AbstractMIA):
     """Implementation of the You Only Query Once attack."""
 
-    AttackConfig = YOQOConfig
+    class Config(BaseModel):
+        """Configuration for the RMIA attack."""
+
+        training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Fraction of auxilary dataset to use for each shadow model training")  # noqa: E501
+        num_shadow_models: int = Field(default=8, ge=1, description="Number of shadow models to train")
+        online: bool = Field(default=False, description="Perform online or offline attack")
+        lr_xprime_optimization: float = Field(default=1e-3, ge=0.0, description="Learning rate for optimization of xprime")
+        max_iterations: int = Field(default=35, ge=1, description="Maximum number of iterations for optimization of xprime")
 
     def __init__(self:Self,
                  handler: AbstractInputHandler,
@@ -42,8 +40,7 @@ class AttackYOQO(AbstractMIA):
             configs (dict): Configuration parameters for the attack.
 
         """
-        self.configs = YOQOConfig() if configs is None else YOQOConfig(**configs)
-
+        self.configs = self.Config() if configs is None else self.Config(**configs)
         super().__init__(handler)
 
         # Assign the configuration parameters to the object

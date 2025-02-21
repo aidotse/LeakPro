@@ -18,35 +18,6 @@ from leakpro.utils.import_helper import Any, Self, Tuple
 from leakpro.utils.logger import logger
 
 
-class QMIAConfig(BaseModel):
-    """Configuration for the RMIA attack."""
-
-    quantiles: List[float] = Field(default_factory=lambda: [0.05, 0.25, 0.5, 0.75, 0.95], description="List of quantiles between 0 and 1")  # noqa: E501
-    training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow models")  # noqa: E501
-    epochs : int = Field(default=100, ge=0, description="Number of epochs for training the quantile regressor")
-
-    @field_validator("quantiles")
-    @classmethod
-    def check_quantiles(cls, v: List[float]) -> List[float]:
-        """Validate that all quantiles are between 0 and 1.
-
-        Args:
-        ----
-            v (List[float]): List of quantiles to validate.
-
-        Returns:
-        -------
-            List[float]: The validated list of quantiles.
-
-        Raises:
-        ------
-            ValueError: If any quantile is not between 0 and 1.
-
-        """
-        if not all(0.0 <= q <= 1.0 for q in v):
-            raise ValueError("All quantiles must be between 0 and 1.")
-        return v
-
 class QMIADataset(Dataset):
     """Dataset class for the QMIA attack."""
 
@@ -163,7 +134,34 @@ class PinballLoss(torch.nn.Module):
 class AttackQMIA(AbstractMIA):
     """Implementation of the RMIA attack."""
 
-    AttackConfig = QMIAConfig # required config for attack
+    class Config(BaseModel):
+        """Configuration for the RMIA attack."""
+
+        quantiles: List[float] = Field(default_factory=lambda: [0.05, 0.25, 0.5, 0.75, 0.95], description="List of quantiles between 0 and 1")  # noqa: E501
+        training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow models")  # noqa: E501
+        epochs : int = Field(default=100, ge=0, description="Number of epochs for training the quantile regressor")
+
+        @field_validator("quantiles")
+        @classmethod
+        def check_quantiles(cls, v: List[float]) -> List[float]:
+            """Validate that all quantiles are between 0 and 1.
+
+            Args:
+            ----
+                v (List[float]): List of quantiles to validate.
+
+            Returns:
+            -------
+                List[float]: The validated list of quantiles.
+
+            Raises:
+            ------
+                ValueError: If any quantile is not between 0 and 1.
+
+            """
+            if not all(0.0 <= q <= 1.0 for q in v):
+                raise ValueError("All quantiles must be between 0 and 1.")
+            return v
 
     def __init__(
         self:Self,
@@ -180,7 +178,7 @@ class AttackQMIA(AbstractMIA):
         """
         logger.info("Configuring the QMIA attack")
 
-        self.configs = QMIAConfig() if configs is None else QMIAConfig(**configs)
+        self.configs = self.Config() if configs is None else self.Config(**configs)
 
         # Initializes the parent metric
         super().__init__(handler)

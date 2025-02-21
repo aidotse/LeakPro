@@ -17,26 +17,25 @@ from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 
-class LiRAConfig(BaseModel):
-    """Configuration for the LiRA attack."""
-
-    num_shadow_models: int = Field(default=1, ge=1, description="Number of shadow models")
-    training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow models")  # noqa: E501
-    online: bool = Field(default=False, description="Online vs offline attack")
-    eval_batch_size: int = Field(default=32, ge=1, description="Batch size for evaluation")
-    var_calculation: Literal["carlini", "individual_carlini", "fixed"] = Field(default="carlini", description="Variance estimation method to use [carlini, individual_carlini, fixed]")  # noqa: E501
-    # memorization boosting
-    memorization: bool = Field(default=False, description="Activate memorization boosting")
-    use_privacy_score: bool = Field(default=False, description="Filter based on privacy score aswell as memorization score")
-    memorization_threshold: float = Field(default=0.8, ge=0.0, le=1.0, description="Set percentile for most vulnerable data points, use 0.0 for paper thresholds")  # noqa: E501
-    min_num_memorization_audit_points: int = Field(default=10, ge=1, description="Set minimum allowed audit points after memorization")  # noqa: E501
-    num_memorization_audit_points: int = Field(default=0, ge=0, description="Directly set number of most vulnerable audit data points (Overrides 'memorization_threshold')")  # noqa: E501
 
 
 class AttackLiRA(AbstractMIA):
     """Implementation of the LiRA attack."""
 
-    AttackConfig = LiRAConfig # required config for attack
+    class Config(BaseModel):
+        """Configuration for the LiRA attack."""
+
+        num_shadow_models: int = Field(default=1, ge=1, description="Number of shadow models")
+        training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow models")  # noqa: E501
+        online: bool = Field(default=False, description="Online vs offline attack")
+        eval_batch_size: int = Field(default=32, ge=1, description="Batch size for evaluation")
+        var_calculation: Literal["carlini", "individual_carlini", "fixed"] = Field(default="carlini", description="Variance estimation method to use [carlini, individual_carlini, fixed]")  # noqa: E501
+        # memorization boosting
+        memorization: bool = Field(default=False, description="Activate memorization boosting")
+        use_privacy_score: bool = Field(default=False, description="Filter based on privacy score aswell as memorization score")
+        memorization_threshold: float = Field(default=0.8, ge=0.0, le=1.0, description="Set percentile for most vulnerable data points, use 0.0 for paper thresholds")  # noqa: E501
+        min_num_memorization_audit_points: int = Field(default=10, ge=1, description="Set minimum allowed audit points after memorization")  # noqa: E501
+        num_memorization_audit_points: int = Field(default=0, ge=0, description="Directly set number of most vulnerable audit data points (Overrides 'memorization_threshold')")  # noqa: E501
 
     def __init__(self:Self,
                  handler: AbstractInputHandler,
@@ -50,7 +49,7 @@ class AttackLiRA(AbstractMIA):
             configs (dict): Configuration parameters for the attack.
 
         """
-        self.configs = LiRAConfig() if configs is None else LiRAConfig(**configs)
+        self.configs = self.Config() if configs is None else self.Config(**configs)
 
         # Initializes the parent metric
         super().__init__(handler)

@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from leakpro import AbstractInputHandler
+from leakpro.schemas import TrainingOutput
 
 
 class MimicInputHandler(AbstractInputHandler):
@@ -32,7 +33,7 @@ class MimicInputHandler(AbstractInputHandler):
         criterion: torch.nn.Module = None,
         optimizer: optim.Optimizer = None,
         epochs: int = None,
-    ) -> dict:
+    ) -> TrainingOutput:
         """Model training procedure."""
 
         compute_device = device("cuda" if cuda.is_available() else "cpu")
@@ -62,5 +63,8 @@ class MimicInputHandler(AbstractInputHandler):
 
         train_acc = train_acc/len(dataloader.dataset)
         train_loss = train_loss/len(dataloader)
-
-        return {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}
+        
+        output_dict = {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}
+        output = TrainingOutput(**output_dict)
+        
+        return output

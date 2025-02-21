@@ -13,52 +13,50 @@ from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 
-class HSJConfig(BaseModel):
-    """Configuration for the RMIA attack."""
-
-    attack_data_fraction: float = Field(default=0.1, ge = 0.0, le=1.0, description="Fraction of the data to use for the attack")
-    norm: Union[int, float] = Field(default=2, description="The norm to use for the attack. Must be one of [1, 2, np.inf]")
-    initial_num_evals: int = Field(default=100, ge=1, le=1000, description="The initial number of evaluations")
-    max_num_evals: int = Field(default=10000, ge=1, description="The maximum number of evaluations")
-    num_iterations: int = Field(default=100, ge=1, description="The number of iterations")
-    gamma: float = Field(default=1.0, ge=0.0, description="The gamma value")
-    constraint: Literal[1,2] = Field(default=2, description="The constraint value must be 1 or 2")
-    batch_size: int = Field(default=128, ge=1, description="The batch size")
-    epsilon_threshold: float = Field(default=1e-6, ge=0.0, le=0.001, description="The epsilon threshold")
-
-    @field_validator("norm", mode="before")
-    @classmethod
-    def validate_norm(cls, v: Union[int, float]) -> Union[int, float]:
-        """Validate the norm value.
-
-        Args:
-            v (Union[int, float]): The norm value to validate.
-
-        Returns:
-            Union[int, float]: The validated norm value.
-
-        Raises:
-            ValueError: If the norm value is not one of [1, 2, np.inf].
-
-        """
-        if v not in {1, 2, np.inf}:
-            raise ValueError("Norm must be one of [1, 2, np.inf]")
-        return v
-
-    @model_validator(mode="after")
-    @classmethod
-    def check_max_greater_than_initial(cls, values : dict) -> dict:
-        """Ensure max_num_evals > initial_num_evals."""
-        if values.max_num_evals <= values.initial_num_evals:
-            raise ValueError("max_num_evals must be greater than initial_num_evals")
-        return values
-
-    model_config = {"arbitrary_types_allowed": True}  # Pydantic v2 config to allow `np.inf`
-
-
 class AttackHopSkipJump(AbstractMIA):  # noqa: D101
 
-    AttackConfig = HSJConfig
+    class HSJConfig(BaseModel):
+        """Configuration for the RMIA attack."""
+
+        attack_data_fraction: float = Field(default=0.1, ge = 0.0, le=1.0, description="Fraction of the data to use for the attack")
+        norm: Union[int, float] = Field(default=2, description="The norm to use for the attack. Must be one of [1, 2, np.inf]")
+        initial_num_evals: int = Field(default=100, ge=1, le=1000, description="The initial number of evaluations")
+        max_num_evals: int = Field(default=10000, ge=1, description="The maximum number of evaluations")
+        num_iterations: int = Field(default=100, ge=1, description="The number of iterations")
+        gamma: float = Field(default=1.0, ge=0.0, description="The gamma value")
+        constraint: Literal[1,2] = Field(default=2, description="The constraint value must be 1 or 2")
+        batch_size: int = Field(default=128, ge=1, description="The batch size")
+        epsilon_threshold: float = Field(default=1e-6, ge=0.0, le=0.001, description="The epsilon threshold")
+
+        @field_validator("norm", mode="before")
+        @classmethod
+        def validate_norm(cls, v: Union[int, float]) -> Union[int, float]:
+            """Validate the norm value.
+
+            Args:
+                v (Union[int, float]): The norm value to validate.
+
+            Returns:
+                Union[int, float]: The validated norm value.
+
+            Raises:
+                ValueError: If the norm value is not one of [1, 2, np.inf].
+
+            """
+            if v not in {1, 2, np.inf}:
+                raise ValueError("Norm must be one of [1, 2, np.inf]")
+            return v
+
+        @model_validator(mode="after")
+        @classmethod
+        def check_max_greater_than_initial(cls, values : dict) -> dict:
+            """Ensure max_num_evals > initial_num_evals."""
+            if values.max_num_evals <= values.initial_num_evals:
+                raise ValueError("max_num_evals must be greater than initial_num_evals")
+            return values
+
+        model_config = {"arbitrary_types_allowed": True}  # Pydantic v2 config to allow `np.inf`
+
 
     def __init__(self: Self,
                  handler: AbstractInputHandler,
@@ -73,7 +71,7 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
 
         """
         logger.info("Configuring label only attack")
-        self.configs = HSJConfig() if configs is None else HSJConfig(**configs)
+        self.configs = self.Config() if configs is None else self.Config(**configs)
 
         super().__init__(handler)
 

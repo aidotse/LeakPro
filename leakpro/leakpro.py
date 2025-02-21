@@ -77,6 +77,7 @@ class LeakPro:
         for attack_name in audit_results:
             logger.info(f"Preparing results for attack: {attack_name}")
 
+            # Return the result object, dont save it
             if return_results:
 
                 result = audit_results[attack_name]["result_object"]

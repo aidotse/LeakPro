@@ -6,33 +6,31 @@ from pydantic import BaseModel, Field
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.attacks.utils.utils import softmax_logits
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.metrics.attack_result import MIAResult
 from leakpro.signals.signal import ModelLogits
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 
-class RMIAConfig(BaseModel):
-    """Configuration for the RMIA attack."""
-
-    num_shadow_models: int = Field(default=1, ge=1, description="Number of shadow models")
-    offline_a: float = Field(default=0.33, ge=0.0, le=1.0, description="Parameter to estimate the marginal p(x)")
-    offline_b: float = Field(default=0.66, ge=0.0, le=1.0, description="Parameter to estimate the marginal p(x)")
-    gamma: float = Field(default=2.0, ge=0.0, description="Parameter to threshold LLRs")
-    temperature: float = Field(default=2.0, ge=0.0, description="Softmax temperature")
-    training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow models")  # noqa: E501
-    attack_data_fraction: float = Field(default=0.1, ge=0.0, le=1.0, description="Part of available attack data to use for attack")  # noqa: E501
-    online: bool = Field(default=False, description="Online vs offline attack")
-
-
 class AttackRMIA(AbstractMIA):
     """Implementation of the RMIA attack."""
+    
+    class Config(BaseModel):
+        """Configuration for the RMIA attack."""
 
-    AttackConfig = RMIAConfig # required config for attack
+        num_shadow_models: int = Field(default=1, ge=1, description="Number of shadow models")
+        offline_a: float = Field(default=0.33, ge=0.0, le=1.0, description="Parameter to estimate the marginal p(x)")
+        offline_b: float = Field(default=0.66, ge=0.0, le=1.0, description="Parameter to estimate the marginal p(x)")
+        gamma: float = Field(default=2.0, ge=0.0, description="Parameter to threshold LLRs")
+        temperature: float = Field(default=2.0, ge=0.0, description="Softmax temperature")
+        training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow models")  # noqa: E501
+        attack_data_fraction: float = Field(default=0.1, ge=0.0, le=1.0, description="Part of available attack data to use for attack")  # noqa: E501
+        online: bool = Field(default=False, description="Online vs offline attack")
+
 
     def __init__(self:Self,
-                 handler: AbstractInputHandler,
+                 handler: MIAHandler,
                  configs: dict
                  ) -> None:
         """Initialize the RMIA attack.
@@ -46,7 +44,7 @@ class AttackRMIA(AbstractMIA):
         logger.info("Configuring the RMIA attack")
         # Initializes the pydantic object using the user-provided configs
         # This will ensure that the user-provided configs are valid
-        self.configs = RMIAConfig() if configs is None else RMIAConfig(**configs)
+        self.configs = self.Config() if configs is None else self.Config(**configs)
 
         # Call the parent class constructor. It will check the configs.
         super().__init__(handler)

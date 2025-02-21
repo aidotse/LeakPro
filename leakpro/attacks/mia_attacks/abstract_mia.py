@@ -39,8 +39,8 @@ class AbstractMIA(ABC):
             handler (AbstractInputHandler): The input handler object.
 
         """
-        if not hasattr(self, "AttackConfig"):
-            raise NotImplementedError(f"{self.__class__.__name__} must define an AttackConfig.")
+        if not hasattr(self, "Config"):
+            raise ValueError(f"{self.__class__.__name__}.Config must be defined as a Pydantic BaseModel subclass.")
         if not isinstance(self.configs, BaseModel):
             raise TypeError(f"{self.__class__.__name__}.configs must be a subclass of Pydantic's BaseModel.")
 
@@ -64,6 +64,21 @@ class AbstractMIA(ABC):
         # These objects are instance specific
         self.signal_data = []
 
+    @classmethod
+    def get_default_attack_config(cls) -> BaseModel:
+        """Get the attack configuration.
+
+        Returns:
+        -------
+            BaseModel: The configuration of the attack.
+
+        Raises:
+        ------
+            ValueError: If the attack type is unknown.
+
+        """
+        return cls.Config()
+    
     def _validate_shared_quantities(self:Self)->None:
         """Validate the shared quantities used by the attack."""
         if AbstractMIA.population is None:

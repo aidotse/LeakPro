@@ -34,27 +34,6 @@ class AttackFactoryMIA:
     distillation_model_handler = None
 
     @classmethod
-    def get_default_attack_config(cls, name: str) -> BaseModel:
-        """Get the attack configuration.
-
-        Args:
-        ----
-            name (str): The name of the attack.
-
-        Returns:
-        -------
-            BaseModel: The configuration of the attack.
-
-        Raises:
-        ------
-            ValueError: If the attack type is unknown.
-
-        """
-        if name not in cls.attack_classes:
-            raise ValueError(f"Attack '{name}' is not defined.")
-        return cls.attack_classes[name]().AttackConfig()
-
-    @classmethod
     def create_attack(cls, name: str, handler: MIAHandler) -> AbstractMIA:  # noqa: ANN102
         """Create the attack object.
 
