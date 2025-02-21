@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader
 from torchvision import transforms, datasets
 from tqdm import tqdm
 from leakpro import AbstractInputHandler
-from leakpro.attacks.utils import losses
+from leakpro.attacks.utils import gan_losses
 import kornia
 import time
 
@@ -100,14 +100,14 @@ class CelebA_InputHandler(AbstractInputHandler):
                     log_interval: int,
                     sample_from_generator: callable
                   ) -> None:
-        """Train the GAN model. Copied from https://github.com/LetheSec/PLG-MI-Attack."""
+        """Train the GAN model. Inspired by cGAN from https://github.com/LetheSec/PLG-MI-Attack."""
         torch.set_default_device(device)
         torch.backends.cudnn.benchmark = True
         gen_losses = []
         dis_losses = []
         inv_losses = []
         
-        # Augmentations for generated images. TODO: Move this to a image modality extension
+        # Augmentations for generated images. TODO: Move this to a image modality extension and have it as an input
         aug_list = kornia.augmentation.container.ImageSequential(
             kornia.augmentation.ColorJitter(brightness=0.2, contrast=0.2, p=0.5),
             kornia.augmentation.RandomHorizontalFlip(),
@@ -126,12 +126,14 @@ class CelebA_InputHandler(AbstractInputHandler):
             cumulative_target_acc = .0
             target_correct = 0
             count = 0
+            
+            # Number of discriminator updates per generator update
             for j in range(n_dis):
                 if j == 0:
                     fake, fake_labels, _ = sample_from_generator(gen, num_classes, 128, device, gen.dim_z)
                     fake_aug = aug_list(fake).to(device)
                     dis_fake = dis(fake_aug, fake_labels)
-                    inv_loss = losses.max_margin_loss(model(fake_aug), fake_labels)
+                    inv_loss = gan_losses.max_margin_loss(model(fake_aug), fake_labels)
 
                     inv_losses.append(inv_loss.item())
                     dis_real = None
@@ -176,6 +178,6 @@ class CelebA_InputHandler(AbstractInputHandler):
                         'iteration: {:05d}/{:05d}, loss gen: {:05f}, loss dis {:05f}, inv loss {:05f}, target acc {:04f}, time {}'.format(
                             i, n_iter, _l_g, cumulative_loss_dis, cumulative_inv_loss,
                             cumulative_target_acc, time.strftime("%H:%M:%S")))
-                
+
         torch.save(gen.state_dict(), './gen.pth')
         torch.save(dis.state_dict(), './dis.pth')

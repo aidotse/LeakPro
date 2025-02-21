@@ -4,7 +4,7 @@ from torch.nn import functional as F  # noqa: N812
 from torch.utils.data import DataLoader
 
 from leakpro.attacks.minv_attacks.abstract_minv import AbstractMINV
-from leakpro.attacks.utils import losses
+from leakpro.attacks.utils import gan_losses
 from leakpro.attacks.utils.gan_handler import GANHandler
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.input_handler.modality_extensions.image_metrics import ImageMetrics
@@ -75,9 +75,16 @@ class AttackPLGMI(AbstractMINV):
     def description(self:Self) -> dict:
         """Return the description of the attack."""
         title_str = "PLG-MI Attack"
-        reference_str = "https://arxiv.org/abs/2302.09814"
+        reference_str = "Pseudo Label-Guided Model Inversion Attack via Conditional Generative \
+                            Adversarial Network, Yuan et al. 2023, https://arxiv.org/abs/2302.09814"
         summary_str = "This attack is a model inversion attack that uses the PLG-MI algorithm."
-        detailed_str = ""
+        detailed_str = "The Pseudo Label Guided Model Inversion Attack (PLG-MI) is a white-box attack \
+                        that implements pseudo-labels on a public dataset to construct a conditional GAN. \
+                            Steps: \
+                                1. Top-n selection of pseudo labels. \
+                                2. Train the GAN. \
+                                3. Generate samples from the GAN. \
+                                4. Compute image metrics. "
         return {
             "title_str": title_str,
             "reference": reference_str,
@@ -160,8 +167,8 @@ class AttackPLGMI(AbstractMINV):
             self.handler.train_gan(pseudo_loader = self.pseudo_loader,
                                         gen = self.generator,
                                         dis = self.discriminator,
-                                        gen_criterion = losses.GenLoss(loss_type="hinge", is_relativistic=False),
-                                        dis_criterion = losses.DisLoss(loss_type="hinge", is_relativistic=False),
+                                        gen_criterion = gan_losses.GenLoss(loss_type="hinge", is_relativistic=False),
+                                        dis_criterion = gan_losses.DisLoss(loss_type="hinge", is_relativistic=False),
                                         model = self.target_model,
                                         opt_gen = self.gen_optimizer,
                                         opt_dis = self.dis_optimizer,
