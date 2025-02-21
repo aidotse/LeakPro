@@ -131,8 +131,12 @@ class ImageMetrics:
             features = []
             with torch.no_grad():
                 for _ in range(len(self.private_dataloader)):  # Match number of batches
-                    z = torch.randn(self.batch_size, self.generator.dim_z, device=self.device)
-                    fake_images = self.generator(z)
+                    fake_images = self.generator_handler.sample_from_generator(self.generator,
+                                                                            self.num_audited_classes,
+                                                                            self.batch_size // self.num_audited_classes,
+                                                                            self.device,
+                                                                            self.generator.dim_z
+                                                                            )[0]
 
                     pil_images = [tensor_to_pil(img) for img in fake_images]
                     transformed_images = torch.stack([transform(img) for img in pil_images]).to(self.device)
