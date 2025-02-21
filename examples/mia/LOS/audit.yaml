@@ -4,7 +4,7 @@ audit:  # Configurations for auditing
     rmia:
       training_data_fraction: 0.5  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
       attack_data_fraction: 0.5 # Fraction of auxiliary dataset to sample from during attack
-      num_shadow_models: 8 # Number of shadow models to train
+      num_shadow_models: 2 # Number of shadow models to train
       online: True # perform online or offline attack
       temperature: 2
       gamma: 1.0
@@ -15,12 +15,12 @@ audit:  # Configurations for auditing
     #   epochs: 5  # Number of training epochs for quantile regression
     # population:
     #   attack_data_fraction: 1.0  # Fraction of the auxilary dataset to use for this attack
-    lira:
-      training_data_fraction: 0.5  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
-      num_shadow_models: 8 # Number of shadow models to train
-      online: True # perform online or offline attack
-      fixed_variance: True # Use a fixed variance for the whole audit
-      boosting: True
+    # lira:
+    #   training_data_fraction: 0.5  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
+    #   num_shadow_models: 8 # Number of shadow models to train
+    #   online: True # perform online or offline attack
+    #   fixed_variance: True # Use a fixed variance for the whole audit
+    #   boosting: True
     # loss_traj:
     #   training_distill_data_fraction : 0.7 # Fraction of the auxilary dataset to use for training the distillation models D_s = (1-D_KD)/2
     #   number_of_traj: 10 # Number of epochs (number of points in the loss trajectory)
@@ -32,11 +32,11 @@ audit:  # Configurations for auditing
 
 target:
   # Target model path
-  module_path: "utils/model_LR.py" # either model_grud.py or model_LR.py for logestic regression
-  model_class: "LR" #  LR/GRUD
+  module_path: "utils/model_GRUD.py" # either model_GRUD.py or model_LR.py for logestic regression
+  model_class: "GRUD" #  LR/GRUD
   # Data paths
-  target_folder: "./target_LR" # either target_GRUD or target_LR
-  data_path: "./data/flattened/dataset.pkl" #unflattened dataset for GRUD and flattened dataset for LR
+  target_folder: "./target_GRUD" # either target_GRUD or target_LR
+  data_path: "./data/GRUD_data/dataset.pkl" #unflattened dataset for GRUD in GRUD_data direcotry and flattened dataset for LR in LR_data directory
 
 shadow_model:
   model_class: # LR/GRUD
