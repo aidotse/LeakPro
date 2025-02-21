@@ -133,7 +133,7 @@ class ImageMetrics:
                 for _ in range(len(self.private_dataloader)):  # Match number of batches
                     fake_images = self.generator_handler.sample_from_generator(self.generator,
                                                                             self.num_audited_classes,
-                                                                            self.batch_size // self.num_audited_classes,
+                                                                            self.num_class_samples,
                                                                             self.device,
                                                                             self.generator.dim_z
                                                                             )[0]
