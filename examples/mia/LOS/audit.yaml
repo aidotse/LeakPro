@@ -29,6 +29,7 @@ audit:  # Configurations for auditing
 
   output_dir: "./leakpro_output"
   attack_type: "mia" #mia, gia
+  data_modality: "tabular" #image, tabular
 
 target:
   # Target model path
@@ -39,6 +40,5 @@ target:
   data_path: "./data/flattened/dataset.pkl" #unflattened dataset for GRUD and flattened dataset for LR
 
 shadow_model:
-  model_class: # LR/GRUD
   
 distillation_model:

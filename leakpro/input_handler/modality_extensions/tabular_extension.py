@@ -39,7 +39,9 @@ class TabularExtension(AbstractModalityExtension):
             self.one_hot_encoded = x.shape[1] != n_dec_cols
             logger.info(f"Data is one-hot encoded: {self.one_hot_encoded}")
         else:
-            raise ValueError("Data object must contain dec_to_onehot dict.")
+            logger.warning("No one-hot encoding information found in the population object.")
+            self.dec_to_onehot = {}
+            self.one_hot_encoded = False
 
     def augmentation(self:Self, data:Tensor, n_aug:int) -> Tensor:
         """Augment the data by generating additional samples.
