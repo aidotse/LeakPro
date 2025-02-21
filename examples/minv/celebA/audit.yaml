@@ -4,7 +4,7 @@ audit:  # Configurations for auditing
   attack_list:
     plgmi:
       n_dis: 2 # Integer number for indicating the number of discriminator updates per generator update
-      n_iter: 10000 # Integer number for indicating the iterations for training the GAN
+      n_iter: 10 # Integer number for indicating the iterations for training the GAN
       batch_size: 32 # Integer number for indicating batch size for training the GAN
       gen_lr: 0.0005 # Float number for indicating learning rate for training the generator
       dis_lr: 0.0002 # Float number for indicating learning rate for training the discriminator
@@ -47,9 +47,9 @@ target:
   model_class: "ResNet18" 
   # Data paths
   target_folder: "./target"
-  data_path: "./data/celebaA_data.pkl"
+  data_path: "./data/celebA_private_data.pkl"
 
 public_dataset:
   # path to public dataset
-  public_data_path: "./data/celebaA_aux_data.pkl"
+  public_data_path: "./data/celebA_public_data.pkl"
 
