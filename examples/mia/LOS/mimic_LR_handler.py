@@ -44,7 +44,7 @@ class MimicInputHandler(AbstractInputHandler):
 
         for e in tqdm(range(epochs), desc="Training Progress"):
             model.train()
-            train_acc, train_loss = 0.0, 0.0
+            train_acc, train_loss, total_sample = 0.0, 0.0, 0
 
             for data, target in dataloader:
                 target = target.float().unsqueeze(1)
@@ -55,12 +55,13 @@ class MimicInputHandler(AbstractInputHandler):
                 loss = criterion(output, target)
                 pred = sigmoid(output) >= 0.5
                 train_acc += pred.eq(target).sum().item()
+                total_samples += target.numel()
 
                 loss.backward()
                 optimizer.step()
                 train_loss += loss.item()
 
-        train_acc = train_acc/len(dataloader.dataset)
-        train_loss = train_loss/len(dataloader)
+        train_acc /= total_samples
+        train_loss /= len(dataloader)
 
         return {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}
