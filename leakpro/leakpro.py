@@ -36,7 +36,7 @@ from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import add_file_handler, logger
 
 modality_extensions = {"tabular": TabularExtension,
-                       "image": None,
+                       "image":None,
                        "text":None,
                        "graph":None}
 

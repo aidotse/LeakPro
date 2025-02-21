@@ -20,7 +20,7 @@ class AbstractMINV(ABC):
     This serves as a guideline for implementing a metric to be used for measuring the privacy leakage of a target model.
     """
 
-    # TODO: Class attributes
+    # TODO: Think about what class attributes should be used and not used
 
     # Class attributes for sharing between the different attacks
     public_population = None

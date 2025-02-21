@@ -1,0 +1,8 @@
+To prepare data for CelebA example:
+
+    1. Download CelebA images "img_align_celeba.zip" from https://drive.google.com/drive/folders/0B7EVK8r0v71pTUZsaXdaSnZBZzg?resourcekey=0-rJlzl934LzC-Xp28GeIBzQ 
+    2. Download CelebA identities "identity_CelebA.txt" from https://drive.google.com/drive/folders/0B7EVK8r0v71pOC0wOVZlQnFfaGs?resourcekey=0-pEjrQoTrlbjZJO2UL8K_WQ 
+    3. Unzip "img_align_celeba.zip" and place /img_align_celeba folder in examples/minv/celebA/data/
+    4. Place "identity_CelebA.txt" in examples/minv/celebA/data/
+    5. Open partition.py and select n classes to use, and n_private classes as private, n - n_private will be public.
+    6. Save and run partition.py

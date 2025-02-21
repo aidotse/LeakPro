@@ -64,7 +64,7 @@ class AttackPLGMI(AbstractMINV):
             # alpha, 0 to inf
             "alpha": (self.alpha, 0, 1000), # 0 to inf
             "n_dis": (self.n_dis, 1, 1000), # 1 to inf
-            # TODO: Add
+            # TODO: Add more parameters
         }
 
         # Validate parameters
@@ -96,7 +96,6 @@ class AttackPLGMI(AbstractMINV):
     def top_n_selection(self:Self) -> DataLoader:
         """"Top n selection of pseudo labels."""
         # TODO: This does not scale well. Consider creating a class for the dataloader and implementing the __getitem__ method.
-        # TODO: Does this go into modality extension; image?
         logger.info("Performing top-n selection for pseudo labels")
         self.target_model = self.handler.target_model
         self.target_model.eval()
@@ -142,7 +141,7 @@ class AttackPLGMI(AbstractMINV):
         logger.info("Preparing attack")
 
         self.gan_handler = GANHandler(self.handler, configs=self.configs)
-        # TODO: Change structure of how we load data, handler should do this, not gan_handler
+        # TODO: Change structure of how we load data, handler or model_handler should do this, not gan_handler
         # Get public dataloader
         self.public_dataloader = self.gan_handler.get_public_data(self.batch_size)
 
@@ -164,6 +163,7 @@ class AttackPLGMI(AbstractMINV):
             # Top-n-selection to get pseudo labels
             self.pseudo_loader = self.top_n_selection()
             logger.info("Training the GAN")
+            # TODO: Change this input structure to just pass the attack class
             self.handler.train_gan(pseudo_loader = self.pseudo_loader,
                                         gen = self.generator,
                                         dis = self.discriminator,
