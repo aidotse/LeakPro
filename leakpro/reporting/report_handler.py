@@ -66,7 +66,7 @@ class ReportHandler():
 
         self.logger.info(f"Saving results for {attack_name}")
         attack_config = config.attack_list.get(attack_name, None)
-        
+
         if attack_config is None:
             attack_config = AttackFactoryMIA.attack_classes[attack_name].get_default_attack_config()
             config.attack_list[attack_name] = attack_config

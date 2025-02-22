@@ -1,7 +1,7 @@
 """Implementation of the RMIA attack."""
 
 import numpy as np
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
@@ -15,7 +15,7 @@ from leakpro.utils.logger import logger
 
 class AttackRMIA(AbstractMIA):
     """Implementation of the RMIA attack."""
-    
+
     class Config(BaseModel):
         """Configuration for the RMIA attack."""
 
@@ -28,6 +28,22 @@ class AttackRMIA(AbstractMIA):
         attack_data_fraction: float = Field(default=0.1, ge=0.0, le=1.0, description="Part of available attack data to use for attack")  # noqa: E501
         online: bool = Field(default=False, description="Online vs offline attack")
 
+        @model_validator(mode="after")
+        def check_num_shadow_models_if_online(self) -> Self:
+            """Check if the number of shadow models is at least 2 when online is True.
+
+            Returns
+            -------
+                Config: The attack configuration.
+
+            Raises
+            ------
+                ValueError: If online is True and the number of shadow models is less than 2.
+
+            """
+            if self.online and self.num_shadow_models < 2:
+                raise ValueError("When online is True, num_shadow_models must be >= 2")
+            return self
 
     def __init__(self:Self,
                  handler: MIAHandler,

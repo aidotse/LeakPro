@@ -18,7 +18,7 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
     class HSJConfig(BaseModel):
         """Configuration for the RMIA attack."""
 
-        attack_data_fraction: float = Field(default=0.1, ge = 0.0, le=1.0, description="Fraction of the data to use for the attack")
+        attack_data_fraction: float = Field(default=0.1, ge = 0.0, le=1.0, description="Fraction of the data to use for the attack") # noqa: E501
         norm: Union[int, float] = Field(default=2, description="The norm to use for the attack. Must be one of [1, 2, np.inf]")
         initial_num_evals: int = Field(default=100, ge=1, le=1000, description="The initial number of evaluations")
         max_num_evals: int = Field(default=10000, ge=1, description="The maximum number of evaluations")

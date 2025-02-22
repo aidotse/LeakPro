@@ -3,7 +3,7 @@
 from typing import Literal
 
 import numpy as np
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from scipy.stats import norm
 from tqdm import tqdm
 
@@ -15,8 +15,6 @@ from leakpro.metrics.attack_result import MIAResult
 from leakpro.signals.signal import ModelRescaledLogits
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
-
-
 
 
 class AttackLiRA(AbstractMIA):
@@ -36,6 +34,23 @@ class AttackLiRA(AbstractMIA):
         memorization_threshold: float = Field(default=0.8, ge=0.0, le=1.0, description="Set percentile for most vulnerable data points, use 0.0 for paper thresholds")  # noqa: E501
         min_num_memorization_audit_points: int = Field(default=10, ge=1, description="Set minimum allowed audit points after memorization")  # noqa: E501
         num_memorization_audit_points: int = Field(default=0, ge=0, description="Directly set number of most vulnerable audit data points (Overrides 'memorization_threshold')")  # noqa: E501
+
+        @model_validator(mode="after")
+        def check_num_shadow_models_if_online(self) -> Self:
+            """Check if the number of shadow models is at least 2 when online is True.
+
+            Returns
+            -------
+                Config: The attack configuration.
+
+            Raises
+            ------
+                ValueError: If online is True and the number of shadow models is less than 2.
+
+            """
+            if self.online and self.num_shadow_models < 2:
+                raise ValueError("When online is True, num_shadow_models must be >= 2")
+            return self
 
     def __init__(self:Self,
                  handler: AbstractInputHandler,

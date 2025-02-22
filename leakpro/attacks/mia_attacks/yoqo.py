@@ -15,7 +15,6 @@ from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 
-
 class AttackYOQO(AbstractMIA):
     """Implementation of the You Only Query Once attack."""
 

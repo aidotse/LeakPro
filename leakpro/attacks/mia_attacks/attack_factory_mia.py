@@ -1,6 +1,5 @@
 """Module that contains the AttackFactory class which is responsible for creating the attack objects."""
 
-from pydantic import BaseModel
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.mia_attacks.attack_p import AttackP

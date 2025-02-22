@@ -12,15 +12,13 @@ from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 
-
-
 class AttackP(AbstractMIA):
     """Implementation of the P-attack."""
 
     class Config(BaseModel):
         """Configuration for the RMIA attack."""
 
-        attack_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Fraction of population to use for the attack")
+        attack_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Fraction of population to use for the attack") # noqa: E501
 
     def __init__(
         self:Self,

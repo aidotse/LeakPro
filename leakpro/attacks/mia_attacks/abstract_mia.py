@@ -68,17 +68,17 @@ class AbstractMIA(ABC):
     def get_default_attack_config(cls) -> BaseModel:
         """Get the attack configuration.
 
-        Returns:
+        Returns
         -------
             BaseModel: The configuration of the attack.
 
-        Raises:
+        Raises
         ------
             ValueError: If the attack type is unknown.
 
         """
         return cls.Config()
-    
+
     def _validate_shared_quantities(self:Self)->None:
         """Validate the shared quantities used by the attack."""
         if AbstractMIA.population is None:

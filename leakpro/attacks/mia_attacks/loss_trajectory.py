@@ -20,8 +20,6 @@ from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 
-
-
 class AttackLossTrajectory(AbstractMIA):
     """Implementation of the loss trajectory attack."""
 
@@ -34,7 +32,7 @@ class AttackLossTrajectory(AbstractMIA):
         mia_classifier_epochs: int = Field(default=100, ge=1, description="Number of epochs for training the MIA classifier")
         label_only: bool = Field(default=False, description="Whether to use only the labels for the attack")
         temperature: float = Field(default=2.0, ge=0.0, description="Temperature for the softmax")
-        
+
     def __init__(self: Self,
                  handler: AbstractInputHandler,
                  configs: dict
