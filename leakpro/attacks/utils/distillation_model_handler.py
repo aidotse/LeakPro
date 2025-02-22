@@ -26,8 +26,7 @@ def singleton(cls):  # noqa: ANN001, ANN201
             params[cls] = (args, kwargs)
             instances[cls] = cls(*args, **kwargs)  # Create the singleton instance
         elif args or kwargs:
-            # Raise an error if trying to reinitialize with different parameters
-            raise ValueError("Singleton already created with specific parameters.")
+            instances[cls].__init__(*args, **kwargs)  # Update the singleton instance with new parameters
         return instances[cls]
 
     return get_instance

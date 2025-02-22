@@ -28,8 +28,8 @@ def singleton(cls):  # noqa: ANN001, ANN201
             params[cls] = (args, kwargs)
             instances[cls] = cls(*args, **kwargs)  # Create the singleton instance
         elif args or kwargs:
-            # Raise an error if trying to reinitialize with different parameters
-            raise ValueError("Singleton already created with specific parameters.")
+            # Call init again to update states such as model path, target hash etc
+            instances[cls].__init__(*args, **kwargs)
         return instances[cls]
 
     def is_created() -> bool:
@@ -64,7 +64,7 @@ class ShadowModelHandler(ModelHandler):
         # Set up the names of the shadow model
         self.model_storage_name = "shadow_model"
         self.metadata_storage_name = "metadata"
-
+        
     def _filter(self:Self, data_size:int, online:bool)->list[int]:
         # Get the metadata for the shadow models
         entries = os.listdir(self.storage_path)
@@ -264,11 +264,11 @@ class ShadowModelHandler(ModelHandler):
         dataset_tensor = torch.from_numpy(dataset_indices).to(device=device)
         indice_masks_tensor = torch.zeros((len(dataset_indices), len(models_in_indices)), dtype=torch.bool, device=device)
 
-        return torch_indice_in_shadowmodel_training_set(indice_masks_tensor,\
+        return _torch_indice_in_shadowmodel_training_set(indice_masks_tensor,\
                                                         dataset_tensor, model_indices_tensor).cpu().numpy()
 
 @jit.script
-def torch_indice_in_shadowmodel_training_set(in_tensor:Tensor, dataset:Tensor, model_indices:Tensor) -> Tensor:
+def _torch_indice_in_shadowmodel_training_set(in_tensor:Tensor, dataset:Tensor, model_indices:Tensor) -> Tensor:
     """Check if an audit indice is present in the shadow model training set.
 
     Args:

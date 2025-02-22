@@ -75,7 +75,7 @@ class ModelHandler():
                 logger.info(f"Created folder {self.storage_path}")
         else:
             raise ValueError("Storage path not provided")
-
+        
         # Create the hash for the target model
         self.target_model_hash = self._hash_model(self.handler.target_model)
 

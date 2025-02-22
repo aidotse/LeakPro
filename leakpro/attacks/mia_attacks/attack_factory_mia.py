@@ -50,13 +50,19 @@ class AttackFactoryMIA:
             ValueError: If the attack type is unknown.
 
         """
-
+        
         if AttackFactoryMIA.shadow_model_handler is None:
             logger.info("Creating shadow model handler singleton")
+            AttackFactoryMIA.shadow_model_handler = ShadowModelHandler(handler)
+        else:
+            logger.info("Shadow model handler singleton already exists, updating state")
             AttackFactoryMIA.shadow_model_handler = ShadowModelHandler(handler)
 
         if AttackFactoryMIA.distillation_model_handler is None:
             logger.info("Creating distillation model handler singleton")
+            AttackFactoryMIA.distillation_model_handler = DistillationModelHandler(handler)
+        else:
+            logger.info("Distillation model handler singleton already exists, updating state")
             AttackFactoryMIA.distillation_model_handler = DistillationModelHandler(handler)
 
         if name in cls.attack_classes:
