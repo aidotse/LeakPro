@@ -43,7 +43,10 @@ class ModelHandler():
                 self.model_class = caller_configs.model_class
             except AttributeError as e:
                 raise ValueError("Model path or class not provided in shadow model config") from e
-            self.model_blueprint = self._import_model_from_path(self.model_path, self.model_class)
+            try:
+                self.model_blueprint = self._import_model_from_path(self.model_path, self.model_class)
+            except Exception as e:
+                raise ValueError(f"Failed to create model blueprint from {self.model_class} in {self.model_path}") from e
 
         # Pick either target config or caller config
         setup_config = handler.target_model_metadata if self.use_target_model_setup else caller_configs
