@@ -2,7 +2,7 @@
 
 from typing import Annotated, Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from torch.nn import Module
 
 
@@ -122,6 +122,8 @@ class MIAMetaDataSchema(BaseModel):
     test_loss: float = Field(..., description="Test loss")
     dataset: str = Field(..., description="Dataset name")
 
+    model_config = ConfigDict(from_attributes=True)
+
 class ShadowModelTrainingSchema(BaseModel):
     """Schema for Shadow model metadata storage."""
 
@@ -135,7 +137,8 @@ class ShadowModelTrainingSchema(BaseModel):
     train_acc: float = Field(..., ge=0.0, le=1.0, description="Training accuracy (0 to 1)")
     train_loss: float = Field(..., ge=0.0, description="Training loss")
     online: bool = Field(..., description="Online vs. offline training")
-    model_type: str = Field(..., description="Type of shadow model")
+    model_class: str = Field(..., description="Model class name")
+    target_model_hash: str = Field(..., description="Hash of target model")
 
 class DistillationModelTrainingSchema(BaseModel):
     """Schema for metadata storage for distillation."""
