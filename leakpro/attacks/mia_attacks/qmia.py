@@ -11,8 +11,8 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
-from leakpro.metrics.attack_result import MIAResult
 from leakpro.input_handler.mia_handler import MIAHandler
+from leakpro.metrics.attack_result import MIAResult
 from leakpro.signals.signal import ModelRescaledLogits
 from leakpro.utils.import_helper import Any, Self, Tuple
 from leakpro.utils.logger import logger
