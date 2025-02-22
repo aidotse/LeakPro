@@ -60,11 +60,11 @@ class ShadowModelHandler(ModelHandler):
         """
         caller = "shadow_model"
         super().__init__(handler, caller)
-        
+
         # Set up the names of the shadow model
         self.model_storage_name = "shadow_model"
         self.metadata_storage_name = "metadata"
-        
+
     def _filter(self:Self, data_size:int, online:bool)->list[int]:
         # Get the metadata for the shadow models
         entries = os.listdir(self.storage_path)

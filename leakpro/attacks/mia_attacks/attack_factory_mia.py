@@ -50,7 +50,7 @@ class AttackFactoryMIA:
             ValueError: If the attack type is unknown.
 
         """
-        
+
         if AttackFactoryMIA.shadow_model_handler is None:
             logger.info("Creating shadow model handler singleton")
             AttackFactoryMIA.shadow_model_handler = ShadowModelHandler(handler)

@@ -31,8 +31,8 @@ class ModelHandler():
         self.handler = handler
 
         caller_configs = getattr(handler.configs, caller) if caller is not None else None
-        self.use_target_model_setup = True if caller_configs is None else False
-        
+        self.use_target_model_setup = caller_configs is None
+
         # get the bluepring for the model
         if self.use_target_model_setup:
             self.model_class = handler.target_model_blueprint.__name__
@@ -75,7 +75,7 @@ class ModelHandler():
                 logger.info(f"Created folder {self.storage_path}")
         else:
             raise ValueError("Storage path not provided")
-        
+
         # Create the hash for the target model
         self.target_model_hash = self._hash_model(self.handler.target_model)
 
