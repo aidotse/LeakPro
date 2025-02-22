@@ -10,7 +10,7 @@ from tqdm import tqdm
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.boosting import Memorization
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.metrics.attack_result import MIAResult
 from leakpro.signals.signal import ModelRescaledLogits
 from leakpro.utils.import_helper import Self
@@ -53,14 +53,14 @@ class AttackLiRA(AbstractMIA):
             return self
 
     def __init__(self:Self,
-                 handler: AbstractInputHandler,
+                 handler: MIAHandler,
                  configs: dict
                  ) -> None:
         """Initialize the LiRA attack.
 
         Args:
         ----
-            handler (AbstractInputHandler): The input handler object.
+            handler (MIAHandler): The input handler object.
             configs (dict): Configuration parameters for the attack.
 
         """

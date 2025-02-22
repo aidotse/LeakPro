@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.threshold_computation import linear_itp_threshold_func
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.metrics.attack_result import MIAResult
 from leakpro.signals.signal import ModelLoss
 from leakpro.utils.import_helper import Self
@@ -22,14 +22,14 @@ class AttackP(AbstractMIA):
 
     def __init__(
         self:Self,
-        handler: AbstractInputHandler,
+        handler: MIAHandler,
         configs: dict
     ) -> None:
         """Initialize the AttackP class.
 
         Args:
         ----
-            handler (AbstractInputHandler): The input handler object.
+            handler (MIAHandler): The input handler object.
             configs (dict): A dictionary containing the attack configurations.
 
         """

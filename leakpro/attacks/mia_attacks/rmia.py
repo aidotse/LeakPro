@@ -53,7 +53,7 @@ class AttackRMIA(AbstractMIA):
 
         Args:
         ----
-            handler (AbstractInputHandler): The input handler object.
+            handler (MIAHandler): The input handler object.
             configs (dict): Configuration parameters for the attack.
 
         """

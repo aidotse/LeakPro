@@ -11,8 +11,8 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.metrics.attack_result import MIAResult
+from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.signals.signal import ModelRescaledLogits
 from leakpro.utils.import_helper import Any, Self, Tuple
 from leakpro.utils.logger import logger
@@ -165,14 +165,14 @@ class AttackQMIA(AbstractMIA):
 
     def __init__(
         self:Self,
-        handler: AbstractInputHandler,
+        handler: MIAHandler,
         configs: dict
     ) -> None:
         """Initialize the QMIA attack.
 
         Args:
         ----
-            handler (AbstractInputHandler): The input handler object.
+            handler (MIAHandler): The input handler object.
             configs (dict): Configuration parameters for the attack.
 
         """

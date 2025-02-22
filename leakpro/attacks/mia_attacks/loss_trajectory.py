@@ -13,7 +13,7 @@ from tqdm import tqdm
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.distillation_model_handler import DistillationModelHandler
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.metrics.attack_result import MIAResult
 from leakpro.signals.signal import ModelLogits
 from leakpro.utils.import_helper import Self
@@ -34,14 +34,14 @@ class AttackLossTrajectory(AbstractMIA):
         temperature: float = Field(default=2.0, ge=0.0, description="Temperature for the softmax")
 
     def __init__(self: Self,
-                 handler: AbstractInputHandler,
+                 handler: MIAHandler,
                  configs: dict
                 ) -> None:
         """Initialize the LossTrajectoryAttack class.
 
         Args:
         ----
-            handler (AbstractInputHandler): The input handler object.
+            handler (MIAHandler): The input handler object.
             configs (dict): A dictionary containing the attack loss_traj configurations.
 
         """

@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
@@ -28,14 +28,14 @@ class AttackYOQO(AbstractMIA):
         max_iterations: int = Field(default=35, ge=1, description="Maximum number of iterations for optimization of xprime")
 
     def __init__(self:Self,
-                 handler: AbstractInputHandler,
+                 handler: MIAHandler,
                  configs: dict
                  ) -> None:
         """Initialize the YOQO attack.
 
         Args:
         ----
-            handler (AbstractInputHandler): The input handler object.
+            handler (MIAHandler): The input handler object.
             configs (dict): Configuration parameters for the attack.
 
         """

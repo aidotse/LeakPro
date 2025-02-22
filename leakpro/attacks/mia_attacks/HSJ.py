@@ -6,7 +6,7 @@ import numpy as np
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.metrics.attack_result import MIAResult
 from leakpro.signals.signal import HopSkipJumpDistance
 from leakpro.utils.import_helper import Self
@@ -59,14 +59,14 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
 
 
     def __init__(self: Self,
-                 handler: AbstractInputHandler,
+                 handler: MIAHandler,
                  configs: dict
                 ) -> None:
         """Initialize the HopSkipJump class.
 
         Args:
         ----
-            handler (AbstractInputHandler): The input handler object.
+            handler (MIAHandler): The input handler object.
             configs (dict): A dictionary containing the attack loss_traj configurations.
 
         """
