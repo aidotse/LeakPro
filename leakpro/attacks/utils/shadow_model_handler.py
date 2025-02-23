@@ -157,7 +157,7 @@ class ShadowModelHandler(ModelHandler):
             if len(remaining_indices) == 0:
                 test_loss, test_acc = 0.0, 0.0
             else:
-                test_loss, test_acc = self._eval_shadow_model(shadow_model, criterion, remaining_indices)
+                test_acc, test_loss = self._eval_shadow_model(shadow_model, criterion, remaining_indices)
 
             logger.info(f"Training shadow model {i} complete")
             with open(f"{self.storage_path}/{self.model_storage_name}_{i}.pkl", "wb") as f:
