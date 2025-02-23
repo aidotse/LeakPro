@@ -60,7 +60,7 @@ class AdultInputHandler(AbstractInputHandler):
 
                 loss.backward()
                 optimizer.step()
-                train_loss += loss.item() * target.size(0)
+                train_loss += loss.item() 
                 total_samples += target.size(0)
 
         train_acc = train_acc/len(dataloader.dataset)

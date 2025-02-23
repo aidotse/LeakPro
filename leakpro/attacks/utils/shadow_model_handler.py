@@ -65,13 +65,9 @@ class ShadowModelHandler(ModelHandler):
         self.model_storage_name = "shadow_model"
         self.metadata_storage_name = "metadata"
 
-<<<<<<< HEAD
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    def _filter(self:Self, data_size:int, online:bool, model_type: str)->list[int]:
-=======
     def _filter(self:Self, data_size:int, online:bool)->list[int]:
->>>>>>> shadow_leakage
         # Get the metadata for the shadow models
         entries = os.listdir(self.storage_path)
         pattern = re.compile(rf"^{self.metadata_storage_name}_\d+\.pkl$")
@@ -185,6 +181,7 @@ class ShadowModelHandler(ModelHandler):
                 "model_class": self.model_class,
                 "target_model_hash": self.target_model_hash,
             }
+            logger.info(f"Metadata for shadow model {i}:\n{meta_data}")
             validated_meta = ShadowModelTrainingSchema(**meta_data)
             with open(f"{self.storage_path}/{self.metadata_storage_name}_{i}.pkl", "wb") as f:
                 pickle.dump(validated_meta, f)
