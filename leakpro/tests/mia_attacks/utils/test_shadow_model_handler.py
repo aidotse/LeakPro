@@ -17,9 +17,13 @@ def test_shadow_model_handler_singleton(image_handler:ImageInputHandler) -> None
         sm = ShadowModelHandler(image_handler)
         assert ShadowModelHandler.is_created() == True
 
+    image_handler.configs.shadow_model.model_class = "ConvNet_Dummy"
+    module_path = image_handler.configs.shadow_model.module_path
+    error_str = f"Failed to create model blueprint from ConvNet_Dummy in {module_path}"
+    # expect value error as there is no class ConvNetDummy
     with raises(ValueError) as excinfo:
         ShadowModelHandler(image_handler)
-    assert str(excinfo.value) == "Singleton already created with specific parameters."
+    assert str(excinfo.value) == error_str
 
 def test_shadow_model_handler_creation_from_target(image_handler:ImageInputHandler) -> None:
     image_handler.configs.shadow_model = None
