@@ -61,7 +61,7 @@ def create_trained_model_and_metadata(model, train_loader, test_loader, epochs =
             output = model(data)
 
             loss = criterion(output, target)
-            pred = sigmoid(output) >= 0.5
+            pred = output >= 0.5
             train_acc += pred.eq(target).sum().item()
 
             loss.backward()

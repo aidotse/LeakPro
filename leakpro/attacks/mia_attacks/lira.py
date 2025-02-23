@@ -287,6 +287,8 @@ class AttackLiRA(AbstractMIA):
                 pr_in = 0
 
             score[i] = (pr_in - pr_out)  # Append the calculated probability density value to the score list
+            if np.isnan(score[i]):
+                raise ValueError("Score is NaN")
 
         # Generate thresholds based on the range of computed scores for decision boundaries
         self.thresholds = np.linspace(np.min(score), np.max(score), 1000)
