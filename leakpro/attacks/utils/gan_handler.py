@@ -54,33 +54,31 @@ class GANHandler(GeneratorHandler):
         self.handler.train_gan(self)
 
     def sample_from_generator(self,
-                                gen: Module,
-                                n_classes: int,
-                                batch_size: int,
-                                device: torch.device,
-                                dim_z: int,
-                                label: int = None) -> tuple:
+                                batch_size: int = None,
+                                label: int = None,
+                                z: torch.tensor = None) -> tuple:
         """Samples data from a given generator model.
 
         Args:
-            gen (Module): The generator model to sample from.
-            n_classes (int): The number of classes for the conditional generation.
             batch_size (int): The number of samples to generate.
-            device (torch.device): The device to perform the computation on.
-            dim_z (int): The dimensionality of the latent space.
             label (int): The optional class label to generate samples for, otherwise random.
+            z (torch.tensor): The latent vector to generate samples from, otherwise random.
 
         Returns:
             tuple: A tuple containing the generated samples, the class labels, and the latent vectors.
 
         """
+        if batch_size is None:
+            batch_size = self.batch_size
 
-        z = torch.empty(batch_size, dim_z, dtype=torch.float32, device=device).normal_()
+        if z is None:
+            z = torch.empty(batch_size, self.dim_z, dtype=torch.float32, device=self.handler.device).normal_()
+
         if label is not None:
-            y = torch.tensor([label] * batch_size).to(device)
+            y = torch.tensor([label] * batch_size).to(self.handler.device)
         else:
-            y = torch.randint(0, n_classes, (batch_size,)).to(device)
-        return gen(z, y), y, z
+            y = torch.randint(0, self.num_classes, (batch_size,)).to(self.handler.device)
+        return self.generator(z, y), y, z
 
     def save_discriminator(self, discriminator: Module, path: str) -> None:
         """Save the discriminator model."""

@@ -70,12 +70,7 @@ class ImageMetrics:
         self.generator.to(self.device)
         correct_predictions = []
         for i in range(self.num_audited_classes):
-            generated_sample = self.generator_handler.sample_from_generator(self.generator,
-                                                                            self.num_audited_classes,
-                                                                            self.num_class_samples,
-                                                                            self.device,
-                                                                            self.generator.dim_z,
-                                                                            label=i)
+            generated_sample = self.generator_handler.sample_from_generator(label=i)
             for j in range(self.num_class_samples):
                 with torch.no_grad():
                     output = self.evaluation_model(generated_sample[j])
@@ -131,12 +126,7 @@ class ImageMetrics:
             features = []
             with torch.no_grad():
                 for _ in range(len(self.private_dataloader)):  # Match number of batches
-                    fake_images = self.generator_handler.sample_from_generator(self.generator,
-                                                                            self.num_audited_classes,
-                                                                            self.num_class_samples,
-                                                                            self.device,
-                                                                            self.generator.dim_z
-                                                                            )[0]
+                    fake_images = self.generator_handler.sample_from_generator()[0]
 
                     pil_images = [tensor_to_pil(img) for img in fake_images]
                     transformed_images = torch.stack([transform(img) for img in pil_images]).to(self.device)

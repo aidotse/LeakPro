@@ -165,7 +165,6 @@ class AttackPLGMI(AbstractMINV):
                                         opt_dis = self.dis_optimizer,
                                         n_iter = self.n_iter,
                                         n_dis  = self.n_dis,
-                                        num_classes = self.num_classes,
                                         device = self.device,
                                         alpha = self.alpha,
                                         log_interval = self.log_interval,

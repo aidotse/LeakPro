@@ -29,6 +29,8 @@ class GeneratorHandler(ModelHandler):
         self.generator_path = configs.get("generator", {}).get("module_path")
         self.generator_class = configs.get("generator", {}).get("model_class")
         self.gen_init_params = configs.get("generator", {}).get("init_params", {})
+        self.dim_z = self.gen_init_params.get("dim_z", 128)
+        self.num_classes = self.gen_init_params.get("num_classes", 0)
         self.generator_checkpoint = configs.get("generator", {}).get("checkpoint_path", None)
         logger.info(f"Generator path: {self.generator_path}, Generator class: {self.generator_class}")
         if self.generator_path and self.generator_class:

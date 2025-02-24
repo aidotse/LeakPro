@@ -99,7 +99,6 @@ class CelebA_InputHandler(AbstractInputHandler):
                     opt_dis: optim.Optimizer,
                     n_iter: int,
                     n_dis: int,
-                    num_classes: int,
                     device: torch.device,
                     alpha: float,
                     log_interval: int,
@@ -136,7 +135,7 @@ class CelebA_InputHandler(AbstractInputHandler):
             for j in range(n_dis):
                 if j == 0:
                     # Generator update
-                    fake, fake_labels, _ = sample_from_generator(gen, num_classes, 128, device, gen.dim_z)
+                    fake, fake_labels, _ = sample_from_generator()
                     fake_aug = aug_list(fake).to(device)
                     dis_fake = dis(fake_aug, fake_labels)
                     inv_loss = gan_losses.max_margin_loss(target_model(fake_aug), fake_labels)
@@ -155,7 +154,7 @@ class CelebA_InputHandler(AbstractInputHandler):
                     cumulative_inv_loss += inv_loss.item()
                 
                 # Discriminator update
-                fake, fake_labels, _ = sample_from_generator(gen, num_classes, 128, device, gen.dim_z)
+                fake, fake_labels, _ = sample_from_generator()
 
                 real, real_labels = next(iter(pseudo_loader))
                 real, real_labels = real.to(device), real_labels.to(device)
