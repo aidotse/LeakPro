@@ -189,20 +189,22 @@ class AttackPLGMI(AbstractMINV):
 
         self.evaluation_model = self.target_model # TODO: Change to evaluation model
 
-        audit_configs = self.handler.configs.get("audit", {}).get("reconstruction", {})
+        reconstruction_configs = self.handler.configs.get("audit", {}).get("reconstruction", {})
 
-        num_audited_classes = audit_configs.get("num_audited_classes", self.num_classes)
+        num_audited_classes = reconstruction_configs.get("num_audited_classes", self.num_classes)
 
-        z_optimization_iter = audit_configs.get("z_optimization_iter", 1000)
+        z_optimization_iter = reconstruction_configs.get("z_optimization_iter", 1000)
+        z_optimization_lr = reconstruction_configs.get("z_optimization_lr", 2e-2)
 
-        z_optimization_lr = audit_configs.get("z_optimization_lr", 2e-2)
-
+        # Get random labels
         labels = torch.randint(0, self.num_classes, (num_audited_classes,)).to(self.device)
 
+        # Optimize z, TODO: Optimize in batches
         opt_z = self.optimize_z(y=labels, lr= z_optimization_lr, iter_times=z_optimization_iter).to(self.device)
 
+        # Compute image metrics for the optimized z and labels
         image_metrics = ImageMetrics(self.handler, self.gan_handler,
-                                     audit_configs,
+                                     reconstruction_configs,
                                      labels=labels,
                                      z=opt_z)
         logger.info(image_metrics.results)
@@ -222,7 +224,7 @@ class AttackPLGMI(AbstractMINV):
             iter_times (int): The number of iterations for optimization.
 
         """
-        bs = y.shape[0]
+        bs = y.shape[0] # Number of samples
         y = y.view(-1).long().to(self.device)
 
         self.generator.eval()
@@ -237,7 +239,7 @@ class AttackPLGMI(AbstractMINV):
             augmentation.ColorJitter(brightness=0.2, contrast=0.2),
             augmentation.RandomHorizontalFlip(),
             augmentation.RandomRotation(5),
-        ).to(self.device)
+        ).to(self.device) # TODO: Move this to a image modality extension and have it as an input
 
         logger.info("Optimizing z for the PLG-MI attack")
 
@@ -247,16 +249,21 @@ class AttackPLGMI(AbstractMINV):
         optimizer = torch.optim.Adam([z], lr=lr)
 
         for i in range(iter_times):
+
+            # Generate fake images
             fake = self.generator(z, y)
 
+            # Average the output of the target model
             out1 = self.target_model(aug_list(fake))
             out2 = self.target_model(aug_list(fake))
 
             if z.grad is not None:
                 z.grad.data.zero_()
 
+            # Compute the loss
             inv_loss = F.cross_entropy(out1, y) + F.cross_entropy(out2, y)
 
+            # Update the latent vector z
             optimizer.zero_grad()
             inv_loss.backward()
             optimizer.step()
