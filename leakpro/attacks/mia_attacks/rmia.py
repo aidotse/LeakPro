@@ -1,4 +1,5 @@
 """Implementation of the RMIA attack."""
+import os
 
 import numpy as np
 from pydantic import BaseModel, Field, model_validator
@@ -9,7 +10,7 @@ from leakpro.attacks.utils.utils import softmax_logits
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.metrics.attack_result import MIAResult
 from leakpro.signals.signal import ModelLogits
-from leakpro.utils.import_helper import Self
+from leakpro.utils.import_helper import Self, Tuple
 from leakpro.utils.logger import logger
 
 
@@ -44,12 +45,7 @@ class AttackRMIA(AbstractMIA):
                                  ge=0.0,
                                  le=1.0,
                                  description="Parameter to estimate the marginal p(x)",
-                                 suggest={"type": "float", "low": 0.0, "high": 1.0,"enabled_if": lambda model: not model.online})
-        offline_b: float = Field(default=0.66,
-                                 ge=0.0,
-                                 le=1.0,
-                                 description="Parameter to estimate the marginal p(x)",
-                                 suggest={"type": "float", "low": 0.0, "high": 1.0,"enabled_if": lambda model: not model.online})
+                                 optuna={"type": "float", "low": 0.0, "high": 1.0,"enabled_if": lambda model: not model.online})
 
         @model_validator(mode="after")
         def check_num_shadow_models_if_online(self) -> Self:
@@ -98,6 +94,11 @@ class AttackRMIA(AbstractMIA):
         self.shadow_models = None
         self.shadow_model_indices = None
 
+        # Folder to store intermediate results
+        self.attack_folder_path = "leakpro_output/attacks/rmia"
+        os.makedirs(self.attack_folder_path, exist_ok=True)
+        self.load_for_optuna = False
+
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
@@ -117,20 +118,11 @@ class AttackRMIA(AbstractMIA):
             "detailed": detailed_str,
         }
 
-    def prepare_attack(self:Self) -> None:
-        """Prepare data needed for running the attack on the target model and dataset.
-
-        Signals are computed on the auxiliary model(s) and dataset.
-        """
-        logger.info("Preparing shadow models for RMIA attack")
-        # Check number of shadow models that are available
-
-        # sample dataset to compute histogram
-        logger.info("Preparing attack data for training the RMIA attack")
+    def _prepare_shadow_models(self:Self) -> None:
 
         # Get all available indices for attack dataset, if self.online = True, include training and test data
         self.attack_data_indices = self.sample_indices_from_population(include_train_indices = self.online,
-                                                                       include_test_indices = self.online)
+                                                                    include_test_indices = self.online)
 
         # train shadow models
         logger.info(f"Check for {self.num_shadow_models} shadow models (dataset: {len(self.attack_data_indices)} points)")
@@ -142,29 +134,62 @@ class AttackRMIA(AbstractMIA):
         # load shadow models
         self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)
 
+    def _prepare_offline_aux_attack_logits(self:Self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Prepare the logits for the offline attack on the auxiliary dataset."""
+
+        # subsample the attack data based on the fraction
+        logger.info(f"Subsampling attack data from {len(self.attack_data_indices)} points")
+        n_points = int(self.attack_data_fraction * len(self.attack_data_indices))
+        chosen_attack_data_indices = np.random.choice(self.attack_data_indices, n_points, replace=False)
+        logger.info(f"Number of attack data points after subsampling: {len(chosen_attack_data_indices)}")
+
+        # get the true label indices
+        z_true_labels = self.handler.get_labels(chosen_attack_data_indices)
+        assert np.issubdtype(z_true_labels.dtype, np.integer)
+        f_z_true_labels = f"{self.attack_folder_path}/z_true_labels.npy"
+        np.save(f_z_true_labels, z_true_labels)
+
+        # run points through real model to collect the logits
+        logits_theta = np.array(self.signal([self.target_model], self.handler, chosen_attack_data_indices))
+
+        # Store the ratio of p(z|theta) to p(z) for the audit dataset to be used in other optuna
+        f_logits_theta = f"{self.attack_folder_path}/logits_theta.npy"
+        np.save(f_logits_theta, logits_theta)
+
+        # run points through shadow models and collect the logits
+        logits_shadow_models = self.signal(self.shadow_models, self.handler, chosen_attack_data_indices)
+        f_logits_sm = f"{self.attack_folder_path}/logits_shadow_models.npy"
+        np.save(f_logits_sm, logits_shadow_models)
+
+        return logits_theta, logits_shadow_models, z_true_labels
+
+    def prepare_attack(self:Self) -> None:
+        """Prepare Data needed for running the attack on the target model and dataset.
+
+        Signals are computed on the auxiliary model(s) and dataset.
+        """
+        logger.info("Preparing shadow models for RMIA attack")
+
+        # If we already have one run, we dont need to check for shadow models as logits are stored
+        if not self.load_for_optuna:
+            self._prepare_shadow_models()
+
         # compute quantities that are not touching the audit dataset
         if self.online is False:
             # compute the ratio of p(z|theta) (target model) to p(z)=sum_{theta'} p(z|theta') (shadow models)
             # for all points in the attack dataset output from signal: # models x # data points x # classes
 
-            # subsample the attack data based on the fraction
-            logger.info(f"Subsampling attack data from {len(self.attack_data_indices)} points")
-            n_points = int(self.attack_data_fraction * len(self.attack_data_indices))
-            chosen_attack_data_indices = np.random.choice(self.attack_data_indices, n_points, replace=False)
-            logger.info(f"Number of attack data points after subsampling: {len(chosen_attack_data_indices)}")
+            if not self.load_for_optuna:
+                logits_theta, logits_shadow_models, z_true_labels = self._prepare_offline_aux_attack_logits()
+            else:
+                logits_theta = np.load(f"{self.attack_folder_path}/logits_theta.npy")
+                logits_shadow_models = np.load(f"{self.attack_folder_path}/logits_shadow_models.npy")
+                z_true_labels = np.load(f"{self.attack_folder_path}/z_true_labels.npy")
 
-            # get the true label indices
-            z_true_labels = self.handler.get_labels(chosen_attack_data_indices)
-            assert np.issubdtype(z_true_labels.dtype, np.integer)
-
-            # run points through real model to collect the logits
-            logits_theta = np.array(self.signal([self.target_model], self.handler, chosen_attack_data_indices))
             # collect the softmax output of the correct class
-            n_attack_points = len(chosen_attack_data_indices)
+            n_attack_points = len(z_true_labels)
             p_z_given_theta = softmax_logits(logits_theta, self.temperature)[:,np.arange(n_attack_points),z_true_labels]
 
-            # run points through shadow models and collect the logits
-            logits_shadow_models = self.signal(self.shadow_models, self.handler, chosen_attack_data_indices)
             # collect the softmax output of the correct class for each shadow model
             sm_logits_shadow_models = [softmax_logits(x, self.temperature) for x in logits_shadow_models]
             p_z_given_shadow_models = np.array([x[np.arange(n_attack_points),z_true_labels] for x in sm_logits_shadow_models])
@@ -267,11 +292,30 @@ class AttackRMIA(AbstractMIA):
         self.in_member_signals = score[in_members].reshape(-1,1)
         self.out_member_signals = score[out_members].reshape(-1,1)
 
-    def _offline_attack(self:Self) -> None:
-        logger.info("Running RMIA offline attack")
+    def _prepare_offline_audit_logits(self:Self) -> Tuple[np.ndarray, np.ndarray]:
+        """Prepare the logits for the offline attack on the audit dataset."""
 
         # run target points through real model to get logits
         logits_theta = np.array(self.signal([self.target_model], self.handler, self.audit_dataset["data"]))
+        f_logits_theta = f"{self.attack_folder_path}/logits_audit_theta.npy"
+        np.save(f_logits_theta, logits_theta)
+
+        # run points through shadow models and collect the logits
+        logits_shadow_models = self.signal(self.shadow_models, self.handler, self.audit_dataset["data"])
+        f_logits_sm = f"{self.attack_folder_path}/logits_audit_shadow_models.npy"
+        np.save(f_logits_sm, logits_shadow_models)
+
+        return logits_theta, logits_shadow_models
+
+    def _offline_attack(self:Self) -> None:
+        logger.info("Running RMIA offline attack")
+
+        if not self.load_for_optuna:
+            logits_theta, logits_shadow_models = self._prepare_offline_audit_logits()
+        else:
+            logits_theta = np.load(f"{self.attack_folder_path}/logits_audit_theta.npy")
+            logits_shadow_models = np.load(f"{self.attack_folder_path}/logits_audit_shadow_models.npy")
+
         # collect the softmax output of the correct class
         ground_truth_indices = self.handler.get_labels(self.audit_dataset["data"])
         assert np.issubdtype(ground_truth_indices.dtype, np.integer)
@@ -279,8 +323,6 @@ class AttackRMIA(AbstractMIA):
         n_audit_points = len(self.audit_dataset["data"])
         p_x_given_target_model = softmax_logits(logits_theta, self.temperature)[:,np.arange(n_audit_points),ground_truth_indices]
 
-        # run points through shadow models and collect the logits
-        logits_shadow_models = self.signal(self.shadow_models, self.handler, self.audit_dataset["data"])
         # collect the softmax output of the correct class for each shadow model
         # Stack to dimension # models x # data points
         sm_shadow_models = [softmax_logits(x, self.temperature) for x in logits_shadow_models]
@@ -342,6 +384,9 @@ class AttackRMIA(AbstractMIA):
             [self.in_member_signals, self.out_member_signals]
         )
 
+        # Ensure we use the stored quantities from now
+        self.load_for_optuna = True
+
         # compute ROC, TP, TN etc
         return MIAResult(
             predicted_labels=predictions,
@@ -350,11 +395,13 @@ class AttackRMIA(AbstractMIA):
             signal_values=signal_values,
         )
 
-    def reset_attack(self: Self) -> None:
+    def reset_attack(self: Self, config:BaseModel) -> None:
         """Reset attack to initial state."""
-        self.shadow_models = []
-        self.shadow_models = None
-        self.shadow_model_indices = None
+
+        # Assign the new configuration parameters to the object
+        for key, value in config.model_dump().items():
+            setattr(self, key, value)
+
         # new hyperparameters have been set, let's prepare the attack again
         self.prepare_attack()
 

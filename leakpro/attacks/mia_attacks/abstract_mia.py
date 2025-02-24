@@ -175,19 +175,19 @@ class AbstractMIA(AbstractAttack):
             optuna_config = OptunaConfig()
         optuna_optimal_hyperparameters(self, optuna_config)
 
-    def suggest_parameters(self:Self, config:BaseModel, trial: Trial) -> BaseModel:
+    def suggest_parameters(self:Self, trial: Trial) -> BaseModel:
         """Update the given config with suggested parameters from the trial."""
         suggestions = {}
-        for field_name, field in config.model_fields().items():
-            extra = field.field_info.extra
-            if "optuna" not in extra:
+        for field_name, field in self.configs.model_fields.items():
+            extra = field.json_schema_extra
+            if extra is None or "optuna" not in extra:
                 continue
 
             opt_variable = extra["optuna"]
 
             # Check if the field should be suggested (e.g. only when not online)
-            enabled_if = opt_variable.get("enabled_if")
-            if enabled_if is not None and not enabled_if(config):
+            enabled_if = opt_variable.get("enabled_if", None)
+            if enabled_if is not None and not enabled_if(self.configs):
                 continue
 
             param_type = opt_variable.get("type")
@@ -212,7 +212,7 @@ class AbstractMIA(AbstractAttack):
             else:
                 raise ValueError(f"Unsupported parameter type: {param_type}")
 
-        return config.model_copy(update=suggestions)
+        return self.configs.model_copy(update=suggestions)
 
     @property
     def population(self:Self)-> List:
