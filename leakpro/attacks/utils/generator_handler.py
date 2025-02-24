@@ -66,6 +66,7 @@ class GeneratorHandler(ModelHandler):
         """Abstract sample generation method for generator models. To be implemented by subclasses."""
         raise NotImplementedError("Subclasses must implement the generate_samples method")
 
+    '''
     def get_public_data(self, batch_size: int) -> DataLoader:
         """Return data loader for the public dataset."""
         # Get public dataloader
@@ -91,6 +92,7 @@ class GeneratorHandler(ModelHandler):
         except FileNotFoundError as e:
             raise FileNotFoundError(f"Could not find the private data at {self.private_path}") from e
         return DataLoader(self.private_dataset, batch_size = batch_size, shuffle=False)
+    '''
 
     def save_generator(self, generator: Module, path: str) -> None:
         """Save the generator model."""
