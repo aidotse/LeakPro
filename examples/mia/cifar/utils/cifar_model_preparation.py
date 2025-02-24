@@ -1,117 +1,98 @@
-import torch.nn as nn
-from torch import device, optim, cuda, no_grad, save, sigmoid
-import torchvision.models as models
+import xgboost as xgb
+import numpy as np
 import pickle
 from tqdm import tqdm
+from torch import device, cuda, no_grad
 
-class ResNet18(nn.Module):
+class XGBoostModel:
     def __init__(self, num_classes):
-        super(ResNet18, self).__init__()
-        self.model = models.resnet18(pretrained=False)
-        self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
+        """
+        Initialize an XGBoost classifier.
+        """
+        self.num_classes = num_classes
+        self.model = xgb.XGBClassifier(
+            objective="multi:softmax" if num_classes > 2 else "binary:logistic",
+            eval_metric="mlogloss" if num_classes > 2 else "logloss",
+            use_label_encoder=False,
+            num_class=num_classes if num_classes > 2 else 1
+        )
         self.init_params = {"num_classes": num_classes}
-    
-    def forward(self, x):
-        return self.model(x)
 
-def evaluate(model, loader, criterion, device):
-    model.eval()
+    def fit(self, X_train, y_train):
+        """Train the model."""
+        self.model.fit(X_train, y_train)
+
+    def predict(self, X):
+        """Make predictions."""
+        return self.model.predict(X)
+
+
+def evaluate(model, loader, device):
+    model.model.eval()
     loss, acc = 0, 0
+    all_preds, all_targets = [], []
+    
     with no_grad():
         for data, target in loader:
-            data, target = data.to(device), target.to(device)
-            target = target.view(-1) 
-            output = model(data)
-            loss += criterion(output, target).item()
-            pred = output.argmax(dim=1) 
-            acc += pred.eq(target).sum().item()
-        loss /= len(loader)
-        acc = float(acc) / len(loader.dataset)
-    return loss, acc
+            data, target = data.numpy(), target.numpy()  # Convert tensors to NumPy arrays
+            preds = model.predict(data)
+            
+            all_preds.extend(preds)
+            all_targets.extend(target)
+    
+    acc = np.mean(np.array(all_preds) == np.array(all_targets))  # Compute accuracy
+    return loss, acc  # No loss function equivalent in XGBoost like CrossEntropyLoss
 
-def create_trained_model_and_metadata(model,
-                                      train_loader,
-                                      test_loader,
-                                      train_config):
+
+def create_trained_model_and_metadata(model, train_loader, test_loader, train_config):
     lr = train_config["train"]["learning_rate"]
-    momentum = train_config["train"]["momentum"]
     epochs = train_config["train"]["epochs"]
     
     device_name = device("cuda" if cuda.is_available() else "cpu")
-    model.to(device_name)
-    model.train()
 
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum)
     train_losses, train_accuracies = [], []
     test_losses, test_accuracies = [], []
     
+    X_train, y_train = [], []
+    for data, target in train_loader:
+        X_train.append(data.numpy())
+        y_train.append(target.numpy())
+    
+    X_train = np.vstack(X_train)
+    y_train = np.hstack(y_train)
+
     for e in tqdm(range(epochs), desc="Training Progress"):
-        model.train()
-        train_acc, train_loss = 0.0, 0.0
-        
-        for data, target in train_loader:
-            data, target = data.to(device_name, non_blocking=True), target.to(device_name, non_blocking=True)
-            target = target.view(-1)
-            optimizer.zero_grad()
-            output = model(data)
-            
-            loss = criterion(output, target)
-            pred = output.argmax(dim=1)  # for multi-class classification
-            train_acc += pred.eq(target).sum().item()
-            
-            loss.backward()
-            optimizer.step()
-            train_loss += loss.item()
-        
-        train_loss /= len(train_loader)
-        train_acc /= len(train_loader.dataset)
-            
+        model.fit(X_train, y_train)
+
+        # Evaluate training and test performance
+        train_loss, train_acc = evaluate(model, train_loader, device_name)
+        test_loss, test_acc = evaluate(model, test_loader, device_name)
+
         train_losses.append(train_loss)
         train_accuracies.append(train_acc)
-        
-        test_loss, test_acc = evaluate(model, test_loader, criterion, device_name)
         test_losses.append(test_loss)
         test_accuracies.append(test_acc)
 
-    # Move the model back to the CPU
-    model.to("cpu")
-    with open( train_config["run"]["log_dir"]+"/target_model.pkl", "wb") as f:
-        save(model.state_dict(), f)
+    # Save the trained model
+    with open(train_config["run"]["log_dir"] + "/target_model.pkl", "wb") as f:
+        pickle.dump(model.model, f)
 
-    # Create metadata and store it
-    meta_data = {}
-    meta_data["train_indices"] = train_loader.dataset.indices
-    meta_data["test_indices"] = test_loader.dataset.indices
-    meta_data["num_train"] = len(meta_data["train_indices"])
-    
-    # Write init params
-    meta_data["init_params"] = {}
-    for key, value in model.init_params.items():
-        meta_data["init_params"][key] = value
-    
-    # read out optimizer parameters
-    meta_data["optimizer"] = {}
-    meta_data["optimizer"]["name"] = optimizer.__class__.__name__.lower()
-    meta_data["optimizer"]["lr"] = optimizer.param_groups[0].get("lr", 0)
-    meta_data["optimizer"]["weight_decay"] = optimizer.param_groups[0].get("weight_decay", 0)
-    meta_data["optimizer"]["momentum"] = optimizer.param_groups[0].get("momentum", 0)
-    meta_data["optimizer"]["dampening"] = optimizer.param_groups[0].get("dampening", 0)
-    meta_data["optimizer"]["nesterov"] = optimizer.param_groups[0].get("nesterov", False)
-
-    # read out criterion parameters
-    meta_data["loss"] = {}
-    meta_data["loss"]["name"] = criterion.__class__.__name__.lower()
-
-    meta_data["batch_size"] = train_loader.batch_size
-    meta_data["epochs"] = epochs
-    meta_data["train_acc"] = train_acc
-    meta_data["test_acc"] = test_acc
-    meta_data["train_loss"] = train_loss
-    meta_data["test_loss"] = test_loss
-    meta_data["dataset"] = train_config["data"]["dataset"]
+    # Create metadata
+    meta_data = {
+        "train_indices": train_loader.dataset.indices,
+        "test_indices": test_loader.dataset.indices,
+        "num_train": len(train_loader.dataset.indices),
+        "init_params": model.init_params,
+        "batch_size": train_loader.batch_size,
+        "epochs": epochs,
+        "train_acc": train_acc,
+        "test_acc": test_acc,
+        "train_loss": train_loss,
+        "test_loss": test_loss,
+        "dataset": train_config["data"]["dataset"],
+    }
     
     with open("target/model_metadata.pkl", "wb") as f:
         pickle.dump(meta_data, f)
-    
+
     return train_accuracies, train_losses, test_accuracies, test_losses
