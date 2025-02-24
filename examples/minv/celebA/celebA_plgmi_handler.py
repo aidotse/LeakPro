@@ -40,9 +40,9 @@ class CelebA_InputHandler(AbstractInputHandler):
         model.to(gpu_or_cpu)
 
         for epoch in range(epochs):
-            train_loss, train_acc = 0.0, 0
+            train_loss, train_acc, total_samples = 0.0, 0, 0
             model.train()
-            for inputs, labels in tqdm(dataloader, desc="Training Progress"):
+            for inputs, labels in tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}"):
                 inputs, labels = inputs.to(gpu_or_cpu), labels.to(gpu_or_cpu)
                 optimizer.zero_grad()
 
@@ -54,11 +54,14 @@ class CelebA_InputHandler(AbstractInputHandler):
                 # Performance metrics
                 preds = outputs.argmax(dim=1)
                 train_acc += (preds == labels).sum().item()
-                train_loss += loss.item()
+                train_loss += loss.item()* labels.size(0)
+                total_samples += labels.size(0)
 
+        avg_train_loss = train_loss / len(dataloader)
+        train_accuracy = train_acc / total_samples  
         model.to("cpu")
 
-        return {"model": model, "metrics": {"accuracy": train_acc / len(dataloader.dataset), "loss": train_loss}}
+        return {"model": model, "metrics": {"accuracy": train_accuracy, "loss": avg_train_loss}}
     
     
     def evaluate(self, dataloader: DataLoader, model: torch.nn.Module, criterion: torch.nn.Module) -> dict:
@@ -67,7 +70,7 @@ class CelebA_InputHandler(AbstractInputHandler):
         model.to(gpu_or_cpu)
         model.eval()
 
-        test_loss, test_acc = 0.0, 0
+        test_loss, test_acc, total_samples = 0.0, 0, 0
         with torch.no_grad():
             for inputs, labels in tqdm(dataloader, desc="Evaluating"):
                 inputs, labels = inputs.to(gpu_or_cpu), labels.to(gpu_or_cpu)
@@ -76,19 +79,22 @@ class CelebA_InputHandler(AbstractInputHandler):
 
                 preds = outputs.argmax(dim=1)
                 test_acc += (preds == labels).sum().item()
-                test_loss += loss.item()
-
+                test_loss += loss.item()* labels.size(0)
+                total_samples += labels.size(0)
+        
+        avg_test_loss = test_loss / len(dataloader)
+        test_accuracy = test_acc / total_samples
         model.to("cpu")
 
-        return {"accuracy": test_acc / len(dataloader.dataset), "loss": test_loss}
+        return {"accuracy": test_accuracy, "loss": avg_test_loss}
 
     def train_gan(self,
                     pseudo_loader: DataLoader,
                     gen: torch.nn.Module,
                     dis: torch.nn.Module,
-                    gen_criterion: torch.nn.Module,
-                    dis_criterion: torch.nn.Module,
-                    model: torch.nn.Module,
+                    gen_criterion: callable,
+                    dis_criterion: callable,
+                    target_model: torch.nn.Module,
                     opt_gen: optim.Optimizer,
                     opt_dis: optim.Optimizer,
                     n_iter: int,
@@ -113,7 +119,7 @@ class CelebA_InputHandler(AbstractInputHandler):
             kornia.augmentation.RandomRotation(5),
         ).to(device)
 
-        model.to(device)
+        target_model.to(device)
         gen.to(device)
         dis.to(device)
         # Training loop
@@ -129,10 +135,11 @@ class CelebA_InputHandler(AbstractInputHandler):
             # Number of discriminator updates per generator update
             for j in range(n_dis):
                 if j == 0:
+                    # Generator update
                     fake, fake_labels, _ = sample_from_generator(gen, num_classes, 128, device, gen.dim_z)
                     fake_aug = aug_list(fake).to(device)
                     dis_fake = dis(fake_aug, fake_labels)
-                    inv_loss = gan_losses.max_margin_loss(model(fake_aug), fake_labels)
+                    inv_loss = gan_losses.max_margin_loss(target_model(fake_aug), fake_labels)
 
                     inv_losses.append(inv_loss.item())
                     dis_real = None
@@ -146,7 +153,8 @@ class CelebA_InputHandler(AbstractInputHandler):
                     opt_gen.step()
                     _l_g += loss_gen.item()
                     cumulative_inv_loss += inv_loss.item()
-
+                
+                # Discriminator update
                 fake, fake_labels, _ = sample_from_generator(gen, num_classes, 128, device, gen.dim_z)
 
                 real, real_labels = next(iter(pseudo_loader))
@@ -165,9 +173,10 @@ class CelebA_InputHandler(AbstractInputHandler):
                 cumulative_loss_dis += loss_dis.item()
                 dis_losses.append(cumulative_loss_dis/n_dis)
                 
+                # Evaluate target model accuracy for training progress monitoring TODO: make optional for efficiency
                 with torch.no_grad():
                     count += fake.shape[0]
-                    T_logits = model(fake)
+                    T_logits = target_model(fake)
                     T_preds = T_logits.max(1, keepdim=True)[1]
                     target_correct += T_preds.eq(fake_labels.view_as(T_preds)).sum().item()
                     cumulative_target_acc += round(target_correct / count, 4)
@@ -175,8 +184,8 @@ class CelebA_InputHandler(AbstractInputHandler):
             if i % log_interval == 0:
                 print(
                         'iteration: {:05d}/{:05d}, loss gen: {:05f}, loss dis {:05f}, inv loss {:05f}, target acc {:04f}, time {}'.format(
-                            i, n_iter, _l_g, cumulative_loss_dis, cumulative_inv_loss,
-                            cumulative_target_acc, time.strftime("%H:%M:%S")))
+                            i, n_iter, _l_g, cumulative_loss_dis / n_dis, cumulative_inv_loss,
+                            cumulative_target_acc / n_dis, time.strftime("%H:%M:%S")))
 
         torch.save(gen.state_dict(), './gen.pth')
         torch.save(dis.state_dict(), './dis.pth')
