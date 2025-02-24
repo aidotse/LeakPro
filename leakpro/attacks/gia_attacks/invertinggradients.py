@@ -3,8 +3,8 @@ from collections.abc import Generator
 from copy import deepcopy
 from dataclasses import dataclass, field
 
-import optuna
 import torch
+from optuna.trial import Trial
 from torch import Tensor
 from torch.nn import CrossEntropyLoss, Module
 from torch.utils.data import DataLoader
@@ -140,7 +140,7 @@ class InvertingGradients(AbstractGIA):
     def _configure_attack(self: Self, configs: dict) -> None:
         pass
 
-    def suggest_parameters(self: Self, trial: optuna.trial.Trial) -> None:
+    def suggest_parameters(self: Self, trial: Trial) -> None:
         """Suggest parameters to chose and range for optimization for the Inverting Gradient attack."""
         total_variation = trial.suggest_float("total_variation", 1e-6, 1e-1, log=True)
         self.configs.tv_reg = total_variation
@@ -153,7 +153,3 @@ class InvertingGradients(AbstractGIA):
         self.model = deepcopy(self.original_model)
         self.prepare_attack()
         logger.info("Inverting attack reset to initial state.")
-
-    def get_configs(self: Self) -> dict:
-        """Return configs used for attack."""
-        return self.configs

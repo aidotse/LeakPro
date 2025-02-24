@@ -3,6 +3,7 @@
 from abc import ABC, abstractmethod
 
 import numpy as np
+from optuna.trial import Trial
 from pydantic import BaseModel
 from torch.utils.data import DataLoader
 
@@ -162,6 +163,44 @@ class AbstractMIA(ABC):
             raise ValueError("Size of the sample is greater than the size of the data.")
         return self.get_dataloader(np.random.choice(data, size, replace=False))
 
+    def suggest_parameters_from_model(self:Self, config:BaseModel, trial: Trial) -> BaseModel:
+        """Update the given config with suggested parameters from the trial."""
+        suggestions = {}
+        for field_name, field in config.model_fields().items():
+            extra = field.field_info.extra
+            if "optuna" not in extra:
+                continue
+
+            opt_variable = extra["optuna"]
+
+            # Check if the field should be suggested (e.g. only when not online)
+            enabled_if = opt_variable.get("enabled_if")
+            if enabled_if is not None and not enabled_if(config):
+                continue
+
+            param_type = opt_variable.get("type")
+            if param_type == "float":
+                suggestions[field_name] = trial.suggest_float(
+                    field_name,
+                    opt_variable["low"],
+                    opt_variable["high"],
+                    log=opt_variable.get("log", False)
+                )
+            elif param_type == "int":
+                suggestions[field_name] = trial.suggest_int(
+                    field_name,
+                    opt_variable["low"],
+                    opt_variable["high"]
+                )
+            elif param_type == "categorical":
+                suggestions[field_name] = trial.suggest_categorical(
+                    field_name,
+                    opt_variable["choices"]
+                )
+            else:
+                raise ValueError(f"Unsupported parameter type: {param_type}")
+
+        return config.model_copy(update=suggestions)
 
     @property
     def population(self:Self)-> List:

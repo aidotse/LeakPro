@@ -3,7 +3,7 @@
 from abc import abstractmethod
 from collections.abc import Generator
 from copy import deepcopy
-from typing import Callable, Optional
+from typing import Callable
 
 import optuna
 import torch
@@ -13,7 +13,6 @@ from torch.utils.data import DataLoader
 from leakpro.attacks.attack_base import AbstractAttack
 from leakpro.fl_utils.model_utils import MedianPool2d
 from leakpro.fl_utils.similarity_measurements import dataloaders_psnr, dataloaders_ssim_ignite
-from leakpro.hyperparameter_tuning.optuna import OptunaConfig, optuna_optimal_hyperparameters
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
@@ -92,12 +91,6 @@ class AbstractGIA(AbstractAttack):
         """Get the configs used for the attack."""
         pass
 
-    def run_with_optuna(self:Self, optuna_config: Optional[OptunaConfig] = None) -> optuna.study.Study:
-        """Fins optimal hyperparameters using optuna."""
-        if optuna_config is None:
-            optuna_config = OptunaConfig()
-        optuna_optimal_hyperparameters(self, optuna_config)
-
     def generic_attack_loop(self: Self, configs:dict, gradient_closure: Callable, at_iterations: int,
                             reconstruction: Tensor, data_mean: Tensor, data_std: Tensor, attack_lr: float,
                             median_pooling: bool, client_loader: DataLoader, reconstruction_loader: DataLoader
@@ -122,7 +115,7 @@ class AbstractGIA(AbstractAttack):
                     )
                 if (i +1) % 500 == 0 and median_pooling:
                     reconstruction.data = MedianPool2d(kernel_size=3, stride=1, padding=1, same=False)(reconstruction)
-            # Chose image who has given least loss
+            # Choose image who has given least loss
             if loss < self.best_loss:
                 self.best_loss = loss
                 self.best_reconstruction = deepcopy(reconstruction_loader)

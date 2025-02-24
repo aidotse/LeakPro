@@ -4,8 +4,8 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Optional
 
-import optuna
 import torch
+from optuna.trial import Trial
 from torch import Tensor
 from torch.nn import CrossEntropyLoss, Module
 from torch.utils.data import DataLoader
@@ -165,7 +165,7 @@ class Huang(AbstractGIA):
     def _configure_attack(self: Self, configs: dict) -> None:
         pass
 
-    def suggest_parameters(self: Self, trial: optuna.trial.Trial) -> None:
+    def suggest_parameters(self: Self, trial: Trial) -> None:
         """Suggest parameters to chose and range for optimization for the Huang attack."""
         total_variation = trial.suggest_float("total_variation", 1e-6, 1e-1, log=True)
         bn_reg = trial.suggest_float("bn_reg", 1e-4, 1e-1, log=True)
@@ -180,7 +180,3 @@ class Huang(AbstractGIA):
         self.model = deepcopy(self.original_model)
         self.prepare_attack()
         logger.info("Huang attack reset to initial state.")
-
-    def get_configs(self: Self) -> dict:
-        """Return configs used for attack."""
-        return self.configs

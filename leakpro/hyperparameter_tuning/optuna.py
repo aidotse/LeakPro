@@ -1,8 +1,9 @@
 """Run optuna to find best hyperparameters."""
 from collections.abc import Generator
-from dataclasses import dataclass, field
+from typing import Literal
 
 import optuna
+from pydantic import BaseModel, Field
 from torch import Tensor
 
 from leakpro.attacks.attack_base import AbstractAttack
@@ -11,21 +12,20 @@ from leakpro.utils.logger import logger
 from leakpro.utils.seed import seed_everything
 
 
-@dataclass
-class OptunaConfig:
-    """Config for configurable stuff in optuna."""
+class OptunaConfig(BaseModel):
+    """Configuration for the Optuna hyperparameter search."""
 
-    # pruner (optuna.pruners.BasePruner): Number of steps before pruning of experiments will be available.
-    pruner: optuna.pruners.BasePruner = field(default_factory=lambda: optuna.pruners.MedianPruner(n_warmup_steps=5))
-    # n_trials (int): Number of trials to find the optimal hyperparameters.
-    n_trials: int = 50
-    # direction (str): Direction of the optimization, minimize or maximize, depending on the optuna objective.
-    direction: str = "maximize"
-    # seed (int): Random seed to run the attack from.
-    seed:int = 1234
+    seed: int = Field(default=1234, description="Random seed for reproducibility")
+    n_trials: int = Field(default=50, description="Number of trials to find the optimal hyperparameters")
+    direction: Literal["maximize", "minimize"] = Field(..., description="Direction of the optimization, minimize or maximize")
+    pruner: optuna.pruners.BasePruner = Field(default=optuna.pruners.MedianPruner(n_warmup_steps=5), description="Number of steps before pruning of experiments will be available")  # noqa: E501
 
-def optuna_optimal_hyperparameters(attack_object: AbstractAttack, optuna_config: OptunaConfig
-                                   ) -> optuna.study.Study:
+    class Config:
+        """Configuration for OptunaConfig to enable arbitrary type handling."""
+
+        arbitrary_types_allowed = True
+
+def optuna_optimal_hyperparameters(attack_object: AbstractAttack, optuna_config: OptunaConfig = None) -> optuna.study.Study:
     """Find optimal hyperparameters for an attack object.
 
     Args:
@@ -44,12 +44,13 @@ def optuna_optimal_hyperparameters(attack_object: AbstractAttack, optuna_config:
                 trial.report(intermediary_results, step)
 
                 if trial.should_prune():
-                    break
+                    raise optuna.TrialPruned()
                 # save results if not pruned
                 if result_object is not None:
                     result_object.save(name="optuna", path="./leakpro_output/results", config=attack_object.get_configs())
                     return intermediary_results
         elif isinstance(result, MIAResult):
+            # MIA cannot be used with pruning as we need the final result to be computed
             return result.accuracy # add something reasonable to optimize toward here
         return None
 

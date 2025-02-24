@@ -19,14 +19,37 @@ class AttackRMIA(AbstractMIA):
     class Config(BaseModel):
         """Configuration for the RMIA attack."""
 
-        num_shadow_models: int = Field(default=1, ge=1, description="Number of shadow models")
-        offline_a: float = Field(default=0.33, ge=0.0, le=1.0, description="Parameter to estimate the marginal p(x)")
-        offline_b: float = Field(default=0.66, ge=0.0, le=1.0, description="Parameter to estimate the marginal p(x)")
-        gamma: float = Field(default=2.0, ge=0.0, description="Parameter to threshold LLRs")
-        temperature: float = Field(default=2.0, ge=0.0, description="Softmax temperature")
-        training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow models")  # noqa: E501
-        attack_data_fraction: float = Field(default=0.1, ge=0.0, le=1.0, description="Part of available attack data to use for attack")  # noqa: E501
-        online: bool = Field(default=False, description="Online vs offline attack")
+        num_shadow_models: int = Field(default=1,
+                                       ge=1,
+                                       description="Number of shadow models")
+        temperature: float = Field(default=2.0,
+                                   ge=0.0,
+                                   description="Softmax temperature")
+        training_data_fraction: float = Field(default=0.5,
+                                              ge=0.0,
+                                              le=1.0,
+                                              description="Part of available attack data to use for shadow models")
+        attack_data_fraction: float = Field(default=0.1,
+                                            ge=0.0,
+                                            le=1.0,
+                                            description="Part of available attack data to use for attack")
+        online: bool = Field(default=False,
+                             description="Online vs offline attack")
+        # Parameters to be used with optuna
+        gamma: float = Field(default=2.0,
+                        ge=0.0,
+                        description="Parameter to threshold LLRs",
+                        optuna={"type": "float", "low": 0.1, "high": 10, "log": True})
+        offline_a: float = Field(default=0.33,
+                                 ge=0.0,
+                                 le=1.0,
+                                 description="Parameter to estimate the marginal p(x)",
+                                 suggest={"type": "float", "low": 0.0, "high": 1.0,"enabled_if": lambda model: not model.online})
+        offline_b: float = Field(default=0.66,
+                                 ge=0.0,
+                                 le=1.0,
+                                 description="Parameter to estimate the marginal p(x)",
+                                 suggest={"type": "float", "low": 0.0, "high": 1.0,"enabled_if": lambda model: not model.online})
 
         @model_validator(mode="after")
         def check_num_shadow_models_if_online(self) -> Self:
@@ -327,4 +350,13 @@ class AttackRMIA(AbstractMIA):
             signal_values=signal_values,
         )
 
+
+    def reset_attack(self: Self) -> None:
+        """Reset attack to initial state."""
+        self.shadow_models = []
+        self.shadow_models = None
+        self.shadow_model_indices = None
+
+        self.prepare_attack()
+        logger.info("RMIA attack reset to initial state.")
 
