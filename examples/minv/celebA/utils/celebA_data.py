@@ -86,36 +86,6 @@ class celebADataset(Dataset):
 
 
         return cls(data, targets)
-    
-    
-    @classmethod # TODO: Combine this with above
-    def from_celebA_pseudo(cls, config):
-        data_dir = config["data"]["data_dir"]
-        
-        train_transform = transforms.Compose([
-           transforms.ToTensor(),
-           _noise_adder
-        ])
-        
-        train_dataset = datasets.ImageFolder(os.path.join(data_dir, 'pseudo'), allow_empty=True, transform=train_transform)
-
-        train_dataset.class_to_idx = {cls_name: int(cls_name) for cls_name in train_dataset.class_to_idx.keys()}
-
-        # Prepare data loader to iterate over combined_dataset
-        loader = DataLoader(train_dataset, batch_size=1, shuffle=False)
-
-        # Collect all data and targets
-        data_list = []
-        target_list = []
-        for data, target in loader:
-            data_list.append(data)  # Remove batch dimension
-            target_list.append(target)
-
-        # Concatenate data and targets into large tensors
-        data = cat(data_list, dim=0)  # Shape: (N, C, H, W)
-        targets = cat(target_list, dim=0)  # Shape: (N,)
-
-        return cls(data, targets)
 
 
     def subset(self, indices):
@@ -123,8 +93,9 @@ class celebADataset(Dataset):
         return celebADataset(self.x[indices], self.y[indices], transform=self.transform)
 
 
-def get_celebA_dataloader(data_path, train_config):
-    # TODO: Stratified sampling
+def get_celebA_train_test_loader(train_config):
+    """This function returns the train and test data loaders for the private CelebA dataset."""
+    # TODO: Stratified sampling for train and test
     train_fraction = train_config["data"]["f_train"]
     test_fraction = train_config["data"]["f_test"]
     batch_size = train_config["train"]["batch_size"]
@@ -157,8 +128,8 @@ def get_celebA_dataloader(data_path, train_config):
     return train_loader, test_loader
 
 
-def get_celebA_publicloader(data_path, train_config):
-    # Here, we want to do as above, but only return one loader with all the data
+def get_celebA_publicloader(train_config):
+    """This function returns the data loader for the public CelebA dataset."""
     batch_size = train_config["train"]["batch_size"]
     data_dir =  train_config["data"]["data_dir"] + "/celebA_public_data.pkl"
 
@@ -172,8 +143,6 @@ def get_celebA_publicloader(data_path, train_config):
             population_dataset = pickle.load(file)
             print(f"Load data from {data_dir}")
 
-    aux_loader = DataLoader(population_dataset, batch_size =batch_size, shuffle=False)
-
-    return aux_loader
+    return DataLoader(population_dataset, batch_size =batch_size, shuffle=False)
 
 
