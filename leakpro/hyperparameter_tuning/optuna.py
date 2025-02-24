@@ -17,7 +17,7 @@ class OptunaConfig(BaseModel):
 
     seed: int = Field(default=1234, description="Random seed for reproducibility")
     n_trials: int = Field(default=400, description="Number of trials to find the optimal hyperparameters")
-    direction: Literal["maximize", "minimize"] = Field("maximize", description="Direction of the optimization, minimize or maximize")
+    direction: Literal["maximize", "minimize"] = Field("maximize", description="Direction of the optimization, minimize or maximize")  # noqa: E501
     pruner: optuna.pruners.BasePruner = Field(default=optuna.pruners.MedianPruner(n_warmup_steps=5), description="Number of steps before pruning of experiments will be available")  # noqa: E501
 
     class Config:
