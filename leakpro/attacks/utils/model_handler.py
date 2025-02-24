@@ -1,12 +1,13 @@
 """Abstract class for the model handler."""
 
+import hashlib
 import os
 
 import joblib
 from torch import load
 from torch.nn import Module
 
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.input_handler.user_imports import (
     get_class_from_module,
     get_criterion_mapping,
@@ -22,7 +23,7 @@ class ModelHandler():
 
     def __init__(
         self:Self,
-        handler: AbstractInputHandler,
+        handler: MIAHandler,
         caller:str=None
     )->None:
         """Initialize the ModelHandler class."""
@@ -30,25 +31,26 @@ class ModelHandler():
         self.handler = handler
 
         caller_configs = getattr(handler.configs, caller) if caller is not None else None
-        if caller_configs is None:
-            caller_configs = {}
-            self.model_path = None
-            self.model_class = None
-        else:
-            self.model_path = caller_configs.module_path
-            self.model_class = caller_configs.model_class
+        self.use_target_model_setup = caller_configs is None
 
-        self.use_target_model_setup = self.model_path is None or self.model_class is None
-
-        # Get the model blueprint
+        # get the bluepring for the model
         if self.use_target_model_setup:
+            self.model_class = handler.target_model_blueprint.__name__
             self.model_blueprint = handler.target_model_blueprint
         else:
-            self.model_blueprint = self._import_model_from_path(self.model_path, self.model_class)
+            try:
+                self.model_path = caller_configs.module_path
+                self.model_class = caller_configs.model_class
+            except AttributeError as e:
+                raise ValueError("Model path or class not provided in shadow model config") from e
+            try:
+                self.model_blueprint = self._import_model_from_path(self.model_path, self.model_class)
+            except Exception as e:
+                raise ValueError(f"Failed to create model blueprint from {self.model_class} in {self.model_path}") from e
 
         # Pick either target config or caller config
-        setup_config = (handler.target_model_metadata) if self.use_target_model_setup else caller_configs
-
+        setup_config = handler.target_model_metadata if self.use_target_model_setup else caller_configs
+        # extract the init params
         self.init_params = setup_config.init_params
 
         # Get optimizer class
@@ -76,6 +78,9 @@ class ModelHandler():
                 logger.info(f"Created folder {self.storage_path}")
         else:
             raise ValueError("Storage path not provided")
+
+        # Create the hash for the target model
+        self.target_model_hash = self._hash_model(self.handler.target_model)
 
     def _import_model_from_path(self:Self, module_path:str, model_class:str)->None:
         """Import the model from the given path.
@@ -182,3 +187,23 @@ class ModelHandler():
                 return joblib.load(f)
         except FileNotFoundError as e:
             raise FileNotFoundError(f"Metadata at {metadata_path} not found") from e
+
+
+    def _hash_model(self:Self, model: Module) -> str:
+        """Generate a SHA-256 hash of a PyTorch model's state dictionary.
+
+        This function takes into account the model weights by iterating
+        over the state dictionary (which includes both parameters and buffers)
+        and updating the hash with both the key names and the corresponding tensor values.
+        """
+        hasher = hashlib.sha256()
+        state_dict = model.state_dict()
+
+        # Sort keys to ensure consistent ordering across models
+        for key in sorted(state_dict.keys()):
+            hasher.update(key.encode("utf-8"))
+            # Convert tensor to CPU, detach, convert to numpy and then to bytes
+            tensor_bytes = state_dict[key].detach().cpu().numpy().tobytes()
+            hasher.update(tensor_bytes)
+
+        return hasher.hexdigest()
