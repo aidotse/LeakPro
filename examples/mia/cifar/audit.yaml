@@ -2,6 +2,8 @@ audit:  # Configurations for auditing
   random_seed: 1234  # Integer specifying the random seed
   attack_list:
     rmia:
+      online: True
+      num_shadow_models: 3
     # population:
     # lira:
     # loss_traj:

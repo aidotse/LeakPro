@@ -1,6 +1,7 @@
 """Run optuna to find best hyperparameters."""
 from abc import ABC, abstractmethod
-from typing import Self
+
+from leakpro.utils.import_helper import Self
 
 
 class AbstractAttack(ABC):
