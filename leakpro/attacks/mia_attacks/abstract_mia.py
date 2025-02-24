@@ -1,7 +1,7 @@
 """Module that contains the abstract class for constructing and performing a membership inference attack on a target."""
 
 from abc import abstractmethod
-from typing import Optional, Self
+from typing import Optional
 
 import numpy as np
 import optuna
