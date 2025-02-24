@@ -2,7 +2,7 @@
 
 import numpy as np
 import torch
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from torch import Tensor
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from tqdm import tqdm
@@ -26,6 +26,15 @@ class AttackYOQO(AbstractMIA):
         online: bool = Field(default=False, description="Perform online or offline attack")
         lr_xprime_optimization: float = Field(default=1e-3, ge=0.0, description="Learning rate for optimization of xprime")
         max_iterations: int = Field(default=35, ge=1, description="Maximum number of iterations for optimization of xprime")
+
+        @model_validator(mode="after")
+        def check_offline_data(self:Self) -> Self:
+            """Check that there is data for shadow models."""
+
+            if self.online is False and AbstractMIA.population_size == len(AbstractMIA.audit_dataset["data"]):
+                raise ValueError("The audit dataset is the same size as the population dataset. \
+                        There is no data left for the shadow models.")
+            return self
 
     def __init__(self:Self,
                  handler: MIAHandler,

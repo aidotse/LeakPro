@@ -5,7 +5,7 @@ import pickle
 
 import numpy as np
 import torch.nn.functional as F  # noqa: N812
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from torch import cuda, device, load, nn, no_grad, optim, save, tensor
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
@@ -32,6 +32,15 @@ class AttackLossTrajectory(AbstractMIA):
         mia_classifier_epochs: int = Field(default=100, ge=1, description="Number of epochs for training the MIA classifier")
         label_only: bool = Field(default=False, description="Whether to use only the labels for the attack")
         temperature: float = Field(default=2.0, ge=0.0, description="Temperature for the softmax")
+
+        @model_validator(mode="after")
+        def check_available_attack_data(self:Self) -> Self:
+            """Check that there is data for shadow models."""
+
+            if AbstractMIA.population_size == len(AbstractMIA.audit_dataset["data"]):
+                raise ValueError("The audit dataset is the same size as the population dataset. \
+                        There is no data left for the shadow and distillation models.")
+            return self
 
     def __init__(self: Self,
                  handler: MIAHandler,

@@ -1,7 +1,7 @@
 """Module that contains the implementation of the attack P."""
 
 import numpy as np
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.threshold_computation import linear_itp_threshold_func
@@ -19,6 +19,15 @@ class AttackP(AbstractMIA):
         """Configuration for the RMIA attack."""
 
         attack_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Fraction of population to use for the attack") # noqa: E501
+
+        @model_validator(mode="after")
+        def check_available_attack_data(self:Self) -> Self:
+            """Check that there is data for shadow models."""
+
+            if AbstractMIA.population_size == len(AbstractMIA.audit_dataset["data"]):
+                raise ValueError("The audit dataset is the same size as the population dataset. \
+                        There is no data left to find the thresholds.")
+            return self
 
     def __init__(
         self:Self,

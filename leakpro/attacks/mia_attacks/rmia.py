@@ -45,6 +45,15 @@ class AttackRMIA(AbstractMIA):
                 raise ValueError("When online is True, num_shadow_models must be >= 2")
             return self
 
+        @model_validator(mode="after")
+        def check_offline_data(self:Self) -> Self:
+            """Check that there is data for shadow models."""
+
+            if self.online is False and AbstractMIA.population_size == len(AbstractMIA.audit_dataset["data"]):
+                raise ValueError("The audit dataset is the same size as the population dataset. \
+                        There is no data left for the shadow models.")
+            return self
+
     def __init__(self:Self,
                  handler: MIAHandler,
                  configs: dict

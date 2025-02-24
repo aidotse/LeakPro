@@ -55,7 +55,17 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
                 raise ValueError("max_num_evals must be greater than initial_num_evals")
             return values
 
+        @model_validator(mode="after")
+        def check_available_attack_data(self:Self) -> Self:
+            """Check that there is data for shadow models."""
+
+            if AbstractMIA.population_size == len(AbstractMIA.audit_dataset["data"]):
+                raise ValueError("The audit dataset is the same size as the population dataset. \
+                        There is no data left to use for attacks.")
+            return self
+
         model_config = {"arbitrary_types_allowed": True}  # Pydantic v2 config to allow `np.inf`
+
 
 
     def __init__(self: Self,

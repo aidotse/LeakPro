@@ -5,7 +5,7 @@ from typing import List
 
 import numpy as np
 import torch
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
@@ -162,6 +162,16 @@ class AttackQMIA(AbstractMIA):
             if not all(0.0 <= q <= 1.0 for q in v):
                 raise ValueError("All quantiles must be between 0 and 1.")
             return v
+
+
+        @model_validator(mode="after")
+        def check_available_attack_data(self:Self) -> Self:
+            """Check that there is data for shadow models."""
+
+            if AbstractMIA.population_size == len(AbstractMIA.audit_dataset["data"]):
+                raise ValueError("The audit dataset is the same size as the population dataset. \
+                        There is no data left for the quantile regressor.")
+            return self
 
     def __init__(
         self:Self,
