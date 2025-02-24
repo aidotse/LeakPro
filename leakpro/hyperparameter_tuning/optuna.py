@@ -16,7 +16,7 @@ class OptunaConfig(BaseModel):
     """Configuration for the Optuna hyperparameter search."""
 
     seed: int = Field(default=1234, description="Random seed for reproducibility")
-    n_trials: int = Field(default=50, description="Number of trials to find the optimal hyperparameters")
+    n_trials: int = Field(default=400, description="Number of trials to find the optimal hyperparameters")
     direction: Literal["maximize", "minimize"] = Field("maximize", description="Direction of the optimization, minimize or maximize")
     pruner: optuna.pruners.BasePruner = Field(default=optuna.pruners.MedianPruner(n_warmup_steps=5), description="Number of steps before pruning of experiments will be available")  # noqa: E501
 
@@ -32,6 +32,10 @@ def optuna_optimal_hyperparameters(attack_object: AbstractAttack, optuna_config:
     ----
             attack_object (Union[AbstractGIA, AbstractMIA]): Attack object to find optimal hyperparameters for.
             optuna_config (OptunaConfig): configureable settings for optuna
+
+    Returns:
+    -------
+            optuna.study.Study: Optuna study object containing the results of the optimization.
 
     """
     def objective(trial: optuna.trial.Trial) -> Tensor:
@@ -53,16 +57,16 @@ def optuna_optimal_hyperparameters(attack_object: AbstractAttack, optuna_config:
                     return intermediary_results
         elif isinstance(result, MIAResult):
             # Retrieve configuration and result metric
-            roc_auc = result.roc_auc
+            tpr_at_target = result.tpr_at_target
 
             trial.set_user_attr("config", new_config)
-            trial.set_user_attr("roc_auc", roc_auc)
+            trial.set_user_attr("roc_auc", tpr_at_target)
 
             # Optionally print the details for immediate feedback
-            logger.info(f"Trial {trial.number} - Config: {new_config} - roc_auc: {roc_auc}")
+            logger.info(f"Trial {trial.number} - Config: {new_config} - roc_auc: {tpr_at_target}")
 
             # MIA cannot be used with pruning as we need the final result to be computed
-            return result.roc_auc  # add something reasonable to optimize toward here
+            return result.tpr_at_target  # add something reasonable to optimize toward here
         return None
 
     # Define the pruner and study
@@ -83,5 +87,6 @@ def optuna_optimal_hyperparameters(attack_object: AbstractAttack, optuna_config:
             f.write(f"{key}: {value}\n")
 
     logger.info(f"Results saved to {f_results_file}")
-    best_config = attack_object.configs.copy(update=study.best_params)
-    return best_config  # noqa: RET504
+
+    # Return the study
+    return study

@@ -173,7 +173,7 @@ class AbstractMIA(AbstractAttack):
         if optuna_config is None:
             # Use default valiues for config
             optuna_config = OptunaConfig()
-        optuna_optimal_hyperparameters(self, optuna_config)
+        return optuna_optimal_hyperparameters(self, optuna_config)
 
     def suggest_parameters(self:Self, trial: Trial) -> BaseModel:
         """Update the given config with suggested parameters from the trial."""

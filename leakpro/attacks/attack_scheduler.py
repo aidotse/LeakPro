@@ -76,7 +76,8 @@ class AttackScheduler:
 
             logger.info(f"Running attack: {attack_type}")
             if use_optuna:
-                best_config = attack.run_with_optuna()
+                study = attack.run_with_optuna()
+                best_config = attack.configs.model_copy(update=study.best_params)
                 attack.reset_attack(best_config)
             result = attack.run_attack()
             results[attack_type] = {"attack_object": attack, "result_object": result}
