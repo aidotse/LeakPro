@@ -10,9 +10,6 @@ from leakpro.metrics.attack_result import AttackResult
 from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import List, Self, Union
 
-########################################################################################################################
-# METRIC CLASS
-########################################################################################################################
 
 class AbstractMINV(ABC):
     """Interface to construct and perform a model inversion attack on a target model and dataset.

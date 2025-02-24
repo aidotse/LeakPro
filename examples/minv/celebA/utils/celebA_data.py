@@ -2,12 +2,11 @@
 import os
 import numpy as np
 from sklearn.model_selection import train_test_split
-from torch.utils.data import ConcatDataset, DataLoader, Subset, Dataset
+from torch.utils.data import DataLoader, Subset, Dataset
 from torchvision import datasets, transforms
-from torchvision.datasets import ImageFolder
 import torch
 import pickle
-from torch import cat, float32, tensor
+from torch import cat
 
 def _noise_adder(img):
             return torch.empty_like(img, dtype=img.dtype).uniform_(0.0, 1 / 256.0) + img
@@ -17,7 +16,7 @@ def _noise_adder(img):
 class celebADataset(Dataset):
     def __init__(self, x, y, transform=None,  indices=None):
         """
-        Custom dataset for 1000 celebA classes.
+        Dataset for celebA.
 
         Args:
             x (torch.Tensor): Tensor of input images.

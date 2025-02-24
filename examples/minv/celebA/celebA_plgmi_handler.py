@@ -2,7 +2,6 @@ import torch
 from torch import cuda, device, optim
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
-from torchvision import transforms, datasets
 from tqdm import tqdm
 from leakpro import AbstractInputHandler
 from leakpro.attacks.utils import gan_losses
