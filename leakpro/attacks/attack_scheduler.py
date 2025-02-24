@@ -67,7 +67,7 @@ class AttackScheduler:
         """Add an attack to the list of attacks."""
         self.attacks.append(attack)
 
-    def run_attacks(self:Self) -> Dict[str, Any]:
+    def run_attacks(self: Self, use_optuna: bool = False) -> Dict[str, Any]:
         """Run the attacks and return the results."""
         results = {}
         for attack, attack_type in zip(self.attacks, self.attack_list):
@@ -75,8 +75,7 @@ class AttackScheduler:
             attack.prepare_attack()
 
             logger.info(f"Running attack: {attack_type}")
-
-            result = attack.run_attack()
+            result = attack.run_with_optuna() if use_optuna else attack.run_attack()
             results[attack_type] = {"attack_object": attack, "result_object": result}
 
             logger.info(f"Finished attack: {attack_type}")

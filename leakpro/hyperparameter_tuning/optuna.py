@@ -35,8 +35,10 @@ def optuna_optimal_hyperparameters(attack_object: AbstractAttack, optuna_config:
 
     """
     def objective(trial: optuna.trial.Trial) -> Tensor:
-        attack_object.reset_attack()
+        # Suggest hyperparameters
         attack_object.suggest_parameters(trial)
+        # Reset attack to apply new hyperparameters
+        attack_object.reset_attack()
         seed_everything(optuna_config.seed)
         result = attack_object.run_attack()
         if isinstance(result, Generator):

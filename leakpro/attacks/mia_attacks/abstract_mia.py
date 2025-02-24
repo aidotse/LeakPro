@@ -1,19 +1,23 @@
 """Module that contains the abstract class for constructing and performing a membership inference attack on a target."""
 
-from abc import ABC, abstractmethod
+from abc import abstractmethod
+from typing import Optional, Self
 
 import numpy as np
+import optuna
 from optuna.trial import Trial
 from pydantic import BaseModel
 from torch.utils.data import DataLoader
 
+from leakpro.attacks.attack_base import AbstractAttack
+from leakpro.hyperparameter_tuning.optuna import OptunaConfig, optuna_optimal_hyperparameters
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.metrics.attack_result import AttackResult
 from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import List, Self, Union
 
 
-class AbstractMIA(ABC):
+class AbstractMIA(AbstractAttack):
     """Interface to construct and perform a membership inference attack on a target model and dataset.
 
     This serves as a guideline for implementing a metric to be used for measuring the privacy leakage of a target model.
@@ -163,7 +167,15 @@ class AbstractMIA(ABC):
             raise ValueError("Size of the sample is greater than the size of the data.")
         return self.get_dataloader(np.random.choice(data, size, replace=False))
 
-    def suggest_parameters_from_model(self:Self, config:BaseModel, trial: Trial) -> BaseModel:
+
+    def run_with_optuna(self:Self, optuna_config: Optional[OptunaConfig] = None) -> optuna.study.Study:
+        """Finds optimal hyperparameters using optuna."""
+        if optuna_config is None:
+            # Use default valiues for config
+            optuna_config = OptunaConfig()
+        optuna_optimal_hyperparameters(self, optuna_config)
+
+    def suggest_parameters(self:Self, config:BaseModel, trial: Trial) -> BaseModel:
         """Update the given config with suggested parameters from the trial."""
         suggestions = {}
         for field_name, field in config.model_fields().items():

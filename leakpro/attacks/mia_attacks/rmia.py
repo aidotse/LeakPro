@@ -350,13 +350,12 @@ class AttackRMIA(AbstractMIA):
             signal_values=signal_values,
         )
 
-
     def reset_attack(self: Self) -> None:
         """Reset attack to initial state."""
         self.shadow_models = []
         self.shadow_models = None
         self.shadow_model_indices = None
-
+        # new hyperparameters have been set, let's prepare the attack again
         self.prepare_attack()
-        logger.info("RMIA attack reset to initial state.")
+
 
