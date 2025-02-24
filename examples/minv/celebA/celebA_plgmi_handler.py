@@ -92,9 +92,9 @@ class CelebA_InputHandler(AbstractInputHandler):
                     pseudo_loader: DataLoader,
                     gen: torch.nn.Module,
                     dis: torch.nn.Module,
-                    gen_criterion: torch.nn.Module,
-                    dis_criterion: torch.nn.Module,
-                    model: torch.nn.Module,
+                    gen_criterion: callable,
+                    dis_criterion: callable,
+                    target_model: torch.nn.Module,
                     opt_gen: optim.Optimizer,
                     opt_dis: optim.Optimizer,
                     n_iter: int,
@@ -119,7 +119,7 @@ class CelebA_InputHandler(AbstractInputHandler):
             kornia.augmentation.RandomRotation(5),
         ).to(device)
 
-        model.to(device)
+        target_model.to(device)
         gen.to(device)
         dis.to(device)
         # Training loop
@@ -139,7 +139,7 @@ class CelebA_InputHandler(AbstractInputHandler):
                     fake, fake_labels, _ = sample_from_generator(gen, num_classes, 128, device, gen.dim_z)
                     fake_aug = aug_list(fake).to(device)
                     dis_fake = dis(fake_aug, fake_labels)
-                    inv_loss = gan_losses.max_margin_loss(model(fake_aug), fake_labels)
+                    inv_loss = gan_losses.max_margin_loss(target_model(fake_aug), fake_labels)
 
                     inv_losses.append(inv_loss.item())
                     dis_real = None
@@ -173,9 +173,10 @@ class CelebA_InputHandler(AbstractInputHandler):
                 cumulative_loss_dis += loss_dis.item()
                 dis_losses.append(cumulative_loss_dis/n_dis)
                 
+                # Evaluate target model accuracy for training progress monitoring TODO: make optional for efficiency
                 with torch.no_grad():
                     count += fake.shape[0]
-                    T_logits = model(fake)
+                    T_logits = target_model(fake)
                     T_preds = T_logits.max(1, keepdim=True)[1]
                     target_correct += T_preds.eq(fake_labels.view_as(T_preds)).sum().item()
                     cumulative_target_acc += round(target_correct / count, 4)
