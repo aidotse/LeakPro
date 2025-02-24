@@ -39,7 +39,7 @@ class AttackPLGMI(AbstractMINV):
         """
         # General parameters
         self.configs = configs
-        self.num_classes = configs.get("num_classes") # TODO: fail check
+        self.num_classes = configs.get("num_classes")
         self.batch_size = configs.get("batch_size", 32)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # PLG-MI parameters
@@ -59,18 +59,6 @@ class AttackPLGMI(AbstractMINV):
         # Paths
         self.pseudo_label_path = configs.get("pseudo_label_path")
         self.output_dir = configs.get("output_dir")
-        # Define the validation dictionary as: {parameter_name: (parameter, min_value, max_value)}
-        validation_dict = {
-            # alpha, 0 to inf
-            "alpha": (self.alpha, 0, 1000), # 0 to inf
-            "n_dis": (self.n_dis, 1, 1000), # 1 to inf
-            # TODO: Add more parameters
-        }
-
-        # Validate parameters
-        for param_name, (param_value, min_val, max_val) in validation_dict.items():
-            self._validate_config(param_name, param_value, min_val, max_val)
-
 
     def description(self:Self) -> dict:
         """Return the description of the attack."""
@@ -109,13 +97,14 @@ class AttackPLGMI(AbstractMINV):
         self.confidences = torch.cat(all_confidences)
 
         logger.info("Retrieved confidences from the target model")
-        # Get the pseudo labels
-        pseudo_labels = torch.max(self.confidences, dim=1)
+        # Get the pseudo label confidences
+        label_confidences = torch.max(self.confidences, dim=1)
 
-        # Empty array of size num_classes to store the pseudo labels
+        # Empty array of size num_classes to store the entries for each pseudo label
         pseudo_map = [[] for _ in range(self.num_classes)]
 
-        for i, (conf, label) in enumerate(zip(pseudo_labels[0], pseudo_labels[1])):
+        for i, (conf, label) in enumerate(zip(label_confidences[0], label_confidences[1])):
+            # Append the image index i and confidence to the corresponding pseudo label
             pseudo_map[label.item()].append((i, conf.item()))
 
         # Sort pseudo_map by confidence descending
@@ -123,15 +112,17 @@ class AttackPLGMI(AbstractMINV):
             pseudo_map[i] = sorted(pseudo_map[i], key=lambda x: x[1], reverse=True)
 
         # Keep only top_n entries in each element of pseudo_map
-        pseudo_map = [pseudo_map[i][:self.top_n] for i in range(self.num_classes)]
+        top_n_pseudo_map = [pseudo_map[i][:self.top_n] for i in range(self.num_classes)]
 
-        # Create pseudo dataloader from pseudo_map
+        # Create pseudo dataloader from top-n pseudo_map
         pseudo_data = []
         for i in range(self.num_classes):
-            for index, _ in pseudo_map[i]:
+            for index, _ in top_n_pseudo_map[i]:
+                # Append the image and pseudo label (index i) to the pseudo data
                 pseudo_data.append((self.public_dataloader.dataset[index][0], i))
 
         logger.info("Created pseudo dataloader")
+        # pseudo_data is now a list of tuples (image, pseudo_label)
         # We want to set the default device to the sampler in the returned dataloader to be on device
         return DataLoader(pseudo_data, batch_size=self.batch_size, shuffle=True, generator=torch.Generator(device=self.device))
 
