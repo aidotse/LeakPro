@@ -2,6 +2,7 @@ import pickle
 
 from torch import cuda, device, nn, no_grad, optim, save, sigmoid
 from tqdm import tqdm
+from leakpro.schemas import MIAMetaDataSchema, OptimizerConfig, LossConfig
 
 
 class AdultNet(nn.Module):
@@ -82,39 +83,39 @@ def create_trained_model_and_metadata(model, train_loader, test_loader, epochs =
     with open("target/target_model.pkl", "wb") as f:
         save(model.state_dict(), f)
 
-    # Create metadata and store it
-    meta_data = {}
-    meta_data["train_indices"] = train_loader.dataset.indices
-    meta_data["test_indices"] = test_loader.dataset.indices
-    meta_data["num_train"] = len(meta_data["train_indices"])
-
     # Write init params
-    meta_data["init_params"] = {}
+    init_params = {}
     for key, value in model.init_params.items():
-        meta_data["init_params"][key] = value
-
-    # read out optimizer parameters
-    meta_data["optimizer"] = {}
-    meta_data["optimizer"]["name"] = optimizer.__class__.__name__.lower()
-    meta_data["optimizer"]["lr"] = optimizer.param_groups[0].get("lr", 0)
-    meta_data["optimizer"]["weight_decay"] = optimizer.param_groups[0].get("weight_decay", 0)
-    meta_data["optimizer"]["momentum"] = optimizer.param_groups[0].get("momentum", 0)
-    meta_data["optimizer"]["dampening"] = optimizer.param_groups[0].get("dampening", 0)
-    meta_data["optimizer"]["nesterov"] = optimizer.param_groups[0].get("nesterov", False)
-
-    # read out criterion parameters
-    meta_data["loss"] = {}
-    meta_data["loss"]["name"] = criterion.__class__.__name__.lower()
-
-    meta_data["batch_size"] = train_loader.batch_size
-    meta_data["epochs"] = epochs
-    meta_data["train_acc"] = train_acc
-    meta_data["test_acc"] = test_acc
-    meta_data["train_loss"] = train_loss
-    meta_data["test_loss"] = test_loss
-    meta_data["dataset"] = "adult"
-
+        init_params[key] = value
+    
+    optimizer_data = {
+        "name": optimizer.__class__.__name__.lower(),
+        "lr": optimizer.param_groups[0].get("lr", 0),
+        "weight_decay": optimizer.param_groups[0].get("weight_decay", 0),
+        "momentum": optimizer.param_groups[0].get("momentum", 0),
+        "dampening": optimizer.param_groups[0].get("dampening", 0),
+        "nesterov": optimizer.param_groups[0].get("nesterov", False)
+    }
+    
+    loss_data = {"name": criterion.__class__.__name__.lower()}
+    
+    meta_data = MIAMetaDataSchema(
+            train_indices=train_loader.dataset.indices,
+            test_indices=test_loader.dataset.indices,
+            num_train=len(train_loader.dataset.indices),
+            init_params=init_params,
+            optimizer=OptimizerConfig(**optimizer_data),
+            loss=LossConfig(**loss_data),
+            batch_size=train_loader.batch_size,
+            epochs=epochs,
+            train_acc=train_acc,
+            test_acc=test_acc,
+            train_loss=train_loss,
+            test_loss=test_loss,
+            dataset="adult"
+        )
+    
     with open("target/model_metadata.pkl", "wb") as f:
         pickle.dump(meta_data, f)
-
+    
     return train_accuracies, train_losses, test_accuracies, test_losses

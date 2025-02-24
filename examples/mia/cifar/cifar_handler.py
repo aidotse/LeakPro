@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from leakpro import AbstractInputHandler
+from leakpro.schemas import TrainingOutput
 
 class CifarInputHandler(AbstractInputHandler):
     """Class to handle the user input for the CIFAR100 dataset."""
@@ -33,7 +34,7 @@ class CifarInputHandler(AbstractInputHandler):
         criterion: torch.nn.Module = None,
         optimizer: optim.Optimizer = None,
         epochs: int = None,
-    ) -> dict:
+    ) -> TrainingOutput:
         """Model training procedure."""
 
         # read hyperparams for training (the parameters for the dataloader are defined in get_dataloader):
@@ -55,19 +56,21 @@ class CifarInputHandler(AbstractInputHandler):
                 optimizer.zero_grad()
                 outputs = model(inputs)
                 loss = criterion(outputs, labels)
-                pred = outputs.data.max(1, keepdim=True)[1]
+                pred = outputs.argmax(dim=1) 
                 loss.backward()
                 optimizer.step()
 
                 # Accumulate performance of shadow model
-                train_acc += pred.eq(labels.data.view_as(pred)).sum().item()
+                train_acc += pred.eq(labels.data.view_as(pred)).sum()
                 total_samples += labels.size(0)
-                train_loss += loss.item() * labels.size(0) 
-
-        avg_train_loss = train_loss / total_samples
+                train_loss += loss.item()
+                
+        avg_train_loss = train_loss / len(dataloader)
         train_accuracy = train_acc / total_samples  
-
+        
         model.to("cpu")
 
-        return {"model": model, "metrics": {"accuracy": train_accuracy, "loss": avg_train_loss}}
-
+        output_dict = {"model": model, "metrics": {"accuracy": train_accuracy, "loss": avg_train_loss}}
+        output = TrainingOutput(**output_dict)
+        
+        return output

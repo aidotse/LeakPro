@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sn
+from pydantic import BaseModel
 from sklearn.metrics import (
     accuracy_score,
     auc,
@@ -730,8 +731,9 @@ def get_result_fixed_fpr(fpr: list, tpr: list) -> dict:
             "TPR@0.01%FPR": find_tpr_at_fpr(fpr, tpr, 0.0001),
             "TPR@0.0%FPR": find_tpr_at_fpr(fpr, tpr, 0.0)}
 
-def get_config_name(config: dict) -> str:
+def get_config_name(config: BaseModel) -> str:
     """Create id from the attack config."""
+
     config = dict(sorted(config.items()))
 
     exclude = ["attack_data_dir"]

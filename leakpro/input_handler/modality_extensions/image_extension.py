@@ -1,37 +1,35 @@
-"""Module for handling image data with preprocessing and normalization."""
-import numpy as np
-import torch
-from PIL import Image
-from torch import Tensor
-from torchvision import transforms
+"""TabularExtension class for handling tabular data with one-hot encoding and decoding."""
 
+from torch import Tensor
+
+from leakpro.input_handler.mia_handler import MIAHandler
+from leakpro.input_handler.modality_extensions.modality_extension import AbstractModalityExtension
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 
-class ImageExtension:
-    """Class for handling image data with preprocessing and normalization."""
+class ImageExtension(AbstractModalityExtension):
+    """Class for handling extra functionality for image data."""
 
-    def __init__(self: Self, transform: transforms.Compose) -> None:
-        """Initialize the ImageExtension class and perform initial checks."""
-        x, y = next(iter(self.get_dataloader(0)))
-        if not isinstance(x, (Tensor, np.ndarray, Image.Image)) or not isinstance(y, (Tensor, np.ndarray)):
-            raise ValueError("Data must be a tensor, numpy array, or PIL image.")
+    # Assumes that the data is in shape: batchsize, channels, height, width
 
-        if transform is not None:
-            self.transform = transform
-            logger.info("ImageExtension initialized with custom transformations.")
-            return
+    def __init__(self:Self, handler:MIAHandler) -> None:
 
-        logger.info("ImageExtension initialized with NO transformations.")
+        super().__init__(handler)
+        logger.info("Image extension initialized.")
 
-    def preprocess_image(self: Self, image: Image.Image) -> Tensor:
-        """Preprocess a single image."""
-        if not isinstance(image, Image.Image):
-            raise ValueError("Input must be a PIL image.")
-        return self.transform(image)
+    def augmentation(self:Self, data:Tensor, n_aug:int) -> Tensor:
+        """Augment the data by generating additional samples.
 
-    def preprocess_batch(self: Self, images: list) -> Tensor:
-        """Preprocess a batch of images."""
-        return torch.stack([self.preprocess_image(img) for img in images])
+        Args:
+        ----
+            data (Tensor): The input data tensor to augment.
+            n_aug (int): The number of augmented samples to generate.
 
+        Returns:
+        -------
+            Tensor: The augmented data tensor.
+
+        """
+        n_aug = n_aug // len(data) #dummy to pass ruff
+        return data

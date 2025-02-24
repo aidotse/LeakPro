@@ -1,10 +1,11 @@
 """Module that contains the implementation of the attack P."""
 
 import numpy as np
+from pydantic import BaseModel, Field
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.threshold_computation import linear_itp_threshold_func
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.metrics.attack_result import MIAResult
 from leakpro.signals.signal import ModelLoss
 from leakpro.utils.import_helper import Self
@@ -14,37 +15,35 @@ from leakpro.utils.logger import logger
 class AttackP(AbstractMIA):
     """Implementation of the P-attack."""
 
+    class Config(BaseModel):
+        """Configuration for the RMIA attack."""
+
+        attack_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Fraction of population to use for the attack") # noqa: E501
+
     def __init__(
         self:Self,
-        handler: AbstractInputHandler,
+        handler: MIAHandler,
         configs: dict
     ) -> None:
         """Initialize the AttackP class.
 
         Args:
         ----
-            handler (AbstractInputHandler): The input handler object.
+            handler (MIAHandler): The input handler object.
             configs (dict): A dictionary containing the attack configurations.
 
         """
-        # Initializes the parent metric
+        logger.info("Configuring the Population attack")
+        self.configs = self.Config() if configs is None else self.Config(**configs)
+
+        # Initializes the parent
         super().__init__(handler)
+
+        for key, value in self.configs.model_dump().items():
+            setattr(self, key, value)
 
         self.signal = ModelLoss()
         self.hypothesis_test_func = linear_itp_threshold_func
-
-        logger.info("Configuring the Population attack")
-        self._configure_attack(configs)
-
-    def _configure_attack(self:Self, configs:dict) -> None:
-        self.attack_data_fraction = configs.get("attack_data_fraction", 0.5)
-
-        # Define the validation dictionary as: {parameter_name: (parameter, min_value, max_value)}
-        validation_dict = {"attack_data_fraction": (self.attack_data_fraction, 0.01, 1)}
-
-        # Validate parameters
-        for param_name, (param_value, min_val, max_val) in validation_dict.items():
-            self._validate_config(param_name, param_value, min_val, max_val)
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
