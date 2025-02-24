@@ -1,12 +1,12 @@
 
 from sklearn.metrics import accuracy_score
-from torch import cuda, device, nn, optim, squeeze, sigmoid
+from torch import cuda, device, nn, optim, sigmoid
 from torch.nn import BCEWithLogitsLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from leakpro import AbstractInputHandler
-
+from leakpro.schemas import TrainingOutput
 
 class MimicInputHandlerGRU(AbstractInputHandler):
     """Class to handle the user input for the MIMICIII dataset."""
@@ -23,13 +23,6 @@ class MimicInputHandlerGRU(AbstractInputHandler):
         learning_rate = 0.01
         return optim.Adam(model.parameters(), lr=learning_rate)
 
-    def convert_to_device(self, x):
-        device_name = device("cuda" if cuda.is_available() else "cpu")
-        return x.to(device_name)
-
-    def to_numpy(self, tensor) :
-        return tensor.detach().cpu().numpy() if tensor.is_cuda else tensor.detach().numpy()
-
     def train(
         self,
         dataloader: DataLoader,
@@ -37,7 +30,7 @@ class MimicInputHandlerGRU(AbstractInputHandler):
         criterion: nn.Module = None,
         optimizer: optim.Optimizer = None,
         epochs: int = None,
-    ) -> dict:
+    ) -> TrainingOutput:
         """Model training procedure."""
         device_name = device("cuda" if cuda.is_available() else "cpu")
         model.to(device_name)
@@ -53,9 +46,8 @@ class MimicInputHandlerGRU(AbstractInputHandler):
             all_labels = []
 
             for _, (x, labels) in enumerate(tqdm(dataloader, desc="Training Batches")):
-                x = self.convert_to_device(x)
-                labels = self.convert_to_device(labels)
-                labels = labels.float()
+                x = x.to(device_name)
+                labels = labels.to(device_name).float()
 
                 optimizer.zero_grad()
                 output = model(x)
@@ -75,8 +67,12 @@ class MimicInputHandlerGRU(AbstractInputHandler):
             # Ensure labels are integer and 1D
             binary_labels = labels.squeeze().cpu().numpy().astype(int)
             train_acc = accuracy_score(binary_labels, binary_predictions)
+            train_loss = train_loss/len(dataloader)
 
-        return {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}
+        output_dict = {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}
+        output = TrainingOutput(**output_dict)
+        
+        return output
 
 
 

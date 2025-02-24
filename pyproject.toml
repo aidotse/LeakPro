@@ -20,6 +20,7 @@ dependencies = [
   "joblib",
   "pyyaml",
   "scikit-learn",
+  "pydantic",  
 ]
 
 [project.optional-dependencies]
@@ -37,7 +38,6 @@ dev = [
   "torchvision",  # from mia & federated
   "torchmetrics",  # from federated
   "numba",  # from synthetic
-  "pydantic",  # from synthetic
   "transformers",  # from synthetic
   "sentence-transformers",  # from synthetic
   "pytorch-ignite", # from federated

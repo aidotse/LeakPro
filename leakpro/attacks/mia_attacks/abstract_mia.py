@@ -3,16 +3,13 @@
 from abc import ABC, abstractmethod
 
 import numpy as np
+from pydantic import BaseModel
 from torch.utils.data import DataLoader
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.metrics.attack_result import AttackResult
 from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import List, Self, Union
-
-########################################################################################################################
-# METRIC CLASS
-########################################################################################################################
 
 
 class AbstractMIA(ABC):
@@ -26,8 +23,10 @@ class AbstractMIA(ABC):
     population_size = None
     target_model = None
     audit_dataset = None
-    handler=None
+    handler = None
     _initialized = False
+
+    AttackConfig: type[BaseModel]  # Subclasses must define an attack config
 
     def __init__(
         self:Self,
@@ -40,6 +39,11 @@ class AbstractMIA(ABC):
             handler (AbstractInputHandler): The input handler object.
 
         """
+        if not hasattr(self, "Config"):
+            raise ValueError(f"{self.__class__.__name__}.Config must be defined as a Pydantic BaseModel subclass.")
+        if not isinstance(self.configs, BaseModel):
+            raise TypeError(f"{self.__class__.__name__}.configs must be a subclass of Pydantic's BaseModel.")
+
         # These objects are shared and should be initialized only once
         if not AbstractMIA._initialized:
             AbstractMIA.population = handler.population
@@ -59,6 +63,21 @@ class AbstractMIA(ABC):
 
         # These objects are instance specific
         self.signal_data = []
+
+    @classmethod
+    def get_default_attack_config(cls) -> BaseModel:
+        """Get the attack configuration.
+
+        Returns
+        -------
+            BaseModel: The configuration of the attack.
+
+        Raises
+        ------
+            ValueError: If the attack type is unknown.
+
+        """
+        return cls.Config()
 
     def _validate_shared_quantities(self:Self)->None:
         """Validate the shared quantities used by the attack."""
@@ -210,21 +229,6 @@ class AbstractMIA(ABC):
 
         """
         return AbstractMIA.audit_dataset["out_members"]
-
-    @abstractmethod
-    def _configure_attack(self:Self, configs:dict)->None:
-        """Configure the attack.
-
-        Args:
-        ----
-            configs (dict): The configurations for the attack.
-
-        """
-        pass
-
-    def _validate_config(self: Self, name: str, value: float, min_val: float, max_val: float) -> None:
-        if not (min_val <= value <= (max_val if max_val is not None else value)):
-            raise ValueError(f"{name} must be between {min_val} and {max_val}")
 
     @abstractmethod
     def description(self:Self) -> dict:

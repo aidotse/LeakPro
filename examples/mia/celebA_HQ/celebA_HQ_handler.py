@@ -4,6 +4,8 @@ from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from leakpro import AbstractInputHandler 
+from leakpro.schemas import TrainingOutput
+
 
 class CelebAHQInputHandler(AbstractInputHandler):
     """Class to handle the user input for the CelebA_HQ dataset."""
@@ -27,11 +29,8 @@ class CelebAHQInputHandler(AbstractInputHandler):
         criterion: torch.nn.Module,
         optimizer: optim.Optimizer,
         epochs: int,
-    ) -> dict:
+    ) -> TrainingOutput:
         """Model training procedure."""
-
-        if not epochs:
-            raise ValueError("Epochs not found in configurations")
 
         gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
         model.to(gpu_or_cpu)
@@ -51,11 +50,15 @@ class CelebAHQInputHandler(AbstractInputHandler):
                 # Performance metrics
                 preds = outputs.argmax(dim=1)
                 train_acc += (preds == labels).sum().item()
-                train_loss += loss.item()* labels.size(0)
+                total_samples += labels.size(0)
+                train_loss += loss.item()
 
         avg_train_loss = train_loss / len(dataloader)
         train_accuracy = train_acc / total_samples  
         model.to("cpu")
 
-        return {"model": model, "metrics": {"accuracy": train_accuracy, "loss": avg_train_loss}}
+        output_dict = {"model": model, "metrics": {"accuracy": train_accuracy, "loss": avg_train_loss}}
+        output = TrainingOutput(**output_dict)
+        
+        return output
 
