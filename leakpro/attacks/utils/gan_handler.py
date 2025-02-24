@@ -71,13 +71,15 @@ class GANHandler(GeneratorHandler):
         if batch_size is None:
             batch_size = self.batch_size
 
-        if z is None:
-            z = torch.empty(batch_size, self.dim_z, dtype=torch.float32, device=self.handler.device).normal_()
+        if z is not None:
+            z = z.unsqueeze(0).expand(batch_size, -1).to(self.device)
+        else:
+            z = torch.empty(batch_size, self.dim_z, dtype=torch.float32, device=self.device).normal_()
 
         if label is not None:
-            y = torch.tensor([label] * batch_size).to(self.handler.device)
+            y = torch.tensor([label] * batch_size).to(self.device)
         else:
-            y = torch.randint(0, self.num_classes, (batch_size,)).to(self.handler.device)
+            y = torch.randint(0, self.num_classes, (batch_size,)).to(self.device)
         return self.generator(z, y), y, z
 
     def save_discriminator(self, discriminator: Module, path: str) -> None:

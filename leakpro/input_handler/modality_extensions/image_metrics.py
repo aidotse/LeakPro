@@ -12,13 +12,20 @@ from leakpro.utils.logger import logger
 class ImageMetrics:
     """Class for computing image metrics."""
 
-    def __init__(self,  handler: AbstractInputHandler, generator_handler: GeneratorHandler, configs: dict) -> None:
+    def __init__(self,
+                 handler: AbstractInputHandler,
+                 generator_handler: GeneratorHandler,
+                 configs: dict,
+                 labels: torch.tensor = None,
+                 z: torch.tensor = None,) -> None:
         """Initialize the ImageMetrics class."""
         self.handler = handler
         self.generator_handler = generator_handler
         self.generator = self.generator_handler.get_generator()
         self.evaluation_model = self.handler.target_model # TODO: Change to evaluation model from configs
         self.target_model = self.handler.target_model
+        self.labels = labels
+        self.z = z
         logger.info("Configuring ImageMetrics")
         self._configure_metrics(configs)
         self.test_dict = {
@@ -69,13 +76,16 @@ class ImageMetrics:
         self.generator.eval()
         self.generator.to(self.device)
         correct_predictions = []
-        for i in range(self.num_audited_classes):
-            generated_sample = self.generator_handler.sample_from_generator(label=i)
+        for label_i, z_i in zip(self.labels, self.z):
+            # generate samples for each pair of label and z
+            generated_sample = self.generator_handler.sample_from_generator(batch_size=self.num_class_samples,
+                                                                            label=label_i,
+                                                                            z=z_i)
             for j in range(self.num_class_samples):
                 with torch.no_grad():
                     output = self.evaluation_model(generated_sample[j])
                     prediction = torch.argmax(output, dim=1)
-                    correct_predictions.append(prediction == i)
+                    correct_predictions.append(prediction == label_i)
         correct_predictions = torch.cat(correct_predictions).float()
         self.accuracy = correct_predictions.mean()
         self.accuracy_std = correct_predictions.std() / torch.sqrt(torch.tensor(len(correct_predictions), dtype=torch.float))
@@ -126,7 +136,7 @@ class ImageMetrics:
             features = []
             with torch.no_grad():
                 for _ in range(len(self.private_dataloader)):  # Match number of batches
-                    fake_images = self.generator_handler.sample_from_generator()[0]
+                    fake_images = self.generator_handler.sample_from_generator()[0] # TODO: Check if this is correct
 
                     pil_images = [tensor_to_pil(img) for img in fake_images]
                     transformed_images = torch.stack([transform(img) for img in pil_images]).to(self.device)

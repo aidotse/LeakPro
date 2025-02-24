@@ -26,6 +26,7 @@ class GeneratorHandler(ModelHandler):
     def _setup_generator_configs(self: Self, configs: dict) -> None:
         """Load generator-specific configurations (e.g., generator path, params)."""
         logger.info("Setting up generator configurations")
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.generator_path = configs.get("generator", {}).get("module_path")
         self.generator_class = configs.get("generator", {}).get("model_class")
         self.gen_init_params = configs.get("generator", {}).get("init_params", {})

@@ -1,5 +1,6 @@
 """Implementation of the PLGMI attack."""
 import torch
+from kornia import augmentation
 from torch.nn import functional as F  # noqa: N812
 from torch.utils.data import DataLoader
 
@@ -85,7 +86,6 @@ class AttackPLGMI(AbstractMINV):
         """"Top n selection of pseudo labels."""
         # TODO: This does not scale well. Consider creating a class for the dataloader and implementing the __getitem__ method.
         logger.info("Performing top-n selection for pseudo labels")
-        self.target_model = self.handler.target_model
         self.target_model.eval()
         all_confidences = []
         for images, _ in self.public_dataloader:
@@ -130,6 +130,9 @@ class AttackPLGMI(AbstractMINV):
     def prepare_attack(self:Self) -> None:
         """Prepare the attack."""
         logger.info("Preparing attack")
+
+        # Get the target model from the handler
+        self.target_model = self.handler.target_model
 
         self.gan_handler = GANHandler(self.handler, configs=self.configs)
         # TODO: Change structure of how we load data, handler or model_handler should do this, not gan_handler
@@ -183,8 +186,89 @@ class AttackPLGMI(AbstractMINV):
         """Run the attack."""
         logger.info("Running the PLG-MI attack")
         # Define image metrics class
+
+        self.evaluation_model = self.target_model # TODO: Change to evaluation model
+
+        audit_configs = self.handler.configs.get("audit", {}).get("reconstruction", {})
+
+        num_audited_classes = audit_configs.get("num_audited_classes", self.num_classes)
+
+        z_optimization_iter = audit_configs.get("z_optimization_iter", 1000)
+
+        z_optimization_lr = audit_configs.get("z_optimization_lr", 2e-2)
+
+        labels = torch.randint(0, self.num_classes, (num_audited_classes,)).to(self.device)
+
+        opt_z = self.optimize_z(y=labels, lr= z_optimization_lr, iter_times=z_optimization_iter).to(self.device)
+
         image_metrics = ImageMetrics(self.handler, self.gan_handler,
-                                     self.handler.configs.get("audit", {}).get("reconstruction", {}))
+                                     audit_configs,
+                                     labels=labels,
+                                     z=opt_z)
         logger.info(image_metrics.results)
         # TODO: Implement a class with a .save function.
         return image_metrics.results
+
+    def optimize_z(self:Self,
+                   y: torch.tensor,
+                   lr: float =2e-2,
+                   iter_times: int = 10) -> torch.tensor:
+        """Find the optimal latent vectors z for labels y.
+
+        Args:
+        ----
+            y (torch.tensor): The class labels.
+            lr (float): The learning rate for optimization.
+            iter_times (int): The number of iterations for optimization.
+
+        """
+        bs = y.shape[0]
+        y = y.view(-1).long().to(self.device)
+
+        self.generator.eval()
+        self.generator.to(self.device)
+        self.target_model.eval()
+        self.target_model.to(self.device)
+        self.evaluation_model.eval()
+        self.evaluation_model.to(self.device)
+
+        aug_list = augmentation.container.ImageSequential(
+            augmentation.RandomResizedCrop((64, 64), scale=(0.8, 1.0), ratio=(1.0, 1.0)),
+            augmentation.ColorJitter(brightness=0.2, contrast=0.2),
+            augmentation.RandomHorizontalFlip(),
+            augmentation.RandomRotation(5),
+        ).to(self.device)
+
+        logger.info("Optimizing z for the PLG-MI attack")
+
+        z = torch.randn(bs, self.generator.dim_z, device=self.device)
+        z.requires_grad = True
+
+        optimizer = torch.optim.Adam([z], lr=lr)
+
+        for i in range(iter_times):
+            fake = self.generator(z, y)
+
+            out1 = self.target_model(aug_list(fake))
+            out2 = self.target_model(aug_list(fake))
+
+            if z.grad is not None:
+                z.grad.data.zero_()
+
+            inv_loss = F.cross_entropy(out1, y) + F.cross_entropy(out2, y)
+
+            optimizer.zero_grad()
+            inv_loss.backward()
+            optimizer.step()
+
+            inv_loss_val = inv_loss.item()
+
+            if (i + 1) % self.log_interval == 0:
+                with torch.no_grad():
+                    fake_img = self.generator(z, y)
+                    eval_prob = self.evaluation_model(fake_img)
+                    eval_iden = torch.argmax(eval_prob, dim=1).view(-1)
+                    acc = y.eq(eval_iden.long()).sum().item() * 1.0 / bs
+                    logger.info("Iteration:{}\tInv Loss:{:.2f}\tAttack Acc:{:.2f}".format(i + 1, inv_loss_val, acc))
+
+        return z
