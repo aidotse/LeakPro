@@ -15,7 +15,7 @@ from leakpro.utils.logger import logger
 
 class AttackHopSkipJump(AbstractMIA):  # noqa: D101
 
-    class HSJConfig(BaseModel):
+    class AttackConfig(BaseModel):
         """Configuration for the RMIA attack."""
 
         attack_data_fraction: float = Field(default=0.1, ge = 0.0, le=1.0, description="Fraction of the data to use for the attack") # noqa: E501
@@ -55,15 +55,6 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
                 raise ValueError("max_num_evals must be greater than initial_num_evals")
             return values
 
-        @model_validator(mode="after")
-        def check_available_attack_data(self:Self) -> Self:
-            """Check that there is data for shadow models."""
-
-            if AbstractMIA.population_size == len(AbstractMIA.audit_dataset["data"]):
-                raise ValueError("The audit dataset is the same size as the population dataset. \
-                        There is no data left to use for attacks.")
-            return self
-
         model_config = {"arbitrary_types_allowed": True}  # Pydantic v2 config to allow `np.inf`
 
 
@@ -81,13 +72,17 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
 
         """
         logger.info("Configuring label only attack")
-        self.configs = self.Config() if configs is None else self.Config(**configs)
+        self.configs = self.AttackConfig() if configs is None else self.AttackConfig(**configs)
 
         super().__init__(handler)
 
         # Assign the configuration parameters to the object
         for key, value in self.configs.model_dump().items():
             setattr(self, key, value)
+
+        if self.population_size == self.audit_size:
+            raise ValueError("The audit dataset is the same size as the population dataset. \
+                    There is no data left to use for attacks.")
 
         self.signal = HopSkipJumpDistance()
 

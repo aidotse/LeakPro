@@ -39,8 +39,8 @@ class AbstractMIA(ABC):
             handler (AbstractInputHandler): The input handler object.
 
         """
-        if not hasattr(self, "Config"):
-            raise ValueError(f"{self.__class__.__name__}.Config must be defined as a Pydantic BaseModel subclass.")
+        if not hasattr(self, "AttackConfig"):
+            raise ValueError(f"{self.__class__.__name__}.AttackConfig must be defined as a Pydantic BaseModel subclass.")
         if not isinstance(self.configs, BaseModel):
             raise TypeError(f"{self.__class__.__name__}.configs must be a subclass of Pydantic's BaseModel.")
 
@@ -229,6 +229,17 @@ class AbstractMIA(ABC):
 
         """
         return AbstractMIA.audit_dataset["out_members"]
+
+    @property
+    def audit_size(self:Self)-> int:
+        """Get the size of the audit dataset.
+
+        Returns
+        -------
+        int: The size of the audit dataset.
+
+        """
+        return len(AbstractMIA.audit_dataset["data"])
 
     @abstractmethod
     def description(self:Self) -> dict:

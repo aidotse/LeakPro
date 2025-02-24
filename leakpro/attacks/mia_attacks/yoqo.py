@@ -2,7 +2,7 @@
 
 import numpy as np
 import torch
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 from torch import Tensor
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from tqdm import tqdm
@@ -18,7 +18,7 @@ from leakpro.utils.logger import logger
 class AttackYOQO(AbstractMIA):
     """Implementation of the You Only Query Once attack."""
 
-    class Config(BaseModel):
+    class AttackConfig(BaseModel):
         """Configuration for the RMIA attack."""
 
         training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Fraction of auxilary dataset to use for each shadow model training")  # noqa: E501
@@ -26,15 +26,6 @@ class AttackYOQO(AbstractMIA):
         online: bool = Field(default=False, description="Perform online or offline attack")
         lr_xprime_optimization: float = Field(default=1e-3, ge=0.0, description="Learning rate for optimization of xprime")
         max_iterations: int = Field(default=35, ge=1, description="Maximum number of iterations for optimization of xprime")
-
-        @model_validator(mode="after")
-        def check_offline_data(self:Self) -> Self:
-            """Check that there is data for shadow models."""
-
-            if self.online is False and AbstractMIA.population_size == len(AbstractMIA.audit_dataset["data"]):
-                raise ValueError("The audit dataset is the same size as the population dataset. \
-                        There is no data left for the shadow models.")
-            return self
 
     def __init__(self:Self,
                  handler: MIAHandler,
@@ -48,12 +39,16 @@ class AttackYOQO(AbstractMIA):
             configs (dict): Configuration parameters for the attack.
 
         """
-        self.configs = self.Config() if configs is None else self.Config(**configs)
+        self.configs = self.AttackConfig() if configs is None else self.AttackConfig(**configs)
         super().__init__(handler)
 
         # Assign the configuration parameters to the object
         for key, value in self.configs.model_dump().items():
             setattr(self, key, value)
+
+        if self.online is False and self.population_size == self.audit_size:
+            raise ValueError("The audit dataset is the same size as the population dataset. \
+                    There is no data left for the shadow models.")
 
         tmp = self.handler.get_dataloader(0, batch_size=1)
         tmp_features, _ = next(iter(tmp))

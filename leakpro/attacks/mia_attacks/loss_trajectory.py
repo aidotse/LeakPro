@@ -5,7 +5,7 @@ import pickle
 
 import numpy as np
 import torch.nn.functional as F  # noqa: N812
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 from torch import cuda, device, load, nn, no_grad, optim, save, tensor
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
@@ -23,7 +23,7 @@ from leakpro.utils.logger import logger
 class AttackLossTrajectory(AbstractMIA):
     """Implementation of the loss trajectory attack."""
 
-    class Config(BaseModel):
+    class AttackConfig(BaseModel):
         """Configuration for the RMIA attack."""
 
         distillation_data_fraction: float = Field(default = 0.5, ge = 0.0, le=1.0, description="Fraction of auxiliary data used for distillation")  # noqa: E501
@@ -32,15 +32,6 @@ class AttackLossTrajectory(AbstractMIA):
         mia_classifier_epochs: int = Field(default=100, ge=1, description="Number of epochs for training the MIA classifier")
         label_only: bool = Field(default=False, description="Whether to use only the labels for the attack")
         temperature: float = Field(default=2.0, ge=0.0, description="Temperature for the softmax")
-
-        @model_validator(mode="after")
-        def check_available_attack_data(self:Self) -> Self:
-            """Check that there is data for shadow models."""
-
-            if AbstractMIA.population_size == len(AbstractMIA.audit_dataset["data"]):
-                raise ValueError("The audit dataset is the same size as the population dataset. \
-                        There is no data left for the shadow and distillation models.")
-            return self
 
     def __init__(self: Self,
                  handler: MIAHandler,
@@ -55,13 +46,17 @@ class AttackLossTrajectory(AbstractMIA):
 
         """
         logger.info("Configuring Loss trajectory attack")
-        self.configs = self.Config() if configs is None else self.Config(**configs)
+        self.configs = self.AttackConfig() if configs is None else self.AttackConfig(**configs)
 
         super().__init__(handler)
 
         # Assign the configuration parameters to the object
         for key, value in self.configs.model_dump().items():
             setattr(self, key, value)
+
+        if self.population_size == self.audit_size:
+            raise ValueError("The audit dataset is the same size as the population dataset. \
+                    There is no data left for the shadow and distillation models.")
 
         self.num_shadow_models = 1
         self.shadow_data_fraction = 1 - self.distillation_data_fraction

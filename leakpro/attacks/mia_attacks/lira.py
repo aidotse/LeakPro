@@ -20,7 +20,7 @@ from leakpro.utils.logger import logger
 class AttackLiRA(AbstractMIA):
     """Implementation of the LiRA attack."""
 
-    class Config(BaseModel):
+    class AttackConfig(BaseModel):
         """Configuration for the LiRA attack."""
 
         num_shadow_models: int = Field(default=1, ge=1, description="Number of shadow models")
@@ -52,15 +52,6 @@ class AttackLiRA(AbstractMIA):
                 raise ValueError("When online is True, num_shadow_models must be >= 2")
             return self
 
-        @model_validator(mode="after")
-        def check_offline_data(self:Self) -> Self:
-            """Check that there is data for shadow models."""
-
-            if self.online is False and AbstractMIA.population_size == len(AbstractMIA.audit_dataset["data"]):
-                raise ValueError("The audit dataset is the same size as the population dataset. \
-                        There is no data left for the shadow models.")
-            return self
-
     def __init__(self:Self,
                  handler: MIAHandler,
                  configs: dict
@@ -73,7 +64,7 @@ class AttackLiRA(AbstractMIA):
             configs (dict): Configuration parameters for the attack.
 
         """
-        self.configs = self.Config() if configs is None else self.Config(**configs)
+        self.configs = self.AttackConfig() if configs is None else self.AttackConfig(**configs)
 
         # Initializes the parent metric
         super().__init__(handler)
@@ -81,6 +72,10 @@ class AttackLiRA(AbstractMIA):
         # Assign the configuration parameters to the object
         for key, value in self.configs.model_dump().items():
             setattr(self, key, value)
+
+        if self.online is False and self.population_size == self.audit_size:
+            raise ValueError("The audit dataset is the same size as the population dataset. \
+                    There is no data left for the shadow models.")
 
         self.shadow_models = []
         self.signal = ModelRescaledLogits()
