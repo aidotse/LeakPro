@@ -79,34 +79,6 @@ class GeneratorHandler():
         except Exception as e:
             raise ValueError(f"Failed to create model blueprint from {model_class} in {module_path}") from e
 
-    '''
-    def get_public_data(self, batch_size: int) -> DataLoader:
-        """Return data loader for the public dataset."""
-        # Get public dataloader
-        self.public_path = self.handler.configs.get("public_dataset", {}).get("public_data_path")
-        # Load pickle file
-        try:
-            with open(self.public_path, "rb") as f:
-                self.public_dataset = joblib.load(f)
-            logger.info(f"Loaded public data from {self.public_path}")
-        except FileNotFoundError as e:
-            raise FileNotFoundError(f"Could not find the public data at {self.public_path}") from e
-        return DataLoader(self.public_dataset, batch_size = batch_size, shuffle=False)
-
-    def get_private_data(self, batch_size: int) -> DataLoader: # TODO: Should be implemented in another class
-        """Return data loader for the private dataset."""
-        # Get private dataloader
-        self.private_path = self.handler.configs.get("target", {}).get("data_path")
-        # Load pickle file
-        try:
-            with open(self.private_path, "rb") as f:
-                self.private_dataset = joblib.load(f)
-            logger.info(f"Loaded private data from {self.private_path}")
-        except FileNotFoundError as e:
-            raise FileNotFoundError(f"Could not find the private data at {self.private_path}") from e
-        return DataLoader(self.private_dataset, batch_size = batch_size, shuffle=False)
-    '''
-
     def save_generator(self, generator: Module, path: str) -> None:
         """Save the generator model."""
         torch.save(generator.state_dict(), path)
