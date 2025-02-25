@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from leakpro import AbstractInputHandler
 from leakpro.attacks.utils import gan_losses
+from leakpro.schemas import TrainingOutput
 import kornia
 import time
 
@@ -61,7 +62,8 @@ class CelebA_InputHandler(AbstractInputHandler):
         train_accuracy = train_acc / total_samples  
         model.to("cpu")
 
-        return {"model": model, "metrics": {"accuracy": train_accuracy, "loss": avg_train_loss}}
+        output = {"model": model, "metrics": {"accuracy": train_accuracy, "loss": avg_train_loss}}
+        return TrainingOutput(**output)
     
     
     def evaluate(self, dataloader: DataLoader, model: torch.nn.Module, criterion: torch.nn.Module) -> dict:

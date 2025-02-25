@@ -1,23 +1,20 @@
 """Module for handling generators."""
 import os
 
-import joblib
 import torch
 from torch.nn import Module
-from torch.utils.data import DataLoader
 
-from leakpro.attacks.utils.model_handler import ModelHandler
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 
-class GeneratorHandler(ModelHandler):
+class GeneratorHandler():
     """Base class for generator models like GANs, diffusion models, etc."""
 
-    def __init__(self: Self, handler: AbstractInputHandler, configs: dict, caller: str = "generator") -> None:
+    def __init__(self: Self, handler: MINVHandler, configs: dict, caller: str = "generator") -> None:
         """Initialize the GeneratorHandler base class."""
-        super().__init__(handler, caller)
+        self.handler = handler
         self._setup_generator_configs(configs)
         self.trained_bool = False
         logger.info(f"Initialized GeneratorHandler with caller: {caller}")

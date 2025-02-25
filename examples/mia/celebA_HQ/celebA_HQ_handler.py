@@ -3,11 +3,11 @@ from torch import cuda, device, optim
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from leakpro import AbstractInputHandler 
+from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.schemas import TrainingOutput
 
 
-class CelebAHQInputHandler(AbstractInputHandler):
+class CelebAHQInputHandler(MINVHandler):
     """Class to handle the user input for the CelebA_HQ dataset."""
 
     def __init__(self, configs: dict) -> None:
