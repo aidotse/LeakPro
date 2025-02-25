@@ -76,8 +76,8 @@ class AbstractMIA(ABC):
             raise ValueError("Target model not found.")
         if AbstractMIA.audit_dataset is None:
             raise ValueError("Audit dataset not found.")
-        if len(AbstractMIA.audit_dataset["data"]) == AbstractMIA.population_size:
-            raise ValueError("Audit dataset is the entire population dataset.")
+        if len(AbstractMIA.audit_dataset["data"]) > AbstractMIA.population_size:
+            raise ValueError("Audit dataset cannot be larger entire population dataset.")
 
     def sample_indices_from_population(
         self:Self,

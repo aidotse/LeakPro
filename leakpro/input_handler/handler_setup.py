@@ -170,9 +170,11 @@ def get_labels(self:Self, dataset_indices: np.ndarray, batch_size: int = 32) -> 
 def get_target_replica(self:Self) -> Tuple[torch.nn.Module, nn.modules.loss._Loss, torch.optim.Optimizer]:
     """Get an instance of a model created from the target model."""
     init_params = self.target_model_metadata.get("init_params", {})
+    optim_dict = self.target_model_metadata.get("optimizer", {})
+    target_criterion = self.target_model_metadata.get("loss", {})["name"]
     try:
         model_replica = self.target_model_blueprint(**init_params)
-        return model_replica, self.get_criterion(), self.get_optimizer(model_replica)
+        return model_replica, self.get_criterion(target_criterion), self.get_optimizer(model_replica, optim_dict)
     except Exception as e:
         raise ValueError("Failed to create an instance of the target model.") from e
 

@@ -13,18 +13,20 @@ class CifarInputHandler(AbstractInputHandler):
 
     def __init__(self, configs: dict) -> None:
         super().__init__(configs = configs)
-        print(configs)
 
-
-    def get_criterion(self)->None:
+    def get_criterion(self, criterion_name:str=None)->None:
         """Set the CrossEntropyLoss for the model."""
+        if type(criterion_name) == str:
+            crit = self._get_criterion_class(criterion_name)()
+            return crit
         return CrossEntropyLoss()
 
-    def get_optimizer(self, model:torch.nn.Module) -> None:
+    def get_optimizer(self, model:torch.nn.Module, optimizer_dict: dict) -> optim.Optimizer: #) -> None:
         """Set the optimizer for the model."""
-        learning_rate = 0.1
-        momentum = 0.8
-        return optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
+        optim_dict = {k:v for k,v in optimizer_dict.items() if k not in ("name")}
+        optimizer_name = optimizer_dict["name"]
+        optimizer = self._get_optimizer_class(optimizer_name)
+        return optimizer(model.parameters(), **optim_dict)
 
     def train(
         self,
@@ -44,6 +46,8 @@ class CifarInputHandler(AbstractInputHandler):
         gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
         model.to(gpu_or_cpu)
 
+        print("optimizer", optimizer)
+
         # training loop
         for epoch in range(epochs):
             train_loss, train_acc = 0, 0
@@ -59,8 +63,8 @@ class CifarInputHandler(AbstractInputHandler):
                 optimizer.step()
 
                 # Accumulate performance of shadow model
-                train_acc += pred.eq(labels.data.view_as(pred)).sum()
-                train_loss += loss.item()
+                train_acc += pred.eq(labels.data.view_as(pred)).sum() / len(dataloader.dataset)
+                train_loss += loss.item() / len(dataloader)
 
         model.to("cpu")
 
