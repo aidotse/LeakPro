@@ -88,11 +88,6 @@ class AbstractGIA(AbstractAttack):
         """Apply and suggest new hyperparameters for the attack using optuna trial."""
         pass
 
-    @abstractmethod
-    def get_configs(self:Self) -> dict:
-        """Get the configs used for the attack."""
-        pass
-
     def run_with_optuna(self:Self, optuna_config: Optional[OptunaConfig] = None) -> optuna.study.Study:
         """Fins optimal hyperparameters using optuna."""
         if optuna_config is None:

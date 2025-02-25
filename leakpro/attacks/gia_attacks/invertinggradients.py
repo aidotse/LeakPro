@@ -1,4 +1,5 @@
 """Geiping, Jonas, et al. "Inverting gradients-how easy is it to break privacy in federated learning?."."""
+import os
 from collections.abc import Generator
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -55,6 +56,10 @@ class InvertingGradients(AbstractGIA):
         self.best_loss = float("inf")
         self.best_reconstruction = None
         self.best_reconstruction_round = None
+        # required for optuna to save the best hyperparameters
+        self.attack_folder_path = "leakpro_output/attacks/inverting_grad"
+        os.makedirs(self.attack_folder_path, exist_ok=True)
+
         logger.info("Inverting gradient initialized.")
         self.prepare_attack()
 
@@ -145,7 +150,7 @@ class InvertingGradients(AbstractGIA):
         total_variation = trial.suggest_float("total_variation", 1e-6, 1e-1, log=True)
         self.configs.tv_reg = total_variation
 
-    def reset_attack(self: Self) -> None:
+    def reset_attack(self: Self, new_config:dict) -> None:  # noqa: ARG002
         """Reset attack to initial state."""
         self.best_loss = float("inf")
         self.best_reconstruction = None

@@ -1,4 +1,6 @@
 """Huang, Yangisibo, et al. "Evaluating Gradient Inversion Attacks and Defenses in Federated Learning."."""
+
+import os
 from collections.abc import Generator
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -30,7 +32,7 @@ class HuangConfig:
     # learning rate on the attack optimizer
     attack_lr: float = 0.1
     # iterations for the attack steps
-    at_iterations: int = 10000
+    at_iterations: int = 2
     # MetaOptimizer, see MetaSGD for implementation
     optimizer: object = field(default_factory=lambda: MetaSGD())
     # Client loss function
@@ -65,6 +67,10 @@ class Huang(AbstractGIA):
         self.train_fn = train_fn if train_fn is not None else train
         self.data_mean = data_mean
         self.data_std = data_std
+
+        # required for optuna to save the best hyperparameters
+        self.attack_folder_path = "leakpro_output/attacks/huang"
+        os.makedirs(self.attack_folder_path, exist_ok=True)
 
         self.prepare_attack()
         logger.info("Evaluating with Huang. et al initialized.")
@@ -172,7 +178,7 @@ class Huang(AbstractGIA):
         self.configs.tv_reg = total_variation
         self.configs.bn_reg = bn_reg
 
-    def reset_attack(self: Self) -> None:
+    def reset_attack(self: Self, new_config:dict) -> None:  # noqa: ARG002
         """Reset attack to initial state."""
         self.best_loss = float("inf")
         self.best_reconstruction = None
