@@ -8,10 +8,6 @@ import torch
 import pickle
 from torch import cat
 
-def _noise_adder(img):
-            return torch.empty_like(img, dtype=img.dtype).uniform_(0.0, 1 / 256.0) + img
-
-
 
 class celebADataset(Dataset):
     def __init__(self, x, y, transform=None,  indices=None):
@@ -63,7 +59,6 @@ class celebADataset(Dataset):
            transforms.ToPILImage(),
            transforms.Resize((re_size, re_size)),
            transforms.ToTensor(),
-           _noise_adder
         ])
 
         train_dataset = datasets.ImageFolder(os.path.join(data_dir, subfolder), train_transform)
