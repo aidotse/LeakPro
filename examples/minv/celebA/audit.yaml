@@ -1,6 +1,7 @@
 
 audit:  # Configurations for auditing
   random_seed: 1234  # Integer specifying the random seed
+  data_modality: "image" #image, tabular
   attack_list:
     plgmi:
       n_dis: 2 # Integer number for indicating the number of discriminator updates per generator update

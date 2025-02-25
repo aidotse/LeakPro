@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from leakpro.attacks.minv_attacks.abstract_minv import AbstractMINV
 from leakpro.attacks.utils import gan_losses
 from leakpro.attacks.utils.gan_handler import GANHandler
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.input_handler.modality_extensions.image_metrics import ImageMetrics
 from leakpro.metrics.attack_result import MinvResult
 from leakpro.utils.import_helper import Self
@@ -56,12 +56,12 @@ class AttackPLGMI(AbstractMINV):
         discriminator: GANConfig = Field(..., description="Configuration for the discriminator")
 
 
-    def __init__(self: Self, handler: AbstractInputHandler, configs: dict) -> None:
+    def __init__(self: Self, handler: MINVHandler, configs: dict) -> None:
         """Initialize the PLG-MI attack.
 
         Args:
         ----
-            handler (AbstractInputHandler): The input handler object.
+            handler (MINVHandler): The input handler object.
             configs (dict): Configuration parameters for the attack.
 
         """

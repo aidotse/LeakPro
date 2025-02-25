@@ -74,7 +74,7 @@ class MINVHandler:
 
                 # check if the metadata is a schema or a dict, initate a schema
                 if not isinstance(target_model_metadata, BaseModel):
-                    self.target_model_metadata = MIAMetaDataSchema(**target_model_metadata.dict())
+                    self.target_model_metadata = MIAMetaDataSchema(**target_model_metadata)
                 else:
                     self.target_model_metadata = target_model_metadata
 

@@ -43,8 +43,6 @@ class AbstractMINV(ABC):
         """
         # These objects are shared and should be initialized only once
         if not AbstractMINV._initialized:
-            AbstractMINV.target_dataset = handler.population
-            AbstractMINV.target_size = handler.population_size
             AbstractMINV.target_model = PytorchModel(handler.target_model, handler.get_criterion())
             # Ensure that public_data_path is provided
             AbstractMINV.public_data_path = handler.configs.target.public_data_path
@@ -131,19 +129,6 @@ class AbstractMINV(ABC):
 
         """
         return AbstractMINV.target_dataset
-
-
-
-    @abstractmethod
-    def _configure_attack(self:Self, configs:dict)->None:
-        """Configure the attack.
-
-        Args:
-        ----
-            configs (dict): The configurations for the attack.
-
-        """
-        pass
 
     def _validate_config(self: Self, name: str, value: float, min_val: float, max_val: float) -> None:
         if not (min_val <= value <= (max_val if max_val is not None else value)):

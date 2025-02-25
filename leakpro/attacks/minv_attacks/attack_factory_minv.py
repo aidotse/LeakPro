@@ -35,5 +35,5 @@ class AttackFactoryMINV:
         """
 
         if name in cls.attack_classes:
-            return cls.attack_classes[name](handler, handler.configs["audit"]["attack_list"][name])
+            return cls.attack_classes[name](handler, handler.configs.audit.attack_list.get(name))
         raise ValueError(f"Unknown attack type: {name}")
