@@ -156,7 +156,7 @@ class AttackPLGMI(AbstractMINV):
         self.gan_handler = GANHandler(self.handler, configs=self.configs)
         # TODO: Change structure of how we load data, handler or model_handler should do this, not gan_handler
         # Get public dataloader
-        self.public_dataloader = self.gan_handler.get_public_data(self.batch_size)
+        self.public_dataloader = self.handler.get_public_dataloader(self.configs.batch_size)
 
         # Get discriminator
         self.discriminator = self.gan_handler.get_discriminator()
@@ -210,7 +210,7 @@ class AttackPLGMI(AbstractMINV):
 
         reconstruction_configs = self.handler.configs.get("audit", {}).get("reconstruction", {})
 
-        num_audited_classes = reconstruction_configs.get("num_audited_classes", self.num_classes)
+        num_audited_classes = reconstruction_configs.get("num_audited_classes", self.configs.num_classes)
 
         z_optimization_iter = reconstruction_configs.get("z_optimization_iter", 1000)
         z_optimization_lr = reconstruction_configs.get("z_optimization_lr", 2e-2)
