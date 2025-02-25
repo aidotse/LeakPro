@@ -26,23 +26,19 @@ class MINVHandler:
 
     def _load_public_data(self) -> None:
         """Load the public dataset."""
-        # Get public dataloader
-        self.public_path = self.configs.get("public_dataset", {}).get("public_data_path")
-        # Load pickle file
+        public_data_path = self.configs.public_dataset.public_data_path
         try:
-            with open(self.public_path, "rb") as f:
+            with open(public_data_path, "rb") as f:
                 self.public_dataset = joblib.load(f)
             logger.info(f"Loaded public data from {self.public_path}")
         except FileNotFoundError as e:
-            raise FileNotFoundError(f"Could not find the public data at {self.public_path}") from e
+            raise FileNotFoundError(f"Could not find the public data at {self.configs.public_dataset.public_data_path}") from e
 
     def _load_private_data(self) -> None:
         """Load the private dataset."""
-        # Get private dataloader
-        self.private_path = self.handler.configs.get("target", {}).get("data_path")
-        # Load pickle file
+        private_data_path = self.configs.target.data_path
         try:
-            with open(self.private_path, "rb") as f:
+            with open(private_data_path, "rb") as f:
                 self.private_dataset = joblib.load(f)
             logger.info(f"Loaded private data from {self.private_path}")
         except FileNotFoundError as e:
