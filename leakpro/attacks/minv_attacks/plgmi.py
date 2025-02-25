@@ -1,4 +1,6 @@
 """Implementation of the PLGMI attack."""
+from typing import Any, Dict, Optional
+
 import torch
 from kornia import augmentation
 from pydantic import BaseModel, Field, model_validator
@@ -14,6 +16,14 @@ from leakpro.metrics.attack_result import MinvResult
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
+
+class GANConfig(BaseModel):
+    """Configuration for GAN."""
+
+    module_path: str = Field(..., description="Path to the model script.")
+    model_class: str = Field(..., description="Class name of the model.")
+    checkpoint_path: Optional[str] = Field(None, description="Path to the saved model checkpoint.")
+    init_params: Dict[str, Any] = Field(default_factory=dict, description="Initialization parameters.")
 
 class AttackPLGMI(AbstractMINV):
     """Class that implements the PLGMI attack."""
@@ -41,6 +51,9 @@ class AttackPLGMI(AbstractMINV):
         dis_lr: float = Field(0.0002, ge=0.0, description="Learning rate for the discriminator")
         dis_beta1: float = Field(0.0, ge=0.0, le=1.0, description="Beta1 parameter for the discriminator")
         dis_beta2: float = Field(0.9, ge=0.0, le=1.0, description="Beta2 parameter for the discriminator")
+
+        generator: GANConfig = Field(..., description="Configuration for the generator")
+        discriminator: GANConfig = Field(..., description="Configuration for the discriminator")
 
 
     def __init__(self: Self, handler: AbstractInputHandler, configs: dict) -> None:

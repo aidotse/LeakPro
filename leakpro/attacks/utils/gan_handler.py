@@ -2,6 +2,7 @@
 import os
 
 import torch
+from pydantic import BaseModel, Field, model_validator
 from torch.nn import Module
 
 from leakpro.input_handler.minv_handler import MINVHandler
@@ -16,8 +17,12 @@ class GANHandler(GeneratorHandler):
 
     def __init__(self: Self, handler: MINVHandler, configs: dict) -> None:
         """Initialize the GANHandler class."""
+        logger.info("Initializing GANHandler...")
+
+        print(self.configs.discriminator.module_path)
+
         super().__init__(handler, configs=configs, caller="gan_handler")
-        self._setup_discriminator_configs(configs)
+        #self._setup_discriminator_configs(configs)
 
     def _setup_discriminator_configs(self: Self, configs : dict) -> None:
         """Load discriminator-specific configurations (e.g., discriminator path, params)."""
