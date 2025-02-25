@@ -9,7 +9,7 @@ from torch.nn import CrossEntropyLoss, KLDivLoss, Module
 from tqdm import tqdm
 
 from leakpro.attacks.utils.model_handler import ModelHandler
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.schemas import DistillationModelTrainingSchema
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
@@ -26,8 +26,7 @@ def singleton(cls):  # noqa: ANN001, ANN201
             params[cls] = (args, kwargs)
             instances[cls] = cls(*args, **kwargs)  # Create the singleton instance
         elif args or kwargs:
-            # Raise an error if trying to reinitialize with different parameters
-            raise ValueError("Singleton already created with specific parameters.")
+            instances[cls].__init__(*args, **kwargs)  # Update the singleton instance with new parameters
         return instances[cls]
 
     return get_instance
@@ -36,12 +35,12 @@ def singleton(cls):  # noqa: ANN001, ANN201
 class DistillationModelHandler(ModelHandler):
     """A class handling the creation, training, and loading of distillation models."""
 
-    def __init__(self:Self, handler: AbstractInputHandler)->None:
+    def __init__(self:Self, handler: MIAHandler)->None:
         """Initialize the DistillationModelHandler.
 
         Args:
         ----
-            handler (AbstractInputHandler): The input handler.
+            handler (MIAHandler): The input handler.
 
         """
         caller = "distillation_model"

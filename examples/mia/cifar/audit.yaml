@@ -6,7 +6,8 @@ audit:  # Configurations for auditing
       num_shadow_models: 5
       gamma: 1
     # population:
-    # lira:
+    lira:
+      online: False
     # loss_traj:
     # HSJ:
     # yoqo:

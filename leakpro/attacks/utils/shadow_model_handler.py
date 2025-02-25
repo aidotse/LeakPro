@@ -10,7 +10,7 @@ from torch import Tensor, jit, save
 from torch.nn import Module
 
 from leakpro.attacks.utils.model_handler import ModelHandler
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.schemas import ShadowModelTrainingSchema, TrainingOutput
 from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import Self, Tuple
@@ -28,8 +28,8 @@ def singleton(cls):  # noqa: ANN001, ANN201
             params[cls] = (args, kwargs)
             instances[cls] = cls(*args, **kwargs)  # Create the singleton instance
         elif args or kwargs:
-            # Raise an error if trying to reinitialize with different parameters
-            raise ValueError("Singleton already created with specific parameters.")
+            # Call init again to update states such as model path, target hash etc
+            instances[cls].__init__(*args, **kwargs)
         return instances[cls]
 
     def is_created() -> bool:
@@ -50,54 +50,47 @@ def singleton(cls):  # noqa: ANN001, ANN201
 class ShadowModelHandler(ModelHandler):
     """A class handling the creation, training, and loading of shadow models."""
 
-    def __init__(self:Self, handler: AbstractInputHandler) -> None:  # noqa: PLR0912
+    def __init__(self:Self, handler: MIAHandler) -> None:  # noqa: PLR0912
         """Initialize the ShadowModelHandler.
 
         Args:
         ----
-            handler (AbstractInputHandler): The input handler object.
+            handler (MIAHandler): The input handler object.
 
         """
         caller = "shadow_model"
         super().__init__(handler, caller)
 
-        shadow_model = self.handler.configs.shadow_model
-        self.shadow_model_type = shadow_model.model_class if isinstance(shadow_model, dict) else None
-
-        self.target_model_type = self.handler.configs.target.model_class
-        if self.target_model_type is None:
-            raise ValueError("Target model type is not specified")
-
         # Set up the names of the shadow model
         self.model_storage_name = "shadow_model"
         self.metadata_storage_name = "metadata"
 
-    def _filter(self:Self, data_size:int, online:bool, model_type: str)->list[int]:
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    def _filter(self:Self, data_size:int, online:bool)->list[int]:
         # Get the metadata for the shadow models
         entries = os.listdir(self.storage_path)
         pattern = re.compile(rf"^{self.metadata_storage_name}_\d+\.pkl$")
         files = [f for f in entries if pattern.match(f)]
+
         # Extract the index of the metadata
         all_indices = [int(re.search(r"\d+", f).group()) for f in files]
 
-        # Filter out indices to only keep the ones with the same data size
-        filtered_indices = []
-        mismatched_model_types = []
+        # Setup checks
+        # Get target model hash, this tells if the data has changed for the training
+        target_model_hash = self.target_model_hash
+        # create check list
+        filter_checks = [data_size, online, self.model_class, target_model_hash]
 
+        # Filter out indices to only keep the ones that passes the checks
+        filtered_indices = []
         for i in all_indices:
             metadata = self._load_shadow_metadata(i)
-            if metadata.num_train == data_size and metadata.online == online:
-                if metadata.model_type == model_type:
-                    filtered_indices.append(i)
-                else:
-                    mismatched_model_types.append((i, metadata.model_type))
+            assert isinstance(metadata, ShadowModelTrainingSchema), "Shadow Model metadata is not of the correct type"
+            meta_check_values = [metadata.num_train, metadata.online, metadata.model_class, metadata.target_model_hash]
+            if all(a == b for a, b in zip(filter_checks, meta_check_values)):
+                filtered_indices.append(i)
 
-        # Warn about mismatched model types
-        if mismatched_model_types:
-            logger.warning(
-                f"Mismatched model types found in saved shadow models: {mismatched_model_types}. "
-                f"Expected model type: {model_type}."
-            )
         return all_indices, filtered_indices
 
     def create_shadow_models(
@@ -124,18 +117,9 @@ class ShadowModelHandler(ModelHandler):
         if num_models < 0:
             raise ValueError("Number of models cannot be negative")
 
-        # Get shadow model class
-        if self.shadow_model_type is None:
-            logger.warning(
-                "Using the same model class for shadow models as the target model."
-            )
-            shadow_model_type = self.target_model_type
-        else:
-            shadow_model_type = self.shadow_model_type
-
         # Get the size of the dataset
         data_size = int(len(shadow_population)*training_fraction)
-        all_indices, filtered_indices = self._filter(data_size, online, shadow_model_type)
+        all_indices, filtered_indices = self._filter(data_size, online)
 
         # Create a list of indices to use for the new shadow models
         n_existing_models = len(filtered_indices)
@@ -161,11 +145,19 @@ class ShadowModelHandler(ModelHandler):
             # Train shadow model
             logger.info(f"Training shadow model {i} on {len(data_loader)* data_loader.batch_size} points")
             training_results = self.handler.train(data_loader, model, criterion, optimizer, self.epochs)
+
             # Read out results
             assert isinstance(training_results, TrainingOutput)
             shadow_model = training_results.model
             train_acc = training_results.metrics.get("accuracy", 0)
             train_loss = training_results.metrics.get("loss", 0)
+
+            # Evaluate shadow model on remaining aux data
+            remaining_indices = list(set(shadow_population) - set(data_indices))
+            if len(remaining_indices) == 0:
+                test_loss, test_acc = 0.0, 0.0
+            else:
+                test_acc, test_loss = self._eval_shadow_model(shadow_model, criterion, remaining_indices)
 
             logger.info(f"Training shadow model {i} complete")
             with open(f"{self.storage_path}/{self.model_storage_name}_{i}.pkl", "wb") as f:
@@ -183,15 +175,49 @@ class ShadowModelHandler(ModelHandler):
                 "epochs": self.epochs,
                 "train_acc": train_acc,
                 "train_loss": train_loss,
+                "test_acc": test_acc,
+                "test_loss": test_loss,
                 "online": online,
-                "model_type": shadow_model_type,
+                "model_class": self.model_class,
+                "target_model_hash": self.target_model_hash,
             }
+            logger.info(f"Metadata for shadow model {i}:\n{meta_data}")
             validated_meta = ShadowModelTrainingSchema(**meta_data)
             with open(f"{self.storage_path}/{self.metadata_storage_name}_{i}.pkl", "wb") as f:
                 pickle.dump(validated_meta, f)
 
             logger.info(f"Metadata for shadow model {i} stored in {self.storage_path}")
         return filtered_indices + indices_to_use
+
+    def _eval_shadow_model(self:Self, model:Module, criterion:Module, indices:list[int])->Tuple[float, float]:
+        """Evaluate the shadow models.
+
+        Args:
+        ----
+            model (Module): The shadow model to evaluate.
+            criterion (Module): The loss function to use.
+            indices (list[int]): The indices in the aux dataset to evaluate.
+
+        Returns:
+        -------
+            Tuple[float, float]: The average accuracy and loss of the shadow models.
+
+        """
+        accuracy = 0.0
+        loss = 0.0
+        model.eval()
+        model.to(self.device)
+        data_loader = self.handler.get_dataloader(indices, self.batch_size)
+        with torch.no_grad():
+            for data, target in data_loader:
+                data, target = data.to(self.device), target.to(self.device)
+                output = model(data).squeeze()
+                loss += criterion(output, target).item()
+                predictions = (output.squeeze() > 0.5).long() if output.ndim == 1 or output.shape[0] == 1 else output.argmax(1)
+                accuracy += (predictions == target).sum().item()
+        loss /= len(data_loader)
+        accuracy /= len(indices)
+        return accuracy, loss
 
     def _load_shadow_model(self:Self, index:int) -> Module:
         """Load a shadow model from a saved state.
@@ -281,11 +307,11 @@ class ShadowModelHandler(ModelHandler):
         dataset_tensor = torch.from_numpy(dataset_indices).to(device=device)
         indice_masks_tensor = torch.zeros((len(dataset_indices), len(models_in_indices)), dtype=torch.bool, device=device)
 
-        return torch_indice_in_shadowmodel_training_set(indice_masks_tensor,\
+        return _torch_indice_in_shadowmodel_training_set(indice_masks_tensor,\
                                                         dataset_tensor, model_indices_tensor).cpu().numpy()
 
 @jit.script
-def torch_indice_in_shadowmodel_training_set(in_tensor:Tensor, dataset:Tensor, model_indices:Tensor) -> Tensor:
+def _torch_indice_in_shadowmodel_training_set(in_tensor:Tensor, dataset:Tensor, model_indices:Tensor) -> Tensor:
     """Check if an audit indice is present in the shadow model training set.
 
     Args:

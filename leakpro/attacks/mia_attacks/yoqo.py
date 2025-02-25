@@ -18,7 +18,7 @@ from leakpro.utils.logger import logger
 class AttackYOQO(AbstractMIA):
     """Implementation of the You Only Query Once attack."""
 
-    class Config(BaseModel):
+    class AttackConfig(BaseModel):
         """Configuration for the RMIA attack."""
 
         training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Fraction of auxilary dataset to use for each shadow model training")  # noqa: E501
@@ -39,12 +39,16 @@ class AttackYOQO(AbstractMIA):
             configs (dict): Configuration parameters for the attack.
 
         """
-        self.configs = self.Config() if configs is None else self.Config(**configs)
+        self.configs = self.AttackConfig() if configs is None else self.AttackConfig(**configs)
         super().__init__(handler)
 
         # Assign the configuration parameters to the object
         for key, value in self.configs.model_dump().items():
             setattr(self, key, value)
+
+        if self.online is False and self.population_size == self.audit_size:
+            raise ValueError("The audit dataset is the same size as the population dataset. \
+                    There is no data left for the shadow models.")
 
         tmp = self.handler.get_dataloader(0, batch_size=1)
         tmp_features, _ = next(iter(tmp))
