@@ -134,7 +134,7 @@ class PinballLoss(torch.nn.Module):
 class AttackQMIA(AbstractMIA):
     """Implementation of the RMIA attack."""
 
-    class Config(BaseModel):
+    class AttackConfig(BaseModel):
         """Configuration for the RMIA attack."""
 
         quantiles: List[float] = Field(default_factory=lambda: [0.05, 0.25, 0.5, 0.75, 0.95], description="List of quantiles between 0 and 1")  # noqa: E501
@@ -163,6 +163,7 @@ class AttackQMIA(AbstractMIA):
                 raise ValueError("All quantiles must be between 0 and 1.")
             return v
 
+
     def __init__(
         self:Self,
         handler: MIAHandler,
@@ -178,13 +179,17 @@ class AttackQMIA(AbstractMIA):
         """
         logger.info("Configuring the QMIA attack")
 
-        self.configs = self.Config() if configs is None else self.Config(**configs)
+        self.configs = self.AttackConfig() if configs is None else self.AttackConfig(**configs)
 
         # Initializes the parent metric
         super().__init__(handler)
 
         for key, value in self.configs.model_dump().items():
             setattr(self, key, value)
+
+        if self.population_size == self.audit_size:
+            raise ValueError("The audit dataset is the same size as the population dataset. \
+                    There is no data left for the quantile regressor.")
 
         self.signal = ModelRescaledLogits()
         dummy_index = np.atleast_1d(np.ones(1)).astype(int)

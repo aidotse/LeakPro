@@ -23,7 +23,7 @@ from leakpro.utils.logger import logger
 class AttackLossTrajectory(AbstractMIA):
     """Implementation of the loss trajectory attack."""
 
-    class Config(BaseModel):
+    class AttackConfig(BaseModel):
         """Configuration for the RMIA attack."""
 
         distillation_data_fraction: float = Field(default = 0.5, ge = 0.0, le=1.0, description="Fraction of auxiliary data used for distillation")  # noqa: E501
@@ -46,13 +46,17 @@ class AttackLossTrajectory(AbstractMIA):
 
         """
         logger.info("Configuring Loss trajectory attack")
-        self.configs = self.Config() if configs is None else self.Config(**configs)
+        self.configs = self.AttackConfig() if configs is None else self.AttackConfig(**configs)
 
         super().__init__(handler)
 
         # Assign the configuration parameters to the object
         for key, value in self.configs.model_dump().items():
             setattr(self, key, value)
+
+        if self.population_size == self.audit_size:
+            raise ValueError("The audit dataset is the same size as the population dataset. \
+                    There is no data left for the shadow and distillation models.")
 
         self.num_shadow_models = 1
         self.shadow_data_fraction = 1 - self.distillation_data_fraction

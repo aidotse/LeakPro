@@ -3,7 +3,8 @@ audit:  # Configurations for auditing
   attack_list:
     rmia:
     # population:
-    # lira:
+    lira:
+      online: False
     # loss_traj:
     # HSJ:
     # yoqo:
