@@ -30,7 +30,7 @@ class GANHandler(GeneratorHandler):
         self.discriminator_checkpoint = configs.checkpoint_path
         logger.info(f"Discriminator path: {self.discriminator_path}, Discriminator class: {self.discriminator_class}")
         # Check that discriminator class is provided, else raise an error
-        if self.discriminator_path and self.discriminator_class:
+        if self.discriminator_path and self.discriminator_class: # TODO: Is this check needed?
             self.discriminator_blueprint = self._import_model_from_path(self.discriminator_path, self.discriminator_class)
         else:
             raise ValueError("Discriminator path and class must be specified in the config.")

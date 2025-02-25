@@ -32,7 +32,7 @@ class GeneratorHandler():
         self.num_classes = self.gen_init_params.get("num_classes", 0)
         self.generator_checkpoint = configs.checkpoint_path
         logger.info(f"Generator path: {self.generator_path}, Generator class: {self.generator_class}")
-        if self.generator_path and self.generator_class:
+        if self.generator_path and self.generator_class: # TODO: Is this check needed?
             self.generator_blueprint = self._import_model_from_path(self.generator_path, self.generator_class)
         else:
             raise ValueError("Generator path and class must be specified in the config.")

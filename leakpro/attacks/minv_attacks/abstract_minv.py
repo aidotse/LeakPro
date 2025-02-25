@@ -46,8 +46,6 @@ class AbstractMINV(ABC):
             AbstractMINV.target_model = PytorchModel(handler.target_model, handler.get_criterion())
             # Ensure that public_data_path is provided
             AbstractMINV.public_data_path = handler.configs.target.public_data_path
-            if AbstractMINV.public_data_path is None:
-                raise ValueError("Model Inversion requires a public data path, but none was provided.")
             AbstractMINV.handler = handler
             AbstractMINV._initialized = True
 
