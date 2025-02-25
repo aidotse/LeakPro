@@ -4,7 +4,7 @@ import os
 import torch
 from torch.nn import Module
 
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
@@ -14,7 +14,7 @@ from .generator_handler import GeneratorHandler
 class GANHandler(GeneratorHandler):
     """Handler for training and managing GANs."""
 
-    def __init__(self: Self, handler: AbstractInputHandler, configs: dict) -> None:
+    def __init__(self: Self, handler: MINVHandler, configs: dict) -> None:
         """Initialize the GANHandler class."""
         super().__init__(handler, configs=configs, caller="gan_handler")
         self._setup_discriminator_configs(configs)
