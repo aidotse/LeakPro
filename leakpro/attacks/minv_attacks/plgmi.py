@@ -52,8 +52,15 @@ class AttackPLGMI(AbstractMINV):
         dis_beta1: float = Field(0.0, ge=0.0, le=1.0, description="Beta1 parameter for the discriminator")
         dis_beta2: float = Field(0.9, ge=0.0, le=1.0, description="Beta2 parameter for the discriminator")
 
+        # Model parameters
         generator: GANConfig = Field(..., description="Configuration for the generator")
         discriminator: GANConfig = Field(..., description="Configuration for the discriminator")
+
+        # Latent space parameters
+        dim_z: int = Field(128, ge=1, description="Dimension of the latent space")
+        z_optimization_iter: int = Field(1000, ge=1, description="Number of iterations for optimizing z")
+        z_optimization_lr: float = Field(0.0002, ge=0.0, description="Learning rate for optimizing z")
+
 
         # TODO: Most of these are not necessary if models are pre-trained
 
@@ -210,18 +217,16 @@ class AttackPLGMI(AbstractMINV):
 
         self.evaluation_model = self.target_model # TODO: Change to evaluation model
 
-        reconstruction_configs = self.handler.configs.get("audit", {}).get("reconstruction", {})
+        reconstruction_configs = self.handler.configs.audit.reconstruction
 
-        num_audited_classes = reconstruction_configs.get("num_audited_classes", self.configs.num_classes)
-
-        z_optimization_iter = reconstruction_configs.get("z_optimization_iter", 1000)
-        z_optimization_lr = reconstruction_configs.get("z_optimization_lr", 2e-2)
+        num_audited_classes = reconstruction_configs.num_audited_classes
 
         # Get random labels
         labels = torch.randint(0, self.num_classes, (num_audited_classes,)).to(self.device)
 
         # Optimize z, TODO: Optimize in batches
-        opt_z = self.optimize_z(y=labels, lr= z_optimization_lr, iter_times=z_optimization_iter).to(self.device)
+        opt_z = self.optimize_z(y=labels, lr= self.configs.z_optimization_lr,
+                                iter_times=self.configs.z_optimization_iter).to(self.device)
 
         # Compute image metrics for the optimized z and labels
         image_metrics = ImageMetrics(self.handler, self.gan_handler,
