@@ -2,6 +2,7 @@
 
 from typing import Annotated, Any, Dict, List, Literal, Optional
 
+import optuna
 from pydantic import BaseModel, Field, field_validator
 from torch.nn import Module
 
@@ -148,4 +149,15 @@ class DistillationModelTrainingSchema(BaseModel):
     epochs: int = Field(..., ge=1, description="Number of training epochs")
     label_only: bool = Field(..., description="Whether the distillation process is label-only")
 
+class OptunaConfig(BaseModel):
+    """Configuration for the Optuna hyperparameter search."""
 
+    seed: int = Field(default=1234, description="Random seed for reproducibility")
+    n_trials: int = Field(default=400, description="Number of trials to find the optimal hyperparameters")
+    direction: Literal["maximize", "minimize"] = Field("maximize", description="Direction of the optimization, minimize or maximize")  # noqa: E501
+    pruner: optuna.pruners.BasePruner = Field(default=optuna.pruners.MedianPruner(n_warmup_steps=5), description="Number of steps before pruning of experiments will be available")  # noqa: E501
+
+    class Config:
+        """Configuration for OptunaConfig to enable arbitrary type handling."""
+
+        arbitrary_types_allowed = True

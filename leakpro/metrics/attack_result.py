@@ -247,7 +247,7 @@ class MIAResult:
 
         # Optuna objective
         mask = self.fpr < 1e-2
-        self.tpr_at_target = np.mean(self.tpr[mask])
+        self.avg_tpr = np.mean(self.tpr[mask])
 
 
     @staticmethod

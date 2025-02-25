@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from torch.utils.data import DataLoader
 
 from leakpro.attacks.attack_base import AbstractAttack
-from leakpro.hyperparameter_tuning.optuna import OptunaConfig, optuna_optimal_hyperparameters
+from leakpro.attacks.utils.hyperparameter_tuning.optuna import OptunaConfig, optuna_optimal_hyperparameters
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.metrics.attack_result import AttackResult
 from leakpro.signals.signal_extractor import PytorchModel

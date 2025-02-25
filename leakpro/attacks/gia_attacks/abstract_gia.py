@@ -11,10 +11,11 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 
 from leakpro.attacks.attack_base import AbstractAttack
+from leakpro.attacks.utils.hyperparameter_tuning.optuna import optuna_optimal_hyperparameters
 from leakpro.fl_utils.model_utils import MedianPool2d
 from leakpro.fl_utils.similarity_measurements import dataloaders_psnr, dataloaders_ssim_ignite
-from leakpro.hyperparameter_tuning.optuna import OptunaConfig, optuna_optimal_hyperparameters
 from leakpro.metrics.attack_result import GIAResults
+from leakpro.schemas import OptunaConfig
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
