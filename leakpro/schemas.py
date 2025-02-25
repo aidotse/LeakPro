@@ -101,10 +101,7 @@ class TrainingOutput(BaseModel):
             raise ValueError("model must be an instance of torch.nn.Module")
         return v
 
-    class Config:
-        """Configuration for TrainingOutput to enable arbitrary type handling."""
-
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 class MIAMetaDataSchema(BaseModel):
     """Schema for training metadata."""
@@ -162,7 +159,4 @@ class OptunaConfig(BaseModel):
     direction: Literal["maximize", "minimize"] = Field("maximize", description="Direction of the optimization, minimize or maximize")  # noqa: E501
     pruner: optuna.pruners.BasePruner = Field(default=optuna.pruners.MedianPruner(n_warmup_steps=5), description="Number of steps before pruning of experiments will be available")  # noqa: E501
 
-    class Config:
-        """Configuration for OptunaConfig to enable arbitrary type handling."""
-
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)

@@ -40,12 +40,12 @@ class AttackRMIA(AbstractMIA):
         gamma: float = Field(default=2.0,
                         ge=0.0,
                         description="Parameter to threshold LLRs",
-                        optuna={"type": "float", "low": 0.1, "high": 10, "log": True})
+                        json_schema_extra = {"optuna": {"type": "float", "low": 0.1, "high": 10, "log": True}})
         offline_a: float = Field(default=0.33,
                                  ge=0.0,
                                  le=1.0,
                                  description="Parameter to estimate the marginal p(x)",
-                                 optuna={"type": "float", "low": 0.0, "high": 1.0,"enabled_if": lambda model: not model.online})
+                                 json_schema_extra = {"optuna": {"type": "float", "low": 0.0, "high": 1.0,"enabled_if": lambda model: not model.online}})  # noqa: E501
 
         @model_validator(mode="after")
         def check_num_shadow_models_if_online(self) -> Self:
