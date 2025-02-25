@@ -6,9 +6,9 @@ audit:  # Configurations for auditing
       attack_data_fraction: 0.5 # Fraction of auxiliary dataset to sample from during attack
       num_shadow_models: 3 # Number of shadow models to train
       online: True # perform online or offline attack
-    qmia:
-      training_data_fraction: 1.0  # Fraction of the auxilary dataset (data without train and test indices) to use for training the quantile regressor
-      epochs: 5  # Number of training epochs for quantile regression
+    # qmia:
+    #   training_data_fraction: 1.0  # Fraction of the auxilary dataset (data without train and test indices) to use for training the quantile regressor
+    #   epochs: 5  # Number of training epochs for quantile regression
     population:
       attack_data_fraction: 1.0  # Fraction of the auxilary dataset to use for this attack
     lira:
