@@ -3,7 +3,7 @@ from typing import Any, Dict, Optional
 
 import torch
 from kornia import augmentation
-from pydantic import BaseModel, Field, model_validator  # noqa: F401
+from pydantic import BaseModel, Field
 from torch.nn import functional as F  # noqa: N812
 from torch.utils.data import DataLoader
 

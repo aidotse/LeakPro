@@ -5,7 +5,7 @@ from scipy.linalg import sqrtm
 from torchvision import models, transforms
 
 from leakpro.attacks.utils.generator_handler import GeneratorHandler
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.utils.logger import logger
 
 
@@ -13,7 +13,7 @@ class ImageMetrics:
     """Class for computing image metrics."""
 
     def __init__(self,
-                 handler: AbstractInputHandler,
+                 handler: MINVHandler,
                  generator_handler: GeneratorHandler,
                  configs: dict,
                  labels: torch.tensor = None,
@@ -55,7 +55,7 @@ class ImageMetrics:
 
     def metric_scheduler(self) -> None:
         """Schedule the metrics to be computed."""
-        tests = self.configs.get("metrics", [])
+        tests = self.configs.metrics
         # If tests empty, return
         if not tests:
             logger.warning("No tests specified in the config.")
