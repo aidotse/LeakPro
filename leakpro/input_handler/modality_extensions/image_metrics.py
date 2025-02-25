@@ -5,7 +5,7 @@ from scipy.linalg import sqrtm
 from torchvision import models, transforms
 
 from leakpro.attacks.utils.generator_handler import GeneratorHandler
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.utils.logger import logger
 
 
@@ -13,7 +13,7 @@ class ImageMetrics:
     """Class for computing image metrics."""
 
     def __init__(self,
-                 handler: AbstractInputHandler,
+                 handler: MINVHandler,
                  generator_handler: GeneratorHandler,
                  configs: dict,
                  labels: torch.tensor = None,
@@ -35,7 +35,7 @@ class ImageMetrics:
         logger.info(configs)
         self.results = {}
         # TODO: This loading functionality should not be in generator_handler
-        self.private_dataloader = self.generator_handler.get_private_data(self.batch_size)
+        self.private_dataloader = self.handler.get_private_dataloader(self.batch_size)
         # Compute desired metrics from configs
         self.metric_scheduler()
 
@@ -48,15 +48,14 @@ class ImageMetrics:
 
         """
         self.configs = configs
-        self.num_classes = configs.get("num_classes")
-        self.batch_size = configs.get("batch_size", 32)
-        self.num_class_samples = configs.get("num_class_samples", 1)
-        self.num_audited_classes = configs.get("num_audited_classes", self.num_classes)
+        self.batch_size = configs.batch_size
+        self.num_class_samples = configs.num_class_samples
+        self.num_audited_classes = configs.num_audited_classes
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def metric_scheduler(self) -> None:
         """Schedule the metrics to be computed."""
-        tests = self.configs.get("metrics", [])
+        tests = self.configs.metrics
         # If tests empty, return
         if not tests:
             logger.warning("No tests specified in the config.")

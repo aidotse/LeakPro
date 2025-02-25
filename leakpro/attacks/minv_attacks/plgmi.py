@@ -1,65 +1,94 @@
 """Implementation of the PLGMI attack."""
+from typing import Any, Dict, Optional
+
 import torch
 from kornia import augmentation
+from pydantic import BaseModel, Field
 from torch.nn import functional as F  # noqa: N812
 from torch.utils.data import DataLoader
 
 from leakpro.attacks.minv_attacks.abstract_minv import AbstractMINV
 from leakpro.attacks.utils import gan_losses
 from leakpro.attacks.utils.gan_handler import GANHandler
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.input_handler.modality_extensions.image_metrics import ImageMetrics
 from leakpro.metrics.attack_result import MinvResult
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 
+# TODO: Move this to a separate file (GanHandler?)
+class GANConfig(BaseModel):
+    """Configuration for GAN."""
+
+    module_path: str = Field(..., description="Path to the model script.")
+    model_class: str = Field(..., description="Class name of the model.")
+    checkpoint_path: Optional[str] = Field(None, description="Path to the saved model checkpoint.")
+    init_params: Dict[str, Any] = Field(default_factory=dict, description="Initialization parameters.")
+
 class AttackPLGMI(AbstractMINV):
     """Class that implements the PLGMI attack."""
 
-    def __init__(self: Self, handler: AbstractInputHandler, configs: dict) -> None:
+    class Config(BaseModel):
+        """Configuration for the PLGMI attack."""
+
+        # General parameters
+        batch_size: int = Field(32, ge=1, description="Batch size for training/evaluation")
+        num_classes: int = Field(10, ge=1, description="Number of classes in the dataset")
+
+        # PLG-MI parameters
+        top_n : int = Field(10, ge=1, description="Number of pseudo-labels to select")
+        alpha: float = Field(0.1, ge=0.0, description="Regularization parameter for inversion optimization")
+        n_iter: int = Field(1000, ge=1, description="Number of iterations for optimization")
+        log_interval: int = Field(10, ge=1, description="Log interval")
+
+        # Generator parameters
+        gen_lr: float = Field(0.0002, ge=0.0, description="Learning rate for the generator")
+        gen_beta1: float = Field(0.0, ge=0.0, le=1.0, description="Beta1 parameter for the generator")
+        gen_beta2: float = Field(0.9, ge=0.0, le=1.0, description="Beta2 parameter for the generator")
+
+        # Discriminator parameters
+        n_dis: int = Field(2, ge=1, description="Number of discriminator updates per generator update")
+        dis_lr: float = Field(0.0002, ge=0.0, description="Learning rate for the discriminator")
+        dis_beta1: float = Field(0.0, ge=0.0, le=1.0, description="Beta1 parameter for the discriminator")
+        dis_beta2: float = Field(0.9, ge=0.0, le=1.0, description="Beta2 parameter for the discriminator")
+
+        # Model parameters
+        generator: GANConfig = Field(..., description="Configuration for the generator")
+        discriminator: GANConfig = Field(..., description="Configuration for the discriminator")
+
+        # Latent space parameters
+        dim_z: int = Field(128, ge=1, description="Dimension of the latent space")
+        z_optimization_iter: int = Field(1000, ge=1, description="Number of iterations for optimizing z")
+        z_optimization_lr: float = Field(0.0002, ge=0.0, description="Learning rate for optimizing z")
+
+
+        # TODO: Most of these are not necessary if models are pre-trained
+
+
+    def __init__(self: Self, handler: MINVHandler, configs: dict) -> None:
         """Initialize the PLG-MI attack.
 
         Args:
         ----
-            handler (AbstractInputHandler): The input handler object.
+            handler (MINVHandler): The input handler object.
             configs (dict): Configuration parameters for the attack.
 
         """
-        super().__init__(handler)
         logger.info("Configuring PLG-MI attack")
-        self._configure_attack(configs)
+        self.configs = self.Config() if configs is None else self.Config(**configs)
 
-    def _configure_attack(self: Self, configs: dict) -> None:
-        """Configure the attack parameters.
+        # Call the parent class constructor
+        super().__init__(handler)
 
-        Args:
-        ----
-            configs (dict): Configuration parameters for the attack.
+        # Assign the configuration parameters to the object
+        for key, value in self.configs.model_dump().items():
+            setattr(self, key, value)
 
-        """
-        # General parameters
-        self.configs = configs
-        self.num_classes = configs.get("num_classes")
-        self.batch_size = configs.get("batch_size", 32)
+        #self.pseudo_label_path = configs.get("pseudo_label_path")  # noqa: ERA001
+        #self.output_dir = configs.get("output_dir")  # noqa: ERA001
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        # PLG-MI parameters
-        self.top_n = configs.get("top_n", 10)
-        self.alpha = configs.get("alpha", 0.1)
-        self.n_iter = configs.get("n_iter", 1000)
-        self.log_interval = configs.get("log_interval", 100)
-        # Generator parameters
-        self.gen_lr = configs.get("gen_lr", 0.0002) # Learning rate of the generator
-        self.gen_beta1 = configs.get("gen_beta1", 0.0) # Beta1 parameter of the generator
-        self.gen_beta2 = configs.get("gen_beta2", 0.9) # Beta2 parameter of the generator
-        # Discriminator parameters
-        self.n_dis = configs.get("n_dis", 5) # Number of discriminator updates per generator update
-        self.dis_lr = configs.get("dis_lr", 0.0002)
-        self.dis_beta1 = configs.get("dis_beta1", 0.0)
-        self.dis_beta2 = configs.get("dis_beta2", 0.9)
-        # Paths
-        self.pseudo_label_path = configs.get("pseudo_label_path")
-        self.output_dir = configs.get("output_dir")
+
 
     def description(self:Self) -> dict:
         """Return the description of the attack."""
@@ -137,7 +166,7 @@ class AttackPLGMI(AbstractMINV):
         self.gan_handler = GANHandler(self.handler, configs=self.configs)
         # TODO: Change structure of how we load data, handler or model_handler should do this, not gan_handler
         # Get public dataloader
-        self.public_dataloader = self.gan_handler.get_public_data(self.batch_size)
+        self.public_dataloader = self.handler.get_public_dataloader(self.configs.batch_size)
 
         # Get discriminator
         self.discriminator = self.gan_handler.get_discriminator()
@@ -189,18 +218,16 @@ class AttackPLGMI(AbstractMINV):
 
         self.evaluation_model = self.target_model # TODO: Change to evaluation model
 
-        reconstruction_configs = self.handler.configs.get("audit", {}).get("reconstruction", {})
+        reconstruction_configs = self.handler.configs.audit.reconstruction
 
-        num_audited_classes = reconstruction_configs.get("num_audited_classes", self.num_classes)
-
-        z_optimization_iter = reconstruction_configs.get("z_optimization_iter", 1000)
-        z_optimization_lr = reconstruction_configs.get("z_optimization_lr", 2e-2)
+        num_audited_classes = reconstruction_configs.num_audited_classes
 
         # Get random labels
         labels = torch.randint(0, self.num_classes, (num_audited_classes,)).to(self.device)
 
         # Optimize z, TODO: Optimize in batches
-        opt_z = self.optimize_z(y=labels, lr= z_optimization_lr, iter_times=z_optimization_iter).to(self.device)
+        opt_z = self.optimize_z(y=labels, lr= self.configs.z_optimization_lr,
+                                iter_times=self.configs.z_optimization_iter).to(self.device)
 
         # Compute image metrics for the optimized z and labels
         image_metrics = ImageMetrics(self.handler, self.gan_handler,

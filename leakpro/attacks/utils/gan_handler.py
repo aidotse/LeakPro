@@ -4,7 +4,7 @@ import os
 import torch
 from torch.nn import Module
 
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
@@ -14,21 +14,23 @@ from .generator_handler import GeneratorHandler
 class GANHandler(GeneratorHandler):
     """Handler for training and managing GANs."""
 
-    def __init__(self: Self, handler: AbstractInputHandler, configs: dict) -> None:
+    def __init__(self: Self, handler: MINVHandler, configs: dict) -> None:
         """Initialize the GANHandler class."""
+        logger.info("Initializing GANHandler...")
+
         super().__init__(handler, configs=configs, caller="gan_handler")
-        self._setup_discriminator_configs(configs)
+        self._setup_discriminator_configs(configs.discriminator)
 
     def _setup_discriminator_configs(self: Self, configs : dict) -> None:
         """Load discriminator-specific configurations (e.g., discriminator path, params)."""
         logger.info("Setting up discriminator configurations")
-        self.discriminator_path = configs.get("discriminator", {}).get("module_path")
-        self.discriminator_class = configs.get("discriminator", {}).get("model_class")
-        self.disc_init_params = configs.get("discriminator", {}).get("init_params", {})
-        self.discriminator_checkpoint = configs.get("discriminator", {}).get("checkpoint_path", None)
+        self.discriminator_path = configs.module_path
+        self.discriminator_class = configs.model_class
+        self.disc_init_params = configs.init_params
+        self.discriminator_checkpoint = configs.checkpoint_path
         logger.info(f"Discriminator path: {self.discriminator_path}, Discriminator class: {self.discriminator_class}")
         # Check that discriminator class is provided, else raise an error
-        if self.discriminator_path and self.discriminator_class:
+        if self.discriminator_path and self.discriminator_class: # TODO: Is this check needed?
             self.discriminator_blueprint = self._import_model_from_path(self.discriminator_path, self.discriminator_class)
         else:
             raise ValueError("Discriminator path and class must be specified in the config.")

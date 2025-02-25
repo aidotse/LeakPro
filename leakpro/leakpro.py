@@ -9,6 +9,7 @@ import yaml
 from leakpro.attacks.attack_scheduler import AttackScheduler
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.input_handler.mia_handler import MIAHandler
+from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.input_handler.modality_extensions.image_extension import ImageExtension
 from leakpro.input_handler.modality_extensions.tabular_extension import TabularExtension
 from leakpro.schemas import LeakProConfig
@@ -53,6 +54,9 @@ class LeakPro:
         if configs.audit.attack_type == "mia":
             handler = MIAHandler(configs)
 
+        elif configs.audit.attack_type == "minv":
+            handler = MINVHandler(configs)
+
             # Attach methods to Handler explicitly defined in AbstractInputHandler from user_input_handler
             for name, _ in inspect.getmembers(AbstractInputHandler, predicate=inspect.isfunction):
                 if hasattr(user_input_handler, name) and not name.startswith("__"):
@@ -60,9 +64,6 @@ class LeakPro:
                     if callable(attr):
                         attr = types.MethodType(attr, handler) # ensure to properly bind methods to handler
                     setattr(handler, name, attr)
-
-        elif configs.audit.attack_type == "minva":
-            return NotImplementedError("MINVA attack is not yet implemented")
 
         # Load extension class and initiate it using the handler (allows for two-way communication)
         modality_extension_instance = modality_extensions[configs.audit.data_modality]
