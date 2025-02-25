@@ -2,7 +2,6 @@
 import os
 
 import torch
-from pydantic import BaseModel, Field, model_validator
 from torch.nn import Module
 
 from leakpro.input_handler.minv_handler import MINVHandler
@@ -19,18 +18,16 @@ class GANHandler(GeneratorHandler):
         """Initialize the GANHandler class."""
         logger.info("Initializing GANHandler...")
 
-        print(self.configs.discriminator.module_path)
-
         super().__init__(handler, configs=configs, caller="gan_handler")
-        #self._setup_discriminator_configs(configs)
+        self._setup_discriminator_configs(configs.discriminator)
 
     def _setup_discriminator_configs(self: Self, configs : dict) -> None:
         """Load discriminator-specific configurations (e.g., discriminator path, params)."""
         logger.info("Setting up discriminator configurations")
-        self.discriminator_path = configs.get("discriminator", {}).get("module_path")
-        self.discriminator_class = configs.get("discriminator", {}).get("model_class")
-        self.disc_init_params = configs.get("discriminator", {}).get("init_params", {})
-        self.discriminator_checkpoint = configs.get("discriminator", {}).get("checkpoint_path", None)
+        self.discriminator_path = configs.module_path
+        self.discriminator_class = configs.model_class
+        self.disc_init_params = configs.init_params
+        self.discriminator_checkpoint = configs.checkpoint_path
         logger.info(f"Discriminator path: {self.discriminator_path}, Discriminator class: {self.discriminator_class}")
         # Check that discriminator class is provided, else raise an error
         if self.discriminator_path and self.discriminator_class:
