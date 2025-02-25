@@ -15,6 +15,7 @@ from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.metrics.attack_result import AttackResult
 from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import List, Self, Union
+from leakpro.utils.logger import logger
 
 
 class AbstractMIA(AbstractAttack):
@@ -68,6 +69,7 @@ class AbstractMIA(AbstractAttack):
 
         # These objects are instance specific
         self.signal_data = []
+        self.optuna_params = 0
 
     @classmethod
     def get_default_attack_config(cls) -> BaseModel:
@@ -213,6 +215,26 @@ class AbstractMIA(AbstractAttack):
                 raise ValueError(f"Unsupported parameter type: {param_type}")
 
         return self.configs.model_copy(update=suggestions)
+
+    def set_effective_optuna_metadata(self:Self, user_attack_config: dict) -> int:
+        """Set the parameters to be optimized by optuna."""
+
+        # Create default config
+        self.optuna_params = 0
+        attack_config = self.configs.model_fields.items() # Read out default configs for attack as a dict
+        for field_name, field in attack_config:
+            extra = field.json_schema_extra
+            if extra is None or "optuna" not in extra:
+                continue
+
+            self.optuna_params += 1 # one more parameter to be optimized
+
+            user_provided_value = user_attack_config.get(field_name)
+            # remove the optuna dict to prevent the parameter to get optimized if the user has provided a value
+            if user_provided_value is not None:
+                self.configs.model_fields[field_name].json_schema_extra = None
+                self.optuna_params -= 1 # remove one parameter going into optuna
+                logger.info(f"User provided value for {field_name}, it won't be optimized by optuna.")
 
     @property
     def population(self:Self)-> List:

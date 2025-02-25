@@ -283,6 +283,21 @@ class AttackRMIA(AbstractMIA):
 
         return logits_target_model, logits_shadow_models, z_true_labels
 
+    def _prepare_offline_audit_logits(self:Self) -> Tuple[np.ndarray, np.ndarray]:
+        """Prepare the logits for the offline attack on the audit dataset."""
+
+        # run target points through real model to get logits
+        logits_theta = np.array(self.signal([self.target_model], self.handler, self.audit_dataset["data"]))
+        f_logits_theta = f"{self.attack_folder_path}/logits_audit_theta.npy"
+        np.save(f_logits_theta, logits_theta)
+
+        # run points through shadow models and collect the logits
+        logits_shadow_models = self.signal(self.shadow_models, self.handler, self.audit_dataset["data"])
+        f_logits_sm = f"{self.attack_folder_path}/logits_audit_shadow_models.npy"
+        np.save(f_logits_sm, logits_shadow_models)
+
+        return logits_theta, logits_shadow_models
+
     def _online_attack(self:Self) -> None:
         logger.info("Running RMIA online attack")
         if not self.load_for_optuna:
@@ -337,21 +352,6 @@ class AttackRMIA(AbstractMIA):
         # pick out the in-members and out-members signals
         self.in_member_signals = score[in_members].reshape(-1,1)
         self.out_member_signals = score[out_members].reshape(-1,1)
-
-    def _prepare_offline_audit_logits(self:Self) -> Tuple[np.ndarray, np.ndarray]:
-        """Prepare the logits for the offline attack on the audit dataset."""
-
-        # run target points through real model to get logits
-        logits_theta = np.array(self.signal([self.target_model], self.handler, self.audit_dataset["data"]))
-        f_logits_theta = f"{self.attack_folder_path}/logits_audit_theta.npy"
-        np.save(f_logits_theta, logits_theta)
-
-        # run points through shadow models and collect the logits
-        logits_shadow_models = self.signal(self.shadow_models, self.handler, self.audit_dataset["data"])
-        f_logits_sm = f"{self.attack_folder_path}/logits_audit_shadow_models.npy"
-        np.save(f_logits_sm, logits_shadow_models)
-
-        return logits_theta, logits_shadow_models
 
     def _offline_attack(self:Self) -> None:
         logger.info("Running RMIA offline attack")

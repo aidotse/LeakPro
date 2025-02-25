@@ -60,5 +60,8 @@ class AttackFactoryMIA:
             AttackFactoryMIA.distillation_model_handler = DistillationModelHandler(handler)
 
         if name in cls.attack_classes:
-            return cls.attack_classes[name](handler, handler.configs.audit.attack_list.get(name))
+            attack_config = handler.configs.audit.attack_list.get(name)
+            attack_object = cls.attack_classes[name](handler, attack_config)
+            attack_object.set_effective_optuna_metadata(attack_config) # remove optuna metadata if params not will be optimized
+            return attack_object
         raise ValueError(f"Unknown attack type: {name}")
