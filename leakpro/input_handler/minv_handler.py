@@ -30,9 +30,9 @@ class MINVHandler:
         try:
             with open(public_data_path, "rb") as f:
                 self.public_dataset = joblib.load(f)
-            logger.info(f"Loaded public data from {self.public_path}")
+            logger.info(f"Loaded public data from {public_data_path}")
         except FileNotFoundError as e:
-            raise FileNotFoundError(f"Could not find the public data at {self.configs.public_dataset.public_data_path}") from e
+            raise FileNotFoundError(f"Could not find the public data at {public_data_path}") from e
 
     def _load_private_data(self) -> None:
         """Load the private dataset."""
@@ -40,13 +40,13 @@ class MINVHandler:
         try:
             with open(private_data_path, "rb") as f:
                 self.private_dataset = joblib.load(f)
-            logger.info(f"Loaded private data from {self.private_path}")
+            logger.info(f"Loaded private data from {private_data_path}")
         except FileNotFoundError as e:
-            raise FileNotFoundError(f"Could not find the private data at {self.private_path}") from e
+            raise FileNotFoundError(f"Could not find the private data at {private_data_path}") from e
 
     def _load_model_class(self:Self) -> None:
         """Get the model class blueprint from the target module."""
-        model_class=self.configs.target.model_class
+        model_class = self.configs.target.model_class
         if model_class is None:
             raise ValueError("model_class not found in configs.")
 
