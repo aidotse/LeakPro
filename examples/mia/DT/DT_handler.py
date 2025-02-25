@@ -1,11 +1,6 @@
 """Module containing the class to handle the user input for the CIFAR10 dataset."""
 
-import torch
-from torch import cuda, device, optim, sigmoid
-from torch.nn import BCEWithLogitsLoss
-from torch.utils.data import DataLoader
-from tqdm import tqdm
-
+import xgboost as xgb
 from leakpro import AbstractInputHandler
 
 
@@ -15,33 +10,14 @@ class DTInputHandler(AbstractInputHandler):
     def __init__(self, configs: dict) -> None:
         super().__init__(configs = configs)
 
-
-    def get_criterion(self)->None:
-        """Set the CrossEntropyLoss for the model."""
-        return BCEWithLogitsLoss()
-
-    def get_optimizer(self, model:torch.nn.Module) -> None:
-        """Set the optimizer for the model."""
-        learning_rate = 0.1
-        momentum = 0.8
-        return optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
-
     def train(
         self,
-        dataloader: DataLoader,
-        model: torch.nn.Module = None,
-        criterion: torch.nn.Module = None,
-        optimizer: optim.Optimizer = None,
-        epochs: int = None,
+        data,
+        model: xgb
     ) -> dict:
         """Model training procedure."""
 
-        dev = device("cuda" if cuda.is_available() else "cpu")
-        model.to(dev)
-        model.train()
 
-        criterion = self.get_criterion()
-        optimizer = self.get_optimizer(model)
 
         for e in tqdm(range(epochs), desc="Training Progress"):
             model.train()
@@ -65,3 +41,43 @@ class DTInputHandler(AbstractInputHandler):
         train_loss = train_loss/len(dataloader)
 
         return {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}
+
+
+
+
+import os
+import numpy as np
+import pickle
+import xgboost as xgb
+from tqdm import tqdm
+from leakpro import AbstractInputHandler
+
+
+class MimicInputHandler(AbstractInputHandler):
+    """Class to handle the user input for the MIMIC-III dataset using XGBoost."""
+
+    def __init__(self, configs: dict) -> None:
+        super().__init__(configs=configs)
+
+    def train(
+        self,
+        X_train: np.ndarray,
+        y_train: np.ndarray,
+        model: xgb.XGBClassifier = None,
+    ) -> dict:
+        """Train the XGBoost model."""
+
+        # Train the XGBoost model
+        print("Training XGBoost model...")
+        model.fit(X_train, y_train)
+
+        # Compute training accuracy
+        train_preds = model.predict(X_train)
+        train_acc = np.mean(train_preds == y_train)
+
+        # Save the trained model
+        os.makedirs("target", exist_ok=True)
+        with open("target/xgboost_model.pkl", "wb") as f:
+            pickle.dump(model, f)
+
+        return {"model": model, "metrics": {"accuracy": train_acc}}
