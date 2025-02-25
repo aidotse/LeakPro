@@ -38,7 +38,7 @@ class AuditConfig(BaseModel):
     """Configuration for the audit process."""
 
     random_seed: int = Field(default=42, description="Random seed for reproducibility")
-    attack_type: Literal["mia", "gia", "minva", "synthetic"] = Field(..., description="Type of attack: must be one of ['mia', 'gia', 'minva', 'synthetic]")  # noqa: E501
+    attack_type: Literal["mia", "gia", "minv", "synthetic"] = Field(..., description="Type of attack: must be one of ['mia', 'gia', 'minv', 'synthetic]")  # noqa: E501
     attack_list: Dict[str, Any] = Field(..., min_length=1, description="Must have at least one attack")
     hyper_param_search: bool = Field(default=False, description="Whether to perform hyperparameter search")
     data_modality: Literal["image", "tabular", "text", "graph", "timeseries"] = Field(..., description="Type of data modality: must be one of ['image', 'tabular', 'text', 'graph', 'timeseries']")  # noqa: E501
@@ -58,6 +58,10 @@ class TargetConfig(BaseModel):
     model_class: str = Field(..., description="Class name of the model")
     target_folder: str = Field(..., description="Directory where target model data is stored")
     data_path: str = Field(..., description="Path to dataset file")
+    # TODO: Change data_path description to be more descriptive, i.e path to target (or private) dataset.
+
+    # MINV-specific field - optional
+    public_data_path: Optional[str] = Field(None, description="Path to the public dataset used for model inversion.")
 
 class ShadowModelConfig(BaseModel):
     """Configuration for the Shadow models."""
@@ -150,5 +154,3 @@ class DistillationModelTrainingSchema(BaseModel):
     batch_size: int = Field(..., ge=1, description="Batch size used during training")
     epochs: int = Field(..., ge=1, description="Number of training epochs")
     label_only: bool = Field(..., description="Whether the distillation process is label-only")
-
-

@@ -3,6 +3,7 @@
 from abc import ABC, abstractmethod
 
 import numpy as np
+from pydantic import BaseModel
 from torch.utils.data import DataLoader
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
@@ -27,7 +28,7 @@ class AbstractMINV(ABC):
     handler=None
     _initialized = False
 
-
+    AttackConfig: type[BaseModel]  # Subclasses must define an attack config
 
     def __init__(
         self:Self,
@@ -45,7 +46,10 @@ class AbstractMINV(ABC):
             AbstractMINV.target_dataset = handler.population
             AbstractMINV.target_size = handler.population_size
             AbstractMINV.target_model = PytorchModel(handler.target_model, handler.get_criterion())
-            #AbstractMINV.public_population =
+            # Ensure that public_data_path is provided
+            AbstractMINV.public_data_path = handler.configs.target.public_data_path
+            if AbstractMINV.public_data_path is None:
+                raise ValueError("Model Inversion requires a public data path, but none was provided.")
             AbstractMINV.handler = handler
             AbstractMINV._initialized = True
 

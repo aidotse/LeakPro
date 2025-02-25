@@ -26,7 +26,7 @@ class MINVHandler:
 
     def _load_public_data(self) -> None:
         """Load the public dataset."""
-        public_data_path = self.configs.public_dataset.public_data_path
+        public_data_path = self.configs.target.public_data_path
         try:
             with open(public_data_path, "rb") as f:
                 self.public_dataset = joblib.load(f)
