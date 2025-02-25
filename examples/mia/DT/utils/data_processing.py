@@ -1,19 +1,18 @@
 import os
 import pickle
-import urllib.request
+# import urllib.request
 
-import joblib
+# import joblib
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
-from torch import float32, tensor, Tensor, from_numpy
+# from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
+# from torch import float32, tensor, Tensor, from_numpy
 from torch.utils.data import DataLoader, Dataset, Subset
 
 
-class Financeataset(Dataset):
+class FinanceDataset(Dataset):
     def __init__(self, x, y):
-        # Check if x is already a tensor
         self.x = x.float()  # Ensure it is of type float
         self.y = y.float()  # Ensure it is of type float
 
@@ -24,27 +23,22 @@ class Financeataset(Dataset):
         return self.x[idx], self.y[idx].squeeze(0)
 
     def subset(self, indices):
-        return Financeataset(self.x[indices], self.y[indices])
+        return FinanceDataset(self.x[indices], self.y[indices])
 
 
-def get_mimic_dataset(data_path,
+def get_finance_dataset(data_path,
                       train_frac,
                       validation_frac,
                       test_frac,
-                      early_stop_frac,
                       use_LR = True):
     """Get the dataset, download it if necessary, and store it."""
 
     # Assert that the sum of all fractions is between 0 and 1
-    total_frac = train_frac + validation_frac + test_frac + early_stop_frac
+    total_frac = train_frac + validation_frac + test_frac 
     assert 0 < total_frac <= 1, "The sum of dataset fractions must be between 0 and 1."
 
-    if use_LR:
-        path = data_path + "flattened/"
-    else:
-        path = data_path + "unflattened/"
-    dataset_path = os.path.join(path, "dataset.pkl")
-    indices_path = os.path.join(path, "indices.pkl")
+    dataset_path = os.path.join(data_path, "dataset.pkl")
+    indices_path = os.path.join(data_path, "indices.pkl")
 
     if os.path.exists(dataset_path) and os.path.exists(indices_path):
         print("Loading dataset...")
@@ -55,70 +49,46 @@ def get_mimic_dataset(data_path,
             train_indices = indices_dict["train_indices"]  # Get the actual train indices
             validation_indices = indices_dict["validation_indices"]  # Get the actual validation indices
             test_indices = indices_dict["test_indices"]    # Get the actual test indices
-            early_stop_indices = indices_dict["early_stop_indices"]  # Get the actual early stop indices
         print(f"Loaded dataset from {dataset_path}")
-        return dataset, train_indices, validation_indices ,test_indices, early_stop_indices
+        return dataset, train_indices, validation_indices ,test_indices
 
-    data_file_path = os.path.join(data_path, "all_hourly_data.h5")
+    data_file_path = os.path.join(data_path, "nodes_train.pkl")
     if os.path.exists(data_file_path):
         print("Loading data...")
-        data = pd.read_hdf(data_file_path, "vitals_labs")
-        statics = pd.read_hdf(data_file_path, "patients")
+        df = pd.read_pickle("data/nodes_train.pkl")
+        
+        # Drop the two first columns 
+        df_no_id = df.iloc[:, 2:]
 
-        ID_COLS = ["subject_id", "hadm_id", "icustay_id"]
+        # Separate features (X) and labels (y)
+        X = df_no_id.iloc[:, :-1]  # All columns except the last one
+        y = df_no_id.iloc[:, -1]   # Last column as the label
+
 
         print("Splitting data...")
-        train_data, holdout_data, y_train, y_holdout_data = data_splitter(statics,
-                                                                 data,
+        train_data, holdout_data, y_train, y_holdout_data = data_splitter(y,
+                                                                 X,
                                                                  train_frac)
         
-        print("Normalizing data...")
-        train_data , holdout_data = data_normalization(train_data, holdout_data)
+        check_missing_values(train_data, holdout_data, y_train, y_holdout_data)
+        #TODO: Normalize/standardize data if not using XGBoost
+        # print("Normalizing data...")
 
-        print("Imputing missing values...")
-        train_data, holdout_data = [
-        simple_imputer(df, ID_COLS) for df in tqdm((train_data, holdout_data), desc="Imputation")]
-
-        if use_LR:
-            # Apply pivot_table to flatten the data
-            print("Flattening data for LR...")
-            flat_train, flat_holdout = [
-                df.pivot_table(index=ID_COLS, columns=["hours_in"])
-                for df in tqdm((train_data, holdout_data), desc="Flattening")
-            ]
-            print("Flattening data...")
-            train, holdout, label_train, label_holdout = [
-                flatten_multi_index(df)
-                for df in tqdm((flat_train, flat_holdout, y_train, y_holdout_data), desc="Flattening Index")
-            ]
-        else:
-            # Skip pivot_table if flatten is False
-            train, holdout, label_train, label_holdout = train_data, holdout_data, y_train, y_holdout_data
-
-        assert_no_missing_values(train_data, holdout_data, train, holdout)
-
-        train_df, holdout_df = standard_scaler(train, holdout)
 
         # Creating the dataset
-        data_x = pd.concat((train_df, holdout_df), axis=0)
-        data_y = pd.concat((label_train, label_holdout), axis=0)
+        data_x = pd.concat((train_data, holdout_data), axis=0)
+        data_y = pd.concat((y_train, y_holdout_data), axis=0)
 
         assert np.issubdtype(data_x.values.dtype, np.number), "Non-numeric data found in features."
         assert np.issubdtype(data_y.values.dtype, np.number), "Non-numeric data found in labels."
 
-        print("Creating dataset...")
-        if use_LR:
-            dataset = MimicDataset(data_x.values, data_y.values)
-        else:
-            data_x = to_3D_tensor(data_x)
-            dataset = MimicDataset(data_x, data_y.values)
+        dataset = FinanceDataset(data_x.values, data_y.values)
 
         # Generate indices for training, validation, test, and early stopping
-        train_indices, validation_indices, test_indices, early_stop_indices = data_indices(data_x,
+        train_indices, validation_indices, test_indices = data_indices(data_x,
                                                                        train_frac,
                                                                        validation_frac,
-                                                                       test_frac,
-                                                                       early_stop_frac)
+                                                                       test_frac)
 
         os.makedirs(os.path.dirname(dataset_path), exist_ok=True)
         # Save the dataset to dataset.pkl
@@ -132,113 +102,37 @@ def get_mimic_dataset(data_path,
             "train_indices": train_indices,
             "validation_indices": validation_indices,
             "test_indices": test_indices,
-            "early_stop_indices": early_stop_indices,
         }
         with open(indices_path, "wb") as file:
             pickle.dump(indices_to_save, file)
             print(f"Saved train and test indices to {indices_path}")
     else:
-        msg = "Please download the MIMIC-III dataset from https://physionet.org/content/mimiciii/1.4/ and save it in the specified path."
+        msg = "The data file does not exist."
         raise FileNotFoundError(msg)
-    return dataset, train_indices, validation_indices, test_indices, early_stop_indices
+    return dataset, train_indices, validation_indices, test_indices
 
 
-def data_splitter(statics,
+def data_splitter(label,
                   data,
                   train_frac):
-    GAP_TIME = 6  # In hours
-    WINDOW_SIZE = 24 # In hours
-    SEED = 1
-
-    Ys = statics[statics.max_hours > WINDOW_SIZE + GAP_TIME][["los_icu"]]
-    Ys["los_3"] = Ys["los_icu"] > 3
-    Ys.drop(columns=["los_icu"], inplace=True)
-    Ys["los_3"] = Ys["los_3"].astype(float)
-
-    lvl2 = data[
-        (data.index.get_level_values("icustay_id").isin(set(Ys.index.get_level_values("icustay_id")))) &
-        (data.index.get_level_values("hours_in") < WINDOW_SIZE)
-    ]
-
-    data_subj_idx, y_subj_idx = [df.index.get_level_values("subject_id") for df in (lvl2, Ys)]
-    data_subjects = set(data_subj_idx)
-    assert data_subjects == set(y_subj_idx), "Subject ID pools differ!"
-
-    # Randomly shuffle subjects and compute the sizes of the splits
-    np.random.seed(SEED)
-    subjects = np.random.permutation(list(data_subjects))
-    N = len(subjects)
-    N_train = int(train_frac * N)
-
-    # Ensure no overlap between train and test sets
-    train_subj = subjects[:N_train]
-    test_subj = subjects[N_train::]
-
-    # Split the data according to the subjects
-    (train_data, holdout_data), (y_train, y_holdout) = [
-        [df[df.index.get_level_values("subject_id").isin(s)] for s in (train_subj, test_subj)]
-        for df in (lvl2, Ys)
-    ]
-    return train_data, holdout_data, y_train, y_holdout
-
-def simple_imputer(dataframe, ID_COLS):
-    idx = pd.IndexSlice
-    df = dataframe.copy()
-
-    # Adjust column levels if necessary
-    if len(df.columns.names) > 2:
-        df.columns = df.columns.droplevel(("label", "LEVEL1", "LEVEL2"))
-
-    # Select mean and count columns
-    df_out = df.loc[:, idx[:, ["mean", "count"]]].copy()  # Explicit deep copy
-
-    # Compute group-level means
-    icustay_means = df_out.loc[:, idx[:, "mean"]].groupby(ID_COLS).transform("mean")
-
-    # Forward fill and fill NaNs with icustay_means
-    df_out.loc[:, idx[:, "mean"]] = (
-        df_out.loc[:, idx[:, "mean"]]
-        .groupby(ID_COLS)
-        .ffill()  # Forward fill within groups
+    # Perform train-test split
+    train_data, holdout_data, y_train, y_holdout = train_test_split(
+        data, label, train_size=train_frac, random_state=42, stratify=label if label.nunique() > 1 else None
     )
-    df_out.loc[:, idx[:, "mean"]] = df_out.loc[:, idx[:, "mean"]].fillna(icustay_means)
 
-    # Fill remaining NaNs with 0
-    df_out.loc[:, idx[:, "mean"]] = df_out.loc[:, idx[:, "mean"]].fillna(0)
-
-    # Binary mask for count columns
-    df_out.loc[:, idx[:, "count"]] = (df.loc[:, idx[:, "count"]] > 0).astype(float)
-    df_out = df_out.rename(columns={"count": "mask"}, level="Aggregation Function")  # Avoid inplace=True
-
-    # Calculate time since last measurement
-    is_absent = (1 - df_out.loc[:, idx[:, "mask"]])
-    hours_of_absence = is_absent.cumsum()
-    time_since_measured = hours_of_absence - hours_of_absence[is_absent == 0].ffill()
-    time_since_measured.rename(columns={"mask": "time_since_measured"}, level="Aggregation Function", inplace=True)
-
-    # Add time_since_measured to the output
-    df_out = pd.concat((df_out, time_since_measured), axis=1)
-    df_out.loc[:, idx[:, "time_since_measured"]] = df_out.loc[:, idx[:, "time_since_measured"]].fillna(100)
-
-    # Sort columns by index
-    df_out.sort_index(axis=1, inplace=True)
-    
-    return df_out
-
-
-
+    return train_data, holdout_data, y_train, y_holdout
 
 
 def data_indices(dataset,
                  train_frac,
                  valid_frac,
-                 test_frac,
-                 early_stop_frac):
+                 test_frac
+                 ):
     N = len(dataset)
     N_train = int(train_frac * N)
     N_validation = int(valid_frac * N)
     N_test = int(test_frac * N)
-    N_early_stop = int(early_stop_frac * N)
+
 
     # Generate sequential indices for training and testing
     # Indices from 0 to N_train-1
@@ -247,9 +141,7 @@ def data_indices(dataset,
     validation_indices = list(range(N_train, N_train + N_validation))
     # Indices for test set
     test_indices = list(range(N_train + N_validation, N_train + N_validation + N_test))
-    # Indices for early stopping
-    early_stop_indices = list(range(N_train + N_validation + N_test, N_train + N_validation + N_test + N_early_stop))
-    return train_indices, validation_indices, test_indices, early_stop_indices
+    return train_indices, validation_indices, test_indices
 
 
 def get_mimic_dataloaders(dataset,
@@ -271,46 +163,18 @@ def get_mimic_dataloaders(dataset,
     return train_loader, validation_loader, test_loader, early_stop_loader
 
 
-def data_normalization(lvl2_train,
-                       lvl2_test):
-    idx = pd.IndexSlice
-    lvl2_means, lvl2_stds = lvl2_train.loc[:, idx[:,"mean"]].mean(axis=0), lvl2_train.loc[:, idx[:,"mean"]].std(axis=0)
-
-    lvl2_train.loc[:, idx[:,"mean"]] = (lvl2_train.loc[:, idx[:,"mean"]] - lvl2_means)/lvl2_stds
-    lvl2_test.loc[:, idx[:,"mean"]] = (lvl2_test.loc[:, idx[:,"mean"]] - lvl2_means)/lvl2_stds
-    return lvl2_train, lvl2_test
-
-
-def standard_scaler(flat_train,
-                    flat_test):
-    # Initialize the scaler
-    scaler = StandardScaler()
-
-    # Identify continuous columns (float64 and int64 types)
-    continuous_columns = flat_train.select_dtypes(include=["float64", "int64"]).columns
-
-    # Fit the scaler on training data and transform both training and test sets
-    train_flat_continuous = scaler.fit_transform(flat_train[continuous_columns])
-    test_flat_continuous = scaler.transform(flat_test[continuous_columns])
-
-    # Create copies of the original DataFrames
-    train_scaled = flat_train.copy()
-    test_scaled = flat_test.copy()
-
-    # Replace continuous columns with the scaled versions
-    train_scaled[continuous_columns] = train_flat_continuous
-    test_scaled[continuous_columns] = test_flat_continuous
-
-    # Return the scaled DataFrames
-    return train_scaled, test_scaled
-
-
-def flatten_multi_index(df):
-    """Flattens the multi-index DataFrame by resetting the index."""
-    return df.reset_index(drop=True)
-
-
-def assert_no_missing_values(*dfs):
-    """Asserts that no DataFrame in the input list contains any missing values."""
-    for df in dfs:
-        assert not df.isnull().any().any(), "DataFrame contains missing values!"
+def check_missing_values(train_data, holdout_data, y_train, y_holdout_data):
+    datasets = {
+        "train_data": train_data,
+        "holdout_data": holdout_data,
+        "y_train": y_train,
+        "y_holdout_data": y_holdout_data
+    }
+    
+    for name, df in datasets.items():
+        missing_count = df.isnull().sum().sum()
+        if missing_count > 0:
+            print(f"Warning: {name} contains {missing_count} missing values!")
+        else:
+            print(f"{name} has no missing values.")
+    return
