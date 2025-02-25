@@ -1,3 +1,6 @@
+"""Generator class from LetheSec/PLG-MI-Attack repository"""
+
+
 import math
 import torch
 import torch.nn as nn
