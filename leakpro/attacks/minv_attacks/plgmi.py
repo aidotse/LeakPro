@@ -55,6 +55,8 @@ class AttackPLGMI(AbstractMINV):
         generator: GANConfig = Field(..., description="Configuration for the generator")
         discriminator: GANConfig = Field(..., description="Configuration for the discriminator")
 
+        # TODO: Most of these are not necessary if models are pre-trained
+
 
     def __init__(self: Self, handler: MINVHandler, configs: dict) -> None:
         """Initialize the PLG-MI attack.
