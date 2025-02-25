@@ -49,8 +49,5 @@ target:
   # Data paths
   target_folder: "./target"
   data_path: "./data/celebA_private_data.pkl"
-
-public_dataset:
-  # path to public dataset
   public_data_path: "./data/celebA_public_data.pkl"
 

@@ -61,7 +61,7 @@ class TargetConfig(BaseModel):
     # TODO: Change data_path description to be more descriptive, i.e path to target (or private) dataset.
 
     # MINV-specific field - optional
-    public_data_path: Optional[str] = Field(None, description="Path to the public dataset used for model inversion.")
+    public_data_path: Optional[str] = Field(None, description="Path to the public dataset used for model inversion")
 
 class ShadowModelConfig(BaseModel):
     """Configuration for the Shadow models."""

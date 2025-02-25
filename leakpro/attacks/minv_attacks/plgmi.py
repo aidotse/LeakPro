@@ -1,6 +1,7 @@
 """Implementation of the PLGMI attack."""
 import torch
 from kornia import augmentation
+from pydantic import BaseModel, Field, model_validator
 from torch.nn import functional as F  # noqa: N812
 from torch.utils.data import DataLoader
 
@@ -17,6 +18,31 @@ from leakpro.utils.logger import logger
 class AttackPLGMI(AbstractMINV):
     """Class that implements the PLGMI attack."""
 
+    class Config(BaseModel):
+        """Configuration for the PLGMI attack."""
+
+        # General parameters
+        batch_size: int = Field(32, ge=1, description="Batch size for training/evaluation")
+        num_classes: int = Field(10, ge=1, description="Number of classes in the dataset")
+
+        # PLG-MI parameters
+        top_n : int = Field(10, ge=1, description="Number of pseudo-labels to select")
+        alpha: float = Field(0.1, ge=0.0, description="Regularization parameter for inversion optimization")
+        n_iter: int = Field(1000, ge=1, description="Number of iterations for optimization")
+        log_interval: int = Field(10, ge=1, description="Log interval")
+
+        # Generator parameters
+        gen_lr: float = Field(0.0002, ge=0.0, description="Learning rate for the generator")
+        gen_beta1: float = Field(0.0, ge=0.0, le=1.0, description="Beta1 parameter for the generator")
+        gen_beta2: float = Field(0.9, ge=0.0, le=1.0, description="Beta2 parameter for the generator")
+
+        # Discriminator parameters
+        n_dis: int = Field(2, ge=1, description="Number of discriminator updates per generator update")
+        dis_lr: float = Field(0.0002, ge=0.0, description="Learning rate for the discriminator")
+        dis_beta1: float = Field(0.0, ge=0.0, le=1.0, description="Beta1 parameter for the discriminator")
+        dis_beta2: float = Field(0.9, ge=0.0, le=1.0, description="Beta2 parameter for the discriminator")
+
+
     def __init__(self: Self, handler: AbstractInputHandler, configs: dict) -> None:
         """Initialize the PLG-MI attack.
 
@@ -26,40 +52,20 @@ class AttackPLGMI(AbstractMINV):
             configs (dict): Configuration parameters for the attack.
 
         """
-        super().__init__(handler)
         logger.info("Configuring PLG-MI attack")
-        self._configure_attack(configs)
+        self.configs = self.Config() if configs is None else self.Config(**configs)
 
-    def _configure_attack(self: Self, configs: dict) -> None:
-        """Configure the attack parameters.
+        # Call the parent class constructor
+        super().__init__(handler)
 
-        Args:
-        ----
-            configs (dict): Configuration parameters for the attack.
+        # Assign the configuration parameters to the object
+        for key, value in self.configs.model_dump().items():
+            setattr(self, key, value)
 
-        """
-        # General parameters
-        self.configs = configs
-        self.num_classes = configs.get("num_classes")
-        self.batch_size = configs.get("batch_size", 32)
+        #self.pseudo_label_path = configs.get("pseudo_label_path")  # noqa: ERA001
+        #self.output_dir = configs.get("output_dir")  # noqa: ERA001
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        # PLG-MI parameters
-        self.top_n = configs.get("top_n", 10)
-        self.alpha = configs.get("alpha", 0.1)
-        self.n_iter = configs.get("n_iter", 1000)
-        self.log_interval = configs.get("log_interval", 100)
-        # Generator parameters
-        self.gen_lr = configs.get("gen_lr", 0.0002) # Learning rate of the generator
-        self.gen_beta1 = configs.get("gen_beta1", 0.0) # Beta1 parameter of the generator
-        self.gen_beta2 = configs.get("gen_beta2", 0.9) # Beta2 parameter of the generator
-        # Discriminator parameters
-        self.n_dis = configs.get("n_dis", 5) # Number of discriminator updates per generator update
-        self.dis_lr = configs.get("dis_lr", 0.0002)
-        self.dis_beta1 = configs.get("dis_beta1", 0.0)
-        self.dis_beta2 = configs.get("dis_beta2", 0.9)
-        # Paths
-        self.pseudo_label_path = configs.get("pseudo_label_path")
-        self.output_dir = configs.get("output_dir")
+
 
     def description(self:Self) -> dict:
         """Return the description of the attack."""
