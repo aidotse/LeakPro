@@ -208,12 +208,13 @@ class ShadowModelHandler(ModelHandler):
         model.eval()
         model.to(self.device)
         data_loader = self.handler.get_dataloader(indices, self.batch_size)
-        for data, target in data_loader:
-            data, target = data.to(self.device), target.to(self.device)
-            output = model(data).squeeze()
-            loss += criterion(output, target).item()
-            predictions = (output.squeeze() > 0.5).long() if output.ndim == 1 or output.shape[0] == 1 else output.argmax(1)
-            accuracy += (predictions == target).sum().item()
+        with torch.no_grad():
+            for data, target in data_loader:
+                data, target = data.to(self.device), target.to(self.device)
+                output = model(data).squeeze()
+                loss += criterion(output, target).item()
+                predictions = (output.squeeze() > 0.5).long() if output.ndim == 1 or output.shape[0] == 1 else output.argmax(1)
+                accuracy += (predictions == target).sum().item()
         loss /= len(data_loader)
         accuracy /= len(indices)
         return accuracy, loss
