@@ -136,6 +136,8 @@ class ShadowModelTrainingSchema(BaseModel):
     epochs: int = Field(..., ge=1, description="Number of training epochs")
     train_acc: float = Field(..., ge=0.0, le=1.0, description="Training accuracy (0 to 1)")
     train_loss: float = Field(..., ge=0.0, description="Training loss")
+    test_acc: float = Field(..., ge=0.0, le=1.0, description="Test accuracy (0 to 1)")
+    test_loss: float = Field(..., ge=0.0, description="Test loss")
     online: bool = Field(..., description="Online vs. offline training")
     model_class: str = Field(..., description="Model class name")
     target_model_hash: str = Field(..., description="Hash of target model")

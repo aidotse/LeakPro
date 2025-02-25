@@ -15,7 +15,7 @@ from leakpro.utils.logger import logger
 class AttackP(AbstractMIA):
     """Implementation of the P-attack."""
 
-    class Config(BaseModel):
+    class AttackConfig(BaseModel):
         """Configuration for the RMIA attack."""
 
         attack_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Fraction of population to use for the attack") # noqa: E501
@@ -34,13 +34,17 @@ class AttackP(AbstractMIA):
 
         """
         logger.info("Configuring the Population attack")
-        self.configs = self.Config() if configs is None else self.Config(**configs)
+        self.configs = self.AttackConfig() if configs is None else self.AttackConfig(**configs)
 
         # Initializes the parent
         super().__init__(handler)
 
         for key, value in self.configs.model_dump().items():
             setattr(self, key, value)
+
+        if self.population_size == self.audit_size:
+            raise ValueError("The audit dataset is the same size as the population dataset. \
+                    There is no data left to find the thresholds.")
 
         self.signal = ModelLoss()
         self.hypothesis_test_func = linear_itp_threshold_func
