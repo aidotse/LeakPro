@@ -47,6 +47,12 @@ def get_audit_config():
     audit_config.attack_list.lira.num_shadow_models = 3
     audit_config.attack_list.lira.online = False
     audit_config.attack_list.lira.fixed_variance = True
+    
+    # RMIA parameters
+    audit_config.attack_list.rmia.training_data_fraction = 0.1
+    audit_config.attack_list.rmia.num_shadow_models = 3
+    audit_config.attack_list.rmia.online = False
+    audit_config.attack_list.rmia.attack_data_fraction = 0.1
     return audit_config
 
 
