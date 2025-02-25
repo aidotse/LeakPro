@@ -17,6 +17,7 @@ from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 
+# TODO: Move this to a separate file (GanHandler?)
 class GANConfig(BaseModel):
     """Configuration for GAN."""
 
