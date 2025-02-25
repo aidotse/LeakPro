@@ -37,6 +37,7 @@ class LossConfig(BaseModel):
 class ReconstructionConfig(BaseModel):
     """Configuration for reconstruction attacks."""
 
+    batch_size: int = Field(32, description="Batch size used during reconstruction")
     num_class_samples: int = Field(1, description="Number of samples to generate for each class")
     num_audited_classes: int = Field(100, description="Number of classes to audit")
     metrics: Dict[str, Any] = Field(default_factory=dict)
