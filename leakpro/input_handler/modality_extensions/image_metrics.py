@@ -144,6 +144,8 @@ class ImageMetrics:
     def compute_knn_dist(self) -> None:
         """Compute the k-NN distance."""
 
+        logger.info("Computing k-NN distance for generated samples.")
+
         # Image transformation for evaluation model input
         transform = transforms.Compose([
             transforms.Resize((112, 112)),
@@ -181,7 +183,6 @@ class ImageMetrics:
         self.results["knn_dist"] = knn_dist
         logger.info(f"k-NN Distance: {knn_dist}")
 
-        logger.info("Computing k-NN distance for generated samples.")
 
     def tensor_to_pil(self, tensor: torch.tensor) -> transforms.PILImage:
         """Convert tensor image (C, H, W) -> PIL Image."""
@@ -189,7 +190,17 @@ class ImageMetrics:
         return transforms.ToPILImage()(tensor)
 
     def get_features(self, dataloader: DataLoader, model: torch.nn.Module, transform: transforms.Compose) -> np.ndarray:
-        """Extract features from images using InceptionV3."""
+        """Extract features from images using evaluation model.
+
+        Args:
+            dataloader (DataLoader): DataLoader containing images.
+            model (torch.nn.Module): The model used to extract features from the images.
+            transform (callable): A function or transform to apply to the images.
+
+        Returns:
+            numpy.ndarray: A numpy array containing the extracted features.
+
+        """
         features = []
         with torch.no_grad():
             for images, _ in dataloader:
