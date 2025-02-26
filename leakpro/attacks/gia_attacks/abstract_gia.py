@@ -11,10 +11,11 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 
 from leakpro.attacks.attack_base import AbstractAttack
+from leakpro.attacks.utils.hyperparameter_tuning.optuna import optuna_optimal_hyperparameters
 from leakpro.fl_utils.model_utils import MedianPool2d
 from leakpro.fl_utils.similarity_measurements import dataloaders_psnr, dataloaders_ssim_ignite
-from leakpro.hyperparameter_tuning.optuna import OptunaConfig, optuna_optimal_hyperparameters
 from leakpro.metrics.attack_result import GIAResults
+from leakpro.schemas import OptunaConfig
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
@@ -87,11 +88,6 @@ class AbstractGIA(AbstractAttack):
         """Apply and suggest new hyperparameters for the attack using optuna trial."""
         pass
 
-    @abstractmethod
-    def get_configs(self:Self) -> dict:
-        """Get the configs used for the attack."""
-        pass
-
     def run_with_optuna(self:Self, optuna_config: Optional[OptunaConfig] = None) -> optuna.study.Study:
         """Fins optimal hyperparameters using optuna."""
         if optuna_config is None:
@@ -122,7 +118,7 @@ class AbstractGIA(AbstractAttack):
                     )
                 if (i +1) % 500 == 0 and median_pooling:
                     reconstruction.data = MedianPool2d(kernel_size=3, stride=1, padding=1, same=False)(reconstruction)
-            # Chose image who has given least loss
+            # Choose image who has given least loss
             if loss < self.best_loss:
                 self.best_loss = loss
                 self.best_reconstruction = deepcopy(reconstruction_loader)

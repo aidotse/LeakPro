@@ -1,5 +1,4 @@
 
-from math import isnan
 import numpy as np
 
 from leakpro.attacks.mia_attacks.rmia import AttackRMIA
@@ -9,14 +8,13 @@ from leakpro.tests.constants import get_audit_config, get_shadow_model_config
 from leakpro.tests.input_handler.image_input_handler import ImageInputHandler
 
 
-def test_lira_setup(image_handler:ImageInputHandler) -> None:
+def test_rmia_setup(image_handler:ImageInputHandler) -> None:
     """Test the initialization of LiRA."""
     
     # Try default params
     default_params = {
             "num_shadow_models": 1,
             "offline_a": 0.33,
-            "offline_b": 0.66,
             "gamma": 2.0,
             "temperature": 2.0,
             "training_data_fraction": 0.5,
