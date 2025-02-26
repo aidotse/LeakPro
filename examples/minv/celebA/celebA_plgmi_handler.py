@@ -115,6 +115,7 @@ class CelebA_InputHandler(AbstractInputHandler):
         
         # Augmentations for generated images. TODO: Move this to a image modality extension and have it as an input
         aug_list = kornia.augmentation.container.ImageSequential(
+            kornia.augmentation.RandomResizedCrop((64, 64), scale=(0.8, 1.0), ratio=(1.0, 1.0)),
             kornia.augmentation.ColorJitter(brightness=0.2, contrast=0.2, p=0.5),
             kornia.augmentation.RandomHorizontalFlip(),
             kornia.augmentation.RandomRotation(5),
