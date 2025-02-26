@@ -127,9 +127,13 @@ class AttackLiRA(AbstractMIA):
         meta = ShadowModelHandler().get_shadow_model_metadata(self.shadow_model_indices)
         
         a=[]
+        train_indices_list = []
         for m in meta:
+            train_indices_list.append(m['train_indices'])
             a.append(m["train_acc"].cpu())
+
         np.save("./sm_train_acc.npy", a)
+        np.save("./sm_train_indices.npy", train_indices_list)
         
         logger.info("Create masks for all IN and OUT samples")
         self.in_indices_masks = ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"])

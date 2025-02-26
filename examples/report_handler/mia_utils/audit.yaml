@@ -14,7 +14,7 @@ audit:  # Configurations for auditing
     #   attack_data_fraction: 1.0  # Fraction of the auxilary dataset to use for this attack
     lira:
       training_data_fraction: 0.5  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
-      num_shadow_models: 1 # Number of shadow models to train
+      num_shadow_models: 32 # Number of shadow models to train
       online: True # perform online or offline attack
     # loss_traj:
     #   training_distill_data_fraction : 0.7 # Fraction of the auxilary dataset to use for training the distillation models D_s = (1-D_KD)/2
