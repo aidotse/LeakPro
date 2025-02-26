@@ -1,9 +1,12 @@
 """Module that contains the schema definitions for the input handler."""
 
-from typing import Annotated, Any, Dict, List, Literal, Optional
+from typing import Annotated, Any, Callable, Dict, List, Literal, Optional
 
+import optuna
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from torch.nn import Module
+
+from leakpro.metrics.attack_result import MIAResult
 
 
 class OptimizerConfig(BaseModel):
@@ -114,10 +117,7 @@ class TrainingOutput(BaseModel):
             raise ValueError("model must be an instance of torch.nn.Module")
         return v
 
-    class Config:
-        """Configuration for TrainingOutput to enable arbitrary type handling."""
-
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 class MIAMetaDataSchema(BaseModel):
     """Schema for training metadata."""
@@ -166,3 +166,30 @@ class DistillationModelTrainingSchema(BaseModel):
     batch_size: int = Field(..., ge=1, description="Batch size used during training")
     epochs: int = Field(..., ge=1, description="Number of training epochs")
     label_only: bool = Field(..., description="Whether the distillation process is label-only")
+
+def avg_tpr_at_low_fpr(result: MIAResult) -> float:
+    """Calculate the average TPR for FPR values below fpr_threshold.
+
+    This will be used as the default objective function for the hyperparameter search on MIA.
+    """
+    from numpy import mean
+    fpr_threshold = 1e-2
+    mask = result.fpr < fpr_threshold
+    return float(mean(result.tpr[mask]))
+
+class OptunaConfig(BaseModel):
+    """Configuration for the Optuna hyperparameter search."""
+
+    seed: int = Field(default=1234,
+                      description="Random seed for reproducibility")
+    n_trials: int = Field(default=50,
+                          description="Number of trials to find the optimal hyperparameters")
+    direction: Literal["maximize", "minimize"] = Field("maximize",
+                                                       description="Direction of the optimization, minimize or maximize")
+    pruner: optuna.pruners.BasePruner = Field(default=optuna.pruners.MedianPruner(n_warmup_steps=5),
+                                              description="Number of steps before pruning of experiments will be available")
+    objective: Callable[[MIAResult], float] = Field(default=avg_tpr_at_low_fpr,
+                                                    description="Objective function: MIAResult -> float")
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
