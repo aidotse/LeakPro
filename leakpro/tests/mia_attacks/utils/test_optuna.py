@@ -10,7 +10,7 @@ from leakpro.schemas import OptunaConfig
 # mask a parameter
 # mask all parameters
 
-def test_rmia_optuna_attack(image_handler:ImageInputHandler) -> None:
+def test_rmia_optuna_attack_change_default_objective(image_handler:ImageInputHandler) -> None:
     audit_config = get_audit_config()
     # Note: this does not include gamma and a_offline
     rmia_params = audit_config.attack_list.rmia
@@ -38,11 +38,17 @@ def test_rmia_optuna_attack(image_handler:ImageInputHandler) -> None:
     # run optuna
     optuna_config = OptunaConfig() # Set up Optuna config
     optuna_config.n_trials = 2
-    study = rmia_obj.run_with_optuna()
+    study = rmia_obj.run_with_optuna(optuna_config)
     best_config = rmia_obj.configs.model_copy(update=study.best_params)
     
     assert best_config.gamma != start_gamma, "Gamma was not optimized"
     assert best_config.offline_a != start_offline_a, "a_offline was not optimized"
+    
+    optuna_config.objective = lambda x: 1
+    study = rmia_obj.run_with_optuna(optuna_config)
+    best_config_dummy_obj = rmia_obj.configs.model_copy(update=study.best_params)
+    assert best_config.gamma != best_config_dummy_obj.gamma, "Gamma was not optimized"
+    assert best_config.offline_a != best_config_dummy_obj.offline_a, "a_offline was not optimized"
     
     
 def test_rmia_optuna_selective_attack(image_handler:ImageInputHandler) -> None:
