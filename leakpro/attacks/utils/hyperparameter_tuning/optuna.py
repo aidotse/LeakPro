@@ -43,16 +43,16 @@ def optuna_optimal_hyperparameters(attack_object: AbstractAttack, optuna_config:
                     return intermediary_results
         elif isinstance(result, MIAResult):
             # Retrieve configuration and result metric
-            avg_tpr = result.avg_tpr
+            obj_val = optuna_config.objective(result)
 
             trial.set_user_attr("config", new_config)
-            trial.set_user_attr("avg_tpr", avg_tpr)
+            trial.set_user_attr("objective_fn val", obj_val)
 
             # Optionally print the details for immediate feedback
-            logger.info(f"Trial {trial.number} - Config: {new_config} - avg TPR (FPR < 1e-2): {avg_tpr}")
+            logger.info(f"Trial {trial.number} - Config: {new_config} - objective_fn val: {obj_val}")
 
             # MIA cannot be used with pruning as we need the final result to be computed
-            return result.avg_tpr  # add something reasonable to optimize toward here
+            return obj_val
         return None
 
     # Define the pruner and study

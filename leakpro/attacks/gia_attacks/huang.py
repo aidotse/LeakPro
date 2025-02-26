@@ -32,7 +32,7 @@ class HuangConfig:
     # learning rate on the attack optimizer
     attack_lr: float = 0.1
     # iterations for the attack steps
-    at_iterations: int = 2
+    at_iterations: int = 10000
     # MetaOptimizer, see MetaSGD for implementation
     optimizer: object = field(default_factory=lambda: MetaSGD())
     # Client loss function

@@ -245,10 +245,6 @@ class MIAResult:
 
         self.roc_auc = auc(self.fpr, self.tpr)
 
-        # Optuna objective
-        mask = self.fpr < 1e-2
-        self.avg_tpr = np.mean(self.tpr[mask])
-
 
     @staticmethod
     def load(data: dict) -> None:
