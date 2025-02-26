@@ -172,14 +172,16 @@ class ImageMetrics:
             true_label = true_label.cpu().long()
 
             knn_dist = 0
-            unique_labels = gen_label.unique()
-            for label in unique_labels:
+
+            for label in gen_label:
                 gen_mask = (gen_label == label).nonzero(as_tuple=True)[0]
                 true_mask = (true_label == label).nonzero(as_tuple=True)[0]
 
+                # Filter features by label
                 gen_feat = feat[gen_mask]
                 true_feat_label = true_feat[true_mask]
 
+                # Skip if no features for the label
                 if gen_feat.size(0) == 0 or true_feat_label.size(0) == 0:
                     continue
 
