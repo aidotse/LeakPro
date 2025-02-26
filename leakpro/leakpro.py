@@ -69,9 +69,10 @@ class LeakPro:
         handler.modality_extension = modality_extension_instance(handler)
         return handler
 
-    def run_audit(self:Self, return_results: bool = False) -> None:
+    def run_audit(self:Self, return_results: bool = False, use_optuna: bool = False) -> None:
         """Run the audit."""
-        audit_results = self.attack_scheduler.run_attacks()
+
+        audit_results = self.attack_scheduler.run_attacks(use_optuna=use_optuna)
         results = [] if return_results else None
 
         for attack_name in audit_results:
