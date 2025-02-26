@@ -32,7 +32,7 @@ class ImageMetrics:
         self.test_dict = {
             "accuracy": self.compute_accuracy,
             "fid" : self.compute_fid,
-            "knn_dist": self.compute_knn_dist,
+            "knn": self.compute_knn_dist,
         }
         logger.info(configs)
         self.results = {}
@@ -122,8 +122,8 @@ class ImageMetrics:
         ])
 
         # Extract features from real and generated images
-        real_features = self.get_features(self.private_dataloader, inception_model, transform)
-        fake_features = self.get_generated_features(inception_model, transform)
+        real_features = self.get_features(self.private_dataloader, inception_model, transform).numpy()
+        fake_features = self.get_generated_features(inception_model, transform).numpy()
 
         # Compute mean and covariance of features
         mu_real, sigma_real = real_features.mean(axis=0), np.cov(real_features, rowvar=False)
@@ -154,42 +154,60 @@ class ImageMetrics:
         ])
 
         # Extract features from private data loader
+        logger.info("Extracting features from private data loader.")
         private_features = self.get_features(self.private_dataloader, self.evaluation_model, transform)
         private_targets = np.concatenate([targets.numpy() for _, targets in self.private_dataloader])
 
         # Extract features from generated images
+        logger.info("Extracting features from generated images.")
         generated_features = self.get_generated_features(self.evaluation_model, transform)
         generated_targets = torch.tensor([label for label in self.labels for _ in range(self.num_class_samples)]).to(self.device)
 
         # Calculate k-NN distance
         def calc_knn(feat, gen_label, true_feat, true_label):  # noqa: ANN001, ANN202
+            """Calculate the k-NN distance between generated and true features using vectorized operations."""
             gen_label = gen_label.cpu().long()
             feat = feat.cpu()
-            bs = feat.size(0)
-            tot = true_feat.size(0)
-            knn_dist = 0
-            for i in range(bs):
-                knn = 1e8
-                for j in range(tot):
-                    if true_label[j] == gen_label[i]:  # Find corresponding class images in the private domain
-                        dist = torch.sum((feat[i, :] - true_feat[j, :]) ** 2)  # Calculate L2 distance of features
-                        knn = min(knn, dist)
-                knn_dist += knn
-            return (knn_dist / bs).item()
+            true_feat = true_feat.cpu()
+            true_label = true_label.cpu().long()
 
-        knn_dist = calc_knn(generated_features, generated_targets, torch.tensor(private_features), torch.tensor(private_targets))
+            knn_dist = 0
+            unique_labels = gen_label.unique()
+            for label in unique_labels:
+                gen_mask = (gen_label == label).nonzero(as_tuple=True)[0]
+                true_mask = (true_label == label).nonzero(as_tuple=True)[0]
+
+                gen_feat = feat[gen_mask]
+                true_feat_label = true_feat[true_mask]
+
+                if gen_feat.size(0) == 0 or true_feat_label.size(0) == 0:
+                    continue
+
+                # Calculate pairwise distances between generated and true features
+                dists = torch.cdist(gen_feat, true_feat_label, p=2)
+
+                # Find the minimum distance for each generated feature
+                min_dists, _ = dists.min(dim=1)
+                knn_dist += min_dists.sum().item()
+
+            return knn_dist / feat.size(0)
+
+        logger.info("Calculating k-NN distance.")
+        knn_dist = calc_knn(generated_features, generated_targets,
+                            torch.tensor(private_features),
+                            torch.tensor(private_targets))
 
         # Store results
         self.results["knn_dist"] = knn_dist
         logger.info(f"k-NN Distance: {knn_dist}")
 
 
-    def tensor_to_pil(self, tensor: torch.tensor) -> transforms.PILImage:
+    def tensor_to_pil(self, tensor: torch.tensor) -> transforms.ToPILImage:
         """Convert tensor image (C, H, W) -> PIL Image."""
         tensor = tensor.detach().cpu().clamp(0, 1)  # Ensure values are in [0, 1]
         return transforms.ToPILImage()(tensor)
 
-    def get_features(self, dataloader: DataLoader, model: torch.nn.Module, transform: transforms.Compose) -> np.ndarray:
+    def get_features(self, dataloader: DataLoader, model: torch.nn.Module, transform: transforms.Compose) -> torch.tensor:
         """Extract features from images using evaluation model.
 
         Args:
@@ -210,9 +228,9 @@ class ImageMetrics:
 
                 feats = model(transformed_images)
                 features.append(feats)
-        return torch.cat(features, dim=0).cpu().numpy()
+        return torch.cat(features, dim=0)
 
-    def get_generated_features(self, model: torch.nn.Module, transform: transforms.Compose) -> np.ndarray:
+    def get_generated_features(self, model: torch.nn.Module, transform: transforms.Compose) -> torch.tensor:
         """Generate fake images using the generator, apply transformations, and extract features using the provided model.
 
         Args:
@@ -235,7 +253,7 @@ class ImageMetrics:
 
                 feats = model(transformed_images)
                 features.append(feats)
-        return torch.cat(features, dim=0).cpu().numpy()
+        return torch.cat(features, dim=0)
 
     pass
 

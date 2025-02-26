@@ -39,6 +39,7 @@ audit:  # Configurations for auditing
     num_audited_classes: 100 # Number of classes to audit
     metrics:
       accuracy:
+      knn:
 
   output_dir: "./leakpro_output"
   attack_type: "minv" #mia, gia

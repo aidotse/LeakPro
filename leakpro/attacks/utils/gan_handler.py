@@ -71,7 +71,7 @@ class GANHandler(GeneratorHandler):
 
         """
         if batch_size is None:
-            batch_size = self.batch_size
+            batch_size = 1
 
         if z is not None:
             z = z.unsqueeze(0).expand(batch_size, -1).to(self.device)
