@@ -192,6 +192,7 @@ class AttackPLGMI(AbstractMINV):
                                         dis = self.discriminator,
                                         gen_criterion = gan_losses.GenLoss(loss_type="hinge", is_relativistic=False),
                                         dis_criterion = gan_losses.DisLoss(loss_type="hinge", is_relativistic=False),
+                                        inv_criterion = gan_losses.max_margin_loss,
                                         model = self.target_model,
                                         opt_gen = self.gen_optimizer,
                                         opt_dis = self.dis_optimizer,

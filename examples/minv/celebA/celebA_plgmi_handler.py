@@ -96,6 +96,7 @@ class CelebA_InputHandler(AbstractInputHandler):
                     dis: torch.nn.Module,
                     gen_criterion: callable,
                     dis_criterion: callable,
+                    inv_criterion: callable,
                     target_model: torch.nn.Module,
                     opt_gen: optim.Optimizer,
                     opt_dis: optim.Optimizer,
@@ -106,7 +107,25 @@ class CelebA_InputHandler(AbstractInputHandler):
                     log_interval: int,
                     sample_from_generator: callable
                   ) -> None:
-        """Train the GAN model. Inspired by cGAN from https://github.com/LetheSec/PLG-MI-Attack."""
+        """Train the GAN model. Inspired by cGAN from https://github.com/LetheSec/PLG-MI-Attack.
+        
+            Args:
+                pseudo_loader: DataLoader for the pseudo data.
+                gen: Generator model.
+                dis: Discriminator model.
+                gen_criterion: Generator criterion.
+                dis_criterion: Discriminator criterion.
+                inv_criterion: Inverted criterion.
+                target_model: Target model.
+                opt_gen: Generator optimizer.
+                opt_dis: Discriminator optimizer.
+                n_iter: Number of iterations.
+                n_dis: Number of discriminator updates per generator update.
+                device: Device to run the training.
+                alpha: Alpha value for the invariance loss.
+                log_interval: Log interval.
+                sample_from_generator: Function to sample from the generator.
+        """
         torch.set_default_device(device)
         torch.backends.cudnn.benchmark = True
         gen_losses = []
@@ -141,7 +160,7 @@ class CelebA_InputHandler(AbstractInputHandler):
                     fake, fake_labels, _ = sample_from_generator()
                     fake_aug = aug_list(fake).to(device)
                     dis_fake = dis(fake_aug, fake_labels)
-                    inv_loss = gan_losses.max_margin_loss(target_model(fake_aug), fake_labels)
+                    inv_loss = inv_criterion(target_model(fake_aug), fake_labels)
 
                     inv_losses.append(inv_loss.item())
                     dis_real = None
