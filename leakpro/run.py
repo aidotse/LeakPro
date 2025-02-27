@@ -1,4 +1,4 @@
-"""Run script."""
+"""Run scripts."""
 from typing import Callable
 
 import torch
@@ -6,9 +6,23 @@ from torch import Tensor
 from torch.nn import Module
 from torch.utils.data import DataLoader, Dataset, random_split
 
+from leakpro.attacks.gia_attacks.huang import Huang
 from leakpro.attacks.gia_attacks.invertinggradients import InvertingConfig, InvertingGradients
 from leakpro.utils.logger import logger
 
+
+def run_huang(model: Module, client_data: DataLoader, train_fn: Callable,
+                data_mean:Tensor, data_std: Tensor, config: dict, experiment_name: str = "Huang",
+                path:str = "./leakpro_output/results", save:bool = True) -> None:
+    """Runs Huang."""
+    attack = Huang(model, client_data, train_fn, data_mean, data_std, config)
+    result_gen = attack.run_attack()
+    for _, _, result_object in result_gen:
+        if result_object is not None:
+            break
+    if save:
+        result_object.save(name=experiment_name, path=path, config=config)
+    return result_object
 
 def run_inverting(model: Module, client_data: DataLoader, train_fn: Callable,
                 data_mean:Tensor, data_std: Tensor, config: dict, experiment_name: str = "InvertingGradients",
@@ -63,7 +77,7 @@ def run_inverting_audit(model: Module, dataset: Dataset,
         client_data, _ = random_split(dataset, [num_batches * batch_size, total_images - num_batches * batch_size])
         client_loader = DataLoader(client_data, batch_size=batch_size, shuffle=False)
         for tv in total_variations:
-            config.total_variation = tv
+            config.tv_reg = tv
             for epochs in epochs_config:
                 config.epochs = epochs
                 # Run the inverting attack with current client_loader and config

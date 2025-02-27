@@ -1,55 +1,48 @@
-"""Diverse util functions."""
+"""Utils used for model functionality in GIAs."""
+
+
+import torch
 import torch.nn.functional as f
-from torch import Tensor, abs, cuda, mean, nn, no_grad
 from torch.nn.modules.utils import _pair, _quadruple
-from torch.utils.data import DataLoader
-from torchmetrics.functional import peak_signal_noise_ratio
 
 from leakpro.utils.import_helper import Self
 
 
-def total_variation(x: Tensor) -> Tensor:
-        """Anisotropic TV."""
-        dx = mean(abs(x[:, :, :, :-1] - x[:, :, :, 1:]))
-        dy = mean(abs(x[:, :, :-1, :] - x[:, :, 1:, :]))
-        return dx + dy
+class BNFeatureHook:
+    """Implementation of the forward hook to track feature statistics and compute a loss on them.
 
-
-def dataloaders_psnr(original_dataloader: DataLoader, recreated_dataloader: DataLoader) -> float:
-    """Calculate the total PSNR between images from two dataloaders (original and recreated).
-
-    Args:
-    ----
-        original_dataloader (torch.utils.data.DataLoader): Dataloader containing original images and labels.
-        recreated_dataloader (torch.utils.data.DataLoader): Dataloader containing recreated images and labels.
-        device (str): Device to perform the computation ('cuda' or 'cpu').
-
-    Returns:
-    -------
-        avg_psnr (float): Average PSNR value over the dataset.
-
+    Will compute mean and variance, and will use l2 as a loss.
     """
-    device = "cuda" if cuda.is_available() else "cpu"
-    total_psnr = 0.0
 
-    with no_grad():
-        # Zip through both dataloaders
-        for (orig_batch, rec_batch) in zip(original_dataloader, recreated_dataloader):
-            orig_images = orig_batch[0].to(device)
+    def __init__(self: Self, module: torch.nn.modules.BatchNorm2d) -> None:
+        self.hook = module.register_forward_hook(self.hook_fn)
 
-            rec_images = rec_batch[0].to(device)    # Recreated images
+    def hook_fn(self: Self, module: torch.nn.modules.BatchNorm2d, input: torch.Tensor, _: torch.Tensor) -> None:
+        """Hook to compute deepinversion's feature distribution regularization."""
+        nch = input[0].shape[1]
+        # Compute the mean of the feature maps across batch, height, and width dimensions
+        mean = input[0].mean([0, 2, 3])
+        # Compute the variance for each channel
+        var = (input[0].permute(1, 0, 2,
+                                3).contiguous().view([nch,
+                                                      -1]).var(1,
+                                                               unbiased=False))
 
-            # Iterate over the batch to compute PSNR for each image pair
-            for i in range(orig_images.size(0)):
-                psnr = peak_signal_noise_ratio(orig_images[i], rec_images[i], data_range=1.0)
-                total_psnr += psnr
+        r_feature = torch.norm(module.running_var.data - var, 2) + torch.norm(
+            module.running_mean.data - mean, 2)
+        self.mean = mean
+        self.var = var
+        self.r_feature = r_feature
 
-    return total_psnr
+    def close(self: Self) -> None:
+        """Remove the hook."""
+        self.hook.remove()
 
-class MedianPool2d(nn.Module):
+class MedianPool2d(torch.nn.Module):
     """Median pool (usable as median filter when stride=1) module.
 
     Args:
+    ----
          kernel_size: size of pooling kernel, int or 2-tuple
          stride: pool stride, int or 2-tuple
          padding: pool padding, int or 4-tuple (l, r, t, b) as in pytorch F.pad
@@ -65,13 +58,15 @@ class MedianPool2d(nn.Module):
         self.padding = _quadruple(padding)  # convert to l, r, t, b
         self.same = same
 
-    def _padding(self: Self, x: Tensor) -> tuple[int,int,int]:
+    def _padding(self: Self, x: torch.Tensor) -> tuple[int,int,int]:
         """Calculate the padding needed for a tensor based on the specified mode and kernel size.
 
         Args:
+        ----
                 x (Tensor): Input tensor with shape (batch_size, channels, height, width).
 
         Returns:
+        -------
                 Tuple[int, int, int, int]: The calculated padding as (left, right, top, bottom).
 
         """
@@ -88,13 +83,15 @@ class MedianPool2d(nn.Module):
             padding = self.padding
         return padding
 
-    def forward(self: Self, x: Tensor) -> Tensor:
+    def forward(self: Self, x: torch.Tensor) -> torch.Tensor:
         """Apply a padded unfolding operation to the input and compute the median value across each kernel's unfolded region.
 
         Args:
+        ----
             x (Tensor): Input tensor with shape (batch_size, channels, height, width).
 
         Returns:
+        -------
             Tensor: A tensor containing the median values for each
               patch, with shape (batch_size, channels, new_height, new_width).
 

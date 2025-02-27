@@ -1,8 +1,5 @@
 """Module that contains the AttackScheduler class, which is responsible for creating and executing attacks."""
 
-from leakpro.attacks.gia_attacks.attack_factory_gia import AttackFactoryGIA
-from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
-from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.utils.import_helper import Any, Dict, Self
 from leakpro.utils.logger import logger
@@ -11,8 +8,7 @@ from leakpro.utils.logger import logger
 class AttackScheduler:
     """Class responsible for creating and executing attacks."""
 
-    attack_type_to_factory = {"mia": AttackFactoryMIA,
-                              "gia": AttackFactoryGIA}
+    attack_type_to_factory = {}
 
     def __init__(
         self:Self,
@@ -26,40 +22,64 @@ class AttackScheduler:
 
         """
         configs = handler.configs
-        if configs["audit"]["attack_type"] not in list(self.attack_type_to_factory.keys()):
-            raise ValueError(
-                f"Unknown attack type: {configs['audit']['attack_type']}. "
-                f"Supported attack types: {self.attack_type_to_factory.keys()}"
-            )
 
-        # Prepare factory
-        factory = self.attack_type_to_factory[configs["audit"]["attack_type"]]
+        # Create factory
+        attack_type = configs.audit.attack_type
+        self._initialize_factory(attack_type)
 
         # Create the attacks
-        self.attack_list = list(configs["audit"]["attack_list"].keys())
+        self.attack_list = list(configs.audit.attack_list.keys())
         self.attacks = []
         for attack_name in self.attack_list:
             try:
-                attack = factory.create_attack(attack_name, handler)
+                attack = self.attack_factory.create_attack(attack_name, handler)
                 self.add_attack(attack)
                 logger.info(f"Added attack: {attack_name}")
             except ValueError as e:
                 logger.info(e)
-                logger.info(f"Failed to create attack: {attack_name}, supported attacks: {factory.attack_classes.keys()}")
+                logger.info(f"Failed to create attack: {attack_name}, supported attacks: {self.attack_factory.attack_classes.keys()}")  # noqa: E501
 
-    def add_attack(self:Self, attack: AbstractMIA) -> None:
+    def _initialize_factory(self:Self, attack_type:str) -> None:
+        """Conditionally import attack factories based on attack."""
+        if attack_type == "mia":
+            try:
+                from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
+                self.attack_factory = AttackFactoryMIA
+                logger.info("MIA attack factory loaded.")
+            except ImportError as e:
+                logger.error("Failed to import MIA attack module.")
+                raise ImportError("MIA attack module is not available.") from e
+
+        elif attack_type == "gia":
+            try:
+                from leakpro.attacks.gia_attacks.attack_factory_gia import AttackFactoryGIA
+                self.attack_factory = AttackFactoryGIA
+                logger.info("GIA attack factory loaded.")
+            except ImportError as e:
+                logger.error("Failed to import GIA attack module.")
+                raise ImportError("GIA attack module is not available.") from e
+
+        else:
+            logger.error(f"Unsupported attack type: {self.attack_type}")
+            raise ValueError(f"Unsupported attack type: {self.attack_type}. Must be 'mia' or 'gia'.")
+
+    def add_attack(self:Self, attack: Any) -> None:
         """Add an attack to the list of attacks."""
         self.attacks.append(attack)
 
-    def run_attacks(self:Self) -> Dict[str, Any]:
+    def run_attacks(self: Self, use_optuna:bool=False) -> Dict[str, Any]:
         """Run the attacks and return the results."""
         results = {}
         for attack, attack_type in zip(self.attacks, self.attack_list):
+
             logger.info(f"Preparing attack: {attack_type}")
             attack.prepare_attack()
 
             logger.info(f"Running attack: {attack_type}")
-
+            if use_optuna and attack.optuna_params > 0:
+                study = attack.run_with_optuna()
+                best_config = attack.configs.model_copy(update=study.best_params)
+                attack.reset_attack(best_config)
             result = attack.run_attack()
             results[attack_type] = {"attack_object": attack, "result_object": result}
 

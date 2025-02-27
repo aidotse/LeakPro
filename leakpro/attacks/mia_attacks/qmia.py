@@ -1,15 +1,17 @@
 """Implementation of the RMIA attack."""
 
 from copy import deepcopy
+from typing import List
 
 import numpy as np
 import torch
+from pydantic import BaseModel, Field, field_validator
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.metrics.attack_result import MIAResult
 from leakpro.signals.signal import ModelRescaledLogits
 from leakpro.utils.import_helper import Any, Self, Tuple
@@ -132,52 +134,68 @@ class PinballLoss(torch.nn.Module):
 class AttackQMIA(AbstractMIA):
     """Implementation of the RMIA attack."""
 
+    class AttackConfig(BaseModel):
+        """Configuration for the RMIA attack."""
+
+        quantiles: List[float] = Field(default_factory=lambda: [0.05, 0.25, 0.5, 0.75, 0.95], description="List of quantiles between 0 and 1")  # noqa: E501
+        training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow models")  # noqa: E501
+        epochs : int = Field(default=100, ge=0, description="Number of epochs for training the quantile regressor")
+
+        @field_validator("quantiles")
+        @classmethod
+        def check_quantiles(cls, v: List[float]) -> List[float]:
+            """Validate that all quantiles are between 0 and 1.
+
+            Args:
+            ----
+                v (List[float]): List of quantiles to validate.
+
+            Returns:
+            -------
+                List[float]: The validated list of quantiles.
+
+            Raises:
+            ------
+                ValueError: If any quantile is not between 0 and 1.
+
+            """
+            if not all(0.0 <= q <= 1.0 for q in v):
+                raise ValueError("All quantiles must be between 0 and 1.")
+            return v
+
+
     def __init__(
         self:Self,
-        handler: AbstractInputHandler,
+        handler: MIAHandler,
         configs: dict
     ) -> None:
         """Initialize the QMIA attack.
 
         Args:
         ----
-            handler (AbstractInputHandler): The input handler object.
+            handler (MIAHandler): The input handler object.
             configs (dict): Configuration parameters for the attack.
 
         """
+        logger.info("Configuring the QMIA attack")
+
+        self.configs = self.AttackConfig() if configs is None else self.AttackConfig(**configs)
+
         # Initializes the parent metric
         super().__init__(handler)
 
-        logger.info("Configuring the QMIA attack")
-        self._configure_attack(configs)
+        for key, value in self.configs.model_dump().items():
+            setattr(self, key, value)
+
+        if self.population_size == self.audit_size:
+            raise ValueError("The audit dataset is the same size as the population dataset. \
+                    There is no data left for the quantile regressor.")
 
         self.signal = ModelRescaledLogits()
         dummy_index = np.atleast_1d(np.ones(1)).astype(int)
         self.quantile_regressor = QuantileRegressor(self.handler.target_model,
                                                     self.handler.get_dataloader(dummy_index),
                                                     len(self.quantiles))
-
-    def _configure_attack(self:Self, configs:dict) -> None:
-        self.training_data_fraction = configs.get("training_data_fraction", 0.5)
-        self.quantiles = configs.get("quantiles", [0, 0.5, 0.9, 0.95, 0.99, 0.995, 0.999, 0.9995, 0.9999, 0.99995, 0.99999])
-        self.epochs = configs.get("epochs", 100)
-
-        # Define the validation dictionary as: {parameter_name: (parameter, min_value, max_value)}
-        validation_dict = {
-            "min_quantile": (min(self.quantiles), 0.0, max(self.quantiles)),
-            "max_quantile": (max(self.quantiles), min(self.quantiles), 1.0),
-            "num_quantiles": (len(self.quantiles), 1, None),
-            "epochs": (self.epochs, 0, None),
-            "training_data_fraction": (self.training_data_fraction, 0, 1)
-        }
-
-        # Validate parameters
-        for param_name, (param_value, min_val, max_val) in validation_dict.items():
-            self._validate_config(param_name, param_value, min_val, max_val)
-
-    def _validate_config(self: Self, name: str, value: float, min_val: float, max_val: float) -> None:
-        if not (min_val <= value <= (max_val if max_val is not None else value)):
-            raise ValueError(f"{name} must be between {min_val} and {max_val}")
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""

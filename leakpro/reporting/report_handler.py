@@ -5,6 +5,9 @@ import logging
 import os
 import subprocess
 
+from pydantic import BaseModel
+
+from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
 from leakpro.metrics.attack_result import GIAResults, MIAResult
 from leakpro.synthetic_data_attacks.inference_utils import InferenceResults
 from leakpro.synthetic_data_attacks.linkability_utils import LinkabilityResults
@@ -58,11 +61,16 @@ class ReportHandler():
                                        InferenceResults,
                                        LinkabilityResults,
                                        SinglingOutResults] = None,
-                    config: dict = None) -> None:
+                    config: BaseModel = None) -> None:
         """Save method for results."""
 
         self.logger.info(f"Saving results for {attack_name}")
-        result_data.save(path=self.report_dir, name=attack_name, config=config)
+        attack_config = config.attack_list.get(attack_name, None)
+
+        if attack_config is None:
+            attack_config = AttackFactoryMIA.attack_classes[attack_name].get_default_attack_config()
+            config.attack_list[attack_name] = attack_config
+        result_data.save(path=self.report_dir, name=attack_name, config=config.model_dump())
 
     def load_results(self:Self) -> None:
         """Load method for results."""
@@ -175,7 +183,7 @@ class ReportHandler():
         # Compile the PDF
         self._compile_pdf()
 
-        # Empty result variables
+        # Reset result variables
         self._reset_result()
 
     def _init_pdf(self:Self) -> None:
@@ -189,6 +197,12 @@ class ReportHandler():
 
     def _compile_pdf(self:Self) -> None:
         """Method to compile PDF."""
+
+        # Support for an empty pdf to compile
+        if self.latex_content.strip()[-16:] == "\\begin{document}":
+            self.latex_content += "\\null"
+            self.logger.info("Warning! You are about to compile an empty pdf.")
+            self.logger.info("Please ensure that you append your results!")
 
         self.latex_content += """
         \\end{document}
@@ -213,6 +227,6 @@ class ReportHandler():
             self.logger.info("Make sure to install pdflatex with apt install texlive-latex-base")
 
     def _reset_result(self:Self) -> None:
-        self.results = []
+        del self.results
         for key in self.pdf_results:
             self.pdf_results[key] = []

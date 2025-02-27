@@ -2,36 +2,37 @@
 
 from abc import ABC, abstractmethod
 
-import torch
-from torch import nn
+from torch.nn import Module
+from torch.nn.modules.loss import _Loss
+from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 
-from leakpro.utils.import_helper import Self
+from leakpro.schemas import TrainingOutput
 
 
 class AbstractInputHandler(ABC):
     """Parent class for user inputs."""
 
-    def __init__(self:Self, configs: dict) -> None:
+    def __init__(self, configs: dict) -> None:
         self.configs = configs
 
     @abstractmethod
-    def get_criterion(self:Self, criterion: torch.nn.modules.loss._Loss) -> None:
+    def get_criterion(self, criterion: _Loss) -> _Loss:
         """Get the loss function for the target model to be used in model training."""
         pass
 
     @abstractmethod
-    def get_optimizer(self:Self, model:torch.nn.Module) -> torch.optim.Optimizer:
+    def get_optimizer(self, model:Module) -> Optimizer:
         """Get the optimizer used for the target model to be used in model training."""
         pass
 
     @abstractmethod
     def train(
-        self: Self,
+        self,
         dataloader: DataLoader,
-        model: torch.nn.Module,
-        criterion: torch.nn.modules.loss._Loss,
-        optimizer: torch.optim.Optimizer
-    ) -> nn.Module:
+        model: Module,
+        criterion: _Loss,
+        optimizer: Optimizer
+    ) -> TrainingOutput:
         """Procedure to train a model on data from the population."""
         pass

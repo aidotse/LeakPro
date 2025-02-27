@@ -6,16 +6,18 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from leakpro import AbstractInputHandler
+from leakpro.schemas import TrainingOutput
+
 
 class MimicInputHandler(AbstractInputHandler):
-    """Class to handle the user input for the CIFAR10 dataset."""
+    """Class to handle the user input for the MIMICIII dataset."""
 
     def __init__(self, configs: dict) -> None:
         super().__init__(configs = configs)
 
 
     def get_criterion(self)->None:
-        """Set the CrossEntropyLoss for the model."""
+        """Set the Binary Cross Entropy Loss for the model."""
         return BCELoss()
 
     def get_optimizer(self, model:torch.nn.Module) -> None:
@@ -31,7 +33,7 @@ class MimicInputHandler(AbstractInputHandler):
         criterion: torch.nn.Module = None,
         optimizer: optim.Optimizer = None,
         epochs: int = None,
-    ) -> dict:
+    ) -> TrainingOutput:
         """Model training procedure."""
 
         compute_device = device("cuda" if cuda.is_available() else "cpu")
@@ -40,11 +42,11 @@ class MimicInputHandler(AbstractInputHandler):
 
         criterion = self.get_criterion()
         optimizer = self.get_optimizer(model)
-        
+
         for e in tqdm(range(epochs), desc="Training Progress"):
             model.train()
-            train_acc, train_loss = 0.0, 0.0
-            
+            train_acc, train_loss, total_samples = 0.0, 0.0, 0
+
             for data, target in dataloader:
                 target = target.float().unsqueeze(1)
                 data, target = data.to(compute_device, non_blocking=True), target.to(compute_device, non_blocking=True)
@@ -54,12 +56,16 @@ class MimicInputHandler(AbstractInputHandler):
                 loss = criterion(output, target)
                 pred = sigmoid(output) >= 0.5
                 train_acc += pred.eq(target).sum().item()
-                
+                total_samples += target.numel()
+
                 loss.backward()
                 optimizer.step()
                 train_loss += loss.item()
-        
-        train_acc = train_acc/len(dataloader.dataset)
-        train_loss = train_loss/len(dataloader)
 
-        return {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}
+        train_acc = train_acc/total_samples
+        train_loss = train_loss/len(dataloader)
+        
+        output_dict = {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}
+        output = TrainingOutput(**output_dict)
+        
+        return output
