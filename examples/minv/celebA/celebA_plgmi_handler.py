@@ -4,7 +4,6 @@ from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from leakpro import AbstractInputHandler
-from leakpro.attacks.utils import gan_losses
 from leakpro.schemas import TrainingOutput
 import kornia
 import time

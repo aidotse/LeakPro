@@ -53,17 +53,25 @@ class LeakPro:
 
         if configs.audit.attack_type == "mia":
             handler = MIAHandler(configs)
-
         elif configs.audit.attack_type == "minv":
             handler = MINVHandler(configs)
 
-            # Attach methods to Handler explicitly defined in AbstractInputHandler from user_input_handler
-            for name, _ in inspect.getmembers(AbstractInputHandler, predicate=inspect.isfunction):
-                if hasattr(user_input_handler, name) and not name.startswith("__"):
-                    attr = getattr(user_input_handler, name)
-                    if callable(attr):
-                        attr = types.MethodType(attr, handler) # ensure to properly bind methods to handler
-                    setattr(handler, name, attr)
+            # Attach train_gan method explicitly if it exists in user_input_handler
+            if hasattr(user_input_handler, "train_gan"):
+                handler.train_gan = types.MethodType(user_input_handler.train_gan, handler)
+
+        else:
+            raise ValueError(f"Unknown attack type: {configs.audit.attack_type}")
+
+        # Attach methods to Handler explicitly defined in AbstractInputHandler from user_input_handler
+        for name, _ in inspect.getmembers(AbstractInputHandler, predicate=inspect.isfunction):
+            if hasattr(user_input_handler, name) and not name.startswith("__"):
+                attr = getattr(user_input_handler, name)
+                if callable(attr):
+                    attr = types.MethodType(attr, handler) # ensure to properly bind methods to handler
+                setattr(handler, name, attr)
+
+
 
         # Load extension class and initiate it using the handler (allows for two-way communication)
         modality_extension_instance = modality_extensions[configs.audit.data_modality]
