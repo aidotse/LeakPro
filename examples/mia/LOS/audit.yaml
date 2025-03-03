@@ -10,6 +10,7 @@ audit:  # Configurations for auditing
       gamma: 1.0
       offline_a: 0.33 # parameter from which we compute p(x) from p_OUT(x) such that p_IN(x) = a p_OUT(x) + b.
       offline_b: 0.66
+  
 
   output_dir: "./leakpro_output"
   attack_type: "mia" #mia, gia
@@ -17,12 +18,16 @@ audit:  # Configurations for auditing
 
 target:
   # Target model path
-  module_path: "utils/model_GRUD.py" # either model_GRUD.py or model_LR.py for logestic regression
-  model_class: "GRUD" #  LR/GRUD
+  module_path: "utils/model_GRUD_dpsgd.py" # either model_GRUD.py or model_LR.py for logestic regression
+  model_class: "GRUD_DPSGD" #  LR/GRUD
   # Data paths
-  target_folder: "./target_GRUD" # either target_GRUD or target_LR
+  target_folder: "./target_GRUD_dpsgd" # either target_GRUD or target_LR
   data_path: "./data/GRUD_data/dataset.pkl" #unflattened dataset for GRUD in GRUD_data direcotry and flattened dataset for LR in LR_data directory
+  dpsgd_path: "./target_GRUD_dpsgd/dpsgd_dic.pkl"
+
+
 
 shadow_model:
   
 distillation_model:
+
