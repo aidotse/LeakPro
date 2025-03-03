@@ -1,4 +1,3 @@
-
 from sklearn.metrics import accuracy_score
 from torch import cuda, device, nn, optim, sigmoid
 from torch.nn import BCEWithLogitsLoss
@@ -15,7 +14,7 @@ class MimicInputHandlerGRU(AbstractInputHandler):
         super().__init__(configs = configs)
 
     def get_criterion(self)->BCEWithLogitsLoss:
-        """Set the CrossEntropyLoss for the model."""
+        """Set the BCEWithLogitsLoss for the model."""
         return BCEWithLogitsLoss()
 
     def get_optimizer(self, model:nn.Module) -> optim.Optimizer:
@@ -40,7 +39,6 @@ class MimicInputHandlerGRU(AbstractInputHandler):
         optimizer = self.get_optimizer(model)
 
         for e in tqdm(range(epochs), desc="Training Progress"):
-            model.train()
             train_acc, train_loss = 0.0, 0.0
             all_predictions = []
             all_labels = []
