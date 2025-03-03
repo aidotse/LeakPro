@@ -96,7 +96,8 @@ class AbstractGIA(AbstractAttack):
 
     def generic_attack_loop(self: Self, configs:dict, gradient_closure: Callable, at_iterations: int,
                             reconstruction: Tensor, data_mean: Tensor, data_std: Tensor, attack_lr: float,
-                            median_pooling: bool, client_loader: DataLoader, reconstruction_loader: DataLoader
+                            median_pooling: bool, client_loader: DataLoader, reconstruction_loader: DataLoader,
+                            nr_intermediate_results: int = 3
                             ) -> Generator[tuple[int, Tensor, GIAResults]]:
         """Generic attack loop for GIA's."""
         optimizer = torch.optim.Adam([reconstruction], lr=attack_lr)
@@ -127,6 +128,14 @@ class AbstractGIA(AbstractAttack):
             if i % 250 == 0:
                 logger.info(f"Iteration {i}, loss {loss}")
                 yield i, dataloaders_ssim_ignite(client_loader, self.best_reconstruction), None
+            
+            if i % int(at_iterations/(nr_intermediate_results+1)) == 0:
+                ssim_score = dataloaders_ssim_ignite(client_loader, self.best_reconstruction)
+                psnr_score = dataloaders_psnr(client_loader, self.best_reconstruction)
+                gia_result = GIAResults(client_loader, self.best_reconstruction,
+                          psnr_score=psnr_score, ssim_score=ssim_score,
+                          data_mean=data_mean, data_std=data_std, config=configs)
+                yield i, ssim_score, gia_result
 
         ssim_score = dataloaders_ssim_ignite(client_loader, self.best_reconstruction)
         psnr_score = dataloaders_psnr(client_loader, self.best_reconstruction)
