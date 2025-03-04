@@ -2,6 +2,7 @@
 from collections.abc import Generator
 from copy import deepcopy
 from dataclasses import dataclass, field
+from typing import Optional
 
 import optuna
 import torch
@@ -45,7 +46,7 @@ class InvertingGradients(AbstractGIA):
     """Gradient inversion attack by Geiping et al."""
 
     def __init__(self: Self, model: Module, client_loader: DataLoader, train_fn: Callable,
-                 data_mean: Tensor, data_std: Tensor, configs: InvertingConfig) -> None:
+                 data_mean: Tensor, data_std: Tensor, configs: Optional[InvertingConfig] = None) -> None:
         super().__init__()
         self.original_model = model
         self.model = deepcopy(self.original_model)
@@ -53,7 +54,7 @@ class InvertingGradients(AbstractGIA):
         self.train_fn = train_fn
         self.data_mean = data_mean
         self.data_std = data_std
-        self.configs = configs
+        self.configs = configs if configs is not None else InvertingConfig()
         self.best_loss = float("inf")
         self.best_reconstruction = None
         self.best_reconstruction_round = None
@@ -87,7 +88,8 @@ class InvertingGradients(AbstractGIA):
 
         """
         self.model.eval()
-        self.reconstruction, self.reconstruction_loader = self.configs.data_extension.get_at_data(self.client_loader)
+        self.reconstruction, self.reconstruction_labels, self.reconstruction_loader = self.configs.data_extension.get_at_data(
+            self.client_loader)
         self.reconstruction.requires_grad = True
         client_gradient = self.train_fn(self.model, self.client_loader, self.configs.optimizer,
                                         self.configs.criterion, self.configs.epochs)
@@ -144,8 +146,14 @@ class InvertingGradients(AbstractGIA):
 
     def suggest_parameters(self: Self, trial: optuna.trial.Trial) -> None:
         """Suggest parameters to chose and range for optimization for the Inverting Gradient attack."""
-        total_variation = trial.suggest_float("total_variation", 1e-6, 1e-1, log=True)
+        total_variation = trial.suggest_float("total_variation", 1e-7, 1e-1, log=True)
+        # attack_lr = trial.suggest_float("attack_lr", 1e-2, 1e-0, log=True)
+        # median_pooling = trial.suggest_categorical("median_pooling", [True, False])
+        # top10norms = trial.suggest_categorical("top10norms", [True, False])
         self.configs.tv_reg = total_variation
+        # self.configs.attack_lr = attack_lr
+        # self.configs.median_pooling = median_pooling
+        # self.configs.top10norms = top10norms
 
     def reset_attack(self: Self) -> None:
         """Reset attack to initial state."""

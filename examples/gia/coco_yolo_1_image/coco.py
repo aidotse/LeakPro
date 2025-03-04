@@ -1,28 +1,97 @@
-import time
+from copy import deepcopy
 from torch import Tensor, as_tensor
 from torch.utils.data import DataLoader, Subset
 from torchvision import transforms
-from torchvision.datasets import CocoDetection
 from leakpro.fl_utils.data_utils import get_meanstd
 from random import sample
 
-def get_coco_detection_loader(num_images: int = 1, batch_size: int = 1, num_workers: int = 2, root: str = './coco2017', ann_file: str = 'annotations/instances_train2017.json') -> tuple[DataLoader, Tensor, Tensor]:
+
+import os
+from pathlib import Path
+from typing import Optional, Callable, Union, List, Tuple
+from PIL import Image
+import torch
+from torchvision.datasets.vision import VisionDataset
+from torchvision import transforms
+
+class CocoDetectionWithSeparateTransforms(VisionDataset):
+    def __init__(
+        self,
+        root: Union[str, Path],
+        annFile: str,
+        transform: Optional[Callable] = None,
+        target_transform: Optional[Callable] = None,
+    ) -> None:
+        # We set transforms=None here because we'll handle image and target transforms separately.
+        super().__init__(root, transforms=None, transform=transform, target_transform=target_transform)
+        from pycocotools.coco import COCO
+        self.coco = COCO(annFile)
+        self.ids = list(sorted(self.coco.imgs.keys()))
+    
+    def _load_image(self, id: int) -> Image.Image:
+        path = self.coco.loadImgs(id)[0]["file_name"]
+        return Image.open(os.path.join(self.root, path)).convert("RGB")
+    
+    def _load_target(self, id: int) -> List[dict]:
+        return self.coco.loadAnns(self.coco.getAnnIds(id))
+    
+    def __getitem__(self, index: int) -> Tuple[torch.Tensor, List[dict]]:
+        id = self.ids[index]
+        image = self._load_image(id)
+        target = self._load_target(id)
+        
+        # Capture the original size before applying the image transform
+        original_size = image.size  # (width, height)
+        if self.transform is not None:
+            image = self.transform(image)
+        
+        if self.target_transform is not None:
+            target = self.target_transform(target, original_size)
+        
+        return image, target
+    
+    def __len__(self) -> int:
+        return len(self.ids)
+
+def resize_target(target: List[dict], original_size: Tuple[int, int], new_size: Tuple[int, int] = (64, 64)) -> List[dict]:
+    orig_w, orig_h = original_size
+    new_w, new_h = new_size
+    scale_x = new_w / orig_w
+    scale_y = new_h / orig_h
+    new_target = []
+    for obj in target:
+        new_obj = deepcopy(obj)
+        if 'bbox' in new_obj:
+            x, y, w, h = new_obj['bbox']
+            new_obj['bbox'] = [x * scale_x, y * scale_y, w * scale_x, h * scale_y]
+        new_target.append(new_obj)
+    return new_target
+
+def custom_collate_fn(batch):
+    images, targets = zip(*batch)
+    images = torch.stack(images, dim=0)
+    return images, list(targets)
+
+def get_coco_detection_loader(num_images: int = 1, img_size = 256, start_idx= 0, batch_size: int = 1, num_workers: int = 2, root: str = './coco2017', ann_file: str = 'annotations/instances_train2017.json') -> tuple[DataLoader, Tensor, Tensor]:
     """Get a dataloader for COCO detection."""
     ann_file = f"{root}/annotations/instances_train2017.json"
     img_dir = f"{root}/train2017"
-    dataset = CocoDetection(root=img_dir, annFile=ann_file, transform=transforms.Compose([transforms.Resize((256,256)), transforms.ToTensor()]))
-    subset_indices = sample(range(len(dataset)), min(len(dataset), 200))
+    dataset = CocoDetectionWithSeparateTransforms(root=img_dir, annFile=ann_file, transform=transforms.Compose([transforms.Resize((img_size,img_size)), transforms.ToTensor()]), target_transform=lambda target, orig_size: resize_target(target, orig_size, new_size=(img_size, img_size)))
+    subset_indices = sample(range(len(dataset)), min(len(dataset), 10000))
     data_mean, data_std = get_meanstd(Subset(dataset, subset_indices))
     transform = transforms.Compose([
-            transforms.Normalize(data_mean, data_std)])
+        transforms.Resize((img_size, img_size)),
+        transforms.ToTensor(),
+        transforms.Normalize(data_mean, data_std)
+    ])
 
     total_examples = len(dataset)
-    end_idx = min(17 + num_images, total_examples)
-    indices = list(range(17, end_idx))
+    end_idx = min(start_idx + num_images, total_examples)
+    indices = list(range(start_idx, end_idx))
     subset_trainset = Subset(dataset, indices)
     subset_trainset.dataset.transform = transform
-    trainloader = DataLoader(subset_trainset, batch_size=batch_size,
+    client_loader = DataLoader(subset_trainset, batch_size=batch_size, collate_fn=custom_collate_fn,
                                             shuffle=False, drop_last=True, num_workers=num_workers)
     data_mean = as_tensor(data_mean)[:, None, None]
     data_std = as_tensor(data_std)[:, None, None]
-    return trainloader, data_mean, data_std
+    return client_loader, data_mean, data_std

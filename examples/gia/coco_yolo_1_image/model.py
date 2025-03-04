@@ -180,6 +180,7 @@ class Head(torch.nn.Module):
 
         c1 = max(filters[0], self.nc)
         c2 = max((filters[0] // 4, self.ch * 4))
+        self.evaluating = False
 
         self.dfl = DFL(self.ch)
         self.cls = torch.nn.ModuleList(torch.nn.Sequential(Conv(x, c1, 3),
@@ -188,11 +189,14 @@ class Head(torch.nn.Module):
         self.box = torch.nn.ModuleList(torch.nn.Sequential(Conv(x, c2, 3),
                                                            Conv(c2, c2, 3),
                                                            torch.nn.Conv2d(c2, 4 * self.ch, 1)) for x in filters)
+    
+    def set_eval(self, on):
+        self.evaluating = on
 
     def forward(self, x):
         for i in range(self.nl):
             x[i] = torch.cat((self.box[i](x[i]), self.cls[i](x[i])), 1)
-        if self.training:
+        if not self.evaluating: #self.training:
             return x
         self.anchors, self.strides = (x.transpose(0, 1) for x in make_anchors(x, self.stride, 0.5))
 
@@ -220,9 +224,9 @@ class YOLO(torch.nn.Module):
         self.net = DarkNet(width, depth)
         self.fpn = DarkFPN(width, depth)
 
-        img_dummy = torch.zeros(1, 3, 256, 256)
+        img_dummy = torch.zeros(1, 3, 64, 64)
         self.head = Head(num_classes, (width[3], width[4], width[5]))
-        self.head.stride = torch.tensor([256 / x.shape[-2] for x in self.forward(img_dummy)])
+        self.head.stride = torch.tensor([64 / x.shape[-2] for x in self.forward(img_dummy)])
         self.stride = self.head.stride
         self.head.initialize_biases()
 
@@ -238,6 +242,9 @@ class YOLO(torch.nn.Module):
                 m.forward = m.fuse_forward
                 delattr(m, 'norm')
         return self
+    
+    def set_eval(self, on):
+        self.head.set_eval(on)
 
 
 def yolo_v8_n(num_classes: int = 90):

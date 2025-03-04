@@ -1,5 +1,6 @@
 """Util functions relating to data."""
 from abc import ABC, abstractmethod
+from copy import deepcopy
 from torch import Tensor, cat, mean, randn, std, tensor
 from torch.utils.data import DataLoader, Dataset, TensorDataset
 import torch
@@ -23,11 +24,10 @@ class GiaImageClassifictaionExtension(GiaDataModalityExtension):
         labels = tensor(labels)
         reconstruction_dataset = TensorDataset(reconstruction, labels)
         reconstruction_loader = DataLoader(reconstruction_dataset, batch_size=32, shuffle=True)
-        return reconstruction, reconstruction_loader
+        return reconstruction, labels, reconstruction_loader
 
-class ReconstructionDataset(Dataset):
+class CustomTensorDataset(Dataset):
     def __init__(self, reconstruction: torch.Tensor, labels: list):
-        # Save the global tensor and labels.
         self.reconstruction = reconstruction
         self.labels = labels
 
@@ -35,8 +35,7 @@ class ReconstructionDataset(Dataset):
         return self.reconstruction.size(0)
 
     def __getitem__(self, index):
-        # Return just the index (and corresponding label)
-        return index, self.labels[index]
+        return self.reconstruction[index], self.labels[index]
 
 class GiaImageDetectionExtension(GiaDataModalityExtension):
 
@@ -44,11 +43,11 @@ class GiaImageDetectionExtension(GiaDataModalityExtension):
         """DataLoader with random noise images of the same shape as the client_loader's dataset, using the same COCO labels."""
         img_shape = client_loader.dataset[0][0].shape
         num_images = len(client_loader.dataset)
-        reconstruction = randn((num_images, *img_shape))  # Random noise images
+        reconstruction = randn((num_images, *img_shape))
         labels = []
         for _, label in client_loader:
-            labels.append(label)
-        reconstruction_dataset = ReconstructionDataset(reconstruction, labels) #list(zip(reconstruction, labels))
+            labels.append(deepcopy(label))
+        reconstruction_dataset = CustomTensorDataset(reconstruction, labels)
         reconstruction_loader = DataLoader(reconstruction_dataset, batch_size=32, shuffle=True)
 
         return reconstruction, labels, reconstruction_loader
