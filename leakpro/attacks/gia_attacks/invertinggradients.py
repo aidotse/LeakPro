@@ -112,7 +112,12 @@ class InvertingGradients(AbstractGIA):
             GIAResults: Container for results on GIA attacks.
 
         """
-        return self.generic_attack_loop(self.configs, self.gradient_closure_text, self.configs.at_iterations, self.reconstruction,
+        if self.configs.image_data:
+            grad_closure = self.gradient_closure
+        else:   
+            grad_closure = self.gradient_closure_text
+            
+        return self.generic_attack_loop(self.configs, grad_closure, self.configs.at_iterations, self.reconstruction,
                                 self.data_mean, self.data_std, self.configs.attack_lr, self.configs.median_pooling,
                                 self.client_loader, self.reconstruction_loader,self.configs.image_data)
 
