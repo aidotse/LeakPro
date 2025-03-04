@@ -116,7 +116,8 @@ class AbstractGIA(AbstractAttack):
         for i in range(at_iterations):
             # loss function which does training and compares distance from reconstruction training to the real training.
             closure = gradient_closure(optimizer)
-
+            # loss i computed based on data performance before optimization update so we copy the data  before optimization
+            previous_reconstruction_data = deepcopy(reconstruction_loader)
             loss = optimizer.step(closure)
             scheduler.step()
             if image_data:
@@ -130,7 +131,7 @@ class AbstractGIA(AbstractAttack):
             # Chose image who has given least loss
             if loss < self.best_loss:
                 self.best_loss = loss
-                self.best_reconstruction = deepcopy(reconstruction_loader)
+                self.best_reconstruction = previous_reconstruction_data
                 self.best_reconstruction_round = i
                 logger.info(f"New best loss: {loss} on round: {i}")
             if i % 250 == 0:
