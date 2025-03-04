@@ -100,10 +100,14 @@ class AbstractGIA(AbstractAttack):
 
     def generic_attack_loop(self: Self, configs:dict, gradient_closure: Callable, at_iterations: int,
                             reconstruction: Tensor, data_mean: Tensor, data_std: Tensor, attack_lr: float,
-                            median_pooling: bool, client_loader: DataLoader, reconstruction_loader: DataLoader
+                            median_pooling: bool, client_loader: DataLoader, reconstruction_loader: DataLoader,
+                            image_data: bool=True
                             ) -> Generator[tuple[int, Tensor, GIAResults]]:
         """Generic attack loop for GIA's."""
-        optimizer = torch.optim.Adam([reconstruction], lr=attack_lr)
+        if isinstance(self.reconstruction, list):
+            optimizer = torch.optim.Adam(reconstruction, lr=attack_lr)
+        else:
+            optimizer = torch.optim.Adam([reconstruction], lr=attack_lr)
         # reduce LR every 1/3 of total iterations
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
                                                             milestones=[at_iterations // 2.667,
@@ -115,13 +119,14 @@ class AbstractGIA(AbstractAttack):
 
             loss = optimizer.step(closure)
             scheduler.step()
-            with torch.no_grad():
-                # force pixels to be in reasonable ranges
-                reconstruction.data = torch.max(
-                    torch.min(reconstruction, (1 - data_mean) / data_std), -data_mean / data_std
-                    )
-                if (i +1) % 500 == 0 and median_pooling:
-                    reconstruction.data = MedianPool2d(kernel_size=3, stride=1, padding=1, same=False)(reconstruction)
+            if image_data:
+                with torch.no_grad():
+                    # force pixels to be in reasonable ranges
+                    reconstruction.data = torch.max(
+                        torch.min(reconstruction, (1 - data_mean) / data_std), -data_mean / data_std
+                        )
+                    if (i +1) % 500 == 0 and median_pooling:
+                        reconstruction.data = MedianPool2d(kernel_size=3, stride=1, padding=1, same=False)(reconstruction)
             # Chose image who has given least loss
             if loss < self.best_loss:
                 self.best_loss = loss

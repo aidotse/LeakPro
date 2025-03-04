@@ -34,6 +34,24 @@ def cosine_similarity_weights(client_gradient: torch.Tensor, reconstruction_grad
                         for y in filtered_input_gradients).sqrt()
     return 1 - (costs / trial_norm / input_norm)
 
+
+def l2_distance(client_gradient: torch.Tensor, reconstruction_gradient: torch.Tensor) -> torch.Tensor:
+    """Computes the reconstruction costs between client gradients and the reconstruction gradient.
+
+    This function calculates the pairwise costs between each client gradient and the reconstruction gradient
+    using the l2 norm measure. The costs are accumulated and averaged over all client gradients.
+
+    Returns
+    -------
+        torch.Tensor: The average reconstruction cost.
+
+    """
+    with torch.no_grad():
+
+        costs = sum(torch.norm(p1 - p2, p=2) for p1, p2 in zip(client_gradient, reconstruction_gradient))
+
+    return costs
+
 def total_variation(x: Tensor) -> Tensor:
         """Anisotropic TV."""
         dx = mean(abs(x[:, :, :, :-1] - x[:, :, :, 1:]))
