@@ -34,9 +34,7 @@ class MimicInputHandlerGRUdpsgd(AbstractInputHandler):
         criterion: nn.Module = None,
         optimizer: optim.Optimizer = None,
         epochs: int = None,
-    ) -> dict:
-
-
+    ) -> TrainingOutput:
         print("Training shadow models with DP-SGD")
         dpsgd_path = "./target_GRUD_dpsgd/dpsgd_dic.pkl"
 

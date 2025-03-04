@@ -20,6 +20,10 @@ conda activate mimic_data_extraction
  ```
 
 #### Compiling the data
+First create the data folder:
+```bash
+ $ mkdir ../data
+```
 Navigate to ```mimic-code/buildmimic``` . <br>
 If you already have MIMIC-III dataset downloaded, place the unzipped CSV files in the  ```data ``` folder, and run the following check command:
 ``` bash
