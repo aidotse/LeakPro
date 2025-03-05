@@ -24,7 +24,7 @@ class GANConfig(BaseModel):
     module_path: str = Field(..., description="Path to the model script.")
     model_class: str = Field(..., description="Class name of the model.")
     checkpoint_path: Optional[str] = Field(None, description="Path to the saved model checkpoint.")
-    init_params: Dict[str, Any] = Field(default_factory=dict, description="Initialization parameters.")
+    init_params: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Initialization parameters.")
 
 class AttackPLGMI(AbstractMINV):
     """Class that implements the PLGMI attack."""
@@ -34,7 +34,6 @@ class AttackPLGMI(AbstractMINV):
 
         # General parameters
         batch_size: int = Field(32, ge=1, description="Batch size for training/evaluation")
-        num_classes: int = Field(10, ge=1, description="Number of classes in the dataset")
 
         # PLG-MI parameters
         top_n : int = Field(10, ge=1, description="Number of pseudo-labels to select")
@@ -86,6 +85,12 @@ class AttackPLGMI(AbstractMINV):
             setattr(self, key, value)
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self.num_classes = self.handler.get_num_classes()
+
+        self.configs.generator.init_params["num_classes"] = self.num_classes
+        self.configs.discriminator.init_params["num_classes"] = self.num_classes
+
 
 
     def description(self:Self) -> dict:
