@@ -13,8 +13,8 @@ from torch.utils.data import DataLoader, Dataset, Subset
 
 class FinanceDataset(Dataset):
     def __init__(self, x, y):
-        self.x = x.float()  # Ensure it is of type float
-        self.y = y.float()  # Ensure it is of type float
+        self.x = x.astype(np.float32)  # Ensure it is of type float
+        self.y = y.astype(np.float32)  # Ensure it is of type float
 
     def __len__(self):
         return len(self.y)
@@ -29,8 +29,7 @@ class FinanceDataset(Dataset):
 def get_finance_dataset(data_path,
                       train_frac,
                       validation_frac,
-                      test_frac,
-                      use_LR = True):
+                      test_frac):
     """Get the dataset, download it if necessary, and store it."""
 
     # Assert that the sum of all fractions is between 0 and 1
@@ -52,10 +51,10 @@ def get_finance_dataset(data_path,
         print(f"Loaded dataset from {dataset_path}")
         return dataset, train_indices, validation_indices ,test_indices
 
-    data_file_path = os.path.join(data_path, "nodes_train.pkl")
+    data_file_path = os.path.join(data_path, "nodes_train.csv")
     if os.path.exists(data_file_path):
         print("Loading data...")
-        df = pd.read_pickle("data/nodes_train.pkl")
+        df = pd.read_csv(data_file_path)
         
         # Drop the two first columns 
         df_no_id = df.iloc[:, 2:]
@@ -65,27 +64,27 @@ def get_finance_dataset(data_path,
         y = df_no_id.iloc[:, -1]   # Last column as the label
 
 
-        print("Splitting data...")
-        train_data, holdout_data, y_train, y_holdout_data = data_splitter(y,
-                                                                 X,
-                                                                 train_frac)
+        # print("Splitting data...")
+        # train_data, holdout_data, y_train, y_holdout_data = data_splitter(y,
+        #                                                          X,
+        #                                                          train_frac)
         
-        check_missing_values(train_data, holdout_data, y_train, y_holdout_data)
+        # check_missing_values(train_data, holdout_data, y_train, y_holdout_data)
         #TODO: Normalize/standardize data if not using XGBoost
         # print("Normalizing data...")
 
 
-        # Creating the dataset
-        data_x = pd.concat((train_data, holdout_data), axis=0)
-        data_y = pd.concat((y_train, y_holdout_data), axis=0)
+        # # Creating the dataset
+        # data_x = pd.concat((train_data, holdout_data), axis=0)
+        # data_y = pd.concat((y_train, y_holdout_data), axis=0)
 
-        assert np.issubdtype(data_x.values.dtype, np.number), "Non-numeric data found in features."
-        assert np.issubdtype(data_y.values.dtype, np.number), "Non-numeric data found in labels."
+        assert np.issubdtype(X.values.dtype, np.number), "Non-numeric data found in features."
+        assert np.issubdtype(y.values.dtype, np.number), "Non-numeric data found in labels."
 
-        dataset = FinanceDataset(data_x.values, data_y.values)
+        dataset = FinanceDataset(X.values, y.values)
 
         # Generate indices for training, validation, test, and early stopping
-        train_indices, validation_indices, test_indices = data_indices(data_x,
+        train_indices, validation_indices, test_indices = data_indices(dataset,
                                                                        train_frac,
                                                                        validation_frac,
                                                                        test_frac)
@@ -112,15 +111,14 @@ def get_finance_dataset(data_path,
     return dataset, train_indices, validation_indices, test_indices
 
 
-def data_splitter(label,
-                  data,
-                  train_frac):
-    # Perform train-test split
-    train_data, holdout_data, y_train, y_holdout = train_test_split(
-        data, label, train_size=train_frac, random_state=42, stratify=label if label.nunique() > 1 else None
-    )
+def split_dataset(dataset, train_indices, validation_indices, test_indices):
+    """Splits dataset into training, validation, and test sets based on provided indices."""
+    
+    X_train, Y_train = dataset.x[train_indices], dataset.y[train_indices]
+    X_val, Y_val = dataset.x[validation_indices], dataset.y[validation_indices]
+    X_test, Y_test = dataset.x[test_indices], dataset.y[test_indices]
 
-    return train_data, holdout_data, y_train, y_holdout
+    return X_train, Y_train, X_val, Y_val, X_test, Y_test
 
 
 def data_indices(dataset,

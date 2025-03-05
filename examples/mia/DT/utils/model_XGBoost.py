@@ -2,7 +2,7 @@ import os
 import xgboost as xgb
 import numpy as np
 import pickle
-
+from utils.data_processing import split_dataset
 
 class XGBoostModel:
     def __init__(self, num_classes, n_estimators=100):
@@ -38,14 +38,19 @@ def evaluate(model, X, y):
 
 
 def create_trained_model_and_metadata(model,
-                                    X_train,
-                                    y_train, 
-                                    X_test,
-                                    y_test, 
+                                    dataset,
+                                    train_indices,
+                                    validation_indices,
+                                    test_indices,
                                     train_config):
     """
     Train the XGBoost model and save metadata.
     """
+
+    X_train,y_train, X_val, y_val, X_test, y_test = split_dataset(dataset,
+                                                                   train_indices,
+                                                                   validation_indices,
+                                                                   test_indices)
 
     # Train the model
     print("Training XGBoost model...")
@@ -69,10 +74,15 @@ def create_trained_model_and_metadata(model,
     meta_data = {
         "train_size": len(y_train),
         "test_size": len(y_test),
+        "train_indices": train_indices,
+        "test_indices": test_indices,
+        "num_train": len(y_train),
         "init_params": model.init_params,
         "batch_size": 0,
         "train_acc": train_acc,
         "test_acc": test_acc,
+        "train_loss": 0,
+        "test_loss": 0,
         "dataset": train_config["data"]["dataset"],
     }
 
@@ -81,3 +91,4 @@ def create_trained_model_and_metadata(model,
         pickle.dump(meta_data, f)
 
     return train_acc, test_acc
+
