@@ -96,32 +96,6 @@ def _load_trained_target_model(self:Self) -> None:
         logger.info(f"Loaded target model from {model_path}")
     except FileNotFoundError as e:
         raise FileNotFoundError(f"Could not find the trained target model at {model_path}") from e
-    
-# def _load_trained_target_model(self:Self) -> None:
-#         """Get the trained target model."""
-#         model_type = "xgboost"
-#         model_path = self.configs["target"].get("target_folder", None)
-#         if model_path is None:
-#             raise ValueError("Trained model path not found in configs.")
-#         self.model_path = f"{model_path}/target_model.pkl"
-#         init_params = self.target_model_metadata.get("init_params", {})
-#         # This handles if target model is torch or not...
-#         if model_type == "torch":
-#             try:
-#                 with open(self.model_path, "rb") as f:
-#                     self.target_model = self.target_model_blueprint(**init_params)
-#                     self.target_model.load_state_dict(torch.load(f))
-#                 logger.info(f"Loaded target model from {model_path}")
-#             except FileNotFoundError as e:
-#                 raise FileNotFoundError(f"Could not find the trained target model at {model_path}") from e
-#         elif model_type == "xgboost":
-#             try:
-#                 with open(self.model_path, "rb") as f:
-#                     self.target_model = joblib.load(f)
-#                 logger.info(f"Loaded target model from {model_path}")
-#             except FileNotFoundError as e:
-#                 raise FileNotFoundError(f"Could not find the trained target model at {model_path}") from e
-
 #------------------------------------------------
 # Methods related to population dataset
 #------------------------------------------------
