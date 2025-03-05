@@ -353,16 +353,12 @@ def dpsgd_gru_trained_model_and_metadata( model,
                                         epsilon_tolerance = privacy_engine_dict["epsilon_tolerance"],
                                         accountant = "prv",
                                         eps_error = privacy_engine_dict["eps_error"],)
-    except:
-        # the prv accountant is not robust to large epsilon (even epsilon = 10)
-        # so we will use rdp when it fails, so the actual epsilon may be slightly off
-        # see https://github.com/pytorch/opacus/issues/604
-        noise_multiplier = get_noise_multiplier(target_epsilon = 2,
-                                                target_delta = privacy_engine_dict["target_delta"],
-                                                sample_rate = sample_rate,
-                                                epochs = privacy_engine_dict["epochs"],
-                                                epsilon_tolerance = privacy_engine_dict["epsilon_tolerance"],
-                                                accountant = "rdp")
+    except Exception as e:
+        raise ValueError(
+            f"Failed to compute noise multiplier using the 'prv' accountant. "
+            f"This may be due to a large target_epsilon ({privacy_engine_dict['target_epsilon']}). "
+            f"Consider reducing epsilon or switching to a different accountant (e.g., 'rdp'). "
+            f"Original error: {e}")
 
     # make the model private
     privacy_engine = PrivacyEngine(accountant = "prv")
