@@ -57,7 +57,7 @@ class CelebA_InputHandler(AbstractInputHandler):
                 train_loss += loss.item()* labels.size(0)
                 total_samples += labels.size(0)
 
-        avg_train_loss = train_loss / len(dataloader)
+        avg_train_loss = train_loss / total_samples
         train_accuracy = train_acc / total_samples  
         model.to("cpu")
 
@@ -83,7 +83,7 @@ class CelebA_InputHandler(AbstractInputHandler):
                 test_loss += loss.item()* labels.size(0)
                 total_samples += labels.size(0)
         
-        avg_test_loss = test_loss / len(dataloader)
+        avg_test_loss = test_loss / total_samples
         test_accuracy = test_acc / total_samples
         model.to("cpu")
 

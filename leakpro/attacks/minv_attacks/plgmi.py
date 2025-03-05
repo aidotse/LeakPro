@@ -85,8 +85,6 @@ class AttackPLGMI(AbstractMINV):
         for key, value in self.configs.model_dump().items():
             setattr(self, key, value)
 
-        #self.pseudo_label_path = configs.get("pseudo_label_path")  # noqa: ERA001
-        #self.output_dir = configs.get("output_dir")  # noqa: ERA001
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 

@@ -218,7 +218,7 @@ class ImageMetrics:
             transform (callable): A function or transform to apply to the images.
 
         Returns:
-            numpy.ndarray: A numpy array containing the extracted features.
+            torch.tensor: A tensor containing the extracted features.
 
         """
         features = []
@@ -240,7 +240,7 @@ class ImageMetrics:
             transform (callable): A function or transform to apply to the generated images.
 
         Returns:
-            numpy.ndarray: A numpy array containing the extracted features.
+            torch.tensor: A tensor containing the extracted features.
 
         """
         self.generator.eval()
