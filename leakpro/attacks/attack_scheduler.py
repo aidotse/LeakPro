@@ -59,6 +59,15 @@ class AttackScheduler:
                 logger.error("Failed to import GIA attack module.")
                 raise ImportError("GIA attack module is not available.") from e
 
+        elif attack_type == "minv":
+            try:
+                from leakpro.attacks.minv_attacks.attack_factory_minv import AttackFactoryMINV
+                self.attack_factory = AttackFactoryMINV
+                logger.info("MINV attack factory loaded.")
+            except ImportError as e:
+                logger.error("Failed to import MINV attack module.")
+                raise ImportError("MINV attack module is not available.") from e
+
         else:
             logger.error(f"Unsupported attack type: {self.attack_type}")
             raise ValueError(f"Unsupported attack type: {self.attack_type}. Must be 'mia' or 'gia'.")
