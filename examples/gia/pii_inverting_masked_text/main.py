@@ -56,7 +56,7 @@ if __name__ == "__main__":
     train_fn = train
     # baseline config
     #configs = InvertingConfig(attack_lr=0.0001)#, optimizer = field(default_factory=lambda: MetaSGD()))
-    configs = InvertingConfig(attack_lr=0.0001, data_extension = GiaNERExtension, image_data=False)#, optimizer = field(default_factory=lambda: MetaSGD()))
+    configs = InvertingConfig(attack_lr=0.00001, data_extension = GiaNERExtension, image_data=False)#, optimizer = field(default_factory=lambda: MetaSGD()))
 
     result = run_inverting(model, client_dataloader, train_fn, data_mean, data_std, configs)
 

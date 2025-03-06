@@ -17,7 +17,7 @@ from leakpro.metrics.attack_result import GIAResults
 from leakpro.utils.import_helper import Callable, Self
 from leakpro.utils.logger import logger
 from leakpro.fl_utils.data_utils import get_used_tokens
-
+from leakpro.attacks.fl_attacks.gia_attacks.gia_closures import GIAClossure
 
 @dataclass
 class InvertingConfig:
