@@ -96,6 +96,7 @@ def _load_trained_target_model(self:Self) -> None:
         logger.info(f"Loaded target model from {model_path}")
     except FileNotFoundError as e:
         raise FileNotFoundError(f"Could not find the trained target model at {model_path}") from e
+
 #------------------------------------------------
 # Methods related to population dataset
 #------------------------------------------------
