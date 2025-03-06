@@ -648,6 +648,12 @@ class GIAResults:
             latex += _latex(save_name=name, original=res.original, recreated=res.recreated)
         return latex
 
+class MinvResult:
+    """Contains results for a MI attack."""
+
+    pass
+
+
 
 class TEMPLATEResult:
     """Contains results related to the performance of the metric. It contains the results for multiple fpr."""

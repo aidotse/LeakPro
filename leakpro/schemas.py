@@ -37,15 +37,25 @@ class LossConfig(BaseModel):
         """Convert loss name type to lowercase."""
         return v.lower() if isinstance(v, str) else v
 
+class ReconstructionConfig(BaseModel):
+    """Configuration for reconstruction attacks."""
+
+    batch_size: int = Field(32, description="Batch size used during reconstruction")
+    num_class_samples: int = Field(1, description="Number of samples to generate for each class")
+    num_audited_classes: int = Field(100, description="Number of classes to audit")
+    metrics: Dict[str, Any] = Field(default_factory=dict)
+
 class AuditConfig(BaseModel):
     """Configuration for the audit process."""
 
     random_seed: int = Field(default=42, description="Random seed for reproducibility")
-    attack_type: Literal["mia", "gia", "minva", "synthetic"] = Field(..., description="Type of attack: must be one of ['mia', 'gia', 'minva', 'synthetic]")  # noqa: E501
+    attack_type: Literal["mia", "gia", "minv", "synthetic"] = Field(..., description="Type of attack: must be one of ['mia', 'gia', 'minv', 'synthetic]")  # noqa: E501
     attack_list: Dict[str, Any] = Field(..., min_length=1, description="Must have at least one attack")
     hyper_param_search: bool = Field(default=False, description="Whether to perform hyperparameter search")
     data_modality: Literal["image", "tabular", "text", "graph", "timeseries"] = Field(..., description="Type of data modality: must be one of ['image', 'tabular', 'text', 'graph', 'timeseries']")  # noqa: E501
     output_dir: str = Field(..., description="Output directory for audit results")
+
+    reconstruction: Optional[ReconstructionConfig] = Field(None, description="Reconstruction attack configuration")
 
     # turn some of the fields to lowercase
     @field_validator("attack_type", "data_modality", "attack_list", mode="before")
@@ -61,6 +71,10 @@ class TargetConfig(BaseModel):
     model_class: str = Field(..., description="Class name of the model")
     target_folder: str = Field(..., description="Directory where target model data is stored")
     data_path: str = Field(..., description="Path to dataset file")
+    # TODO: Change data_path description to be more descriptive, i.e path to target (or private) dataset.
+
+    # MINV-specific field - optional
+    public_data_path: Optional[str] = Field(None, description="Path to the public dataset used for model inversion")
 
 class ShadowModelConfig(BaseModel):
     """Configuration for the Shadow models."""
