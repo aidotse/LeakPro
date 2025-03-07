@@ -253,41 +253,110 @@ def precompute_column_stats(df: pd.DataFrame, columns: List[str]) -> tuple[dict[
 
 
 
-def query_from_record(*,
+def query_from_record(
+    *,
+    df: pd.DataFrame,
     record: pd.Series,
     dtypes: pd.Series,
     columns: List[str],
-    medians: Optional[pd.Series]
+    medians: Optional[pd.Series] = None,
+    use_medians: bool = True,
+    precomputed_sorted: Optional[dict[str, pd.Series]] = None,
+    precomputed_counts: Optional[dict[str, pd.Series]] = None,
+    use_tree: bool = False,
+    tree_models: Optional[Dict[str, any]] = None  # Expecting tree models keyed by column name.
 ) -> str:
-    """Function that constructs and returns a query from the attributes in a record."""
-    #Placeholder query
-    query = []
-    #Iterate through columns
+    """
+    Construct a query from a record. For numeric attributes, if use_medians is True
+    a median-based operator (>= or <=) is used; otherwise, the function uses the
+    extreme values and uniqueness check. If use_tree is True, then for continuous columns,
+    the decision tree’s decision path is used to generate an interval predicate.
+    
+    Parameters:
+        df (pd.DataFrame): The dataframe.
+        record (pd.Series): The record for which to build a query.
+        dtypes (pd.Series): The data types for the dataframe columns.
+        columns (List[str]): The list of columns to consider.
+        medians (Optional[pd.Series]): Precomputed medians for numeric columns.
+        use_medians (bool): Whether to use the median-based approach.
+        precomputed_sorted (Optional[dict[str, pd.Series]]): Precomputed sorted values per column.
+        precomputed_counts (Optional[dict[str, pd.Series]]): Precomputed value counts per column.
+        use_tree (bool): If True, use the decision tree for continuous columns.
+        tree_models (Optional[Dict[str, any]]): Dictionary of pre-fitted decision trees keyed by column.
+    
+    Returns:
+        str: The constructed query string.
+    """
+    query_parts: List[str] = []
     for col in columns:
-        #NaN
+        # If using decision tree for continuous columns, and a tree exists for this column:
+        if use_tree and tree_models is not None and col in tree_models:
+            tree = tree_models[col]
+            # Use the tree's decision path for this record (for univariate case)
+            X = df[[col]]
+            # Get decision path for the record (using its index)
+            node_indicator = tree.decision_path(X.loc[[record.name]])
+            node_index = node_indicator.indices
+            lower_bound, upper_bound = -np.inf, np.inf
+            for node_id in node_index:
+                if tree.tree_.feature[node_id] != -2:  # not a leaf node
+                    threshold = tree.tree_.threshold[node_id]
+                    # For univariate tree, no need to check feature name.
+                    if record[col] <= threshold:
+                        upper_bound = min(upper_bound, threshold)
+                    else:
+                        lower_bound = max(lower_bound, threshold)
+            query_parts.append(f"{col} >= {lower_bound:.2f} & {col} < {upper_bound:.2f}")
+            continue
+
+        # Default processing:
         if pd.isna(record[col]):
-            item = ".isna()"
-        #Boolean
-        elif is_bool_dtype(dtypes[col]):
-            item = f"== {record[col]}"
-        #Numeric
-        elif is_numeric_dtype(dtypes[col]):
-            if medians is None:
-                operator = rng.choice([">=", "<="])
-            elif record[col] > medians[col]:
-                operator = ">="
+            query_parts.append(f"{col}.isna()")
+            continue
+
+        if is_bool_dtype(dtypes[col]):
+            query_parts.append(f"{col} == {record[col]}")
+            continue
+
+        if is_numeric_dtype(dtypes[col]):
+            if use_medians:
+                if medians is None:
+                    operator = np.random.choice([">=", "<="])
+                elif record[col] > medians[col]:
+                    operator = ">="
+                else:
+                    operator = "<="
+                query_parts.append(f"{col} {operator} {record[col]}")
             else:
-                operator = "<="
-            item = f"{operator} {record[col]}"
-        #Categorical
-        elif isinstance(dtypes[col], pd.CategoricalDtype) and is_numeric_dtype(dtypes[col].categories.dtype):
-            item = f"== {record[col]}"
-        elif isinstance(record[col], str):
-            item = f"== '{escape_quotes(input=record[col])}'"
+                values = (precomputed_sorted[col]
+                          if precomputed_sorted and col in precomputed_sorted
+                          else df[col].dropna().sort_values())
+                if len(values) > 0:
+                    if record[col] <= values.iloc[0]:
+                        query_parts.append(f"{col} <= {values.iloc[0]}")
+                    elif record[col] >= values.iloc[-1]:
+                        query_parts.append(f"{col} >= {values.iloc[-1]}")
+                    else:
+                        counts = (precomputed_counts[col]
+                                  if precomputed_counts and col in precomputed_counts
+                                  else df[col].value_counts())
+                        if counts.get(record[col], 0) == 1:
+                            query_parts.append(f"{col} == {record[col]}")
+            continue
+
+        # For categorical columns with numeric underlying categories:
+        if isinstance(dtypes[col], pd.CategoricalDtype) and is_numeric_dtype(dtypes[col].categories.dtype):
+            query_parts.append(f"{col} == {record[col]}")
         else:
-            item = f'== "{record[col]}"'
-        query.append(f"{col} {item}")
-    return " & ".join(query)
+            if not use_medians:
+                counts = (precomputed_counts[col]
+                          if precomputed_counts and col in precomputed_counts
+                          else df[col].value_counts())
+                if counts.get(record[col], 0) == 1:
+                    query_parts.append(f"{col} == '{record[col]}'")
+            else:
+                query_parts.append(f"{col} == '{record[col]}'")
+    return " & ".join(query_parts)
 
 def multivariate_singling_out_queries(
     df: pd.DataFrame,
