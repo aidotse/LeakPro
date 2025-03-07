@@ -94,9 +94,17 @@ def random_queries(*, df: pd.DataFrame, n_queries: int, n_cols: int) -> List[str
     return queries
 
 class UniqueSinglingOutQueries(BaseModel):
-    """Collection of unique queries that single out in a DataFrame."""
+    """
+    Collection of unique queries that single out records in a DataFrame.
 
-    model_config = ConfigDict(arbitrary_types_allowed = True)
+    Attributes:
+        df (pd.DataFrame): The DataFrame to evaluate queries against.
+        sorted_queries_set (Set[str]): A set of sorted query strings to ensure uniqueness.
+        queries (List[str]): List of unique queries.
+        idxs (List[int]): Indices of records singled out by the queries.
+        count (int): Total count of unique queries.
+    """
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     df: pd.DataFrame
     sorted_queries_set: Set[str] = set()
     queries: List[str] = []
@@ -146,6 +154,19 @@ class UniqueSinglingOutQueries(BaseModel):
                 self.queries.append(query)
                 self.idxs.append(idxs[0])
                 self.count += 1
+
+    def append_only(self, *, query: str) -> None:
+        """
+        Add a query to the collection if it is unique, without evaluating its result.
+
+        Parameters:
+            query (str): The query to add.
+        """
+        sorted_query = "".join(sorted(query))
+        if sorted_query not in self.sorted_queries_set:
+            self.sorted_queries_set.add(sorted_query)
+            self.queries.append(query)
+            self.count += 1
 
 def naive_singling_out_attack(*,
     ori: pd.DataFrame,
