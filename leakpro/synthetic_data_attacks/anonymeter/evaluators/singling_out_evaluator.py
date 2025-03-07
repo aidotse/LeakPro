@@ -230,6 +230,29 @@ def univariate_singling_out_queries(*, df: pd.DataFrame, n_queries: int) -> List
             break
     return queries.queries
 
+
+def precompute_column_stats(df: pd.DataFrame, columns: List[str]) -> tuple[dict[str, pd.Series], dict[str, pd.Series]]:
+    """
+    Precompute sorted non-null values and value counts for each column.
+    
+    Parameters:
+        df (pd.DataFrame): The dataframe to process.
+        columns (List[str]): List of column names.
+    
+    Returns:
+        Tuple containing:
+          - sorted_vals: A dictionary mapping each column to its sorted (non-null) values.
+          - value_counts: A dictionary mapping each column to its value counts.
+    """
+    sorted_vals = {}
+    value_counts = {}
+    for col in columns:
+        sorted_vals[col] = df[col].dropna().sort_values()
+        value_counts[col] = df[col].value_counts()
+    return sorted_vals, value_counts
+
+
+
 def query_from_record(*,
     record: pd.Series,
     dtypes: pd.Series,
