@@ -138,7 +138,6 @@ class AttackRaMIA(AbstractMIA):
         def handle_objective(self) -> Self:
             """Set default objective if not provided."""
             if self.objective is None:
-                from leakpro.schemas import avg_tpr_at_low_fpr
                 self.objective = avg_tpr_at_low_fpr
             return self
 
@@ -316,7 +315,7 @@ class AttackRaMIA(AbstractMIA):
         
         return transformed_samples, true_labels, self.selected_indices
 
-    def create_transformed_dataset_pkl(self: Self, transformed_samples, original_indices, tmp_dir="./tmp"):
+    def create_transformed_dataset_pkl(self: Self, transformed_samples, selected_indices, tmp_dir="./tmp"):
         """Create a generic dataset with transformed samples that works with any image dataset type.
         
         This function creates a dataset that maintains the same interface expected by the handler
@@ -324,7 +323,7 @@ class AttackRaMIA(AbstractMIA):
         
         Args:
             transformed_samples: List of lists of transformed tensors
-            original_indices: Indices of original samples
+            selected_indices: Indices of original selected samples
             tmp_dir: Directory to save the temporary dataset
             
         Returns:
@@ -364,7 +363,7 @@ class AttackRaMIA(AbstractMIA):
         metadata = {
             "sample_to_range": sample_to_range_map,
             "range_to_samples": range_to_samples_map,
-            "original_indices": original_indices,
+            "selected_indices": selected_indices,
             "range_membership": {i: self.range_labels[i] for i in range(len(self.range_labels))} # added to check
         }
         
@@ -637,7 +636,7 @@ class AttackRaMIA(AbstractMIA):
         logger.info("Estimating score distributions for adaptive trimming")
         
         # Get masks that tell us which samples come from members vs non-members
-        self.sample_to_range = self.metadata["sample_to_range"]
+        #self.sample_to_range = self.metadata["sample_to_range"]
         
         in_scores = []
         out_scores = []
@@ -653,13 +652,13 @@ class AttackRaMIA(AbstractMIA):
                     out_scores.append(score)
         
         # Calculate distribution parameters
-        self.in_mean = np.mean(in_scores) if in_scores else 0
-        self.in_std = np.std(in_scores) if in_scores else 1
-        self.out_mean = np.mean(out_scores) if out_scores else 0
-        self.out_std = np.std(out_scores) if out_scores else 1
+        self.in_mean_est = np.mean(in_scores) if in_scores else 0
+        self.in_std_est = np.std(in_scores) if in_scores else 1
+        self.out_mean_est = np.mean(out_scores) if out_scores else 0
+        self.out_std_est = np.std(out_scores) if out_scores else 1
         
-        logger.info(f"Estimated IN distribution: N({self.in_mean:.4f}, {self.in_std:.4f}²)")
-        logger.info(f"Estimated OUT distribution: N({self.out_mean:.4f}, {self.out_std:.4f}²)")
+        logger.info(f"Estimated IN distribution: N({self.in_mean_est:.4f}, {self.in_std_est:.4f})")
+        logger.info(f"Estimated OUT distribution: N({self.out_mean_est:.4f}, {self.out_std_est:.4f})")
 
     def optimize_p(self: Self) -> None:
         """Optimize the p parameter for adaptive trimming using Optuna.
@@ -683,7 +682,7 @@ class AttackRaMIA(AbstractMIA):
             for range_idx, sample_indices in self.metadata["range_to_samples"].items():
                 range_sample_scores = self.all_sample_scores[sample_indices]
                 # Calculate qs based on OUT distribution and current p value
-                qs = norm.ppf(1.0 - temp_p, loc=self.out_mean, scale=self.out_std)
+                qs = norm.ppf(1.0 - temp_p, loc=self.out_mean_est, scale=self.out_std_est)
                 # Apply trimming
                 sorted_scores = np.sort(range_sample_scores)
                 trimmed = sorted_scores[sorted_scores <= qs]
@@ -696,7 +695,7 @@ class AttackRaMIA(AbstractMIA):
             # Generate simplified decision thresholds
             min_score = np.min(range_scores)
             max_score = np.max(range_scores)
-            thresholds = np.linspace(min_score, max_score, 100)
+            thresholds = np.linspace(min_score, max_score, 1000)
             
             # Prepare binary predictions matrix
             predictions = (range_scores.reshape(-1, 1) < thresholds.reshape(1, -1))
@@ -717,7 +716,7 @@ class AttackRaMIA(AbstractMIA):
         study = optuna.create_study(
             direction=self.configs.optuna_config.direction, # Whether to maximize (e.g., higher TPR) or minimize (e.g., lower FPR)
             pruner=self.configs.optuna_config.pruner, # Kills underperforming trials early (saves compute)
-            sampler=optuna.samplers.TPESampler(seed=self.configs.optuna_config.seed) # Smart algorithm to suggest better p values over time
+            sampler=optuna.samplers.TPESampler(seed=self.configs.optuna_config.seed) # Tree-structured Parzen Estimator: Smart algorithm to suggest better p values over time
         )
         
         study.optimize(
@@ -749,7 +748,7 @@ class AttackRaMIA(AbstractMIA):
         # Calculate quantile threshold qs based on OUT distribution and p
         # For a given p (probability), find the qs such that P[LLR(x) > qs] = p for x~out
         # This means qs is the (1-p) quantile of the OUT distribution
-        qs = norm.ppf(1.0 - self.best_p, loc=self.out_mean, scale=self.out_std)
+        qs = norm.ppf(1.0 - self.best_p, loc=self.out_mean_est, scale=self.out_std_est)
         logger.info(f"Using adaptive trimming with p={self.best_p:.4f}, qs={qs:.4f}")
         
         # Sort scores and keep only those below qs
@@ -824,3 +823,6 @@ class AttackRaMIA(AbstractMIA):
                 "num_ranges": len(range_scores)
             }
         )
+
+
+        
