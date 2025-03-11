@@ -5,12 +5,12 @@ audit:  # Configurations for auditing
     - attack: rmia
       online: False
       num_shadow_models: 2
-      training_data_fraction: 0.5   
+      training_data_fraction: 0.5
 # BASE
     - attack: base
       online: False
       num_shadow_models: 2
-      training_data_fraction: 0.5  
+      training_data_fraction: 0.5
 # BASE but through RaMIA
     - attack: ramia
       num_transforms: 0
@@ -21,12 +21,20 @@ audit:  # Configurations for auditing
       num_transforms: 1
       n_ops: 1
       augment_strength: "strong"
-# 8 transform      
+# 8 transform
     - attack: ramia
       num_transforms: 8
       n_ops: 1
       augment_strength: "strong"
-      
+# OSLO
+    - attack: oslo
+      n_audits: 500
+      training_data_fraction: 0.5
+      num_source_models: 6
+      num_validation_models: 2
+      online: True
+      step_size: 0.01
+      max_perturbation_size: 0.314
 
   output_dir: "./cifar10/leakpro_output"
   attack_type: "mia" #mia, gia

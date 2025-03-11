@@ -2,20 +2,40 @@
 
 import numpy as np
 import torch
+from pydantic import BaseModel, Field
 from torch import Tensor
-from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
+from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss
 from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
-from leakpro.metrics.attack_result import CombinedMetricResult
+from leakpro.metrics.attack_result import MIAResult
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 
 class AttackOSLO(AbstractMIA):
     """Implementation of the You Only Query Once attack."""
+
+    class AttackConfig(BaseModel):
+        """Configuration for the OSLO attack."""
+
+        training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Fraction of auxilary dataset to use for each shadow model training")  # noqa: E501
+        online: bool = Field(default=False, description="Perform online or offline attack")
+        num_source_models: int = Field(default=9, ge=1, description="Number of source shadow models to train")
+        num_validation_models: int = Field(default=3, ge=1, description="Number of validation shadow models to train")
+        num_sub_procedures: int = Field(default=80, ge=1, description='Number of iterations of the "subprocedure"')
+        num_iterations: int = Field(default=5, ge=1, description='Number of iterations in each "subprocedure"')
+        step_size: float = Field(default=1e-2, ge=0.0, description="Learning rate for optimization of xprime")
+        max_perturbation_size: float = Field(default=80/255, ge=0.0, description="Maximum distance between x and xprime")
+        min_threshold: float = Field(default=1e-4, ge=0.0, description="Minimum threshold for the early stopping criterion")
+        max_threshold: float = Field(default=1, ge=0.0, description="Maximum threshold for the early stopping criterion")
+        n_thresholds: float = Field(default=5, ge=0.0, description="Number of thresholds to use for the early stopping criterion")
+        n_audits: int = Field(default=500, ge=1, description="Number of data points to audit")
+
+        lr_xprime_optimization: float = Field(default=1e-3, ge=0.0, description="Learning rate for optimization of xprime")
+        max_iterations: int = Field(default=35, ge=1, description="Maximum number of iterations for optimization of xprime")
 
     def __init__(self:Self,
                  handler: AbstractInputHandler,
@@ -29,8 +49,16 @@ class AttackOSLO(AbstractMIA):
             configs (dict): Configuration parameters for the attack.
 
         """
-        # Initializes the parent metric
+        self.configs = self.AttackConfig() if configs is None else self.AttackConfig(**configs)
         super().__init__(handler)
+
+        # Assign the configuration parameters to the object
+        for key, value in self.configs.model_dump().items():
+            setattr(self, key, value)
+
+        if self.online is False and self.population_size == self.audit_size:
+            raise ValueError("The audit dataset is the same size as the population dataset. \
+                    There is no data left for the shadow models.")
 
         tmp = self.handler.get_dataloader(0, batch_size=1)
         tmp_features, _ = next(iter(tmp))
@@ -41,44 +69,6 @@ class AttackOSLO(AbstractMIA):
             self.loss = BCEWithLogitsLoss(reduction = "none")
         else:
             self.loss = CrossEntropyLoss(reduction = "none")
-
-        self._configure_attack(configs)
-
-    def _configure_attack(self:Self, configs: dict) -> None:
-        """Configure the YOQO attack.
-
-        Args:
-        ----
-            configs (dict): Configuration parameters for the attack.
-
-        """
-        self.shadow_models = []
-        self.num_shadow_models = configs.get("num_shadow_models", 64)
-        self.online = configs.get("online", False)
-        self.training_data_fraction = configs.get("training_data_fraction", 0.5)
-
-        # OSLO specific
-        self.num_source_models = configs.get("num_source_models", 3)
-        self.num_validation_models = configs.get("num_validation_models", 9)
-
-        self.num_sub_procedures = configs.get("num_sub_procedures", 80)
-        self.num_iterations = configs.get("num_iterations", 5)
-        self.step_size = configs.get("step_size", 0.01)
-        self.max_perturbation_size = configs.get("max_perturbation_size", 80/255)
-        self.min_threshold = configs.get("min_threshold", 0.0001)
-        self.max_threshold = configs.get("max_threshold", 1)
-        self.n_thresholds = configs.get("n_thresholds", 5)
-        self.n_audits = configs.get("n_audits", -1)
-
-        # Define the validation dictionary as: {parameter_name: (parameter, min_value, max_value)}
-        validation_dict = {
-            "num_shadow_models": (self.num_shadow_models, 1, None),
-            "training_data_fraction": (self.training_data_fraction, 0, 1),
-        }
-
-        # Validate parameters
-        for param_name, (param_value, min_val, max_val) in validation_dict.items():
-            self._validate_config(param_name, param_value, min_val, max_val)
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
@@ -121,10 +111,12 @@ class AttackOSLO(AbstractMIA):
         self.audit_data_indices = self.attack_data_indices[:self.n_audits]
         self.attack_data_indices = self.attack_data_indices[self.n_audits:]
 
-        self.shadow_model_indices = ShadowModelHandler().create_shadow_models(num_models = self.num_source_models + self.num_validation_models,
-                                                                              shadow_population =  self.attack_data_indices,
-                                                                              training_fraction = self.training_data_fraction,
-                                                                              online = True)
+        self.shadow_model_indices = ShadowModelHandler().create_shadow_models(
+            num_models = self.num_source_models + self.num_validation_models,
+            shadow_population =  self.attack_data_indices,
+            training_fraction = self.training_data_fraction,
+            online = True
+        )
 
         self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)
         self.source_models, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices[:self.num_source_models])
@@ -137,9 +129,9 @@ class AttackOSLO(AbstractMIA):
         y: Tensor
     ) -> float:
         if self.binary_output:
-            loss = -torch.cat([self.loss(shadow_model.model_obj(x0 + dx),y) for shadow_model in self.source_models], dim = 0)
+            loss = -torch.cat([self.loss(shadow_model.model_obj(x0 + dx)[0],y) for shadow_model in self.source_models], dim = 0)
         else:
-            loss = -torch.stack([self.loss(shadow_model.model_obj(x0 + dx),y) for shadow_model in self.source_models], dim = 2)
+            loss = -torch.cat([self.loss(shadow_model.model_obj(x0 + dx),y) for shadow_model in self.source_models], dim = 0)
         return loss.sum()
 
     def _stop_criterion(
@@ -149,15 +141,17 @@ class AttackOSLO(AbstractMIA):
         y: Tensor
     ) -> float:
         if self.binary_output:
-            loss = -torch.cat([self.loss(shadow_model.model_obj(x0 + dx),y) for shadow_model in self.validation_models], dim = 0)
+            loss = -torch.cat(
+                [self.loss(shadow_model.model_obj(x0 + dx)[0],y) for shadow_model in self.validation_models], dim = 0
+            )
         else:
-            loss = -torch.stack([self.loss(shadow_model.model_obj(x0 + dx),y) for shadow_model in self.validation_models], dim = 2)
+            loss = -torch.cat([self.loss(shadow_model.model_obj(x0 + dx),y) for shadow_model in self.validation_models], dim = 0)
         return loss.sum()
 
     def _generate_adversarial_example(
         self: Self,
         x0: Tensor,
-        y: int
+        y: Tensor
     ) -> Tensor:
         dx = torch.zeros(x0.shape, device = x0.device)
         x = torch.zeros((self.n_thresholds,) + tuple(x0.shape), device = x0.device)
@@ -173,7 +167,8 @@ class AttackOSLO(AbstractMIA):
                 optim.step()
 
                 with torch.no_grad():
-                    dx[:] = dx * torch.clamp(k * self.max_perturbation_size / self.num_sub_procedures / (torch.linalg.vector_norm(dx) + 1e-30), max = 1)
+                    norm = k * self.max_perturbation_size / self.num_sub_procedures / (torch.linalg.vector_norm(dx) + 1e-30)
+                    dx[:] = dx * torch.clamp(norm, max = 1)
                 while i < self.n_thresholds and self._stop_criterion(x0, dx, y) < self.thresholds[i]:
                     x[i,:] = x0 + dx
                     i += 1
@@ -185,7 +180,7 @@ class AttackOSLO(AbstractMIA):
 
         return x
 
-    def run_attack(self:Self) -> CombinedMetricResult:
+    def run_attack(self:Self) -> MIAResult:
         """Runs the attack on the target model and dataset and assess privacy risks or data leakage.
 
         This method evaluates how the target model's output (logits) for a specific dataset
@@ -216,38 +211,34 @@ class AttackOSLO(AbstractMIA):
             model.model_obj.eval()
             model.model_obj.to(device_name)
 
-        for i, (data, labels) in tqdm(enumerate(data_loader),
+        for _, (data, labels) in tqdm(enumerate(data_loader),
                                       total = len(data_loader),
                                       desc="Optimizing queries",
                                       leave=False):
-            xprime = self._generate_adversarial_example(data[0].to(device_name), labels)
+            xprime = self._generate_adversarial_example(data.to(device_name), labels)
 
-            lprime = self.target_model.get_logits(xprime)
-            lprime = 1 * (lprime > 0)
+            lprime = np.array([self.target_model.get_logits(xprime[j]) for j in range(xprime.shape[0])])
+            lprime = 1 * (lprime > 0) if self.binary_output else np.argmax(lprime, axis = 2)
 
             batch_predictions = np.equal(lprime,labels)
             predictions.append(batch_predictions)
 
         predictions = np.array(predictions).reshape(-1,self.n_thresholds)
-        logger.info(f"predictions.shape: {predictions.shape}")
-        signal_values = predictions.copy().reshape(-1,1)
+        signal_values = predictions[:,-1].copy().reshape(-1,1)
 
         # Prepare true labels array, marking 1 for training data and 0 for non-training data
         in_members = self.audit_dataset["data"][self.audit_dataset["in_members"]]
         true_labels = np.array([i in in_members for i in self.audit_data_indices])
 
-        logger.info(f"{predictions.shape}, {true_labels[:,np.newaxis].shape}, {np.sum(predictions, axis = 0)}, {np.sum(true_labels)}")
         logger.info(f"Accuracy: {np.sum(predictions == true_labels[:,np.newaxis], axis = 0)/predictions.shape[0]}")
         logger.info(f"TPR: {np.sum(predictions * true_labels[:,np.newaxis], axis = 0)/np.sum(true_labels)}")
         logger.info(f"FPR: {np.sum(predictions * (1 - true_labels[:,np.newaxis]), axis = 0)/np.sum(1 - true_labels)}")
 
         # Output in a format that can be used to generate ROC curve.
-        predictions = np.concatenate(
-            [np.zeros((1,predictions.shape[0])), predictions.T, np.ones((1,predictions.shape[0]))], axis = 0
-        )
+        predictions = predictions.T
 
         # Return a result object containing predictions, true labels, and the signal values for further evaluation
-        return CombinedMetricResult(
+        return MIAResult(
             predicted_labels=predictions,
             true_labels=true_labels,
             predictions_proba=None,  # Note: Direct probability predictions are not computed here
