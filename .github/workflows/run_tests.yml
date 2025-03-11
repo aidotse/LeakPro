@@ -41,10 +41,6 @@ jobs:
         run: |
           pytest --cov=leakpro --cov-report=term-missing:skip-covered --cov-report=xml --cov-report=html leakpro/tests/
           cat ./coverage.xml
-
-      - name: Debug GitHub Secrets
-        run: |
-          echo "GH_PAT is set: ${#secrets.GH_PAT} characters long"
           
       - name: Create Coverage Badge
         run: |
@@ -54,6 +50,6 @@ jobs:
       - name: Deploy Coverage Badge to GitHub Pages
         uses: JamesIves/github-pages-deploy-action@v4
         with:
-          token: ${{ secrets.GH_PAT }}
+          token: ${{ secrets.GITHUB_TOKEN }}
           branch: gh-pages
           folder: badges
