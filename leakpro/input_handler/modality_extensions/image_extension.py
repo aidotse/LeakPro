@@ -77,101 +77,92 @@ class ImageExtension(AbstractModalityExtension):
             return data
         else:
             raise TypeError(f"Unsupported data type: {type(data)}. Expected tensor, ndarray, or PIL Image.")
-        
+    
     def get_transform(self, transform_type, **kwargs):
         """Get transformation function based on specified type."""
         if transform_type == "cifar":
-            # Create a list of transformations
             transform_list = [
-                # 1. Identity transformation (original image)
-                transforms.Compose([
-                    transforms.ToTensor()
-                ]),
-                
-                # 2. Horizontal flip
+                # 1. Identity (original image)
+                transforms.Compose([transforms.ToTensor()]),
+
+                # 2. Horizontal flipping
                 transforms.Compose([
                     transforms.RandomHorizontalFlip(p=1.0),
                     transforms.ToTensor()
                 ]),
-                
-                # 3-4. Small rotations (±5 degrees)
+
+                # 3-5. Rotations
                 transforms.Compose([
-                    transforms.RandomRotation(degrees=(5, 5)),
+                    transforms.RandomRotation(degrees=15),
                     transforms.ToTensor()
                 ]),
                 transforms.Compose([
-                    transforms.RandomRotation(degrees=(-5, -5)),
-                    transforms.ToTensor()
-                ]),
-                
-                # 5. Small crop with padding
-                transforms.Compose([
-                    transforms.RandomCrop(32, padding=4),
-                    transforms.ToTensor()
-                ]),
-                
-                # 6-7. Mild brightness adjustments
-                transforms.Compose([
-                    transforms.ColorJitter(brightness=(1.1, 1.1)),
+                    transforms.RandomRotation(degrees=(-15, 15)),
                     transforms.ToTensor()
                 ]),
                 transforms.Compose([
-                    transforms.ColorJitter(brightness=(0.9, 0.9)),
+                    transforms.RandomRotation(degrees=30),
                     transforms.ToTensor()
                 ]),
-                
-                # 8-9. Mild contrast adjustments
+
+                # 6-7. Random resized cropping
                 transforms.Compose([
-                    transforms.ColorJitter(contrast=(1.1, 1.1)),
+                    transforms.RandomResizedCrop(size=32, scale=(0.8, 1.0)),
                     transforms.ToTensor()
                 ]),
                 transforms.Compose([
-                    transforms.ColorJitter(contrast=(0.9, 0.9)),
+                    transforms.RandomResizedCrop(size=32, scale=(0.6, 0.9)),
                     transforms.ToTensor()
                 ]),
-                
-                # 10. Horizontal flip + small rotation
+
+                # 8-9. Brightness adjustments
                 transforms.Compose([
-                    transforms.RandomHorizontalFlip(p=1.0),
-                    transforms.RandomRotation(degrees=(3, 3)),
+                    transforms.ColorJitter(brightness=0.2),
                     transforms.ToTensor()
                 ]),
-                
-                # 11. Small crop + mild brightness
                 transforms.Compose([
-                    transforms.RandomCrop(30, padding=2),
-                    transforms.Resize(32),
-                    transforms.ColorJitter(brightness=(1.05, 1.05)),
+                    transforms.ColorJitter(brightness=0.4),
                     transforms.ToTensor()
                 ]),
-                
-                # 12. Small translations (shift the image slightly)
+
+                # 10-11. Contrast adjustments
                 transforms.Compose([
-                    transforms.RandomAffine(degrees=0, translate=(0.05, 0.05)),
+                    transforms.ColorJitter(contrast=0.2),
                     transforms.ToTensor()
                 ]),
-                
-                # 13. Small scale change (zoom slightly)
                 transforms.Compose([
-                    transforms.RandomAffine(degrees=0, scale=(0.95, 0.95)),
+                    transforms.ColorJitter(contrast=0.4),
                     transforms.ToTensor()
                 ]),
-                
-                # 14. Slight sharpening effect
+
+                # 12. Hue adjustment
+                transforms.Compose([
+                    transforms.ColorJitter(hue=0.1),
+                    transforms.ToTensor()
+                ]),
+
+                # 13. Combined rotation and brightness
+                transforms.Compose([
+                    transforms.RandomRotation(degrees=10),
+                    transforms.ColorJitter(brightness=0.2),
+                    transforms.ToTensor()
+                ]),
+
+                # 14. Combined cropping, flipping, and contrast
+                transforms.Compose([
+                    transforms.RandomResizedCrop(size=32, scale=(0.85, 1.0)),
+                    transforms.RandomHorizontalFlip(p=0.5),
+                    transforms.ColorJitter(contrast=0.2),
+                    transforms.ToTensor()
+                ]),
+
+                # 15. Sharpening
                 transforms.Compose([
                     transforms.RandomAdjustSharpness(sharpness_factor=1.5, p=1.0),
                     transforms.ToTensor()
                 ]),
-                
-                # 15. Training-like combined transformation
-                transforms.Compose([
-                    transforms.RandomHorizontalFlip(p=0.5),
-                    transforms.RandomCrop(32, padding=4),
-                    transforms.ColorJitter(brightness=0.1, contrast=0.1),
-                    transforms.ToTensor()
-                ])
             ]
-            
+
             # Define a function that applies one of these transformations based on index
             def transform_function(img, transform_idx=None):
                 # Add logging to track which transformation is being applied
@@ -183,6 +174,7 @@ class ImageExtension(AbstractModalityExtension):
                 return transform_list[transform_idx](img)
             
             return transform_function
+
         
                 
             
