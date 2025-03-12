@@ -1,16 +1,32 @@
 audit:  # Configurations for auditing
   random_seed: 1234  # Integer specifying the random seed
   attack_list:
-    rmia:
-      online: False
-      num_shadow_models: 5
-      gamma: 1
-    # population:
-    lira:
-      online: False
+    # rmia:
+    #   online: False
+    #   num_shadow_models: 5
+    #   gamma: 1
+    # # population:
+    # lira:
+    #   online: False
     # loss_traj:
     # HSJ:
     # yoqo:
+    lira:
+      training_data_fraction: 0.5  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
+      num_shadow_models: 8 #Number of shadow models to train
+      online: False # perform online
+      fixed_variance: True
+      boosting: False
+    ramia:
+      training_data_fraction: 0.5  # Fraction of auxiliary dataset for shadow models
+      num_shadow_models: 8 # Number of shadow models (as recommended in paper)
+      online: False  # We're doing offline attack
+      num_transforms: 10  # Number of transformations to apply
+      fixed_variance: True
+      boosting: False
+      range_num_audit_samples: 500
+      #dataset_type: "image"
+      #transform_type: "cifar"
 
   output_dir: "./leakpro_output"
   attack_type: "mia" #mia, gia
