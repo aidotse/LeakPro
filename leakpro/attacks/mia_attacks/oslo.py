@@ -16,7 +16,7 @@ from leakpro.utils.logger import logger
 
 
 class AttackOSLO(AbstractMIA):
-    """Implementation of the You Only Query Once attack."""
+    """Implementation of the One-Shot Label-Only Membership Inference Attacks attack."""
 
     class AttackConfig(BaseModel):
         """Configuration for the OSLO attack."""
@@ -41,7 +41,7 @@ class AttackOSLO(AbstractMIA):
                  handler: AbstractInputHandler,
                  configs: dict
                  ) -> None:
-        """Initialize the YOQO attack.
+        """Initialize the OSLO attack.
 
         Args:
         ----
@@ -72,20 +72,19 @@ class AttackOSLO(AbstractMIA):
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
-        title_str = "You Only Query Once (YOQO) attack"
+        title_str = "One-Shot Label-Only Membership Inference Attacks (OSLO) attack"
 
-        reference_str = "Wu Y, et al. You Only Query Once: An Efficient Label- Only Membership Inference Attack"
+        reference_str = "Peng Y, et al. OSLO: One-Shot Label-Only Membership Inference Attacks"
 
-        summary_str = "YOQO is a membership inference attack based on the predictecd hard labels of a black-box model"
+        summary_str = "OSLO is a membership inference attack based on the predicted hard labels of a black-box model"
 
         detailed_str = "The attack is executed according to: \
-            1. A fraction of the target model dataset is sampled to be included (in-) or excluded (out-) \
-            from the shadow model training dataset. \
-            2. The shadow models are used to find perturbations to the datapoints such that the performance \
-            difference between in- and out-models is maximized.\
-            3. Membership status in the target model is determined using a single query (for each datapoint) \
-            at the perturbed datapoint. \
-            4. The attack is evaluated on an audit dataset to determine the attack performance."
+            1. Train surrogate (source and validation) models using \
+                an auxiliary data set. \
+            2. For data points not used in the surrogate model training, \
+                generate an adversarial example based on a minimal perturbation.\
+            3. If the same perturbation is insufficient to ``fool'' the target \
+                model, the null hypothesis (data point not in training data) is rejected."
 
         return {
             "title_str": title_str,
