@@ -142,4 +142,7 @@ class AbstractGIA(AbstractAttack):
         gia_result = GIAResults(client_loader, self.best_reconstruction,
                           psnr_score=psnr_score, ssim_score=ssim_score,
                           data_mean=data_mean, data_std=data_std, config=configs)
+        for data in client_loader:
+            print(data[0])
+        print(psnr_score, ssim_score, client_loader)
         yield i, ssim_score, gia_result

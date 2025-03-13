@@ -667,6 +667,60 @@ class GIAResults:
             latex += _latex(save_name=name, original=res.original, recreated=res.recreated)
         return latex
 
+    @staticmethod
+    def merge_intermediate(
+        GIAResults_list: List["GIAResults"],
+    ) -> "GIAResults":
+        """Configure the attack.
+
+        Args:
+        ----
+            GIAResults_list: The list containing all intermediate GIAResults.
+                The final GIAResult should also be included last, GIAResults_list[-1]
+                
+        Returns
+        -------
+            GIAResults: A single GIAResult containing all intermediate and final result.
+
+        """
+
+        # Make sure GIAResults_list is not empty
+        assert isinstance(GIAResults_list, list)
+
+        # Make sure GIAResults_list is not empty
+        assert len(GIAResults_list) > 0
+        
+        # Make sure there are GIAResults in the GIAResults_list
+        assert all(isinstance(res, GIAResults) for res in GIAResults_list if res is not None)
+
+        # Make sure the final results, GIAResults_list[-1], is a GIAResult
+        assert isinstance(GIAResults_list[-1], GIAResults)
+
+        # Initialize lists for merging results
+        intr_rec, intr_psnr, intr_ssim = [], [], []
+
+        # Collect values from each GIAResults instance
+        for giares in GIAResults_list:
+            if giares is not None:
+
+                # Append intermediate results to be merged
+                intr_rec.append(giares.recreated_data) # Keep each value as a list element
+                intr_psnr.append(giares.PSNR_score) # Keep each value as a list element
+                intr_ssim.append(giares.SSIM_score) # Keep each value as a list element
+
+        # Extract final result
+        merged_giares = GIAResults_list[-1]
+
+         # Change values to lists containing all intermediate results
+        merged_giares.recreated_data = intr_rec  # List of all recreated_data values
+        merged_giares.PSNR_score = intr_psnr  # List of all PSNR scores
+        merged_giares.SSIM_score = intr_ssim  # List of all SSIM scores
+        
+        return merged_giares
+
+    @staticmethod
+    def collect_intermediate_generator_results():
+        pass
 
 class TEMPLATEResult:
     """Contains results related to the performance of the metric. It contains the results for multiple fpr."""
