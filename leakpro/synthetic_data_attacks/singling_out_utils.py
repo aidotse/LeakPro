@@ -146,8 +146,9 @@ def aux_singling_out_risk_evaluation(**kwargs: Any) -> Tuple[Optional[Union[int,
     n_cols = kwargs["n_cols"]
     #Return non if n_cols==2
     #Note: this is because n_cols==2 takes A LOT of time. Seems algorithm is not good for predicates with len==2
-    if n_cols == 2:
-        return None, None
+    #Update: with the current modifications we get better heuristics 
+    # if n_cols == 2:
+    #     return None, None
     #Instantiate singling-out evaluator and evaluate
     evaluator = SinglingOutEvaluator(**kwargs)
     evaluator.evaluate()
@@ -159,7 +160,7 @@ def aux_singling_out_risk_evaluation(**kwargs: Any) -> Tuple[Optional[Union[int,
     res_cols.append("n_cols")
     if verbose:
         print(f"Finished aux_singling_out_risk_evaluation for n_cols: {n_cols}") # noqa: T201
-    return res, res_cols
+    return res, res_cols, evaluator.main_queries
 
 def aux_apply_kwargs_to_fun(fun: Callable, kwargs: Dict) -> Any: # noqa: ANN401
     """Auxiliary function that executes passed fun with given kwargs."""
@@ -170,6 +171,7 @@ def starmap_with_kwargs(pool: mp.Pool, fn: Callable, kwargs_list: List[Dict]) ->
     args_for_starmap = zip(repeat(fn), kwargs_list)
     return pool.starmap(aux_apply_kwargs_to_fun, args_for_starmap)
 
+
 def singling_out_risk_evaluation(
     ori: DataFrame,
     syn: DataFrame,
@@ -178,6 +180,16 @@ def singling_out_risk_evaluation(
     verbose: bool = False,
     save_results_json: bool = False,
     path: str = None,
+    max_per_combo= 5,
+    sample_size_per_combo: int = 2,
+    max_rounds_no_progress: int = 10,
+    use_medians: bool = True,
+    use_tree: bool = True,
+    tree_params: Dict = {
+        'min_samples_leaf': 1,
+        'max_depth': None,           # let the tree grow
+        'random_state': 42
+    }, 
     **kwargs: dict
 ) -> SinglingOutResults:
     """Perform an individual/full singling-out risk evaluation.
@@ -204,6 +216,11 @@ def singling_out_risk_evaluation(
         Path where to save json results file.
     kwargs: dict
         Other keyword arguments for SinglingOutEvaluator.
+    max_per_combo (int): Maximum allowed queries per column combination.
+    max_attempts (Optional[int]): Maximum number of attempts to generate queries before stopping.
+    sample_size_per_combo (int): Number of unique records to sample from each combination per iteration.
+    max_rounds_no_progress (int): Number of rounds with no progress before stopping.
+    use_medians (int): whether to use the medians in the query construction or not
 
     Returns
     -------
@@ -216,10 +233,13 @@ def singling_out_risk_evaluation(
         print(f"\nRunning singling out risk evaluation for `{dataset}` with n_cols {suffix}") # noqa: T201
     if n_cols is not None:
         check_for_int_value(x=n_cols)
-        if n_cols == 2:
-            raise ValueError("Parameter `n_cols` must be different than 2.")
+        # no need for this checking, since the modifications has better heurestics 
+
+        # if n_cols == 2:
+        #     raise ValueError("Parameter `n_cols` must be different than 2.")
+
         #Run individual aux_singling_out_risk_evaluation
-        res, res_cols = aux_singling_out_risk_evaluation(
+        res, res_cols, queries = aux_singling_out_risk_evaluation(
             ori = ori,
             syn = syn,
             n_cols = n_cols,
@@ -236,7 +256,13 @@ def singling_out_risk_evaluation(
                 "ori": ori,
                 "syn": syn,
                 "n_cols": i+1,
-                "verbose": verbose
+                "verbose": verbose,
+                "max_per_combo": max_per_combo,
+                "sample_size_per_combo": sample_size_per_combo,
+                "max_rounds_no_progress": max_rounds_no_progress,
+                "use_medians": use_medians,
+                "use_tree": use_tree,
+                "tree_params" : tree_params
             }
             kwargs_t.update(kwargs)
             kwargs_list.append(kwargs_t)
@@ -251,6 +277,7 @@ def singling_out_risk_evaluation(
         # Repack res and res_cols
         res = [i[0] for i in res_ if i[0] is not None]
         res_cols = res_[0][1]
+        queries = [i[2] for i in res_ if i[2] is not None]
     #Instantiate SinglingOutResults
     sin_out_res = SinglingOutResults(
         res_cols = res_cols,
@@ -266,7 +293,7 @@ def singling_out_risk_evaluation(
             res = sin_out_res.model_dump(),
             path = path
         )
-    return sin_out_res
+    return sin_out_res, queries
 
 def load_singling_out_results(*, dataset: str, n_cols: Optional[int] = None, path: str = None) -> SinglingOutResults:
     """Function to load and return singling-out results from given dataset."""
