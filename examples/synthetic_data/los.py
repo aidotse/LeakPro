@@ -175,15 +175,22 @@ synthetic_data = synthesizer.generate_leaky_data(
     )
 
 sin_out_res = singling_out_risk_evaluation(
-    dataset = "los_syn_10k_diverse_modified_report_v4_None",
+    dataset = "los_syn_10_diverse_modified",
     ori = ori,
     syn = syn,
-    n_attacks = 10_000,
+    n_cols=2, 
+    n_attacks = 10,
     verbose = True,
     save_results_json = True,
     max_attempts = 200_000,
     max_per_combo= 50,
     sample_size_per_combo= 10,
     max_rounds_no_progress= 100,
-    use_medians = False
+    use_medians = False,
+    use_tree=True,
+    tree_params={
+        'min_samples_leaf': 1,
+        'max_depth': None,           # let the tree grow
+        'random_state': 42
+    }
 )
