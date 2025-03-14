@@ -41,14 +41,27 @@ jobs:
         run: |
           pytest --cov=leakpro --cov-report=term-missing:skip-covered --cov-report=xml --cov-report=html leakpro/tests/
           cat ./coverage.xml
-
+      
+      - name: Check if running in a fork
+        id: check_fork
+        run: |
+          if [ "${{ github.event.pull_request.head.repo.fork }}" == "true" ]; then
+            echo "Skipping coverage badge generation because this is a forked PR."
+            echo "is_fork=true" >> $GITHUB_ENV
+          else
+            echo "is_fork=false" >> $GITHUB_ENV
+          fi
+      
       - name: Create Coverage Badge
+        if: env.is_fork == 'false'
         run: |
           mkdir -p badges
           coverage-badge -o badges/coverage.svg -f
-
+      
       - name: Deploy Coverage Badge to GitHub Pages
+        if: env.is_fork == 'false'
         uses: JamesIves/github-pages-deploy-action@v4
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           branch: gh-pages
           folder: badges

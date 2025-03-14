@@ -722,6 +722,13 @@ class GIAResults:
     def collect_intermediate_generator_results():
         pass
 
+class MinvResult:
+    """Contains results for a MI attack."""
+
+    pass
+
+
+
 class TEMPLATEResult:
     """Contains results related to the performance of the metric. It contains the results for multiple fpr."""
 
