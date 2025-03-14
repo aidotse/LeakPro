@@ -595,6 +595,32 @@ class SinglingOutEvaluator(BaseModel):
         EvaluationResults object containing the success rates for the various attacks.
         Parameter will be set in evaluate method.
 
+    max_per_combo : int, default is 5
+        The maximum number of queries allowed per column combination. This parameter 
+        limits the number of successful queries generated for each specific grouping.
+    sample_size_per_combo : int, default is 2
+        The number of unique records (per column combination) that are sampled to generate 
+        candidate queries.
+    max_rounds_no_progress : int, default is 10
+        The number of consecutive rounds with no new queries found after which the algorithm 
+        will stop further attempts. This helps prevent infinite loops when the data does not 
+        yield additional singletons.
+    use_medians : bool, default is False
+        If True, for numeric attributes the query is constructed using a median-based condition 
+        (e.g. using ">=" or "<="). If False, the algorithm uses extreme value and uniqueness checks.
+    use_tree : bool, default is True
+        If True, a decision tree is used to construct adaptive interval predicates for continuous 
+        columns. In this approach, a decision tree is pre-fitted (one per continuous column) and 
+        its decision path is used to determine the lower and upper bounds that ideally isolate 
+        the record.
+    tree_params : Dict[str, Any], default is {'min_samples_leaf': 1, 'max_depth': None, 'random_state': 42}
+        A dictionary of hyperparameters to configure the decision tree used for continuous columns.
+        - `min_samples_leaf`: Minimum number of samples required in a leaf node. A value of 1 allows 
+          the tree to isolate single records.
+        - `max_depth`: Maximum depth of the tree. If set to None, the tree is allowed to grow until 
+          other stopping criteria are met.
+        - `random_state`: Seed for reproducibility.
+
     """
 
     model_config = ConfigDict(arbitrary_types_allowed = True)
@@ -604,16 +630,12 @@ class SinglingOutEvaluator(BaseModel):
     n_attacks: int = 2_000
     confidence_level: float = 0.95
     max_attempts: Optional[int] = 10_000_000
-    max_per_combo: int = 5,
-    sample_size_per_combo: int = 2,
-    max_rounds_no_progress: int = 10,
+    max_per_combo: int = 5
+    sample_size_per_combo: int = 2
+    max_rounds_no_progress: int = 10
     use_medians: bool = False
     use_tree: bool = True
-    tree_params={
-        'min_samples_leaf': 1,
-        'max_depth': None,           # let the tree grow
-        'random_state': 42
-    }
+    tree_params: Dict[str, Any] = {'min_samples_leaf': 1, 'max_depth': None, 'random_state': 42}
     #Following parameters are set in evaluate method
     main_queries: Optional[UniqueSinglingOutQueries] = None
     naive_queries: Optional[UniqueSinglingOutQueries] = None
