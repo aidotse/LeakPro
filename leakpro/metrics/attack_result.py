@@ -3,6 +3,7 @@
 import json
 import os
 from collections import defaultdict
+from collections.abc import Generator
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -719,8 +720,11 @@ class GIAResults:
         return merged_giares
 
     @staticmethod
-    def collect_intermediate_generator_results():
-        pass
+    def collect_generator_results(
+        GIAResult_Gen: Generator[tuple["int", "Tensor", "GIAResults"]]
+        ) -> "GIAResults":
+        _, _, GIA_result_list = zip(*GIAResult_Gen)
+        return GIAResults.merge_intermediate(GIAResults_list=GIA_result_list)
 
 class MinvResult:
     """Contains results for a MI attack."""

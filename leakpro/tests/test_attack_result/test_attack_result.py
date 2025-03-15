@@ -262,10 +262,15 @@ class TestGIAResult:
     def setup_method(self:Self) -> None:
         """Set up temporary directory and logger for GIAResult."""
         self.temp_dir = tempfile.TemporaryDirectory()
-        
+
         import torch
+        import torchvision
+        from torch import Tensor, as_tensor, randperm
         from torch.nn import BCEWithLogitsLoss
+        from torch.utils.data import DataLoader, Subset
+        from torchvision import transforms
         from leakpro.attacks.gia_attacks.invertinggradients import InvertingConfig
+        from leakpro.fl_utils.data_utils import get_meanstd
         
         configs = InvertingConfig()
         configs.at_iterations = 24000
@@ -274,9 +279,36 @@ class TestGIAResult:
         configs.criterion = BCEWithLogitsLoss() #CrossEntropyLoss()
         configs.epochs = 1
         self.config = configs
+
+        def get_cifar10_loader(num_images:int =1, batch_size:int = 1, num_workers:int = 2 ) -> tuple[DataLoader, Tensor, Tensor]:
+            """Get the full dataset for CIFAR10."""
+            trainset = torchvision.datasets.CIFAR10(root="./data", train=True, download=True, transform=transforms.ToTensor())
+            data_mean, data_std = get_meanstd(trainset)
+            transform = transforms.Compose([
+                    transforms.ToTensor(),
+                    transforms.Normalize(data_mean, data_std)])
+            trainset.transform = transform
+
+            total_examples = len(trainset)
+            random_indices = randperm(total_examples)[:num_images]
+            subset_trainset = Subset(trainset, random_indices)
+            trainloader = DataLoader(subset_trainset, batch_size=batch_size,
+                                                    shuffle=False, drop_last=True, num_workers=num_workers)
+            data_mean = as_tensor(data_mean)[:, None, None]
+            data_std = as_tensor(data_std)[:, None, None]
+            return trainloader, data_mean, data_std
         
         org_data = torch.tensor([2.0271e+00, 2.0112e+00, 2.0271e+00, 1.0625e-01, -4.8768e-03, -3.2237e-01])
+        client_dataloader, data_mean, data_std = get_cifar10_loader(num_images=1, batch_size=1, num_workers=2)
         self.GIAresult = GIAResults(org_data,
+                org_data*2,
+                torch.tensor(12.8943),
+                0.8470116640585275,
+                torch.tensor([0.4914]),
+                torch.tensor([0.2470]),
+                self.config)
+
+        self.GIAresult_multiple = GIAResults(org_data,
                 org_data*2,
                 torch.tensor(12.8943),
                 0.8470116640585275,
