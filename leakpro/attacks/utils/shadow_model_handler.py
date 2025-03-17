@@ -161,8 +161,12 @@ class ShadowModelHandler(ModelHandler):
                 test_acc, test_loss = self._eval_shadow_model(shadow_model, criterion, remaining_indices, dataset_params)
 
             logger.info(f"Training shadow model {i} complete")
+            shadow_model_state_dict = shadow_model.state_dict()
+            cleaned_state_dict = {key.replace("_module.", "").replace("module.", ""): value
+                    for key, value in shadow_model_state_dict.items()}
+
             with open(f"{self.storage_path}/{self.model_storage_name}_{i}.pkl", "wb") as f:
-                save(shadow_model.state_dict(), f)
+                save(cleaned_state_dict, f)
                 logger.info(f"Saved shadow model {i} to {self.storage_path}")
 
             logger.info(f"Storing metadata for shadow model {i}")

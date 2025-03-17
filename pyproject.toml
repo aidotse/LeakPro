@@ -27,6 +27,7 @@ dependencies = [
 mia = ["torch", "torchvision", "optuna"]
 synthetic = ["numba", "pydantic", "transformers", "sentence-transformers"]
 federated = ["torch", "torchvision", "torchmetrics", "pytorch-ignite", "optuna"]
+minv = ["torch", "torchvision", "optuna", "kornia"]
 
 dev = [
   "pytest",
@@ -42,6 +43,7 @@ dev = [
   "sentence-transformers",  # from synthetic
   "pytorch-ignite", # from federated
   "optuna", # federated and mia
+  "kornia", # from minv
 ]
 
 [tool.setuptools]
