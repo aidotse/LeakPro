@@ -20,7 +20,7 @@ conda activate mimic_data_extraction
  ```
 
 #### Compiling the data
-First create the data folder:
+To create the `data` folder, run the following command from the `mimiciii_prepration` directory (where this `ReadMe.md` file is located):  
 ```bash
  $ mkdir ../data
 ```
