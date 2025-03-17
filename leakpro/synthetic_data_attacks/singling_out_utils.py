@@ -175,6 +175,7 @@ def singling_out_risk_evaluation(
     syn: DataFrame,
     n_cols: Optional[int] = None,
     dataset: str = "test",
+    categorical_threshold: int = 20,
     verbose: bool = False,
     save_results_json: bool = False,
     path: str = None,
@@ -196,6 +197,9 @@ def singling_out_risk_evaluation(
         If None, performs a full evaluation. Otherwise performs individual evaluation for given n_cols
     dataset: str
         Name of dataframes, used when verbose True and when saving results to json.
+    categorical_threshold: int, default is 20
+        If the number of unique values in any numerically valued colums does not exceed this tthreshold, 
+        the corresponding column dtype will be set as categorical values columns
     verbose: bool, default is False
         If True, prints progress of evaluation.
     save_results_json: bool, default is False
@@ -223,6 +227,7 @@ def singling_out_risk_evaluation(
             ori = ori,
             syn = syn,
             n_cols = n_cols,
+            categorical_threshold = categorical_threshold,
             verbose = verbose,
             **kwargs
         )
@@ -236,6 +241,7 @@ def singling_out_risk_evaluation(
                 "ori": ori,
                 "syn": syn,
                 "n_cols": i+1,
+                "categorical_threshold": categorical_threshold, 
                 "verbose": verbose
             }
             kwargs_t.update(kwargs)
