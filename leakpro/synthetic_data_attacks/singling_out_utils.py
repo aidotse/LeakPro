@@ -198,7 +198,7 @@ def singling_out_risk_evaluation(
     dataset: str
         Name of dataframes, used when verbose True and when saving results to json.
     categorical_threshold: int, default is 20
-        If the number of unique values in any numerically valued colums does not exceed this tthreshold, 
+        If the number of unique values in any numerically valued colums does not exceed this tthreshold,
         the corresponding column dtype will be set as categorical values columns
     verbose: bool, default is False
         If True, prints progress of evaluation.
@@ -241,7 +241,7 @@ def singling_out_risk_evaluation(
                 "ori": ori,
                 "syn": syn,
                 "n_cols": i+1,
-                "categorical_threshold": categorical_threshold, 
+                "categorical_threshold": categorical_threshold,
                 "verbose": verbose
             }
             kwargs_t.update(kwargs)

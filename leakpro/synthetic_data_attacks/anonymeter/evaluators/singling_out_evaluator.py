@@ -361,7 +361,7 @@ class SinglingOutEvaluator(BaseModel):
         avoid excessively long running calculations. If ``max_attempts`` is None,
         no limit will be imposed.
     categorical_threshold: int, default is 20
-        If the number of unique values in any numerically valued colums does not exceed this tthreshold, 
+        If the number of unique values in any numerically valued colums does not exceed this tthreshold,
         the corresponding column dtype will be set as categorical values columns
     main_queries: UniqueSinglingOutQueries, optional
         UniqueSinglingOutQueries object holding main attack queries and count.
