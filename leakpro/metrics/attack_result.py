@@ -720,7 +720,7 @@ class GIAResults:
         return merged_giares
 
     @staticmethod
-    def collect_generator_results(
+    def collect_generator(
         GIAResult_Gen: Generator[tuple["int", "Tensor", "GIAResults"]]
         ) -> "GIAResults":
         _, _, GIA_result_list = zip(*GIAResult_Gen)

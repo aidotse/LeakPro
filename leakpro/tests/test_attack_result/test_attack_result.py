@@ -298,23 +298,22 @@ class TestGIAResult:
             data_std = as_tensor(data_std)[:, None, None]
             return trainloader, data_mean, data_std
         
-        org_data = torch.tensor([2.0271e+00, 2.0112e+00, 2.0271e+00, 1.0625e-01, -4.8768e-03, -3.2237e-01])
         client_dataloader, data_mean, data_std = get_cifar10_loader(num_images=1, batch_size=1, num_workers=2)
-        self.GIAresult = GIAResults(org_data,
-                org_data*2,
-                torch.tensor(12.8943),
-                0.8470116640585275,
-                torch.tensor([0.4914]),
-                torch.tensor([0.2470]),
-                self.config)
+        self.GIAresult = GIAResults(client_dataloader, # Original data
+                client_dataloader, # Recreated data
+                torch.tensor(12.8943), # PSNR Score
+                0.8470116640585275, # SSIM Score
+                torch.tensor([0.4914]), # Data Mean
+                torch.tensor([0.2470]), # Data Std
+                self.config) # Config
 
-        self.GIAresult_multiple = GIAResults(org_data,
-                org_data*2,
-                torch.tensor(12.8943),
-                0.8470116640585275,
-                torch.tensor([0.4914]),
-                torch.tensor([0.2470]),
-                self.config)
+        self.GIAresult_multiple = GIAResults(client_dataloader, # Original data
+                [client_dataloader, client_dataloader, client_dataloader, client_dataloader], # Recreated data
+                [torch.tensor(12.8943),torch.tensor(12.8943),torch.tensor(12.8943),torch.tensor(12.8943)] # PSNR Score
+                [0.8470116640585275,0.8470116640585275,0.8470116640585275,0.8470116640585275] # SSIM Score
+                torch.tensor([0.4914]), # Data Mean
+                torch.tensor([0.2470]), # Data Std
+                self.config) # Config
 
     def teardown_method(self:Self) -> None:
         """Clean up temporary directory."""
@@ -322,7 +321,16 @@ class TestGIAResult:
 
     def test_giaresult_init(self:Self) -> None:
         """Test the initialization of MIAResult."""
-        assert self.GIAresult is not None
+        assert isinstance(self.GIAresult, GIAResults)
+        assert self.GIAresult.original_data is not None
+        assert self.GIAresult.recreated_data is not None
+        assert self.GIAresult.psnr_score is not None
+        assert self.GIAresult.ssim_score is not None
+        assert self.GIAresult.data_mean is not None
+        assert self.GIAresult.data_std is not None
+        assert self.GIAresult.config is not None
+
+        assert isinstance(self.GIAresult_multiple, GIAResults)
 
     def test_save_load_giaresult(self:Self) -> None:
         """Test load and save functionality."""
