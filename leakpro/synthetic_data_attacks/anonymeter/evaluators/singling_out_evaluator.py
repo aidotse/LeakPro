@@ -360,6 +360,9 @@ class SinglingOutEvaluator(BaseModel):
         the requested `n_attacks` singling out queries. This is useful to
         avoid excessively long running calculations. If ``max_attempts`` is None,
         no limit will be imposed.
+    categorical_threshold: int, default is 20
+        If the number of unique values in any numerically valued colums does not exceed this tthreshold, 
+        the corresponding column dtype will be set as categorical values columns
     main_queries: UniqueSinglingOutQueries, optional
         UniqueSinglingOutQueries object holding main attack queries and count.
         Parameter will be set in evaluate method.
@@ -379,6 +382,10 @@ class SinglingOutEvaluator(BaseModel):
     n_attacks: int = 2_000
     confidence_level: float = 0.95
     max_attempts: Optional[int] = 10_000_000
+
+    # New parameter for the unique count threshold
+    categorical_threshold: int = 20
+
     #Following parameters are set in evaluate method
     main_queries: Optional[UniqueSinglingOutQueries] = None
     naive_queries: Optional[UniqueSinglingOutQueries] = None
@@ -388,6 +395,18 @@ class SinglingOutEvaluator(BaseModel):
         super().__init__(**kwargs)
         self.ori = self.ori.drop_duplicates()
         self.syn = self.syn.drop_duplicates()
+
+        # Convert numeric columns with low unique counts (<= categorical_threshold) to categorical
+        for df in [self.ori, self.syn]:
+            for col in df.columns:
+                if pd.api.types.is_numeric_dtype(df[col]):
+                    unique_vals = set(df[col].dropna().unique())
+                    # first, convert binary columns (values exactly {0, 1}) to boolean.
+                    if unique_vals == {0, 1}:
+                        df[col] = df[col].astype(bool)
+                    # convert numeric columns with low unique counts (<= categorical_threshold) to categorical.
+                    elif df[col].nunique() <= self.categorical_threshold:
+                        df[col] = df[col].astype("category")
 
     def evaluate(self: Self) -> EvaluationResults:
         """Run the singling-out attacks (main and naive) and set and return results."""
