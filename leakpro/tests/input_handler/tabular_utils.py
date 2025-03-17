@@ -5,12 +5,12 @@ import random
 import numpy as np
 from dotmap import DotMap
 from sklearn.preprocessing import OneHotEncoder
-from torch import from_numpy, save, tensor
+from torch import from_numpy, save
 from torch.nn import Linear, Module, ReLU
-from torch.utils.data import TensorDataset
 
 from leakpro.tests.constants import STORAGE_PATH, get_tabular_handler_config
-from leakpro.schemas import MIAMetaDataSchema
+from leakpro.schemas import MIAMetaDataSchema, OptimizerConfig, LossConfig
+from leakpro.tests.input_handler.tabular_input_handler import TabularInputHandler
 
 class MLP(Module):
     def __init__(self, input_size, hidden_size, num_classes):
@@ -27,28 +27,6 @@ class MLP(Module):
         out = self.relu(out)
         out = self.fc2(out)
         return out
-
-class DatasetWithSubset(TensorDataset):
-    """Dataset with a subset method."""
-
-    def __init__(self, x:tensor, y:tensor, dec_to_onehot:dict, one_hot_encoded:bool=True):
-        self.x = x
-        self.y = y
-
-        # create dictionary to map categorical columns to number of classes
-        self.dec_to_onehot = dec_to_onehot
-        self.one_hot_encoded = one_hot_encoded
-
-    def subset(self, indices):
-        return DatasetWithSubset(self.x[indices],
-                                 self.y[indices],
-                                 self.dec_to_onehot,
-                                 self.one_hot_encoded)
-    def __len__(self):
-        return len(self.y)
-
-    def __getitem__(self, idx):
-        return self.x[idx], self.y[idx]
 
 def setup_tabular_test()->None:
     """Setup for the input handler test."""
@@ -120,7 +98,8 @@ def create_mock_tabular_dataset() -> str:
     data = from_numpy(combined_data).float()
     label = from_numpy(np.random.randint(0, num_classes, n_points)).float()
 
-    dataset = DatasetWithSubset(data, label, dec_to_onehot, one_hot_encoded)
+    params = {"dec_to_onehot": dec_to_onehot, "one_hot_encoded": one_hot_encoded}
+    dataset = TabularInputHandler.UserDataset(data, label, **params)
 
     # Save the dataset to a .pkg file
     pkg_file_path = STORAGE_PATH + "/" + dataset_name
@@ -143,31 +122,30 @@ def create_mock_model_and_metadata(input_size:int) -> str:
         save(model.state_dict(), f)
 
     # Create metadata
-    metadata = {
-        "init_params": {"input_size": input_size,
+    optimizer_config = OptimizerConfig(name=parameters.optimizer, params = {"lr": parameters.learning_rate})
+    loss_config = LossConfig(name=parameters.loss)
+    
+    meta_data = MIAMetaDataSchema(
+        train_indices=np.arange(parameters.train_data_points).tolist(),
+        test_indices=np.arange(parameters.train_data_points,
+                                  parameters.train_data_points + parameters.test_data_points).tolist(),
+        num_train=parameters.data_points,
+        init_params={"input_size": input_size,
                         "hidden_size": 64,
                         "num_classes": parameters.num_classes},
-        "train_indices": np.arange(parameters.train_data_points).tolist(),
-        "test_indices": np.arange(parameters.train_data_points,
-                                  parameters.train_data_points + parameters.test_data_points).tolist(),
-        "num_train": parameters.data_points,
-        "optimizer": {
-            "name": parameters.optimizer,
-            "lr": parameters.learning_rate,
-        },
-        "loss": {"name": parameters.loss},
-        "batch_size": parameters.batch_size,
-        "epochs": parameters.epochs,
-        "train_acc": 0.9,
-        "test_acc": 0.8,
-        "train_loss": 0.1,
-        "test_loss": 0.2,
-        "dataset": "CIFAR-10",
-    }
-    validated_metadata = MIAMetaDataSchema(**metadata)
+        optimizer=optimizer_config,
+        loss=loss_config,
+        batch_size=parameters.batch_size,
+        epochs=parameters.epochs,
+        train_acc=0.9,
+        test_acc=0.8,
+        train_loss=0.1,
+        test_loss=0.2,
+        dataset="CIFAR-10"
+        )
     metadata_path = parameters.target_folder + "/model_metadata.pkl"
 
     with open(metadata_path, "wb") as f:
-        pickle.dump(validated_metadata, f)
+        pickle.dump(meta_data, f)
 
     return model_path, metadata_path

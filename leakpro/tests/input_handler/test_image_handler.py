@@ -30,7 +30,7 @@ def test_abstract_handler_setup(image_handler:ImageInputHandler) -> None:
 
     assert image_handler.target_model_metadata.optimizer is not None
     assert image_handler.target_model_metadata.optimizer.name == parameters.optimizer
-    assert image_handler.target_model_metadata.optimizer.lr == parameters.learning_rate
+    assert image_handler.target_model_metadata.optimizer.params["lr"] == parameters.learning_rate
 
     assert image_handler.target_model_metadata.loss is not None
     assert image_handler.target_model_metadata.loss.name == parameters.loss

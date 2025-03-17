@@ -17,17 +17,6 @@ class ImageInputHandler(AbstractInputHandler):
     def __init__(self:Self, configs: dict) -> None:
         super().__init__(configs = configs)
 
-
-    def get_criterion(self:Self)->None:
-        """Set the CrossEntropyLoss for the model."""
-        return torch.nn.CrossEntropyLoss()
-
-    def get_optimizer(self: Self, model:torch.nn.Module) -> None:
-        """Set the optimizer for the model."""
-        learning_rate = 0.1
-        momentum = 0.8
-        return optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
-
     def train(
         self: Self,
         dataloader: DataLoader,
@@ -75,3 +64,19 @@ class ImageInputHandler(AbstractInputHandler):
         output_dict = {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}
         training_output = TrainingOutput(**output_dict)
         return training_output
+
+    class UserDataset(AbstractInputHandler.UserDataset):
+        """Dataset with a subset method."""
+
+        def __init__(self, data, targets, **kwargs):
+            super().__init__(data, targets, **kwargs)
+            self.data = data
+            self.targets = targets
+
+        def __getitem__(self, index: int) -> tuple:
+            """Return a sample from the dataset."""
+            return self.data[index], self.targets[index]
+
+        def __len__(self) -> int:
+            """Return the length of the dataset."""
+            return len(self.targets)

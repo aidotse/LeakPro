@@ -16,17 +16,6 @@ class TabularInputHandler(AbstractInputHandler):
     def __init__(self, configs: dict) -> None:
         super().__init__(configs = configs)
 
-
-    def get_criterion(self)->None:
-        """Set the CrossEntropyLoss for the model."""
-        return BCEWithLogitsLoss()
-
-    def get_optimizer(self, model:torch.nn.Module) -> None:
-        """Set the optimizer for the model."""
-        learning_rate = 0.1
-        momentum = 0.8
-        return optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
-
     def train(
         self,
         dataloader: DataLoader,
@@ -69,3 +58,18 @@ class TabularInputHandler(AbstractInputHandler):
         training_output = TrainingOutput(**output_dict)
         return training_output
 
+
+    class UserDataset(AbstractInputHandler.UserDataset):
+        
+        def __init__(self, data, targets, **kwargs):
+            self.data = data
+            self.targets = targets
+
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+
+        def __len__(self):
+            return len(self.targets)
+
+        def __getitem__(self, idx):
+            return self.data[idx], self.targets[idx]

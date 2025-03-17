@@ -137,7 +137,7 @@ class ShadowModelHandler(ModelHandler):
         for i in indices_to_use:
             # Get dataloader
             data_indices = np.random.choice(shadow_population, data_size, replace=False)
-            data_loader = self.handler.get_dataloader(data_indices, self.batch_size)
+            data_loader = self.handler.get_dataloader(data_indices, self.batch_size, params=None)
 
             # Get shadow model blueprint
             model, criterion, optimizer = self._get_model_criterion_optimizer()
@@ -217,7 +217,7 @@ class ShadowModelHandler(ModelHandler):
         loss = 0.0
         model.eval()
         model.to(self.device)
-        data_loader = self.handler.get_dataloader(indices, self.batch_size, params)
+        data_loader = self.handler.get_dataloader(indices, self.batch_size, params=params)
         with torch.no_grad():
             for data, target in data_loader:
                 data, target = data.to(self.device), target.to(self.device)

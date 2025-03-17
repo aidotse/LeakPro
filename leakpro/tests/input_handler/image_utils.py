@@ -12,7 +12,8 @@ from torchvision import transforms
 
 from leakpro.tests.constants import STORAGE_PATH, get_image_handler_config
 from leakpro.utils.import_helper import Self
-from leakpro.schemas import MIAMetaDataSchema
+from leakpro.schemas import MIAMetaDataSchema, OptimizerConfig, LossConfig
+from leakpro.tests.input_handler.image_input_handler import ImageInputHandler
 
 class ConvNet(Module):
     """Convolutional Neural Network model."""
@@ -43,14 +44,7 @@ class ConvNet(Module):
         x = flatten(x, 1) # flatten all dimensions except batch
         return self.fc1(x)
 
-class DatasetWithSubset(TensorDataset):
-    """Dataset with a subset method."""
 
-    def subset(self:Self, indices:np.ndarray) -> Self:
-        """Extract a subset of the dataset based on the given indices."""
-
-        subsets = [tensor[indices] for tensor in self.tensors]
-        return DatasetWithSubset(*subsets)
 
 def setup_image_test()->None:
     """Setup for the input handler test."""
@@ -68,7 +62,7 @@ def setup_image_test()->None:
 
     # Ensure the dataset has the correct size and shape
     assert len(dataset) == parameters.data_points
-    assert dataset.tensors[0][0].shape == parameters.img_size
+    assert dataset[0][0].shape == parameters.img_size
 
     del dataset
     config.data_path = dataset_path
@@ -116,7 +110,7 @@ def create_mock_image_dataset() -> str:
     images_tensor = stack(images)
     # Convert labels list to a tensor
     labels_tensor = tensor(labels, dtype=long)
-    dataset = DatasetWithSubset(images_tensor, labels_tensor)
+    dataset = ImageInputHandler.UserDataset(images_tensor, labels_tensor)
 
     # Save the dataset to a .pkg file
     pkg_file_path = STORAGE_PATH + "/" + dataset_name
@@ -139,29 +133,28 @@ def create_mock_model_and_metadata() -> str:
         save(model.state_dict(), f)
 
     # Create metadata
-    metadata = {
-        "init_params": {},
-        "train_indices": np.arange(parameters.train_data_points).tolist(),
-        "test_indices": np.arange(parameters.train_data_points,
+    optimizer_config = OptimizerConfig(name=parameters.optimizer, params={"lr": parameters.learning_rate})
+    loss_config = LossConfig(name=parameters.loss)
+    meta_data = MIAMetaDataSchema(
+        train_indices=np.arange(parameters.train_data_points).tolist(),
+        test_indices=np.arange(parameters.train_data_points,
                                   parameters.train_data_points + parameters.test_data_points).tolist(),
-        "num_train": parameters.data_points,
-        "optimizer": {
-            "name": parameters.optimizer,
-            "lr": parameters.learning_rate,
-        },
-        "loss": {"name": parameters.loss},
-        "batch_size": parameters.batch_size,
-        "epochs": parameters.epochs,
-        "train_acc": 0.9,
-        "test_acc": 0.8,
-        "train_loss": 0.1,
-        "test_loss": 0.2,
-        "dataset": "CIFAR-10",
-    }
-    validated_metadata = MIAMetaDataSchema(**metadata)
+        num_train=parameters.data_points,
+        init_params={},
+        optimizer=optimizer_config,
+        loss=loss_config,
+        batch_size=parameters.batch_size,
+        epochs=parameters.epochs,
+        train_acc=0.9,
+        test_acc=0.8,
+        train_loss=0.1,
+        test_loss=0.2,
+        dataset="CIFAR-10"
+        )
+    
     metadata_path = parameters.target_folder + "/model_metadata.pkl"
 
     with open(metadata_path, "wb") as f:
-        pickle.dump(validated_metadata, f)
+        pickle.dump(meta_data, f)
 
     return model_path, metadata_path
