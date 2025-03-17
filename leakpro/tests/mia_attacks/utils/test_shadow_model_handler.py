@@ -38,9 +38,9 @@ def test_shadow_model_handler_creation_from_target(image_handler:ImageInputHandl
     assert sm.init_params == image_handler.target_model_metadata.init_params
     assert sm.model_blueprint == image_handler.target_model.__class__
 
-    optimizer_config = image_handler.target_model_metadata.optimizer.model_copy().model_dump(exclude={"name"})
+    optimizer_config = image_handler.target_model_metadata.optimizer.params
     assert sm.optimizer_config == optimizer_config
-    loss_config = image_handler.target_model_metadata.loss.model_copy().model_dump(exclude={"name"})
+    loss_config = image_handler.target_model_metadata.loss.params
     assert sm.loss_config == loss_config
 
 def test_shadow_model_creation_and_loading(image_handler:ImageInputHandler) -> None:
