@@ -2,7 +2,6 @@
 
 import torch
 from torch import cuda, device, optim
-from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -11,21 +10,6 @@ from leakpro.schemas import TrainingOutput
 
 class CifarInputHandler(AbstractInputHandler):
     """Class to handle the user input for the CIFAR100 dataset."""
-
-    def __init__(self, configs: dict) -> None:
-        super().__init__(configs = configs)
-        print(configs)
-
-
-    def get_criterion(self)->None:
-        """Set the CrossEntropyLoss for the model."""
-        return CrossEntropyLoss()
-
-    def get_optimizer(self, model:torch.nn.Module) -> None:
-        """Set the optimizer for the model."""
-        learning_rate = 0.1
-        momentum = 0.8
-        return optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
 
     def train(
         self,
@@ -45,6 +29,9 @@ class CifarInputHandler(AbstractInputHandler):
         gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
         model.to(gpu_or_cpu)
 
+        accuracy_history = []
+        loss_history = []
+        
         # training loop
         for epoch in range(epochs):
             train_loss, train_acc, total_samples = 0, 0, 0
@@ -61,16 +48,64 @@ class CifarInputHandler(AbstractInputHandler):
                 optimizer.step()
 
                 # Accumulate performance of shadow model
-                train_acc += pred.eq(labels.data.view_as(pred)).sum()
+                train_acc += pred.eq(labels.data.view_as(pred)).sum().item()
                 total_samples += labels.size(0)
                 train_loss += loss.item()
                 
-        avg_train_loss = train_loss / len(dataloader)
-        train_accuracy = train_acc / total_samples  
+            avg_train_loss = train_loss / len(dataloader)
+            train_accuracy = train_acc / total_samples 
+            
+            accuracy_history.append(train_accuracy) 
+            loss_history.append(avg_train_loss)
         
         model.to("cpu")
 
-        output_dict = {"model": model, "metrics": {"accuracy": train_accuracy, "loss": avg_train_loss}}
+        output_dict = {"model": model, "metrics": {"accuracy": train_accuracy, "loss": avg_train_loss, "accuracy_history": accuracy_history, "loss_history": loss_history}}
         output = TrainingOutput(**output_dict)
         
         return output
+
+    class UserDataset(AbstractInputHandler.UserDataset):
+        def __init__(self, data, targets, **kwargs):
+            """
+            Args:
+                data (Tensor): Image data of shape (N, H, W, C) or (N, C, H, W)
+                               Expected to be in range [0,1] (normalized).
+                targets (Tensor): Corresponding labels.
+                mean (Tensor, optional): Precomputed mean for normalization.
+                std (Tensor, optional): Precomputed std for normalization.
+            """
+            assert data.shape[0] == targets.shape[0], "Data and targets must have the same length"
+            assert data.max() <= 1.0 and data.min() >= 0.0, "Data should be in range [0,1]"
+
+            self.data = data.float()  # Ensure float type
+            self.targets = targets
+
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+                
+            if not hasattr(self, "mean") or not hasattr(self, "std"):
+                self.mean, self.std = self._compute_mean_std()
+
+        def _compute_mean_std(self):
+            """Compute mean and std from dataset."""
+            mean = self.data.mean(dim=(0, 2, 3))  # Shape (3,)
+            std = self.data.std(dim=(0, 2, 3))    # Shape (3,)
+
+            # Reshape to (C, 1, 1) for broadcasting
+            mean = mean.view(-1, 1, 1)  
+            std = std.view(-1, 1, 1)   
+            return mean, std
+
+        def transform(self, x):
+            """Normalize using stored mean and std."""
+            return (x - self.mean) / self.std 
+
+        def __getitem__(self, index):
+            x = self.data[index]
+            y = self.targets[index]
+            x = self.transform(x)
+            return x, y
+
+        def __len__(self):
+            return len(self.targets)

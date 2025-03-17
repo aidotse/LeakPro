@@ -1,7 +1,5 @@
 """Main class for LeakPro."""
 
-import inspect
-import types
 from pathlib import Path
 
 import yaml
@@ -51,15 +49,7 @@ class LeakPro:
         """Prepare the handler using dynamic composition to merge the user-input handler and modality extension."""
 
         if configs.audit.attack_type == "mia":
-            handler = MIAHandler(configs)
-
-            # Attach methods to Handler explicitly defined in AbstractInputHandler from user_input_handler
-            for name, _ in inspect.getmembers(AbstractInputHandler, predicate=inspect.isfunction):
-                if hasattr(user_input_handler, name) and not name.startswith("__"):
-                    attr = getattr(user_input_handler, name)
-                    if callable(attr):
-                        attr = types.MethodType(attr, handler) # ensure to properly bind methods to handler
-                    setattr(handler, name, attr)
+            handler = MIAHandler(configs, user_input_handler)
 
         elif configs.audit.attack_type == "minva":
             return NotImplementedError("MINVA attack is not yet implemented")

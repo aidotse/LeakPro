@@ -1,14 +1,18 @@
 """Parent class for user inputs."""
 
+import inspect
+import types
+
 import joblib
 import numpy as np
 import torch
 from pydantic import BaseModel
-from torch import nn
+from torch import nn, optim
 from torch.utils.data import DataLoader
 
+from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.input_handler.user_imports import get_class_from_module, import_module_from_file
-from leakpro.schemas import MIAMetaDataSchema
+from leakpro.schemas import LossConfig, MIAMetaDataSchema, OptimizerConfig
 from leakpro.utils.import_helper import Any, Self, Tuple
 from leakpro.utils.logger import logger
 
@@ -16,12 +20,24 @@ from leakpro.utils.logger import logger
 class MIAHandler:
     """Parent class for user inputs."""
 
-    def __init__(self:Self, configs: dict) -> None:
+    def __init__(self:Self, configs: dict, user_input_handler:AbstractInputHandler) -> None:
         self.configs = configs
         self._load_model_class()
         self._load_target_metadata()
         self._load_trained_target_model()
         self._load_population()
+        self._load_criterion()
+
+        # Attach methods to Handler explicitly defined in AbstractInputHandler from user_input_handler
+        for name, _ in inspect.getmembers(AbstractInputHandler, predicate=inspect.isfunction):
+            if hasattr(user_input_handler, name) and not name.startswith("__"):
+                attr = getattr(user_input_handler, name)
+                if callable(attr):
+                    attr = types.MethodType(attr, self) # ensure to properly bind methods to handler
+                setattr(self, name, attr)
+
+        # Save the Data-creation class to allow for creation of datasets with the same properties
+        self.UserDataset = user_input_handler.UserDataset
 
     def _load_population(self:Self) -> None:
         """Default implementation of the population loading."""
@@ -94,6 +110,28 @@ class MIAHandler:
         except FileNotFoundError as e:
             raise FileNotFoundError(f"Could not find the trained target model at {model_path}") from e
 
+    def _load_criterion(self:Self) -> None:
+        """Get the criterion for the target model."""
+
+        criterion_config = self.target_model_metadata.loss
+        if not isinstance(criterion_config, LossConfig):
+            raise ValueError("Criterion is not a valid schema.")
+
+        # create dict of losses as {name (lower-case): Class}
+        loss_classes = {
+            cls.__name__.lower(): cls for cls in vars(nn.modules.loss).values()
+            if isinstance(cls, type) and issubclass(cls, nn.Module)
+        }
+
+        loss_cls = loss_classes.get(criterion_config.name.lower())  # Retrieve correct case-sensitive name
+        if loss_cls is None:
+            raise ValueError(f"Criterion {criterion_config.name} not found in torch.nn.modules.loss")
+
+        # Retrieve only valid __init__ parameters
+        valid_params = inspect.signature(loss_cls.__init__).parameters
+        filtered_params = {k: v for k, v in criterion_config.params.items() if k in valid_params}
+
+        self._criterion = loss_cls(**filtered_params)  # Instantiate the loss function
 
     #------------------------------------------------
     # Methods related to population dataset
@@ -131,19 +169,27 @@ class MIAHandler:
             return True
         raise ValueError("Object is not indexable.")
 
-    def get_dataset(self:Self, dataset_indices: np.ndarray) -> np.ndarray:
+    def get_dataset(self:Self, dataset_indices: np.ndarray, params:dict=None) -> np.ndarray:
         """Get the dataset from the population."""
 
+        if params is None:
+            params = {}
         if isinstance(dataset_indices, np.ndarray) is False:
             dataset_indices = np.array(dataset_indices, ndmin=1)
 
         self._validate_indices(dataset_indices)
 
-        return self.population.subset(dataset_indices)
+        data = self.population.data[dataset_indices]
+        targets = self.population.targets[dataset_indices]
 
-    def get_dataloader(self: Self, dataset_indices: np.ndarray, batch_size: int = 32) -> DataLoader:
+        params = {} if params is None else params
+        return self.UserDataset(data, targets, **params)
+
+    def get_dataloader(self: Self, dataset_indices: np.ndarray, batch_size: int = 32, params:dict=None) -> DataLoader:
         """Default implementation of the dataloader."""
-        dataset = self.get_dataset(dataset_indices)
+        if params is None:
+            params = {}
+        dataset = self.get_dataset(dataset_indices, params)
         collate_fn = self.population.collate_fn if hasattr(self.population, "collate_fn") else None
         return DataLoader(dataset=dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
 
@@ -228,3 +274,30 @@ class MIAHandler:
     def get_test_indices(self:Self) -> np.ndarray:
         """Get the testing indices of the target model."""
         return self._test_indices
+
+    def get_criterion(self:Self) -> nn.modules.loss._Loss:
+        """Get the criterion for the target model."""
+        return self._criterion
+
+    def get_optimizer(self:Self, model:torch.nn.Module) -> None:
+        """Get an instance of same optimizer as used in target model."""
+
+        optimizer_config = self.target_model_metadata.optimizer
+        if not isinstance(optimizer_config, OptimizerConfig):
+            raise ValueError("Optimizer is not a valid schema.")
+
+        # Get all optimizer class names from torch.optim both case sensitive and lower-case
+        optimizer_classes = {
+            cls.__name__.lower(): cls for cls in vars(optim).values()
+            if isinstance(cls, type) and issubclass(cls, optim.Optimizer)
+        }
+        optimizer_cls = optimizer_classes.get(optimizer_config.name.lower())
+
+        if optimizer_cls is None:
+            raise ValueError(f"Optimizer {self.name} not found in torch.optim")
+
+        # Retrieve only valid __init__ parameters
+        valid_params = inspect.signature(optimizer_cls.__init__).parameters
+        filtered_params = {k: v for k, v in optimizer_config.params.items() if k in valid_params}
+
+        return optimizer_cls(model.parameters(), **filtered_params)

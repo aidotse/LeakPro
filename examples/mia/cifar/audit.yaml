@@ -1,13 +1,16 @@
 audit:  # Configurations for auditing
   random_seed: 1234  # Integer specifying the random seed
   attack_list:
-    rmia:
-      online: False
-      num_shadow_models: 5
-      gamma: 1
+    # rmia:
+    #   online: False
+    #   num_shadow_models: 5
+    #   gamma: 1
     # population:
     lira:
-      online: False
+      online: True
+      num_shadow_models: 100
+      training_data_fraction: 0.4
+
     # loss_traj:
     # HSJ:
     # yoqo:
@@ -20,8 +23,8 @@ target:
   # Target model path
   module_path: "./utils/cifar_model_preparation.py"
   model_class: "ResNet18" 
-  # Data paths
   target_folder: "./target"
+  # Data paths
   data_path: "./data/cifar10.pkl"
 
 shadow_model:

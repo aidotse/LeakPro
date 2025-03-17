@@ -13,11 +13,7 @@ class OptimizerConfig(BaseModel):
     """Schema for optimizer parameters."""
 
     name: str = Field(..., description="Optimizer name")
-    lr: float = Field(default=1e-3, ge=0, description="Learning rate")
-    weight_decay: float = Field(default=0.0, ge=0, description="Weight decay parameter")
-    momentum: float = Field(default=0.0, ge=0, description="Momentum parameter")
-    dampening: float = Field(default=0.0, ge=0, description="Dampening parameter")
-    nesterov: bool = Field(default=False, description="Whether Nesterov momentum is used")
+    params: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Optimizer parameters")
 
     @field_validator("name", mode="before")
     @classmethod
@@ -30,6 +26,7 @@ class LossConfig(BaseModel):
     """Schema for loss function parameters."""
 
     name: str = Field(..., description="Loss function name")
+    params: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Loss function parameters")
 
     @field_validator("name", mode="before")
     @classmethod

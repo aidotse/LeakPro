@@ -157,7 +157,8 @@ class ShadowModelHandler(ModelHandler):
             if len(remaining_indices) == 0:
                 test_loss, test_acc = 0.0, 0.0
             else:
-                test_acc, test_loss = self._eval_shadow_model(shadow_model, criterion, remaining_indices)
+                dataset_params = data_loader.dataset.return_params()
+                test_acc, test_loss = self._eval_shadow_model(shadow_model, criterion, remaining_indices, dataset_params)
 
             logger.info(f"Training shadow model {i} complete")
             with open(f"{self.storage_path}/{self.model_storage_name}_{i}.pkl", "wb") as f:
@@ -189,7 +190,11 @@ class ShadowModelHandler(ModelHandler):
             logger.info(f"Metadata for shadow model {i} stored in {self.storage_path}")
         return filtered_indices + indices_to_use
 
-    def _eval_shadow_model(self:Self, model:Module, criterion:Module, indices:list[int])->Tuple[float, float]:
+    def _eval_shadow_model(self:Self,
+                           model:Module,
+                           criterion:Module,
+                           indices:list[int],
+                           params:dict)->Tuple[float, float]:
         """Evaluate the shadow models.
 
         Args:
@@ -197,6 +202,7 @@ class ShadowModelHandler(ModelHandler):
             model (Module): The shadow model to evaluate.
             criterion (Module): The loss function to use.
             indices (list[int]): The indices in the aux dataset to evaluate.
+            params (dict): The parameters for the dataset.
 
         Returns:
         -------
@@ -207,7 +213,7 @@ class ShadowModelHandler(ModelHandler):
         loss = 0.0
         model.eval()
         model.to(self.device)
-        data_loader = self.handler.get_dataloader(indices, self.batch_size)
+        data_loader = self.handler.get_dataloader(indices, self.batch_size, params)
         with torch.no_grad():
             for data, target in data_loader:
                 data, target = data.to(self.device), target.to(self.device)
