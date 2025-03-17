@@ -67,9 +67,9 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
         # make the model private
         privacy_engine = PrivacyEngine(accountant = "prv")
         self.model, self.optimizer, self.dataloader = privacy_engine.make_private(
-            module=model,
-            optimizer=optimizer,
-            data_loader=dataloader,
+            module=self.model,
+            optimizer=self.optimizer,
+            data_loader=self.dataloader,
             noise_multiplier=noise_multiplier,
             max_grad_norm= privacy_engine_dict["max_grad_norm"],
         )
