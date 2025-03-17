@@ -160,7 +160,7 @@ def create_trained_model_and_metadata(model,
             dataset=train_config["data"]["dataset"]
         )
     
-    with open("target/model_metadata.pkl", "wb") as f:
+    with open(f"{target_model_dir}/model_metadata.pkl", "wb") as f:
         pickle.dump(meta_data, f)
     
-    return train_accuracies, train_losses, test_accuracies, test_losses
+    return train_accuracies, train_losses, test_accuracies, test_losses, model, privacy_engine
