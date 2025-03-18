@@ -237,11 +237,20 @@ class MIAResult:
         )
 
         self.fpr = np.divide(self.fp.astype(float), (self.fp + self.tn).astype(float),
-                            out=np.zeros_like(self.fp, dtype=float),
+                            out=np.full_like(self.fp, np.nan, dtype=float),
                             where=(self.fp + self.tn) != 0.0)
         self.tpr = np.divide(self.tp.astype(float), (self.tp + self.fn).astype(float),
-                            out=np.zeros_like(self.tp, dtype=float),
+                            out=np.full_like(self.tp, np.nan, dtype=float),
                             where=(self.tp + self.fn) != 0.0)
+
+        # In case denominator is zero in fpr/tpr calculations
+        self.fpr = self.fpr[~(np.isnan(self.fpr) | np.isnan(self.tpr))]
+        self.tpr = self.tpr[~(np.isnan(self.fpr) | np.isnan(self.tpr))]
+
+        # In case the fpr are not sorted in ascending order.
+        sorted_indices = np.argsort(self.fpr)
+        self.fpr = self.fpr[sorted_indices]
+        self.tpr = self.tpr[sorted_indices]
 
         self.roc_auc = auc(self.fpr, self.tpr)
 
@@ -712,18 +721,16 @@ class TEMPLATEResult:
             return results
         return _latex(results)
 
-def get_result_fixed_fpr(fpr: list, tpr: list) -> dict:
-    """Find TPR values for fixed TPRs."""
-    # Function to find TPR at given FPR thresholds
-    def find_tpr_at_fpr(fpr_array:np.ndarray, tpr_array:np.ndarray, threshold:float) -> float:
-        """Find tpr for a given fpr."""
-        try:
-            # Find the last index where FPR is less than the threshold
-            valid_index = np.where(fpr_array < threshold)[0][-1]
-            return float(f"{tpr_array[valid_index] * 100:.4f}")
-        except IndexError:
-            # Return None or some default value if no valid index found
-            return "N/A"
+def find_tpr_at_fpr(fpr_array: np.ndarray, tpr_array:np.ndarray, threshold:float) -> float:
+    """Find TPR for a given FPR."""
+    # Find the last index where FPR is less than or equal to the threshold
+    less_equal = np.nonzero(fpr_array <= threshold)[0]
+    if len(less_equal) == 0: # If no fpr at given threshold exists return 0.0%
+        return 0.0
+    return float(f"{tpr_array[less_equal[-1]] * 100:.4f}")
+
+def get_result_fixed_fpr(fpr: np.ndarray, tpr: np.ndarray) -> dict:
+    """Find TPR values for fixed FPRs."""
 
     # Compute TPR values at various FPR thresholds
     return {"TPR@1.0%FPR": find_tpr_at_fpr(fpr, tpr, 0.01),
