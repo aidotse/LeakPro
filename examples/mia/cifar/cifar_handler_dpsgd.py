@@ -32,7 +32,12 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
         momentum = 0.8
         return optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
 
-    def dpsgd(self) -> None:
+    def dpsgd(
+        self,
+        dataloader: DataLoader,
+        model: torch.nn.Module = None,
+        optimizer: optim.Optimizer = None,
+    ) -> None:
         """Set the model, optimizer and dataset using DPsgd."""
 
         print("Training shadow models with DP-SGD")
@@ -66,13 +71,15 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
 
         # make the model private
         privacy_engine = PrivacyEngine(accountant = "prv")
-        self.model, self.optimizer, self.dataloader = privacy_engine.make_private(
-            module=self.model,
-            optimizer=self.optimizer,
-            data_loader=self.dataloader,
+        self.priv_model, self.priv_optimizer, self.priv_dataloader = privacy_engine.make_private(
+            module=model,
+            optimizer=optimizer,
+            data_loader=dataloader,
             noise_multiplier=noise_multiplier,
             max_grad_norm= privacy_engine_dict["max_grad_norm"],
         )
+
+        return privacy_engine
 
     def train(
         self,
@@ -81,16 +88,16 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
         criterion: torch.nn.Module = None,
         optimizer: optim.Optimizer = None,
         epochs: int = None,
-        dpsgd: bool = False,
+        dpsgd: bool = True,
     ) -> TrainingOutput:
 
         """Model training procedure."""
-        self.model = model
-        self.dataloader = dataloader
-        self.optimizer = optimizer
+        self.priv_model = model
+        self.priv_dataloader = dataloader
+        self.priv_optimizer = optimizer
 
         if dpsgd:
-            self.dpsgd()
+            privacy_engine = self.dpsgd(model, optimizer, dataloader)
 
         # read hyperparams for training (the parameters for the dataloader are defined in get_dataloader):
         if epochs is None:
@@ -98,38 +105,39 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
 
         # prepare training
         gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
-        self.model.to(gpu_or_cpu)
+        self.priv_model.to(gpu_or_cpu)
 
         # training loop
         for epoch in range(epochs):
             train_loss, train_acc, total_samples = 0, 0, 0
-            self.model.train()
+            self.priv_model.train()
             for inputs, labels in tqdm(self.dataloader, desc=f"Epoch {epoch+1}/{epochs}"):
                 labels = labels.long()
                 inputs, labels = inputs.to(gpu_or_cpu, non_blocking=True), labels.to(gpu_or_cpu, non_blocking=True)
                 
-                self.optimizer.zero_grad()
-                outputs = self.model(inputs)
+                self.priv_model.zero_grad()
+                self.priv_optimizer.zero_grad()
+
+                outputs = self.priv_model(inputs)
                 loss = criterion(outputs, labels)
                 pred = outputs.argmax(dim=1) 
                 loss.backward()
-                self.optimizer.step()
+                self.priv_optimizer.step()
 
                 # Accumulate performance of shadow model
                 train_acc += pred.eq(labels.data.view_as(pred)).sum()
-                total_samples += labels.size(0)
                 train_loss += loss.item()
                 
-        avg_train_loss = train_loss / len(self.dataloader.dataset)
-        train_accuracy = train_acc / total_samples  
+        avg_train_loss = train_loss / len(dataloader.dataset)
+        train_accuracy = train_acc / len(dataloader.dataset) 
         
-        self.model.to("cpu")
+        self.priv_model.to("cpu")
 
-        output_dict = {"model": self.model, "metrics": {"accuracy": train_accuracy, "loss": avg_train_loss}}
+        output_dict = {"model": self.priv_model, "metrics": {"accuracy": train_accuracy, "loss": avg_train_loss}}
         output = TrainingOutput(**output_dict)
         
-        del self.model
-        del self.optimizer
-        del self.dataloader
+        del self.priv_model
+        del self.priv_optimizer
+        del self.priv_dataloader
 
         return output

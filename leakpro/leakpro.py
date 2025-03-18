@@ -72,7 +72,6 @@ class LeakPro:
                 setattr(handler, name, attr)
 
 
-
         # Load extension class and initiate it using the handler (allows for two-way communication)
         modality_extension_instance = modality_extensions[configs.audit.data_modality]
         handler.modality_extension = modality_extension_instance(handler)

@@ -17,7 +17,7 @@ class ResNet18(nn.Module):
         self.model = models.resnet18(pretrained=False)
         self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
         self.init_params = {"num_classes": num_classes}
-    
+
     def forward(self, x):
         return self.model(x)
 
@@ -37,23 +37,7 @@ def evaluate(model, loader, criterion, device):
         acc = float(acc) / len(loader.dataset)
     return loss, acc
 
-def create_trained_model_and_metadata(model,
-                                      train_dataloader,
-                                      test_loader,
-                                      train_config,
-                                      privacy_engine_dict,
-                                      target_model_dir):
-    lr = train_config["train"]["learning_rate"]
-    momentum = train_config["train"]["momentum"]
-    epochs = train_config["train"]["epochs"]
-    
-    device_name = device("cuda" if cuda.is_available() else "cpu")
-    model.to(device_name)
-    model.train()
-
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum)
-
+def dpsgd_model_preparation(model, optimizer, train_dataloader, privacy_engine_dict):
     sample_rate = 1 / len(train_dataloader)
     try:
         noise_multiplier = get_noise_multiplier(target_epsilon = privacy_engine_dict["target_epsilon"],
@@ -72,55 +56,90 @@ def create_trained_model_and_metadata(model,
 
     # make the model private
     privacy_engine = PrivacyEngine(accountant = "prv")
-    model, optimizer, train_dataloader = privacy_engine.make_private(
+    priv_model, optimizer, train_dataloader = privacy_engine.make_private(
         module=model,
         optimizer=optimizer,
         data_loader=train_dataloader,
         noise_multiplier=noise_multiplier,
         max_grad_norm= privacy_engine_dict["max_grad_norm"],
     )
+    
+    # Reassign init_params_ to the modified model
+    if hasattr(model, 'init_params'):
+        priv_model.init_params = model.init_params
 
+    return priv_model, optimizer, train_dataloader, privacy_engine
+
+def create_trained_dpsgdmodel_and_metadata(model,
+                                      train_dataloader,
+                                      test_loader,
+                                      train_config,
+                                      privacy_engine_dict,
+                                      target_model_dir):
+    lr = train_config["train"]["learning_rate"]
+    momentum = train_config["train"]["momentum"]
+    epochs = train_config["train"]["epochs"]
+    
+    device_name = device("cuda" if cuda.is_available() else "cpu")
+    model.to(device_name)
+    model.train()
+
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum)
+
+    priv_model, priv_optimizer, priv_train_dataloader, privacy_engine\
+        = dpsgd_model_preparation(model, optimizer, train_dataloader, privacy_engine_dict)
+    
     train_losses, train_accuracies = [], []
     test_losses, test_accuracies = [], []
     
+    priv_model.to(device_name)
     for e in tqdm(range(epochs), desc="Training Progress"):
-        model.train()
+        priv_model.train()
         train_acc, train_loss = 0.0, 0.0
         
-        for data, target in train_dataloader:
+        for data, target in priv_train_dataloader:
             data, target = data.to(device_name, non_blocking=True), target.to(device_name, non_blocking=True)
             target = target.view(-1)
-            optimizer.zero_grad()
-            output = model(data)
+
+            priv_optimizer.zero_grad()
+            priv_model.zero_grad()
+
+            output = priv_model(data)
             
             loss = criterion(output, target)
             pred = output.argmax(dim=1)  # for multi-class classification
             train_acc += pred.eq(target).sum().item()
             
             loss.backward()
-            optimizer.step()
+            priv_optimizer.step()
             train_loss += loss.item()
         
-        train_loss /= len(train_dataloader)
+        train_loss /= len(train_dataloader.dataset)
         train_acc /= len(train_dataloader.dataset)
             
         train_losses.append(train_loss)
         train_accuracies.append(train_acc)
         
-        test_loss, test_acc = evaluate(model, test_loader, criterion, device_name)
+        test_loss, test_acc = evaluate(priv_model, test_loader, criterion, device_name)
         test_losses.append(test_loss)
         test_accuracies.append(test_acc)
 
     # Move the model back to the CPU
-    model.to("cpu")
+    priv_model.to("cpu")
 
     os.makedirs(target_model_dir, exist_ok=True)
 
-    state_dict = model.state_dict()
+    state_dict = priv_model.state_dict()
     cleaned_state_dict = {key.replace("_module.", "").replace("module.", ""): value
                       for key, value in state_dict.items()}
 
-    with open(f"{target_model_dir}/target_dpsgd_model.pkl", "wb") as f:
+    # Check that keys are the same for the private model and the original model
+    import numpy as np 
+    model_keys = list(model.state_dict().keys())
+    print(np.setdiff1d(model_keys,list(cleaned_state_dict.keys())))
+
+    with open(f"{target_model_dir}/target_model.pkl", "wb") as f:
         save(cleaned_state_dict, f)
     
     # Create metadata for privacy engine
