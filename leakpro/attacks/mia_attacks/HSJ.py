@@ -25,7 +25,7 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
         num_iterations: int = Field(default=100, ge=1, description="The number of iterations")
         gamma: float = Field(default=1.0, ge=0.0, description="The gamma value")
         constraint: Literal[1,2] = Field(default=2, description="The constraint value must be 1 or 2")
-        batch_size: int = Field(default=128, ge=1, description="The batch size")
+        batch_size: int = Field(default=64, ge=1, description="The batch size")
         epsilon_threshold: float = Field(default=1e-6, ge=0.0, le=0.001, description="The epsilon threshold")
 
         @field_validator("norm", mode="before")
@@ -132,6 +132,7 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
                                                 int(len(out_member_indices) * self.attack_data_fraction),
                                                 replace=False)
         audit_indices = np.concatenate((audit_in_member_indicies, audit_out_member_indicies))
+        assert len(audit_indices) >= self.batch_size , "The batch size must be greater than the number of audit indices"
 
         self.attack_dataloader = self.handler.get_dataloader(audit_indices, batch_size=self.batch_size)
 

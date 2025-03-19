@@ -13,6 +13,7 @@ audit:  # Configurations for auditing
 
     # loss_traj:
     # HSJ:
+    #   verbose: False
     # yoqo:
 
   output_dir: "./leakpro_output"
