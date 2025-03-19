@@ -1,0 +1,30 @@
+audit:  # Configurations for auditing
+  random_seed: 1234  # Integer specifying the random seed
+  attack_list:
+    rmia:
+      online: False
+      num_shadow_models: 5
+      gamma: 1
+    # population:
+    lira:
+      online: False
+    # loss_traj:
+    # HSJ:
+    # yoqo:
+
+  output_dir: "./leakpro_output"
+  attack_type: "mia" #mia, gia
+  data_modality: "image" #image, tabular
+
+target:
+  # Target model path
+  module_path: "./utils/cifar_dpsgd_model_preparation.py" # Use the ResNet18 model that is dpsgd compatible
+  model_class: "ResNet18" 
+  # Data paths
+  target_folder: "./target_dpsgd"
+  data_path: "./data/cifar10.pkl"
+  dpsgd_path: "./target_dpsgd/dpsgd_dic.pkl"
+
+shadow_model:
+
+distillation_model:

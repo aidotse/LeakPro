@@ -34,14 +34,14 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
 
     def dpsgd(
         self,
-        dataloader: DataLoader,
         model: torch.nn.Module = None,
         optimizer: optim.Optimizer = None,
+        dataloader: DataLoader = None,
     ) -> None:
         """Set the model, optimizer and dataset using DPsgd."""
 
         print("Training shadow models with DP-SGD")
-        dpsgd_path = "./target_dpsgd/dpsgd_cifar.pkl"
+        dpsgd_path = "./target_dpsgd/dpsgd_dic.pkl"
 
         sample_rate = 1/len(dataloader)
         # Check if the file exists
