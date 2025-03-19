@@ -89,7 +89,8 @@ class MIAHandler:
         try:
             with open(self.model_path, "rb") as f:
                 self.target_model = self.target_model_blueprint(**init_params)
-                self.target_model.load_state_dict(torch.load(f))
+                self.target_model.load_state_dict(torch.load(f), strict=False)
+
             logger.info(f"Loaded target model from {model_path}")
         except FileNotFoundError as e:
             raise FileNotFoundError(f"Could not find the trained target model at {model_path}") from e

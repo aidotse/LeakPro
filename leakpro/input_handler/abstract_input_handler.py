@@ -36,3 +36,13 @@ class AbstractInputHandler(ABC):
     ) -> TrainingOutput:
         """Procedure to train a model on data from the population."""
         pass
+
+    @abstractmethod
+    def dpsgd(
+        self,
+        dataloader: DataLoader,
+        model: Module = None,
+        optimizer: Optimizer = None,
+    ) -> None:
+        """Set the model, optimizer and dataset using DPsgd."""
+        pass
