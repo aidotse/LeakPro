@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.input_handler.user_imports import get_class_from_module, import_module_from_file
-from leakpro.schemas import LossConfig, MIAMetaDataSchema, OptimizerConfig
+from leakpro.schemas import DataLoaderConfig, LossConfig, MIAMetaDataSchema, OptimizerConfig
 from leakpro.utils.import_helper import Any, Self, Tuple
 from leakpro.utils.logger import logger
 
@@ -27,6 +27,7 @@ class MIAHandler:
         self._load_trained_target_model()
         self._load_population()
         self._load_criterion()
+        self._load_dataloader_params()
 
         # Attach methods to Handler explicitly defined in AbstractInputHandler from user_input_handler
         for name, _ in inspect.getmembers(AbstractInputHandler, predicate=inspect.isfunction):
@@ -50,7 +51,6 @@ class MIAHandler:
                 if not self._is_indexable(self.population):
                     raise ValueError("Population dataset is not indexable.")
                 logger.info(f"Loaded population dataset from {self.configs.target.data_path}")
-            logger.info(f"Loaded population dataset from {self.configs.target.data_path}")
         except FileNotFoundError as e:
             raise FileNotFoundError(f"Could not find the population dataset at {self.configs.target.data_path}") from e
 
@@ -133,6 +133,12 @@ class MIAHandler:
 
         self._criterion = loss_cls(**filtered_params)  # Instantiate the loss function
 
+    def _load_dataloader_params(self:Self) -> None:
+        dataloader_config = self.target_model_metadata.data_loader
+        if not isinstance(dataloader_config, DataLoaderConfig):
+            raise ValueError("Dataloader is not a valid schema.")
+        self.dataloader_config = dataloader_config
+
     #------------------------------------------------
     # Methods related to population dataset
     #------------------------------------------------
@@ -185,20 +191,30 @@ class MIAHandler:
         params = {} if params is None else params
         return self.UserDataset(data, targets, **params)
 
-    def get_dataloader(self: Self, dataset_indices: np.ndarray, batch_size: int = 32, params:dict=None) -> DataLoader:
+    def get_dataloader(self: Self,
+                       dataset_indices: np.ndarray,
+                       params:dict=None,
+                       batch_size:int=None,
+                       shuffle:bool=None) -> DataLoader:
         """Default implementation of the dataloader."""
         if params is None:
             params = {}
         dataset = self.get_dataset(dataset_indices, params)
-        collate_fn = self.population.collate_fn if hasattr(self.population, "collate_fn") else None
-        return DataLoader(dataset=dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
 
-    def get_labels(self:Self, dataset_indices: np.ndarray, batch_size: int = 32) -> np.ndarray:
+        # Get default parameters from stored config (includes batch size, collate_fn, shuffle etc.)
+        dataloader_params = self.dataloader_config.params.copy()
+
+        if batch_size is not None:
+            dataloader_params["batch_size"] = batch_size
+        if shuffle is not None:
+            dataloader_params["shuffle"] = shuffle
+
+        # Use stored parameters to configure DataLoader
+        return DataLoader(dataset=dataset, **dataloader_params)
+
+    def get_labels(self:Self, dataset_indices: np.ndarray) -> np.ndarray:
         """Get the labels for given indices in the population."""
-        dataset = self.get_dataset(dataset_indices)
-        collate_fn = self.population.collate_fn if hasattr(self.population, "collate_fn") else None
-        dataloader = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_fn)
-
+        dataloader = self.get_dataloader(dataset_indices)
         # Initialize an empty list to store the labels
         all_labels = []
 
@@ -259,21 +275,13 @@ class MIAHandler:
         """Get the size of the population."""
         return self._population_size
 
-    def set_train_indices(self:Self, indices:np.ndarray) -> None:
-        """Set the training indices of the target model."""
-        self._train_indices = indices
-
     def get_train_indices(self:Self) -> np.ndarray:
         """Get the training indices of the target model."""
-        return self._train_indices
-
-    def set_test_indices(self:Self, indices:np.ndarray) -> None:
-        """Set the testing indices of the target model."""
-        self._test_indices = indices
+        return self.train_indices
 
     def get_test_indices(self:Self) -> np.ndarray:
         """Get the testing indices of the target model."""
-        return self._test_indices
+        return self.test_indices
 
     def get_criterion(self:Self) -> nn.modules.loss._Loss:
         """Get the criterion for the target model."""

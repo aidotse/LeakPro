@@ -7,7 +7,7 @@ from torch.nn.modules.loss import _Loss
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader, Dataset
 
-from leakpro.schemas import TrainingOutput
+from leakpro.schemas import EvalOutput, TrainingOutput
 from leakpro.utils.import_helper import Any, Dict, Self
 
 
@@ -31,6 +31,17 @@ class AbstractInputHandler(ABC):
         criterion: _Loss,
         optimizer: Optimizer
     ) -> TrainingOutput:
+        """Procedure to train a model on data from the population."""
+        pass
+
+    @abstractmethod
+    def eval(
+        self,
+        dataloader: DataLoader,
+        model: Module,
+        criterion: _Loss,
+        device: str
+    ) -> EvalOutput:
         """Procedure to train a model on data from the population."""
         pass
 

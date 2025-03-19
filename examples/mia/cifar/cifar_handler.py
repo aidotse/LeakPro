@@ -1,12 +1,12 @@
 """Module containing the class to handle the user input for the CIFAR100 dataset."""
 
 import torch
-from torch import cuda, device, optim
+from torch import cuda, device, optim, no_grad
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from leakpro import AbstractInputHandler
-from leakpro.schemas import TrainingOutput
+from leakpro.schemas import TrainingOutput, EvalOutput
 
 class CifarInputHandler(AbstractInputHandler):
     """Class to handle the user input for the CIFAR100 dataset."""
@@ -60,10 +60,26 @@ class CifarInputHandler(AbstractInputHandler):
         
         model.to("cpu")
 
-        output_dict = {"model": model, "metrics": {"accuracy": train_accuracy, "loss": avg_train_loss, "accuracy_history": accuracy_history, "loss_history": loss_history}}
-        output = TrainingOutput(**output_dict)
-        
-        return output
+        results = EvalOutput(accuracy=train_accuracy, loss=avg_train_loss, extra={"accuracy_history": accuracy_history, "loss_history": loss_history})
+        return TrainingOutput(model=model, metrics=results)
+
+    def eval(self, loader, model, criterion, device):
+        model.to(device)
+        model.eval()
+        loss, acc = 0, 0
+        with no_grad():
+            for data, target in loader:
+                data, target = data.to(device), target.to(device)
+                target = target.view(-1) 
+                output = model(data)
+                loss += criterion(output, target).item()
+                pred = output.argmax(dim=1) 
+                acc += pred.eq(target).sum().item()
+            loss /= len(loader)
+            acc = float(acc) / len(loader.dataset)
+            
+        output_dict = {"accuracy": acc, "loss": loss}
+        return EvalOutput(**output_dict)
 
     class UserDataset(AbstractInputHandler.UserDataset):
         def __init__(self, data, targets, **kwargs):

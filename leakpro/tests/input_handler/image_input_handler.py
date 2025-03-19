@@ -8,7 +8,7 @@ from tqdm import tqdm
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
-from leakpro.schemas import TrainingOutput
+from leakpro.schemas import TrainingOutput, EvalOutput
 
 
 class ImageInputHandler(AbstractInputHandler):
@@ -16,6 +16,24 @@ class ImageInputHandler(AbstractInputHandler):
 
     def __init__(self:Self, configs: dict) -> None:
         super().__init__(configs = configs)
+
+    def eval(self, dataloader, model, criterion, device):
+        """Model evaluation procedure."""
+        model.to(device)
+        model.eval()
+        test_loss, acc, total = 0, 0, 0
+        with torch.no_grad():
+            for inputs, labels in dataloader:
+                inputs, labels = inputs.to(device), labels.to(device)
+                outputs = model(inputs)
+                test_loss += criterion(outputs, labels).item()
+                pred = outputs.data.max(1, keepdim=True)[1]
+                acc += pred.eq(labels.data.view_as(pred)).sum()
+                total += len(labels)
+        test_loss /= len(dataloader)
+        test_acc = acc / total
+        model.to("cpu")
+        return EvalOutput(loss=test_loss, accuracy=test_acc)
 
     def train(
         self: Self,
@@ -61,8 +79,8 @@ class ImageInputHandler(AbstractInputHandler):
             logger.info(log_train_str)
         model.to("cpu")
 
-        output_dict = {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}
-        training_output = TrainingOutput(**output_dict)
+        eval_output = EvalOutput(accuracy=train_acc, loss=train_loss)
+        training_output = TrainingOutput(model=model, metrics=eval_output)
         return training_output
 
     class UserDataset(AbstractInputHandler.UserDataset):

@@ -65,7 +65,6 @@ class ModelHandler():
         # copy to only have parameters left
         self.loss_config = setup_config.loss.params
 
-        self.batch_size = setup_config.batch_size
         self.epochs = setup_config.epochs
 
         # Set the storage paths for objects created by the handler

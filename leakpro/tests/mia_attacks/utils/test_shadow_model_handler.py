@@ -33,7 +33,6 @@ def test_shadow_model_handler_creation_from_target(image_handler:ImageInputHandl
         ShadowModelHandler.delete_instance()
     sm = ShadowModelHandler(image_handler)
 
-    assert sm.batch_size == image_handler.target_model_metadata.batch_size
     assert sm.epochs == image_handler.target_model_metadata.epochs
     assert sm.init_params == image_handler.target_model_metadata.init_params
     assert sm.model_blueprint == image_handler.target_model.__class__
@@ -54,7 +53,6 @@ def test_shadow_model_creation_and_loading(image_handler:ImageInputHandler) -> N
         ShadowModelHandler.delete_instance()
     sm = ShadowModelHandler(image_handler)
 
-    assert sm.batch_size == image_handler.configs.shadow_model.batch_size
     assert sm.epochs == image_handler.configs.shadow_model.epochs
     assert sm.init_params == {}
     assert sm.model_blueprint is not None

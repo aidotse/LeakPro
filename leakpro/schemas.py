@@ -21,6 +21,8 @@ class OptimizerConfig(BaseModel):
         """Convert optimizer name type to lowercase."""
         return v.lower() if isinstance(v, str) else v
 
+    model_config = ConfigDict(extra="forbid")  # Prevent extra fields
+
 
 class LossConfig(BaseModel):
     """Schema for loss function parameters."""
@@ -34,6 +36,14 @@ class LossConfig(BaseModel):
         """Convert loss name type to lowercase."""
         return v.lower() if isinstance(v, str) else v
 
+    model_config = ConfigDict(extra="forbid")  # Prevent extra fields
+
+class DataLoaderConfig(BaseModel):
+    """Schema for loss function parameters."""
+
+    params: Dict[str, Any]
+    model_config = ConfigDict(extra="forbid")  # Prevent extra fields
+
 class ReconstructionConfig(BaseModel):
     """Configuration for reconstruction attacks."""
 
@@ -41,6 +51,8 @@ class ReconstructionConfig(BaseModel):
     num_class_samples: int = Field(1, description="Number of samples to generate for each class")
     num_audited_classes: int = Field(100, description="Number of classes to audit")
     metrics: Dict[str, Any] = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="forbid")  # Prevent extra fields
 
 class AuditConfig(BaseModel):
     """Configuration for the audit process."""
@@ -61,6 +73,8 @@ class AuditConfig(BaseModel):
         """Convert attack type to lowercase."""
         return v.lower() if isinstance(v, str) else v
 
+    model_config = ConfigDict(extra="forbid")  # Prevent extra fields
+
 class TargetConfig(BaseModel):
     """Configuration for the target model."""
 
@@ -73,6 +87,8 @@ class TargetConfig(BaseModel):
     # MINV-specific field - optional
     public_data_path: Optional[str] = Field(None, description="Path to the public dataset used for model inversion")
 
+    model_config = ConfigDict(extra="forbid")  # Prevent extra fields
+
 class ShadowModelConfig(BaseModel):
     """Configuration for the Shadow models."""
 
@@ -83,6 +99,8 @@ class ShadowModelConfig(BaseModel):
     loss: Optional[LossConfig] = Field(..., description="Loss function configuration")
     batch_size: Optional[int] = Field(..., ge=1, description="Batch size used during training")
     epochs: Optional[int] = Field(..., ge=1, description="Number of training epochs")
+
+    model_config = ConfigDict(extra="forbid")  # Prevent extra fields
 
 class DistillationModelConfig(BaseModel):
     """Configuration for the distillation models."""
@@ -97,13 +115,24 @@ class LeakProConfig(BaseModel):
     target: TargetConfig
     shadow_model: Optional[ShadowModelConfig] = Field(None, description="Shadow model config")
     distillation_model: Optional[DistillationModelConfig] = Field(None, description="Distillation model config")
+    model_config = ConfigDict(extra="forbid")  # Prevent extra fields
+
+
+class EvalOutput(BaseModel):
+    """Output of the evaluation procedure."""
+
+    accuracy: float = Field(..., ge=0, le=1, description="Accuracy of the model")
+    loss: float = Field(..., description="Loss of the model")
+    extra: Dict[str, Any] = Field(default_factory=dict, description="Additional evaluation metrics")
+
+    model_config = ConfigDict(extra="forbid")  # Prevent extra fields
 
 
 class TrainingOutput(BaseModel):
     """Output of the training procedure."""
 
     model: Module
-    metrics: Dict[str, Any] = Field(default_factory=dict)
+    metrics: EvalOutput = Field(..., description="Evaluation metrics")
 
     # Validate that the model is an instance of torch.nn.Module
     @field_validator("model", mode="before")
@@ -114,7 +143,8 @@ class TrainingOutput(BaseModel):
             raise ValueError("model must be an instance of torch.nn.Module")
         return v
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+
 
 class MIAMetaDataSchema(BaseModel):
     """Schema for training metadata."""
@@ -125,15 +155,13 @@ class MIAMetaDataSchema(BaseModel):
     init_params: Dict[str, Any] = Field(default_factory=dict, description="Model initialization parameters")
     optimizer: OptimizerConfig = Field(..., description="Optimizer configuration")
     loss: LossConfig = Field(..., description="Loss function configuration")
-    batch_size: int = Field(ge=1, description="Batch size used during training")
+    data_loader: DataLoaderConfig = Field(..., description="DataLoader configuration")
     epochs: int = Field(ge=1, description="Number of training epochs")
-    train_acc: float = Field(ge=0, le=1, description="Training accuracy (0-1 scale)")
-    test_acc: float = Field(ge=0, le=1, description="Test accuracy (0-1 scale)")
-    train_loss: float = Field(..., description="Training loss")
-    test_loss: float = Field(..., description="Test loss")
+    train_result: EvalOutput = Field(..., description="Final evaluation during training")
+    test_result: EvalOutput = Field(..., description="Evaluation output for the test set")
     dataset: str = Field(..., description="Dataset name")
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, extra="forbid")  # Prevent extra fields
 
 class ShadowModelTrainingSchema(BaseModel):
     """Schema for Shadow model metadata storage."""
@@ -143,15 +171,14 @@ class ShadowModelTrainingSchema(BaseModel):
     num_train: int = Field(..., ge=0, description="Number of training samples")
     optimizer: str = Field(..., description="Optimizer name")
     criterion: str = Field(..., description="Criterion (loss function) name")
-    batch_size: int = Field(..., ge=1, description="Batch size used during training")
     epochs: int = Field(..., ge=1, description="Number of training epochs")
-    train_acc: float = Field(..., ge=0.0, le=1.0, description="Training accuracy (0 to 1)")
-    train_loss: float = Field(..., ge=0.0, description="Training loss")
-    test_acc: float = Field(..., ge=0.0, le=1.0, description="Test accuracy (0 to 1)")
-    test_loss: float = Field(..., ge=0.0, description="Test loss")
+    train_result: EvalOutput = Field(..., description="Evaluation output for the training set")
+    test_result: EvalOutput = Field(..., description="Evaluation output for the test set")
     online: bool = Field(..., description="Online vs. offline training")
     model_class: str = Field(..., description="Model class name")
     target_model_hash: str = Field(..., description="Hash of target model")
+
+    model_config = ConfigDict(extra="forbid")  # Prevent extra fields
 
 class DistillationModelTrainingSchema(BaseModel):
     """Schema for metadata storage for distillation."""
@@ -163,6 +190,8 @@ class DistillationModelTrainingSchema(BaseModel):
     batch_size: int = Field(..., ge=1, description="Batch size used during training")
     epochs: int = Field(..., ge=1, description="Number of training epochs")
     label_only: bool = Field(..., description="Whether the distillation process is label-only")
+
+    model_config = ConfigDict(extra="forbid")  # Prevent extra fields
 
 def avg_tpr_at_low_fpr(result: MIAResult) -> float:
     """Calculate the average TPR for FPR values below fpr_threshold.
@@ -188,5 +217,5 @@ class OptunaConfig(BaseModel):
     objective: Callable[[MIAResult], float] = Field(default=avg_tpr_at_low_fpr,
                                                     description="Objective function: MIAResult -> float")
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # Prevent extra fields
 
