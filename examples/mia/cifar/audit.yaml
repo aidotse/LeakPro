@@ -6,10 +6,11 @@ audit:  # Configurations for auditing
       num_shadow_models: 5
       gamma: 1
     # population:
-    lira:
-      online: False
+    # lira:
+    #   online: False
     # loss_traj:
-    # HSJ:
+    HSJ:
+      verbose: False
     # yoqo:
 
   output_dir: "./leakpro_output"
