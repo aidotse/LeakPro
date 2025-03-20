@@ -4,7 +4,7 @@ import numpy as np
 from tqdm import tqdm
 
 from leakpro.attacks.utils.utils import softmax_logits
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.signals.signal import ModelLogits, ModelRescaledLogits
 from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import Self
@@ -29,7 +29,7 @@ class Memorization():
             audit_data_indices: list,
             audit_data_labels: list,
             org_audit_data_length: int,
-            handler: AbstractInputHandler,
+            handler: MIAHandler,
             online: bool,
             batch_size: int = 32,
         ) -> None:
@@ -47,7 +47,7 @@ class Memorization():
             audit_data_indices (list): List of all audit data indices.
             audit_data_labels (list): List of corresponding labels.
             org_audit_data_length (int): Length of the original audit dataset, before any filtering.
-            handler (AbstractInputHandler): Data handler to manage data.
+            handler (MIAHandler): Data handler to manage data.
             online (bool): Flag if the attack is online or not.
             batch_size (int): Integer to set batch size when loading data (will effect performance).
 

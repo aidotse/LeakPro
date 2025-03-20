@@ -2,43 +2,31 @@ audit:  # Configurations for auditing
   random_seed: 1234  # Integer specifying the random seed
   attack_list:
     rmia:
-      training_data_fraction: 0.5  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
-      attack_data_fraction: 0.5 # Fraction of auxiliary dataset to sample from during attack
-      num_shadow_models: 8 # Number of shadow models to train
-      online: True # perform online or offline attack
-      temperature: 2
-      gamma: 1.0
-      offline_a: 0.33 # parameter from which we compute p(x) from p_OUT(x) such that p_IN(x) = a p_OUT(x) + b.
-      offline_b: 0.66
-    # qmia:
-    #   training_data_fraction: 1.0  # Fraction of the auxilary dataset (data without train and test indices) to use for training the quantile regressor
-    #   epochs: 5  # Number of training epochs for quantile regression
+      online: False
+      num_shadow_models: 5
+      gamma: 1
     # population:
-    #   attack_data_fraction: 1.0  # Fraction of the auxilary dataset to use for this attack
     lira:
-      training_data_fraction: 0.5  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
-      num_shadow_models: 8 # Number of shadow models to train
-      online: True # perform online or offline attack
-      fixed_variance: True # Use a fixed variance for the whole audit
-      boosting: True
+      online: False
     # loss_traj:
-    #   training_distill_data_fraction : 0.7 # Fraction of the auxilary dataset to use for training the distillation models D_s = (1-D_KD)/2
-    #   number_of_traj: 10 # Number of epochs (number of points in the loss trajectory)
-    #   label_only: False # True or False
-    #   mia_classifier_epochs: 100
+    # HSJ:
+    # yoqo:
 
   output_dir: "./leakpro_output"
   attack_type: "mia" #mia, gia
+  data_modality: "tabular" #image, tabular
 
 target:
   # Target model path
-  module_path: "utils/model_LR.py" # either model_grud.py or model_LR.py for logestic regression
-  model_class: "LR" #  LR/GRUD
+  module_path: "utils/model_GRUD_dpsgd.py" # either model_GRUD.py or model_LR.py for logestic regression
+  model_class: "GRUD_DPSGD" #  LR/GRUD
   # Data paths
-  target_folder: "./target_LR" # either target_GRUD or target_LR
-  data_path: "./data/flattened/dataset.pkl" #unflattened dataset for GRUD and flattened dataset for LR
+  target_folder: "./target_GRUD_dpsgd" # either target_GRUD or target_LR
+  data_path: "./data/GRUD_data/dataset.pkl" #unflattened dataset for GRUD in GRUD_data direcotry and flattened dataset for LR in LR_data directory
+  dpsgd_path: "./target_GRUD_dpsgd/dpsgd_dic.pkl"
+
 
 shadow_model:
-  model_class: # LR/GRUD
   
 distillation_model:
+

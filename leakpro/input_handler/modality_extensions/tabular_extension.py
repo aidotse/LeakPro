@@ -4,25 +4,30 @@ from numpy import ndarray
 from torch import Tensor, argmax, cat, tensor
 from torch.nn.functional import one_hot
 
+from leakpro.input_handler.mia_handler import MIAHandler
+from leakpro.input_handler.modality_extensions.modality_extension import AbstractModalityExtension
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 
-class TabularExtension:
+class TabularExtension(AbstractModalityExtension):
     """Class for handling tabular data with one-hot encoding and decoding.
 
     Assumes that the data is a tensor or numpy array.
     """
 
-    def __init__(self:Self) -> None:
+    def __init__(self:Self, handler:MIAHandler) -> None:
         """Check if the data is a pandas DataFrame."""
 
-        x,y = next(iter(self.get_dataloader(0)))
+        super().__init__(handler)
+        logger.info("Image extension initialized.")
+
+        x,y = next(iter(self.handler.get_dataloader(0)))
         if not isinstance(x, (Tensor, ndarray)) or not isinstance(y, (Tensor,ndarray)):
             raise ValueError("Data must be a tensor or nparray.")
 
-        if hasattr(self.population, "dec_to_onehot"):
-            self.dec_to_onehot = self.population.dec_to_onehot
+        if hasattr(self.handler.population, "dec_to_onehot"):
+            self.dec_to_onehot = self.handler.population.dec_to_onehot
 
             # Check number of continuous and categorical columns
             n_dec_cols = len(self.dec_to_onehot)
@@ -34,8 +39,25 @@ class TabularExtension:
             self.one_hot_encoded = x.shape[1] != n_dec_cols
             logger.info(f"Data is one-hot encoded: {self.one_hot_encoded}")
         else:
-            raise ValueError("Data object must contain dec_to_onehot dict.")
+            logger.warning("No one-hot encoding information found in the population object.")
+            self.dec_to_onehot = {}
+            self.one_hot_encoded = False
 
+    def augmentation(self:Self, data:Tensor, n_aug:int) -> Tensor:
+        """Augment the data by generating additional samples.
+
+        Args:
+        ----
+            data (Tensor): The input data tensor to augment.
+            n_aug (int): The number of augmented samples to generate.
+
+        Returns:
+        -------
+            Tensor: The augmented data tensor.
+
+        """
+        n_aug = n_aug // len(data) #dummy to pass ruff
+        return data
 
     def one_hot_encode(self:Self, data:tensor) -> tensor:
         """One-hot encode all categorical columns in the feature tensor.

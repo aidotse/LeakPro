@@ -1,9 +1,12 @@
-import pickle  # noqa: D100
+"""A module that implements the HopSkipJump attack for membership inference."""
+
+from typing import Literal, Union
 
 import numpy as np
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.metrics.attack_result import MIAResult
 from leakpro.signals.signal import HopSkipJumpDistance
 from leakpro.utils.import_helper import Self
@@ -11,117 +14,82 @@ from leakpro.utils.logger import logger
 
 
 class AttackHopSkipJump(AbstractMIA):  # noqa: D101
+
+    class AttackConfig(BaseModel):
+        """Configuration for the RMIA attack."""
+
+        attack_data_fraction: float = Field(default=0.1, ge = 0.0, le=1.0, description="Fraction of the data to use for the attack") # noqa: E501
+        norm: Union[int, float] = Field(default=2, description="The norm to use for the attack. Must be one of [1, 2, np.inf]")
+        initial_num_evals: int = Field(default=100, ge=1, le=1000, description="The initial number of evaluations")
+        max_num_evals: int = Field(default=10000, ge=1, description="The maximum number of evaluations")
+        num_iterations: int = Field(default=100, ge=1, description="The number of iterations")
+        gamma: float = Field(default=1.0, ge=0.0, description="The gamma value")
+        constraint: Literal[1,2] = Field(default=2, description="The constraint value must be 1 or 2")
+        batch_size: int = Field(default=64, ge=1, description="The batch size")
+        epsilon_threshold: float = Field(default=1e-6, ge=0.0, le=0.001, description="The epsilon threshold")
+
+        @field_validator("norm", mode="before")
+        @classmethod
+        def validate_norm(cls, v: Union[int, float]) -> Union[int, float]:
+            """Validate the norm value.
+
+            Args:
+                v (Union[int, float]): The norm value to validate.
+
+            Returns:
+                Union[int, float]: The validated norm value.
+
+            Raises:
+                ValueError: If the norm value is not one of [1, 2, np.inf].
+
+            """
+            if v not in {1, 2, np.inf}:
+                raise ValueError("Norm must be one of [1, 2, np.inf]")
+            return v
+
+        @model_validator(mode="after")
+        @classmethod
+        def check_max_greater_than_initial(cls, values : dict) -> dict:
+            """Ensure max_num_evals > initial_num_evals."""
+            if values.max_num_evals <= values.initial_num_evals:
+                raise ValueError("max_num_evals must be greater than initial_num_evals")
+            return values
+
+        model_config = {"arbitrary_types_allowed": True}  # Pydantic v2 config to allow `np.inf`
+
+
+
     def __init__(self: Self,
-                 handler: AbstractInputHandler,
+                 handler: MIAHandler,
                  configs: dict
                 ) -> None:
-        super().__init__(handler)
         """Initialize the HopSkipJump class.
 
         Args:
         ----
-            handler (AbstractInputHandler): The input handler object.
+            handler (MIAHandler): The input handler object.
             configs (dict): A dictionary containing the attack loss_traj configurations.
 
         """
-
         logger.info("Configuring label only attack")
-        self._configure_attack(configs)
+        self.configs = self.AttackConfig() if configs is None else self.AttackConfig(**configs)
+
+        super().__init__(handler)
+
+        # Assign the configuration parameters to the object
+        for key, value in self.configs.model_dump().items():
+            setattr(self, key, value)
+
+        if self.population_size == self.audit_size:
+            raise ValueError("The audit dataset is the same size as the population dataset. \
+                    There is no data left to use for attacks.")
+
         self.signal = HopSkipJumpDistance()
 
-
-    def _configure_attack(self:Self,
-                          configs: dict) -> None:
-        """Configure the attack using the configurations."""
-        self.configs = configs
-        self.attack_data_fraction = configs.get("attack_data_fraction", 0.1)
-        self.target_metadata_path = configs.get("trained_model_metadata_path", "./target/model_metadata.pkl")
-        with open(self.target_metadata_path, "rb") as f:
-             self.target_model_metadata = pickle.load(f)  # noqa: S301
-
-        self.norm = configs.get("norm", 2)
-        self.y_target = configs.get("y_target", None)  # noqa: SIM910
-        self.image_target = configs.get("image_target", None)  # noqa: SIM910
-        self.initial_num_evals = configs.get("initial_num_evals", 100)
-        self.max_num_evals = configs.get("max_num_evals", 10000)
-        self.stepsize_search = configs.get("stepsize_search", "geometric_progression")
-        self.num_iterations = configs.get("num_iterations", 100)
-        self.gamma = configs.get("gamma", 1.0)
-        self.constraint = configs.get("constraint", 2)
-        self.batch_size = configs.get("batch_size", 128)
-        self.verbose = configs.get("verbose", True)
-        self.epsilon_threshold = configs.get("epsilon_threshold", 1e-6)
-        self.user_input_validation()
-
-    def user_input_validation(self:Self) -> None:
-        """Validate the user input configurations."""
-        self._validate_norm()
-        self._validate_stepsize_search()
-        self._validate_constraint()
-        self._validate_initial_num_evals()
-        self._validate_max_num_evals()
-        self._validate_num_iterations()
-        self._validate_gamma()
-        self._validate_batch_size()
-        self._validate_y_target()
-
-    def _validate_norm(self:Self) -> None:
-        """Validate the norm value."""
-        valid_norm_values = [1, 2, np.inf]
-        if self.norm not in valid_norm_values:
-            raise ValueError(f"Invalid norm value: {self.norm}. Must be one of {valid_norm_values}")
-
-    def _validate_stepsize_search(self:Self) -> None:
-        """Validate the stepsize_search value."""
-        valid_stepsize_search_values = ["geometric_progression"]
-        if self.stepsize_search not in valid_stepsize_search_values:
-            raise ValueError(f"Invalid stepsize_search. This version supports{valid_stepsize_search_values}")
-
-    def _validate_constraint(self:Self) -> None:
-        """Validate the constraint value."""
-        valid_constraint_values = [1, 2]
-        if self.constraint not in valid_constraint_values:
-            raise ValueError(f"Invalid constraint value: {self.constraint}. Must be one of {valid_constraint_values}")
-
-    def _validate_initial_num_evals(self:Self) -> None:
-        """Validate the initial_num_evals value."""
-        if not (1 <= self.initial_num_evals <= 1000):
-            raise ValueError(f"Invalid initial_num_evals value: {self.initial_num_evals}. "
-                            "Must be between 1 and 1000 (inclusive).")
-
-    def _validate_max_num_evals(self:Self) -> None:
-        """Validate the max_num_evals value."""
-        if self.max_num_evals <= self.initial_num_evals:
-            raise ValueError("max_num_evals must be greater than initial_num_evals")
-
-    def _validate_num_iterations(self:Self) -> None:
-        """Validate the num_iterations value."""
-        if self.num_iterations <= 0:
-            raise ValueError("num_iterations must be greater than 0")
-
-    def _validate_gamma(self:Self) -> None:
-        """Validate the gamma value."""
-        if self.gamma <= 0:
-            raise ValueError("gamma must be greater than 0")
-
-    def _validate_batch_size(self:Self) -> None:
-        """Validate the batch_size value."""
-        if self.batch_size <= 0:
-            raise ValueError("batch_size must be greater than 0")
-
-    def _validate_y_target(self:Self) -> None:
-        """Validate the y_target value."""
-        num_classes = self.target_model_metadata["init_params"]["num_classes"]
-        if self.y_target is not None and self.y_target not in range(num_classes):
-            raise ValueError("y_target must be an integer and in the range of the number of classes in the target model.")
-
-    def _validate_epsilon_threshold(self:Self) -> None:
-        """Validate the epsilon_threshold value."""
-        if self.epsilon_threshold <= 0:
-            raise ValueError("epsilon_threshold must be greater than 0")
-        if self.epsilon_threshold >= 0.001:
-            raise ValueError("epsilon_threshold must be a very small value")
-
+        self.y_target = None
+        self.image_target = None
+        self.verbose = configs.get("verbose", True) if configs is not None else True
+        self.stepsize_search = "geometric_progression"
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
@@ -164,6 +132,7 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
                                                 int(len(out_member_indices) * self.attack_data_fraction),
                                                 replace=False)
         audit_indices = np.concatenate((audit_in_member_indicies, audit_out_member_indicies))
+        assert len(audit_indices) >= self.batch_size , "The batch size must be greater than the number of audit indices"
 
         self.attack_dataloader = self.handler.get_dataloader(audit_indices, batch_size=self.batch_size)
 

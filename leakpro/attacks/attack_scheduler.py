@@ -24,11 +24,11 @@ class AttackScheduler:
         configs = handler.configs
 
         # Create factory
-        attack_type = configs["audit"]["attack_type"].lower()
+        attack_type = configs.audit.attack_type
         self._initialize_factory(attack_type)
 
         # Create the attacks
-        self.attack_list = list(configs["audit"]["attack_list"].keys())
+        self.attack_list = list(configs.audit.attack_list.keys())
         self.attacks = []
         for attack_name in self.attack_list:
             try:
@@ -59,6 +59,15 @@ class AttackScheduler:
                 logger.error("Failed to import GIA attack module.")
                 raise ImportError("GIA attack module is not available.") from e
 
+        elif attack_type == "minv":
+            try:
+                from leakpro.attacks.minv_attacks.attack_factory_minv import AttackFactoryMINV
+                self.attack_factory = AttackFactoryMINV
+                logger.info("MINV attack factory loaded.")
+            except ImportError as e:
+                logger.error("Failed to import MINV attack module.")
+                raise ImportError("MINV attack module is not available.") from e
+
         else:
             logger.error(f"Unsupported attack type: {self.attack_type}")
             raise ValueError(f"Unsupported attack type: {self.attack_type}. Must be 'mia' or 'gia'.")
@@ -67,15 +76,19 @@ class AttackScheduler:
         """Add an attack to the list of attacks."""
         self.attacks.append(attack)
 
-    def run_attacks(self:Self) -> Dict[str, Any]:
+    def run_attacks(self: Self, use_optuna:bool=False) -> Dict[str, Any]:
         """Run the attacks and return the results."""
         results = {}
         for attack, attack_type in zip(self.attacks, self.attack_list):
+
             logger.info(f"Preparing attack: {attack_type}")
             attack.prepare_attack()
 
             logger.info(f"Running attack: {attack_type}")
-
+            if use_optuna and attack.optuna_params > 0:
+                study = attack.run_with_optuna()
+                best_config = attack.configs.model_copy(update=study.best_params)
+                attack.reset_attack(best_config)
             result = attack.run_attack()
             results[attack_type] = {"attack_object": attack, "result_object": result}
 

@@ -261,8 +261,9 @@ class HopSkipJumpDistance:
         perturbation_distance = 0
         perturbed_previous_step = init_batch_perturbed.clone().detach()
 
-
-        for j in np.arange(self.num_iterations):
+        for j, _ in tqdm(enumerate(range(self.num_iterations)), total=self.num_iterations, desc="Processing Iterations"):
+            if j % 10 == 0:
+                tqdm.write(f"Current iteration: {j}/{self.num_iterations}")
             current_iter = j + 1
 
             # Binary search to approach the boundary.
@@ -272,7 +273,7 @@ class HopSkipJumpDistance:
 
             # Choose delta.
             delta = self.select_delta( batch_sample,
-                                      perturbed_previous_step)
+                                    perturbed_previous_step)
 
             # approximate gradient.
             gradf = self.approximate_gradient(perturbed,
@@ -285,11 +286,11 @@ class HopSkipJumpDistance:
             if self.stepsize_search == "geometric_progression":
                 # find step size.
                 epsilon = self.geometric_progression_for_stepsize(batch_sample,
-                                                                  update,
-                                                                  perturbed,
-                                                                  current_iter,
-                                                                  active_dataset_indices,
-                                                                  b_i)
+                                                                update,
+                                                                perturbed,
+                                                                current_iter,
+                                                                active_dataset_indices,
+                                                                b_i)
 
                 # Update the sample.
                 updated_perturbed = self.clamping(perturbed + epsilon.view(len(epsilon),1,1,1) * update )

@@ -5,6 +5,7 @@ from torch import cuda, device, optim, sigmoid
 from torch.nn import BCEWithLogitsLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from leakpro.schemas import TrainingOutput
 
 from leakpro import AbstractInputHandler
 
@@ -33,7 +34,7 @@ class AdultInputHandler(AbstractInputHandler):
         criterion: torch.nn.Module = None,
         optimizer: optim.Optimizer = None,
         epochs: int = None,
-    ) -> dict:
+    ) -> TrainingOutput:
         """Model training procedure."""
 
         dev = device("cuda" if cuda.is_available() else "cpu")
@@ -45,7 +46,7 @@ class AdultInputHandler(AbstractInputHandler):
 
         for e in tqdm(range(epochs), desc="Training Progress"):
             model.train()
-            train_acc, train_loss = 0.0, 0.0
+            train_acc, train_loss, total_samples = 0.0, 0.0, 0
 
             for data, target in dataloader:
                 target = target.float().unsqueeze(1)
@@ -54,14 +55,19 @@ class AdultInputHandler(AbstractInputHandler):
                 output = model(data)
 
                 loss = criterion(output, target)
-                pred = sigmoid(output) >= 0.5
+                pred = output >= 0.5
                 train_acc += pred.eq(target).sum().item()
 
                 loss.backward()
                 optimizer.step()
-                train_loss += loss.item()
+                train_loss += loss.item() 
+                total_samples += target.size(0)
 
         train_acc = train_acc/len(dataloader.dataset)
         train_loss = train_loss/len(dataloader)
-
-        return {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}
+        
+        
+        output_dict = {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}
+        output = TrainingOutput(**output_dict)
+        
+        return output

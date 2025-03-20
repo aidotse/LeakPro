@@ -9,7 +9,8 @@ from torch.nn import CrossEntropyLoss, KLDivLoss, Module
 from tqdm import tqdm
 
 from leakpro.attacks.utils.model_handler import ModelHandler
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.mia_handler import MIAHandler
+from leakpro.schemas import DistillationModelTrainingSchema
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
@@ -25,8 +26,7 @@ def singleton(cls):  # noqa: ANN001, ANN201
             params[cls] = (args, kwargs)
             instances[cls] = cls(*args, **kwargs)  # Create the singleton instance
         elif args or kwargs:
-            # Raise an error if trying to reinitialize with different parameters
-            raise ValueError("Singleton already created with specific parameters.")
+            instances[cls].__init__(*args, **kwargs)  # Update the singleton instance with new parameters
         return instances[cls]
 
     return get_instance
@@ -35,17 +35,17 @@ def singleton(cls):  # noqa: ANN001, ANN201
 class DistillationModelHandler(ModelHandler):
     """A class handling the creation, training, and loading of distillation models."""
 
-    def __init__(self:Self, handler: AbstractInputHandler)->None:
+    def __init__(self:Self, handler: MIAHandler)->None:
         """Initialize the DistillationModelHandler.
 
         Args:
         ----
-            handler (AbstractInputHandler): The input handler.
+            handler (MIAHandler): The input handler.
 
         """
         caller = "distillation_model"
         super().__init__(handler, caller)
-        self.configs = handler.configs.get("distillation_model", None)
+        self.configs = handler.configs.distillation_model
 
         self.model_storage_name = "distillation_epochs"
         self.metadata_storage_name = "metadata"
@@ -152,17 +152,20 @@ class DistillationModelHandler(ModelHandler):
             distillation_checkpoints.append(student_model)
 
             logger.info("Storing metadata for distillation model")
-            meta_data = {}
-            meta_data["init_params"] = self.init_params
-            meta_data["train_indices"] = distillation_data_indices
-            meta_data["num_train"] = len(distillation_data_indices)
-            meta_data["optimizer"] = optimizer.__class__.__name__
-            meta_data["batch_size"] = self.batch_size
-            meta_data["epochs"] = self.epochs
-            meta_data["label_only"] = label_only
+            meta_data = {
+                "init_params" : self.init_params,
+                "train_indices" : distillation_data_indices,
+                "num_train" : len(distillation_data_indices),
+                "optimizer" : optimizer.__class__.__name__,
+                "batch_size" : self.batch_size,
+                "epochs" : self.epochs,
+                "label_only" : label_only
+            }
+
+            validated_meta_data = DistillationModelTrainingSchema(**meta_data)
 
             with open(f"{self.storage_path}/{model_pair_name}_metadata_{d}.pkl", "wb") as f:
-                pickle.dump(meta_data, f)
+                pickle.dump(validated_meta_data, f)
 
             logger.info(f"Metadata for distillation model stored in {self.storage_path}")
 

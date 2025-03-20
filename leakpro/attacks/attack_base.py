@@ -1,9 +1,5 @@
 """Run optuna to find best hyperparameters."""
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import Optional
-
-import optuna
 
 from leakpro.utils.import_helper import Self
 
@@ -11,10 +7,9 @@ from leakpro.utils.import_helper import Self
 class AbstractAttack(ABC):
     """Abstract attack template for attack objects."""
 
-    @abstractmethod
-    def run_with_optuna(self:Self, optuna_config: Optional[dataclass]) -> optuna.study.Study:
-        """Fins optimal hyperparameters using optuna."""
-        pass
+    def get_configs(self: Self) -> dict:
+        """Return configs used for attack."""
+        return self.configs
 
     @abstractmethod
     def run_attack() -> None:

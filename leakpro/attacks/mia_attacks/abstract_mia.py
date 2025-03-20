@@ -1,21 +1,25 @@
 """Module that contains the abstract class for constructing and performing a membership inference attack on a target."""
 
-from abc import ABC, abstractmethod
+from abc import abstractmethod
+from typing import Optional
 
 import numpy as np
+import optuna
+from optuna.trial import Trial
+from pydantic import BaseModel
 from torch.utils.data import DataLoader
 
+from leakpro.attacks.attack_base import AbstractAttack
+from leakpro.attacks.utils.hyperparameter_tuning.optuna import optuna_optimal_hyperparameters
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.metrics.attack_result import AttackResult
+from leakpro.schemas import OptunaConfig
 from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import List, Self, Union
-
-########################################################################################################################
-# METRIC CLASS
-########################################################################################################################
+from leakpro.utils.logger import logger
 
 
-class AbstractMIA(ABC):
+class AbstractMIA(AbstractAttack):
     """Interface to construct and perform a membership inference attack on a target model and dataset.
 
     This serves as a guideline for implementing a metric to be used for measuring the privacy leakage of a target model.
@@ -26,8 +30,10 @@ class AbstractMIA(ABC):
     population_size = None
     target_model = None
     audit_dataset = None
-    handler=None
+    handler = None
     _initialized = False
+
+    AttackConfig: type[BaseModel]  # Subclasses must define an attack config
 
     def __init__(
         self:Self,
@@ -40,6 +46,11 @@ class AbstractMIA(ABC):
             handler (AbstractInputHandler): The input handler object.
 
         """
+        if not hasattr(self, "AttackConfig"):
+            raise ValueError(f"{self.__class__.__name__}.AttackConfig must be defined as a Pydantic BaseModel subclass.")
+        if not isinstance(self.configs, BaseModel):
+            raise TypeError(f"{self.__class__.__name__}.configs must be a subclass of Pydantic's BaseModel.")
+
         # These objects are shared and should be initialized only once
         if not AbstractMIA._initialized:
             AbstractMIA.population = handler.population
@@ -59,6 +70,22 @@ class AbstractMIA(ABC):
 
         # These objects are instance specific
         self.signal_data = []
+        self.optuna_params = 0
+
+    @classmethod
+    def get_default_attack_config(cls) -> BaseModel:
+        """Get the attack configuration.
+
+        Returns
+        -------
+            BaseModel: The configuration of the attack.
+
+        Raises
+        ------
+            ValueError: If the attack type is unknown.
+
+        """
+        return cls.Config()
 
     def _validate_shared_quantities(self:Self)->None:
         """Validate the shared quantities used by the attack."""
@@ -76,8 +103,8 @@ class AbstractMIA(ABC):
             raise ValueError("Target model not found.")
         if AbstractMIA.audit_dataset is None:
             raise ValueError("Audit dataset not found.")
-        if len(AbstractMIA.audit_dataset["data"]) == AbstractMIA.population_size:
-            raise ValueError("Audit dataset is the entire population dataset.")
+        if len(AbstractMIA.audit_dataset["data"]) > AbstractMIA.population_size:
+            raise ValueError("Audit dataset is larger than the entire population dataset.")
 
     def sample_indices_from_population(
         self:Self,
@@ -143,6 +170,72 @@ class AbstractMIA(ABC):
             raise ValueError("Size of the sample is greater than the size of the data.")
         return self.get_dataloader(np.random.choice(data, size, replace=False))
 
+
+    def run_with_optuna(self:Self, optuna_config: Optional[OptunaConfig] = None) -> optuna.study.Study:
+        """Finds optimal hyperparameters using optuna."""
+        if optuna_config is None:
+            # Use default valiues for config
+            optuna_config = OptunaConfig()
+        return optuna_optimal_hyperparameters(self, optuna_config)
+
+    def suggest_parameters(self:Self, trial: Trial) -> BaseModel:
+        """Update the given config with suggested parameters from the trial."""
+        suggestions = {}
+        for field_name, field in self.configs.model_fields.items():
+            extra = field.json_schema_extra
+            if extra is None or "optuna" not in extra:
+                continue
+
+            opt_variable = extra["optuna"]
+
+            # Check if the field should be suggested (e.g. only when not online)
+            enabled_if = opt_variable.get("enabled_if", None)
+            if enabled_if is not None and not enabled_if(self.configs):
+                continue
+
+            param_type = opt_variable.get("type")
+            if param_type == "float":
+                suggestions[field_name] = trial.suggest_float(
+                    field_name,
+                    opt_variable["low"],
+                    opt_variable["high"],
+                    log=opt_variable.get("log", False)
+                )
+            elif param_type == "int":
+                suggestions[field_name] = trial.suggest_int(
+                    field_name,
+                    opt_variable["low"],
+                    opt_variable["high"]
+                )
+            elif param_type == "categorical":
+                suggestions[field_name] = trial.suggest_categorical(
+                    field_name,
+                    opt_variable["choices"]
+                )
+            else:
+                raise ValueError(f"Unsupported parameter type: {param_type}")
+
+        return self.configs.model_copy(update=suggestions)
+
+    def set_effective_optuna_metadata(self:Self, user_attack_config: dict) -> int:
+        """Set the parameters to be optimized by optuna."""
+
+        # Create default config
+        self.optuna_params = 0
+        attack_config = self.configs.model_fields.items() # Read out default configs for attack as a dict
+        for field_name, field in attack_config:
+            extra = field.json_schema_extra
+            if extra is None or "optuna" not in extra:
+                continue
+
+            self.optuna_params += 1 # one more parameter to be optimized
+
+            user_provided_value = user_attack_config.get(field_name)
+            # remove the optuna dict to prevent the parameter to get optimized if the user has provided a value
+            if user_provided_value is not None:
+                self.configs.model_fields[field_name].json_schema_extra = None
+                self.optuna_params -= 1 # remove one parameter going into optuna
+                logger.info(f"User provided value for {field_name}, it won't be optimized by optuna.")
 
     @property
     def population(self:Self)-> List:
@@ -211,20 +304,16 @@ class AbstractMIA(ABC):
         """
         return AbstractMIA.audit_dataset["out_members"]
 
-    @abstractmethod
-    def _configure_attack(self:Self, configs:dict)->None:
-        """Configure the attack.
+    @property
+    def audit_size(self:Self)-> int:
+        """Get the size of the audit dataset.
 
-        Args:
-        ----
-            configs (dict): The configurations for the attack.
+        Returns
+        -------
+        int: The size of the audit dataset.
 
         """
-        pass
-
-    def _validate_config(self: Self, name: str, value: float, min_val: float, max_val: float) -> None:
-        if not (min_val <= value <= (max_val if max_val is not None else value)):
-            raise ValueError(f"{name} must be between {min_val} and {max_val}")
+        return len(AbstractMIA.audit_dataset["data"])
 
     @abstractmethod
     def description(self:Self) -> dict:

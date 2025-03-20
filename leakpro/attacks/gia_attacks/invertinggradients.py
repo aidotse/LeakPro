@@ -1,11 +1,12 @@
 """Geiping, Jonas, et al. "Inverting gradients-how easy is it to break privacy in federated learning?."."""
+import os
 from collections.abc import Generator
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Optional
 
-import optuna
 import torch
+from optuna.trial import Trial
 from torch import Tensor
 from torch.nn import CrossEntropyLoss, Module
 from torch.utils.data import DataLoader
@@ -58,6 +59,10 @@ class InvertingGradients(AbstractGIA):
         self.best_loss = float("inf")
         self.best_reconstruction = None
         self.best_reconstruction_round = None
+        # required for optuna to save the best hyperparameters
+        self.attack_folder_path = "leakpro_output/attacks/inverting_grad"
+        os.makedirs(self.attack_folder_path, exist_ok=True)
+
         logger.info("Inverting gradient initialized.")
         self.prepare_attack()
 
@@ -144,7 +149,7 @@ class InvertingGradients(AbstractGIA):
     def _configure_attack(self: Self, configs: dict) -> None:
         pass
 
-    def suggest_parameters(self: Self, trial: optuna.trial.Trial) -> None:
+    def suggest_parameters(self: Self, trial: Trial) -> None:
         """Suggest parameters to chose and range for optimization for the Inverting Gradient attack."""
         total_variation = trial.suggest_float("total_variation", 1e-7, 1e-1, log=True)
         # attack_lr = trial.suggest_float("attack_lr", 1e-2, 1e-0, log=True)
@@ -155,7 +160,7 @@ class InvertingGradients(AbstractGIA):
         # self.configs.median_pooling = median_pooling
         # self.configs.top10norms = top10norms
 
-    def reset_attack(self: Self) -> None:
+    def reset_attack(self: Self, new_config:dict) -> None:  # noqa: ARG002
         """Reset attack to initial state."""
         self.best_loss = float("inf")
         self.best_reconstruction = None
@@ -163,7 +168,3 @@ class InvertingGradients(AbstractGIA):
         self.model = deepcopy(self.original_model)
         self.prepare_attack()
         logger.info("Inverting attack reset to initial state.")
-
-    def get_configs(self: Self) -> dict:
-        """Return configs used for attack."""
-        return self.configs

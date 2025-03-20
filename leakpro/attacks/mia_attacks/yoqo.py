@@ -2,13 +2,14 @@
 
 import numpy as np
 import torch
+from pydantic import BaseModel, Field
 from torch import Tensor
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.metrics.attack_result import CombinedMetricResult
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
@@ -17,20 +18,37 @@ from leakpro.utils.logger import logger
 class AttackYOQO(AbstractMIA):
     """Implementation of the You Only Query Once attack."""
 
+    class AttackConfig(BaseModel):
+        """Configuration for the RMIA attack."""
+
+        training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Fraction of auxilary dataset to use for each shadow model training")  # noqa: E501
+        num_shadow_models: int = Field(default=8, ge=1, description="Number of shadow models to train")
+        online: bool = Field(default=False, description="Perform online or offline attack")
+        lr_xprime_optimization: float = Field(default=1e-3, ge=0.0, description="Learning rate for optimization of xprime")
+        max_iterations: int = Field(default=35, ge=1, description="Maximum number of iterations for optimization of xprime")
+
     def __init__(self:Self,
-                 handler: AbstractInputHandler,
+                 handler: MIAHandler,
                  configs: dict
                  ) -> None:
         """Initialize the YOQO attack.
 
         Args:
         ----
-            handler (AbstractInputHandler): The input handler object.
+            handler (MIAHandler): The input handler object.
             configs (dict): Configuration parameters for the attack.
 
         """
-        # Initializes the parent metric
+        self.configs = self.AttackConfig() if configs is None else self.AttackConfig(**configs)
         super().__init__(handler)
+
+        # Assign the configuration parameters to the object
+        for key, value in self.configs.model_dump().items():
+            setattr(self, key, value)
+
+        if self.online is False and self.population_size == self.audit_size:
+            raise ValueError("The audit dataset is the same size as the population dataset. \
+                    There is no data left for the shadow models.")
 
         tmp = self.handler.get_dataloader(0, batch_size=1)
         tmp_features, _ = next(iter(tmp))
@@ -42,39 +60,11 @@ class AttackYOQO(AbstractMIA):
         else:
             self.loss = CrossEntropyLoss(reduction = "none")
 
-        self._configure_attack(configs)
-
-    def _configure_attack(self:Self, configs: dict) -> None:
-        """Configure the YOQO attack.
-
-        Args:
-        ----
-            configs (dict): Configuration parameters for the attack.
-
-        """
-        self.shadow_models = []
-        self.num_shadow_models = configs.get("num_shadow_models", 64)
-        self.online = configs.get("online", False)
-        self.training_data_fraction = configs.get("training_data_fraction", 0.5)
-
         # YOQO specific
-        self.alpha = configs.get("alpha", 2)
-        self.n_audits = configs.get("n_audits", -1)
-        self.lr_xprime_optimization = configs.get("lr_xprime_optimization", 1e-3)
-        self.stop_criterion = configs.get("stop_criterion", self.num_shadow_models / 8)
-        self.max_iterations = configs.get("max_iterations", 30)
+        self.alpha = 2.0
+        self.n_audits = -1
+        self.stop_criterion = self.num_shadow_models / 8
 
-        # Define the validation dictionary as: {parameter_name: (parameter, min_value, max_value)}
-        validation_dict = {
-            "num_shadow_models": (self.num_shadow_models, 1, None),
-            "training_data_fraction": (self.training_data_fraction, 0, 1),
-            "lr_xprime_optimization": (self.lr_xprime_optimization, 0, None),
-            "max_iterations": (self.max_iterations, 0, None),
-        }
-
-        # Validate parameters
-        for param_name, (param_value, min_val, max_val) in validation_dict.items():
-            self._validate_config(param_name, param_value, min_val, max_val)
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""

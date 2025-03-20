@@ -1,9 +1,8 @@
 
-from math import isnan
-
-from pytest import raises
+import numpy as np
 
 from leakpro.attacks.mia_attacks.lira import AttackLiRA
+from leakpro.metrics.attack_result import MIAResult
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.tests.constants import get_audit_config, get_shadow_model_config
 from leakpro.tests.input_handler.image_input_handler import ImageInputHandler
@@ -21,11 +20,6 @@ def test_lira_setup(image_handler:ImageInputHandler) -> None:
     assert lira_obj.num_shadow_models == lira_params.num_shadow_models
     assert lira_obj.training_data_fraction == lira_params.training_data_fraction
     assert lira_obj.memorization == False
-
-    lira_params.num_shadow_models = -1
-    with raises(ValueError) as excinfo:
-        lira_obj = AttackLiRA(image_handler, lira_params)
-    assert str(excinfo.value) == "num_shadow_models must be between 1 and None"
 
     lira_params.num_shadow_models = 3
 
@@ -121,8 +115,8 @@ def test_lira_online_attack(image_handler:ImageInputHandler):
     assert lira_obj.fixed_in_std != lira_obj.fixed_out_std
     n_attack_points = len(lira_obj.in_members) + len(lira_obj.out_members)
     assert len(lira_obj.in_member_signals)+len(lira_obj.out_member_signals) == n_attack_points
-    assert any(isnan(x) for x in lira_obj.in_member_signals) == False
-    assert any(isnan(x) for x in lira_obj.out_member_signals) == False
+    assert not np.any(np.isnan(lira_obj.in_member_signals))
+    assert not np.any(np.isnan(lira_obj.out_member_signals))
 
 def test_lira_offline_attack(image_handler:ImageInputHandler):
     # Set up for testing
@@ -137,9 +131,12 @@ def test_lira_offline_attack(image_handler:ImageInputHandler):
     lira_obj.fix_var_threshold = 0.0
 
     # Test attack
-    lira_obj.run_attack()
+    lira_result = lira_obj.run_attack()
     assert lira_obj.fixed_in_std != lira_obj.fixed_out_std
     n_attack_points = len(lira_obj.in_members) + len(lira_obj.out_members)
     assert len(lira_obj.in_member_signals)+len(lira_obj.out_member_signals) == n_attack_points
-    assert any(isnan(x) for x in lira_obj.in_member_signals) == False
-    assert any(isnan(x) for x in lira_obj.out_member_signals) == False
+    assert not np.any(np.isnan(lira_obj.in_member_signals))
+    assert not np.any(np.isnan(lira_obj.out_member_signals))
+
+    assert lira_result is not None
+    assert isinstance(lira_result, MIAResult)
