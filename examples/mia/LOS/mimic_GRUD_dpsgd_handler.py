@@ -1,3 +1,8 @@
+import os
+import pickle
+
+from opacus import PrivacyEngine
+from opacus.accountants.utils import get_noise_multiplier
 from sklearn.metrics import accuracy_score
 from torch import cuda, device, nn, optim, sigmoid
 from torch.nn import BCEWithLogitsLoss
@@ -7,7 +12,7 @@ from tqdm import tqdm
 from leakpro import AbstractInputHandler
 from leakpro.schemas import TrainingOutput
 
-class MimicInputHandlerGRU(AbstractInputHandler):
+class MimicInputHandlerGRUdpsgd(AbstractInputHandler):
     """Class to handle the user input for the MIMICIII dataset."""
 
     def __init__(self, configs: dict) -> None:
@@ -30,13 +35,50 @@ class MimicInputHandlerGRU(AbstractInputHandler):
         optimizer: optim.Optimizer = None,
         epochs: int = None,
     ) -> TrainingOutput:
-        """Model training procedure."""
+        print("Training shadow models with DP-SGD")
+        dpsgd_path = "./target_GRUD_dpsgd/dpsgd_dic.pkl"
+
+        sample_rate = 1/len(dataloader)
+        # Check if the file exists
+        if os.path.exists(dpsgd_path):
+            # Open and read the pickle file
+            with open(dpsgd_path, "rb") as file:
+                privacy_engine_dict = pickle.load(file)
+            print("Pickle file loaded successfully!")
+            print("Data:", privacy_engine_dict)
+        else:
+            raise Exception(f"File not found at: {dpsgd_path}")
+
+        try:
+            noise_multiplier = get_noise_multiplier(target_epsilon = privacy_engine_dict["target_epsilon"],
+                                            target_delta = privacy_engine_dict["target_delta"],
+                                            sample_rate = sample_rate ,
+                                            epochs = privacy_engine_dict["epochs"],
+                                            epsilon_tolerance = privacy_engine_dict["epsilon_tolerance"],
+                                            accountant = "prv",
+                                            eps_error = privacy_engine_dict["eps_error"],)
+        except Exception as e:
+            raise ValueError(
+                f"Failed to compute noise multiplier using the 'prv' accountant. "
+                f"This may be due to a large target_epsilon ({privacy_engine_dict['target_epsilon']}). "
+                f"Consider reducing epsilon or switching to a different accountant (e.g., 'rdp'). "
+                f"Original error: {e}")
+
+        # make the model private
+        privacy_engine = PrivacyEngine(accountant = "prv")
+        model, optimizer, dataloader = privacy_engine.make_private(
+            module=model,
+            optimizer=optimizer,
+            data_loader=dataloader,
+            noise_multiplier=noise_multiplier,
+            max_grad_norm= privacy_engine_dict["max_grad_norm"],
+        )
+
         device_name = device("cuda" if cuda.is_available() else "cpu")
         model.to(device_name)
         model.train()
 
         criterion = self.get_criterion()
-        optimizer = self.get_optimizer(model)
 
         for e in tqdm(range(epochs), desc="Training Progress"):
             train_acc, train_loss = 0.0, 0.0
@@ -71,13 +113,3 @@ class MimicInputHandlerGRU(AbstractInputHandler):
         output = TrainingOutput(**output_dict)
         
         return output
-
-
-
-
-
-
-
-
-
-

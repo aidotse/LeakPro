@@ -149,7 +149,10 @@ class AttackRMIA(AbstractMIA):
 
         # get the true label indices
         z_true_labels = self.handler.get_labels(chosen_attack_data_indices)
-        assert np.issubdtype(z_true_labels.dtype, np.integer)
+        # make sure that the labels are integers
+        if not np.issubdtype(z_true_labels.dtype, np.integer):
+            z_true_labels = z_true_labels.astype(int)
+        # save the true labels
         f_z_true_labels = f"{self.attack_folder_path}/z_true_labels.npy"
         np.save(f_z_true_labels, z_true_labels)
 
@@ -271,7 +274,8 @@ class AttackRMIA(AbstractMIA):
 
         # get the true label indices
         z_true_labels = self.handler.get_labels(self.attack_data_index).astype(int)
-        assert np.issubdtype(z_true_labels.dtype, np.integer)
+        if not np.issubdtype(z_true_labels.dtype, np.integer):
+            z_true_labels = z_true_labels.astype(int)
 
         # run points through real model to collect the logits
         logits_target_model = np.array(self.signal([self.target_model], self.handler, self.attack_data_index))
@@ -368,7 +372,8 @@ class AttackRMIA(AbstractMIA):
 
         # collect the softmax output of the correct class
         ground_truth_indices = self.handler.get_labels(self.audit_dataset["data"])
-        assert np.issubdtype(ground_truth_indices.dtype, np.integer)
+        if not np.issubdtype(ground_truth_indices.dtype, np.integer):
+            ground_truth_indices = ground_truth_indices.astype(int)
 
         n_audit_points = len(self.audit_dataset["data"])
         p_x_given_target_model = softmax_logits(logits_theta, self.temperature)[:,np.arange(n_audit_points),ground_truth_indices]

@@ -20,16 +20,16 @@ class TestMIAResult:
         self.temp_dir = tempfile.TemporaryDirectory()
 
         predicted_labels = np.array([[False, False, False, False, False, False],
-                                    [False, False, False, False, False, False],
-                                    [False, False,  True, False, False, False],
-                                    [False,  True,  True, False,  True, False],
-                                    [ True,  True,  True,  True,  True,  True],
-                                    [ True,  True,  True,  True,  True,  True],
-                                    [ True,  True,  True,  True,  True,  True],
-                                    [ True,  True,  True,  True,  True,  True],
+                                    [False, False, True, False, False, False],
+                                    [False, False,  True, True, False, False],
+                                    [False,  True,  True, True,  False, False],
+                                    [ False,  True,  True,  True,  True,  False],
+                                    [ False,  True,  True,  True,  True,  False],
+                                    [ True,  True,  True,  True,  True,  False],
+                                    [ True,  True,  True,  True,  True,  False],
                                     [ True,  True,  True,  True,  True,  True],
                                     [ True,  True,  True,  True,  True,  True]])
-        true_labels = np.ones((6))
+        true_labels = np.array([False,  True,  True, True,  False, False])
         signal_values =  np.array([[-0.00614866],
                                     [-0.45619705],
                                     [-2.30781003],
@@ -72,6 +72,9 @@ class TestMIAResult:
                                                                         "split_method":
                                                                                 "no_overlapping"
                         }
+        
+        self.fpr_array = np.array([0., 0., 0., 0., 0.33333333, 0.33333333, 0.66666667, 0.66666667, 1., 1.])
+        self.tpr_array = np.array([0., 0.33333333, 0.66666667, 1., 1., 1., 1., 1., 1., 1.])
 
     def teardown_method(self:Self) -> None:
         """Clean up temporary directory."""
@@ -82,21 +85,10 @@ class TestMIAResult:
         assert self.miaresult.id is None
 
     def test_check_tpr_fpr(self:Self) -> None:
-        """Test the true positive rate (TPR) and false positive rate (FPR) of MIAresult.
+        """Test fpr and tpr."""
 
-        This function verifies:
-        - The `tpr` (true positive rate) values are close to the expected array.
-        - The `fp` (false positives) values are all zeros.
-        - The `tn` (true negatives) values are all zeros.
-        """
-
-        # Check if the calculated TPR values match the expected ones (within numerical tolerance)
-        assert np.allclose(
-            self.miaresult.tpr, 
-            np.array([0., 0., 0.16666667, 0.5, 1., 1., 1., 1., 1., 1.])
-        )
-
-        # Ensure all false positive values are exactly zero
+        assert np.allclose(self.miaresult.fpr, self.fpr_array)
+        assert np.allclose(self.miaresult.tpr, self.tpr_array)
         assert self.miaresult.fp.all() == 0.
 
         # Ensure all true negative values are exactly zero
@@ -147,9 +139,9 @@ class TestMIAResult:
         # Load the data into the new instance
         self.miaresult_new = MIAResult.load(data)
 
-        # Verify that the loaded instance contains the expected TPR values
-        expected_tpr = np.array([0., 0., 0.16666667, 0.5, 1., 1., 1., 1., 1., 1.])
-        assert np.allclose(self.miaresult_new.tpr, expected_tpr), "Loaded TPR values do not match expected values."
+        # Verify that the loaded instance contains the expected TPR and FPR values
+        assert np.allclose(self.miaresult_new.fpr, self.fpr_array)
+        assert np.allclose(self.miaresult_new.tpr, self.tpr_array)
 
     def test_get_strongest_miaresult(self: Self, mocker: MockerFixture) -> None:
         """Test selecting the strongest attack based on ROC AUC.
