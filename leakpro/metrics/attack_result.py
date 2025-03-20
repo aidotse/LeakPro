@@ -21,7 +21,9 @@ from torch import Tensor, clamp, stack
 from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision.utils import save_image
 
+from leakpro.attacks.gia_attacks.invertinggradients import InvertingConfig
 from leakpro.utils.import_helper import Any, List, Self
+
 
 ########################################################################################################################
 # METRIC_RESULT CLASS
@@ -524,7 +526,7 @@ class GIAResults:
             ssim_score: float = None,
             data_mean: float = None,
             data_std: float = None,
-            config: dict = None,
+            config: InvertingConfig = None,
         ) -> None:
 
         self.original_data = original_data
@@ -555,12 +557,12 @@ class GIAResults:
             self: Self,
             name: str,
             path: str,
-            config: dict,
+            config: InvertingConfig,
             show_plot: bool = False # noqa: ARG002
         ) -> None:
         """Save the GIAResults to disk."""
 
-        def get_gia_config(instance: Any, skip_keys: List[str] = None) -> dict:
+        def get_gia_config(instance: InvertingConfig, skip_keys: List[str] = None) -> dict:
             """Extract manually typed variables and their values from a class instance with options to skip keys."""
             if skip_keys is None:
                 skip_keys = []

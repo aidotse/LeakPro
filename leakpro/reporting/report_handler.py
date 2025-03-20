@@ -20,12 +20,19 @@ from leakpro.utils.logger import setup_logger
 class ReportHandler():
     """Implementation of the report handler."""
 
-    def __init__(self:Self, report_dir: str = None, logger:logging.Logger = None) -> None:
+    def __init__(
+            self:Self,
+            report_dir: str = None,
+            report_name: str = "LeakPro_output",
+            logger:logging.Logger = None
+        ) -> None:
         self.logger = setup_logger() if logger is None else logger
         self.logger.info("Initializing report handler...")
 
         self.report_dir = self._try_find_rep_dir() if report_dir is None else report_dir
         self.logger.info(f"report_dir set to: {self.report_dir}")
+        
+        self.report_name = report_name
 
         self.pdf_results = {}
         self.leakpro_types = ["MIAResult",
@@ -207,7 +214,7 @@ class ReportHandler():
         self.latex_content += """
         \\end{document}
         """
-        with open(f"{self.report_dir}/LeakPro_output.tex", "w") as f:
+        with open(f"{self.report_dir}/{self.report_name}.tex", "w") as f:
             f.write(self.latex_content)
 
         try:
@@ -217,7 +224,7 @@ class ReportHandler():
                 self.logger.info("Could not find pdflatex installed\
                                  \nPlease install pdflatex with apt install texlive-latex-base")
 
-            cmd = ["pdflatex", "-interaction", "nonstopmode", "LeakPro_output.tex"]
+            cmd = ["pdflatex", "-interaction", "nonstopmode", f"{self.report_name}.tex"]
             proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, cwd=f"{self.report_dir}") # noqa: S603
             proc.communicate()
             self.logger.info("PDF compiled")
