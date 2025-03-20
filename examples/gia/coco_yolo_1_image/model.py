@@ -317,26 +317,6 @@ class ComputeLoss:
     def __call__(self, outputs, targets):
         x = outputs[1] if isinstance(outputs, tuple) else outputs
         output = torch.cat([i.view(x[0].shape[0], self.no, -1) for i in x], 2)
-        # x = outputs[1] if isinstance(outputs, tuple) else outputs
-        # batch_size = x[0].shape[0]
-        # reshaped_outputs = []
-        # for idx, i in enumerate(x):
-        #     original_shape = i.shape
-        #     total_elements_per_sample = i.numel() // batch_size
-        #     print(f"Layer {idx}: original shape {original_shape}, "
-        #         f"total elements per sample: {total_elements_per_sample}")
-        #     if total_elements_per_sample % self.no != 0:
-        #         print(f"WARNING: Layer {idx} total elements per sample ({total_elements_per_sample}) "
-        #             f"is not divisible by self.no ({self.no})")
-        #     grid_size = total_elements_per_sample // self.no
-        #     print(f"Layer {idx}: computed grid size: {grid_size}")
-        #     reshaped = i.view(batch_size, self.no, grid_size)
-        #     print(f"Layer {idx}: reshaped to {reshaped.shape}")
-        #     reshaped_outputs.append(reshaped)
-            
-        # output = torch.cat(reshaped_outputs, 2)
-        # print(f"Concatenated output shape: {output.shape}")
-        # return output
         pred_output, pred_scores = output.split((4 * self.dfl_ch, self.nc), 1)
 
         pred_output = pred_output.permute(0, 2, 1).contiguous()

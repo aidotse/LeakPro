@@ -26,6 +26,9 @@ if __name__ == "__main__":
     test_train(model, train_loader, pre_train_loader)
     map50, meanap = test_eval(model, pre_train_loader)
     print(map50, meanap)
+
+
+    
     # attack setup
     configs = InvertingConfig()
     configs.data_extension = GiaImageDetectionExtension()
