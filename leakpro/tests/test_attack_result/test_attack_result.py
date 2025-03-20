@@ -19,16 +19,16 @@ class TestMIAResult:
         self.temp_dir = tempfile.TemporaryDirectory()
 
         predicted_labels = np.array([[False, False, False, False, False, False],
-                                    [False, False, False, False, False, False],
-                                    [False, False,  True, False, False, False],
-                                    [False,  True,  True, False,  True, False],
-                                    [ True,  True,  True,  True,  True,  True],
-                                    [ True,  True,  True,  True,  True,  True],
-                                    [ True,  True,  True,  True,  True,  True],
-                                    [ True,  True,  True,  True,  True,  True],
+                                    [False, False, True, False, False, False],
+                                    [False, False,  True, True, False, False],
+                                    [False,  True,  True, True,  False, False],
+                                    [ False,  True,  True,  True,  True,  False],
+                                    [ False,  True,  True,  True,  True,  False],
+                                    [ True,  True,  True,  True,  True,  False],
+                                    [ True,  True,  True,  True,  True,  False],
                                     [ True,  True,  True,  True,  True,  True],
                                     [ True,  True,  True,  True,  True,  True]])
-        true_labels = np.ones((6))
+        true_labels = np.array([False,  True,  True, True,  False, False])
         signal_values =  np.array([[-0.00614866],
                                     [-0.45619705],
                                     [-2.30781003],
@@ -71,6 +71,9 @@ class TestMIAResult:
                                                                         "split_method":
                                                                                 "no_overlapping"
                         }
+        
+        self.fpr_array = np.array([0., 0., 0., 0., 0.33333333, 0.33333333, 0.66666667, 0.66666667, 1., 1.])
+        self.tpr_array = np.array([0., 0.33333333, 0.66666667, 1., 1., 1., 1., 1., 1., 1.])
 
     def teardown_method(self:Self) -> None:
         """Clean up temporary directory."""
@@ -83,7 +86,8 @@ class TestMIAResult:
     def test_check_tpr_fpr(self:Self) -> None:
         """Test fpr and tpr."""
 
-        assert np.allclose(self.miaresult.tpr, np.array([0., 0., 0.16666667, 0.5, 1., 1., 1., 1., 1., 1.]))
+        assert np.allclose(self.miaresult.fpr, self.fpr_array)
+        assert np.allclose(self.miaresult.tpr, self.tpr_array)
         assert self.miaresult.fp.all() == 0.
         assert self.miaresult.tn.all() == 0.
 
@@ -112,7 +116,8 @@ class TestMIAResult:
         assert self.miaresult_new.signal_values is None
 
         self.miaresult_new = MIAResult.load(data)
-        assert np.allclose(self.miaresult_new.tpr, np.array([0., 0., 0.16666667, 0.5, 1., 1., 1., 1., 1., 1.]))
+        assert np.allclose(self.miaresult_new.fpr, self.fpr_array)
+        assert np.allclose(self.miaresult_new.tpr, self.tpr_array)
 
     def test_get_strongest_miaresult(self:Self, mocker: MockerFixture) -> None:
         """Test selecting the strongest attack based on ROC AUC."""
