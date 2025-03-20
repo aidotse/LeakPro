@@ -87,9 +87,8 @@ def get_coco_detection_loader(num_images: int = 1, img_size=256, start_idx=0, ba
         target_transform=lambda target, orig_size: resize_target(target, orig_size, new_size=(img_size, img_size))
     )
     
-    print("warning low mean std calcualting currently :)")
     # Compute data_mean and data_std on a small random subset of the dataset.
-    subset_indices = sample(range(len(dataset)), min(len(dataset), 100))
+    subset_indices = sample(range(len(dataset)), min(len(dataset), 10000))
     data_mean, data_std = get_meanstd(Subset(dataset, subset_indices))
     transform = transforms.Compose([
         transforms.Resize((img_size, img_size)),
