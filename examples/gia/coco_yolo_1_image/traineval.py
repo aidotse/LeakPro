@@ -1,10 +1,12 @@
 from copy import deepcopy
 import math
+import os
 import torch
 import tqdm
 import numpy as np
 import time
 import torchvision
+from coco import batch_targets_to_tensor
 from model import ComputeLoss
 
 def wh2xy(x):
@@ -170,7 +172,7 @@ def test_eval(model, loader):
     model.to(device)
     model.set_eval(True)
     model.eval()
-    model.half()
+    # model.half()
 
     # Configure
     iou_v = torch.linspace(0.5, 0.95, 10).cuda()  # iou vector for mAP@0.5:0.95
@@ -184,24 +186,9 @@ def test_eval(model, loader):
     p_bar = tqdm.tqdm(loader, desc=('%10s' * 3) % ('precision', 'recall', 'mAP'))
     for samples, targets in p_bar:
         samples = samples.cuda()
-        gt_list = []
-        for img_idx, annotations in enumerate(targets):
-            # Assuming annotations["bbox"] is in [x, y, w, h] format
-            bbox = torch.tensor(annotations["bbox"], dtype=torch.float32, device=device)
-            # If needed, convert to center-based format; in COCO, [x, y, w, h] is often already center-based for evaluation,
-            # but if not, perform the necessary conversion here.
-            # Prepend the image index and the category id.
-            category_id = torch.tensor([annotations["category_id"]], dtype=torch.float32, device=device)
-            target_tensor = torch.cat((torch.tensor([img_idx], dtype=torch.float32, device=device),
-                                        category_id, bbox))
-            gt_list.append(target_tensor)
-        if len(gt_list) == 0:
-            targets = torch.zeros(0, 6, device=device)
-            raise("targets list zero len bad")
-        else:
-            targets = torch.stack(gt_list)
-        samples = samples.half()  # uint8 to fp16/32
-        samples = samples / 255  # 0 - 255 to 0.0 - 1.0
+        targets = batch_targets_to_tensor(targets)
+        # samples = samples.half()  # uint8 to fp16/32
+        # samples = samples / 255  # 0 - 255 to 0.0 - 1.0
         _, _, height, width = samples.shape  # batch size, channels, height, width
 
         # Inference
@@ -251,15 +238,13 @@ def test_eval(model, loader):
             metrics.append((correct, output[:, 4], output[:, 5], labels[:, 0]))
 
     # Compute metrics
-    metrics = [torch.cat(x, 0).cpu().numpy() for x in zip(*metrics)]  # to numpy
+    # metrics = [torch.cat(x, 0).cpu().numpy() for x in zip(*metrics)]  # to numpy
+    metrics = [torch.cat(x, 0).detach().cpu().numpy() for x in zip(*metrics)]
     if len(metrics) and metrics[0].any():
         tp, fp, m_pre, m_rec, map50, mean_ap = compute_ap(*metrics)
 
     # Print results
     print('%10.3g' * 3 % (m_pre, m_rec, mean_ap))
-
-    # Return results
-    model.float()  # for training
     return map50, mean_ap
 
 def learning_rate(epochs, lrf):
@@ -318,12 +303,13 @@ def test_train(model, loader, loader_test):
     batch_size = 32
     # Optimizer
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
     lrf = 0.010
     accumulate = max(round(64 / (batch_size)), 1)
     weight_decay = 0.0005
     weight_decay *= batch_size * accumulate / 64
     momentum = 0.93700000
-    epochs = 5
+    epochs = 200
 
     p = [], [], []
     for v in model.modules():
@@ -357,6 +343,7 @@ def test_train(model, loader, loader_test):
     num_warmup = max(round(warmup_epochs * num_batch), 1000)
     for epoch in range(epochs):
         model.train()
+        model.set_eval(False)
 
         if epochs - epoch == 10:
             loader.dataset.mosaic = False
@@ -372,25 +359,8 @@ def test_train(model, loader, loader_test):
 
         for i, (samples, targets) in p_bar:
             x = i + num_batch * epoch  # number of iterations
-            samples = samples.cuda().float() / 255
-            gt_list = []
-            for img_idx, annotations in enumerate(targets):
-                # Assuming annotations["bbox"] is in [x, y, w, h] format
-                print(f"type annotations: {type(annotations)}")
-                print(f"type annotations[0]: {type(annotations[0])}")
-                bbox = torch.tensor(annotations["bbox"], dtype=torch.float32, device=device)
-                # If needed, convert to center-based format; in COCO, [x, y, w, h] is often already center-based for evaluation,
-                # but if not, perform the necessary conversion here.
-                # Prepend the image index and the category id.
-                category_id = torch.tensor([annotations["category_id"]], dtype=torch.float32, device=device)
-                target_tensor = torch.cat((torch.tensor([img_idx], dtype=torch.float32, device=device),
-                                            category_id, bbox))
-                gt_list.append(target_tensor)
-            if len(gt_list) == 0:
-                targets = torch.zeros(0, 6, device=device)
-                raise("targets list zero len bad")
-            else:
-                targets = torch.stack(gt_list)
+            samples = samples.cuda()
+            targets = batch_targets_to_tensor(targets)
 
             # Warmup
             if x <= num_warmup:
@@ -408,8 +378,8 @@ def test_train(model, loader, loader_test):
                         y['momentum'] = np.interp(x, xp, fp)
 
             # Forward
-            with torch.cuda.amp.autocast():
-                outputs = model(samples)  # forward
+            # with torch.cuda.amp.autocast():
+            outputs = model(samples)  # forward
             loss = criterion(outputs, targets)
 
             m_loss.update(loss.item(), samples.size(0))
@@ -437,9 +407,9 @@ def test_train(model, loader, loader_test):
             del loss
             del outputs
 
-        # Scheduler
+        # # Scheduler
         scheduler.step()
-        # mAP
+        # # mAP
         last = test_eval(model, loader_test)
         print({'mAP': str(f'{last[1]:.3f}'),
                             'epoch': str(epoch + 1).zfill(3),
@@ -449,6 +419,8 @@ def test_train(model, loader, loader_test):
         if last[1] > best:
             best = last[1]
 
+        # Ensure the directory exists
+        os.makedirs('./weights', exist_ok=True)
         # Save model
         ckpt = {'model': deepcopy(ema.ema).half()}
 

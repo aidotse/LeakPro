@@ -1,8 +1,8 @@
 """Re-implemented code to fit new standard COCO structure and GIA, from repository: https://github.com/jahongir7174/YOLOv8-pt, reference to Ultralytics"""
 import math
-import time
 import torch
 from torch.nn.functional import cross_entropy, one_hot
+from torch.nn.utils.rnn import pad_sequence
 
 def make_anchors(x, strides, offset=0.5):
     """
@@ -215,7 +215,7 @@ class Head(torch.nn.Module):
         for a, b, s in zip(m.box, m.cls, m.stride):
             a[-1].bias.data[:] = 1.0  # box
             # cls (.01 objects, 80 classes, 640 img)
-            b[-1].bias.data[:m.nc] = math.log(5 / m.nc / (640 / s) ** 2)
+            b[-1].bias.data[:m.nc] = math.log(5 / m.nc / (256 / s) ** 2)
 
 
 class YOLO(torch.nn.Module):
@@ -224,9 +224,9 @@ class YOLO(torch.nn.Module):
         self.net = DarkNet(width, depth)
         self.fpn = DarkFPN(width, depth)
 
-        img_dummy = torch.zeros(1, 3, 64, 64)
+        img_dummy = torch.zeros(1, 3, 256, 256)
         self.head = Head(num_classes, (width[3], width[4], width[5]))
-        self.head.stride = torch.tensor([64 / x.shape[-2] for x in self.forward(img_dummy)])
+        self.head.stride = torch.tensor([256 / x.shape[-2] for x in self.forward(img_dummy)])
         self.stride = self.head.stride
         self.head.initialize_biases()
 
@@ -317,6 +317,26 @@ class ComputeLoss:
     def __call__(self, outputs, targets):
         x = outputs[1] if isinstance(outputs, tuple) else outputs
         output = torch.cat([i.view(x[0].shape[0], self.no, -1) for i in x], 2)
+        # x = outputs[1] if isinstance(outputs, tuple) else outputs
+        # batch_size = x[0].shape[0]
+        # reshaped_outputs = []
+        # for idx, i in enumerate(x):
+        #     original_shape = i.shape
+        #     total_elements_per_sample = i.numel() // batch_size
+        #     print(f"Layer {idx}: original shape {original_shape}, "
+        #         f"total elements per sample: {total_elements_per_sample}")
+        #     if total_elements_per_sample % self.no != 0:
+        #         print(f"WARNING: Layer {idx} total elements per sample ({total_elements_per_sample}) "
+        #             f"is not divisible by self.no ({self.no})")
+        #     grid_size = total_elements_per_sample // self.no
+        #     print(f"Layer {idx}: computed grid size: {grid_size}")
+        #     reshaped = i.view(batch_size, self.no, grid_size)
+        #     print(f"Layer {idx}: reshaped to {reshaped.shape}")
+        #     reshaped_outputs.append(reshaped)
+            
+        # output = torch.cat(reshaped_outputs, 2)
+        # print(f"Concatenated output shape: {output.shape}")
+        # return output
         pred_output, pred_scores = output.split((4 * self.dfl_ch, self.nc), 1)
 
         pred_output = pred_output.permute(0, 2, 1).contiguous()
@@ -327,21 +347,29 @@ class ComputeLoss:
 
         anchor_points, stride_tensor = make_anchors(x, self.stride, 0.5)
 
-        # Process targets from list of dictionaries
-        gt_list = []
-        for img_idx, annotations in enumerate(targets):
-            bbox = torch.tensor(annotations["bbox"], dtype=torch.float32, device=self.device)
-            category_id = torch.tensor([annotations["category_id"]], dtype=torch.float32, device=self.device)
-            xyxy_bbox = wh2xy(bbox)  # Convert COCO format (x, y, w, h) to (x1, y1, x2, y2)
-            gt_list.append(torch.cat((category_id, xyxy_bbox)))
-        
-        if len(gt_list) == 0:
-            gt = torch.zeros(pred_scores.shape[0], 0, 5, device=self.device)
-        else:
-            gt = torch.stack(gt_list).view(-1, 5)
-        
-        gt_labels, gt_bboxes = gt.split((1, 4), 1)  # cls, xyxy
-        gt_labels, gt_bboxes = gt_labels.unsqueeze(0), gt_bboxes.unsqueeze(0)
+        batch_size = pred_scores.shape[0]
+        gt_labels_list = []
+        gt_bboxes_list = []
+
+        for img_idx in range(batch_size):
+            # Select annotations belonging to the current image
+            inds = targets[:, 0] == img_idx  
+            if inds.sum() > 0:
+                ann = targets[inds]
+                category_ids = ann[:, 1:2]          # shape: [n, 1]
+                bboxes_wh = ann[:, 2:6]              # shape: [n, 4]
+                xyxy_bboxes = wh2xy(bboxes_wh)       # shape: [n, 4]
+            else:
+                # No annotations for this image: create empty tensors
+                category_ids = torch.empty((0, 1), device=self.device)
+                xyxy_bboxes = torch.empty((0, 4), device=self.device)
+            
+            gt_labels_list.append(category_ids)
+            gt_bboxes_list.append(xyxy_bboxes)
+
+        gt_labels = pad_sequence(gt_labels_list, batch_first=True, padding_value=0)
+        gt_bboxes = pad_sequence(gt_bboxes_list, batch_first=True, padding_value=0)
+
         mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0)
 
         # boxes
@@ -401,7 +429,7 @@ class ComputeLoss:
                     torch.zeros_like(pred_scores[..., 0]).to(device))
 
         i = torch.zeros([2, self.bs, self.num_max_boxes], dtype=torch.long)
-        i[0] = torch.arange(end=self.bs).view(-1, 1).repeat(1, self.num_max_boxes)
+        i[0] = torch.arange(end=self.bs, dtype=torch.long, device=true_labels.device).view(-1, 1).repeat(1, self.num_max_boxes)
         i[1] = true_labels.long().squeeze(-1)
 
         overlaps = self.iou(true_bboxes.unsqueeze(2), pred_bboxes.unsqueeze(1))

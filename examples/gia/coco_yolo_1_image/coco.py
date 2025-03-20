@@ -1,4 +1,5 @@
 from copy import deepcopy
+import time
 from torch import Tensor, as_tensor
 from torch.utils.data import DataLoader, Subset
 from torchvision import transforms
@@ -72,12 +73,23 @@ def custom_collate_fn(batch):
     images = torch.stack(images, dim=0)
     return images, list(targets)
 
-def get_coco_detection_loader(num_images: int = 1, img_size = 256, start_idx= 0, batch_size: int = 1, num_workers: int = 2, root: str = './coco2017', ann_file: str = 'annotations/instances_train2017.json') -> tuple[DataLoader, Tensor, Tensor]:
-    """Get a dataloader for COCO detection."""
+def get_coco_detection_loader(num_images: int = 1, img_size=256, start_idx=0, batch_size: int = 1, num_workers: int = 2, root: str = './coco2017', ann_file: str = 'annotations/instances_train2017.json') -> tuple[DataLoader, Tensor, Tensor]:
+    """Get a dataloader for COCO detection with non-empty labels."""
     ann_file = f"{root}/annotations/instances_train2017.json"
     img_dir = f"{root}/train2017"
-    dataset = CocoDetectionWithSeparateTransforms(root=img_dir, annFile=ann_file, transform=transforms.Compose([transforms.Resize((img_size,img_size)), transforms.ToTensor()]), target_transform=lambda target, orig_size: resize_target(target, orig_size, new_size=(img_size, img_size)))
-    subset_indices = sample(range(len(dataset)), min(len(dataset), 10000))
+    dataset = CocoDetectionWithSeparateTransforms(
+        root=img_dir, 
+        annFile=ann_file, 
+        transform=transforms.Compose([
+            transforms.Resize((img_size, img_size)), 
+            transforms.ToTensor()
+        ]), 
+        target_transform=lambda target, orig_size: resize_target(target, orig_size, new_size=(img_size, img_size))
+    )
+    
+    print("warning low mean std calcualting currently :)")
+    # Compute data_mean and data_std on a small random subset of the dataset.
+    subset_indices = sample(range(len(dataset)), min(len(dataset), 100))
     data_mean, data_std = get_meanstd(Subset(dataset, subset_indices))
     transform = transforms.Compose([
         transforms.Resize((img_size, img_size)),
@@ -86,12 +98,51 @@ def get_coco_detection_loader(num_images: int = 1, img_size = 256, start_idx= 0,
     ])
 
     total_examples = len(dataset)
-    end_idx = min(start_idx + num_images, total_examples)
-    indices = list(range(start_idx, end_idx))
-    subset_trainset = Subset(dataset, indices)
+    filtered_indices = []
+    current_idx = start_idx
+
+    # Iterate until we have num_images with non-empty labels or we run out of examples.
+    while len(filtered_indices) < num_images and current_idx < total_examples:
+        # Assuming dataset[current_idx] returns (image, target)
+        _, target = dataset[current_idx]
+        if len(target) > 0:
+            filtered_indices.append(current_idx)
+        current_idx += 1
+    if len(filtered_indices) < num_images:
+        print(f"Warning: Only found {len(filtered_indices)} images with non-empty labels out of requested {num_images}")
+
+    subset_trainset = Subset(dataset, filtered_indices)
     subset_trainset.dataset.transform = transform
-    client_loader = DataLoader(subset_trainset, batch_size=batch_size, collate_fn=custom_collate_fn,
-                                            shuffle=False, drop_last=True, num_workers=num_workers)
+
+    client_loader = DataLoader(
+        subset_trainset, 
+        batch_size=batch_size, 
+        collate_fn=custom_collate_fn,
+        shuffle=False, 
+        drop_last=True, 
+        num_workers=num_workers
+    )
     data_mean = as_tensor(data_mean)[:, None, None]
     data_std = as_tensor(data_std)[:, None, None]
     return client_loader, data_mean, data_std
+
+def batch_targets_to_tensor(targets: Tensor):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    gt_list = []
+    for img_idx, image_annotations in enumerate(targets):
+        # Each image_annotations is a list of dictionaries.
+        for annotation in image_annotations:
+            # Assuming annotation["bbox"] is in [x, y, w, h] format.
+            bbox = torch.tensor(annotation["bbox"], dtype=torch.float32, device=device)
+            # Convert category id to a tensor.
+            # We use float here so that the whole tensor has a single dtype.
+            # You can convert it to long later if needed.
+            category_id = torch.tensor([annotation["category_id"] - 1], dtype=torch.float32, device=device)
+            # Prepend the image index.
+            image_idx_tensor = torch.tensor([img_idx], dtype=torch.float32, device=device)
+            # Concatenate image index, category id, and bbox.
+            target_tensor = torch.cat((image_idx_tensor, category_id, bbox))
+            gt_list.append(target_tensor)
+    # Stack all the target tensors into a single tensor.
+    targets = torch.stack(gt_list)
+    return targets

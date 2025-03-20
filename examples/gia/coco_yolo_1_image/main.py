@@ -15,11 +15,13 @@ from traineval import test_eval, test_train
 
 if __name__ == "__main__":
     model = yolo_v8_n()
-    client_loader, data_mean, data_std = get_coco_detection_loader(start_idx=0, num_images=64, batch_size=32)
-    train_loader, data_mean, data_std = get_coco_detection_loader(start_idx=1000, num_images=6400, batch_size=32)
+    client_loader, data_mean, data_std = get_coco_detection_loader(start_idx=0, num_images=320, batch_size=32)
+    train_loader, data_mean, data_std = get_coco_detection_loader(start_idx=700, num_images=64000, batch_size=32)
     test_train(model, train_loader, client_loader)
-    # map50, meanap = test_eval(model, client_loader)
-    # time.sleep(10000)
+    map50, meanap = test_eval(model, client_loader)
+    print("done :))")
+    print(map50, meanap)
+    time.sleep(10000)
     # baseline config
     configs = InvertingConfig()
     configs.data_extension = GiaImageDetectionExtension()
