@@ -244,8 +244,9 @@ class MIAResult:
                             where=(self.tp + self.fn) != 0.0)
 
         # In case denominator is zero in fpr/tpr calculations
-        self.fpr = self.fpr[~(np.isnan(self.fpr) | np.isnan(self.tpr))]
-        self.tpr = self.tpr[~(np.isnan(self.fpr) | np.isnan(self.tpr))]
+        not_nan = ~(np.isnan(self.fpr) | np.isnan(self.tpr))
+        self.fpr = self.fpr[not_nan]
+        self.tpr = self.tpr[not_nan]
 
         # In case the fpr are not sorted in ascending order.
         sorted_indices = np.argsort(self.fpr)
