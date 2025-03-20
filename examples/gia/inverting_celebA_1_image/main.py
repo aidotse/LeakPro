@@ -22,6 +22,8 @@ if __name__ == "__main__":
     configs.at_iterations = 24000
     configs.tv_reg = 1.0e-06
     configs.attack_lr = 0.1
+    configs.top10norms = True
+    configs.median_pooling = True
     configs.criterion = BCEWithLogitsLoss() #CrossEntropyLoss()
     configs.epochs = 1
 
