@@ -2,43 +2,20 @@
 import os
 from collections.abc import Generator
 from copy import deepcopy
-from dataclasses import dataclass, field
 
 import torch
 from optuna.trial import Trial
 from torch import Tensor
-from torch.nn import CrossEntropyLoss, Module
+from torch.nn import Module
 from torch.utils.data import DataLoader
 
 from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
+from leakpro.attacks.gia_attacks.utils import InvertingConfig
 from leakpro.fl_utils.data_utils import get_at_images
-from leakpro.fl_utils.gia_optimizers import MetaSGD
 from leakpro.fl_utils.similarity_measurements import cosine_similarity_weights, total_variation
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.utils.import_helper import Callable, Self
 from leakpro.utils.logger import logger
-
-
-@dataclass
-class InvertingConfig:
-    """Possible configs for the Inverting Gradients attack."""
-
-    # total variation scale for smoothing the reconstructions after each iteration
-    tv_reg: float = 1.0e-06
-    # learning rate on the attack optimizer
-    attack_lr: float = 0.1
-    # iterations for the attack steps
-    at_iterations: int = 8000
-    # MetaOptimizer, see MetaSGD for implementation
-    optimizer: object = field(default_factory=lambda: MetaSGD())
-    # Client loss function
-    criterion: object = field(default_factory=lambda: CrossEntropyLoss())
-    # Number of epochs for the client attack
-    epochs: int = 1
-    # if to use median pool 2d on images, can improve attack on high higher resolution (100+)
-    median_pooling: bool = False
-    # if we compare difference only for top 10 layers with largest changes. Potentially good for larger models.
-    top10norms: bool = False
 
 class InvertingGradients(AbstractGIA):
     """Gradient inversion attack by Geiping et al."""

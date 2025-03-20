@@ -26,6 +26,8 @@ class ReportHandler():
             report_name: str = "LeakPro_output",
             logger:logging.Logger = None
         ) -> None:
+        """Initialize ReportHandler."""
+
         self.logger = setup_logger() if logger is None else logger
         self.logger.info("Initializing report handler...")
 

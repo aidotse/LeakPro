@@ -21,8 +21,8 @@ from torch import Tensor, clamp, stack
 from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision.utils import save_image
 
-from leakpro.attacks.gia_attacks.invertinggradients import InvertingConfig
-from leakpro.utils.import_helper import Any, List, Self
+from leakpro.attacks.gia_attacks.utils import InvertingConfig
+from leakpro.utils.import_helper import Any, List, Self, Union
 
 
 ########################################################################################################################
@@ -568,28 +568,18 @@ class GIAResults:
             name: str,
             path: str,
             config: InvertingConfig,
-            show_plot: bool = False # noqa: ARG002
         ) -> None:
         """Save the GIAResults to disk."""
 
-        def get_gia_config(instance: InvertingConfig, skip_keys: List[str] = None) -> dict:
-            """Extract manually typed variables and their values from a class instance with options to skip keys."""
-            if skip_keys is None:
-                skip_keys = []
-
-            cls_annotations = instance.__class__.__annotations__  # Get typed attributes
-            return {
-                var: getattr(instance, var)
-                for var in cls_annotations
-                if var not in skip_keys  # Exclude skipped keys
-            }
-
+        print(name)
         result_config = get_gia_config(config, skip_keys=["optimizer", "criterion"])
+        print(result_config)
 
         # Get the name for the attack configuration
         config_name = get_config_name(result_config)
         self.id = f"{name}{config_name}"
         path = f"{path}/gradient_inversion/{self.id}"
+        print(path)
 
         # Check if path exists, otherwise create it.
         if not os.path.exists(f"{path}"):
@@ -819,22 +809,49 @@ def get_result_fixed_fpr(fpr: np.ndarray, tpr: np.ndarray) -> dict:
             "TPR@0.01%FPR": find_tpr_at_fpr(fpr, tpr, 0.0001),
             "TPR@0.0%FPR": find_tpr_at_fpr(fpr, tpr, 0.0)}
 
-def get_config_name(config: BaseModel) -> str:
+def get_config_name(config: Union[BaseModel, dict, InvertingConfig]) -> str:
     """Create id from the attack config."""
 
-    config = dict(sorted(config.items()))
+    if isinstance(config, dict):
+        config = dict(sorted(config.items()))
+        exclude = ["attack_data_dir"]
 
-    exclude = ["attack_data_dir"]
+        config_name = ""
+        for key, value in zip(list(config.keys()), list(config.values())):
+            if key in exclude:
+                pass
+            elif type(value) is bool:
+                config_name += f"-{key}"
+            else:
+                config_name += f"-{key}={value}"
+        return config_name
 
-    config_name = ""
-    for key, value in zip(list(config.keys()), list(config.values())):
-        if key in exclude:
-            pass
-        elif type(value) is bool:
-            config_name += f"-{key}"
-        else:
-            config_name += f"-{key}={value}"
-    return config_name
+    elif isinstance(config, InvertingConfig):
+        config_dict = config.__dict__
+        exclude = ["optimizer", "criterion"]
+
+        config_name = ""
+        for key, value in sorted(config_dict.items()):
+            if key in exclude:
+                continue
+            elif isinstance(value, bool):
+                config_name += f"-{key}" if value else ""
+            else:
+                config_name += f"-{key}={value}"
+        return config_name
+
+def get_gia_config(instance: dict, skip_keys: List[str] = None) -> dict:
+    """Extract manually typed variables and their values from a class instance with options to skip keys."""
+    if skip_keys is None:
+        skip_keys = []
+
+    cls_annotations = instance.__class__.__annotations__  # Get typed attributes
+    return {
+        var: getattr(instance, var)
+        for var in cls_annotations
+        if var not in skip_keys  # Exclude skipped keys
+    }
+
 
 def reduce_to_unique_labels(results: list) -> list:
     """Reduce very long labels to unique and distinct ones."""

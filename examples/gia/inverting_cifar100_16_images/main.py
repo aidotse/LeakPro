@@ -7,7 +7,7 @@ from model import ResNet
 from pre_train import pre_train
 from torchvision.models.resnet import BasicBlock
 
-from leakpro.attacks.gia_attacks.invertinggradients import InvertingConfig
+from leakpro.attacks.gia_attacks.utils import InvertingConfig
 from leakpro.fl_utils.gia_train import train
 from leakpro.run import run_inverting
 from leakpro.utils.logger import logger
