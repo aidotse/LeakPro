@@ -430,6 +430,5 @@ class AttackLossTrajectory(AbstractMIA):
         return MIAResult(
             predicted_labels=predictions,
             true_labels=true_labels,
-            predictions_proba=None,
             signal_values=signals,
         )

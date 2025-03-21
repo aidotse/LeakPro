@@ -46,7 +46,6 @@ class TestMIAResult:
         self.miaresult = MIAResult(predicted_labels = predicted_labels,
                                     true_labels = true_labels,
                                     signal_values = signal_values,
-                                    predictions_proba = predictions_proba,
                                     threshold = threshold,
                                     audit_indices = audit_indices,
                                     resultname = resultname,
