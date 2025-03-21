@@ -61,50 +61,39 @@ class ImageExtension(AbstractModalityExtension):
             logger.error(f"Failed to convert to PIL image: {e}")
             return None
     
-    
+
     def get_transform(self, transform_type="cifar", **kwargs):
-        """Returns CIFAR-10 transformation function for RaMIA"""
+        """Returns transformation function that applies ONE random transform per ID"""
         if transform_type == "cifar":
+            # Define all possible individual transformations
+            TRANSFORM_POOL = [
+                transforms.RandomHorizontalFlip(p=0.3),
+                transforms.RandomRotation(degrees=(-8, 8)),
+                transforms.RandomResizedCrop(32, scale=(0.85, 1.0), ratio=(0.9, 1.1)),
+                transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.04),
+                transforms.RandomAffine(degrees=0, translate=(0.08, 0.08)),
+                transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 0.75))
+            ]
+
             def cifar_transform(image, transform_idx):
-                # Seed random generators for reproducibility
-                seed = transform_idx  # Unique seed per transformation index
+                # Seed all generators using transform_idx
+                seed = transform_idx
                 random.seed(seed)
                 torch.manual_seed(seed)
+                np.random.seed(seed)
 
-                return transforms.Compose([
-                    # Geometric transforms (mild)
-                    transforms.RandomHorizontalFlip(p=0.3),
-                    transforms.RandomRotation(degrees=(-8, 8)),
-                    transforms.RandomResizedCrop(
-                        size=32,  # Maintain original size
-                        scale=(0.85, 1.0),  # Mild cropping
-                        ratio=(0.9, 1.1)
-                    ),
-                    
-                    # Photometric transforms (subtle)
-                    transforms.ColorJitter(
-                        brightness=0.1,  # ±10% brightness
-                        contrast=0.1,     # ±10% contrast
-                        saturation=0.1,   # ±10% saturation
-                        hue=0.04          # ±4% hue
-                    ),
-                    
-                    # Spatial transforms (conservative)
-                    transforms.RandomAffine(
-                        degrees=0,
-                        translate=(0.08, 0.08)  # ±8% translation
-                    ),
-                    
-                    # Mild noise/blur
-                    transforms.GaussianBlur(
-                        kernel_size=3,  # Small kernel for 32x32 images
-                        sigma=(0.1, 0.75)
-                    ),
-                    
-                    # Final tensor conversion
+                # Select ONE transformation from the pool
+                transform_idx = transform_idx % len(TRANSFORM_POOL)
+                selected_transform = TRANSFORM_POOL[transform_idx]
+
+                # Create transform pipeline
+                transform = transforms.Compose([
+                    selected_transform,
                     transforms.ToTensor(),
                     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-                ])(image)
+                ])
+
+                return transform(image)
 
             return cifar_transform
         else:
