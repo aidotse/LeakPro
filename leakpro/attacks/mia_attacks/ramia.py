@@ -118,7 +118,7 @@ class AttackRaMIA(AbstractMIA):
         num_shadow_models: int = Field(default=1, ge=1, description="Number of shadow models")
         training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow models")  # noqa: E501
         eval_batch_size: int = Field(default=32, ge=1, description="Batch size for evaluation")
-        var_calculation: Literal["carlini", "individual_carlini", "fixed"] = Field(default="carlini", description="Variance estimation method to use [carlini, individual_carlini, fixed]")  # noqa: E501
+        var_calculation: Literal["carlini", "individual_carlini", "fixed"] = Field(default="individual_carlini", description="Variance estimation method to use [carlini, individual_carlini, fixed]")  # noqa: E501
         # memorization boosting
         memorization: bool = Field(default=False, description="Activate memorization boosting")
         use_privacy_score: bool = Field(default=False, description="Filter based on privacy score aswell as memorization score")
@@ -262,7 +262,8 @@ class AttackRaMIA(AbstractMIA):
         self.selected_in = np.random.choice(self.in_members, num_in, replace=False)
         self.selected_out = np.random.choice(self.out_members, num_out, replace=False)
         self.selected_indices = np.concatenate([self.selected_in, self.selected_out])
-        # np.random.shuffle(self.selected_indices)  # Shuffle to mix IN/OUT
+        # self.selected_indices = np.concatenate([self.in_members, self.out_members]) # Uncomment this for no transformation and comment the above three lines
+
 
         # Validation checks
         unique_indices = np.unique(self.selected_indices)
@@ -281,7 +282,6 @@ class AttackRaMIA(AbstractMIA):
             
             # Get image using the method from ImageExtension
             raw_sample = self.image_extension.get_data(dataset, data_idx)
-            #sample = raw_sample.clone() # dedicated for debugging
             
             # Skip if we couldn't get the data
             if raw_sample is None:
@@ -300,19 +300,15 @@ class AttackRaMIA(AbstractMIA):
             try:
                 range_samples = []
                 for transform_idx in range(self.num_transforms):
+                    # Apply transformations to the image
                     transformed = self.range_transforms(sample, transform_idx)
-                    # Apply normalization manually
-                    # normalize = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-                    # # Compose transforms
-                    # manual_transform = transforms.Compose([transforms.ToTensor(), normalize])
-                    # transformed = manual_transform(sample)
                     range_samples.append(transformed)
 
+                    # For no transformation uncomment the below code
                     # sample = tensor(raw_sample, dtype=torch.uint8)
                     # p_sample = sample.float()
                     # p_sample /= 255.0
                     # normalize = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-                    # # p_sample = p_sample.permute(0, 3, 1, 2) # <class 'torch.Tensor'>
                     # p_sample = p_sample.permute(2, 0, 1) # <class 'torch.Tensor'>
                     # p_sample = normalize(p_sample)
                     # range_samples.append(p_sample)
@@ -364,11 +360,6 @@ class AttackRaMIA(AbstractMIA):
         # Convert to tensors and standardize format
         transformed_tensors = []
         for sample in flattened_samples:
-            # if not isinstance(sample, torch.Tensor):
-            #     sample = transforms.Compose([
-            #         transforms.ToTensor(),
-            #         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))  # Match original normalization
-            #     ])(sample)
             transformed_tensors.append(sample)
             
         # Create dataset with proper labels
@@ -385,7 +376,6 @@ class AttackRaMIA(AbstractMIA):
 
         # Get mask from original audit dataset
         for range_idx, audit_idx in enumerate(selected_indices):  # Position in filtered audit dataset
-            # original_audit_idx = self.audit_data_indices[audit_idx]  # Original population index
             mask = self.in_indices_masks[audit_idx]  # Mask from prepare_attack()
             range_masks.append(mask)  # Append mask for this range
             
@@ -466,7 +456,6 @@ class AttackRaMIA(AbstractMIA):
 
         logger.info("Create masks for all IN and OUT samples")
         self.in_indices_masks = ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_data_indices)
-        # self.in_indices_masks = ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"])
 
         count_in_samples = np.count_nonzero(self.in_indices_masks)
         if count_in_samples > 0:
@@ -475,7 +464,7 @@ class AttackRaMIA(AbstractMIA):
 
         # Generate transformed ranges
         num_samples = self.range_num_audit_samples
-        # num_samples = len(self.audit_data_indices)
+        # num_samples = len(self.audit_data_indices) # Uncomment this for no transformation and comment the above line
         self.transformed_ranges, self.range_labels, self.selected_indices = \
             self.create_transformed_dataset(num_samples)
         
@@ -724,6 +713,22 @@ class AttackRaMIA(AbstractMIA):
         return np.mean(trimmed) if len(trimmed) > 0 else sorted_scores[0]
         # return np.mean(ta_scores)
 
+    def compute_trimmed_average(self: Self, ta_scores: np.ndarray) -> float:
+        """Trim top x% of scores and return mean of remaining x%"""
+        if len(ta_scores) == 0:
+            return 0.0
+        
+        # Sort scores in ascending order
+        sorted_scores = np.sort(ta_scores)
+        
+        # Calculate cutoff index for bottom x%
+        cutoff_idx = int(len(sorted_scores) * 0.4)
+        
+        # Get scores to keep (bottom x%)
+        trimmed_scores = sorted_scores[:cutoff_idx]
+        
+        return np.mean(trimmed_scores) if len(trimmed_scores) > 0 else 0.0
+
     def run_attack(self:Self) -> MIAResult:
         """Runs the attack on the target model and dataset and assess privacy risks or data leakage.
 
@@ -740,32 +745,50 @@ class AttackRaMIA(AbstractMIA):
         # Expand range_masks to transformed_samples:
         self.transformed_masks = np.array([self.metadata["range_masks"][range_idx] for range_idx in self.metadata["sample_to_range"]])
 
+        # After creating transformed_masks
+        assert len(self.transformed_masks) == self.num_transformed_samples, \
+            "transformed_masks length mismatch with transformed samples"
+        
+        # Check mask consistency for a sample range
+        sample_range_idx = 0
+        sample_audit_idx = self.selected_indices[sample_range_idx]
+        assert np.all(self.transformed_masks[self.metadata["range_to_samples"][sample_range_idx]] 
+                    == self.in_indices_masks[sample_audit_idx]), \
+            "Mask mismatch between transformed samples and original audit data"
+
         #self.fixed_in_std = self.get_std(self.shadow_models_logits.flatten(), self.transformed_masks.flatten(), True, "fixed")
         self.fixed_out_std = self.get_std(self.shadow_models_logits.flatten(), (~self.transformed_masks).flatten(), False, "fixed")
 
         # Calculate all membership scores for transformed samples
         self.all_sample_scores = self.calculate_scores_for_transformed_samples()
 
+        # Comment below two lines for no transformation
         self.estimate_distribution_separation() 
         self.optimize_p()
 
         range_scores = []
         for range_idx, sample_indices in self.metadata["range_to_samples"].items():
             range_sample_scores = self.all_sample_scores[sample_indices]
+            
+            # transformation with adaptive trimming
             trimmed_score = self.compute_adaptive_trimmed_average(range_sample_scores)
             range_scores.append(trimmed_score)
+
+            # transformation with predefined trimming
+            # trimmed_score = self.compute_trimmed_average(range_sample_scores)
+            # range_scores.append(trimmed_score)
+
+            # Uncomment below line for no transformation with no adaptive trimming or any trimming
             # range_scores.append(range_sample_scores)
         
         # Convert to numpy array and handle NaN values
         range_scores = np.array(range_scores)
-        # range_scores = range_scores.reshape(-1) # Flatten for easier processing debugging
 
         # Generate thresholds based on range scores
-        self.thresholds = np.linspace(np.min(range_scores), np.max(range_scores), 1000)  # High resolution for final evaluation
+        self.thresholds = np.linspace(np.min(range_scores), np.max(range_scores), 1000)
 
         # Create prediction matrix (num_thresholds x num_ranges)
         predictions = (range_scores.reshape(-1, 1) < self.thresholds.reshape(1, -1)).T
-        # predictions = (range_scores[:, None] < self.thresholds[None, :]).T
 
         # Prepare true labels (original range membership)
         true_labels = np.array(self.range_labels, dtype=np.int32)
