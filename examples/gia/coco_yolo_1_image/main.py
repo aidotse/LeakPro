@@ -1,16 +1,11 @@
 """Hyperparameter tuning with optuna on evaluating."""
-from collections import OrderedDict
-import time
 from coco import get_coco_detection_loader
-from leakpro.attacks.gia_attacks.huang import Huang, HuangConfig
 from leakpro.attacks.gia_attacks.invertinggradients import InvertingGradients, InvertingConfig
 from leakpro.fl_utils.data_utils import GiaImageDetectionExtension
 from leakpro.fl_utils.gia_train import train
 from leakpro.run import run_gia_attack
 from model import yolo_v8_n, ComputeLoss
 from torch import cuda, device
-from torch.optim.sgd import SGD
-from torch.autograd import grad
 from traineval import test_eval, test_train
 
 if __name__ == "__main__":

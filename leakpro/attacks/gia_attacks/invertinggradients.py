@@ -14,6 +14,7 @@ from torch.utils.data import DataLoader
 from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
 from leakpro.fl_utils.data_utils import GiaImageClassifictaionExtension
 from leakpro.fl_utils.gia_optimizers import MetaSGD
+from leakpro.fl_utils.gia_train import train
 from leakpro.fl_utils.similarity_measurements import cosine_similarity_weights, total_variation
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.utils.import_helper import Callable, Self
@@ -46,13 +47,13 @@ class InvertingConfig:
 class InvertingGradients(AbstractGIA):
     """Gradient inversion attack by Geiping et al."""
 
-    def __init__(self: Self, model: Module, client_loader: DataLoader, train_fn: Callable,
-                 data_mean: Tensor, data_std: Tensor, configs: Optional[InvertingConfig] = None) -> None:
+    def __init__(self: Self, model: Module, client_loader: DataLoader, data_mean: Tensor, data_std: Tensor,
+                 train_fn: Optional[Callable] = None, configs: Optional[InvertingConfig] = None) -> None:
         super().__init__()
         self.original_model = model
         self.model = deepcopy(self.original_model)
         self.client_loader = client_loader
-        self.train_fn = train_fn
+        self.train_fn = train_fn if train_fn is not None else train
         self.data_mean = data_mean
         self.data_std = data_std
         self.configs = configs if configs is not None else InvertingConfig()
@@ -152,13 +153,7 @@ class InvertingGradients(AbstractGIA):
     def suggest_parameters(self: Self, trial: Trial) -> None:
         """Suggest parameters to chose and range for optimization for the Inverting Gradient attack."""
         total_variation = trial.suggest_float("total_variation", 1e-7, 1e-1, log=True)
-        # attack_lr = trial.suggest_float("attack_lr", 1e-2, 1e-0, log=True)
-        # median_pooling = trial.suggest_categorical("median_pooling", [True, False])
-        # top10norms = trial.suggest_categorical("top10norms", [True, False])
         self.configs.tv_reg = total_variation
-        # self.configs.attack_lr = attack_lr
-        # self.configs.median_pooling = median_pooling
-        # self.configs.top10norms = top10norms
 
     def reset_attack(self: Self, new_config:dict) -> None:  # noqa: ARG002
         """Reset attack to initial state."""

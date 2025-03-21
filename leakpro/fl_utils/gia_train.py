@@ -32,7 +32,7 @@ def train(
     outputs = None
     for _ in range(epochs):
         for inputs, labels in data:
-            inputs, labels = inputs.to(gpu_or_cpu, non_blocking=True), (labels.to(gpu_or_cpu, non_blocking=True) if 
+            inputs, labels = inputs.to(gpu_or_cpu, non_blocking=True), (labels.to(gpu_or_cpu, non_blocking=True) if
                                                                         isinstance(labels, Tensor) else labels)
             outputs = patched_model(inputs, patched_model.parameters)
             loss = criterion(outputs, labels).sum()
