@@ -9,7 +9,7 @@ import numpy as np
 
 from leakpro.metrics.attack_result import MIAResult, get_config_name
 from leakpro.utils.import_helper import Self
-
+from leakpro.schemas import AuditConfig
 
 class TestMIAResult:
     """Test class for MIAResult."""
@@ -99,7 +99,15 @@ class TestMIAResult:
         save_path = f"{self.temp_dir}/{name}/{name}{config_name}"
 
         # Test saving
-        self.miaresult.save(self.temp_dir, name, self.config)
+        config = {}
+        config["random_seed"] = 1234
+        config["attack_list"] = self.config["attack_list"]
+        config["attack_type"] = "mia"
+        config["data_modality"] = "tabular"
+        config["output_dir"] = save_path
+        config_schema = AuditConfig(**config)
+
+        self.miaresult.save(self.temp_dir, name, config_schema)
 
         assert os.path.isdir(save_path)
         assert os.path.exists(f"{save_path}/data.json")

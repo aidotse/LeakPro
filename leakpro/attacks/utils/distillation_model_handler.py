@@ -104,7 +104,7 @@ class DistillationModelHandler(ModelHandler):
         student_model.train()
         teacher_model.eval()
 
-        data_loader = self.handler.get_dataloader(distillation_data_indices, self.batch_size)
+        data_loader = self.handler.get_dataloader(distillation_data_indices)
         logger.info(f"Created distillation dataset with size {len(distillation_data_indices)}")
 
         distillation_checkpoints = []
@@ -157,7 +157,6 @@ class DistillationModelHandler(ModelHandler):
                 "train_indices" : distillation_data_indices,
                 "num_train" : len(distillation_data_indices),
                 "optimizer" : optimizer.__class__.__name__,
-                "batch_size" : self.batch_size,
                 "epochs" : self.epochs,
                 "label_only" : label_only
             }

@@ -2,13 +2,12 @@
 
 import torch
 from torch import cuda, device, optim, sigmoid
-from torch.nn import BCEWithLogitsLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from leakpro import AbstractInputHandler
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
-from leakpro.schemas import TrainingOutput
+from leakpro.schemas import TrainingOutput, EvalOutput
 
 class TabularInputHandler(AbstractInputHandler):
     """Class to handle the user input for the CIFAR10 dataset."""
@@ -16,16 +15,24 @@ class TabularInputHandler(AbstractInputHandler):
     def __init__(self, configs: dict) -> None:
         super().__init__(configs = configs)
 
+    def eval(self, dataloader, model, criterion, device) -> EvalOutput:
+        """Model evaluation procedure."""
+        model.to(device)
+        model.eval()
+        test_loss, acc, total = 0, 0, 0
+        with torch.no_grad():
+            for inputs, labels in dataloader:
+                inputs, labels = inputs.to(device), labels.to(device)
+                outputs = model(inputs)
+                test_loss += criterion(outputs, labels).item()
+                pred = sigmoid(outputs) >= 0.5
+                acc += pred.eq(labels).sum()
+                total += len(labels)
+        test_loss /= len(dataloader)
+        test_acc = acc / total
+        model.to("cpu")
+        return EvalOutput(loss=test_loss, accuracy=test_acc)
 
-    def get_criterion(self)->None:
-        """Set the CrossEntropyLoss for the model."""
-        return BCEWithLogitsLoss()
-
-    def get_optimizer(self, model:torch.nn.Module) -> None:
-        """Set the optimizer for the model."""
-        learning_rate = 0.1
-        momentum = 0.8
-        return optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
 
     def train(
         self,
@@ -34,7 +41,7 @@ class TabularInputHandler(AbstractInputHandler):
         criterion: torch.nn.Module = None,
         optimizer: optim.Optimizer = None,
         epochs: int = None,
-    ) -> dict:
+    ) -> TrainingOutput:
         """Model training procedure."""
 
         dev = device("cuda" if cuda.is_available() else "cpu")
@@ -69,3 +76,18 @@ class TabularInputHandler(AbstractInputHandler):
         training_output = TrainingOutput(**output_dict)
         return training_output
 
+
+    class UserDataset(AbstractInputHandler.UserDataset):
+        
+        def __init__(self, data, targets, **kwargs):
+            self.data = data
+            self.targets = targets
+
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+
+        def __len__(self):
+            return len(self.targets)
+
+        def __getitem__(self, idx):
+            return self.data[idx], self.targets[idx]
