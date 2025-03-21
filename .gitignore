@@ -163,7 +163,7 @@ cython_debug/
 .DS_Store
 
 # Ignore data and model folders
-data/*
+**/data/*
 data/cifar*
 data/CINIC*
 attack_objects/
@@ -175,3 +175,4 @@ leakpro_output
 nohup.out
 img_align_celeba
 optuna_results.txt
+coco2017
