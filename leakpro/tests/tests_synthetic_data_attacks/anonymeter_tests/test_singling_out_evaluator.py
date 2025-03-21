@@ -274,22 +274,67 @@ def test_multivariate_singling_out_queries_max_attempts(max_attempts: int) -> No
 
 def test_multivariate_singling_out_queries() -> None:
     """Assert results of function multivariate_singling_out_queries with simple input."""
-    df = pd.DataFrame({"c0": ["a", "b"], "c1": [1.23, 9.87]})
-    n_queries = 2
-    queries = singl_ev.multivariate_singling_out_queries(df=df, n_queries=n_queries, n_cols=2, max_attempts=None)
-    assert len(queries) == n_queries
-    possible_queries = [
-        "c0 == 'a' & c1 <= 1.23",
-        "c1 <= 1.23 & c0 == 'a'",
-        "c0 == 'a' & c1 >= 9.87",
-        "c1 >= 9.87 & c0 == 'a'",
-        "c0 == 'b' & c1 <= 1.23",
-        "c1 <= 1.23 & c0 == 'b'",
-        "c0 == 'b' & c1 >= 9.87",
-        "c1 >= 9.87 & c0 == 'b'"
-    ]
+    n_rows = 30
+    # c0 will have only two unique values, so it will be converted to categorical.
+    # c1 will have 30 unique values (from 0 to 29), so it will remain numeric.
+    df = pd.DataFrame({
+         "c0": np.random.choice([1, 2], size=n_rows),
+         "c1": np.linspace(0, 29, n_rows)  # 30 unique float values: 0.0, 1.0, ... 29.0
+    })
+    
+    # Instantiate the evaluator to process the dtypes accordingly.
+    evaluator = singl_ev.SinglingOutEvaluator(ori=df.copy(), syn=df.copy())
+    
+    # Generate multivariate queries using the processed (evaluated) DataFrame.
+    queries = singl_ev.multivariate_singling_out_queries(
+         df=evaluator.ori, n_queries=2, n_cols=2, max_attempts=None
+    )
+    assert len(queries) == 2
+
+    # Define regex patterns for the expected predicates:
+    # For the categorical column (c0), we expect an equality check.
+    # This pattern matches strings that start with "c0", followed by optional whitespace,
+    # then the equality operator "==", then more optional whitespace, and then an integer.
+    # It also allows an optional ".0" after the integer.
+    # Breakdown:
+    #   ^         : Assert the start of the string.
+    #   c0        : Match the literal characters "c0".
+    #   \s*       : Match zero or more whitespace characters.
+    #   ==        : Match the literal "==" operator.
+    #   \s*       : Match zero or more whitespace characters.
+    #   \d+       : Match one or more digits (an integer).
+    #   (\.0)?   : Optionally match a group consisting of a dot followed by a 0.
+    #   $         : Assert the end of the string.
+    pattern_c0 = re.compile(r"^c0\s*==\s*\d+(\.0)?$")
+    # For the numeric column (c1), we expect a numeric comparison with >= or <=.
+
+    # This pattern matches strings that start with "c1", followed by optional whitespace,
+    # then a numeric comparison operator (either ">=" or "<="), then more optional whitespace,
+    # and then a number. The number must start with one or more digits and can optionally include
+    # a decimal part.
+    # Breakdown:
+    #   ^             : Assert the start of the string.
+    #   c1            : Match the literal characters "c1".
+    #   \s*           : Match zero or more whitespace characters.
+    #   (>=|<=)      : Match either ">=" or "<=".
+    #   \s*           : Match zero or more whitespace characters.
+    #   \d+           : Match one or more digits (the integer part of the number).
+    #   (\.\d+)?     : Optionally match a decimal part: a dot followed by one or more digits.
+    #   $             : Assert the end of the string.
+    pattern_c1 = re.compile(r"^c1\s*(>=|<=)\s*\d+(\.\d+)?$")
+
     for query in queries:
-        assert query in possible_queries
+        # Split the query into its subqueries.
+        subqueries = [q.strip() for q in query.split("&")]
+        # We expect exactly 2 subqueries, one for c0 and one for c1.
+        assert len(subqueries) == 2
+        for subquery in subqueries:
+            if subquery.startswith("c0"):
+                assert pattern_c0.match(subquery), f"c0 query {subquery} does not match expected pattern"
+            elif subquery.startswith("c1"):
+                assert pattern_c1.match(subquery), f"c1 query {subquery} does not match expected pattern"
+            else:
+                pytest.fail(f"Unexpected subquery: {subquery}")
 
 def test_main_singling_out_attack() -> None:
     """Assert function main_singling_out_attack raises no errors with adults simple input."""
@@ -312,11 +357,13 @@ def test_SinglingOutEvaluator(n_cols: int) -> None: # noqa: N802
     syn = get_adult(return_ori=False, n_samples=10)
     #Instantiate SinglingOutEvaluator
     soe = singl_ev.SinglingOutEvaluator(ori=ori, syn=syn, n_cols=n_cols, n_attacks=5)
-    assert soe.ori.equals(ori)
-    assert soe.syn.equals(syn)
+    #This assertions do not hold any more, since the datasets are being formatted  
+    # assert soe.ori.equals(ori)
+    # assert soe.syn.equals(syn)
     assert soe.n_cols == n_cols
     assert soe.n_attacks == 5
     assert soe.confidence_level == 0.95
+    assert soe.categorical_threshold == 20
     assert soe.max_attempts == 10_000_000
     assert soe.main_queries is None
     assert soe.naive_queries is None
