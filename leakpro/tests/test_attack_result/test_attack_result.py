@@ -3,19 +3,21 @@
 import json
 import os
 import tempfile
+import pytest
 from pytest_mock import MockerFixture
 
 import numpy as np
 import torch
 import torchvision
 from torch import Tensor, as_tensor, randperm
-from torch.nn import BCEWithLogitsLoss
+from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss
 from torch.utils.data import DataLoader, Subset
 from torchvision import transforms
         
-from leakpro.attacks.gia_attacks.utils import InvertingConfig
+from leakpro.attacks.gia_attacks.utils import InvertingConfig, InvertingConfigDictMap
 from leakpro.fl_utils.data_utils import get_meanstd
-from leakpro.metrics.attack_result import MIAResult, GIAResults, get_config_name
+from leakpro.fl_utils.gia_optimizers import MetaSGD, MetaAdam
+from leakpro.metrics.attack_result import MIAResult, GIAResults, get_config_name, get_gia_config_name
 from leakpro.utils.import_helper import Self
 
 
@@ -289,14 +291,14 @@ class TestGIAResult:
             data_std = as_tensor(data_std)[:, None, None]
             return trainloader, data_mean, data_std
         
-        client_dataloader, data_mean, data_std = get_cifar10_loader(num_images=1, batch_size=1, num_workers=2)
+        client_dataloader, _, _ = get_cifar10_loader(num_images=1, batch_size=1, num_workers=2)
         self.GIAresult = GIAResults(
             original_data = client_dataloader, 
             recreated_data = client_dataloader, 
-            psnr_score = torch.tensor(12.8943), 
-            ssim_score = 0.8470116640585275, 
-            data_mean = torch.tensor([0.4914]), 
-            data_std = torch.tensor([0.2470]), 
+            psnr_score = 12.0, 
+            ssim_score = 0.84, 
+            data_mean = torch.tensor(2.0), 
+            data_std = torch.tensor(1.0), 
             config = self.config)
 
     def teardown_method(self:Self) -> None:
@@ -309,10 +311,10 @@ class TestGIAResult:
         assert isinstance(self.GIAresult, GIAResults)
         assert isinstance(self.GIAresult.original_data, DataLoader)
         assert isinstance(self.GIAresult.recreated_data, DataLoader)
-        assert self.GIAresult.PSNR_score  is not None
-        assert self.GIAresult.SSIM_score is not None
-        assert self.GIAresult.data_mean is not None
-        assert self.GIAresult.data_std is not None
+        assert self.GIAresult.PSNR_score == 12.0
+        assert self.GIAresult.SSIM_score == 0.84
+        assert torch.isclose(self.GIAresult.data_mean, torch.tensor(2.0))
+        assert torch.isclose(self.GIAresult.data_std, torch.tensor(1.0))
         assert isinstance(self.GIAresult.config, InvertingConfig)
         assert isinstance(self.GIAresult.config.criterion, BCEWithLogitsLoss)
 
@@ -320,16 +322,16 @@ class TestGIAResult:
         """Test load and save functionality."""
 
         name = "gia"
-        config_name = get_config_name(self.config)
+        config_name = get_gia_config_name(self.config)
         save_path = f"{self.temp_dir}/{name}/{name}{config_name}"
-        print(self.temp_dir, save_path)
+
         # Test saving
         self.GIAresult.save(self.temp_dir, name, self.config)
 
         assert os.path.isdir(save_path)
         assert os.path.exists(f"{save_path}/data.json")
-        assert os.path.exists(f"{save_path}/{name}.png")
-        assert os.path.exists(f"{save_path}/SignalHistogram.png")
+        assert os.path.exists(f"{save_path}/original_image.png")
+        assert os.path.exists(f"{save_path}/recreated_image.png")
 
         # Test loading
         with open(f"{save_path}/data.json") as f:
@@ -345,38 +347,62 @@ class TestGIAResult:
         assert self.giaresult_new.config is None
 
         self.giaresult_new = GIAResults.load(data)
-        assert self.giaresult_new.result_config == self.GIAresult.config
-        
+
+        # Compare all fields after loading
+        assert isinstance(self.giaresult_new.original, str)
+        assert isinstance(self.giaresult_new.recreated, str)
+        assert self.giaresult_new.PSNR_score == self.GIAresult.PSNR_score
+        assert self.giaresult_new.SSIM_score == self.GIAresult.SSIM_score
+        assert self.giaresult_new.data_mean == self.GIAresult.data_mean 
+        assert self.giaresult_new.data_std == self.GIAresult.data_std
+        assert isinstance(self.giaresult_new.config, InvertingConfig)
+
+        # Compare all InvertingConfig fields after loading
+        assert self.giaresult_new.config.tv_reg == self.GIAresult.config.tv_reg
+        assert self.giaresult_new.config.attack_lr == self.GIAresult.config.attack_lr
+        assert self.giaresult_new.config.at_iterations == self.GIAresult.config.at_iterations
+        assert isinstance(self.giaresult_new.config.optimizer, type(self.GIAresult.config.optimizer))
+        assert isinstance(self.giaresult_new.config.criterion, type(self.GIAresult.config.criterion))
+        assert self.giaresult_new.config.epochs == self.GIAresult.config.epochs
+        assert self.giaresult_new.config.median_pooling == self.GIAresult.config.median_pooling
+        assert self.giaresult_new.config.top10norms == self.GIAresult.config.top10norms
+
     def test_latex(self:Self, mocker: MockerFixture) -> None:
         """Test if the LaTeX content is generated correctly."""
 
-        result = [mocker.Mock(id="attack-config-1", resultname="test_attack_1",\
-                     fixed_fpr_table={"TPR@1.0%FPR": 0.90, "TPR@0.1%FPR": 0.80, "TPR@0.01%FPR": 0.70, "TPR@0.0%FPR": 0.60},
-                     config={"training_data_fraction": 0.5, "num_shadow_models": 3, "online": True})]
+        # Set name
+        name = "gia"
 
-        # name = "attack_comparison"
-        # filename = f"{self.temp_dir}/{name}"
+        # Load GIAResults
+        config_name = get_gia_config_name(self.config)
+        save_path = f"{self.temp_dir}/{name}/{name}{config_name}"
 
-        # latex_content = MIAResult()._latex(result, save_dir=self.temp_dir, save_name=name)
+        # Load data
+        with open(f"{save_path}/data.json") as f:
+            data = json.load(f)
+        self.giaresult = GIAResults.load(data)
 
-        # # Check that the subsection is correctly included
-        # assert "\\subsection{attack comparison}" in latex_content
+        # Create results and examine latex text
+        latex_content = GIAResults.create_results([self.giaresult], save_dir=self.temp_dir, save_name=name)
 
-        # # Check that the figure is correctly included
-        # assert f"\\includegraphics[width=0.8\\textwidth]{{{name}.png}}" in latex_content
+        # Check that the subsection is correctly included
+        assert f"\\subsection{name}" in latex_content
 
-        # # Check that the table header is correct
-        # assert "Attack name & attack config & TPR: 1.0\\%FPR & 0.1\\%FPR & 0.01\\%FPR & 0.0\\%FPR" in latex_content
+        # Check that the figure is correctly included
+        assert f"\\includegraphics[width=0.8\\textwidth]{{{name}.png}}" in latex_content
 
-        # # Check if the results for mock_result are included correctly
-        # assert "test-attack-1" in latex_content
-        # assert "0.9" in latex_content
-        # assert "0.8" in latex_content
-        # assert "0.7" in latex_content
-        # assert "0.6" in latex_content
+        # Check that the table header is correct
+        assert "Attack name & attack config & TPR: 1.0\\%FPR & 0.1\\%FPR & 0.01\\%FPR & 0.0\\%FPR" in latex_content
 
-        # # Ensure the LaTeX content ends properly
-        # assert "\\newline\n"  in latex_content
+        # Check if the results for mock_result are included correctly
+        assert "test-attack-1" in latex_content
+        assert "0.9" in latex_content
+        assert "0.8" in latex_content
+        assert "0.7" in latex_content
+        assert "0.6" in latex_content
+
+        # Ensure the LaTeX content ends properly
+        assert "\\newline\n"  in latex_content
 
 
 # class TestIntermediateAndMergedGIAResult:
@@ -584,3 +610,88 @@ class TestGIAResult:
 
         # # Ensure the LaTeX content ends properly
         # assert "\\newline\n"  in latex_content
+        
+def test_invertingconfigdictmap():
+    """Test InvertingConfigDictMap functionality."""
+
+    # Test mapping with custom values
+    custom_config_dict = {
+        'tv_reg': 1.0e-05,
+        'attack_lr': 0.2,
+        'at_iterations': 10000,
+        'epochs': 2,
+        'median_pooling': True,
+        'top10norms': True,
+        'optimizer': 'MetaAdam',
+        'criterion': 'BCEWithLogitsLoss'
+    }
+
+    # Run mapping
+    custom_config = InvertingConfigDictMap(custom_config_dict)
+    
+    # Check if values are correctly mapped
+    assert isinstance(custom_config, InvertingConfig)
+    assert custom_config.tv_reg == 1.0e-05
+    assert custom_config.attack_lr == 0.2
+    assert custom_config.at_iterations == 10000
+    assert custom_config.epochs == 2
+    assert custom_config.median_pooling == True
+    assert custom_config.top10norms == True
+    assert isinstance(custom_config.optimizer, MetaAdam)
+    assert isinstance(custom_config.criterion, BCEWithLogitsLoss)
+    
+    # Test with partial dict
+    partial_config_dict = {
+        'tv_reg': 2.0e-06,
+        'attack_lr': 0.3
+    }
+    
+    partial_config = InvertingConfigDictMap(partial_config_dict)
+    assert isinstance(partial_config, InvertingConfig)
+    assert partial_config.tv_reg == 2.0e-06 
+    assert partial_config.attack_lr == 0.3
+    assert partial_config.at_iterations == 8000  # Default value
+    assert partial_config.epochs == 1  # Default value
+    assert partial_config.median_pooling == False  # Default value
+    assert partial_config.top10norms == False  # Default value
+
+    # Test with None dict (should raise ValueError)
+    with pytest.raises(ValueError, match="Config must be a dictionary"):
+        InvertingConfigDictMap(None)
+
+    # Test with empty dict (should raise ValueError)
+    with pytest.raises(ValueError, match="Config dictionary cannot be empty"):
+        _ = InvertingConfigDictMap({})
+
+    # Test with invalid optimizer string
+    invalid_optimizer_dict = {
+        'optimizer': 'InvalidOptimizer'
+    }
+    with pytest.raises(KeyError):
+        InvertingConfigDictMap(invalid_optimizer_dict)
+        
+    # Test with invalid criterion string 
+    invalid_criterion_dict = {
+        'criterion': 'InvalidCriterion'
+    }
+    with pytest.raises(KeyError):
+        InvertingConfigDictMap(invalid_criterion_dict)
+
+    # Test with invalid attribute name
+    invalid_attr_dict = {
+        'invalid_attribute': 'some_value'
+    }
+    with pytest.raises(AttributeError):
+        config = InvertingConfigDictMap(invalid_attr_dict)
+    
+    # Test that all default values remain unchanged for attributes not in dict
+    minimal_dict = {'tv_reg': 2.0e-05}
+    config = InvertingConfigDictMap(minimal_dict)
+    assert config.tv_reg == 2.0e-05
+    assert config.attack_lr == 0.1  # default
+    assert config.at_iterations == 8000  # default 
+    assert config.epochs == 1  # default
+    assert config.median_pooling == False  # default
+    assert config.top10norms == False  # default
+    assert isinstance(config.optimizer, MetaSGD)  # default
+    assert isinstance(config.criterion, CrossEntropyLoss)  # default

@@ -1,9 +1,9 @@
 """Module that contains utility classes, functions and more for constructing and performing a gradient inversion attack on a target."""
 
 from dataclasses import dataclass, field
-from torch.nn import CrossEntropyLoss
+from torch.nn import CrossEntropyLoss, BCEWithLogitsLoss
 
-from leakpro.fl_utils.gia_optimizers import MetaSGD
+from leakpro.fl_utils.gia_optimizers import *
 
 @dataclass
 class InvertingConfig:
@@ -25,3 +25,41 @@ class InvertingConfig:
     median_pooling: bool = False
     # if we compare difference only for top 10 layers with largest changes. Potentially good for larger models.
     top10norms: bool = False
+
+def InvertingConfigDictMap(config_dict: dict) -> InvertingConfig:
+    """Map a dictionary of parameters to an InvertingConfig object.
+
+    Args:
+        config_dict: Dictionary containing parameter names and values
+
+    Returns:
+        InvertingConfig: Configuration object with parameters set from dictionary
+    """
+
+    # Make sure config is a dictionary
+    if not isinstance(config_dict, dict):
+        raise ValueError("Config must be a dictionary")
+
+    # Make sure config is not empty
+    if not config_dict:
+        raise ValueError("Config dictionary cannot be empty")
+
+    # Initialize dummy configuration object
+    config = InvertingConfig()
+    
+    for key, value in config_dict.items():
+        if key == 'optimizer':
+            # Map optimizer string name to class
+            optimizer_class = globals()[value]
+            config.optimizer = optimizer_class()
+        elif key == 'criterion':
+            # Map criterion string name to class 
+            criterion_class = globals()[value]
+            config.criterion = criterion_class()
+        else:
+            if key not in InvertingConfig.__dataclass_fields__:
+                raise AttributeError(f"Unknown parameter: {key}, does not exist in InvertingConfig")
+            # Set other attributes directly
+            setattr(config, key, value)
+
+    return config
