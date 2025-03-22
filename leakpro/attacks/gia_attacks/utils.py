@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 
-from torch.nn import CrossEntropyLoss
+from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss  # noqa: F401
 
 from leakpro.fl_utils.gia_optimizers import MetaAdam, MetaSGD  # noqa: F401
 

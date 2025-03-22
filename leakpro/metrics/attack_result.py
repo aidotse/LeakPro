@@ -761,8 +761,8 @@ class GIAResults:
 
         """
 
-        _, _, gia_result_list = map(list, zip(*giaresult_gen))
-        return GIAResults.merge_intermediate(GIAResults_list=gia_result_list)
+        _, _, giaresult_list = map(list, zip(*giaresult_gen))
+        return GIAResults.merge_intermediate(giaresult_list)
 
 class MinvResult:
     """Contains results for a MI attack."""
