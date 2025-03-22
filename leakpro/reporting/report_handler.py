@@ -33,7 +33,7 @@ class ReportHandler():
 
         self.report_dir = self._try_find_rep_dir() if report_dir is None else report_dir
         self.logger.info(f"report_dir set to: {self.report_dir}")
-        
+
         self.report_name = report_name
 
         self.pdf_results = {}

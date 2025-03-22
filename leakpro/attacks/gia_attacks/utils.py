@@ -1,9 +1,11 @@
-"""Module that contains utility classes, functions and more for constructing and performing a gradient inversion attack on a target."""
+"""Module that contains utility classes, functions and more for gradient inversion attack on a target."""
 
 from dataclasses import dataclass, field
-from torch.nn import CrossEntropyLoss, BCEWithLogitsLoss
 
-from leakpro.fl_utils.gia_optimizers import *
+from torch.nn import CrossEntropyLoss
+
+from leakpro.fl_utils.gia_optimizers import MetaAdam, MetaSGD  # noqa: F401
+
 
 @dataclass
 class InvertingConfig:
@@ -26,7 +28,7 @@ class InvertingConfig:
     # if we compare difference only for top 10 layers with largest changes. Potentially good for larger models.
     top10norms: bool = False
 
-def InvertingConfigDictMap(config_dict: dict) -> InvertingConfig:
+def invertingconfigdictmap(config_dict: dict) -> InvertingConfig:
     """Map a dictionary of parameters to an InvertingConfig object.
 
     Args:
@@ -34,6 +36,7 @@ def InvertingConfigDictMap(config_dict: dict) -> InvertingConfig:
 
     Returns:
         InvertingConfig: Configuration object with parameters set from dictionary
+
     """
 
     # Make sure config is a dictionary
@@ -46,14 +49,14 @@ def InvertingConfigDictMap(config_dict: dict) -> InvertingConfig:
 
     # Initialize dummy configuration object
     config = InvertingConfig()
-    
+
     for key, value in config_dict.items():
-        if key == 'optimizer':
+        if key == "optimizer":
             # Map optimizer string name to class
             optimizer_class = globals()[value]
             config.optimizer = optimizer_class()
-        elif key == 'criterion':
-            # Map criterion string name to class 
+        elif key == "criterion":
+            # Map criterion string name to class
             criterion_class = globals()[value]
             config.criterion = criterion_class()
         else:

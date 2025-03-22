@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sn
+import torch
 from pydantic import BaseModel
 from sklearn.metrics import (
     accuracy_score,
@@ -17,14 +18,12 @@ from sklearn.metrics import (
     roc_auc_score,
     roc_curve,
 )
-import torch
 from torch import Tensor, clamp, stack
 from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision.utils import save_image
 
-from leakpro.attacks.gia_attacks.utils import InvertingConfig, InvertingConfigDictMap
+from leakpro.attacks.gia_attacks.utils import InvertingConfig, invertingconfigdictmap
 from leakpro.utils.import_helper import Any, List, Self, Union
-
 
 ########################################################################################################################
 # METRIC_RESULT CLASS
@@ -555,7 +554,7 @@ class GIAResults:
         """Load the GIAResults from disk."""
 
         # Initialize empty GIAResults object
-        giaresult = GIAResults() 
+        giaresult = GIAResults()
 
         giaresult.original = data["original"]
         giaresult.resulttype = data["resulttype"]
@@ -565,7 +564,7 @@ class GIAResults:
         giaresult.data_mean = torch.tensor(data["data_mean"])
         giaresult.data_std = torch.tensor(data["data_std"])
         giaresult.id = data["id"]
-        giaresult.config = InvertingConfigDictMap(data["config"])
+        giaresult.config = invertingconfigdictmap(data["config"])
 
         return giaresult
 
@@ -580,8 +579,8 @@ class GIAResults:
         if config is None:
             try:
                 config = self.config
-            except AttributeError:
-                raise AttributeError("No configuration provided nor any of self")
+            except AttributeError as e:
+                raise AttributeError("No configuration provided nor any in self") from e
 
         # Get a dict version of Union[InvertingConfig]
         result_config = get_gia_config(config)
@@ -618,7 +617,7 @@ class GIAResults:
                 recreated_i = os.path.join(path, f"recreated_image_{i}.png")
                 save_image(output_denormalized, recreated_i)
                 recreated.append(recreated_i)
-        
+
         # If only the final result have been produced, extract and save it
         else:
             recreated_data = extract_tensors_from_subset(self.recreated_data.dataset)
@@ -693,38 +692,38 @@ class GIAResults:
 
     @staticmethod
     def merge_intermediate(
-        GIAResults_list: List["GIAResults"],
+        giaresults_list: List["GIAResults"],
     ) -> "GIAResults":
         """Configure the attack.
 
         Args:
         ----
-            GIAResults_list: The list containing all intermediate GIAResults.
+            giaresults_list: The list containing all intermediate GIAResults.
                 The final GIAResult should also be included last, GIAResults_list[-1]
-  
-        Returns
+
+        Returns:
         -------
             GIAResults: A single GIAResult containing all intermediate and final result.
 
         """
 
-        # Make sure GIAResults_list is a list
-        assert isinstance(GIAResults_list, list)
+        # Make sure giaresults_list is a list
+        assert isinstance(giaresults_list, list)
 
-        # Make sure GIAResults_list is not empty
-        assert len(GIAResults_list) > 0
-        
-        # Make sure there are GIAResults in the GIAResults_list
-        assert all(isinstance(res, GIAResults) for res in GIAResults_list if res is not None)
+        # Make sure giaresults_list is not empty
+        assert len(giaresults_list) > 0
 
-        # Make sure the final results, GIAResults_list[-1], is a GIAResult
-        assert isinstance(GIAResults_list[-1], GIAResults)
+        # Make sure there are GIAResults in the giaresults_list
+        assert all(isinstance(res, GIAResults) for res in giaresults_list if res is not None)
+
+        # Make sure the final results, giaresults_list[-1], is a GIAResult
+        assert isinstance(giaresults_list[-1], GIAResults)
 
         # Initialize lists for merging results
         intr_rec, intr_psnr, intr_ssim = [], [], []
 
         # Collect values from each GIAResults instance
-        for giares in GIAResults_list:
+        for giares in giaresults_list:
             if giares is not None:
 
                 # Append intermediate results to be merged
@@ -733,21 +732,37 @@ class GIAResults:
                 intr_ssim.append(giares.SSIM_score) # Keep each value as a list element
 
         # Extract final result
-        merged_giares = GIAResults_list[-1]
+        merged_giares = giaresults_list[-1]
 
          # Change values to lists containing all intermediate results
         merged_giares.recreated_data = intr_rec  # List of all recreated_data values
         merged_giares.PSNR_score = intr_psnr  # List of all PSNR scores
         merged_giares.SSIM_score = intr_ssim  # List of all SSIM scores
-        
+
         return merged_giares
 
     @staticmethod
     def collect_generator(
-        GIAResult_Gen: Generator[tuple["int", "Tensor", "GIAResults"]]
+        giaresult_gen: Generator[tuple["int", "Tensor", "GIAResults"]]
         ) -> "GIAResults":
-        _, _, GIA_result_list = map(list, zip(*GIAResult_Gen))
-        return GIAResults.merge_intermediate(GIAResults_list=GIA_result_list)
+        """Collects and merges GIA results from a generator of result tuples.
+
+        Args:
+            giaresult_gen (Generator[tuple[int, Tensor, GIAResults]]): Generator yielding tuples of
+                (index, tensor, GIAResults) where index is an integer, tensor is a PyTorch Tensor,
+                and GIAResults contains gradient inversion attack results.
+
+        Returns:
+            GIAResults: Merged results from all GIAResults objects in the generator.
+
+        Note:
+            This function extracts only the GIAResults from each tuple and merges them into
+            a single GIAResults object using the merge_intermediate class method.
+
+        """
+
+        _, _, gia_result_list = map(list, zip(*giaresult_gen))
+        return GIAResults.merge_intermediate(GIAResults_list=gia_result_list)
 
 class MinvResult:
     """Contains results for a MI attack."""
@@ -815,6 +830,7 @@ class TEMPLATEResult:
 
 def _latex_image(figure_path: str, caption: str) -> str:
     """Create latex text for an image."""
+
     return f"""
     \\begin{{figure}}[ht]
     \\includegraphics[width=0.6\\textwidth]{{{figure_path}}}
@@ -858,12 +874,13 @@ def get_config_name(config: Union[BaseModel, dict]) -> str:
 
 def get_gia_config(config: InvertingConfig) -> dict:
     """Create a unique identifier name from an InvertingConfig instance.
-    
+
     Args:
         config: InvertingConfig instance to create name from
-        
+
     Returns:
         dict: Formatted configuration name with all fields
+
     """
     config_dict = {}
 
@@ -882,28 +899,28 @@ def get_gia_config(config: InvertingConfig) -> dict:
 
 def get_gia_config_name(config: Union[dict, InvertingConfig]) -> str:
     """Create a unique identifier name from an InvertingConfig instance.
-    
+
     Args:
         config: InvertingConfig instance to create name from
-        
+
     Returns:
         str: Formatted configuration name with all fields
+
     """
 
     # If config is a dictionary, get the name from it directly
     if isinstance(config, dict):
-        get_config_name(config)
+        return get_config_name(config)
 
     # If config is a InvertingConfig, convert it to a dictionary and get the name
-    elif isinstance(config, InvertingConfig):
+    if isinstance(config, InvertingConfig):
         return get_config_name(get_gia_config(config))
 
     # Otherwise, try to get the name or return error
-    else:
-        try:
-            return get_config_name(config)
-        except Exception as e:
-            raise ValueError(f"Config type not supported for \" get_gia_config_name() \": {e}")
+    try:
+        return get_config_name(config)
+    except Exception as e:
+        raise ValueError("Config type not supported for 'get_gia_config_name()'") from e
 
 def reduce_to_unique_labels(results: list) -> list:
     """Reduce very long labels to unique and distinct ones."""

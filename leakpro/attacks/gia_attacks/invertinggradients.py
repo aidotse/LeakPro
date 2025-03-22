@@ -17,6 +17,7 @@ from leakpro.metrics.attack_result import GIAResults
 from leakpro.utils.import_helper import Callable, Self
 from leakpro.utils.logger import logger
 
+
 class InvertingGradients(AbstractGIA):
     """Gradient inversion attack by Geiping et al."""
 

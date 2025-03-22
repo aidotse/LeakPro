@@ -14,7 +14,7 @@ from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss
 from torch.utils.data import DataLoader, Subset
 from torchvision import transforms
         
-from leakpro.attacks.gia_attacks.utils import InvertingConfig, InvertingConfigDictMap
+from leakpro.attacks.gia_attacks.utils import InvertingConfig, invertingconfigdictmap
 from leakpro.fl_utils.data_utils import get_meanstd
 from leakpro.fl_utils.gia_optimizers import MetaSGD, MetaAdam
 from leakpro.metrics.attack_result import MIAResult, GIAResults, get_config_name, get_gia_config_name
@@ -644,7 +644,7 @@ def get_gia_config():
     pass
 
 def test_invertingconfigdictmap():
-    """Test InvertingConfigDictMap functionality."""
+    """Test invertingconfigdictmap functionality."""
 
     # Test mapping with custom values
     custom_config_dict = {
@@ -659,7 +659,7 @@ def test_invertingconfigdictmap():
     }
 
     # Run mapping
-    custom_config = InvertingConfigDictMap(custom_config_dict)
+    custom_config = invertingconfigdictmap(custom_config_dict)
     
     # Check if values are correctly mapped
     assert isinstance(custom_config, InvertingConfig)
@@ -678,7 +678,7 @@ def test_invertingconfigdictmap():
         'attack_lr': 0.3
     }
     
-    partial_config = InvertingConfigDictMap(partial_config_dict)
+    partial_config = invertingconfigdictmap(partial_config_dict)
     assert isinstance(partial_config, InvertingConfig)
     assert partial_config.tv_reg == 2.0e-06 
     assert partial_config.attack_lr == 0.3
@@ -689,36 +689,36 @@ def test_invertingconfigdictmap():
 
     # Test with None dict (should raise ValueError)
     with pytest.raises(ValueError, match="Config must be a dictionary"):
-        InvertingConfigDictMap(None)
+        invertingconfigdictmap(None)
 
     # Test with empty dict (should raise ValueError)
     with pytest.raises(ValueError, match="Config dictionary cannot be empty"):
-        _ = InvertingConfigDictMap({})
+        _ = invertingconfigdictmap({})
 
     # Test with invalid optimizer string
     invalid_optimizer_dict = {
         'optimizer': 'InvalidOptimizer'
     }
     with pytest.raises(KeyError):
-        InvertingConfigDictMap(invalid_optimizer_dict)
+        invertingconfigdictmap(invalid_optimizer_dict)
         
     # Test with invalid criterion string 
     invalid_criterion_dict = {
         'criterion': 'InvalidCriterion'
     }
     with pytest.raises(KeyError):
-        InvertingConfigDictMap(invalid_criterion_dict)
+        invertingconfigdictmap(invalid_criterion_dict)
 
     # Test with invalid attribute name
     invalid_attr_dict = {
         'invalid_attribute': 'some_value'
     }
     with pytest.raises(AttributeError):
-        config = InvertingConfigDictMap(invalid_attr_dict)
+        config = invertingconfigdictmap(invalid_attr_dict)
     
     # Test that all default values remain unchanged for attributes not in dict
     minimal_dict = {'tv_reg': 2.0e-05}
-    config = InvertingConfigDictMap(minimal_dict)
+    config = invertingconfigdictmap(minimal_dict)
     assert config.tv_reg == 2.0e-05
     assert config.attack_lr == 0.1  # default
     assert config.at_iterations == 8000  # default 
