@@ -532,9 +532,9 @@ class GIAResults:
     def __init__(
             self: Self,
             original_data: DataLoader = None,
-            recreated_data: DataLoader = None,
-            psnr_score: float = None,
-            ssim_score: float = None,
+            recreated_data: Union[DataLoader] = None,
+            psnr_score: Union[float] = None,
+            ssim_score: Union[float] = None,
             data_mean: Tensor = None,
             data_std: Tensor = None,
             config: InvertingConfig = None,
@@ -610,7 +610,7 @@ class GIAResults:
             return stack(all_tensors)
 
         # If intermediate results have been produced, extract all and save them
-        if self.recreated_data is list:
+        if isinstance(self.recreated_data, list):
             recreated = []
             for i, recreated_data in enumerate(self.recreated_data):
                 recreated_data = extract_tensors_from_subset(recreated_data.dataset)
@@ -660,22 +660,33 @@ class GIAResults:
         def _latex(
                 save_name: str,
                 original: str,
-                recreated: str
+                recreated: Union[str, list]
             ) -> str:
             """Latex method for GIAResults."""
 
+            # Start off with creating the subsection header
             latex = f"""
             \\subsection{{{" ".join(save_name.split("_"))}}}
             """
+
+            # Append the original image
             latex += _latex_image(original, "Original")
 
-            if recreated is list:
+            # Append the recreated image(s)
+            if isinstance(recreated, list):
                 for i, rec in recreated:
                     latex += _latex_image(rec, "Recreated" if i == (len(recreated)-1) else f"Intermediate recreated {i}")
-            else:
-                latex += _latex_image(rec, "Recreated")
 
+            # Or image if only one recreated image path is provided
+            elif isinstance(recreated, str):
+                latex += _latex_image(recreated, "Recreated")
+
+            return latex
+
+        # If there are multiple results, reduce the names of them to unique ones
         unique_names = reduce_to_unique_labels(results)
+
+        # Create latex for each result
         for res, name in zip(results, unique_names):
             latex += _latex(save_name=name, original=res.original, recreated=res.recreated)
         return latex
@@ -697,7 +708,7 @@ class GIAResults:
 
         """
 
-        # Make sure GIAResults_list is not empty
+        # Make sure GIAResults_list is a list
         assert isinstance(GIAResults_list, list)
 
         # Make sure GIAResults_list is not empty
@@ -735,7 +746,7 @@ class GIAResults:
     def collect_generator(
         GIAResult_Gen: Generator[tuple["int", "Tensor", "GIAResults"]]
         ) -> "GIAResults":
-        _, _, GIA_result_list = zip(*GIAResult_Gen)
+        _, _, GIA_result_list = map(list, zip(*GIAResult_Gen))
         return GIAResults.merge_intermediate(GIAResults_list=GIA_result_list)
 
 class MinvResult:

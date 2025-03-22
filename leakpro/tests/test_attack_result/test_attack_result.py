@@ -373,9 +373,10 @@ class TestGIAResult:
         # Set name
         name = "gia"
 
-        # Load GIAResults
+        # Run save function
         config_name = get_gia_config_name(self.config)
         save_path = f"{self.temp_dir}/{name}/{name}{config_name}"
+        self.GIAresult.save(self.temp_dir, name)
 
         # Load data
         with open(f"{save_path}/data.json") as f:
@@ -386,231 +387,262 @@ class TestGIAResult:
         latex_content = GIAResults.create_results([self.giaresult], save_dir=self.temp_dir, save_name=name)
 
         # Check that the subsection is correctly included
-        assert f"\\subsection{name}" in latex_content
+        assert f"\\subsection{{{name}}}" in latex_content
 
-        # Check that the figure is correctly included
-        assert f"\\includegraphics[width=0.8\\textwidth]{{{name}.png}}" in latex_content
+        # Check that the original figure is correctly included
+        assert "Original" in latex_content
 
-        # Check that the table header is correct
-        assert "Attack name & attack config & TPR: 1.0\\%FPR & 0.1\\%FPR & 0.01\\%FPR & 0.0\\%FPR" in latex_content
+        # Check that the figure is recreated included
+        assert "Recreated" in latex_content
 
-        # Check if the results for mock_result are included correctly
-        assert "test-attack-1" in latex_content
-        assert "0.9" in latex_content
-        assert "0.8" in latex_content
-        assert "0.7" in latex_content
-        assert "0.6" in latex_content
+        # Check that the config is included
+        assert config_name in latex_content
 
-        # Ensure the LaTeX content ends properly
-        assert "\\newline\n"  in latex_content
+class TestIntermediateAndMergedGIAResult:
+    """Test class for intermediate and merged GIAResults."""
 
-
-# class TestIntermediateAndMergedGIAResult:
-#     """Test class for intermediate and merged GIAResults."""
-
-#     def setup_method(self:Self) -> None:
-#         """Set up temporary directory and logger for GIAResult."""
-#         self.temp_dir = tempfile.TemporaryDirectory()
+    def setup_method(self:Self) -> None:
+        """Set up temporary directory and logger for GIAResult."""
+        self.temp_dir = tempfile.TemporaryDirectory()
         
-#         configs = InvertingConfig()
-#         configs.at_iterations = 24000
-#         configs.tv_reg = 1.0e-06
-#         configs.attack_lr = 0.1
-#         configs.criterion = BCEWithLogitsLoss() 
-#         configs.epochs = 1
-#         self.config = configs
+        configs = InvertingConfig()
+        configs.at_iterations = 24000
+        configs.tv_reg = 1.0e-06
+        configs.attack_lr = 0.1
+        configs.criterion = BCEWithLogitsLoss() 
+        configs.epochs = 1
+        self.config = configs
 
-#         def get_cifar10_loader(num_images:int =1, batch_size:int = 1, num_workers:int = 2 ) -> tuple[DataLoader, Tensor, Tensor]:
-#             """Get the full dataset for CIFAR10."""
-#             trainset = torchvision.datasets.CIFAR10(root="./data", train=True, download=True, transform=transforms.ToTensor())
-#             data_mean, data_std = get_meanstd(trainset)
-#             transform = transforms.Compose([
-#                     transforms.ToTensor(),
-#                     transforms.Normalize(data_mean, data_std)])
-#             trainset.transform = transform
+        def get_cifar10_loader(num_images:int =1, batch_size:int = 1, num_workers:int = 2 ) -> tuple[DataLoader, Tensor, Tensor]:
+            """Get the full dataset for CIFAR10."""
+            trainset = torchvision.datasets.CIFAR10(root="./data", train=True, download=True, transform=transforms.ToTensor())
+            data_mean, data_std = get_meanstd(trainset)
+            transform = transforms.Compose([
+                    transforms.ToTensor(),
+                    transforms.Normalize(data_mean, data_std)])
+            trainset.transform = transform
 
-#             total_examples = len(trainset)
-#             random_indices = randperm(total_examples)[:num_images]
-#             subset_trainset = Subset(trainset, random_indices)
-#             trainloader = DataLoader(subset_trainset, batch_size=batch_size,
-#                                                     shuffle=False, drop_last=True, num_workers=num_workers)
-#             data_mean = as_tensor(data_mean)[:, None, None]
-#             data_std = as_tensor(data_std)[:, None, None]
-#             return trainloader, data_mean, data_std
+            total_examples = len(trainset)
+            random_indices = randperm(total_examples)[:num_images]
+            subset_trainset = Subset(trainset, random_indices)
+            trainloader = DataLoader(subset_trainset, batch_size=batch_size,
+                                                    shuffle=False, drop_last=True, num_workers=num_workers)
+            data_mean = as_tensor(data_mean)[:, None, None]
+            data_std = as_tensor(data_std)[:, None, None]
+            return trainloader, data_mean, data_std
         
-#         client_dataloader, data_mean, data_std = get_cifar10_loader(num_images=1, batch_size=1, num_workers=2)
+        client_dataloader, _, _ = get_cifar10_loader(num_images=1, batch_size=1, num_workers=2)
 
-#         self.GIAresult_multiple = GIAResults(
-#             original_data = client_dataloader, 
-#             recreated_data = [client_dataloader, client_dataloader, client_dataloader, client_dataloader],
-#             psnr_score = [torch.tensor(12.8943),torch.tensor(12.8943),torch.tensor(12.8943),torch.tensor(12.8943)], 
-#             ssim_score = [0.8470116640585275,0.8470116640585275,0.8470116640585275,0.8470116640585275], 
-#             data_mean = data_mean, 
-#             data_std = data_std, 
-#             config = self.config 
-#             )
+        self.GIAresult = GIAResults(
+            original_data = client_dataloader, 
+            recreated_data = client_dataloader, 
+            psnr_score = 12.0, 
+            ssim_score = 0.84, 
+            data_mean = torch.tensor(2.0), 
+            data_std = torch.tensor(1.0), 
+            config = self.config
+            )
 
-#     def teardown_method(self:Self) -> None:
-#         """Clean up temporary directory."""
-#         self.temp_dir.cleanup()
+        self.GIAresult_multiple = GIAResults(
+            original_data = client_dataloader, 
+            recreated_data = [client_dataloader, client_dataloader, client_dataloader, client_dataloader],
+            psnr_score = [12.8, 12.8, 12.8, 12.8], 
+            ssim_score = [0.84, 0.84, 0.84, 0.84],
+            data_mean = torch.tensor(2.0), 
+            data_std = torch.tensor(1.0), 
+            config = self.config 
+            )
 
-#     def test_merged_giaresult_init(self:Self) -> None:
-#         """Test the initialization of a merged GIAResult."""
-#         from torch.utils.data import DataLoader
+    def teardown_method(self:Self) -> None:
+        """Clean up temporary directory."""
+        self.temp_dir.cleanup()
 
-#         assert isinstance(self.GIAresult_multiple, GIAResults)
-#         assert isinstance(self.GIAresult.original_data, DataLoader)
-#         assert isinstance(self.GIAresult.recreated_data, list)
+    def test_merged_giaresult_init(self:Self) -> None:
+        """Test the initialization of a merged GIAResult."""
 
-#     def test_save_load_merged_giaresults(self:Self) -> None:
-#         """Test load and save functionality."""
+        assert isinstance(self.GIAresult_multiple, GIAResults)
+        assert isinstance(self.GIAresult_multiple.original_data, DataLoader)
+        assert isinstance(self.GIAresult_multiple.recreated_data, list)
+        assert isinstance(self.GIAresult_multiple.recreated_data[0], DataLoader)
+        assert isinstance(self.GIAresult_multiple.config, InvertingConfig)
+        assert isinstance(self.GIAresult_multiple.config.criterion, BCEWithLogitsLoss)
 
-#         name = "gia"
-#         config_name = get_config_name(self.config["attack_list"][name])
-#         save_path = f"{self.temp_dir}/{name}/{name}{config_name}"
+    def test_save_load_merged_giaresults(self:Self) -> None:
+        """Test load and save functionality."""
 
-#         # Test saving
-#         self.GIAresult.save(self.temp_dir, name, self.config)
+        name = "gia"
+        config_name = get_gia_config_name(self.config)
+        save_path = f"{self.temp_dir}/{name}/{name}{config_name}"
 
-#         assert os.path.isdir(save_path)
-#         assert os.path.exists(f"{save_path}/data.json")
-#         assert os.path.exists(f"{save_path}/{name}.png")
-#         assert os.path.exists(f"{save_path}/SignalHistogram.png")
+        # Test saving
+        self.GIAresult_multiple.save(self.temp_dir, name, self.config)
 
-#         # Test loading
-#         with open(f"{save_path}/data.json") as f:
-#             data = json.load(f)
+        assert os.path.isdir(save_path)
+        assert os.path.exists(f"{save_path}/data.json")
+        assert os.path.exists(f"{save_path}/original_image.png")
+        assert os.path.exists(f"{save_path}/recreated_image_0.png")
+        assert os.path.exists(f"{save_path}/recreated_image_1.png")
+        assert os.path.exists(f"{save_path}/recreated_image_2.png")
+        assert os.path.exists(f"{save_path}/recreated_image_3.png")
 
-#         self.giaresult_new = GIAResults()
-#         assert self.giaresult_new.original_data is None
-#         assert self.giaresult_new.recreated_data is None
-#         assert self.giaresult_new.PSNR_score is None
-#         assert self.giaresult_new.SSIM_score is None
-#         assert self.giaresult_new.data_mean is None
-#         assert self.giaresult_new.data_std is None
-#         assert self.giaresult_new.config is None
+        # Test loading
+        with open(f"{save_path}/data.json") as f:
+            data = json.load(f)
 
-#         self.giaresult_new = GIAResults.load(data)
-#         assert self.giaresult_new.result_config == self.GIAresult.config
+        self.GIAresult_multiple_new = GIAResults()
+        assert self.GIAresult_multiple_new.original_data is None
+        assert self.GIAresult_multiple_new.recreated_data is None
+        assert self.GIAresult_multiple_new.PSNR_score  is None
+        assert self.GIAresult_multiple_new.SSIM_score is None
+        assert self.GIAresult_multiple_new.data_mean is None
+        assert self.GIAresult_multiple_new.data_std is None
+        assert self.GIAresult_multiple_new.config is None
 
-#     def test_merge_intermediate_giaresults(self: Self) -> None:
-#         """Test merging multiple GIAResults into a single result with intermediate values."""
+        self.GIAresult_multiple_new = GIAResults.load(data)
+
+        # Compare all fields after loading
+        assert isinstance(self.GIAresult_multiple_new.original, str)
+        assert isinstance(self.GIAresult_multiple_new.recreated, list)
+        assert self.GIAresult_multiple_new.PSNR_score == self.GIAresult_multiple.PSNR_score
+        assert self.GIAresult_multiple_new.SSIM_score == self.GIAresult_multiple.SSIM_score
+        assert self.GIAresult_multiple_new.data_mean == self.GIAresult_multiple.data_mean 
+        assert self.GIAresult_multiple_new.data_std == self.GIAresult_multiple.data_std
+        assert isinstance(self.GIAresult_multiple_new.config, InvertingConfig)
+
+        # Compare all InvertingConfig fields after loading
+        assert self.GIAresult_multiple_new.config.tv_reg == self.GIAresult_multiple.config.tv_reg
+        assert self.GIAresult_multiple_new.config.attack_lr == self.GIAresult_multiple.config.attack_lr
+        assert self.GIAresult_multiple_new.config.at_iterations == self.GIAresult_multiple.config.at_iterations
+        assert isinstance(self.GIAresult_multiple_new.config.optimizer, type(self.GIAresult_multiple.config.optimizer))
+        assert isinstance(self.GIAresult_multiple_new.config.criterion, type(self.GIAresult_multiple.config.criterion))
+        assert self.GIAresult_multiple_new.config.epochs == self.GIAresult_multiple.config.epochs
+        assert self.GIAresult_multiple_new.config.median_pooling == self.GIAresult_multiple.config.median_pooling
+        assert self.GIAresult_multiple_new.config.top10norms == self.GIAresult_multiple.config.top10norms
+
+    def test_merge_intermediate_giaresults(self: Self) -> None:
+        """Test merging multiple GIAResults into a single result with intermediate values."""
         
-#         # Create mock intermediate results
-#         result1 = GIAResults(
-#             original_data=self.GIAresult.original_data,
-#             recreated_data=self.GIAresult.recreated_data, 
-#             psnr_score=torch.tensor(10.0),
-#             ssim_score=0.5,
-#             data_mean=self.GIAresult.data_mean,
-#             data_std=self.GIAresult.data_std,
-#             config=self.config
-#         )
+        # Create mock intermediate results
+        result1 = GIAResults(
+            original_data=self.GIAresult.original_data,
+            recreated_data=self.GIAresult.recreated_data, 
+            psnr_score=torch.tensor(10.0),
+            ssim_score=0.5,
+            data_mean=self.GIAresult.data_mean,
+            data_std=self.GIAresult.data_std,
+            config=self.config
+        )
         
-#         result2 = GIAResults(
-#             original_data=self.GIAresult.original_data,
-#             recreated_data=self.GIAresult.recreated_data,
-#             psnr_score=torch.tensor(11.0), 
-#             ssim_score=0.6,
-#             data_mean=self.GIAresult.data_mean,
-#             data_std=self.GIAresult.data_std,
-#             config=self.config
-#         )
+        result2 = GIAResults(
+            original_data=self.GIAresult.original_data,
+            recreated_data=self.GIAresult.recreated_data,
+            psnr_score=torch.tensor(11.0), 
+            ssim_score=0.6,
+            data_mean=self.GIAresult.data_mean,
+            data_std=self.GIAresult.data_std,
+            config=self.config
+        )
         
-#         result3 = GIAResults(
-#             original_data=self.GIAresult.original_data, 
-#             recreated_data=self.GIAresult.recreated_data,
-#             psnr_score=torch.tensor(12.0),
-#             ssim_score=0.7,
-#             data_mean=self.GIAresult.data_mean,
-#             data_std=self.GIAresult.data_std, 
-#             config=self.config
-#         )
+        result3 = GIAResults(
+            original_data=self.GIAresult.original_data, 
+            recreated_data=self.GIAresult.recreated_data,
+            psnr_score=torch.tensor(12.0),
+            ssim_score=0.7,
+            data_mean=self.GIAresult.data_mean,
+            data_std=self.GIAresult.data_std, 
+            config=self.config
+        )
 
-#         # Create list of intermediate results
-#         intermediate_results = [result1, result2, result3]
+        # Create list of intermediate results
+        intermediate_results = [result1, result2, result3]
 
-#         # Merge results
-#         merged = GIAResults.merge_intermediate(intermediate_results)
+        # Merge results
+        merged = GIAResults.merge_intermediate(intermediate_results)
 
-#         # Verify merged result contains all intermediate values
-#         assert len(merged.recreated_data) == 3
-#         assert len(merged.PSNR_score) == 3
-#         assert len(merged.SSIM_score) == 3
+        # Verify merged result contains all intermediate values
+        assert len(merged.recreated_data) == 3
+        assert len(merged.PSNR_score) == 3
+        assert len(merged.SSIM_score) == 3
         
-#         assert torch.allclose(merged.PSNR_score[0], torch.tensor(10.0))
-#         assert torch.allclose(merged.PSNR_score[1], torch.tensor(11.0)) 
-#         assert torch.allclose(merged.PSNR_score[2], torch.tensor(12.0))
+        assert torch.allclose(merged.PSNR_score[0], torch.tensor(10.0))
+        assert torch.allclose(merged.PSNR_score[1], torch.tensor(11.0)) 
+        assert torch.allclose(merged.PSNR_score[2], torch.tensor(12.0))
         
-#         assert merged.SSIM_score[0] == 0.5
-#         assert merged.SSIM_score[1] == 0.6
-#         assert merged.SSIM_score[2] == 0.7
+        assert merged.SSIM_score[0] == 0.5
+        assert merged.SSIM_score[1] == 0.6
+        assert merged.SSIM_score[2] == 0.7
 
-#     def test_collect_generator(self: Self) -> None:
-#         """Test collecting results from a generator of GIAResults."""
+    def test_collect_generator(self: Self) -> None:
+        """Test collecting results from a generator of GIAResults."""
         
-#         # Create mock generator that yields iteration number, tensor and result
-#         def mock_generator():
-#             for i in range(3):
-#                 yield i, torch.randn(1), GIAResults(
-#                     original_data=self.GIAresult.original_data,
-#                     recreated_data=self.GIAresult.recreated_data,
-#                     psnr_score=torch.tensor(10.0 + i),
-#                     ssim_score=0.5 + i/10,
-#                     data_mean=self.GIAresult.data_mean,
-#                     data_std=self.GIAresult.data_std,
-#                     config=self.config
-#                 )
-                
-#         # Collect results from generator
-#         collected = GIAResults.collect_generator(mock_generator())
+        # Create mock generator that yields iteration number, tensor and result
+        def mock_generator():
+            for i in range(3):
+                yield i, torch.randn(1), GIAResults(
+                    original_data=self.GIAresult.original_data,
+                    recreated_data=self.GIAresult.recreated_data,
+                    psnr_score=torch.tensor(10.0 + i),
+                    ssim_score=0.5 + i/10,
+                    data_mean=self.GIAresult.data_mean,
+                    data_std=self.GIAresult.data_std,
+                    config=self.config
+                )
+
+        # Collect results from generator
+        collected = GIAResults.collect_generator(mock_generator())
         
-#         # Verify collected contains results from all iterations
-#         assert len(collected.recreated_data) == 3
-#         assert len(collected.PSNR_score) == 3
-#         assert len(collected.SSIM_score) == 3
+        # Verify collected contains results from all iterations
+        assert len(collected.recreated_data) == 3
+        assert len(collected.PSNR_score) == 3
+        assert len(collected.SSIM_score) == 3
         
-#         # Verify values are collected in order
-#         assert torch.allclose(collected.PSNR_score[0], torch.tensor(10.0))
-#         assert torch.allclose(collected.PSNR_score[1], torch.tensor(11.0))
-#         assert torch.allclose(collected.PSNR_score[2], torch.tensor(12.0))
+        # Verify values are collected in order
+        assert torch.allclose(collected.PSNR_score[0], torch.tensor(10.0))
+        assert torch.allclose(collected.PSNR_score[1], torch.tensor(11.0))
+        assert torch.allclose(collected.PSNR_score[2], torch.tensor(12.0))
         
-#         assert collected.SSIM_score[0] == 0.5
-#         assert collected.SSIM_score[1] == 0.6  
-#         assert collected.SSIM_score[2] == 0.7
+        assert collected.SSIM_score[0] == 0.5
+        assert collected.SSIM_score[1] == 0.6  
+        assert collected.SSIM_score[2] == 0.7
 
         
-#     def test_latex(self:Self, mocker: MockerFixture) -> None:
-#         """Test if the LaTeX content is generated correctly."""
+    def test_latex(self:Self, mocker: MockerFixture) -> None:
+        """Test if the LaTeX content is generated correctly."""
 
-#         result = [mocker.Mock(id="attack-config-1", resultname="test_attack_1",\
-#                      fixed_fpr_table={"TPR@1.0%FPR": 0.90, "TPR@0.1%FPR": 0.80, "TPR@0.01%FPR": 0.70, "TPR@0.0%FPR": 0.60},
-#                      config={"training_data_fraction": 0.5, "num_shadow_models": 3, "online": True})]
+        # Set name
+        name = "gia"
 
-        # name = "attack_comparison"
-        # filename = f"{self.temp_dir}/{name}"
+        # Run save function
+        config_name = get_gia_config_name(self.config)
+        save_path = f"{self.temp_dir}/{name}/{name}{config_name}"
+        self.GIAresult.save(self.temp_dir, name)
 
-        # latex_content = MIAResult()._latex(result, save_dir=self.temp_dir, save_name=name)
+        # Load data
+        with open(f"{save_path}/data.json") as f:
+            data = json.load(f)
+        self.giaresult = GIAResults.load(data)
 
-        # # Check that the subsection is correctly included
-        # assert "\\subsection{attack comparison}" in latex_content
+        # Create results and examine latex text
+        latex_content = GIAResults.create_results([self.giaresult], save_dir=self.temp_dir, save_name=name)
 
-        # # Check that the figure is correctly included
-        # assert f"\\includegraphics[width=0.8\\textwidth]{{{name}.png}}" in latex_content
+        # Check that the subsection is correctly included
+        assert f"\\subsection{{{name}}}" in latex_content
 
-        # # Check that the table header is correct
-        # assert "Attack name & attack config & TPR: 1.0\\%FPR & 0.1\\%FPR & 0.01\\%FPR & 0.0\\%FPR" in latex_content
+        # Check that the original figure is correctly included
+        assert "Original" in latex_content
 
-        # # Check if the results for mock_result are included correctly
-        # assert "test-attack-1" in latex_content
-        # assert "0.9" in latex_content
-        # assert "0.8" in latex_content
-        # assert "0.7" in latex_content
-        # assert "0.6" in latex_content
+        # Check that the figure is recreated included
+        assert "Recreated" in latex_content
 
-        # # Ensure the LaTeX content ends properly
-        # assert "\\newline\n"  in latex_content
-        
+        # Check that the config is included
+        assert config_name in latex_content
+
+def test_get_gia_config_name():
+    pass
+
+def get_gia_config():
+    pass
+
 def test_invertingconfigdictmap():
     """Test InvertingConfigDictMap functionality."""
 
