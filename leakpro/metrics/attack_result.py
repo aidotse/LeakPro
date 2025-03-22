@@ -3,11 +3,13 @@
 import json
 import os
 from collections import defaultdict
+from collections.abc import Generator
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sn
+import torch
 from pydantic import BaseModel
 from sklearn.metrics import (
     accuracy_score,
@@ -20,7 +22,8 @@ from torch import Tensor, clamp, stack
 from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision.utils import save_image
 
-from leakpro.utils.import_helper import Any, List, Self
+from leakpro.attacks.gia_attacks.utils import InvertingConfig, invertingconfigdictmap
+from leakpro.utils.import_helper import Any, List, Self, Union
 
 ########################################################################################################################
 # METRIC_RESULT CLASS
@@ -528,12 +531,12 @@ class GIAResults:
     def __init__(
             self: Self,
             original_data: DataLoader = None,
-            recreated_data: DataLoader = None,
-            psnr_score: float = None,
-            ssim_score: float = None,
-            data_mean: float = None,
-            data_std: float = None,
-            config: dict = None,
+            recreated_data: Union[DataLoader] = None,
+            psnr_score: Union[float] = None,
+            ssim_score: Union[float] = None,
+            data_mean: Tensor = None,
+            data_std: Tensor = None,
+            config: InvertingConfig = None,
         ) -> None:
 
         self.original_data = original_data
@@ -550,48 +553,50 @@ class GIAResults:
         ) -> None:
         """Load the GIAResults from disk."""
 
+        # Initialize empty GIAResults object
         giaresult = GIAResults()
 
         giaresult.original = data["original"]
         giaresult.resulttype = data["resulttype"]
         giaresult.recreated = data["recreated"]
+        giaresult.PSNR_score = data["psnr_score"]
+        giaresult.SSIM_score = data["ssim_score"]
+        giaresult.data_mean = torch.tensor(data["data_mean"])
+        giaresult.data_std = torch.tensor(data["data_std"])
         giaresult.id = data["id"]
-        giaresult.result_config = data["result_config"]
+        giaresult.config = invertingconfigdictmap(data["config"])
 
         return giaresult
 
     def save(
             self: Self,
-            name: str,
             path: str,
-            config: dict,
-            show_plot: bool = False # noqa: ARG002
+            name: str,
+            config: Union[InvertingConfig] = None,
         ) -> None:
         """Save the GIAResults to disk."""
 
-        def get_gia_config(instance: Any, skip_keys: List[str] = None) -> dict:
-            """Extract manually typed variables and their values from a class instance with options to skip keys."""
-            if skip_keys is None:
-                skip_keys = []
+        if config is None:
+            try:
+                config = self.config
+            except AttributeError as e:
+                raise AttributeError("No configuration provided nor any in self") from e
 
-            cls_annotations = instance.__class__.__annotations__  # Get typed attributes
-            return {
-                var: getattr(instance, var)
-                for var in cls_annotations
-                if var not in skip_keys  # Exclude skipped keys
-            }
-
-        result_config = get_gia_config(config, skip_keys=["optimizer", "criterion"])
+        # Get a dict version of Union[InvertingConfig]
+        result_config = get_gia_config(config)
 
         # Get the name for the attack configuration
-        config_name = get_config_name(result_config)
+        config_name = get_gia_config_name(config)
+
+        # Set config id and path
         self.id = f"{name}{config_name}"
-        path = f"{path}/gradient_inversion/{self.id}"
+        path = f"{path}/{name}/{self.id}"
 
         # Check if path exists, otherwise create it.
         if not os.path.exists(f"{path}"):
             os.makedirs(f"{path}")
 
+        # Helper function to extract images from dataset
         def extract_tensors_from_subset(dataset: Dataset) -> Tensor:
             all_tensors = []
             if isinstance(dataset, Subset):
@@ -603,13 +608,25 @@ class GIAResults:
                     all_tensors.append(dataset[idx][0])
             return stack(all_tensors)
 
-        recreated_data = extract_tensors_from_subset(self.recreated_data.dataset)
+        # If intermediate results have been produced, extract all and save them
+        if isinstance(self.recreated_data, list):
+            recreated = []
+            for i, recreated_data in enumerate(self.recreated_data):
+                recreated_data = extract_tensors_from_subset(recreated_data.dataset)
+                output_denormalized = clamp(recreated_data * self.data_std + self.data_mean, 0, 1)
+                recreated_i = os.path.join(path, f"recreated_image_{i}.png")
+                save_image(output_denormalized, recreated_i)
+                recreated.append(recreated_i)
+
+        # If only the final result have been produced, extract and save it
+        else:
+            recreated_data = extract_tensors_from_subset(self.recreated_data.dataset)
+            output_denormalized = clamp(recreated_data * self.data_std + self.data_mean, 0, 1)
+            recreated = os.path.join(path, "recreated_image.png")
+            save_image(output_denormalized, recreated)
+
+        # Extract and save the original data
         original_data = extract_tensors_from_subset(self.original_data.dataset)
-
-        output_denormalized = clamp(recreated_data * self.data_std + self.data_mean, 0, 1)
-        recreated = os.path.join(path, "recreated_image.png")
-        save_image(output_denormalized, recreated)
-
         gt_denormalized = clamp(original_data * self.data_std + self.data_mean, 0, 1)
         original = os.path.join(path, "original_image.png")
         save_image(gt_denormalized, original)
@@ -619,7 +636,11 @@ class GIAResults:
             "resulttype": self.__class__.__name__,
             "original": original,
             "recreated": recreated,
-            "result_config": result_config,
+            "psnr_score": self.PSNR_score,
+            "ssim_score": self.SSIM_score,
+            "data_mean": self.data_mean.item(),
+            "data_std": self.data_std.item(),
+            "config": result_config,
             "id": self.id,
         }
 
@@ -638,25 +659,110 @@ class GIAResults:
         def _latex(
                 save_name: str,
                 original: str,
-                recreated: str
+                recreated: Union[str, list]
             ) -> str:
             """Latex method for GIAResults."""
-            return f"""
-            \\subsection{{{" ".join(save_name.split("_"))}}}
-            \\begin{{figure}}[ht]
-            \\includegraphics[width=0.6\\textwidth]{{{original}}}
-            \\caption{{Original}}
-            \\end{{figure}}
 
-            \\begin{{figure}}[ht]
-            \\includegraphics[width=0.6\\textwidth]{{{recreated}}}
-            \\caption{{Recreated}}
-            \\end{{figure}}
+            # Start off with creating the subsection header
+            latex = f"""
+            \\subsection{{{" ".join(save_name.split("_"))}}}
             """
+
+            # Append the original image
+            latex += _latex_image(original, "Original")
+
+            # Append the recreated image(s)
+            if isinstance(recreated, list):
+                for i, rec in recreated:
+                    latex += _latex_image(rec, "Recreated" if i == (len(recreated)-1) else f"Intermediate recreated {i}")
+
+            # Or image if only one recreated image path is provided
+            elif isinstance(recreated, str):
+                latex += _latex_image(recreated, "Recreated")
+
+            return latex
+
+        # If there are multiple results, reduce the names of them to unique ones
         unique_names = reduce_to_unique_labels(results)
+
+        # Create latex for each result
         for res, name in zip(results, unique_names):
             latex += _latex(save_name=name, original=res.original, recreated=res.recreated)
         return latex
+
+    @staticmethod
+    def merge_intermediate(
+        giaresults_list: List["GIAResults"],
+    ) -> "GIAResults":
+        """Configure the attack.
+
+        Args:
+        ----
+            giaresults_list: The list containing all intermediate GIAResults.
+                The final GIAResult should also be included last, GIAResults_list[-1]
+
+        Returns:
+        -------
+            GIAResults: A single GIAResult containing all intermediate and final result.
+
+        """
+
+        # Make sure giaresults_list is a list
+        assert isinstance(giaresults_list, list)
+
+        # Make sure giaresults_list is not empty
+        assert len(giaresults_list) > 0
+
+        # Make sure there are GIAResults in the giaresults_list
+        assert all(isinstance(res, GIAResults) for res in giaresults_list if res is not None)
+
+        # Make sure the final results, giaresults_list[-1], is a GIAResult
+        assert isinstance(giaresults_list[-1], GIAResults)
+
+        # Initialize lists for merging results
+        intr_rec, intr_psnr, intr_ssim = [], [], []
+
+        # Collect values from each GIAResults instance
+        for giares in giaresults_list:
+            if giares is not None:
+
+                # Append intermediate results to be merged
+                intr_rec.append(giares.recreated_data) # Keep each value as a list element
+                intr_psnr.append(giares.PSNR_score) # Keep each value as a list element
+                intr_ssim.append(giares.SSIM_score) # Keep each value as a list element
+
+        # Extract final result
+        merged_giares = giaresults_list[-1]
+
+         # Change values to lists containing all intermediate results
+        merged_giares.recreated_data = intr_rec  # List of all recreated_data values
+        merged_giares.PSNR_score = intr_psnr  # List of all PSNR scores
+        merged_giares.SSIM_score = intr_ssim  # List of all SSIM scores
+
+        return merged_giares
+
+    @staticmethod
+    def collect_generator(
+        giaresult_gen: Generator[tuple["int", "Tensor", "GIAResults"]]
+        ) -> "GIAResults":
+        """Collects and merges GIA results from a generator of result tuples.
+
+        Args:
+            giaresult_gen (Generator[tuple[int, Tensor, GIAResults]]): Generator yielding tuples of
+                (index, tensor, GIAResults) where index is an integer, tensor is a PyTorch Tensor,
+                and GIAResults contains gradient inversion attack results.
+
+        Returns:
+            GIAResults: Merged results from all GIAResults objects in the generator.
+
+        Note:
+            This function extracts only the GIAResults from each tuple and merges them into
+            a single GIAResults object using the merge_intermediate class method.
+
+        """
+
+        _, _, giaresult_list = map(list, zip(*giaresult_gen))
+        return GIAResults.merge_intermediate(giaresult_list)
 
 class MinvResult:
     """Contains results for a MI attack."""
@@ -722,6 +828,16 @@ class TEMPLATEResult:
             return results
         return _latex(results)
 
+def _latex_image(figure_path: str, caption: str) -> str:
+    """Create latex text for an image."""
+
+    return f"""
+    \\begin{{figure}}[ht]
+    \\includegraphics[width=0.6\\textwidth]{{{figure_path}}}
+    \\caption{{{caption}}}
+    \\end{{figure}}
+    """
+
 def find_tpr_at_fpr(fpr_array: np.ndarray, tpr_array:np.ndarray, threshold:float) -> float:
     """Find TPR for a given FPR."""
     # Find the last index where FPR is less than or equal to the threshold
@@ -740,11 +856,10 @@ def get_result_fixed_fpr(fpr: np.ndarray, tpr: np.ndarray) -> dict:
             "TPR@0.01%FPR": find_tpr_at_fpr(fpr, tpr, 0.0001),
             "TPR@0.0%FPR": find_tpr_at_fpr(fpr, tpr, 0.0)}
 
-def get_config_name(config: BaseModel) -> str:
+def get_config_name(config: Union[BaseModel, dict]) -> str:
     """Create id from the attack config."""
 
     config = dict(sorted(config.items()))
-
     exclude = ["attack_data_dir"]
 
     config_name = ""
@@ -756,6 +871,56 @@ def get_config_name(config: BaseModel) -> str:
         else:
             config_name += f"-{key}={value}"
     return config_name
+
+def get_gia_config(config: InvertingConfig) -> dict:
+    """Create a unique identifier name from an InvertingConfig instance.
+
+    Args:
+        config: InvertingConfig instance to create name from
+
+    Returns:
+        dict: Formatted configuration name with all fields
+
+    """
+    config_dict = {}
+
+    # Handle all attributes including objects
+    for key, value in vars(config).items():
+        if isinstance(value, bool):
+            if value:
+                config_dict[key] = True
+        elif isinstance(value, (float, int)):
+            config_dict[key] = value
+        elif isinstance(value, object):
+            # Get class name for object fields like optimizer and criterion
+            config_dict[key] = value.__class__.__name__
+
+    return config_dict
+
+def get_gia_config_name(config: Union[dict, InvertingConfig]) -> str:
+    """Create a unique identifier name from an InvertingConfig instance.
+
+    Args:
+        config: InvertingConfig instance to create name from
+
+    Returns:
+        str: Formatted configuration name with all fields
+
+    """
+
+    # If config is a dictionary, get the name from it directly
+    if isinstance(config, dict):
+        return get_config_name(config)
+
+    # If config is a InvertingConfig, convert it to a dictionary and get the name
+    if isinstance(config, InvertingConfig):
+        return get_config_name(get_gia_config(config))
+
+    # Otherwise, try to get the name or return error
+    try:
+        return get_config_name(config)
+    except Exception as e:
+        raise ValueError("Config type not supported for 'get_gia_config_name()'") from e
 
 def reduce_to_unique_labels(results: list) -> list:
     """Reduce very long labels to unique and distinct ones."""
