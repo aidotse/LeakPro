@@ -7,7 +7,7 @@ from pytest_mock import MockerFixture
 
 import numpy as np
 
-from leakpro.metrics.attack_result import MIAResult, get_config_name
+from leakpro.reporting.attack_result import MIAResult, get_config_name
 from leakpro.utils.import_helper import Self
 from leakpro.schemas import AuditConfig
 

@@ -5,7 +5,7 @@ import optuna
 from torch import Tensor
 
 from leakpro.attacks.attack_base import AbstractAttack
-from leakpro.metrics.attack_result import MIAResult
+from leakpro.reporting.attack_result import MIAResult
 from leakpro.schemas import OptunaConfig
 from leakpro.utils.logger import logger
 from leakpro.utils.seed import seed_everything

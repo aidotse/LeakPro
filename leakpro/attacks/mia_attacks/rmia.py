@@ -8,7 +8,7 @@ from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.attacks.utils.utils import softmax_logits
 from leakpro.input_handler.mia_handler import MIAHandler
-from leakpro.metrics.attack_result import MIAResult
+from leakpro.reporting.attack_result import MIAResult
 from leakpro.signals.signal import ModelLogits
 from leakpro.utils.import_helper import Self, Tuple
 from leakpro.utils.logger import logger

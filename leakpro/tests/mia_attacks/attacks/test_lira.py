@@ -2,7 +2,7 @@
 import numpy as np
 
 from leakpro.attacks.mia_attacks.lira import AttackLiRA
-from leakpro.metrics.attack_result import MIAResult
+from leakpro.reporting.attack_result import MIAResult
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.tests.constants import get_audit_config, get_shadow_model_config
 from leakpro.tests.input_handler.image_input_handler import ImageInputHandler

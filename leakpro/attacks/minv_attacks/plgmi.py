@@ -12,7 +12,7 @@ from leakpro.attacks.utils import gan_losses
 from leakpro.attacks.utils.gan_handler import GANHandler
 from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.input_handler.modality_extensions.image_metrics import ImageMetrics
-from leakpro.metrics.attack_result import MinvResult
+from leakpro.reporting.attack_result import MinvResult
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 

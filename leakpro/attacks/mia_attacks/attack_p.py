@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.threshold_computation import linear_itp_threshold_func
 from leakpro.input_handler.mia_handler import MIAHandler
-from leakpro.metrics.attack_result import MIAResult
+from leakpro.reporting.attack_result import MIAResult
 from leakpro.signals.signal import ModelLoss
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
