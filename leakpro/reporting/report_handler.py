@@ -8,7 +8,8 @@ import subprocess
 from pydantic import BaseModel
 
 from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
-from leakpro.reporting.attack_result import GIAResults, MIAResult
+from leakpro.reporting.gia_result import GIAResults
+from leakpro.reporting.mia_result import MIAResult
 from leakpro.synthetic_data_attacks.inference_utils import InferenceResults
 from leakpro.synthetic_data_attacks.linkability_utils import LinkabilityResults
 from leakpro.synthetic_data_attacks.singling_out_utils import SinglingOutResults

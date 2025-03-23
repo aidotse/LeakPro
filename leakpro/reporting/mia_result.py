@@ -5,11 +5,9 @@ import os
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
-import seaborn as sn
 from sklearn.metrics import auc
 
-from leakpro.reporting.report_utils import get_config_name, get_result_fixed_fpr, reduce_to_unique_labels
+from leakpro.reporting.report_utils import create_roc_plot, get_config_name
 from leakpro.utils.import_helper import Self
 
 
@@ -18,8 +16,7 @@ class MIAResult:
 
     def __init__(  # noqa: PLR0913
         self:Self,
-        predicted_labels: list=None,
-        true_labels: list=None,
+        true_membership: list=None,
         signal_values:list=None,
         audit_indices: list = None,
         metadata: dict = None,
@@ -30,8 +27,7 @@ class MIAResult:
 
         Args:
         ----
-            predicted_labels: Membership predictions of the metric.
-            true_labels: True membership labels used to evaluate the metric.
+            true_membership: True membership labels used to evaluate the metric.
             signal_values: Values of the signal used by the metric.
             threshold: Threshold computed by the metric.
             audit_indices: The corresponding dataset indices for the results
@@ -41,29 +37,52 @@ class MIAResult:
             resultname: The name of the attack and result
 
         """
-
-        self.predicted_labels = predicted_labels
-        self.true_labels = true_labels
+        self.true = np.ravel(true_membership)
         self.signal_values = signal_values
         self.audit_indices = audit_indices
         self.metadata = metadata
         self.resultname = resultname
         self.id = id
 
-        if true_labels is None or predicted_labels is None:
-            self.tn = self.tp = self.fn = self.fp = 0.0
-            self.fpr = self.tpr = self.roc_auc = 0.0
-            return
+        # Compute results
+        thresholds = np.unique(signal_values) # ensure we consider each unique value as a threshold
+        self.tp, self.fp, self.fn, self.tn = [], [], [], []
 
-        self.tp = np.sum(predicted_labels & (true_labels == 1), axis=1)
-        self.fp = np.sum(predicted_labels & (true_labels == 0), axis=1)
-        self.fn = np.sum((true_labels == 1) & ~predicted_labels, axis=1)
-        self.tn = np.sum((true_labels == 0) & ~predicted_labels, axis=1)
+        for threshold in thresholds :
+            pred = np.ravel(signal_values >= threshold)
+
+            self.tp.append(np.sum(pred & (self.true == 1)))
+            self.fp.append(np.sum(pred & (self.true == 0)))
+            self.fn.append(np.sum((self.true == 1) & ~pred))
+            self.tn.append(np.sum((self.true == 0) & ~pred))
+
+        self.tp = np.array(self.tp)
+        self.fp = np.array(self.fp)
+        self.fn = np.array(self.fn)
+        self.tn = np.array(self.tn)
 
         self.fpr = np.where(self.fp + self.tn != 0, self.fp / (self.fp + self.tn), 0.0)
         self.tpr = np.where(self.tp + self.fn != 0, self.tp / (self.tp + self.fn), 0.0)
 
         self.roc_auc = auc(self.fpr, self.tpr)
+
+    def _get_result_fixed_fpr(self: Self, fpr_targets: list[float]) -> dict:
+        """Find TPR values for fixed FPRs."""
+        results = {}
+
+        for fpr_target in fpr_targets:
+            # Get indices where FPR is less than or equal to the target
+            valid_indices = np.where(self.fpr <= fpr_target)[0]
+
+            if len(valid_indices) > 0:
+                valid_index = valid_indices[-1]
+                tpr = self.tpr[valid_index]
+            else:
+                tpr = 0.0
+
+            results[f"TPR@{fpr_target:.1%}FPR"] = tpr
+
+        return results
 
 
     @staticmethod
@@ -91,7 +110,9 @@ class MIAResult:
         """Save the MIAResults to disk."""
 
         result_config = config.attack_list[name]
-        fixed_fpr_table = get_result_fixed_fpr(self.fpr, self.tpr)
+
+        fpr_targets = [0.0, 0.0001, 0.001, 0.01, 0.1]
+        fixed_fpr_table = self._get_result_fixed_fpr(fpr_targets)
 
         # Get the name for the attack configuration
         config_name = get_config_name(result_config)
@@ -110,7 +131,7 @@ class MIAResult:
             "fixed_fpr": fixed_fpr_table,
             "audit_indices": self.audit_indices.tolist() if self.audit_indices is not None else None,
             "signal_values": self.signal_values.tolist() if self.signal_values is not None else None,
-            "true_labels": self.true_labels.tolist() if self.true_labels is not None else None,
+            "true_labels": self.true.tolist() if self.true is not None else None,
             "id": name,
         }
 
@@ -122,125 +143,43 @@ class MIAResult:
         with open(f"{save_path}/data.json", "w") as f:
             json.dump(data, f)
 
-        # Create ROC plot for MIAResult
-        temp_res = MIAResult()
-        temp_res.tpr = self.tpr
-        temp_res.fpr = self.fpr
-        temp_res.id = self.id
-        self.create_plot(results = [temp_res],
-                        save_dir = save_path,
-                        save_name = name,
-                        show_plot = show_plot
-                        )
+        # Create ROC plot
+        create_roc_plot([self], save_dir = save_path, save_name = name)
 
         # Create SignalHistogram plot for MIAResult
-        self.create_signal_histogram(save_path = save_path,
-                                    save_name = "SignalHistogram",
-                                    signal_values = self.signal_values,
-                                    true_labels = self.true_labels,
-                                    threshold = self.threshold,
-                                    show_plot = show_plot,
-                                    )
+        self.create_signal_histogram(save_path = save_path)
 
     @staticmethod
     def get_strongest(results: list) -> list:
         """Method for selecting the strongest attack."""
         return max((res for res in results), key=lambda d: d.roc_auc)
 
-    def create_signal_histogram(
-            self:Self,
-            save_path: str,
-            save_name: str,
-            signal_values: list,
-            true_labels: list,
-            threshold: float,
-            show_plot: bool = False,
-            ) -> None:
+    def create_signal_histogram(self:Self, save_path: str) -> None:
         """Method to create Signal Histogram."""
 
-        filename = f"{save_path}/{save_name}"
-        values = np.array(signal_values).ravel()
-        labels = np.array(true_labels).ravel()
+        filename = f"{save_path}/SignalHistogram"
+        values = np.array(self.signal_values).ravel()
+        labels = np.array(self.true).ravel()
 
-        data = pd.DataFrame(
-                {
-                    "Signal": values,
-                    "Membership": ["Member" if y == 1 else "Non-member" for y in labels],
-                }
-            )
+        # Split values by membership
+        member_values = values[labels == 1]
+        non_member_values = values[labels == 0]
 
+        # Compute bin edges (shared for both histograms)
         bin_edges = np.histogram_bin_edges(values, bins=1000)
 
-        histogram = sn.histplot(
-            data=data,
-            x="Signal",
-            hue="Membership",
-            element="step",
-            kde=True,
-            bins = bin_edges
-        )
-
-        if threshold is not None and isinstance(threshold, float):
-            histogram.axvline(x=threshold, linestyle="--", color="C{}".format(2))
-            histogram.text(
-                x=threshold - (np.max(values) - np.min(values)) / 30,
-                y=0.8,
-                s="Threshold",
-                rotation=90,
-                color="C{}".format(2),
-                transform=histogram.get_xaxis_transform(),
-            )
+        # Plot histograms
+        plt.hist(non_member_values, bins=bin_edges, histtype="step", label="out-member", density=False)
+        plt.hist(member_values, bins=bin_edges, histtype="step", label="in-member", density=False)
 
         plt.grid()
         plt.xlabel("Signal value")
         plt.ylabel("Number of samples")
         plt.title("Signal histogram")
-        plt.savefig(fname=filename+".png", dpi=1000)
-        if show_plot:
-            plt.show()
-        else:
-            plt.clf()
-
-    @staticmethod
-    def create_plot(
-            results: list,
-            save_dir: str = "",
-            save_name: str = "",
-            show_plot: bool = False
-        ) -> None:
-        """Plot method for MIAResult."""
-
-        filename = f"{save_dir}/{save_name}"
-
-        # Create plot for results
-        reduced_labels = reduce_to_unique_labels(results)
-        for res, label in zip(results, reduced_labels):
-
-            plt.fill_between(res.fpr, res.tpr, alpha=0.15)
-            plt.plot(res.fpr, res.tpr, label=label)
-
-        # Plot random guesses
-        range01 = np.linspace(0, 1)
-        plt.plot(range01, range01, "--", label="Random guess")
-
-        # Set plot parameters
-        plt.yscale("log")
-        plt.xscale("log")
-        plt.xlim(left=1e-5)
-        plt.ylim(bottom=1e-5)
+        plt.legend()
         plt.tight_layout()
-        plt.grid()
-        plt.legend(bbox_to_anchor =(0.5,-0.27), loc="lower center")
-
-        plt.xlabel("False positive rate (FPR)")
-        plt.ylabel("True positive rate (TPR)")
-        plt.title(save_name+" ROC Curve")
-        plt.savefig(fname=f"{filename}.png", dpi=1000, bbox_inches="tight")
-
-        if show_plot:
-            plt.show()
-        else:
-            plt.clf()
+        plt.savefig(fname=filename + ".png", dpi=1000)
+        plt.clf()
 
     @staticmethod
     def _get_all_attacknames(

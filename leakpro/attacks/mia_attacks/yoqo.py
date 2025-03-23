@@ -10,7 +10,7 @@ from tqdm import tqdm
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
-from leakpro.reporting.attack_result import CombinedMetricResult
+from leakpro.reporting.mia_result import MIAResult
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
@@ -238,7 +238,7 @@ class AttackYOQO(AbstractMIA):
 
         return (x0 + dx)
 
-    def run_attack(self:Self) -> CombinedMetricResult:
+    def run_attack(self:Self) -> MIAResult:
         """Runs the attack on the target model and dataset and assess privacy risks or data leakage.
 
         This method evaluates how the target model's output (logits) for a specific dataset
@@ -293,9 +293,8 @@ class AttackYOQO(AbstractMIA):
         )
 
         # Return a result object containing predictions, true labels, and the signal values for further evaluation
-        return CombinedMetricResult(
+        return MIAResult(
             predicted_labels=predictions,
             true_labels=true_labels,
-            predictions_proba=None,  # Note: Direct probability predictions are not computed here
             signal_values=signal_values,
         )

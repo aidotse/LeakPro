@@ -11,7 +11,7 @@ from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.boosting import Memorization
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
-from leakpro.reporting.attack_result import MIAResult
+from leakpro.reporting.mia_result import MIAResult
 from leakpro.signals.signal import ModelRescaledLogits
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
@@ -277,13 +277,13 @@ class AttackLiRA(AbstractMIA):
             target_logit = self.target_logits[i]
 
             # Calculate the log probability density function value
-            pr_out = -norm.logpdf(target_logit, out_mean, out_std + 1e-30)
+            pr_out = norm.logpdf(target_logit, out_mean, out_std + 1e-30)
 
             if self.online:
                 in_mean = np.mean(shadow_models_logits[mask])
                 in_std = self.get_std(shadow_models_logits, mask, True, self.var_calculation)
 
-                pr_in = -norm.logpdf(target_logit, in_mean, in_std + 1e-30)
+                pr_in = norm.logpdf(target_logit, in_mean, in_std + 1e-30)
             else:
                 pr_in = 0
 
@@ -315,8 +315,7 @@ class AttackLiRA(AbstractMIA):
 
         # Return a result object containing predictions, true labels, and the signal values for further evaluation
         return MIAResult(
-            predicted_labels=predictions,
-            true_labels=true_labels,
+            true_membership=true_labels,
             signal_values=signal_values,
             audit_indices=self.audit_data_indices,
         )

@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 from leakpro.attacks.attack_base import AbstractAttack
 from leakpro.attacks.utils.hyperparameter_tuning.optuna import optuna_optimal_hyperparameters
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
-from leakpro.reporting.attack_result import AttackResult
+from leakpro.reporting.mia_result import MIAResult
 from leakpro.schemas import OptunaConfig
 from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import List, Self, Union
@@ -332,7 +332,7 @@ class AbstractMIA(AbstractAttack):
         pass
 
     @abstractmethod
-    def run_attack(self:Self) -> Union[AttackResult, List[AttackResult]]:
+    def run_attack(self:Self) -> Union[MIAResult, List[MIAResult]]:
         """Run the metric on the target model and dataset. This method handles all the computations related to the audit dataset.
 
         Args:

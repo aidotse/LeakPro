@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.input_handler.mia_handler import MIAHandler
-from leakpro.reporting.attack_result import MIAResult
+from leakpro.reporting.mia_result import MIAResult
 from leakpro.signals.signal import ModelRescaledLogits
 from leakpro.utils.import_helper import Any, Self, Tuple
 from leakpro.utils.logger import logger
@@ -350,7 +350,6 @@ class AttackQMIA(AbstractMIA):
         return MIAResult(
             predicted_labels=predictions,
             true_labels=true_labels,
-            predictions_proba=None,
             signal_values=signal_values,
         )
 

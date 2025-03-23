@@ -6,7 +6,7 @@ import optuna
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from torch.nn import Module
 
-from leakpro.reporting.attack_result import MIAResult
+from leakpro.reporting.mia_result import MIAResult
 
 
 class OptimizerConfig(BaseModel):
