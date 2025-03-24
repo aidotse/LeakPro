@@ -335,7 +335,7 @@ class AttackQMIA(AbstractMIA):
 
         predictions = np.less(score, self.target_logits[np.newaxis, :])
 
-        # set true labels for being in the training dataset
+        # set true labels for being in the training datasetz
         true_labels = np.concatenate(
             [
                 np.ones(len(self.audit_dataset["in_members"])),
@@ -348,8 +348,7 @@ class AttackQMIA(AbstractMIA):
 
         # compute ROC, TP, TN etc
         return MIAResult(
-            predicted_labels=predictions,
-            true_labels=true_labels,
+            true_membership=true_labels,
             signal_values=signal_values,
         )
 

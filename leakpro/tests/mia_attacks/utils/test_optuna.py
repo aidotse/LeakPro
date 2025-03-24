@@ -1,7 +1,7 @@
 import numpy as np
 
 from leakpro.attacks.mia_attacks.rmia import AttackRMIA
-from leakpro.reporting.attack_result import MIAResult
+from leakpro.reporting.mia_result import MIAResult
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.tests.constants import get_audit_config, get_shadow_model_config
 from leakpro.tests.input_handler.image_input_handler import ImageInputHandler
@@ -25,7 +25,7 @@ def test_rmia_optuna_attack_change_default_objective(image_handler:ImageInputHan
     assert rmia_obj.optuna_params > 0, "No parameters to optimize"
         
     # set gamma and a_offline
-    start_gamma = 9
+    start_gamma = 1
     start_offline_a = 0.9999
     rmia_obj.configs.gamma = start_gamma
     rmia_obj.configs.offline_a = start_offline_a

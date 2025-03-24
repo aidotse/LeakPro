@@ -68,7 +68,12 @@ class MIAResult:
 
         self.accuracy = (self.tp + self.tn) / (self.tp + self.fp + self.fn + self.tn)
 
-        self.roc_auc = auc(self.fpr, self.tpr)
+        # if too few unique values, it is not possible to compute ROC AUC
+        if len(self.fpr) < 2:
+            logger.warning("Too few unique values to compute ROC AUC")
+            self.roc_auc = 0.0
+        else:
+            self.roc_auc = auc(self.fpr, self.tpr)
 
         fpr_targets = [0.0, 0.0001, 0.001, 0.01, 0.1]
         self.fixed_fpr_table = self._get_result_fixed_fpr(fpr_targets)
@@ -105,6 +110,8 @@ class MIAResult:
             ub: The upper bound of the FPR interval.
 
         """
+        if len(self.fpr) < 2:
+            return 0.0
         mask = self.fpr < ub
         return float(np.mean(self.tpr[mask]))
 

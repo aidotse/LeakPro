@@ -278,7 +278,6 @@ class AttackYOQO(AbstractMIA):
             predictions.extend(batch_predictions)
 
         predictions = np.array(predictions).reshape(1,-1)
-        signal_values = predictions.copy().reshape(-1,1)
 
         # Prepare true labels array, marking 1 for training data and 0 for non-training data
         true_labels = np.concatenate(
@@ -294,7 +293,6 @@ class AttackYOQO(AbstractMIA):
 
         # Return a result object containing predictions, true labels, and the signal values for further evaluation
         return MIAResult(
-            predicted_labels=predictions,
-            true_labels=true_labels,
-            signal_values=signal_values,
+            true_membership=true_labels,
+            signal_values=predictions,
         )

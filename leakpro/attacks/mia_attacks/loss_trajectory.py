@@ -373,7 +373,7 @@ class AttackLossTrajectory(AbstractMIA):
         -------
             A tuple containing the ground truth labels and the predicted membership probabilities for each data point.
             - auc_ground_truth: The ground truth labels for the data points.
-            - member_preds: The predicted membership probabilities for each data point.
+            - auc_pred: The predicted membership probabilities for each data point.
 
         """
         logger.info("Running the MIA attack")
@@ -404,31 +404,22 @@ class AttackLossTrajectory(AbstractMIA):
                      auc_pred = np.concatenate((auc_pred, auc_pred_current.cpu().detach().numpy()),axis=0)
 
         test_loss /= len(self.mia_test_data_loader.dataset)
-        accuracy = 100. * correct / len(self.mia_test_data_loader.dataset)  # noqa: F841
 
-        thresholds = np.linspace(0, 1, 1000)
-        member_preds = np.array([(auc_pred < threshold).astype(int) for threshold in thresholds])
-
-        return auc_ground_truth, member_preds
+        return auc_ground_truth, auc_pred
 
     def run_attack(self:Self) -> MIAResult:
         """Run the attack and return the combined metric result.
 
         Returns
         -------
-            CombinedMetricResult: The combined metric result containing predicted labels, true labels,
-            predictions probabilities, and signal values.
+            MIAResult: The result of the attack.
 
         """
         self.mia_classifier()
-        true_labels, predictions = self.mia_attack(self.mia_classifer)
+        true_labels, signals = self.mia_attack(self.mia_classifer)
 
-        #TODO: We don't have signals in this attack, unlike RMIA. I set it to random to pass the PR before refactoring.
-        signals = np.random.rand(*true_labels.shape)
-
-        # compute ROC, TP, TN etc
         return MIAResult(
-            predicted_labels=predictions,
-            true_labels=true_labels,
+            true_membership=true_labels,
             signal_values=signals,
+            result_name="LossTrajectory",
         )

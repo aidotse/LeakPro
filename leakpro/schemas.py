@@ -202,7 +202,7 @@ class OptunaConfig(BaseModel):
                                                        description="Direction of the optimization, minimize or maximize")
     pruner: optuna.pruners.BasePruner = Field(default=optuna.pruners.MedianPruner(n_warmup_steps=5),
                                               description="Number of steps before pruning of experiments will be available")
-    objective: Callable[[Any], float] = Field(..., description="Objective function")
+    objective: Callable[[Any], float] = Field(lambda x: x, description="Objective function to optimize")
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # Prevent extra fields
 

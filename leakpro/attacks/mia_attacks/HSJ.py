@@ -168,28 +168,16 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
                                                     self.verbose
                                                     )
 
-        # create thresholds
-        min_signal_val = np.min(perturbation_distances)
-        max_signal_val = np.max(perturbation_distances)
-        thresholds = np.linspace(min_signal_val, max_signal_val, 1000)
-        num_threshold = len(thresholds)
-
-        # compute the signals for the in-members and out-members
-        member_signals = (np.array(perturbation_distances).reshape(-1, 1).repeat(num_threshold, 1).T)
-
-        member_preds = np.greater(member_signals, thresholds[:, np.newaxis])
+        # Ensure that the largest values are the most likely to be in the training dataset
+        perturbation_distances = -np.array(perturbation_distances)
 
         # set true labels for being in the training dataset
         true_labels = np.concatenate(
-            [
-                np.ones(int(len(self.attack_dataloader.dataset)/2)),
-                np.zeros(int(len(self.attack_dataloader.dataset)/2)),
-            ]
+            [np.ones(len(self.in_member_signals)), np.zeros(len(self.out_member_signals))]
         )
 
-        # compute ROC, TP, TN etc
         return MIAResult(
-            predicted_labels=member_preds,
-            true_labels=true_labels,
+            true_membership=true_labels,
             signal_values= perturbation_distances,
+            result_name="HopSkipJump",
         )
