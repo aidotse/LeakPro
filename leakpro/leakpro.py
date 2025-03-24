@@ -106,7 +106,6 @@ class LeakPro:
             dataloader (DataLoader): The dataloader used to train "model"
             test_result (EvalOutput): The result of the model evaluation on the test set
             train_indices (list[int]): The indices of the training set
-            test_indices (list[int]): The indices of the test set
             dataset_name (str): The name of the dataset
 
         Returns:

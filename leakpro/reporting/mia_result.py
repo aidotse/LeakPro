@@ -68,6 +68,8 @@ class MIAResult:
 
     def _get_result_fixed_fpr(self: Self, fpr_targets: list[float]) -> dict:
         """Find TPR values for fixed FPRs."""
+
+
         results = {}
 
         for fpr_target in fpr_targets:
@@ -106,7 +108,7 @@ class MIAResult:
 
         return miaresult
 
-    def save(self:Self, path: str, name: str, config:dict = None, show_plot:bool = False) -> None:
+    def save(self:Self, path: str, name: str, config:dict = None) -> None:
         """Save the MIAResults to disk."""
 
         result_config = config.attack_list[name]

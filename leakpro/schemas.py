@@ -6,8 +6,6 @@ import optuna
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from torch.nn import Module
 
-from leakpro.reporting.mia_result import MIAResult
-
 
 class OptimizerConfig(BaseModel):
     """Schema for optimizer parameters."""
@@ -193,16 +191,6 @@ class DistillationModelTrainingSchema(BaseModel):
 
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields
 
-def avg_tpr_at_low_fpr(result: MIAResult) -> float:
-    """Calculate the average TPR for FPR values below fpr_threshold.
-
-    This will be used as the default objective function for the hyperparameter search on MIA.
-    """
-    from numpy import mean
-    fpr_threshold = 1e-2
-    mask = result.fpr < fpr_threshold
-    return float(mean(result.tpr[mask]))
-
 class OptunaConfig(BaseModel):
     """Configuration for the Optuna hyperparameter search."""
 
@@ -214,8 +202,7 @@ class OptunaConfig(BaseModel):
                                                        description="Direction of the optimization, minimize or maximize")
     pruner: optuna.pruners.BasePruner = Field(default=optuna.pruners.MedianPruner(n_warmup_steps=5),
                                               description="Number of steps before pruning of experiments will be available")
-    objective: Callable[[MIAResult], float] = Field(default=avg_tpr_at_low_fpr,
-                                                    description="Objective function: MIAResult -> float")
+    objective: Callable[[Any], float] = Field(..., description="Objective function")
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # Prevent extra fields
 
