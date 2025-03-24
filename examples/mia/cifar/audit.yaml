@@ -3,13 +3,19 @@ audit:  # Configurations for auditing
   attack_list:
     rmia:
       online: False
-      num_shadow_models: 5
+      num_shadow_models: 2
       gamma: 1
     # population:
     lira:
+<<<<<<< HEAD
       online: False
       num_shadow_models: 2
       training_data_fraction: 0.1
+=======
+      online: True
+      num_shadow_models: 3
+      training_data_fraction: 0.6
+>>>>>>> main
 
     # loss_traj:
     # HSJ:

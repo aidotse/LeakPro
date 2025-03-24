@@ -131,17 +131,17 @@ class LeakPro:
         """
 
         return MIAMetaDataSchema(
-            init_params=_get_model_init_params(train_result.model),
-            optimizer=_optimizer_to_config(optimizer),
-            loss=_loss_to_config(loss_fn),
-            data_loader=_dataloader_to_config(dataloader),
-            epochs=epochs,
-            train_indices=train_indices,
-            test_indices=test_indices,
-            num_train=len(train_indices),
-            dataset=dataset_name,
-            train_result=train_result.metrics,
-            test_result=test_result
+            init_params = _get_model_init_params(train_result.model),
+            optimizer = _optimizer_to_config(optimizer),
+            criterion = _loss_to_config(loss_fn),
+            data_loader = _dataloader_to_config(dataloader),
+            epochs = epochs,
+            train_indices = train_indices,
+            test_indices = test_indices,
+            num_train = len(train_indices),
+            dataset = dataset_name,
+            train_result = train_result.metrics,
+            test_result = test_result
         )
 
     def run_audit(self:Self, return_results: bool = False, use_optuna: bool = False) -> None:

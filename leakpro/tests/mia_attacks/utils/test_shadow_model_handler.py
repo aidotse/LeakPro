@@ -39,7 +39,7 @@ def test_shadow_model_handler_creation_from_target(image_handler:ImageInputHandl
 
     optimizer_config = image_handler.target_model_metadata.optimizer.params
     assert sm.optimizer_config == optimizer_config
-    loss_config = image_handler.target_model_metadata.loss.params
+    loss_config = image_handler.target_model_metadata.criterion.params
     assert sm.loss_config == loss_config
 
 def test_shadow_model_creation_and_loading(image_handler:ImageInputHandler) -> None:

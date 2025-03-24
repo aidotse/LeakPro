@@ -60,10 +60,10 @@ class ModelHandler():
         self.optimizer_config = setup_config.optimizer.params
 
         # Get criterion class
-        criterion_class = setup_config.loss.name
+        criterion_class = setup_config.criterion.name
         self.criterion_class = self._get_criterion_class(criterion_class)
         # copy to only have parameters left
-        self.loss_config = setup_config.loss.params
+        self.loss_config = setup_config.criterion.params
 
         self.epochs = setup_config.epochs
 
