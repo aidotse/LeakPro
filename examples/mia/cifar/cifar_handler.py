@@ -21,7 +21,6 @@ class CifarInputHandler(AbstractInputHandler):
     ) -> TrainingOutput:
         """Model training procedure."""
 
-        # read hyperparams for training (the parameters for the dataloader are defined in get_dataloader):
         if epochs is None:
             raise ValueError("epochs not found in configs")
 
@@ -48,11 +47,11 @@ class CifarInputHandler(AbstractInputHandler):
                 optimizer.step()
 
                 # Accumulate performance of shadow model
-                train_acc += pred.eq(labels.data.view_as(pred)).sum().item()
+                train_acc += pred.eq(labels.view_as(pred)).sum().item()
                 total_samples += labels.size(0)
-                train_loss += loss.item()
+                train_loss += loss.item() * labels.size(0)
                 
-            avg_train_loss = train_loss / len(dataloader)
+            avg_train_loss = train_loss / total_samples
             train_accuracy = train_acc / total_samples 
             
             accuracy_history.append(train_accuracy) 
@@ -60,23 +59,28 @@ class CifarInputHandler(AbstractInputHandler):
         
         model.to("cpu")
 
-        results = EvalOutput(accuracy=train_accuracy, loss=avg_train_loss, extra={"accuracy_history": accuracy_history, "loss_history": loss_history})
-        return TrainingOutput(model=model, metrics=results)
+        results = EvalOutput(accuracy = train_accuracy,
+                             loss = avg_train_loss,
+                             extra = {"accuracy_history": accuracy_history, "loss_history": loss_history})
+        return TrainingOutput(model = model, metrics=results)
 
-    def eval(self, loader, model, criterion, device):
-        model.to(device)
+    def eval(self, loader, model, criterion):
+        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        model.to(gpu_or_cpu)
         model.eval()
         loss, acc = 0, 0
+        total_samples = 0
         with no_grad():
             for data, target in loader:
-                data, target = data.to(device), target.to(device)
+                data, target = data.to(gpu_or_cpu), target.to(gpu_or_cpu)
                 target = target.view(-1) 
                 output = model(data)
-                loss += criterion(output, target).item()
+                loss += criterion(output, target).item() * target.size(0)
                 pred = output.argmax(dim=1) 
                 acc += pred.eq(target).sum().item()
-            loss /= len(loader)
-            acc = float(acc) / len(loader.dataset)
+                total_samples += target.size(0)
+            loss /= total_samples
+            acc = float(acc) / total_samples
             
         output_dict = {"accuracy": acc, "loss": loss}
         return EvalOutput(**output_dict)
@@ -101,17 +105,9 @@ class CifarInputHandler(AbstractInputHandler):
                 setattr(self, key, value)
                 
             if not hasattr(self, "mean") or not hasattr(self, "std"):
-                self.mean, self.std = self._compute_mean_std()
-
-        def _compute_mean_std(self):
-            """Compute mean and std from dataset."""
-            mean = self.data.mean(dim=(0, 2, 3))  # Shape (3,)
-            std = self.data.std(dim=(0, 2, 3))    # Shape (3,)
-
-            # Reshape to (C, 1, 1) for broadcasting
-            mean = mean.view(-1, 1, 1)  
-            std = std.view(-1, 1, 1)   
-            return mean, std
+                # Reshape to (C, 1, 1) for broadcasting
+                self.mean = self.data.mean(dim=(0, 2, 3)).view(-1, 1, 1)
+                self.std = self.data.std(dim=(0, 2, 3)).view(-1, 1, 1)
 
         def transform(self, x):
             """Normalize using stored mean and std."""

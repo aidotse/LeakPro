@@ -154,7 +154,7 @@ class ShadowModelHandler(ModelHandler):
             remaining_indices = list(set(shadow_population) - set(data_indices))
             dataset_params = data_loader.dataset.return_params()
             test_loader = self.handler.get_dataloader(remaining_indices, params=dataset_params)
-            test_result = self.handler.eval(test_loader, shadow_model, criterion, self.device)
+            test_result = self.handler.eval(test_loader, shadow_model, criterion)
 
             logger.info(f"Training shadow model {i} complete")
             shadow_model_state_dict = shadow_model.state_dict()

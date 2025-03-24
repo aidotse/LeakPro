@@ -154,7 +154,7 @@ class MIAMetaDataSchema(BaseModel):
     num_train: int = Field(ge=0, description="Number of training samples")
     init_params: Dict[str, Any] = Field(default_factory=dict, description="Model initialization parameters")
     optimizer: OptimizerConfig = Field(..., description="Optimizer configuration")
-    loss: LossConfig = Field(..., description="Loss function configuration")
+    criterion: LossConfig = Field(..., description="Loss function configuration")
     data_loader: DataLoaderConfig = Field(..., description="DataLoader configuration")
     epochs: int = Field(ge=1, description="Number of training epochs")
     train_result: EvalOutput = Field(..., description="Final evaluation during training")

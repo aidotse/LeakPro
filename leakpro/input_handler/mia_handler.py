@@ -113,7 +113,7 @@ class MIAHandler:
     def _load_criterion(self:Self) -> None:
         """Get the criterion for the target model."""
 
-        criterion_config = self.target_model_metadata.loss
+        criterion_config = self.target_model_metadata.criterion
         if not isinstance(criterion_config, LossConfig):
             raise ValueError("Criterion is not a valid schema.")
 
