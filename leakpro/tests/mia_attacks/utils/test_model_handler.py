@@ -23,8 +23,8 @@ def test_model_handler(image_handler:ImageInputHandler) -> None:
     model_handler._get_optimizer_class(meta_data.optimizer.name)
     assert model_handler.optimizer_class.__name__.lower() == meta_data.optimizer.name
 
-    model_handler._get_criterion_class(meta_data.loss.name)
-    assert model_handler.criterion_class.__name__.lower() == meta_data.loss.name
+    model_handler._get_criterion_class(meta_data.criterion.name)
+    assert model_handler.criterion_class.__name__.lower() == meta_data.criterion.name
 
     model_path = f"{configs.target_folder}/target_model.pkl"
     new_model, new_criterion = model_handler._load_model(model_path)

@@ -30,13 +30,13 @@ def test_abstract_handler_setup(image_handler:ImageInputHandler) -> None:
 
     assert image_handler.target_model_metadata.optimizer is not None
     assert image_handler.target_model_metadata.optimizer.name == parameters.optimizer
-    assert image_handler.target_model_metadata.optimizer.lr == parameters.learning_rate
+    assert image_handler.target_model_metadata.optimizer.params["lr"] == parameters.learning_rate
 
-    assert image_handler.target_model_metadata.loss is not None
-    assert image_handler.target_model_metadata.loss.name == parameters.loss
+    assert image_handler.target_model_metadata.criterion is not None
+    assert image_handler.target_model_metadata.criterion.name == parameters.loss
 
     assert image_handler.target_model_metadata.epochs == parameters.epochs
-    assert image_handler.target_model_metadata.batch_size == parameters.batch_size
+    assert image_handler.target_model_metadata.data_loader.params["batch_size"] == parameters.batch_size
     assert image_handler.population is not None
 
     # Check data-related methods
@@ -67,7 +67,7 @@ def test_cifar10_input_handler(image_handler:ImageInputHandler) -> None:
     """Test the CIFAR10 input handler."""
     parameters = get_image_handler_config()
     # get dataloader for training
-    train_loader = image_handler.get_dataloader(image_handler.train_indices, parameters.batch_size)
+    train_loader = image_handler.get_dataloader(image_handler.train_indices)
     assert train_loader is not None
     assert len(train_loader.dataset) == parameters.train_data_points
     assert train_loader.batch_size == parameters.batch_size
