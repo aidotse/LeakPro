@@ -206,3 +206,18 @@ class OptunaConfig(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # Prevent extra fields
 
+class MIAResultSchema(BaseModel):
+    """Schema for the MIA attack results."""
+
+    result_name: str = Field(..., description="Name of the result")
+    tpr: List[float] = Field(..., description="True positive rate")
+    fpr: List[float] = Field(..., description="False positive rate")
+    roc_auc: float = Field(..., description="Area under the ROC curve")
+    accuracy: List[float] = Field(..., description="Attack accuracy")
+    fixed_fpr: Dict[str, float] = Field(..., description="Fixed FPR values")
+    signal_values: List[float] = Field(..., description="Signal values")
+    true_labels: List[int] = Field(..., description="True labels")
+    id: str = Field(..., description="Identity of the attack")
+    config: Dict[str, Any] = Field(..., description="Configuration of the attack")
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # Prevent extra fields

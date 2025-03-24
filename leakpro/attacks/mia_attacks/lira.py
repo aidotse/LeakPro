@@ -291,19 +291,9 @@ class AttackLiRA(AbstractMIA):
             if np.isnan(score[i]):
                 raise ValueError("Score is NaN")
 
-        # Generate thresholds based on the range of computed scores for decision boundaries
-        self.thresholds = np.linspace(np.min(score), np.max(score), 1000)
-
         # Split the score array into two parts based on membership: in (training) and out (non-training)
         self.in_member_signals = score[self.in_members].reshape(-1,1)  # Scores for known training data members
         self.out_member_signals = score[self.out_members].reshape(-1,1)  # Scores for non-training data members
-
-        # Create prediction matrices by comparing each score against all thresholds
-        member_preds = np.less(self.in_member_signals, self.thresholds).T  # Predictions for training data members
-        non_member_preds = np.less(self.out_member_signals, self.thresholds).T  # Predictions for non-members
-
-        # Concatenate the prediction results for a full dataset prediction
-        predictions = np.concatenate([member_preds, non_member_preds], axis=1)
 
         # Prepare true labels array, marking 1 for training data and 0 for non-training data
         true_labels = np.concatenate(
@@ -317,5 +307,5 @@ class AttackLiRA(AbstractMIA):
         return MIAResult(
             true_membership=true_labels,
             signal_values=signal_values,
-            audit_indices=self.audit_data_indices,
+            resultname="LiRA",
         )

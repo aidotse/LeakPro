@@ -30,6 +30,14 @@ class LeakPro:
     """Main class for LeakPro."""
 
     def __init__(self:Self, user_input_handler:AbstractInputHandler, configs_path:str) -> None:
+        """Initialize LeakPro.
+
+        Args:
+        ----
+            user_input_handler (AbstractInputHandler): The user-defined input handler
+            configs_path (str): The path to the configuration file
+
+        """
 
         assert issubclass(user_input_handler, AbstractInputHandler), "handler must be an instance of AbstractInputHandler"
 
@@ -54,7 +62,14 @@ class LeakPro:
         self.attack_scheduler = AttackScheduler(self.handler)
 
     def setup_handler(self:Self, user_input_handler:AbstractInputHandler, configs:dict) -> None:
-        """Prepare the handler using dynamic composition to merge the user-input handler and modality extension."""
+        """Prepare the handler using dynamic composition to merge the user-input handler and modality extension.
+
+        Args:
+        ----
+            user_input_handler (AbstractInputHandler): The user-defined input handler
+            configs (dict): The configuration object
+
+        """
 
         if configs.audit.attack_type == "mia":
             handler = MIAHandler(configs, user_input_handler)
@@ -106,6 +121,7 @@ class LeakPro:
             dataloader (DataLoader): The dataloader used to train "model"
             test_result (EvalOutput): The result of the model evaluation on the test set
             train_indices (list[int]): The indices of the training set
+            test_indices (list[int]): The indices of the test set
             dataset_name (str): The name of the dataset
 
         Returns:

@@ -8,7 +8,15 @@ from pydantic import BaseModel
 
 
 def create_roc_plot(result_objects:list, save_dir: str = "", save_name: str = "") -> None:
-    """Plot method for MIAResult."""
+    """Plot method for MIAResult. This method can be used by individual result objects or multiple.
+
+    Args:
+    ----
+        result_objects (list): List of MIAResult objects to plot.
+        save_dir (str): Directory to save the plot.
+        save_name (str): Name of the plot.
+
+    """
 
     filename = f"{save_dir}/{save_name}"
 
@@ -41,7 +49,17 @@ def create_roc_plot(result_objects:list, save_dir: str = "", save_name: str = ""
     plt.clf()
 
 def get_config_name(config: BaseModel) -> str:
-    """Create id from the attack config."""
+    """Create id from the attack config.
+
+    Args:
+    ----
+        config (BaseModel): The attack configuration.
+
+    Returns:
+    -------
+        str: The id of the attack configuration.
+
+    """
 
     config = dict(sorted(config.items()))
 
@@ -58,7 +76,18 @@ def get_config_name(config: BaseModel) -> str:
     return config_name
 
 def reduce_to_unique_labels(results: list) -> list:
-    """Reduce very long labels to unique and distinct ones."""
+    """Reduce very long labels to unique and distinct ones.
+
+    Args:
+    ----
+        results (list): List of result objects.
+
+    Returns:
+    -------
+        list: List of unique labels.
+
+    """
+
     strings = [res.id for res in results]
 
     # Dictionary to store name as key and a list of configurations as value

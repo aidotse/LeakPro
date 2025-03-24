@@ -177,8 +177,10 @@ class AbstractMIA(AbstractAttack):
             # Use default valiues for config
             optuna_config = OptunaConfig()
 
-        optuna_config.objective = lambda result: result.tpr
+        def objective(result: MIAResult) -> float:
+            return result._get_roc_auc_in_fpr_interval
 
+        optuna_config.objective = objective
         return optuna_optimal_hyperparameters(self, optuna_config)
 
     def suggest_parameters(self:Self, trial: Trial) -> BaseModel:

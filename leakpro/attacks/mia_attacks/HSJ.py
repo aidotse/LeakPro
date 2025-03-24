@@ -37,9 +37,11 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
                 v (Union[int, float]): The norm value to validate.
 
             Returns:
+            -------
                 Union[int, float]: The validated norm value.
 
             Raises:
+            ------
                 ValueError: If the norm value is not one of [1, 2, np.inf].
 
             """
