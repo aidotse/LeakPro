@@ -307,5 +307,5 @@ class AttackLiRA(AbstractMIA):
         return MIAResult(
             true_membership=true_labels,
             signal_values=signal_values,
-            resultname="LiRA",
+            result_name="LiRA",
         )

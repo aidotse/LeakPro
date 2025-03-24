@@ -1,7 +1,7 @@
 """Implementation of the Report module."""
 
-import json
 import os
+import pickle
 import subprocess
 
 from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
@@ -75,7 +75,7 @@ class ReportHandler():
         if attack_config is None:
             attack_config = AttackFactoryMIA.attack_classes[attack_name].AttackConfig()
             config.attack_list[attack_name] = attack_config
-        result_data.save(path=self.report_dir, name=attack_name, config=config.model_dump())
+        result_data.save(path=self.report_dir, name=attack_name, config=config)
 
     def load_results(self:Self) -> None:
         """Load method for results."""
@@ -86,18 +86,18 @@ class ReportHandler():
                 for subdir in os.scandir(f"{self.report_dir}/{parentdir.name}"):
                     if subdir.is_dir():
                         try:
-                            with open(f"{self.report_dir}/{parentdir.name}/{subdir.name}/data.json") as f:
-                                data = json.load(f)
+                            with open(f"{self.report_dir}/{parentdir.name}/{subdir.name}/data.json", "rb") as f:
+                                data = pickle.load(f)  # noqa: S301
 
                             # Extract class name and data
-                            resulttype = data["resulttype"]
+                            result_type = data.result_type
 
                             # Dynamically get the class from its name (resulttype)
                             # This assumes that the class is already defined in the current module or imported to context
-                            if resulttype in globals() and callable(globals()[resulttype]):
-                                cls = globals()[resulttype]
+                            if result_type in globals() and callable(globals()[result_type]):
+                                cls = globals()[result_type]
                             else:
-                                raise ValueError(f"Class '{resulttype}' not found.")
+                                raise ValueError(f"Class '{result_type}' not found.")
 
                             instance =  cls.load(data)
                             self.results.append(instance)
@@ -105,13 +105,10 @@ class ReportHandler():
                         except Exception as e:
                             logger.info(f"In ReportHandler.load_results(), Not able to load data, Error: {e}")
 
-    def create_results(
-        self:Self,
-        types: list = None,
-        ) -> None:
+    def create_results(self:Self) -> None:
         """Result method to group all attacks."""
 
-        for result_type in types:
+        for result_type in self.leakpro_types:
             try:
             # Get all results of type result_type
                 results = [res for res in self.results if res.__class__.__name__ == result_type]
@@ -131,19 +128,11 @@ class ReportHandler():
                 if hasattr(result_class, "create_results") and callable(result_class.create_results):
 
                     # Create all results
-                    latex_results = result_class.create_results(results=results,
-                                                                save_dir=self.report_dir,
-                                                                )
+                    latex_results = result_class.create_results(results=results, save_dir=self.report_dir)
                     self.pdf_results[result_type].append(latex_results)
 
             except Exception as e:
                 logger.info(f"Error in results all: {result_class}, {e}")
-
-    def create_results_all(
-        self:Self,
-        ) -> None:
-        """Method to create all types of results."""
-        self.create_results(types=self.leakpro_types)
 
     def create_results_mia(
         self:Self,
@@ -173,7 +162,7 @@ class ReportHandler():
         if not hasattr(self, "results"):
             self.load_results()
         if self.pdf_results and all(not value for value in self.pdf_results.values()):
-            self.create_results_all()
+            self.create_results()
 
         # Create initial part of the document.
         self._init_pdf()

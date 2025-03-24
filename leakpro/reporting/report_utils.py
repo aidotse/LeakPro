@@ -2,51 +2,8 @@
 
 from collections import defaultdict
 
-import matplotlib.pyplot as plt
-import numpy as np
 from pydantic import BaseModel
 
-
-def create_roc_plot(result_objects:list, save_dir: str = "", save_name: str = "") -> None:
-    """Plot method for MIAResult. This method can be used by individual result objects or multiple.
-
-    Args:
-    ----
-        result_objects (list): List of MIAResult objects to plot.
-        save_dir (str): Directory to save the plot.
-        save_name (str): Name of the plot.
-
-    """
-
-    filename = f"{save_dir}/{save_name}"
-
-    # Create plot for results
-    assert isinstance(result_objects, list), "Results must be a list of MIAResult objects"
-
-    reduced_labels = reduce_to_unique_labels(result_objects)
-    for res, label in zip(result_objects, reduced_labels):
-
-        plt.fill_between(res.fpr, res.tpr, alpha=0.15)
-        plt.plot(res.fpr, res.tpr, label=label)
-
-    # Plot baseline (random guess)
-    range01 = np.linspace(0, 1)
-    plt.plot(range01, range01, "--", label="Random guess")
-
-    # Set plot parameters
-    plt.yscale("log")
-    plt.xscale("log")
-    plt.xlim(left=1e-5)
-    plt.ylim(bottom=1e-5)
-    plt.tight_layout()
-    plt.grid()
-    plt.legend(bbox_to_anchor =(0.5,-0.27), loc="lower center")
-
-    plt.xlabel("False positive rate (FPR)")
-    plt.ylabel("True positive rate (TPR)")
-    plt.title(save_name+" ROC Curve")
-    plt.savefig(fname=f"{filename}.png", dpi=1000, bbox_inches="tight")
-    plt.clf()
 
 def get_config_name(config: BaseModel) -> str:
     """Create id from the attack config.

@@ -210,6 +210,7 @@ class MIAResultSchema(BaseModel):
     """Schema for the MIA attack results."""
 
     result_name: str = Field(..., description="Name of the result")
+    result_type: str = Field(..., description="Type of the result")
     tpr: List[float] = Field(..., description="True positive rate")
     fpr: List[float] = Field(..., description="False positive rate")
     roc_auc: float = Field(..., description="Area under the ROC curve")

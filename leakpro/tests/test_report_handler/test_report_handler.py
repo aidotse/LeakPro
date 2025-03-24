@@ -3,7 +3,6 @@
 import logging
 import os
 import tempfile
-from pytest_mock import MockerFixture
 
 from leakpro.reporting.report_handler import ReportHandler
 from leakpro.utils.import_helper import Self
@@ -17,7 +16,7 @@ class TestReportHandler:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.logger = logging.getLogger("test_logger")
         self.logger.setLevel(logging.INFO)
-        self.report_handler = ReportHandler(report_dir=self.temp_dir.name, logger=self.logger)
+        self.report_handler = ReportHandler(report_dir=self.temp_dir.name)
 
     def teardown_method(self:Self) -> None:
         """Clean up temporary directory."""
@@ -27,7 +26,6 @@ class TestReportHandler:
         """Test the initialization of ReportHandler."""
         assert self.report_handler is not None
         assert self.report_handler.report_dir == self.temp_dir.name
-        assert isinstance(self.report_handler.logger, logging.Logger)
 
         types = ["MIAResult", "GIAResults", "SinglingOutResults", "InferenceResults", "LinkabilityResults"]
         assert False not in [_type in types for _type in self.report_handler.leakpro_types]
@@ -58,7 +56,7 @@ class TestReportHandler:
         assert os.path.isfile(f"{self.report_handler.report_dir}/LeakPro_output.pdf")
 
     def test_create_pdf(self:Self) -> None:
-        report_handler = ReportHandler(report_dir=self.temp_dir.name, logger=self.logger)
+        report_handler = ReportHandler(report_dir=self.temp_dir.name)
 
         # Load results
         report_handler.pdf_results["MIAResult"] = "test_result"
@@ -69,7 +67,7 @@ class TestReportHandler:
         assert os.path.isfile(f"{self.report_handler.report_dir}/LeakPro_output.pdf")
 
     def test_create_empty_pdf(self:Self) -> None:
-        report_handler = ReportHandler(report_dir=self.temp_dir.name, logger=self.logger)
+        report_handler = ReportHandler(report_dir=self.temp_dir.name)
 
         report_handler._init_pdf()
         report_handler._compile_pdf()

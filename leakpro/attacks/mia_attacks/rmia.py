@@ -418,16 +418,6 @@ class AttackRMIA(AbstractMIA):
         else:
             self._offline_attack()
 
-        # create thresholds
-        min_signal_val = np.min(np.concatenate([self.in_member_signals, self.out_member_signals]))
-        max_signal_val = np.max(np.concatenate([self.in_member_signals, self.out_member_signals]))
-        thresholds = np.linspace(min_signal_val, max_signal_val, 1000)
-
-        member_preds = np.greater(self.in_member_signals, thresholds).T
-        non_member_preds = np.greater(self.out_member_signals, thresholds).T
-
-        # what does the attack predict on test and train dataset
-        predictions = np.concatenate([member_preds, non_member_preds], axis=1)
         # set true labels for being in the training dataset
         true_labels = np.concatenate(
             [
@@ -444,9 +434,9 @@ class AttackRMIA(AbstractMIA):
 
         # compute ROC, TP, TN etc
         return MIAResult(
-            predicted_labels=predictions,
-            true_labels=true_labels,
+            true_membership=true_labels,
             signal_values=signal_values,
+            result_name="RMIA"
         )
 
     def reset_attack(self: Self, config:BaseModel) -> None:
