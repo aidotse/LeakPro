@@ -31,8 +31,8 @@ def test_abstract_handler_setup_tabular(tabular_handler:TabularInputHandler) -> 
     assert tabular_handler.target_model_metadata.optimizer.name == parameters.optimizer
     assert tabular_handler.target_model_metadata.optimizer.params["lr"] == parameters.learning_rate
 
-    assert tabular_handler.target_model_metadata.loss is not None
-    assert tabular_handler.target_model_metadata.loss.name == parameters.loss.lower()
+    assert tabular_handler.target_model_metadata.criterion is not None
+    assert tabular_handler.target_model_metadata.criterion.name == parameters.loss.lower()
 
     assert tabular_handler.target_model_metadata.epochs == parameters.epochs
     assert tabular_handler.target_model_metadata.data_loader.params["batch_size"] == parameters.batch_size

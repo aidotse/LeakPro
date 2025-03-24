@@ -17,14 +17,14 @@ class ImageInputHandler(AbstractInputHandler):
     def __init__(self:Self, configs: dict) -> None:
         super().__init__(configs = configs)
 
-    def eval(self, dataloader, model, criterion, device):
+    def eval(self, dataloader, model, criterion):
         """Model evaluation procedure."""
-        model.to(device)
+        gpu_or_cpu = "cpu"
         model.eval()
         test_loss, acc, total = 0, 0, 0
         with torch.no_grad():
             for inputs, labels in dataloader:
-                inputs, labels = inputs.to(device), labels.to(device)
+                inputs, labels = inputs.to(gpu_or_cpu), labels.to(gpu_or_cpu)
                 outputs = model(inputs)
                 test_loss += criterion(outputs, labels).item()
                 pred = outputs.data.max(1, keepdim=True)[1]

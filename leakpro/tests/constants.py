@@ -66,7 +66,7 @@ def get_shadow_model_config():
     shadow_model_config.batch_size = 32
     shadow_model_config.epochs = 1
     shadow_model_config.optimizer = OptimizerConfig(name="sgd", params= {"lr": 0.001})
-    shadow_model_config.loss = LossConfig(name= "crossentropyloss")
+    shadow_model_config.criterion = LossConfig(name= "crossentropyloss")
     return shadow_model_config
 
 

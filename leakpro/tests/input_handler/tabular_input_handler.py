@@ -15,14 +15,16 @@ class TabularInputHandler(AbstractInputHandler):
     def __init__(self, configs: dict) -> None:
         super().__init__(configs = configs)
 
-    def eval(self, dataloader, model, criterion, device) -> EvalOutput:
+    def eval(self, dataloader, model, criterion) -> EvalOutput:
         """Model evaluation procedure."""
-        model.to(device)
+        
+        gpu_or_cpu = "cpu"
+        model.to(gpu_or_cpu)
         model.eval()
         test_loss, acc, total = 0, 0, 0
         with torch.no_grad():
             for inputs, labels in dataloader:
-                inputs, labels = inputs.to(device), labels.to(device)
+                inputs, labels = inputs.to(gpu_or_cpu), labels.to(gpu_or_cpu)
                 outputs = model(inputs)
                 test_loss += criterion(outputs, labels).item()
                 pred = sigmoid(outputs) >= 0.5

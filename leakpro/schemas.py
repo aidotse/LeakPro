@@ -96,7 +96,7 @@ class ShadowModelConfig(BaseModel):
     module_path: Optional[str] = None
     init_params: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Model initialization parameters")
     optimizer: Optional[OptimizerConfig] = Field(..., description="Optimizer configuration")
-    loss: Optional[LossConfig] = Field(..., description="Loss function configuration")
+    criterion: Optional[LossConfig] = Field(..., description="Loss function configuration")
     batch_size: Optional[int] = Field(..., ge=1, description="Batch size used during training")
     epochs: Optional[int] = Field(..., ge=1, description="Number of training epochs")
 
