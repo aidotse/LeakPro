@@ -1,32 +1,29 @@
 """Implementation of the Report module."""
 
 import json
-import logging
 import os
 import subprocess
-
-from pydantic import BaseModel
 
 from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
 from leakpro.reporting.gia_result import GIAResults
 from leakpro.reporting.mia_result import MIAResult
+from leakpro.schemas import AuditConfig
 from leakpro.synthetic_data_attacks.inference_utils import InferenceResults
 from leakpro.synthetic_data_attacks.linkability_utils import LinkabilityResults
 from leakpro.synthetic_data_attacks.singling_out_utils import SinglingOutResults
 from leakpro.utils.import_helper import Self, Union
-from leakpro.utils.logger import setup_logger
+from leakpro.utils.logger import logger
 
 
 # Report Handler
 class ReportHandler():
     """Implementation of the report handler."""
 
-    def __init__(self:Self, report_dir: str = None, logger:logging.Logger = None) -> None:
-        self.logger = setup_logger() if logger is None else logger
-        self.logger.info("Initializing report handler...")
+    def __init__(self:Self, report_dir: str = None) -> None:
+        logger.info("Initializing report handler...")
 
         self.report_dir = self._try_find_rep_dir() if report_dir is None else report_dir
-        self.logger.info(f"report_dir set to: {self.report_dir}")
+        logger.info(f"report_dir set to: {self.report_dir}")
 
         self.pdf_results = {}
         self.leakpro_types = ["MIAResult",
@@ -62,14 +59,21 @@ class ReportHandler():
                                        InferenceResults,
                                        LinkabilityResults,
                                        SinglingOutResults] = None,
-                    config: BaseModel = None) -> None:
+                    config: AuditConfig = None) -> None:
         """Save method for results."""
 
-        self.logger.info(f"Saving results for {attack_name}")
+        assert isinstance(result_data, (MIAResult,
+                                       GIAResults,
+                                       InferenceResults,
+                                       LinkabilityResults,
+                                       SinglingOutResults))
+        assert isinstance(config, AuditConfig)
+
+        logger.info(f"Saving results for {attack_name}")
         attack_config = config.attack_list.get(attack_name, None)
 
         if attack_config is None:
-            attack_config = AttackFactoryMIA.attack_classes[attack_name].get_default_attack_config()
+            attack_config = AttackFactoryMIA.attack_classes[attack_name].AttackConfig()
             config.attack_list[attack_name] = attack_config
         result_data.save(path=self.report_dir, name=attack_name, config=config.model_dump())
 
@@ -99,7 +103,7 @@ class ReportHandler():
                             self.results.append(instance)
 
                         except Exception as e:
-                            self.logger.info(f"In ReportHandler.load_results(), Not able to load data, Error: {e}")
+                            logger.info(f"In ReportHandler.load_results(), Not able to load data, Error: {e}")
 
     def create_results(
         self:Self,
@@ -114,14 +118,14 @@ class ReportHandler():
 
                 # If no results of type "result_type" is found, skip to next result_type
                 if not results:
-                    self.logger.info(f"No results of type {result_type} found.")
+                    logger.info(f"No results of type {result_type} found.")
                     continue
 
                 # Check if the result type has a 'create_results' method
                 try:
                     result_class = globals().get(result_type)
                 except Exception as e:
-                    self.logger.info(f"No {result_type} class could be found or exists. Error: {e}")
+                    logger.info(f"No {result_type} class could be found or exists. Error: {e}")
                     continue
 
                 if hasattr(result_class, "create_results") and callable(result_class.create_results):
@@ -133,7 +137,7 @@ class ReportHandler():
                     self.pdf_results[result_type].append(latex_results)
 
             except Exception as e:
-                self.logger.info(f"Error in results all: {result_class}, {e}")
+                logger.info(f"Error in results all: {result_class}, {e}")
 
     def create_results_all(
         self:Self,
@@ -202,8 +206,8 @@ class ReportHandler():
         # Support for an empty pdf to compile
         if self.latex_content.strip()[-16:] == "\\begin{document}":
             self.latex_content += "\\null"
-            self.logger.info("Warning! You are about to compile an empty pdf.")
-            self.logger.info("Please ensure that you append your results!")
+            logger.info("Warning! You are about to compile an empty pdf.")
+            logger.info("Please ensure that you append your results!")
 
         self.latex_content += """
         \\end{document}
@@ -215,17 +219,17 @@ class ReportHandler():
             # Check if pdflatex is installed
             check = subprocess.check_output(["which", "pdflatex"], universal_newlines=True) # noqa: S607 S603
             if "pdflatex" not in check:
-                self.logger.info("Could not find pdflatex installed\
+                logger.info("Could not find pdflatex installed\
                                  \nPlease install pdflatex with apt install texlive-latex-base")
 
             cmd = ["pdflatex", "-interaction", "nonstopmode", "LeakPro_output.tex"]
             proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, cwd=f"{self.report_dir}") # noqa: S603
             proc.communicate()
-            self.logger.info("PDF compiled")
+            logger.info("PDF compiled")
 
         except Exception as e:
-            self.logger.info(f"Could not compile PDF: {e}")
-            self.logger.info("Make sure to install pdflatex with apt install texlive-latex-base")
+            logger.info(f"Could not compile PDF: {e}")
+            logger.info("Make sure to install pdflatex with apt install texlive-latex-base")
 
     def _reset_result(self:Self) -> None:
         del self.results
