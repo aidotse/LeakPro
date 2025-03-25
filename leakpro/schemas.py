@@ -1,7 +1,8 @@
 """Module that contains the schema definitions for the input handler."""
 
-from typing import Annotated, Any, Callable, Dict, List, Literal, Optional
+from typing import Annotated, Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 
+import numpy as np
 import optuna
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from torch.nn import Module
@@ -185,7 +186,6 @@ class DistillationModelTrainingSchema(BaseModel):
     train_indices: List[int] = Field(..., description="Indices of training samples used for distillation")
     num_train: int = Field(..., ge=0, description="Number of training samples used for distillation")
     optimizer: str = Field(..., description="Optimizer name")
-    batch_size: int = Field(..., ge=1, description="Batch size used during training")
     epochs: int = Field(..., ge=1, description="Number of training epochs")
     label_only: bool = Field(..., description="Whether the distillation process is label-only")
 
@@ -220,5 +220,7 @@ class MIAResultSchema(BaseModel):
     true_labels: List[int] = Field(..., description="True labels")
     id: str = Field(..., description="Identity of the attack")
     config: Dict[str, Any] = Field(..., description="Configuration of the attack")
+    tp_fp_tn_fn: Union[Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray], None] = Field(None,
+                                                                                            description="TP, FP, TN, FN values")
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # Prevent extra fields

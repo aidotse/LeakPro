@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from copy import deepcopy
 
 import numpy as np
-from torch import IntTensor, Tensor, cat, cuda, exp, flatten, log, max, nn, no_grad, sigmoid, sum
+from torch import IntTensor, Tensor, cat, cuda, exp, flatten, log, max, nn, no_grad, sigmoid, sum, tensor
 from torch.utils.data import DataLoader
 
 from leakpro.signals.utils.HopSkipJumpDistance import HopSkipJumpDistance
@@ -162,27 +162,24 @@ class PytorchModel(Model):
             The loss value, as defined by the loss_fn attribute.
 
         """
-        batch_samples_tensor = Tensor(np.array(batch_samples))
+        batch_samples_tensor = tensor(batch_samples)
         batch_labels_tensor = batch_labels.clone().detach()
 
-        if "num_classes" in self.model_obj.init_params:
-            num_classes = self.model_obj.init_params["num_classes"]
-            if num_classes <= 2 and batch_labels_tensor.dim() == 1:
-                batch_labels_tensor = batch_labels_tensor.unsqueeze(1)
+        with no_grad():
+            self.model_obj.eval()
+            dummy_input = batch_samples_tensor[:1] # adapt input shape
+            output = self.model_obj(dummy_input)
+            num_classes = output.shape[1]  # assume (batch_size, num_classes)
+
+        if num_classes <= 2 and batch_labels_tensor.dim() == 1:
+            batch_labels_tensor = batch_labels_tensor.unsqueeze(1)
 
         if per_point:
-            return (
-                self.loss_fn_no_reduction(
-                    self.model_obj(batch_samples_tensor),
-                    batch_labels_tensor,
-                )
+            return (self.loss_fn_no_reduction(self.model_obj(batch_samples_tensor),batch_labels_tensor,)
                 .detach()
                 .numpy()
             )
-        return self.loss_fn(
-            self.model_obj(Tensor(batch_samples_tensor)),
-            Tensor(batch_labels_tensor),
-        ).item()
+        return self.loss_fn(self.model_obj(Tensor(batch_samples_tensor)),Tensor(batch_labels_tensor),).item()
 
     def get_grad(self:Self, batch_samples:np.ndarray, batch_labels:np.ndarray)->np.ndarray:
         """Get the gradient of the model loss with respect to the model parameters, given an input and expected output.

@@ -23,6 +23,7 @@ class MIAResult:
         metadata: dict = None,
         result_name: str = None,
         id: str = None,
+        tp_fp_tn_fn: tuple = None,
     )-> None:
         """Compute and store the accuracy, ROC AUC score, and the confusion matrix for a metric.
 
@@ -33,6 +34,8 @@ class MIAResult:
             id: The identity of the attack
             metadata: Metadata about the results
             result_name: The name of the attack and result
+            signals_are_predictions: If the signal values are hard predictions, set this to True.
+                                     Expected size: #thresholds x #samples
 
         """
         self.true = np.ravel(true_membership)
@@ -41,27 +44,33 @@ class MIAResult:
         self.result_name = result_name
         self.id = id
 
-        # Compute results
-        # Sort signal_values in descending order and align labels
-        sorted_indices = np.argsort(-np.ravel(self.signal_values))
-        sorted_labels = self.true[sorted_indices]
-        sorted_scores = self.signal_values[sorted_indices]
+        if tp_fp_tn_fn is not None:
+            self.tp = tp_fp_tn_fn[0]
+            self.fp = tp_fp_tn_fn[1]
+            self.tn = tp_fp_tn_fn[2]
+            self.fn = tp_fp_tn_fn[3]
+        else:
+            # Compute results
+            # Sort signal_values in descending order and align labels
+            sorted_indices = np.argsort(-np.ravel(self.signal_values))
+            sorted_labels = self.true[sorted_indices]
+            sorted_scores = self.signal_values[sorted_indices]
 
-        # Cumulative true positives and false positives as we move threshold from high to low
-        tp_cumsum = np.cumsum(sorted_labels == 1)
-        fp_cumsum = np.cumsum(sorted_labels == 0)
+            # Cumulative true positives and false positives as we move threshold from high to low
+            tp_cumsum = np.cumsum(sorted_labels == 1)
+            fp_cumsum = np.cumsum(sorted_labels == 0)
 
-        # Unique thresholds (indices returned start from low values)
-        thresholds, first_indices = np.unique(sorted_scores, return_index=True)
-        # Reverse the order to start from high values
-        thresholds = thresholds[::-1]
-        first_indices = first_indices[::-1]
+            # Unique thresholds (indices returned start from low values)
+            thresholds, first_indices = np.unique(sorted_scores, return_index=True)
+            # Reverse the order to start from high values
+            thresholds = thresholds[::-1]
+            first_indices = first_indices[::-1]
 
-        # Collect values at points where threshold changes
-        self.tp = tp_cumsum[first_indices]
-        self.fp = fp_cumsum[first_indices]
-        self.fn = (np.sum(sorted_labels == 1) - tp_cumsum[first_indices])
-        self.tn = (np.sum(sorted_labels == 0) - fp_cumsum[first_indices])
+            # Collect values at points where threshold changes
+            self.tp = tp_cumsum[first_indices]
+            self.fp = fp_cumsum[first_indices]
+            self.fn = (np.sum(sorted_labels == 1) - tp_cumsum[first_indices])
+            self.tn = (np.sum(sorted_labels == 0) - fp_cumsum[first_indices])
 
         self.fpr = np.where(self.fp + self.tn != 0, self.fp / (self.fp + self.tn), 0.0)
         self.tpr = np.where(self.tp + self.fn != 0, self.tp / (self.tp + self.fn), 0.0)
@@ -119,6 +128,11 @@ class MIAResult:
         """Save the MIAResults to disk."""
 
         result_config = config.attack_list[name]
+        if not isinstance(result_config, dict):
+            if hasattr(result_config, "model_dump"):
+                result_config = result_config.model_dump()
+            elif result_config is None:
+                result_config = {}
 
         # Get the name for the attack configuration
         config_name = get_config_name(result_config)
@@ -136,9 +150,10 @@ class MIAResult:
             accuracy = self.accuracy,
             config = result_config,
             fixed_fpr = self.fixed_fpr_table,
-            signal_values = self.signal_values if self.signal_values is not None else None,
-            true_labels = self.true if self.true is not None else None,
+            signal_values = self.signal_values if self.signal_values is not None else [0.0],
+            true_labels = self.true if self.true is not None else [0],
             id = self.id,
+            tp_fp_tn_fn=(self.tp, self.fp, self.tn, self.fn) if self.signal_values is None else None
         )
 
         # Check if path exists, otherwise create it.
@@ -171,7 +186,8 @@ class MIAResult:
             signal_values = mia_data.signal_values,
             metadata = mia_data.config,
             result_name = mia_data.result_name,
-            id = mia_data.id
+            id = mia_data.id,
+            tp_fp_tn_fn = mia_data.tp_fp_tn_fn
         )
 
     def create_signal_histogram(self:Self, save_path: str) -> None:

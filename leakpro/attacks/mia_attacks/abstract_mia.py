@@ -151,7 +151,9 @@ class AbstractMIA(AbstractAttack):
             Dataloader: The sampled data.
 
         """
-        return self.handler.get_dataloader(data) if batch_size is None else self.handler.get_dataloader(data, batch_size)
+        if batch_size is None:
+            return self.handler.get_dataloader(dataset_indices = data)
+        return self.handler.get_dataloader(dataset_indices = data, batch_size = batch_size)
 
     def sample_data_from_dataset(self:Self, data:np.ndarray, size:int)->DataLoader:
         """Function to sample from the dataset.

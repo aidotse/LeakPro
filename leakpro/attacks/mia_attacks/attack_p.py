@@ -111,20 +111,27 @@ class AttackP(AbstractMIA):
         # get the loss for the audit dataset
         audit_signal = np.array(self.signal([self.target_model], self.handler, self.audit_dataset["data"])).squeeze()
 
-        # pick out the in-members and out-members
-        self.in_member_signals =  audit_signal[self.audit_dataset["in_members"]]
-        self.out_member_signals = audit_signal[self.audit_dataset["out_members"]]
+        # set true labels for being in the training dataset
+        true_labels = np.concatenate([np.ones(len(self.audit_dataset["in_members"])),
+                                      np.zeros(len(self.audit_dataset["out_members"]))])
+
+        # compute the true positive, false positive, true negative, and false negative
+        tp = np.zeros(len(thresholds))
+        fp = np.zeros(len(thresholds))
+        tn = np.zeros(len(thresholds))
+        fn = np.zeros(len(thresholds))
+
+        for i, threshold in enumerate(thresholds):
+            # compute the signal values
+            signal_values = np.less(audit_signal, threshold)
+            tp[i] = np.sum(np.logical_and(signal_values, true_labels))
+            fp[i] = np.sum(np.logical_and(signal_values, np.logical_not(true_labels)))
+            tn[i] = np.sum(np.logical_and(np.logical_not(signal_values), np.logical_not(true_labels)))
+            fn[i] = np.sum(np.logical_and(np.logical_not(signal_values), true_labels))
 
         logger.info("Attack completed")
-        # set true labels for being in the training dataset
-        true_labels = np.concatenate(
-            [
-                np.ones(len(self.in_member_signals)),
-                np.zeros(len(self.out_member_signals)),
-            ]
-        )
-        signal_values = np.concatenate([self.in_member_signals, self.out_member_signals])
 
         return MIAResult(true_membership = true_labels,
-                         signal_values = signal_values,
-                         result_name = "P-attack")
+                         signal_values = audit_signal,
+                         result_name = "P-attack",
+                         tp_fp_tn_fn = (tp, fp, tn, fn))

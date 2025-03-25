@@ -15,9 +15,10 @@ from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.input_handler.modality_extensions.image_extension import ImageExtension
 from leakpro.input_handler.modality_extensions.tabular_extension import TabularExtension
+from leakpro.reporting.report_handler import ReportHandler
 from leakpro.schemas import EvalOutput, LeakProConfig, MIAMetaDataSchema, TrainingOutput
 from leakpro.utils.conversion import _dataloader_to_config, _get_model_init_params, _loss_to_config, _optimizer_to_config
-from leakpro.utils.import_helper import Self
+from leakpro.utils.import_helper import Any, Self
 from leakpro.utils.logger import add_file_handler, logger
 
 modality_extensions = {"tabular": TabularExtension,
@@ -144,27 +145,31 @@ class LeakPro:
             test_result = test_result
         )
 
-    def run_audit(self:Self, return_results: bool = False, use_optuna: bool = False) -> None:
+    def run_audit(self:Self, create_pdf: bool = False, use_optuna: bool = False) -> list[Any]:
         """Run the audit."""
 
         audit_results = self.attack_scheduler.run_attacks(use_optuna=use_optuna)
-        results = [] if return_results else None
+        results = []
 
         for attack_name in audit_results:
-            logger.info(f"Preparing results for attack: {attack_name}")
+            logger.info(f"Saving results for attack: {attack_name} to {self.report_dir}")
+            result = audit_results[attack_name]["result_object"]
+            result.save(name=attack_name, path=self.report_dir, config=self.handler.configs.audit)
 
-            # Return the result object, dont save it
-            if return_results:
+            result.attack_name = attack_name
+            result.configs = self.handler.configs.audit
 
-                result = audit_results[attack_name]["result_object"]
-                result.attack_name = attack_name
-                result.configs = self.handler.configs.audit
+            results.append(result)
 
-                # Append
-                results.append(result)
-            else:
-                result = audit_results[attack_name]["result_object"]
-                result.save(name=attack_name, path=self.report_dir, config=self.handler.configs.audit)
+        if create_pdf:
+            logger.info("Creating PDF report")
+            report_handler = ReportHandler(report_dir=self.report_dir)
+            for res in results:
+                report_handler.save_results(attack_name=res.attack_name,
+                                            result_data=res,
+                                            config=res.configs)
+            # Create the report by compiling the latex text
+            report_handler.create_report()
 
         logger.info("Auditing completed")
         return results

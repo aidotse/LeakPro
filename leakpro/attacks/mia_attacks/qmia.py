@@ -342,14 +342,14 @@ class AttackQMIA(AbstractMIA):
                 np.zeros(len(self.audit_dataset["out_members"])),
             ]
         )
-        signal_values = np.hstack(
-            [self.in_member_signals, self.out_member_signals]
-        )
+        signal_values = np.hstack([self.in_member_signals, self.out_member_signals])
 
         # compute ROC, TP, TN etc
         return MIAResult(
             true_membership=true_labels,
             signal_values=signal_values,
+            result_name="QMIA",
+            signals_are_predictions=True
         )
 
 

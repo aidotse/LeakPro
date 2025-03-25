@@ -28,7 +28,7 @@ class AttackLossTrajectory(AbstractMIA):
 
         distillation_data_fraction: float = Field(default = 0.5, ge = 0.0, le=1.0, description="Fraction of auxiliary data used for distillation")  # noqa: E501
         train_mia_batch_size: int = Field(default=64, ge=1, description="Batch size for training the MIA classifier")
-        number_of_traj: int = Field(default=10, ge=1, description="Number of trajectories to consider")
+        number_of_traj: int = Field(default=1, ge=1, description="Number of trajectories to consider")
         mia_classifier_epochs: int = Field(default=100, ge=1, description="Number of epochs for training the MIA classifier")
         label_only: bool = Field(default=False, description="Whether to use only the labels for the attack")
         temperature: float = Field(default=2.0, ge=0.0, description="Temperature for the softmax")
@@ -128,7 +128,7 @@ class AttackLossTrajectory(AbstractMIA):
         logger.info(f"Training shadow models on {len(shadow_training_indices)} points")
         self.shadow_model_indices = ShadowModelHandler().create_shadow_models(self.num_shadow_models,
                                                                          shadow_training_indices,
-                                                                         training_fraction = 1.0)
+                                                                         training_fraction = 0.99)
 
         # load shadow models
         self.shadow_model, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)

@@ -255,7 +255,6 @@ class AttackYOQO(AbstractMIA):
         data_loader = self.handler.get_dataloader(self.audit_data_indices, batch_size=1)
 
         predictions = []
-        signal_values = []
 
         device_name = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -280,9 +279,7 @@ class AttackYOQO(AbstractMIA):
         predictions = np.array(predictions).reshape(1,-1)
 
         # Prepare true labels array, marking 1 for training data and 0 for non-training data
-        true_labels = np.concatenate(
-            [np.ones(len(self.in_members)), np.zeros(len(self.out_members))]
-        )
+        true_labels = np.concatenate([np.ones(len(self.in_members)), np.zeros(len(self.out_members))])
 
         logger.info(f"Accuracy: {np.sum(predictions == true_labels)/predictions.size}")
 
@@ -295,4 +292,6 @@ class AttackYOQO(AbstractMIA):
         return MIAResult(
             true_membership=true_labels,
             signal_values=predictions,
+            result_name="YOQO",
+            signals_are_predictions = True
         )
