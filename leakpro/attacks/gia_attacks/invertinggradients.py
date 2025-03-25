@@ -14,7 +14,7 @@ from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
 from leakpro.fl_utils.data_utils import get_at_images
 from leakpro.fl_utils.gia_optimizers import MetaSGD
 from leakpro.fl_utils.similarity_measurements import cosine_similarity_weights, total_variation
-from leakpro.metrics.attack_result import GIAResults
+from leakpro.reporting.attack_result import GIAResults
 from leakpro.utils.import_helper import Callable, Self
 from leakpro.utils.logger import logger
 

@@ -131,6 +131,9 @@ class MIAHandler:
         valid_params = inspect.signature(loss_cls.__init__).parameters
         filtered_params = {k: v for k, v in criterion_config.params.items() if k in valid_params}
 
+        # Overwrite with parameters that are relevant to the loss function
+        self.target_model_metadata.criterion = LossConfig(name=criterion_config.name, params=filtered_params)
+
         self._criterion = loss_cls(**filtered_params)  # Instantiate the loss function
 
     def _load_dataloader_params(self:Self) -> None:

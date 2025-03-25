@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.input_handler.mia_handler import MIAHandler
-from leakpro.metrics.attack_result import MIAResult
+from leakpro.reporting.mia_result import MIAResult
 from leakpro.signals.signal import ModelRescaledLogits
 from leakpro.utils.import_helper import Any, Self, Tuple
 from leakpro.utils.logger import logger
@@ -335,23 +335,21 @@ class AttackQMIA(AbstractMIA):
 
         predictions = np.less(score, self.target_logits[np.newaxis, :])
 
-        # set true labels for being in the training dataset
+        # set true labels for being in the training datasetz
         true_labels = np.concatenate(
             [
                 np.ones(len(self.audit_dataset["in_members"])),
                 np.zeros(len(self.audit_dataset["out_members"])),
             ]
         )
-        signal_values = np.hstack(
-            [self.in_member_signals, self.out_member_signals]
-        )
+        signal_values = np.hstack([self.in_member_signals, self.out_member_signals])
 
         # compute ROC, TP, TN etc
         return MIAResult(
-            predicted_labels=predictions,
-            true_labels=true_labels,
-            predictions_proba=None,
+            true_membership=true_labels,
             signal_values=signal_values,
+            result_name="QMIA",
+            signals_are_predictions=True
         )
 
 

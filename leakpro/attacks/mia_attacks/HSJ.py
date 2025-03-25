@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.input_handler.mia_handler import MIAHandler
-from leakpro.metrics.attack_result import MIAResult
+from leakpro.reporting.mia_result import MIAResult
 from leakpro.signals.signal import HopSkipJumpDistance
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
@@ -37,9 +37,11 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
                 v (Union[int, float]): The norm value to validate.
 
             Returns:
+            -------
                 Union[int, float]: The validated norm value.
 
             Raises:
+            ------
                 ValueError: If the norm value is not one of [1, 2, np.inf].
 
             """
@@ -166,29 +168,16 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
                                                     self.verbose
                                                     )
 
-        # create thresholds
-        min_signal_val = np.min(perturbation_distances)
-        max_signal_val = np.max(perturbation_distances)
-        thresholds = np.linspace(min_signal_val, max_signal_val, 1000)
-        num_threshold = len(thresholds)
-
-        # compute the signals for the in-members and out-members
-        member_signals = (np.array(perturbation_distances).reshape(-1, 1).repeat(num_threshold, 1).T)
-
-        member_preds = np.greater(member_signals, thresholds[:, np.newaxis])
+        # Ensure that the largest values are the most likely to be in the training dataset
+        perturbation_distances = -np.array(perturbation_distances)
 
         # set true labels for being in the training dataset
         true_labels = np.concatenate(
-            [
-                np.ones(int(len(self.attack_dataloader.dataset)/2)),
-                np.zeros(int(len(self.attack_dataloader.dataset)/2)),
-            ]
+            [np.ones(len(self.in_member_signals)), np.zeros(len(self.out_member_signals))]
         )
 
-        # compute ROC, TP, TN etc
         return MIAResult(
-            predicted_labels=member_preds,
-            true_labels=true_labels,
-            predictions_proba=None,
+            true_membership=true_labels,
             signal_values= perturbation_distances,
+            result_name="HopSkipJump",
         )
