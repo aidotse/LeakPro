@@ -284,11 +284,14 @@ class MIAResult:
     def save(self:Self, path: str, name: str, config:dict = None, show_plot:bool = False) -> None:
         """Save the MIAResults to disk."""
 
-        result_config = config["attack_list"][name]
+        # TPRs values for fixed FPRs
         fixed_fpr_table = get_result_fixed_fpr(self.fpr, self.tpr)
 
+        # Get result configs
+        config = config.attack_list.get(name)
+
         # Get the name for the attack configuration
-        config_name = get_config_name(result_config)
+        config_name = get_config_name(config)
 
         self.id = f"{name}{config_name}".replace("/", "__")
         save_path = f"{path}/{name}/{self.id}"
@@ -300,7 +303,7 @@ class MIAResult:
             "tpr": self.tpr.tolist(),
             "fpr": self.fpr.tolist(),
             "roc_auc": self.roc_auc,
-            "config": result_config,
+            "config": config,
             "fixed_fpr": fixed_fpr_table,
             "audit_indices": self.audit_indices.tolist() if self.audit_indices is not None else None,
             "signal_values": self.signal_values.tolist() if self.signal_values is not None else None,
@@ -404,7 +407,8 @@ class MIAResult:
             show_plot: bool = False
         ) -> None:
         """Plot method for MIAResult."""
-
+        
+        # Set filename for image path
         filename = f"{save_dir}/{save_name}"
 
         # Create plot for results
@@ -532,8 +536,8 @@ class GIAResults:
             self: Self,
             original_data: DataLoader = None,
             recreated_data: Union[DataLoader] = None,
-            psnr_score: Union[float] = None,
-            ssim_score: Union[float] = None,
+            psnr_score: Union[float, list, Tensor] = None,
+            ssim_score: Union[float, list] = None,
             data_mean: Tensor = None,
             data_std: Tensor = None,
             config: InvertingConfig = None,
@@ -636,10 +640,10 @@ class GIAResults:
             "resulttype": self.__class__.__name__,
             "original": original,
             "recreated": recreated,
-            "psnr_score": self.PSNR_score,
+            "psnr_score": np.asarray(self.PSNR_score).tolist(),
             "ssim_score": self.SSIM_score,
-            "data_mean": self.data_mean.item(),
-            "data_std": self.data_std.item(),
+            "data_mean": np.asarray(self.data_mean).tolist(),
+            "data_std": np.asarray(self.data_std).tolist(),
             "config": result_config,
             "id": self.id,
         }
@@ -657,9 +661,10 @@ class GIAResults:
         """Result method for GIA."""
         latex = ""
         def _latex(
-                save_name: str,
-                original: str,
-                recreated: Union[str, list]
+                save_dir: str = "./",
+                save_name: str = "gia",
+                original: str = "org.png",
+                recreated: Union[str, list] = ""
             ) -> str:
             """Latex method for GIAResults."""
 
@@ -669,16 +674,22 @@ class GIAResults:
             """
 
             # Append the original image
-            latex += _latex_image(original, "Original")
+            #   Split image path into local path
+            original_local_path = "gia/"+original.split("/gia/")[-1]
+            latex += _latex_image(original_local_path, "Original")
 
             # Append the recreated image(s)
             if isinstance(recreated, list):
-                for i, rec in recreated:
-                    latex += _latex_image(rec, "Recreated" if i == (len(recreated)-1) else f"Intermediate recreated {i}")
+                for i, rec in enumerate(recreated):
+                    #   Split image path into local path
+                    rec_local_path = "gia/"+rec.split("/gia/")[-1]
+                    latex += _latex_image(rec_local_path, "Recreated" if i == (len(recreated)-1) else f"Intermediate recreated {i}")
 
             # Or image if only one recreated image path is provided
             elif isinstance(recreated, str):
-                latex += _latex_image(recreated, "Recreated")
+                #   Split image path into local path
+                rec_local_path = "gia/"+recreated.split("/gia/")[-1]
+                latex += _latex_image(rec_local_path, "Recreated")
 
             return latex
 
@@ -728,7 +739,7 @@ class GIAResults:
 
                 # Append intermediate results to be merged
                 intr_rec.append(giares.recreated_data) # Keep each value as a list element
-                intr_psnr.append(giares.PSNR_score) # Keep each value as a list element
+                intr_psnr.append(giares.PSNR_score.cpu().item()) # Keep each value as a list element
                 intr_ssim.append(giares.SSIM_score) # Keep each value as a list element
 
         # Extract final result
@@ -736,7 +747,7 @@ class GIAResults:
 
          # Change values to lists containing all intermediate results
         merged_giares.recreated_data = intr_rec  # List of all recreated_data values
-        merged_giares.PSNR_score = intr_psnr  # List of all PSNR scores
+        merged_giares.PSNR_score = torch.tensor(intr_psnr)  # List of all PSNR scores
         merged_giares.SSIM_score = intr_ssim  # List of all SSIM scores
 
         return merged_giares

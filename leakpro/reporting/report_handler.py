@@ -74,12 +74,14 @@ class ReportHandler():
         """Save method for results."""
 
         self.logger.info(f"Saving results for {attack_name}")
-        attack_config = config.attack_list.get(attack_name, None)
 
-        if attack_config is None:
-            attack_config = AttackFactoryMIA.attack_classes[attack_name].get_default_attack_config()
-            config.attack_list[attack_name] = attack_config
-        result_data.save(path=self.report_dir, name=attack_name, config=config.model_dump())
+        if isinstance(result_data, MIAResult):
+            attack_config = config.attack_list.get(attack_name, None)
+            if attack_config is None:
+                attack_config = AttackFactoryMIA.attack_classes[attack_name].get_default_attack_config()
+                config.attack_list[attack_name] = attack_config.model_dump()
+
+        result_data.save(path=self.report_dir, name=attack_name, config=config)
 
     def load_results(self:Self) -> None:
         """Load method for results."""
@@ -116,32 +118,32 @@ class ReportHandler():
         """Result method to group all attacks."""
 
         for result_type in types:
-            try:
+            # try:
             # Get all results of type result_type
-                results = [res for res in self.results if res.__class__.__name__ == result_type]
+            results = [res for res in self.results if res.__class__.__name__ == result_type]
 
-                # If no results of type "result_type" is found, skip to next result_type
-                if not results:
-                    self.logger.info(f"No results of type {result_type} found.")
-                    continue
+            # If no results of type "result_type" is found, skip to next result_type
+            if not results:
+                self.logger.info(f"No results of type {result_type} found.")
+                continue
 
-                # Check if the result type has a 'create_results' method
-                try:
-                    result_class = globals().get(result_type)
-                except Exception as e:
-                    self.logger.info(f"No {result_type} class could be found or exists. Error: {e}")
-                    continue
-
-                if hasattr(result_class, "create_results") and callable(result_class.create_results):
-
-                    # Create all results
-                    latex_results = result_class.create_results(results=results,
-                                                                save_dir=self.report_dir,
-                                                                )
-                    self.pdf_results[result_type].append(latex_results)
-
+            # Check if the result type has a 'create_results' method
+            try:
+                result_class = globals().get(result_type)
             except Exception as e:
-                self.logger.info(f"Error in results all: {result_class}, {e}")
+                self.logger.info(f"No {result_type} class could be found or exists. Error: {e}")
+                continue
+
+            if hasattr(result_class, "create_results") and callable(result_class.create_results):
+
+                # Create all results
+                latex_results = result_class.create_results(results=results,
+                                                            save_dir=self.report_dir,
+                                                            )
+                self.pdf_results[result_type].append(latex_results)
+
+            # except Exception as e:
+            #     self.logger.info(f"Error in results all: {result_class}, {e}")
 
     def create_results_all(
         self:Self,

@@ -5,6 +5,7 @@ import os
 import tempfile
 import pytest
 from pytest_mock import MockerFixture
+from dotmap import DotMap
 
 import numpy as np
 import torch
@@ -13,13 +14,34 @@ from torch import Tensor, as_tensor, randperm
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss
 from torch.utils.data import DataLoader, Subset
 from torchvision import transforms
-        
+
 from leakpro.attacks.gia_attacks.utils import InvertingConfig, invertingconfigdictmap
 from leakpro.fl_utils.data_utils import get_meanstd
 from leakpro.fl_utils.gia_optimizers import MetaSGD, MetaAdam
 from leakpro.metrics.attack_result import MIAResult, GIAResults, get_config_name, get_gia_config_name
 from leakpro.utils.import_helper import Self
 
+# Set a config similar to wahts used in LeakPro
+def get_audit_config():
+    # Audit configuration
+    audit_config = DotMap()
+
+    # Lira parameters
+    audit_config.attack_list.lira.training_data_fraction = 0.1
+    audit_config.attack_list.lira.num_shadow_models = 3
+    audit_config.attack_list.lira.online = False
+    audit_config.attack_list.lira.fixed_variance = True
+    
+    # Additional config elements from the config dictionary
+    audit_config.random_seed = 1234
+    audit_config.report_log = "./leakpro_output/results"
+    audit_config.config_log = "./leakpro_output/config"
+    audit_config.target_model_folder = "./target"
+    audit_config.attack_folder = "attack_objects"
+    audit_config.attack_type = "mia"
+    audit_config.split_method = "no_overlapping"
+    
+    return audit_config
 
 class TestMIAResult:
     """Test class for MIAResult."""
@@ -62,26 +84,9 @@ class TestMIAResult:
                                     resultname = resultname,
                                     id = id)
 
-        self.config = {"random_seed": 1234, "attack_list":
-                            {"lira":
-                                    {"training_data_fraction": 0.5,
-                                     "num_shadow_models": 3,
-                                     "online": True}
-                            },
-                        "report_log":
-                                "./leakpro_output/results",
-                                "config_log":
-                                        "./leakpro_output/config",
-                                        "target_model_folder":
-                                                        "./target",
-                                                        "attack_folder":
-                                                                "attack_objects",
-                                                                "attack_type":
-                                                                        "mia",
-                                                                        "split_method":
-                                                                                "no_overlapping"
-                        }
-        
+        # Set config
+        self.config = get_audit_config()
+
         self.fpr_array = np.array([0., 0., 0., 0., 0.33333333, 0.33333333, 0.66666667, 0.66666667, 1., 1.])
         self.tpr_array = np.array([0., 0.33333333, 0.66666667, 1., 1., 1., 1., 1., 1., 1.])
 
@@ -115,7 +120,7 @@ class TestMIAResult:
         name = "lira"
 
         # Generate the configuration name based on the attack configuration
-        config_name = get_config_name(self.config["attack_list"][name])
+        config_name = get_config_name(self.config.attack_list.get(name))
 
         # Construct the expected save path
         save_path = f"{self.temp_dir}/{name}/{name}{config_name}"
@@ -446,7 +451,7 @@ class TestIntermediateAndMergedGIAResult:
         self.GIAresult_multiple = GIAResults(
             original_data = client_dataloader, 
             recreated_data = [client_dataloader, client_dataloader, client_dataloader, client_dataloader],
-            psnr_score = [12.8, 12.8, 12.8, 12.8], 
+            psnr_score = [torch.tensor(12.8), torch.tensor(12.8), torch.tensor(12.8), torch.tensor(12.8)], 
             ssim_score = [0.84, 0.84, 0.84, 0.84],
             data_mean = torch.tensor(2.0), 
             data_std = torch.tensor(1.0), 
@@ -605,8 +610,8 @@ class TestIntermediateAndMergedGIAResult:
         assert collected.SSIM_score[1] == 0.6  
         assert collected.SSIM_score[2] == 0.7
 
-        
-    def test_latex(self:Self, mocker: MockerFixture) -> None:
+    
+    def test_latex(self:Self) -> None:
         """Test if the LaTeX content is generated correctly."""
 
         # Set name

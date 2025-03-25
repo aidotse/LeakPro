@@ -1,0 +1,31 @@
+audit:  # Configurations for auditing
+  random_seed: 1234  # Integer specifying the random seed
+  attack_list:
+    rmia:
+      online: False
+      num_shadow_models: 8
+      gamma: 1
+    # population:
+    lira:
+      online: True
+      num_shadow_models: 16
+    # loss_traj:
+    # HSJ:
+    #   verbose: False
+    # yoqo:
+
+  output_dir: "./leakpro_output"
+  attack_type: "mia" #mia, gia
+  data_modality: "image" #image, tabular
+
+target:
+  # Target model path
+  module_path: "./utils/cifar_model_preparation.py"
+  model_class: "ResNet18" 
+  # Data paths
+  target_folder: "./target"
+  data_path: "./data/cifar10.pkl"
+
+shadow_model:
+
+distillation_model:
