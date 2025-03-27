@@ -7,6 +7,7 @@ import optuna
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from torch.nn import Module
 
+ArrayOrScalar = Union[np.ndarray, np.integer, int]
 
 class OptimizerConfig(BaseModel):
     """Schema for optimizer parameters."""
@@ -214,13 +215,13 @@ class MIAResultSchema(BaseModel):
     tpr: List[float] = Field(..., description="True positive rate")
     fpr: List[float] = Field(..., description="False positive rate")
     roc_auc: float = Field(..., description="Area under the ROC curve")
-    accuracy: List[float] = Field(..., description="Attack accuracy")
+    accuracy: Union[List[float], float] = Field(..., description="Attack accuracy")
     fixed_fpr: Dict[str, float] = Field(..., description="Fixed FPR values")
-    signal_values: List[float] = Field(..., description="Signal values")
+    signal_values: Union[List[float], None] = Field(..., description="Signal values")
     true_labels: List[int] = Field(..., description="True labels")
     id: str = Field(..., description="Identity of the attack")
     config: Dict[str, Any] = Field(..., description="Configuration of the attack")
-    tp_fp_tn_fn: Union[Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray], None] = Field(None,
+    tp_fp_tn_fn: Union[Tuple[ArrayOrScalar, ArrayOrScalar, ArrayOrScalar, ArrayOrScalar], None] = Field(None,
                                                                                             description="TP, FP, TN, FN values")
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # Prevent extra fields

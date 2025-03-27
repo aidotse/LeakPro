@@ -21,11 +21,11 @@ class AttackYOQO(AbstractMIA):
     class AttackConfig(BaseModel):
         """Configuration for the RMIA attack."""
 
-        training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Fraction of auxilary dataset to use for each shadow model training")  # noqa: E501
-        num_shadow_models: int = Field(default=8, ge=1, description="Number of shadow models to train")
+        training_data_fraction: float = Field(default=0.01, ge=0.0, le=1.0, description="Fraction of auxilary dataset to use for each shadow model training")  # noqa: E501
+        num_shadow_models: int = Field(default=1, ge=1, description="Number of shadow models to train")
         online: bool = Field(default=False, description="Perform online or offline attack")
         lr_xprime_optimization: float = Field(default=1e-3, ge=0.0, description="Learning rate for optimization of xprime")
-        max_iterations: int = Field(default=35, ge=1, description="Maximum number of iterations for optimization of xprime")
+        max_iterations: int = Field(default=1, ge=1, description="Maximum number of iterations for optimization of xprime")
 
     def __init__(self:Self,
                  handler: MIAHandler,
@@ -281,17 +281,18 @@ class AttackYOQO(AbstractMIA):
         # Prepare true labels array, marking 1 for training data and 0 for non-training data
         true_labels = np.concatenate([np.ones(len(self.in_members)), np.zeros(len(self.out_members))])
 
-        logger.info(f"Accuracy: {np.sum(predictions == true_labels)/predictions.size}")
+        # Must evaluate attack performance here as it does not adhere to different thresholds
+        tp = np.sum(np.logical_and(predictions == 1, true_labels == 1))
+        tn = np.sum(np.logical_and(predictions == 0, true_labels == 0))
+        fp = np.sum(np.logical_and(predictions == 1, true_labels == 0))
+        fn = np.sum(np.logical_and(predictions == 0, true_labels == 1))
 
-        # Output in a format that can be used to generate ROC curve.
-        predictions = np.concatenate(
-            [np.zeros((1,predictions.size)), predictions, np.ones((1,predictions.size))], axis = 0
-        )
+        logger.info(f"Accuracy: {np.sum(predictions == true_labels)/predictions.size}")
 
         # Return a result object containing predictions, true labels, and the signal values for further evaluation
         return MIAResult(
             true_membership=true_labels,
-            signal_values=predictions,
+            signal_values=None,
             result_name="YOQO",
-            signals_are_predictions = True
+            tp_fp_tn_fn=(tp, fp, tn, fn),
         )

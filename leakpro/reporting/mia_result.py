@@ -23,7 +23,7 @@ class MIAResult:
         metadata: dict = None,
         result_name: str = None,
         id: str = None,
-        tp_fp_tn_fn: tuple = None,
+        tp_fp_tn_fn: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] = None
     )-> None:
         """Compute and store the accuracy, ROC AUC score, and the confusion matrix for a metric.
 
@@ -34,8 +34,8 @@ class MIAResult:
             id: The identity of the attack
             metadata: Metadata about the results
             result_name: The name of the attack and result
-            signals_are_predictions: If the signal values are hard predictions, set this to True.
-                                     Expected size: #thresholds x #samples
+            tp_fp_tn_fn: Tuple containing the true positives, false positives, true negatives, and false negatives
+                         (this is used if the attack does not support arbitrary threshold value or does not create signal values).
 
         """
         self.true = np.ravel(true_membership)
@@ -77,15 +77,28 @@ class MIAResult:
 
         self.accuracy = (self.tp + self.tn) / (self.tp + self.fp + self.fn + self.tn)
 
+        def _get_length(x: np.ndarray) -> int:
+            """Get the length of the input."""
+            try:
+                return len(x)
+            except TypeError:
+                return 1  # Single value
         # if too few unique values, it is not possible to compute ROC AUC
-        if len(self.fpr) < 2:
+
+        if _get_length(self.fpr) < 2:
             logger.warning("Too few unique values to compute ROC AUC")
             self.roc_auc = 0.0
+            self.fixed_fpr_table = {}
+            self.fpr = [0.0, 1.0]
+            self.tpr = [0.0, 1.0]
+
         else:
             self.roc_auc = auc(self.fpr, self.tpr)
 
-        fpr_targets = [0.0, 0.0001, 0.001, 0.01, 0.1]
-        self.fixed_fpr_table = self._get_result_fixed_fpr(fpr_targets)
+            fpr_targets = [0.0, 0.0001, 0.001, 0.01, 0.1]
+            self.fixed_fpr_table = self._get_result_fixed_fpr(fpr_targets)
+
+
 
     def _get_result_fixed_fpr(self: Self, fpr_targets: list[float]) -> dict:
         """Find TPR values for fixed FPRs.
@@ -165,12 +178,14 @@ class MIAResult:
             pickle.dump(mia_data, f)
 
         # Create ROC plot
-        logger.info(f"Creating ROC plot for {name}")
-        self.create_roc_plot([self], save_dir = save_path, save_name = name)
+        if len(self.fpr) > 1:
+            logger.info(f"Creating ROC plot for {name}")
+            self.create_roc_plot([self], save_dir = save_path, save_name = name)
 
         # Create SignalHistogram plot for MIAResult
-        logger.info(f"Creating SignalHistogram plot for {name}")
-        self.create_signal_histogram(save_path = save_path)
+        if self.signal_values is not None:
+            logger.info(f"Creating SignalHistogram plot for {name}")
+            self.create_signal_histogram(save_path = save_path)
 
     @staticmethod
     def load(mia_data:MIAResultSchema) -> Self:

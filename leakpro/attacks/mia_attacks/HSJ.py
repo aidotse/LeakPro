@@ -22,7 +22,7 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
         norm: Union[int, float] = Field(default=2, description="The norm to use for the attack. Must be one of [1, 2, np.inf]")
         initial_num_evals: int = Field(default=100, ge=1, le=1000, description="The initial number of evaluations")
         max_num_evals: int = Field(default=10000, ge=1, description="The maximum number of evaluations")
-        num_iterations: int = Field(default=100, ge=1, description="The number of iterations")
+        num_iterations: int = Field(default=2, ge=1, description="The number of iterations")
         gamma: float = Field(default=1.0, ge=0.0, description="The gamma value")
         constraint: Literal[1,2] = Field(default=2, description="The constraint value must be 1 or 2")
         batch_size: int = Field(default=64, ge=1, description="The batch size")
@@ -173,7 +173,7 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
 
         # set true labels for being in the training dataset
         true_labels = np.concatenate(
-            [np.ones(len(self.in_member_signals)), np.zeros(len(self.out_member_signals))]
+            [np.ones(len(self.audit_dataset["in_members"])), np.zeros(len(self.audit_dataset["out_members"]))]
         )
 
         return MIAResult(
