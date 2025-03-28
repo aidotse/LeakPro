@@ -44,7 +44,8 @@ def create_trained_model_and_metadata(model,
     model.train()
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum)
+    # optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum) # Uncomment this to use SGD
+    optimizer = optim.Adam(model.parameters(), lr=lr, betas=(0.8, 0.999))
     train_losses, train_accuracies = [], []
     test_losses, test_accuracies = [], []
     
