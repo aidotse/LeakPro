@@ -25,7 +25,8 @@ class CifarInputHandler(AbstractInputHandler):
         """Set the optimizer for the model."""
         learning_rate = 0.1
         momentum = 0.8
-        return optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
+        # return optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum) # Uncomment this line to use SGD
+        return optim.Adam(model.parameters(), lr=learning_rate, betas=(0.8, 0.999))
 
     def train(
         self,
