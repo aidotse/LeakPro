@@ -5,7 +5,7 @@ train:
   training_method : LR # LR, GRUD, dpsgdGRUD
   LR: 
     epochs: 10 # Integer number for indicating the epochs for training target model. For speedyresnet, it uses its own number of epochs.
-    batch_size: 128 # Integer number for indicating batch size for training the target model. For speedyresnet, it uses its own batch size.
+    # batch_size: 128 # Integer number for indicating batch size for training the target model. For speedyresnet, it uses its own batch size.
     optimizer: SGD # String which indicates the optimizer. We support Adam and SGD. For speedyresnet, it uses its own optimizer.
     learning_rate: 0.01 # Float number for indicating learning rate for training the target model. For speedyresnet, it uses its own learning_rate.
     momentum: 0.9
@@ -15,4 +15,5 @@ data: # Configuration for data
   dataset: mimiciiii # String indicates the name of the dataset
   f_train: 0.6 # Float number from 0 to 1 indicating the fraction of the train dataset
   f_test: 0.4 # Float number from 0 to 1 indicating the size of the test set
+  batch_size: 128 # Integer number for indicating batch size for training the target model. For speedyresnet, it uses its own batch size.
   data_dir: ./data/ # String about where to save the data.
