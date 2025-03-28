@@ -3,7 +3,7 @@ audit:  # Configurations for auditing
   attack_list:
     rmia:
       online: True
-      num_shadow_models: 3
+      num_shadow_models: 2
       gamma: 1
     # population:
     lira:
