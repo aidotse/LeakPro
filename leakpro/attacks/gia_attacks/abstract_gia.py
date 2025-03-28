@@ -126,6 +126,8 @@ class AbstractGIA(AbstractAttack):
                 logger.info(f"New best loss: {loss} on round: {i}")
             if i % 250 == 0:
                 logger.info(f"Iteration {i}, loss {loss}")
+                self.best_reconstruction = deepcopy(reconstruction_loader)
+                self.best_reconstruction_round = i
                 yield i, dataloaders_ssim_ignite(client_loader, self.best_reconstruction), None
 
         ssim_score = dataloaders_ssim_ignite(client_loader, self.best_reconstruction)

@@ -14,7 +14,6 @@ class CelebAFloatLabels(CelebA):
     
     def __getitem__(self, index):
         image, label = super().__getitem__(index)
-        # Convert label to float (it will be a tensor now)
         label = label.float()
         return image, label
 

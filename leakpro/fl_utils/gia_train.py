@@ -1,7 +1,7 @@
 """Train function that keeps the computational graph intact."""
 from collections import OrderedDict
 
-from torch import cuda, device
+from torch import Tensor, cuda, device
 from torch.nn import Module
 from torch.utils.data import DataLoader
 
@@ -32,7 +32,8 @@ def train(
     outputs = None
     for _ in range(epochs):
         for inputs, labels in data:
-            inputs, labels = inputs.to(gpu_or_cpu, non_blocking=True), labels.to(gpu_or_cpu, non_blocking=True)
+            inputs, labels = inputs.to(gpu_or_cpu, non_blocking=True), (labels.to(gpu_or_cpu, non_blocking=True) if
+                                                                        isinstance(labels, Tensor) else labels)
             outputs = patched_model(inputs, patched_model.parameters)
             loss = criterion(outputs, labels).sum()
             patched_model.parameters = optimizer.step(loss, patched_model.parameters)
