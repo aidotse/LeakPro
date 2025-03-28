@@ -2,7 +2,7 @@ audit:  # Configurations for auditing
   random_seed: 1236  # Integer specifying the random seed
   attack_list:
     rmia:
-      online: True
+      online: False
       num_shadow_models: 2
       gamma: 1
     # population:
