@@ -14,6 +14,8 @@ from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.utils.logger import logger
 
+from leakpro.attacks.mia_attacks.ramia import AttackRaMIA
+
 
 class AttackFactoryMIA:
     """Class responsible for creating the attack objects."""
@@ -25,7 +27,8 @@ class AttackFactoryMIA:
         "loss_traj":AttackLossTrajectory,
         "lira": AttackLiRA,
         "HSJ" : AttackHopSkipJump,
-        "yoqo": AttackYOQO
+        "yoqo": AttackYOQO,
+        "ramia": AttackRaMIA
     }
 
     # Shared variables for all attacks

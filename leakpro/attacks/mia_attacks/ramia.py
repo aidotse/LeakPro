@@ -316,7 +316,6 @@ class AttackRaMIA(AbstractMIA):
         
         return transformed_samples, true_labels, self.selected_indices
 
-
     def create_transformed_dataset_pkl(self, transformed_samples, selected_indices, true_labels, tmp_dir="./tmp"):
         """Create a dataset with transformed samples that follows CifarDataset structure."""
         os.makedirs(tmp_dir, exist_ok=True)
@@ -688,8 +687,8 @@ class AttackRaMIA(AbstractMIA):
         # This means qs is the (1-p) quantile of the OUT distribution
         qs = norm.ppf(1.0 - self.best_p, loc=self.out_mean_est, scale=self.out_std_est)
         logger.info(f"Using adaptive trimming with p={self.best_p:.4f}, qs={qs:.4f}")
-        
-        # # Sort scores and keep only those below qs
+
+        # Sort scores and keep only those below qs
         sorted_scores = np.sort(ta_scores)
         trimmed = sorted_scores[sorted_scores <= qs]
         return np.mean(trimmed) if len(trimmed) > 0 else sorted_scores[0]
