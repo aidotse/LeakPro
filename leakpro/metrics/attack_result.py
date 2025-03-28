@@ -20,7 +20,7 @@ from torch import Tensor, clamp, stack
 from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision.utils import save_image
 
-from leakpro.utils.import_helper import Any, List, Self, Union
+from leakpro.utils.import_helper import Any, List, Self
 
 ########################################################################################################################
 # METRIC_RESULT CLASS
@@ -281,10 +281,7 @@ class MIAResult:
     def save(self:Self, path: str, name: str, config: dict = None, show_plot:bool = False) -> None:
         """Save the MIAResults to disk."""
 
-        if isinstance(config, dict):
-            config = config["attack_list"][name]
-        else:
-            config = config.attack_list.get(name, None)
+        config = config["attack_list"][name] if isinstance(config, dict) else config.attack_list.get(name, None)
 
         fixed_fpr_table = get_result_fixed_fpr(self.fpr, self.tpr)
 
