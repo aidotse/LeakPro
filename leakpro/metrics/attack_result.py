@@ -20,7 +20,7 @@ from torch import Tensor, clamp, stack
 from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision.utils import save_image
 
-from leakpro.utils.import_helper import Any, List, Self
+from leakpro.utils.import_helper import Any, List, Self, Union
 
 ########################################################################################################################
 # METRIC_RESULT CLASS
@@ -278,14 +278,18 @@ class MIAResult:
 
         return miaresult
 
-    def save(self:Self, path: str, name: str, config:dict = None, show_plot:bool = False) -> None:
+    def save(self:Self, path: str, name: str, config: dict = None, show_plot:bool = False) -> None:
         """Save the MIAResults to disk."""
 
-        result_config = config.attack_list[name]
+        if isinstance(config, dict):
+            config = config["attack_list"][name]
+        else:
+            config = config.attack_list.get(name, None)
+
         fixed_fpr_table = get_result_fixed_fpr(self.fpr, self.tpr)
 
         # Get the name for the attack configuration
-        config_name = get_config_name(result_config)
+        config_name = get_config_name(config)
 
         self.id = f"{name}{config_name}".replace("/", "__")
         save_path = f"{path}/{name}/{self.id}"
@@ -297,7 +301,7 @@ class MIAResult:
             "tpr": self.tpr.tolist(),
             "fpr": self.fpr.tolist(),
             "roc_auc": self.roc_auc,
-            "config": result_config,
+            "config": config,
             "fixed_fpr": fixed_fpr_table,
             "audit_indices": self.audit_indices.tolist() if self.audit_indices is not None else None,
             "signal_values": self.signal_values.tolist() if self.signal_values is not None else None,
