@@ -249,9 +249,9 @@ class MIAResult:
         self.tpr = self.tpr[not_nan]
 
         # In case the fpr are not sorted in ascending order.
-        sorted_indices = np.argsort(self.fpr)
-        self.fpr = self.fpr[sorted_indices]
-        self.tpr = self.tpr[sorted_indices]
+        sorted_indices_fpr = np.argsort(self.fpr)
+        self.fpr = self.fpr[sorted_indices_fpr]
+        self.tpr = self.tpr[sorted_indices_fpr]
 
         self.roc_auc = auc(self.fpr, self.tpr)
 
