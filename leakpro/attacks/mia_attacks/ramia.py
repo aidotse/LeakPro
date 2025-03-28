@@ -35,69 +35,60 @@ from leakpro.utils.logger import logger
 
 # Define the TransformedDataset class at module level so it can be pickled
 class TransformedDataset:
-    """Dataset class for transformed samples that works with any image format."""
+    """Dataset class for transformed samples that mirrors CifarDataset structure."""
     
-    def __init__(self, samples, labels=None):
-        """Initialize with samples and optional labels.
+    def __init__(self, x, y, transform=None, metadata=None):
+        """
+        Initialize with samples and labels.
         
         Args:
-            samples: List of transformed samples (tensors or arrays)
-            labels: Optional labels for the samples
+            x: Tensor of input images
+            y: Tensor of labels
+            transform: Optional transform to be applied
+            metadata: Optional metadata dictionary
         """
-        self.data = samples  # Store directly without conversion
-        self.targets = labels if labels is not None else np.zeros(len(samples), dtype=np.int64)
-        
-        # Detect what type of data we're dealing with
-        sample = samples[0] if samples else None
-        self._is_tensor = isinstance(sample, torch.Tensor)
-        self._is_numpy = isinstance(sample, np.ndarray)
-        
-        # Store the data format characteristics
-        if self._is_tensor:
-            self._channels_first = (sample.dim() == 3 and sample.shape[0] in [1, 3, 4])
-        elif self._is_numpy:
-            self._channels_first = (sample.ndim == 3 and sample.shape[0] in [1, 3, 4])
-        else:
-            self._channels_first = False
+        self.x = x  # Data tensor
+        self.y = y  # Labels tensor
+        self.transform = transform
+        self.metadata = metadata if metadata is not None else {
+            "original_splits": [],
+            "original_idx": [],
+            "raw_data": None
+        }
     
     def __len__(self):
         """Return the total number of samples."""
-        return len(self.data)
+        return len(self.y)
     
     def __getitem__(self, idx):
-        """Retrieve the sample and its label at index 'idx'.
+        """Retrieve the sample and its label at index 'idx'."""
+        image = self.x[idx]
+        label = self.y[idx]
         
-        This method handles different data formats that might be used by various handlers.
-        """
-        sample = self.data[idx]
-        label = self.targets[idx]
+        # Apply transformations to the image if any
+        if self.transform:
+            image = self.transform(image)
         
-        return sample, label
-    
-    def get_data_format(self):
-        """Return information about the data format for debugging."""
-        return {
-            "is_tensor": self._is_tensor,
-            "is_numpy": self._is_numpy,
-            "channels_first": self._channels_first,
-            "sample_shape": self.data[0].shape if len(self.data) > 0 else None
-        }
+        return image, label
     
     def subset(self, indices):
         """Return a subset of the dataset based on the given indices."""
-        # Handle different data formats
-        if isinstance(self.data, torch.Tensor):
-            new_samples = self.data[indices]
-        elif isinstance(self.data, np.ndarray):
-            new_samples = self.data[indices]
-        else:  # Handle lists
-            new_samples = [self.data[i] for i in indices]
-            
-        new_labels = self.targets[indices] if self.targets is not None else None
+        subset_metadata = {
+            "original_splits": [self.metadata.get("original_splits", [])[i] for i in indices] if self.metadata.get("original_splits") else [],
+            "original_idx": [self.metadata.get("original_idx", [])[i] for i in indices] if self.metadata.get("original_idx") else [],
+            "raw_data": self.metadata.get("raw_data", None)
+        }
+        
+        # Preserve RaMIA-specific metadata at the top level
+        for key in self.metadata:
+            if key not in subset_metadata and key not in ["original_splits", "original_idx", "raw_data"]:
+                subset_metadata[key] = self.metadata[key]
         
         return TransformedDataset(
-            samples=new_samples,
-            labels=new_labels
+            x=self.x[indices],
+            y=self.y[indices],
+            transform=self.transform,
+            metadata=subset_metadata
         )
     
 class AttackRaMIA(AbstractMIA):
@@ -325,75 +316,66 @@ class AttackRaMIA(AbstractMIA):
         
         return transformed_samples, true_labels, self.selected_indices
 
-
-    def create_transformed_dataset_pkl(self: Self, transformed_samples, selected_indices, true_labels, tmp_dir="./tmp"):
-        """Create a generic dataset with transformed samples that works with any image dataset type.
-        
-        This function creates a dataset that maintains the same interface expected by the handler
-        but can work with any type of image data, not just CIFAR.
-        
-        Args:
-            transformed_samples: List of lists of transformed tensors
-            selected_indices: Indices of original selected samples
-            true_labels: List of binary labels (1=IN, 0=OUT) for each range
-            tmp_dir: Directory to save the temporary dataset
-            
-        Returns:
-            tuple: (path to saved dataset, path to metadata, number of samples)
-        """
+    def create_transformed_dataset_pkl(self, transformed_samples, selected_indices, true_labels, tmp_dir="./tmp"):
+        """Create a dataset with transformed samples that follows CifarDataset structure."""
         os.makedirs(tmp_dir, exist_ok=True)
         
-        # Flatten all transformed samples into a single list
-        flattened_samples = []
-        sample_to_range_map = []
-        range_to_samples_map = {}
-        range_masks = []  # Moved inside to rebuild correctly
+        # Get original class labels from the audit dataset
+        original_classes = []
+        for idx in selected_indices:
+            data_idx = self.audit_data_indices[idx]
+            # Get class label directly - simplified
+            class_label = self.handler.population.y[data_idx].item() 
+            original_classes.append(class_label)
         
-        # Flatten samples and create mappings
-        for range_idx, range_samples in enumerate(transformed_samples):
-            start = len(flattened_samples)
-            flattened_samples.extend(range_samples)
-            end = len(flattened_samples)
-            sample_to_range_map.extend([range_idx] * len(range_samples))
-            range_to_samples_map[range_idx] = list(range(start, end))
-            
-        # Convert to tensors and standardize format
-        transformed_tensors = []
-        for sample in flattened_samples:
-            transformed_tensors.append(sample)
-            
-        # Create dataset with proper labels
-        transformed_dataset = TransformedDataset(
-            samples=transformed_tensors,
-            labels=np.repeat(true_labels, [len(rs) for rs in transformed_samples])
-        )
+        # Flatten all samples and maintain their class labels
+        all_samples = []
+        all_labels = []
+        sample_to_range = []
+        range_to_samples = {}
+        
+        for range_idx, (range_samples, class_label) in enumerate(zip(transformed_samples, original_classes)):
+            start_idx = len(all_samples)
+            all_samples.extend(range_samples)
+            all_labels.extend([class_label] * len(range_samples))
+            sample_to_range.extend([range_idx] * len(range_samples))
+            range_to_samples[range_idx] = list(range(start_idx, start_idx + len(range_samples)))
+        
+        # Convert to tensors
+        x = torch.stack(all_samples) if all_samples else torch.tensor([])
+        y = torch.tensor(all_labels) if all_labels else torch.tensor([])
+        
+        # Get range masks for classification
+        range_masks = []
+        for idx in selected_indices:
+            range_masks.append(self.in_indices_masks[idx])
+        
+        # Create metadata structure similar to CifarDataset
+        metadata = {
+            "original_splits": ["unknown"] * len(all_samples),
+            "original_idx": list(range(len(all_samples))),
+            "raw_data": None,
+            # Additional metadata for RaMIA
+            "sample_to_range": sample_to_range,
+            "range_to_samples": range_to_samples,
+            "range_masks": range_masks,
+            "range_membership": {i: label for i, label in enumerate(true_labels)},
+            "original_classes": original_classes
+        }
+        
+        # Create dataset
+        transformed_dataset = TransformedDataset(x=x, y=y, metadata=metadata)
         
         # Save dataset
         transformed_dataset_path = os.path.join(tmp_dir, "ramia_transformed_dataset.pkl")
         with open(transformed_dataset_path, "wb") as f:
             pickle.dump(transformed_dataset, f)
-
-
-        # Get mask from original audit dataset
-        for range_idx, audit_idx in enumerate(selected_indices):  # Position in filtered audit dataset
-            mask = self.in_indices_masks[audit_idx]  # Mask from prepare_attack()
-            range_masks.append(mask)  # Append mask for this range
-            
-        # Prepare metadata
-        metadata = {
-            "sample_to_range": sample_to_range_map,
-            "range_to_samples": range_to_samples_map,
-            "selected_indices": selected_indices,
-            "range_masks": range_masks,  # Now mask per transformed sample
-            "range_membership": {i: label for i, label in enumerate(true_labels)},
-            "data_format": transformed_dataset.get_data_format()
-        }
         
         metadata_path = os.path.join(tmp_dir, "ramia_metadata.pkl")
         with open(metadata_path, "wb") as f:
             pickle.dump(metadata, f)
-            
-        return transformed_dataset_path, metadata_path, len(transformed_tensors)
+        
+        return transformed_dataset_path, metadata_path, len(all_samples)
 
 
     def prepare_attack(self:Self)->None:
@@ -493,8 +475,7 @@ class AttackRaMIA(AbstractMIA):
             self.metadata = pickle.load(f)
         
         # Create indices for all transformed samples
-        self.transformed_indices = np.arange(self.num_transformed_samples)
-        
+        self.transformed_indices = np.arange(self.num_transformed_samples)     
 
         logger.info(f"Calculating the logits for all {self.num_shadow_models} shadow models")
         self.shadow_models_logits = np.swapaxes(self.signal(self.shadow_models,
@@ -706,7 +687,7 @@ class AttackRaMIA(AbstractMIA):
         # This means qs is the (1-p) quantile of the OUT distribution
         qs = norm.ppf(1.0 - self.best_p, loc=self.out_mean_est, scale=self.out_std_est)
         logger.info(f"Using adaptive trimming with p={self.best_p:.4f}, qs={qs:.4f}")
-        
+
         # Sort scores and keep only those below qs
         sorted_scores = np.sort(ta_scores)
         trimmed = sorted_scores[sorted_scores <= qs]
@@ -722,7 +703,7 @@ class AttackRaMIA(AbstractMIA):
         sorted_scores = np.sort(ta_scores)
         
         # Calculate cutoff index for bottom x%
-        cutoff_idx = int(len(sorted_scores) * 0.4)
+        cutoff_idx = int(len(sorted_scores) * 0.6)
         
         # Get scores to keep (bottom x%)
         trimmed_scores = sorted_scores[:cutoff_idx]
