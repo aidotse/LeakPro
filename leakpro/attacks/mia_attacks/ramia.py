@@ -6,11 +6,20 @@ import numpy as np
 from pydantic import BaseModel, Field, model_validator
 from scipy.stats import norm
 from tqdm import tqdm
+from sklearn.mixture import GaussianMixture
 
 import optuna
 import os
 import torch
 import pickle
+import torchvision.transforms as transforms
+from torch import tensor, float32, cat
+
+# np.random.seed(1234)
+# torch.manual_seed(1234)
+# if torch.cuda.is_available():
+#     torch.cuda.manual_seed_all(1234)
+
 from leakpro.schemas import OptunaConfig, avg_tpr_at_low_fpr
 from leakpro.input_handler.modality_extensions.image_extension import ImageExtension
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
@@ -26,69 +35,60 @@ from leakpro.utils.logger import logger
 
 # Define the TransformedDataset class at module level so it can be pickled
 class TransformedDataset:
-    """Dataset class for transformed samples that works with any image format."""
+    """Dataset class for transformed samples that mirrors CifarDataset structure."""
     
-    def __init__(self, samples, labels=None):
-        """Initialize with samples and optional labels.
+    def __init__(self, x, y, transform=None, metadata=None):
+        """
+        Initialize with samples and labels.
         
         Args:
-            samples: List of transformed samples (tensors or arrays)
-            labels: Optional labels for the samples
+            x: Tensor of input images
+            y: Tensor of labels
+            transform: Optional transform to be applied
+            metadata: Optional metadata dictionary
         """
-        self.data = samples  # Store directly without conversion
-        self.targets = labels if labels is not None else np.zeros(len(samples), dtype=np.int64)
-        
-        # Detect what type of data we're dealing with
-        sample = samples[0] if samples else None
-        self._is_tensor = isinstance(sample, torch.Tensor)
-        self._is_numpy = isinstance(sample, np.ndarray)
-        
-        # Store the data format characteristics
-        if self._is_tensor:
-            self._channels_first = (sample.dim() == 3 and sample.shape[0] in [1, 3, 4])
-        elif self._is_numpy:
-            self._channels_first = (sample.ndim == 3 and sample.shape[0] in [1, 3, 4])
-        else:
-            self._channels_first = False
+        self.x = x  # Data tensor
+        self.y = y  # Labels tensor
+        self.transform = transform
+        self.metadata = metadata if metadata is not None else {
+            "original_splits": [],
+            "original_idx": [],
+            "raw_data": None
+        }
     
     def __len__(self):
         """Return the total number of samples."""
-        return len(self.data)
+        return len(self.y)
     
     def __getitem__(self, idx):
-        """Retrieve the sample and its label at index 'idx'.
+        """Retrieve the sample and its label at index 'idx'."""
+        image = self.x[idx]
+        label = self.y[idx]
         
-        This method handles different data formats that might be used by various handlers.
-        """
-        sample = self.data[idx]
-        label = self.targets[idx]
+        # Apply transformations to the image if any
+        if self.transform:
+            image = self.transform(image)
         
-        return sample, label
-    
-    def get_data_format(self):
-        """Return information about the data format for debugging."""
-        return {
-            "is_tensor": self._is_tensor,
-            "is_numpy": self._is_numpy,
-            "channels_first": self._channels_first,
-            "sample_shape": self.data[0].shape if len(self.data) > 0 else None
-        }
+        return image, label
     
     def subset(self, indices):
         """Return a subset of the dataset based on the given indices."""
-        # Handle different data formats
-        if isinstance(self.data, torch.Tensor):
-            new_samples = self.data[indices]
-        elif isinstance(self.data, np.ndarray):
-            new_samples = self.data[indices]
-        else:  # Handle lists
-            new_samples = [self.data[i] for i in indices]
-            
-        new_labels = self.targets[indices] if self.targets is not None else None
+        subset_metadata = {
+            "original_splits": [self.metadata.get("original_splits", [])[i] for i in indices] if self.metadata.get("original_splits") else [],
+            "original_idx": [self.metadata.get("original_idx", [])[i] for i in indices] if self.metadata.get("original_idx") else [],
+            "raw_data": self.metadata.get("raw_data", None)
+        }
+        
+        # Preserve RaMIA-specific metadata at the top level
+        for key in self.metadata:
+            if key not in subset_metadata and key not in ["original_splits", "original_idx", "raw_data"]:
+                subset_metadata[key] = self.metadata[key]
         
         return TransformedDataset(
-            samples=new_samples,
-            labels=new_labels
+            x=self.x[indices],
+            y=self.y[indices],
+            transform=self.transform,
+            metadata=subset_metadata
         )
     
 class AttackRaMIA(AbstractMIA):
@@ -98,7 +98,7 @@ class AttackRaMIA(AbstractMIA):
         """Configuration for the RaMIA attack."""
 
         # RaMIA attack parameters
-        num_transforms: int = Field(default=15, ge=1, le=100, description="Number of transformations to apply to each sample in a range") # Range transformation parameters
+        num_transforms: int = Field(default=1, ge=1, le=100, description="Number of transformations to apply to each sample in a range") # Range transformation parameters
         range_num_audit_samples: int = Field(default=50, ge=5, description="Number of audit samples to use for range membership inference") # Range transformation parameters
         online: bool = Field(default=False, description="Online vs offline attack") # Attack type configuration
         transform_type: Literal["standard", "cifar", "custom"] = Field(default="cifar", description="Type of transformation to apply to images") # Image transformation configuration
@@ -109,7 +109,7 @@ class AttackRaMIA(AbstractMIA):
         num_shadow_models: int = Field(default=1, ge=1, description="Number of shadow models")
         training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow models")  # noqa: E501
         eval_batch_size: int = Field(default=32, ge=1, description="Batch size for evaluation")
-        var_calculation: Literal["carlini", "individual_carlini", "fixed"] = Field(default="carlini", description="Variance estimation method to use [carlini, individual_carlini, fixed]")  # noqa: E501
+        var_calculation: Literal["carlini", "individual_carlini", "fixed"] = Field(default="individual_carlini", description="Variance estimation method to use [carlini, individual_carlini, fixed]")  # noqa: E501
         # memorization boosting
         memorization: bool = Field(default=False, description="Activate memorization boosting")
         use_privacy_score: bool = Field(default=False, description="Filter based on privacy score aswell as memorization score")
@@ -138,7 +138,6 @@ class AttackRaMIA(AbstractMIA):
         def handle_objective(self) -> Self:
             """Set default objective if not provided."""
             if self.objective is None:
-                from leakpro.schemas import avg_tpr_at_low_fpr
                 self.objective = avg_tpr_at_low_fpr
             return self
 
@@ -174,10 +173,10 @@ class AttackRaMIA(AbstractMIA):
         if self.dataset_type == "image":
             self.image_extension = ImageExtension(handler)
             transform_config = configs.get("transform_config", {})
-            self.transforms = self.image_extension.get_transform(self.transform_type, **transform_config)
+            self.range_transforms = self.image_extension.get_transform(self.transform_type, **transform_config)
         else:
             # For non-image data, we'll initialize transforms in prepare_attack
-            self.transforms = None
+            self.range_transforms = None
             logger.warning(f"Using dataset type '{self.dataset_type}', custom transformations may be needed")
 
         # Set default objective function if not provided
@@ -227,44 +226,35 @@ class AttackRaMIA(AbstractMIA):
                 - true_labels: List of binary labels (1=IN, 0=OUT)
                 - selected_indices: Indices from original audit dataset that were selected
         """
-
-        # Create a boolean mask for IN members
-        is_in = np.zeros(len(self.audit_data_indices), dtype=bool)
-        is_in[self.in_members] = True  # Mark IN members
-
-        # Get indices of IN and OUT members within audit_data
-        in_indices = np.where(is_in)[0]
-        out_indices = np.where(~is_in)[0]
-
         # Calculate natural class distribution
         total_audit_samples = len(self.audit_data_indices)
-        in_ratio = len(in_indices) / total_audit_samples
-        out_ratio = 1 - in_ratio
+        in_ratio = len(self.in_members) / total_audit_samples
 
         # Calculate sample sizes based on natural distribution
         num_in = int(num_samples * in_ratio)
         num_out = num_samples - num_in
 
         # Ensure we don't exceed available samples
-        num_in = min(num_in, len(in_indices))
-        num_out = min(num_out, len(out_indices))
+        num_in = min(num_in, len(self.in_members))
+        num_out = min(num_out, len(self.out_members))
 
         # Adjust if total samples < requested
         if (num_in + num_out) < num_samples:
             shortfall = num_samples - (num_in + num_out)
             # Distribute remaining samples proportionally
-            add_in = min(shortfall, len(in_indices) - num_in)
-            add_out = min(shortfall - add_in, len(out_indices) - num_out)
+            add_in = min(shortfall, len(self.in_members) - num_in)
+            add_out = min(shortfall - add_in, len(self.in_members) - num_out)
             num_in += add_in
             num_out += add_out
             logger.warning(f"Adjusted sample sizes to {num_in} IN and {num_out} OUT")
 
 
         # Randomly select indices from IN and OUT members
-        self.selected_in = np.random.choice(in_indices, num_in, replace=False)
-        self.selected_out = np.random.choice(out_indices, num_out, replace=False)
+        self.selected_in = np.random.choice(self.in_members, num_in, replace=False)
+        self.selected_out = np.random.choice(self.out_members, num_out, replace=False)
         self.selected_indices = np.concatenate([self.selected_in, self.selected_out])
-        np.random.shuffle(self.selected_indices)  # Shuffle to mix IN/OUT
+        # self.selected_indices = np.concatenate([self.in_members, self.out_members]) # Uncomment this for no transformation and comment the above three lines
+
 
         # Validation checks
         unique_indices = np.unique(self.selected_indices)
@@ -289,7 +279,7 @@ class AttackRaMIA(AbstractMIA):
                 logger.warning(f"Failed to get data for index {data_idx}")
                 continue
                 
-            # Convert to PIL image using the existing method
+            # Convert to PIL image using the existing method (need to fix this while using transformation; double normalization is performed somehow)
             sample = self.image_extension.to_pil_image(raw_sample)
             
             # Skip if conversion failed
@@ -301,14 +291,24 @@ class AttackRaMIA(AbstractMIA):
             try:
                 range_samples = []
                 for transform_idx in range(self.num_transforms):
-                    transformed = self.transforms(sample, transform_idx)
+                    # Apply transformations to the image
+                    transformed = self.range_transforms(sample, transform_idx)
                     range_samples.append(transformed)
 
+                    # For no transformation uncomment the below code
+                    # sample = tensor(raw_sample, dtype=torch.uint8)
+                    # p_sample = sample.float()
+                    # p_sample /= 255.0
+                    # normalize = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+                    # p_sample = p_sample.permute(2, 0, 1) # <class 'torch.Tensor'>
+                    # p_sample = normalize(p_sample)
+                    # range_samples.append(p_sample)
+
                 transformed_samples.append(range_samples)
-                true_labels.append(int(is_in[idx]))
+                true_labels.append(1 if idx in self.in_members else 0)
                 logger.info(f"Successfully created transforms for index {idx}")
             except Exception as e:
-                logger.error(f"Error transforming sample {idx}: {e}")
+                logger.warning(f"Error transforming sample {idx}: {e}")
                 continue
 
         logger.info(f"Created {len(transformed_samples)} ranges "
@@ -316,65 +316,68 @@ class AttackRaMIA(AbstractMIA):
         
         return transformed_samples, true_labels, self.selected_indices
 
-    def create_transformed_dataset_pkl(self: Self, transformed_samples, original_indices, tmp_dir="./tmp"):
-        """Create a generic dataset with transformed samples that works with any image dataset type.
-        
-        This function creates a dataset that maintains the same interface expected by the handler
-        but can work with any type of image data, not just CIFAR.
-        
-        Args:
-            transformed_samples: List of lists of transformed tensors
-            original_indices: Indices of original samples
-            tmp_dir: Directory to save the temporary dataset
-            
-        Returns:
-            tuple: (path to saved dataset, path to metadata, number of samples)
-        """
+
+    def create_transformed_dataset_pkl(self, transformed_samples, selected_indices, true_labels, tmp_dir="./tmp"):
+        """Create a dataset with transformed samples that follows CifarDataset structure."""
         os.makedirs(tmp_dir, exist_ok=True)
         
-        # Flatten all transformed samples into a single list
-        flattened_samples = []
-        sample_to_range_map = []
-        range_to_samples_map = {}
+        # Get original class labels from the audit dataset
+        original_classes = []
+        for idx in selected_indices:
+            data_idx = self.audit_data_indices[idx]
+            # Get class label directly - simplified
+            class_label = self.handler.population.y[data_idx].item() 
+            original_classes.append(class_label)
         
-        for range_idx, range_samples in enumerate(transformed_samples):
-            range_to_samples_map[range_idx] = []
-            for sample in range_samples:
-                sample_idx = len(flattened_samples)
-                flattened_samples.append(sample)
-                sample_to_range_map.append(range_idx)
-                range_to_samples_map[range_idx].append(sample_idx)
+        # Flatten all samples and maintain their class labels
+        all_samples = []
+        all_labels = []
+        sample_to_range = []
+        range_to_samples = {}
         
-        # Create the dataset directly from our transformed samples
-        # We keep them as tensors to preserve their format
-        transformed_dataset = TransformedDataset(flattened_samples)
+        for range_idx, (range_samples, class_label) in enumerate(zip(transformed_samples, original_classes)):
+            start_idx = len(all_samples)
+            all_samples.extend(range_samples)
+            all_labels.extend([class_label] * len(range_samples))
+            sample_to_range.extend([range_idx] * len(range_samples))
+            range_to_samples[range_idx] = list(range(start_idx, start_idx + len(range_samples)))
         
-        # Log dataset format information for debugging
-        format_info = transformed_dataset.get_data_format()
-        logger.info(f"Created transformed dataset with format: {format_info}")
+        # Convert to tensors
+        x = torch.stack(all_samples) if all_samples else torch.tensor([])
+        y = torch.tensor(all_labels) if all_labels else torch.tensor([])
         
-        # Save the dataset
+        # Get range masks for classification
+        range_masks = []
+        for idx in selected_indices:
+            range_masks.append(self.in_indices_masks[idx])
+        
+        # Create metadata structure similar to CifarDataset
+        metadata = {
+            "original_splits": ["unknown"] * len(all_samples),
+            "original_idx": list(range(len(all_samples))),
+            "raw_data": None,
+            # Additional metadata for RaMIA
+            "sample_to_range": sample_to_range,
+            "range_to_samples": range_to_samples,
+            "range_masks": range_masks,
+            "range_membership": {i: label for i, label in enumerate(true_labels)},
+            "original_classes": original_classes
+        }
+        
+        # Create dataset
+        transformed_dataset = TransformedDataset(x=x, y=y, metadata=metadata)
+        
+        # Save dataset
         transformed_dataset_path = os.path.join(tmp_dir, "ramia_transformed_dataset.pkl")
         with open(transformed_dataset_path, "wb") as f:
             pickle.dump(transformed_dataset, f)
-        
-        logger.info(f"Saved transformed dataset with {len(flattened_samples)} samples to {transformed_dataset_path}")
-        
-        # Save metadata for mapping samples to ranges
-        metadata = {
-            "sample_to_range": sample_to_range_map,
-            "range_to_samples": range_to_samples_map,
-            "original_indices": original_indices,
-            "range_membership": {i: self.range_labels[i] for i in range(len(self.range_labels))} # added to check
-        }
         
         metadata_path = os.path.join(tmp_dir, "ramia_metadata.pkl")
         with open(metadata_path, "wb") as f:
             pickle.dump(metadata, f)
         
-        logger.info(f"Saved RaMIA metadata to {metadata_path}")
-        
-        return transformed_dataset_path, metadata_path, len(flattened_samples)
+        return transformed_dataset_path, metadata_path, len(all_samples)
+
 
     def prepare_attack(self:Self)->None:
         """Prepares data to obtain metric on the target model and dataset, using signals computed on the auxiliary model/dataset.
@@ -397,29 +400,54 @@ class AttackRaMIA(AbstractMIA):
                                                                               online = self.online)
 
         self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)
+        
+        # Store original population dataset
+        self.original_population = self.handler.population
+        
+        # Map original audit indices to subset indices
+        self.original_to_subset = {
+            original_idx: subset_idx
+            for subset_idx, original_idx in enumerate(self.original_population.metadata["original_idx"])
+        }
+
+        # In prepare_attack after creating self.audit_data_indices:
+        for idx in self.audit_dataset["data"]:
+            if idx not in self.original_to_subset:
+                raise ValueError(f"Audit index {idx} not found in population subset")
+    
+        valid_audit_indices = []
+        valid_in_members = []
+        valid_out_members = []
+
+        # Track positions in the filtered audit dataset
+        for pos, original_idx in enumerate(self.audit_dataset["data"]):
+            if original_idx in self.original_to_subset:
+                subset_idx = self.original_to_subset[original_idx]
+                valid_audit_indices.append(subset_idx)
+                # Check membership based on original dataset's labels
+                if pos in self.audit_dataset["in_members"]:
+                    valid_in_members.append(len(valid_audit_indices)-1)  # Position in filtered list
+                if pos in self.audit_dataset["out_members"]:
+                    valid_out_members.append(len(valid_audit_indices)-1)  # Position in filtered list
+            else:
+                logger.warning(f"Audit index {original_idx} not found in population. Skipping.")
+
+        # Update audit data indices and membership
+        self.audit_data_indices = np.array(valid_audit_indices)
+        self.in_members = np.array(valid_in_members)
+        self.out_members = np.array(valid_out_members)
 
         logger.info("Create masks for all IN and OUT samples")
-        self.in_indices_masks = ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"])
+        self.in_indices_masks = ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_data_indices)
 
-        self.audit_data_indices = self.audit_dataset["data"]
-        self.in_members = self.audit_dataset["in_members"]
-        self.out_members = self.audit_dataset["out_members"]
-
-        # Check offline attack for possible IN- sample(s)
-        if not self.online:
-            count_in_samples = np.count_nonzero(self.in_indices_masks)
-            if count_in_samples > 0:
-                logger.info(f"Some shadow model(s) contains {count_in_samples} IN samples in total for the model(s)")
-                logger.info("Potential contamination in offline attack!")
-
-        # Create a mapping from data indices to positions in the audit dataset
-        # This helps us correctly map back when calculating scores
-        audit_data = self.audit_dataset["data"]
-        self.audit_data_index_map = {data_idx: pos for pos, data_idx in enumerate(audit_data)} # maps every data in the audit data to a position for easier tracking.
-        logger.info(f"Created mapping for {len(self.audit_data_index_map)} audit data indices")
+        count_in_samples = np.count_nonzero(self.in_indices_masks)
+        if count_in_samples > 0:
+            logger.info(f"Some shadow model(s) contains {count_in_samples} IN samples in total for the model(s)")
+            logger.info("Potential contamination in offline attack!")       
 
         # Generate transformed ranges
         num_samples = self.range_num_audit_samples
+        # num_samples = len(self.audit_data_indices) # Uncomment this for no transformation and comment the above line
         self.transformed_ranges, self.range_labels, self.selected_indices = \
             self.create_transformed_dataset(num_samples)
         
@@ -431,13 +459,10 @@ class AttackRaMIA(AbstractMIA):
         
         logger.info(f"Prepared {len(self.transformed_ranges)} ranges "
                     f"({sum(self.range_labels)} IN, {len(self.range_labels)-sum(self.range_labels)} OUT)")
-        
-        # Store original population dataset
-        self.original_population = self.handler.population
             
         # Create a generic dataset of all transformed samples
         self.transformed_dataset_path, self.metadata_path, self.num_transformed_samples = \
-            self.create_transformed_dataset_pkl(self.transformed_ranges, self.selected_indices) 
+            self.create_transformed_dataset_pkl(self.transformed_ranges, self.selected_indices, self.range_labels) 
         
         # Load the transformed dataset into memory
         with open(self.transformed_dataset_path, "rb") as f:
@@ -451,8 +476,7 @@ class AttackRaMIA(AbstractMIA):
             self.metadata = pickle.load(f)
         
         # Create indices for all transformed samples
-        self.transformed_indices = np.arange(self.num_transformed_samples)
-        
+        self.transformed_indices = np.arange(self.num_transformed_samples)     
 
         logger.info(f"Calculating the logits for all {self.num_shadow_models} shadow models")
         self.shadow_models_logits = np.swapaxes(self.signal(self.shadow_models,
@@ -515,33 +539,6 @@ class AttackRaMIA(AbstractMIA):
             return self.fixed_in_std
         return self.fixed_out_std
     
-    def prepare_transformed_masks(self: Self) -> None:
-        # Get the original sample's IN/OUT masks for each transformed sample
-        self.sample_to_range = self.metadata["sample_to_range"]
-        
-        self.transformed_masks = []
-        for idx in range(len(self.transformed_indices)):
-            range_idx = self.sample_to_range[idx]
-            pos_in_selected = range_idx  # Position in the selected_indices array #Check this later(pos_in_selected)
-            
-            if pos_in_selected >= len(self.selected_indices):
-                logger.warning(f"Index out of bounds: {pos_in_selected} >= {len(self.selected_indices)}")
-                # Use a default mask (assume all OUT)
-                self.transformed_masks.append(np.zeros(len(self.shadow_models), dtype=bool))
-                continue
-                
-            pos_in_audit = self.selected_indices[pos_in_selected]
-            
-            # Get masks from LiRA's in_indices_masks
-            if pos_in_audit < len(self.in_indices_masks):
-                self.transformed_masks.append(self.in_indices_masks[pos_in_audit])
-            else:
-                logger.warning(f"Audit position out of bounds: {pos_in_audit} >= {len(self.in_indices_masks)}")
-                # Use a default mask (assume all OUT)
-                self.transformed_masks.append(np.zeros(len(self.shadow_models), dtype=bool))
-        
-        self.transformed_masks = np.array(self.transformed_masks)
-    
     def calculate_scores_for_transformed_samples(self: Self): 
         # Calculate membership scores for each transformed sample
         sample_scores = np.zeros(len(self.shadow_models_logits))
@@ -569,63 +566,6 @@ class AttackRaMIA(AbstractMIA):
                 raise ValueError("Score is NaN")
             
         return sample_scores
-    
-    # def calculate_scores_for_transformed_samples(self: Self): 
-    #     # Calculate membership scores for each transformed sample
-    #     sample_scores = np.zeros(len(self.shadow_models_logits))
-
-    #     # Calculate global statistics for better estimation
-    #     all_shadow_logits = self.shadow_models_logits.flatten()
-    #     all_transformed_masks = self.transformed_masks.flatten()
-
-    #     # Global OUT statistics (from all shadow models)
-    #     # Provides a macro-level view of how non-member samples typically behave across models.
-    #     global_out_mean = np.mean(all_shadow_logits[~all_transformed_masks])
-    #     global_out_std = np.std(all_shadow_logits[~all_transformed_masks])
-    #     global_out_std = max(global_out_std, 1e-30)  # Ensure non-zero variance
-
-    #     logger.info(f"Global OUT distribution: mean={global_out_mean:.4f}, std={global_out_std:.4f}")
-
-    #     # Iterate over and extract logits for IN and OUT shadow models for each audit sample
-    #     for i, (shadow_models_logits, mask) in tqdm(enumerate(zip(self.shadow_models_logits, self.transformed_masks)),
-    #                                                 total=len(self.shadow_models_logits),
-    #                                                 desc="Processing audit samples"):
-
-
-    #         # Calculate the mean for OUT shadow model logits
-    #         out_mean = np.mean(shadow_models_logits[~mask])
-    #         out_std = self.get_std(shadow_models_logits, ~mask, False, self.var_calculation)
-
-    #         # Get the logit from the target model for the current sample
-    #         target_logit = self.target_logits[i]
-
-    #         # Reference based calibration
-    #         # Calculate the target model's score
-    #         target_score = -norm.logpdf(target_logit, out_mean, out_std + 1e-30)
-
-    #         # Calculate reference scores from each shadow model
-    #         ref_scores = []
-    #         for j in range(len(self.shadow_models)):
-    #             shadow_logit = shadow_models_logits[j]
-    #             # Use the same calculation for all shadow models
-    #             ref_score = -norm.logpdf(shadow_logit, out_mean, out_std + 1e-30)
-    #             ref_scores.append(ref_score)
-
-    #         # Calibrate the target score against shadow model scores
-    #         # This helps distinguish true membership from model similarity effects
-    #         reference_baseline = np.mean(ref_scores)
-
-    #         # Calibrated score: higher values indicate membership
-    #         sample_scores[i] = target_score - reference_baseline
-
-
-    #     # Check for NaN values
-    #     if np.isnan(sample_scores[i]):
-    #         logger.warning(f"NaN score for sample {i}, replacing with 0")
-    #         sample_scores[i] = 0
-            
-            
-    #     return sample_scores
             
     def estimate_distribution_separation(self: Self) -> None:
         """Estimate the distributions of membership scores for IN and OUT samples.
@@ -636,15 +576,12 @@ class AttackRaMIA(AbstractMIA):
         """
         logger.info("Estimating score distributions for adaptive trimming")
         
-        # Get masks that tell us which samples come from members vs non-members
-        self.sample_to_range = self.metadata["sample_to_range"]
-        
         in_scores = []
         out_scores = []
         
         # Separate scores into IN and OUT distributions based on the original samples
         for idx, score in enumerate(self.all_sample_scores):
-            range_idx = self.sample_to_range[idx]
+            range_idx = self.metadata["sample_to_range"][idx]
             if range_idx in self.metadata["range_membership"]:
                 is_member = self.metadata["range_membership"][range_idx]
                 if is_member:
@@ -653,13 +590,13 @@ class AttackRaMIA(AbstractMIA):
                     out_scores.append(score)
         
         # Calculate distribution parameters
-        self.in_mean = np.mean(in_scores) if in_scores else 0
-        self.in_std = np.std(in_scores) if in_scores else 1
-        self.out_mean = np.mean(out_scores) if out_scores else 0
-        self.out_std = np.std(out_scores) if out_scores else 1
+        self.in_mean_est = np.mean(in_scores) if in_scores else 0
+        self.in_std_est = np.std(in_scores) if in_scores else 1
+        self.out_mean_est = np.mean(out_scores) if out_scores else 0
+        self.out_std_est = np.std(out_scores) if out_scores else 1
         
-        logger.info(f"Estimated IN distribution: N({self.in_mean:.4f}, {self.in_std:.4f}²)")
-        logger.info(f"Estimated OUT distribution: N({self.out_mean:.4f}, {self.out_std:.4f}²)")
+        logger.info(f"Estimated IN distribution: N({self.in_mean_est:.4f}, {self.in_std_est:.4f})")
+        logger.info(f"Estimated OUT distribution: N({self.out_mean_est:.4f}, {self.out_std_est:.4f})")
 
     def optimize_p(self: Self) -> None:
         """Optimize the p parameter for adaptive trimming using Optuna.
@@ -673,7 +610,7 @@ class AttackRaMIA(AbstractMIA):
         def objective(trial):
             # Sample a value for p (the probability parameter)
             # This is the 'p' in P[LLR(x) > qs] = p for x~out
-            p = trial.suggest_float("p", 0.01, 0.75)
+            p = trial.suggest_float("p", 0.01, 0.5)
             
             # Set the current p value
             temp_p = p
@@ -683,20 +620,20 @@ class AttackRaMIA(AbstractMIA):
             for range_idx, sample_indices in self.metadata["range_to_samples"].items():
                 range_sample_scores = self.all_sample_scores[sample_indices]
                 # Calculate qs based on OUT distribution and current p value
-                qs = norm.ppf(1.0 - temp_p, loc=self.out_mean, scale=self.out_std)
+                qs = norm.ppf(1.0 - temp_p, loc=self.out_mean_est, scale=self.out_std_est)
                 # Apply trimming
                 sorted_scores = np.sort(range_sample_scores)
                 trimmed = sorted_scores[sorted_scores <= qs]
                 score = np.mean(trimmed) if len(trimmed) > 0 else 0.0
                 range_scores.append(score)
-            
+          
             # Convert to numpy array
             range_scores = np.array(range_scores)
             
             # Generate simplified decision thresholds
             min_score = np.min(range_scores)
             max_score = np.max(range_scores)
-            thresholds = np.linspace(min_score, max_score, 100)
+            thresholds = np.linspace(min_score, max_score, 1000)
             
             # Prepare binary predictions matrix
             predictions = (range_scores.reshape(-1, 1) < thresholds.reshape(1, -1))
@@ -717,7 +654,7 @@ class AttackRaMIA(AbstractMIA):
         study = optuna.create_study(
             direction=self.configs.optuna_config.direction, # Whether to maximize (e.g., higher TPR) or minimize (e.g., lower FPR)
             pruner=self.configs.optuna_config.pruner, # Kills underperforming trials early (saves compute)
-            sampler=optuna.samplers.TPESampler(seed=self.configs.optuna_config.seed) # Smart algorithm to suggest better p values over time
+            sampler=optuna.samplers.TPESampler(seed=self.configs.optuna_config.seed) # Tree-structured Parzen Estimator: Smart algorithm to suggest better p values over time
         )
         
         study.optimize(
@@ -729,7 +666,7 @@ class AttackRaMIA(AbstractMIA):
         self.best_p = study.best_params["p"]
         logger.info(f"Best p parameter: {self.best_p:.4f}")
 
-    def compute_adaptive_trimmed_average(self: Self, scores: np.ndarray) -> float:
+    def compute_adaptive_trimmed_average(self: Self, ta_scores: np.ndarray) -> float:
         """Compute adaptively trimmed average of membership scores.
         
         This method uses the estimated OUT distribution and the optimized p parameter
@@ -742,26 +679,37 @@ class AttackRaMIA(AbstractMIA):
         Returns:
             float: Adaptively trimmed average score
         """
-        n = len(scores)
+        n = len(ta_scores)
         if n == 0:
             return 0.0
         
         # Calculate quantile threshold qs based on OUT distribution and p
         # For a given p (probability), find the qs such that P[LLR(x) > qs] = p for x~out
         # This means qs is the (1-p) quantile of the OUT distribution
-        qs = norm.ppf(1.0 - self.best_p, loc=self.out_mean, scale=self.out_std)
+        qs = norm.ppf(1.0 - self.best_p, loc=self.out_mean_est, scale=self.out_std_est)
         logger.info(f"Using adaptive trimming with p={self.best_p:.4f}, qs={qs:.4f}")
         
-        # Sort scores and keep only those below qs
-        sorted_scores = np.sort(scores)
+        # # Sort scores and keep only those below qs
+        sorted_scores = np.sort(ta_scores)
         trimmed = sorted_scores[sorted_scores <= qs]
+        return np.mean(trimmed) if len(trimmed) > 0 else sorted_scores[0]
+        # return np.mean(ta_scores)
+
+    def compute_trimmed_average(self: Self, ta_scores: np.ndarray) -> float:
+        """Trim top x% of scores and return mean of remaining x%"""
+        if len(ta_scores) == 0:
+            return 0.0
         
-        # Return mean of trimmed scores
-        if len(trimmed) == 0:
-            # If all scores are above qs, just return the smallest score
-            return sorted_scores[0] if len(sorted_scores) > 0 else 0.0
+        # Sort scores in ascending order
+        sorted_scores = np.sort(ta_scores)
         
-        return np.mean(trimmed)
+        # Calculate cutoff index for bottom x%
+        cutoff_idx = int(len(sorted_scores) * 0.6)
+        
+        # Get scores to keep (bottom x%)
+        trimmed_scores = sorted_scores[:cutoff_idx]
+        
+        return np.mean(trimmed_scores) if len(trimmed_scores) > 0 else 0.0
 
     def run_attack(self:Self) -> MIAResult:
         """Runs the attack on the target model and dataset and assess privacy risks or data leakage.
@@ -776,10 +724,19 @@ class AttackRaMIA(AbstractMIA):
         true labels, and signal values.
 
         """
-        # n_audit_samples = self.shadow_models_logits.shape[0]
-        # score = np.zeros(n_audit_samples)  # List to hold the computed probability scores for each sample
+        # Expand range_masks to transformed_samples:
+        self.transformed_masks = np.array([self.metadata["range_masks"][range_idx] for range_idx in self.metadata["sample_to_range"]])
 
-        self.prepare_transformed_masks()
+        # After creating transformed_masks
+        assert len(self.transformed_masks) == self.num_transformed_samples, \
+            "transformed_masks length mismatch with transformed samples"
+        
+        # Check mask consistency for a sample range
+        sample_range_idx = 0
+        sample_audit_idx = self.selected_indices[sample_range_idx]
+        assert np.all(self.transformed_masks[self.metadata["range_to_samples"][sample_range_idx]] 
+                    == self.in_indices_masks[sample_audit_idx]), \
+            "Mask mismatch between transformed samples and original audit data"
 
         #self.fixed_in_std = self.get_std(self.shadow_models_logits.flatten(), self.transformed_masks.flatten(), True, "fixed")
         self.fixed_out_std = self.get_std(self.shadow_models_logits.flatten(), (~self.transformed_masks).flatten(), False, "fixed")
@@ -787,20 +744,30 @@ class AttackRaMIA(AbstractMIA):
         # Calculate all membership scores for transformed samples
         self.all_sample_scores = self.calculate_scores_for_transformed_samples()
 
+        # Comment below two lines for no transformation
         self.estimate_distribution_separation() 
         self.optimize_p()
 
         range_scores = []
         for range_idx, sample_indices in self.metadata["range_to_samples"].items():
             range_sample_scores = self.all_sample_scores[sample_indices]
+            
+            # transformation with adaptive trimming
             trimmed_score = self.compute_adaptive_trimmed_average(range_sample_scores)
             range_scores.append(trimmed_score)
+
+            # transformation with predefined trimming
+            # trimmed_score = self.compute_trimmed_average(range_sample_scores)
+            # range_scores.append(trimmed_score)
+
+            # Uncomment below line for no transformation with no adaptive trimming or any trimming
+            # range_scores.append(range_sample_scores)
         
         # Convert to numpy array and handle NaN values
         range_scores = np.array(range_scores)
 
         # Generate thresholds based on range scores
-        self.thresholds = np.linspace(np.min(range_scores), np.max(range_scores), 1000)  # High resolution for final evaluation
+        self.thresholds = np.linspace(np.min(range_scores), np.max(range_scores), 1000)
 
         # Create prediction matrix (num_thresholds x num_ranges)
         predictions = (range_scores.reshape(-1, 1) < self.thresholds.reshape(1, -1)).T
