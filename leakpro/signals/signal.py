@@ -55,7 +55,6 @@ class ModelLogits(Signal):
         models: List[Model],
         handler: AbstractInputHandler,
         indices: np.ndarray,
-        batch_size: int = 32,
     ) -> List[np.ndarray]:
         """Built-in call method.
 
@@ -64,7 +63,6 @@ class ModelLogits(Signal):
             models: List of models that can be queried.
             handler: The input handler object.
             indices: List of indices in population dataset that can be queried from handler.
-            batch_size: Integer to determine batch size for dataloader.
 
         Returns:
         -------
@@ -74,7 +72,7 @@ class ModelLogits(Signal):
 
         # Iterate over the DataLoader (ensures we use transforms etc)
         # NOTE: Shuffle must be false to maintain indices order
-        data_loader = handler.get_dataloader(indices, batch_size=batch_size)
+        data_loader = handler.get_dataloader(indices, shuffle=False)
         assert self._is_shuffling(data_loader) is False, "DataLoader must not shuffle data to maintain order of indices"
 
         results = []
@@ -103,7 +101,6 @@ class ModelRescaledLogits(Signal):
         models: List[Model],
         handler: AbstractInputHandler,
         indices: np.ndarray,
-        batch_size: int = 32,
     ) -> List[np.ndarray]:
         """Built-in call method.
 
@@ -112,14 +109,13 @@ class ModelRescaledLogits(Signal):
             models: List of models that can be queried.
             handler: The input handler object.
             indices: List of indices in population dataset that can be queried from handler.
-            batch_size: Integer to determine batch size for dataloader.
 
         Returns:
         -------
             The signal value.
 
         """
-        data_loader = handler.get_dataloader(indices, batch_size=batch_size)
+        data_loader = handler.get_dataloader(indices, shuffle=False)
         assert self._is_shuffling(data_loader) is False, "DataLoader must not shuffle data to maintain order of indices"
 
         results = []
@@ -148,7 +144,6 @@ class ModelLoss(Signal):
         models: List[Model],
         handler: AbstractInputHandler,
         indices: np.ndarray,
-        batch_size: int = 32,
     ) -> List[np.ndarray]:
         """Built-in call method.
 
@@ -157,7 +152,6 @@ class ModelLoss(Signal):
             models: List of models that can be queried.
             handler: The input handler object.
             indices: List of indices in population dataset that can be queried from handler.
-            batch_size: Integer to determine batch size for dataloader.
 
         Returns:
         -------
@@ -165,7 +159,7 @@ class ModelLoss(Signal):
 
         """
         # Compute the signal for each model
-        data_loader = handler.get_dataloader(indices, batch_size=batch_size)
+        data_loader = handler.get_dataloader(indices, shuffle=False)
         assert self._is_shuffling(data_loader) is False, "DataLoader must not shuffle data to maintain order of indices"
 
         results = []

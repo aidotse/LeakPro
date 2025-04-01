@@ -15,6 +15,7 @@ from leakpro.schemas import ShadowModelTrainingSchema, TrainingOutput
 from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import Self, Tuple
 from leakpro.utils.logger import logger
+from leakpro.target_model_class import ResNet18
 
 
 def singleton(cls):  # noqa: ANN001, ANN201
@@ -137,27 +138,35 @@ class ShadowModelHandler(ModelHandler):
         for i in indices_to_use:
             # Get dataloader
             data_indices = np.random.choice(shadow_population, data_size, replace=False)
-            data_loader = self.handler.get_dataloader(data_indices, self.batch_size)
+            data_loader = self.handler.get_dataloader(data_indices, params=None)
 
             # Get shadow model blueprint
             model, criterion, optimizer = self._get_model_criterion_optimizer()
+            
+            resmodel = ResNet18()
+            print("\n\ncreate_shadow_models", resmodel)
+            print(resmodel == model)
+
+            print("\n\ncreate_shadow_models", model)
+            from opacus.validators import ModuleValidator
+            errors = ModuleValidator.validate(model, strict=False)
+            for err in errors:
+                print(err)
+            model = ModuleValidator.fix(model)
 
             # Train shadow model
-            logger.info(f"Training shadow model {i} on {len(data_loader)* data_loader.batch_size} points")
+            logger.info(f"Training shadow model {i} on {len(data_loader.dataset)} points")
             training_results = self.handler.train(data_loader, model, criterion, optimizer, self.epochs)
 
             # Read out results
             assert isinstance(training_results, TrainingOutput)
             shadow_model = training_results.model
-            train_acc = training_results.metrics.get("accuracy", 0)
-            train_loss = training_results.metrics.get("loss", 0)
 
             # Evaluate shadow model on remaining aux data
             remaining_indices = list(set(shadow_population) - set(data_indices))
-            if len(remaining_indices) == 0:
-                test_loss, test_acc = 0.0, 0.0
-            else:
-                test_acc, test_loss = self._eval_shadow_model(shadow_model, criterion, remaining_indices)
+            dataset_params = data_loader.dataset.return_params()
+            test_loader = self.handler.get_dataloader(remaining_indices, params=dataset_params)
+            test_result = self.handler.eval(test_loader, shadow_model, criterion)
 
             logger.info(f"Training shadow model {i} complete")
             shadow_model_state_dict = shadow_model.state_dict()
@@ -169,59 +178,26 @@ class ShadowModelHandler(ModelHandler):
                 logger.info(f"Saved shadow model {i} to {self.storage_path}")
 
             logger.info(f"Storing metadata for shadow model {i}")
-            meta_data = {
-                "init_params": self.init_params,
-                "train_indices": data_indices,
-                "num_train": len(data_indices),
-                "optimizer": optimizer.__class__.__name__,
-                "criterion": criterion.__class__.__name__,
-                "batch_size": self.batch_size,
-                "epochs": self.epochs,
-                "train_acc": train_acc,
-                "train_loss": train_loss,
-                "test_acc": test_acc,
-                "test_loss": test_loss,
-                "online": online,
-                "model_class": self.model_class,
-                "target_model_hash": self.target_model_hash,
-            }
+            meta_data = ShadowModelTrainingSchema(
+                init_params=self.init_params,
+                train_indices = data_indices,
+                num_train = len(data_indices),
+                optimizer = optimizer.__class__.__name__,
+                criterion = criterion.__class__.__name__,
+                epochs = self.epochs,
+                train_result = training_results.metrics,
+                test_result = test_result,
+                online = online,
+                model_class = self.model_class,
+                target_model_hash= self.target_model_hash
+            )
+
             logger.info(f"Metadata for shadow model {i}:\n{meta_data}")
-            validated_meta = ShadowModelTrainingSchema(**meta_data)
             with open(f"{self.storage_path}/{self.metadata_storage_name}_{i}.pkl", "wb") as f:
-                pickle.dump(validated_meta, f)
+                pickle.dump(meta_data, f)
 
             logger.info(f"Metadata for shadow model {i} stored in {self.storage_path}")
         return filtered_indices + indices_to_use
-
-    def _eval_shadow_model(self:Self, model:Module, criterion:Module, indices:list[int])->Tuple[float, float]:
-        """Evaluate the shadow models.
-
-        Args:
-        ----
-            model (Module): The shadow model to evaluate.
-            criterion (Module): The loss function to use.
-            indices (list[int]): The indices in the aux dataset to evaluate.
-
-        Returns:
-        -------
-            Tuple[float, float]: The average accuracy and loss of the shadow models.
-
-        """
-        accuracy = 0.0
-        loss = 0.0
-        model.eval()
-        model.to(self.device)
-        data_loader = self.handler.get_dataloader(indices, self.batch_size)
-        with torch.no_grad():
-            for data, target in data_loader:
-                data, target = data.to(self.device), target.to(self.device)
-                output = model(data).squeeze()
-                loss += criterion(output, target).item()
-                predictions = (output.squeeze() > 0.5).long() if output.ndim == 1 or output.shape[0] == 1 else output.argmax(1)
-                accuracy += (predictions == target).sum().item()
-        loss /= len(data_loader)
-        accuracy /= len(indices)
-        return accuracy, loss
 
     def _load_shadow_model(self:Self, index:int) -> Module:
         """Load a shadow model from a saved state.

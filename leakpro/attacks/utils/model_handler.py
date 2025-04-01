@@ -57,15 +57,14 @@ class ModelHandler():
         optimizer_name = setup_config.optimizer.name
         self.optimizer_class = self._get_optimizer_class(optimizer_name)
         # copy to only have parameters left
-        self.optimizer_config = setup_config.optimizer.model_copy().model_dump(exclude={"name"})
+        self.optimizer_config = setup_config.optimizer.params
 
         # Get criterion class
-        criterion_class = setup_config.loss.name
+        criterion_class = setup_config.criterion.name
         self.criterion_class = self._get_criterion_class(criterion_class)
         # copy to only have parameters left
-        self.loss_config = setup_config.loss.model_copy().model_dump(exclude={"name"})
+        self.loss_config = setup_config.criterion.params
 
-        self.batch_size = setup_config.batch_size
         self.epochs = setup_config.epochs
 
         # Set the storage paths for objects created by the handler
@@ -133,7 +132,7 @@ class ModelHandler():
             model = self.model_blueprint(**self.init_params)
             optimizer = self.optimizer_class(model.parameters(), **self.optimizer_config)
             criterion = self.criterion_class(**self.loss_config)
-
+        print("\n\n_get_model_criterion_optimizer", model)
         return model, criterion, optimizer
 
     def get_criterion(self:Self) -> Module:

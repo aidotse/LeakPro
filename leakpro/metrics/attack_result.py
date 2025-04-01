@@ -237,11 +237,21 @@ class MIAResult:
         )
 
         self.fpr = np.divide(self.fp.astype(float), (self.fp + self.tn).astype(float),
-                            out=np.zeros_like(self.fp, dtype=float),
+                            out=np.full_like(self.fp, np.nan, dtype=float),
                             where=(self.fp + self.tn) != 0.0)
         self.tpr = np.divide(self.tp.astype(float), (self.tp + self.fn).astype(float),
-                            out=np.zeros_like(self.tp, dtype=float),
+                            out=np.full_like(self.tp, np.nan, dtype=float),
                             where=(self.tp + self.fn) != 0.0)
+
+        # In case denominator is zero in fpr/tpr calculations
+        not_nan = ~(np.isnan(self.fpr) | np.isnan(self.tpr))
+        self.fpr = self.fpr[not_nan]
+        self.tpr = self.tpr[not_nan]
+
+        # In case the fpr are not sorted in ascending order.
+        sorted_indices_fpr = np.argsort(self.fpr)
+        self.fpr = self.fpr[sorted_indices_fpr]
+        self.tpr = self.tpr[sorted_indices_fpr]
 
         self.roc_auc = auc(self.fpr, self.tpr)
 
@@ -268,14 +278,15 @@ class MIAResult:
 
         return miaresult
 
-    def save(self:Self, path: str, name: str, config:dict = None, show_plot:bool = False) -> None:
+    def save(self:Self, path: str, name: str, config: dict = None, show_plot:bool = False) -> None:
         """Save the MIAResults to disk."""
 
-        result_config = config["attack_list"][name]
+        config = config["attack_list"][name] if isinstance(config, dict) else config.attack_list.get(name, None)
+
         fixed_fpr_table = get_result_fixed_fpr(self.fpr, self.tpr)
 
         # Get the name for the attack configuration
-        config_name = get_config_name(result_config)
+        config_name = get_config_name(config)
 
         self.id = f"{name}{config_name}".replace("/", "__")
         save_path = f"{path}/{name}/{self.id}"
@@ -287,7 +298,7 @@ class MIAResult:
             "tpr": self.tpr.tolist(),
             "fpr": self.fpr.tolist(),
             "roc_auc": self.roc_auc,
-            "config": result_config,
+            "config": config,
             "fixed_fpr": fixed_fpr_table,
             "audit_indices": self.audit_indices.tolist() if self.audit_indices is not None else None,
             "signal_values": self.signal_values.tolist() if self.signal_values is not None else None,
@@ -712,18 +723,17 @@ class TEMPLATEResult:
             return results
         return _latex(results)
 
-def get_result_fixed_fpr(fpr: list, tpr: list) -> dict:
-    """Find TPR values for fixed TPRs."""
-    # Function to find TPR at given FPR thresholds
-    def find_tpr_at_fpr(fpr_array:np.ndarray, tpr_array:np.ndarray, threshold:float) -> float:
-        """Find tpr for a given fpr."""
-        try:
-            # Find the last index where FPR is less than the threshold
-            valid_index = np.where(fpr_array < threshold)[0][-1]
-            return float(f"{tpr_array[valid_index] * 100:.4f}")
-        except IndexError:
-            # Return None or some default value if no valid index found
-            return "N/A"
+def find_tpr_at_fpr(fpr_array: np.ndarray, tpr_array:np.ndarray, threshold:float) -> float:
+    """Find TPR for a given FPR."""
+    # Find the last index where FPR is less than or equal to the threshold
+    less_equal = np.nonzero(fpr_array <= threshold)[0]
+    if len(less_equal) == 0: # If no fpr at given threshold exists return 0.0%
+        return 0.0
+    max_tpr = np.max(tpr_array[less_equal])
+    return float(f"{max_tpr * 100:.4f}")
+
+def get_result_fixed_fpr(fpr: np.ndarray, tpr: np.ndarray) -> dict:
+    """Find TPR values for fixed FPRs."""
 
     # Compute TPR values at various FPR thresholds
     return {"TPR@1.0%FPR": find_tpr_at_fpr(fpr, tpr, 0.01),
