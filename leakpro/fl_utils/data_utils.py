@@ -45,7 +45,7 @@ class GiaImageExtension(GiaDataModalityExtension):
             if isinstance(label, Tensor):
                 labels.extend(deepcopy(label))
             else:
-                labels.append()
+                labels.append(deepcopy(label))
         reconstruction_dataset = CustomTensorDataset(reconstruction, labels)
         reconstruction_loader = DataLoader(reconstruction_dataset, batch_size=32, shuffle=True)
 
