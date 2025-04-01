@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Optional, Callable, Union, List, Tuple
 from PIL import Image
 import torch
+from pycocotools.coco import COCO
 from torchvision.datasets.vision import VisionDataset
 from torchvision import transforms
 
@@ -25,7 +26,6 @@ class CocoDetectionWithSeparateTransforms(VisionDataset):
     ) -> None:
         # We set transforms=None here because we'll handle image and target transforms separately.
         super().__init__(root, transforms=None, transform=transform, target_transform=target_transform)
-        from pycocotools.coco import COCO
         self.coco = COCO(annFile)
         self.ids = list(sorted(self.coco.imgs.keys()))
     
@@ -83,8 +83,8 @@ def get_coco_detection_loader(num_images: int = 1, img_size=256, start_idx=0, ba
         transform=transforms.Compose([
             transforms.Resize((img_size, img_size)), 
             transforms.ToTensor()
-        ]), 
-        target_transform=lambda target, orig_size: resize_target(target, orig_size, new_size=(img_size, img_size))
+        ])
+        #target_transform=lambda target, orig_size: resize_target(target, orig_size, new_size=(img_size, img_size))
     )
     
     # Compute data_mean and data_std on a small random subset of the dataset.

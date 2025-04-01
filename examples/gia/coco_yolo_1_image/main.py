@@ -17,9 +17,9 @@ if __name__ == "__main__":
     # see top of model.py for original repository.
     model = yolo_v8_n()
     pre_train_loader, data_mean, data_std = get_coco_detection_loader(start_idx=0, num_images=320, batch_size=32)
-    train_loader, _, _ = get_coco_detection_loader(start_idx=700, num_images=64000, batch_size=32)
-    test_train(model, train_loader, pre_train_loader)
-    map50, meanap = test_eval(model, pre_train_loader)
+    test_loader, _, _ = get_coco_detection_loader(start_idx=700, num_images=64000, batch_size=32)
+    test_train(model, pre_train_loader, test_loader)
+    map50, meanap = test_eval(model, test_loader)
     print(map50, meanap)
 
 
