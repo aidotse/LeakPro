@@ -14,12 +14,18 @@ from leakpro.synthetic_data_attacks.singling_out_utils import SinglingOutResults
 from leakpro.utils.import_helper import Self, Union
 from leakpro.utils.logger import logger
 
+ResultList = Union[list[MIAResult],
+                    list[GIAResults],
+                    list[SinglingOutResults],
+                    list[InferenceResults],
+                    list[LinkabilityResults]
+                    ]
 
 # Report Handler
 class ReportHandler():
     """Implementation of the report handler."""
 
-    def __init__(self:Self, report_dir: str = None) -> None:
+    def __init__(self:Self, results:ResultList, report_dir: str = None) -> None:
         logger.info("Initializing report handler...")
 
         self.report_dir = self._try_find_rep_dir() if report_dir is None else report_dir
@@ -36,6 +42,11 @@ class ReportHandler():
         # Initiate empty lists for the different types of LeakPro attack types
         for key in self.leakpro_types:
             self.pdf_results[key] = []
+
+        self.results = results
+        for res in results:
+            assert isinstance(res, (MIAResult, GIAResults, InferenceResults, LinkabilityResults, SinglingOutResults))
+            self.results.append(res)
 
     def _try_find_rep_dir(self:Self) -> str:
         save_path = "../leakpro_output/results"
