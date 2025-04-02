@@ -6,7 +6,7 @@ import torch
 from torch import Tensor, cat, mean, randn, std
 from torch.utils.data import DataLoader, Dataset
 
-from leakpro.utils.import_helper import Self, Any
+from leakpro.utils.import_helper import Any, Self
 
 
 class GiaDataModalityExtension(ABC):
@@ -24,7 +24,7 @@ class CustomTensorDataset(Dataset):
         self.reconstruction = reconstruction
         self.labels = labels
 
-    def __len__(self) -> int:
+    def __len__(self: Self) -> int:
         """Dataset length."""
         return self.reconstruction.size(0)
 
@@ -55,6 +55,7 @@ class GiaImageExtension(GiaDataModalityExtension):
 def get_meanstd(trainset: Dataset, axis_to_reduce: tuple=(-2,-1)) -> tuple[Tensor, Tensor]:
     """Get mean and std of a dataset."""
     cc = cat([trainset[i][0].unsqueeze(0) for i in range(len(trainset))], dim=0)
+    cc = cc.float()
     axis_to_reduce += (0,)
     data_mean = mean(cc, dim=axis_to_reduce).tolist()
     data_std = std(cc, dim=axis_to_reduce).tolist()

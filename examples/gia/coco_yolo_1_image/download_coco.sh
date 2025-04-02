@@ -14,3 +14,5 @@ wget http://images.cocodataset.org/annotations/annotations_trainval2017.zip
 unzip train2017.zip -d images/
 unzip val2017.zip -d images/
 unzip annotations_trainval2017.zip
+cd ..
+python3 prepare_coco.py

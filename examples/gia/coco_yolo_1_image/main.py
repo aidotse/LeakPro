@@ -1,7 +1,7 @@
 """Hyperparameter tuning with optuna on evaluating."""
+import time
 from coco import get_coco_detection_loader
 from leakpro.attacks.gia_attacks.invertinggradients import InvertingGradients, InvertingConfig
-from leakpro.fl_utils.data_utils import GiaImageDetectionExtension
 from leakpro.fl_utils.gia_train import train
 from leakpro.run import run_gia_attack
 from model import yolo_v8_n, ComputeLoss
@@ -16,17 +16,17 @@ if __name__ == "__main__":
     # Some parameters have changed to fit 256x256 images better but might still be causing issues.
     # see top of model.py for original repository.
     model = yolo_v8_n()
-    pre_train_loader, data_mean, data_std = get_coco_detection_loader(start_idx=0, num_images=320, batch_size=32)
-    test_loader, _, _ = get_coco_detection_loader(start_idx=700, num_images=64000, batch_size=32)
+    pre_train_loader, data_mean, data_std = get_coco_detection_loader(start_idx=150, num_images=160, batch_size=16)
+    test_loader, _, _ = get_coco_detection_loader(start_idx=800, num_images=160, batch_size=16)
     test_train(model, pre_train_loader, test_loader)
     map50, meanap = test_eval(model, test_loader)
+    # time.sleep(10000)
     print(map50, meanap)
 
 
     
     # attack setup
     configs = InvertingConfig()
-    configs.data_extension = GiaImageDetectionExtension()
     configs.top10norms = False
     configs.median_pooling = True
     configs.at_iterations = 24000

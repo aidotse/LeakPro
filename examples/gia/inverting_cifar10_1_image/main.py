@@ -1,7 +1,6 @@
 """Inverting on a single image."""
 
 from cifar import get_cifar10_loader
-from leakpro.fl_utils.data_utils import GiaImageDetectionExtension
 from model import ResNet
 from torchvision.models.resnet import BasicBlock
 
@@ -15,7 +14,7 @@ if __name__ == "__main__":
 
     # meta train function designed to work with GIA
     train_fn = train
-    configs = InvertingConfig(data_extension=GiaImageDetectionExtension())
+    configs = InvertingConfig()
     attack_object = InvertingGradients(model, client_dataloader, data_mean, data_std, configs=configs)
 
     result = run_gia_attack(attack_object)
