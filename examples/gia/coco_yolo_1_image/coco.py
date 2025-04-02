@@ -100,8 +100,8 @@ class Dataset(data.Dataset):
         # Convert HWC to CHW, BGR to RGB
         sample = image.transpose((2, 0, 1))[::-1]
         sample = np.ascontiguousarray(sample)
-
-        return torch.from_numpy(sample), target, shapes
+        img = torch.from_numpy(sample).float() / 255
+        return img, target, shapes
 
     def __len__(self):
         return len(self.filenames)
@@ -406,7 +406,7 @@ def candidates(box1, box2):
     aspect_ratio = np.maximum(w2 / (h2 + 1e-16), h2 / (w2 + 1e-16))  # aspect ratio
     return (w2 > 2) & (h2 > 2) & (w2 * h2 / (w1 * h1 + 1e-16) > 0.1) & (aspect_ratio < 100)
 
-def get_coco_detection_loader(num_images: int = 1, img_size=256, start_idx=0, batch_size: int = 1, num_workers: int = 2, root: str = './coco2017', ann_file: str = 'annotations/instances_train2017.json') -> tuple[DataLoader, Tensor, Tensor]:
+def get_coco_detection_loader(num_images: int = 1, img_size=256, start_idx=0, batch_size: int = 1, num_workers: int = 2, aug=True) -> tuple[DataLoader, Tensor, Tensor]:
     """Get a dataloader for COCO detection with non-empty labels."""
     with open(os.path.join('args.yaml'), errors='ignore') as f:
         params = yaml.safe_load(f)
@@ -416,10 +416,8 @@ def get_coco_detection_loader(num_images: int = 1, img_size=256, start_idx=0, ba
             filename = filename.rstrip().split('/')[-1]
             filenames.append('COCO/images/train2017/' + filename)
 
-    print(f"USING AUGMENT : True, test with false too!")
-    dataset = Dataset(filenames, img_size, params, True)
-    print("counting data mean std with few samples.")
-    subset_indices = sample(range(len(dataset)), min(len(dataset), 100))
+    dataset = Dataset(filenames, img_size, params, aug)
+    subset_indices = sample(range(len(dataset)), min(len(dataset), 10000))
     asd = Subset(dataset, subset_indices)
     data_mean, data_std = get_meanstd(asd)
 

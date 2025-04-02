@@ -610,7 +610,7 @@ class GIAResults:
             "original": original,
             "recreated": recreated,
             # Can not save config anymore since it contains objects. Need workaround.
-            # "result_config": result_config,
+            # "result_config": result_config,  # noqa: ERA001
             "id": self.id,
         }
 

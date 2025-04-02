@@ -201,9 +201,6 @@ def test_eval(model, loader):
                 continue
 
             detections = output.clone()
-            print(shapes)
-            print(type(shapes))
-            print(type(shapes[i]))
             scale(detections[:, :4], samples[i].shape[1:], shapes[i][0], shapes[i][1])
 
             # Evaluate
@@ -225,7 +222,7 @@ def test_eval(model, loader):
                     x = torch.where((iou >= iou_v[j]) & correct_class)
                     if x[0].shape[0]:
                         matches = torch.cat((torch.stack(x, 1), iou[x[0], x[1]][:, None]), 1)
-                        matches = matches.cpu().numpy()
+                        matches = matches.cpu().detach().numpy()
                         if x[0].shape[0] > 1:
                             matches = matches[matches[:, 2].argsort()[::-1]]
                             matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
@@ -235,7 +232,7 @@ def test_eval(model, loader):
             metrics.append((correct, output[:, 4], output[:, 5], labels[:, 0]))
 
     # Compute metrics
-    metrics = [torch.cat(x, 0).cpu().numpy() for x in zip(*metrics)]  # to numpy
+    metrics = [torch.cat(x, 0).cpu().detach().numpy() for x in zip(*metrics)]  # to numpy
     if len(metrics) and metrics[0].any():
         tp, fp, m_pre, m_rec, map50, mean_ap = compute_ap(*metrics)
 
@@ -425,7 +422,7 @@ def test_train(model, loader, loader_test):
 
         # # Scheduler
         scheduler.step()
-        # # mAP
+        # # mAP 
         last = test_eval(model, loader_test)
         print({'mAP': str(f'{last[1]:.3f}'),
                             'epoch': str(epoch + 1).zfill(3),

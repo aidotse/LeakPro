@@ -191,13 +191,14 @@ class Head(torch.nn.Module):
         self.box = torch.nn.ModuleList(torch.nn.Sequential(Conv(x, c2, 3),
                                                            Conv(c2, c2, 3),
                                                            torch.nn.Conv2d(c2, 4 * self.ch, 1)) for x in filters)
+        self.simulate_train_on_eval = False
 
     def forward(self, x):
         for i in range(self.nl):
             x[i] = torch.cat((self.box[i](x[i]), self.cls[i](x[i])), 1)
         if self.training:
             return x
-        if not self.evaluating:
+        if self.simulate_train_on_eval:
             return x
         self.anchors, self.strides = (x.transpose(0, 1) for x in make_anchors(x, self.stride, 0.5))
 
@@ -217,9 +218,6 @@ class Head(torch.nn.Module):
             a[-1].bias.data[:] = 1.0  # box
             # cls (.01 objects, 80 classes, 640 img)
             b[-1].bias.data[:m.nc] = math.log(5 / m.nc / (256 / s) ** 2)
-
-    def set_eval(self, on):
-        self.evaluating = on
 
 class YOLO(torch.nn.Module):
     def __init__(self, width, depth, num_classes):
@@ -395,7 +393,6 @@ class ComputeLoss:
         """
         self.bs = pred_scores.size(0)
         self.num_max_boxes = true_bboxes.size(1)
-        print(f"shape: {true_bboxes}")
         if self.num_max_boxes == 0:
             device = true_bboxes.device
             return (torch.full_like(pred_scores[..., 0], self.nc).to(device),
