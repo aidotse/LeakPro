@@ -120,11 +120,10 @@ class AbstractGIA(AbstractAttack):
                     reconstruction.data = MedianPool2d(kernel_size=3, stride=1, padding=1, same=False)(reconstruction)
             # Choose image who has given least loss
             if loss < self.best_loss:
-                pass
-            self.best_loss = loss
-            self.best_reconstruction = deepcopy(reconstruction_loader)
-            self.best_reconstruction_round = i
-            # logger.info(f"New best loss: {loss} on round: {i}")
+                self.best_loss = loss
+                self.best_reconstruction = deepcopy(reconstruction_loader)
+                self.best_reconstruction_round = i
+                logger.info(f"New best loss: {loss} on round: {i}")
             if i % 250 == 0:
                 logger.info(f"Iteration {i}, loss {loss}")
                 self.best_reconstruction = deepcopy(reconstruction_loader)
