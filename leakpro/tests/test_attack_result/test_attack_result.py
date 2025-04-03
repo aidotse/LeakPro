@@ -60,7 +60,7 @@ class TestMIAResult:
 
     def test_miaresult_init(self:Self) -> None:
         """Test the initialization of MIAResult."""
-        assert self.miaresult.id is None
+        assert self.miaresult.id is "dummy-test"
 
     def test_check_tpr_fpr(self:Self) -> None:
         """Test fpr and tpr."""

@@ -132,7 +132,8 @@ class MIAResult:
             ub: The upper bound of the FPR interval.
 
         """
-        if len(self.fpr) < 2:
+        # Check if the FPR values are less than or equal to the upper bound
+        if len(self.fpr) <= 2:
             return 0.0
         mask = self.fpr < ub
         return float(np.mean(self.tpr[mask]))

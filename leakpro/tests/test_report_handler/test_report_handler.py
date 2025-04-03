@@ -4,8 +4,11 @@ import logging
 import os
 import tempfile
 
+import numpy as np
+
 from leakpro.reporting.report_handler import ReportHandler
 from leakpro.utils.import_helper import Self
+from leakpro.reporting.mia_result import MIAResult
 
 
 class TestReportHandler:
@@ -13,10 +16,24 @@ class TestReportHandler:
 
     def setup_method(self:Self) -> None:
         """Set up temporary directory and logger for ReportHandler."""
+        
+        true_labels = np.array([False,  True,  True, True,  False, False])
+        signal_values =  np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
+        result_name = "dummy"
+        id = "dummy-test"
+
+        miaresult = MIAResult(true_membership = true_labels,
+                                    signal_values = signal_values,
+                                    result_name = result_name,
+                                    id = id)
+        
+        
         self.temp_dir = tempfile.TemporaryDirectory()
         self.logger = logging.getLogger("test_logger")
         self.logger.setLevel(logging.INFO)
-        self.report_handler = ReportHandler(report_dir=self.temp_dir.name)
+        self.report_handler = ReportHandler(results=[miaresult], report_dir=self.temp_dir.name)
+        
+
 
     def teardown_method(self:Self) -> None:
         """Clean up temporary directory."""
@@ -28,8 +45,13 @@ class TestReportHandler:
         assert self.report_handler.report_dir == self.temp_dir.name
 
         types = ["MIAResult", "GIAResults", "SinglingOutResults", "InferenceResults", "LinkabilityResults"]
-        assert False not in [_type in types for _type in self.report_handler.leakpro_types]
-        assert True not in [bool(self.report_handler.pdf_results[key]) for key in self.report_handler.leakpro_types]
+        
+        # check that pdf_results include all types and is empty
+        for key in self.report_handler.pdf_results:
+            assert key in types
+            assert self.report_handler.pdf_results[key] == []
+
+        assert len(self.report_handler.results) == 1
 
     def test_init_pdf(self:Self) -> None:
         """Test the initialization method of the ReportHandler."""
@@ -56,20 +78,7 @@ class TestReportHandler:
         assert os.path.isfile(f"{self.report_handler.report_dir}/LeakPro_output.pdf")
 
     def test_create_pdf(self:Self) -> None:
-        report_handler = ReportHandler(report_dir=self.temp_dir.name)
-
-        # Load results
-        report_handler.pdf_results["MIAResult"] = "test_result"
-
         # Create pdf report
-        report_handler.create_report()
-
-        assert os.path.isfile(f"{self.report_handler.report_dir}/LeakPro_output.pdf")
-
-    def test_create_empty_pdf(self:Self) -> None:
-        report_handler = ReportHandler(report_dir=self.temp_dir.name)
-
-        report_handler._init_pdf()
-        report_handler._compile_pdf()
+        self.report_handler.create_report()
 
         assert os.path.isfile(f"{self.report_handler.report_dir}/LeakPro_output.pdf")

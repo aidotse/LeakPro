@@ -1,13 +1,9 @@
 """Implementation of the Report module."""
 
-import os
-import pickle
 import subprocess
 
-from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
 from leakpro.reporting.gia_result import GIAResults
 from leakpro.reporting.mia_result import MIAResult
-from leakpro.schemas import AuditConfig
 from leakpro.synthetic_data_attacks.inference_utils import InferenceResults
 from leakpro.synthetic_data_attacks.linkability_utils import LinkabilityResults
 from leakpro.synthetic_data_attacks.singling_out_utils import SinglingOutResults
@@ -25,96 +21,27 @@ ResultList = Union[list[MIAResult],
 class ReportHandler():
     """Implementation of the report handler."""
 
-    def __init__(self:Self, results:ResultList, report_dir: str = None) -> None:
+    def __init__(self:Self, results:ResultList, report_dir: str) -> None:
         logger.info("Initializing report handler...")
 
-        self.report_dir = self._try_find_rep_dir() if report_dir is None else report_dir
+        self.report_dir = report_dir
         logger.info(f"report_dir set to: {self.report_dir}")
 
         self.pdf_results = {}
-        self.leakpro_types = ["MIAResult",
-                           "GIAResults",
-                           "SinglingOutResults",
-                            "InferenceResults",
-                            "LinkabilityResults"
-                           ]
+        self.leakpro_types = {"MIAResult" : MIAResult,
+                              "GIAResults" : GIAResults,
+                              "SinglingOutResults" : SinglingOutResults,
+                              "InferenceResults" : InferenceResults,
+                              "LinkabilityResults" : LinkabilityResults}
 
         # Initiate empty lists for the different types of LeakPro attack types
         for key in self.leakpro_types:
             self.pdf_results[key] = []
 
-        self.results = results
+        self.results = []
         for res in results:
             assert isinstance(res, (MIAResult, GIAResults, InferenceResults, LinkabilityResults, SinglingOutResults))
             self.results.append(res)
-
-    def _try_find_rep_dir(self:Self) -> str:
-        save_path = "../leakpro_output/results"
-        # Check if path exists, otherwise create it.
-        for _ in range(3):
-            if os.path.exists(save_path):
-                return save_path
-            save_path = "../"+save_path
-
-        # If no result folder can be found
-        if not os.path.exists(save_path):
-            save_path = "../../leakpro_output/results"
-            os.makedirs(save_path)
-
-        return save_path
-
-    def save_results(self:Self,
-                    attack_name: str = None,
-                    result_data: Union[MIAResult,
-                                       GIAResults,
-                                       InferenceResults,
-                                       LinkabilityResults,
-                                       SinglingOutResults] = None,
-                    config: AuditConfig = None) -> None:
-        """Save method for results."""
-
-        assert isinstance(result_data, (MIAResult,
-                                       GIAResults,
-                                       InferenceResults,
-                                       LinkabilityResults,
-                                       SinglingOutResults))
-        assert isinstance(config, AuditConfig)
-
-        logger.info(f"Saving results for {attack_name}")
-        attack_config = config.attack_list.get(attack_name, None)
-
-        if attack_config is None:
-            attack_config = AttackFactoryMIA.attack_classes[attack_name].AttackConfig()
-            config.attack_list[attack_name] = attack_config
-        result_data.save(path=self.report_dir, name=attack_name, config=config)
-
-    def load_results(self:Self) -> None:
-        """Load method for results."""
-
-        self.results = []
-        for parentdir in os.scandir(f"{self.report_dir}"):
-            if parentdir.is_dir():
-                for subdir in os.scandir(f"{self.report_dir}/{parentdir.name}"):
-                    if subdir.is_dir():
-                        try:
-                            with open(f"{self.report_dir}/{parentdir.name}/{subdir.name}/data.json", "rb") as f:
-                                data = pickle.load(f)  # noqa: S301
-
-                            # Extract class name and data
-                            result_type = data.result_type
-
-                            # Dynamically get the class from its name (resulttype)
-                            # This assumes that the class is already defined in the current module or imported to context
-                            if result_type in globals() and callable(globals()[result_type]):
-                                cls = globals()[result_type]
-                            else:
-                                raise ValueError(f"Class '{result_type}' not found.")
-
-                            instance =  cls.load(data)
-                            self.results.append(instance)
-
-                        except Exception as e:
-                            logger.info(f"In ReportHandler.load_results(), Not able to load data, Error: {e}")
 
     def create_results(self:Self) -> None:
         """Result method to group all attacks."""
@@ -129,51 +56,24 @@ class ReportHandler():
                     logger.info(f"No results of type {result_type} found.")
                     continue
 
-                # Check if the result type has a 'create_results' method
-                try:
-                    result_class = globals().get(result_type)
-                except Exception as e:
-                    logger.info(f"No {result_type} class could be found or exists. Error: {e}")
-                    continue
+                result_class = self.leakpro_types[result_type]
+                assert hasattr(result_class, "create_results"), f"No create_results in result class {result_class}."
+                assert callable(result_class.create_results), f" create_results is not callable in result class {result_class}."
 
-                if hasattr(result_class, "create_results") and callable(result_class.create_results):
-
-                    # Create all results
-                    latex_results = result_class.create_results(results=results, save_dir=self.report_dir)
-                    self.pdf_results[result_type].append(latex_results)
+                # Create all results
+                latex_results = result_class.create_results(results=results, save_dir=self.report_dir)
+                self.pdf_results[result_type].append(latex_results)
 
             except Exception as e:
                 logger.info(f"Error in results all: {result_class}, {e}")
 
-    def create_results_mia(
-        self:Self,
-        ) -> None:
-        """Method to create MIAResult results."""
-        self.create_results(types=["MIAResult"])
-
-    def create_results_gia(
-        self:Self,
-        ) -> None:
-        """Method to create GIAResults results."""
-        self.create_results(types=["GIAResults"])
-
-    def create_results_syn(
-        self:Self,
-        ) -> None:
-        """Method to create Synthetic results."""
-
-        self.create_results(types=["SinglingOutResults",
-                                   "InferenceResults",
-                                   "LinkabilityResults"])
-
     def create_report(self:Self) -> None:
         """Method to create PDF report."""
 
-        # Make sure results have been read and created
-        if not hasattr(self, "results"):
-            self.load_results()
-        if self.pdf_results and all(not value for value in self.pdf_results.values()):
-            self.create_results()
+        assert self.results, "No results found. Please run the audit first."
+        assert self.report_dir, "No report directory found. Please set the report directory first."
+
+        self.create_results()
 
         # Create initial part of the document.
         self._init_pdf()
@@ -188,9 +88,6 @@ class ReportHandler():
         # Compile the PDF
         self._compile_pdf()
 
-        # Reset result variables
-        self._reset_result()
-
     def _init_pdf(self:Self) -> None:
         self.latex_content = """
         \\documentclass{article}
@@ -202,12 +99,6 @@ class ReportHandler():
 
     def _compile_pdf(self:Self) -> None:
         """Method to compile PDF."""
-
-        # Support for an empty pdf to compile
-        if self.latex_content.strip()[-16:] == "\\begin{document}":
-            self.latex_content += "\\null"
-            logger.info("Warning! You are about to compile an empty pdf.")
-            logger.info("Please ensure that you append your results!")
 
         self.latex_content += """
         \\end{document}
@@ -230,8 +121,3 @@ class ReportHandler():
         except Exception as e:
             logger.info(f"Could not compile PDF: {e}")
             logger.info("Make sure to install pdflatex with apt install texlive-latex-base")
-
-    def _reset_result(self:Self) -> None:
-        del self.results
-        for key in self.pdf_results:
-            self.pdf_results[key] = []

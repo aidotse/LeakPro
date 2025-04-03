@@ -163,11 +163,7 @@ class LeakPro:
 
         if create_pdf:
             logger.info("Creating PDF report")
-            report_handler = ReportHandler(report_dir=self.report_dir)
-            for res in results:
-                report_handler.save_results(attack_name=res.attack_name,
-                                            result_data=res,
-                                            config=res.configs)
+            report_handler = ReportHandler(results=results, report_dir=self.report_dir)
             # Create the report by compiling the latex text
             report_handler.create_report()
 

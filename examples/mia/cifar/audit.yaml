@@ -13,7 +13,7 @@ audit:  # Configurations for auditing
     loss_traj:
     qmia:
     #HSJ:
-    yoqo:
+    #yoqo:
 
   output_dir: "./leakpro_output"
   attack_type: "mia" #mia, gia
