@@ -60,7 +60,7 @@ class LeakPro:
             handler = MIAHandler(configs, user_input_handler)
 
         elif configs.audit.attack_type == "minv":
-            handler = MINVHandler(configs)
+            handler = MINVHandler(configs, user_input_handler)
 
             # Attach train_gan method explicitly if it exists in user_input_handler
             if hasattr(user_input_handler, "train_gan"):

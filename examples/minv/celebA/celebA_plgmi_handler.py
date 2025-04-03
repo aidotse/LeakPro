@@ -1,107 +1,105 @@
-import torch
-from torch import cuda, device, optim
-from torch.nn import CrossEntropyLoss
+from torch import cuda, device, optim, no_grad, save, set_default_device, backends
+from torch.nn import CrossEntropyLoss, Module
 from torch.utils.data import DataLoader
+from torchvision import datasets, transforms
 from tqdm import tqdm
 from leakpro import AbstractInputHandler
-from leakpro.schemas import TrainingOutput
+from leakpro.schemas import TrainingOutput,EvalOutput
 import kornia
 import time
 
+
 class CelebA_InputHandler(AbstractInputHandler):
     """Class to handle the user input for the CelebA dataset for plgmi attack."""
-    
-    def __init__(self, configs: dict) -> None:
-        super().__init__(configs=configs)
-        print("Configurations:", configs)
         
-    def get_criterion(self) -> torch.nn.Module:
-        """Set the CrossEntropyLoss for the model."""
-        return CrossEntropyLoss()
-
-    def get_optimizer(self, model: torch.nn.Module) -> optim.Optimizer:
-        """Set the optimizer for the model."""
-        return optim.SGD(model.parameters())
-
     def train(
         self,
         dataloader: DataLoader,
-        model: torch.nn.Module,
-        criterion: torch.nn.Module,
-        optimizer: optim.Optimizer,
-        epochs: int,
-    ) -> dict:
+        model: Module = None,
+        criterion: Module = None,
+        optimizer: optim.Optimizer = None,
+        epochs: int = None,
+    ) -> TrainingOutput:
         """Model training procedure."""
 
-        if not epochs:
-            raise ValueError("Epochs not found in configurations")
+        if epochs is None:
+            raise ValueError("epochs not found in configs")
 
+        # prepare training
         gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
         model.to(gpu_or_cpu)
 
+        accuracy_history = []
+        loss_history = []
+        
+        # training loop
         for epoch in range(epochs):
-            train_loss, train_acc, total_samples = 0.0, 0, 0
+            train_loss, train_acc, total_samples = 0, 0, 0
             model.train()
             for inputs, labels in tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}"):
-                inputs, labels = inputs.to(gpu_or_cpu), labels.to(gpu_or_cpu)
+                labels = labels.long()
+                inputs, labels = inputs.to(gpu_or_cpu, non_blocking=True), labels.to(gpu_or_cpu, non_blocking=True)
+                
                 optimizer.zero_grad()
-
                 outputs = model(inputs)
                 loss = criterion(outputs, labels)
+                pred = outputs.argmax(dim=1) 
                 loss.backward()
                 optimizer.step()
 
-                # Performance metrics
-                preds = outputs.argmax(dim=1)
-                train_acc += (preds == labels).sum().item()
-                train_loss += loss.item()* labels.size(0)
+                # Accumulate performance of shadow model
+                train_acc += pred.eq(labels.view_as(pred)).sum().item()
                 total_samples += labels.size(0)
-
-        avg_train_loss = train_loss / total_samples
-        train_accuracy = train_acc / total_samples  
+                train_loss += loss.item() * labels.size(0)
+                
+            avg_train_loss = train_loss / total_samples
+            train_accuracy = train_acc / total_samples 
+            
+            accuracy_history.append(train_accuracy) 
+            loss_history.append(avg_train_loss)
+        
         model.to("cpu")
 
-        output = {"model": model, "metrics": {"accuracy": train_accuracy, "loss": avg_train_loss}}
-        return TrainingOutput(**output)
+        results = EvalOutput(accuracy = train_accuracy,
+                             loss = avg_train_loss,
+                             extra = {"accuracy_history": accuracy_history, "loss_history": loss_history})
+        return TrainingOutput(model = model, metrics=results)
     
-    
-    def evaluate(self, dataloader: DataLoader, model: torch.nn.Module, criterion: torch.nn.Module) -> dict:
-        """Evaluate the model."""
+    def eval(self, loader, model, criterion):
         gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
         model.to(gpu_or_cpu)
         model.eval()
+        loss, acc = 0, 0
+        total_samples = 0
+        with no_grad():
+            for data, target in loader:
+                data, target = data.to(gpu_or_cpu), target.to(gpu_or_cpu)
+                target = target.view(-1) 
+                output = model(data)
+                loss += criterion(output, target).item() * target.size(0)
+                pred = output.argmax(dim=1) 
+                acc += pred.eq(target).sum().item()
+                total_samples += target.size(0)
+            loss /= total_samples
+            acc = float(acc) / total_samples
+            
+        output_dict = {"accuracy": acc, "loss": loss}
+        return EvalOutput(**output_dict)
 
-        test_loss, test_acc, total_samples = 0.0, 0, 0
-        with torch.no_grad():
-            for inputs, labels in tqdm(dataloader, desc="Evaluating"):
-                inputs, labels = inputs.to(gpu_or_cpu), labels.to(gpu_or_cpu)
-                outputs = model(inputs)
-                loss = criterion(outputs, labels)
-
-                preds = outputs.argmax(dim=1)
-                test_acc += (preds == labels).sum().item()
-                test_loss += loss.item()* labels.size(0)
-                total_samples += labels.size(0)
-        
-        avg_test_loss = test_loss / total_samples
-        test_accuracy = test_acc / total_samples
-        model.to("cpu")
-
-        return {"accuracy": test_accuracy, "loss": avg_test_loss}
 
     def train_gan(self,
                     pseudo_loader: DataLoader,
-                    gen: torch.nn.Module,
-                    dis: torch.nn.Module,
+                    gen: Module,
+                    dis: Module,
                     gen_criterion: callable,
                     dis_criterion: callable,
                     inv_criterion: callable,
-                    target_model: torch.nn.Module,
+                    target_model: Module,
                     opt_gen: optim.Optimizer,
                     opt_dis: optim.Optimizer,
                     n_iter: int,
                     n_dis: int,
-                    device: torch.device,
+                    device: device,
                     alpha: float,
                     log_interval: int,
                     sample_from_generator: callable
@@ -125,8 +123,8 @@ class CelebA_InputHandler(AbstractInputHandler):
                 log_interval: Log interval.
                 sample_from_generator: Function to sample from the generator.
         """
-        torch.set_default_device(device)
-        torch.backends.cudnn.benchmark = True
+        set_default_device(device)
+        backends.cudnn.benchmark = True
         gen_losses = []
         dis_losses = []
         inv_losses = []
@@ -194,7 +192,7 @@ class CelebA_InputHandler(AbstractInputHandler):
                 dis_losses.append(cumulative_loss_dis/n_dis)
                 
                 # Evaluate target model accuracy for training progress monitoring TODO: make optional for efficiency
-                with torch.no_grad():
+                with no_grad():
                     count += fake.shape[0]
                     T_logits = target_model(fake)
                     T_preds = T_logits.max(1, keepdim=True)[1]
@@ -207,5 +205,83 @@ class CelebA_InputHandler(AbstractInputHandler):
                             i, n_iter, _l_g, cumulative_loss_dis / n_dis, cumulative_inv_loss,
                             cumulative_target_acc / n_dis, time.strftime("%H:%M:%S")))
 
-        torch.save(gen.state_dict(), './gen.pth')
-        torch.save(dis.state_dict(), './dis.pth')
+        save(gen.state_dict(), './gen.pth')
+        save(dis.state_dict(), './dis.pth')
+
+    class UserDataset(AbstractInputHandler.UserDataset):
+        def __init__(self, x, y, transform=None,  indices=None):
+            """
+            Dataset for celebA.
+
+            Args:
+                x (torch.Tensor): Tensor of input images.
+                y (torch.Tensor): Tensor of labels.
+                transform (callable, optional): Optional transform to be applied on the image tensors.
+            """
+            self.x = x
+            self.y = y
+            self.transform = transform
+            self.indices = indices
+
+        def __len__(self):
+            """Return the total number of samples."""
+            return len(self.y)
+
+        def __getitem__(self, idx):
+            """Retrieve the image and its corresponding label at index 'idx'."""
+            image = self.x[idx]
+            label = self.y[idx]
+
+            # Apply transformations to the image if any
+            if self.transform:
+                image = self.transform(image)
+
+            return image, label
+        
+        def get_classes(self):
+            return len(self.y.unique())
+        
+        
+
+        @classmethod
+        def from_celebA(cls, config, subfolder):
+            re_size = 64
+            crop_size = 108
+            offset_height = (218 - crop_size) // 2
+            offset_width = (178 - crop_size) // 2
+            crop = lambda x: x[:, offset_height:offset_height + crop_size, offset_width:offset_width + crop_size]    
+            
+            data_dir = config["data"]["data_dir"]
+            train_transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Lambda(crop),
+            transforms.ToPILImage(),
+            transforms.Resize((re_size, re_size)),
+            transforms.ToTensor(),
+            ])
+
+            train_dataset = datasets.ImageFolder(os.path.join(data_dir, subfolder), train_transform)
+        
+            train_dataset.class_to_idx = {cls_name: int(cls_name) for cls_name in train_dataset.class_to_idx.keys()}
+
+            # Prepare data loader to iterate over combined_dataset
+            loader = DataLoader(train_dataset, batch_size=1, shuffle=False)
+
+            # Collect all data and targets
+            data_list = []
+            target_list = []
+            for data, target in loader:
+                data_list.append(data)  # Remove batch dimension
+                target_list.append(target)
+
+            # Concatenate data and targets into large tensors
+            data = cat(data_list, dim=0)  # Shape: (N, C, H, W)
+            targets = cat(target_list, dim=0)  # Shape: (N,)
+
+
+            return cls(data, targets)
+
+
+        def subset(self, indices):
+            """Return a subset of the dataset based on the given indices."""
+            return celebADataset(self.x[indices], self.y[indices], transform=self.transform)

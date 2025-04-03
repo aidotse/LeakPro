@@ -36,7 +36,7 @@ class AttackLiRA(AbstractMIA):
         num_memorization_audit_points: int = Field(default=0, ge=0, description="Directly set number of most vulnerable audit data points (Overrides 'memorization_threshold')")  # noqa: E501
 
         @model_validator(mode="after")
-        def check_num_shadow_models_if_online(self) -> Self:
+        def check_num_shadow_models_if_online(self: Self) -> Self:
             """Check if the number of shadow models is at least 2 when online is True.
 
             Returns
