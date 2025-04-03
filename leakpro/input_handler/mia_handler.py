@@ -71,7 +71,6 @@ class MIAHandler:
         except Exception as e:
             raise ValueError(f"Failed to create the target model blueprint from {model_class} in {module_path}") from e
 
-
     def _load_target_metadata(self:Self) -> None:
         """Get the target model metadata from the trained model metadata file."""
         target_model_metadata_path = self.configs.target.target_folder
@@ -247,21 +246,17 @@ class MIAHandler:
         """Set the target model blueprint."""
         self._target_model_blueprint = value
 
-
     def get_target_model(self:Self) -> torch.nn.Module:
         """Get the trained target model wrapped as PyTorchModel."""
         return self._target_model
-
 
     def set_target_model(self:Self, model:torch.nn.Module) -> None:
         """Set the trained target model."""
         self._target_model = model
 
-
     def get_target_model_metadata(self:Self) -> dict:
         """Get the metadata of the target model."""
         return self._target_model_metadata
-
 
     def set_target_model_metadata(self:Self, metadata:dict) -> None:
         """Set the metadata of the target model."""

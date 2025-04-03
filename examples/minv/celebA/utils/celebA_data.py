@@ -90,34 +90,7 @@ class celebADataset(Dataset):
 def get_celebA_train_test_loader(train_config):
     """This function returns the train and test data loaders for the private CelebA dataset."""
     # TODO: Stratified sampling for train and test
-    train_fraction = train_config["data"]["f_train"]
-    test_fraction = train_config["data"]["f_test"]
-    batch_size = train_config["train"]["batch_size"]
-    data_dir =  train_config["data"]["data_dir"] + "/celebA_private_data.pkl"
 
-    if not os.path.exists(data_dir):
-        population_dataset = celebADataset.from_celebA(config=train_config, subfolder='private')
-        with open(data_dir, "wb") as file:
-            pickle.dump(population_dataset, file)
-            print(f"Save data to {data_dir}")
-    else:
-        with open(data_dir, "rb") as file:
-            population_dataset = pickle.load(file)
-            print(f"Load data from {data_dir}")
-    
-    dataset_size = len(population_dataset)
-    train_size = int(train_fraction * dataset_size)
-    test_size = int(test_fraction * dataset_size)
-
-    # Use sklearn's train_test_split to split into train and test indices
-    selected_index = np.random.choice(np.arange(dataset_size), train_size + test_size, replace=False)
-    train_indices, test_indices = train_test_split(selected_index, test_size=test_size)
-
-    train_subset = Subset(population_dataset, train_indices)
-    test_subset = Subset(population_dataset, test_indices)
-
-    train_loader = DataLoader(train_subset, batch_size =batch_size, shuffle=True)
-    test_loader = DataLoader(test_subset, batch_size= batch_size, shuffle=False)
 
     return train_loader, test_loader
 

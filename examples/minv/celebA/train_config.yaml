@@ -3,7 +3,7 @@ run: # Configurations for a specific run
   log_dir: target # String for indicating where to save all the information, including models and computed signals. We can reuse the models saved in the same log_dir.
 
 train: # Configuration for training
-  epochs: 30 # Integer number for indicating the epochs for training target model. For speedyresnet, it uses its own number of epochs.
+  epochs: 3 # Integer number for indicating the epochs for training target model. For speedyresnet, it uses its own number of epochs.
   batch_size: 64 # Integer number for indicating batch size for training the target model. For speedyresnet, it uses its own batch size.
   optimizer: SGD # String which indicates the optimizer. We support Adam and SGD. For speedyresnet, it uses its own optimizer.
   learning_rate: 0.001 # Float number for indicating learning rate for training the target model. For speedyresnet, it uses its own learning_rate.

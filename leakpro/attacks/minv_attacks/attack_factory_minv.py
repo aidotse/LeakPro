@@ -22,7 +22,7 @@ class AttackFactoryMINV:
         Args:
         ----
             name (str): The name of the attack.
-            handler (AbstractInputHandler): The input handler object.
+            handler (MINVHandler): The input handler object.
 
         Returns:
         -------
@@ -35,5 +35,8 @@ class AttackFactoryMINV:
         """
 
         if name in cls.attack_classes:
-            return cls.attack_classes[name](handler, handler.configs.audit.attack_list.get(name))
+            attack_config = handler.configs.audit.attack_list.get(name)
+            attack_object = cls.attack_classes[name](handler, attack_config)
+            attack_object.set_effective_optuna_metadata(attack_config) # remove optuna metadata if params not will be optimized
+            return attack_object
         raise ValueError(f"Unknown attack type: {name}")
