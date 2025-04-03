@@ -13,6 +13,7 @@ def max_margin_loss(out: torch.Tensor, iden: torch.Tensor) -> torch.Tensor:
         iden (torch.Tensor): The identity tensor.
 
     Returns:
+    -------
         torch.Tensor: The computed loss.
 
     """
@@ -32,6 +33,7 @@ def cross_entropy_loss(out: torch.Tensor, iden: torch.Tensor) -> torch.Tensor:
         iden (torch.Tensor): The target tensor with the true labels.
 
     Returns:
+    -------
         torch.Tensor: The computed cross-entropy loss.
 
     """
@@ -47,6 +49,7 @@ def poincare_loss(outputs: torch.Tensor, targets: torch.Tensor, xi: float = 1e-4
         xi (float, optional): A small constant to avoid numerical issues. Defaults to 1e-4.
 
     Returns:
+    -------
         torch.Tensor: The computed Poincare loss.
 
     """
@@ -75,6 +78,7 @@ def dis_hinge(dis_fake: torch.Tensor, dis_real: torch.Tensor) -> torch.Tensor:
         dis_real (torch.Tensor): The discriminator output for real data.
 
     Returns:
+    -------
         torch.Tensor: The computed hinge loss.
 
     """
@@ -90,6 +94,7 @@ def gen_hinge(dis_fake: torch.Tensor, dis_real: torch.Tensor = None) -> torch.Te
         dis_real (torch.Tensor, optional): The discriminator output for real data. Defaults to None.
 
     Returns:
+    -------
         torch.Tensor: The computed hinge loss.
 
     """
@@ -104,6 +109,7 @@ def dis_dcgan(dis_fake: torch.Tensor, dis_real: torch.Tensor) -> torch.Tensor:
         dis_real (torch.Tensor): The discriminator output for real data.
 
     Returns:
+    -------
         torch.Tensor: The computed DCGAN loss.
 
     """
@@ -118,6 +124,7 @@ def gen_dcgan(dis_fake: torch.Tensor, dis_real: torch.Tensor = None) -> torch.Te
         dis_real (torch.Tensor, optional): The discriminator output for real data. Defaults to None.
 
     Returns:
+    -------
         torch.Tensor: The computed DCGAN loss.
 
     """
@@ -156,6 +163,7 @@ class DisLoss(_Loss):
             **kwargs: Additional keyword arguments.
 
         Returns:
+        -------
             torch.Tensor: The computed loss.
 
         """
@@ -187,6 +195,7 @@ class GenLoss(_Loss):
             **kwargs: Additional keyword arguments.
 
         Returns:
+        -------
             torch.Tensor: The computed loss.
 
         """

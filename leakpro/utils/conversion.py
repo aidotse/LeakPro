@@ -7,13 +7,22 @@ from torch.optim import Optimizer
 from torch.utils.data import DataLoader, RandomSampler
 
 from leakpro.schemas import DataLoaderConfig, LossConfig, OptimizerConfig
+from leakpro.utils.import_helper import Union
 
+
+def _filter_metadata_to_use_init_params(cls_name:Union[Optimizer, Module], metadata_params: dict) -> dict:
+    """Filter the optimizer config to only include parameters that are valid for the provided class."""
+    valid_params = inspect.signature(cls_name.__init__).parameters
+    return {k: v for k, v in metadata_params.items() if k in valid_params}
 
 def _loss_to_config(loss_fn: Module) -> LossConfig:
     """Convert a PyTorch loss function to a LossConfig instance."""
 
     loss_name = loss_fn.__class__.__name__.lower()  # Convert class name to lowercase
     params = {k: getattr(loss_fn, k) for k in vars(loss_fn) if not k.startswith("_")}
+
+    params = _filter_metadata_to_use_init_params(loss_fn.__class__, params)
+
     return LossConfig(name=loss_name, params=params)
 
 def _optimizer_to_config(optimizer: Optimizer) -> OptimizerConfig:
@@ -21,6 +30,8 @@ def _optimizer_to_config(optimizer: Optimizer) -> OptimizerConfig:
 
     optimizer_name = optimizer.__class__.__name__.lower()
     params = {k: v for k, v in optimizer.defaults.items() if not k.startswith("_")}
+
+    params = _filter_metadata_to_use_init_params(optimizer.__class__, params)
 
     return OptimizerConfig(name=optimizer_name, params=params)
 

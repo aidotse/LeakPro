@@ -181,6 +181,7 @@ class ModelHandler():
             dict: The loaded metadata.
 
         """
+
         try:
             with open(metadata_path, "rb") as f:
                 return joblib.load(f)

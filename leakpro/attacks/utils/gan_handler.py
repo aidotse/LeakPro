@@ -67,6 +67,7 @@ class GANHandler(GeneratorHandler):
             z (torch.tensor): The latent vector to generate samples from, otherwise random.
 
         Returns:
+        -------
             tuple: A tuple containing the generated samples, the class labels, and the latent vectors.
 
         """
