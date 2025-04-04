@@ -161,15 +161,13 @@ class AttackLiRA(AbstractMIA):
         logger.info(f"Calculating the logits for all {self.num_shadow_models} shadow models")
         self.shadow_models_logits = np.swapaxes(self.signal(self.shadow_models,
                                                             self.handler,
-                                                            self.audit_data_indices,
-                                                            self.eval_batch_size), 0, 1)
+                                                            self.audit_data_indices), 0, 1)
 
         # Calculate logits for the target model
         logger.info("Calculating the logits for the target model")
         self.target_logits = np.swapaxes(self.signal([self.target_model],
                                                      self.handler,
-                                                     self.audit_data_indices,
-                                                     self.eval_batch_size), 0, 1).squeeze()
+                                                     self.audit_data_indices), 0, 1).squeeze()
 
         # Using Memorizationg boosting
         if self.memorization:
@@ -192,7 +190,6 @@ class AttackLiRA(AbstractMIA):
                 org_audit_data_length,
                 self.handler,
                 self.online,
-                self.eval_batch_size,
             )
             memorization_mask, _, _ = memorization.run()
 

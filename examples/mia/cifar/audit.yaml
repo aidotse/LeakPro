@@ -1,15 +1,19 @@
 audit:  # Configurations for auditing
-  random_seed: 1234  # Integer specifying the random seed
+  random_seed: 1236  # Integer specifying the random seed
   attack_list:
     rmia:
       online: False
-      num_shadow_models: 5
+      num_shadow_models: 2
       gamma: 1
     # population:
     lira:
-      online: False
+      online: True
+      num_shadow_models: 3
+      training_data_fraction: 0.6
+
     # loss_traj:
     # HSJ:
+    #   verbose: False
     # yoqo:
 
   output_dir: "./leakpro_output"
@@ -18,10 +22,10 @@ audit:  # Configurations for auditing
 
 target:
   # Target model path
-  module_path: "./utils/cifar_model_preparation.py"
+  module_path: "./target_model_class.py"
   model_class: "ResNet18" 
-  # Data paths
   target_folder: "./target"
+  # Data paths
   data_path: "./data/cifar10.pkl"
 
 shadow_model:

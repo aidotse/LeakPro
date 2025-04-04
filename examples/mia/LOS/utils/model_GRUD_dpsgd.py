@@ -11,6 +11,8 @@ import numpy as np
 import pandas as pd
 import torch.nn.functional as F
 import torch.utils.data as utils
+from opacus import PrivacyEngine
+from opacus.accountants.utils import get_noise_multiplier
 from sklearn.metrics import accuracy_score
 from torch import (
     Tensor,
@@ -35,7 +37,6 @@ from torch.autograd import Variable
 from torch.nn.parameter import Parameter
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
-
 from leakpro.schemas import MIAMetaDataSchema, OptimizerConfig, LossConfig
 
 
@@ -94,7 +95,7 @@ class FilterLinear(nn.Module):
             + ", out_features=" + str(self.out_features) \
             + ", bias=" + str(self.bias is not None) + ")"
 
-class GRUD(nn.Module):
+class GRUD_DPSGD(nn.Module):
     def __init__(self, input_size, hidden_size, X_mean, batch_size,
                  bn_flag = True, output_last = False):
         """With minor modifications from https://github.com/zhiyongc/GRU-D/
@@ -121,7 +122,7 @@ class GRUD(nn.Module):
             X_mean: the mean of the historical input data
         """
 
-        super(GRUD, self).__init__()
+        super(GRUD_DPSGD, self).__init__()
 
         # Save init params to a dictionary
         self.init_params = {
@@ -160,7 +161,6 @@ class GRUD(nn.Module):
         self.drop=nn.Dropout(p=0.57, inplace=False)
         if self.bn_flag:
             self.bn= nn.BatchNorm1d(self.hidden_size, eps=1e-05, momentum=0.1, affine=True)
-
 
     def step(self, x, x_last_obsv, x_mean, h, mask, delta):
         """Inputs:
@@ -307,14 +307,16 @@ def model_test(model, test_dataloader, criterion_BCE, criterion_MSE):
     return test_loss, test_acc
 
 
-def gru_trained_model_and_metadata(model,
+def dpsgd_gru_trained_model_and_metadata( model,
                                    train_dataloader,
                                    test_dataloader,
+                                   privacy_engine_dict,
                                    epochs,
                                    patience_early_stopping,
                                    patience_lr,
                                    min_delta,
-                                   learning_rate):
+                                   learning_rate,
+                                   target_model_dir):
 
     print("Model Structure: ", model)
     print("Start Training ... ")
@@ -338,8 +340,35 @@ def gru_trained_model_and_metadata(model,
 
     criterion_BCE = nn.BCEWithLogitsLoss()
     criterion_MSE = nn.MSELoss()
+    
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
     scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.2, patience = patience_lr)
+
+    sample_rate = 1 / len(train_dataloader)
+    try:
+        noise_multiplier = get_noise_multiplier(target_epsilon = privacy_engine_dict["target_epsilon"],
+                                        target_delta = privacy_engine_dict["target_delta"],
+                                        sample_rate = sample_rate ,
+                                        epochs = privacy_engine_dict["epochs"],
+                                        epsilon_tolerance = privacy_engine_dict["epsilon_tolerance"],
+                                        accountant = "prv",
+                                        eps_error = privacy_engine_dict["eps_error"],)
+    except Exception as e:
+        raise ValueError(
+            f"Failed to compute noise multiplier using the 'prv' accountant. "
+            f"This may be due to a large target_epsilon ({privacy_engine_dict['target_epsilon']}). "
+            f"Consider reducing epsilon or switching to a different accountant (e.g., 'rdp'). "
+            f"Original error: {e}")
+
+    # make the model private
+    privacy_engine = PrivacyEngine(accountant = "prv")
+    priv_model, priv_opt, priv_train_dataloader = privacy_engine.make_private(
+        module=model,
+        optimizer=optimizer,
+        data_loader=train_dataloader,
+        noise_multiplier=noise_multiplier,
+        max_grad_norm= privacy_engine_dict["max_grad_norm"],
+    )
 
     train_losses = []
     test_losses = []
@@ -347,21 +376,21 @@ def gru_trained_model_and_metadata(model,
     train_acces = []
 
     device_name = device("cuda" if cuda.is_available() else "cpu")
-    model.to(device_name)
+    priv_model.to(device_name)
 
     for epoch in tqdm(range(epochs), desc="Training Progress"):
 
-        model.train()
+        priv_model.train()
         train_loss = 0.0
         all_labels = []
         all_predictions = []
 
-        for _, (X, labels) in enumerate(tqdm(train_dataloader, desc="Training Batches")):
+        for _, (X, labels) in enumerate(tqdm(priv_train_dataloader, desc="Training Batches")):
 
             X = X.to(device_name)
             labels = labels.to(device_name)
             labels = labels.long().float()
-            prediction = model(X)
+            prediction = priv_model(X)
             prediction = prediction.squeeze(dim =1)
 
             all_labels.append(to_numpy(labels))
@@ -374,12 +403,12 @@ def gru_trained_model_and_metadata(model,
                 full_labels = cat((X[:,1:,:], labels), dim = 1)
                 loss = criterion_MSE(prediction, full_labels)
 
-            optimizer.zero_grad()
+            priv_opt.zero_grad()
             loss.backward()
-            optimizer.step()
+            priv_opt.step()
             train_loss += loss.item()
 
-        train_loss /= len(train_dataloader)
+        train_loss /= len(priv_train_dataloader)
         train_losses.append(train_loss)
 
         # Concatenate all accumulated predictions and labels
@@ -393,7 +422,7 @@ def gru_trained_model_and_metadata(model,
         train_acces.append(train_acc)
 
         # Test the model
-        test_loss, test_acc = model_test(model, test_dataloader, criterion_BCE, criterion_MSE)
+        test_loss, test_acc = model_test(priv_model, test_dataloader, criterion_BCE, criterion_MSE)
 
         test_losses.append(test_loss)
         test_acces.append(test_acc)
@@ -416,7 +445,7 @@ def gru_trained_model_and_metadata(model,
         scheduler.step(test_loss)
 
         # Check the learning rate
-        current_lr =  optimizer.param_groups[0]["lr"]
+        current_lr =  priv_opt.param_groups[0]["lr"]
         print(f"Learning Rate: {current_lr:.12f}")
 
         # Stop if learning rate becomes too small
@@ -432,13 +461,21 @@ def gru_trained_model_and_metadata(model,
 
     # Move the model back to the CPU
     # Ensure the target directory exists
-    os.makedirs("target_GRUD", exist_ok=True)
-    model.to("cpu")
-    with open("target_GRUD/target_model.pkl", "wb") as f:
-        save(model.state_dict(), f)
+    os.makedirs(target_model_dir, exist_ok=True)
+
+    state_dict = priv_model.state_dict()
+    cleaned_state_dict = {key.replace("_module.", "").replace("module.", ""): value
+                      for key, value in state_dict.items()}
+
+    priv_model.to("cpu")
+    with open(f"{target_model_dir}/target_model.pkl", "wb") as f:
+        save(cleaned_state_dict, f)
+    
+    # Create metadata for privacy engine
+    with open(f"{target_model_dir}/dpsgd_dic.pkl", "wb") as f:
+        pickle.dump(privacy_engine_dict, f)
 
     # Create metadata and store it
-    # Write init params
     init_params = {}
     for key, value in model.init_params.items():
         init_params[key] = value
@@ -469,9 +506,9 @@ def gru_trained_model_and_metadata(model,
             test_loss=test_loss,
             dataset="mimiciii"
         )
-    with open("target_GRUD/model_metadata.pkl", "wb") as f:
+    with open(f"{target_model_dir}/model_metadata.pkl", "wb") as f:
         pickle.dump(meta_data, f)
-    return  train_losses, test_losses, train_acces, test_acces
+    return  [train_losses, test_losses, train_acces, test_acces, priv_model, privacy_engine]
 
 
 
