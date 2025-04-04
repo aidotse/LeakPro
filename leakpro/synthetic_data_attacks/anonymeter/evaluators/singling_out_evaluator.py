@@ -63,16 +63,16 @@ def random_query(*, unique_values: Dict[str, List[Any]], cols: List[str]) -> str
             sub_query = f"{random_operator(data_type='boolean')}{col}"
         #Categorical
         elif isinstance(values, pd.CategoricalDtype):
-            sub_query = f"{col} {random_operator(data_type='categorical')} {val}"
+            sub_query = f"{col}{random_operator(data_type='categorical')}{val}"
         #Numerical
         elif is_numeric_dtype(values):
-            sub_query = f"{col} {random_operator(data_type='numerical')} {val}"
+            sub_query = f"{col}{random_operator(data_type='numerical')}{val}"
         #Categorical with escape quotes
         elif isinstance(val, str):
-            sub_query = f"{col} {random_operator(data_type='categorical')} '{escape_quotes(input=val)}'"
+            sub_query = f"{col}{random_operator(data_type='categorical')}'{escape_quotes(input=val)}'"
         #Categorical
         else:
-            sub_query = f"{col} {random_operator(data_type='categorical')} '{val}'"
+            sub_query = f"{col}{random_operator(data_type='categorical')}'{val}'"
         #Append to query
         query.append(sub_query)
     return " & ".join(query)
@@ -225,7 +225,7 @@ def query_from_record(*,
             item = ".isna()"
         #Boolean
         elif is_bool_dtype(dtypes[col]):
-            item = f"== {record[col]}"
+            item = f"=={record[col]}"
         #Numeric
         elif is_numeric_dtype(dtypes[col]):
             if medians is None:
@@ -234,15 +234,15 @@ def query_from_record(*,
                 operator = ">="
             else:
                 operator = "<="
-            item = f"{operator} {record[col]}"
+            item = f"{operator}{record[col]}"
         #Categorical
         elif isinstance(dtypes[col], pd.CategoricalDtype) and is_numeric_dtype(dtypes[col].categories.dtype):
-            item = f"== {record[col]}"
+            item = f"=={record[col]}"
         elif isinstance(record[col], str):
-            item = f"== '{escape_quotes(input=record[col])}'"
+            item = f"=='{escape_quotes(input=record[col])}'"
         else:
-            item = f'== "{record[col]}"'
-        query.append(f"{col} {item}")
+            item = f'=="{record[col]}"'
+        query.append(f"{col}{item}")
     return " & ".join(query)
 
 def multivariate_singling_out_queries(
@@ -330,6 +330,12 @@ def main_singling_out_attack(
         )
     return UniqueSinglingOutQueries(df=ori).evaluate_queries(queries=queries)
 
+def convert_df_numerical_columns_to_categories_with_threshold(*, df: pd.DataFrame, threshold: int) -> None:
+    """Auxiliary function that converts numerical columns in a DataFrame to categories, if number of unique values are lower than threshold.""" # noqa: E501
+    for col in df.columns:
+        if pd.api.types.is_numeric_dtype(df[col]) and (df[col].nunique() <= threshold):
+            df[col] = df[col].astype("category")
+
 class SinglingOutEvaluator(BaseModel):
     """Measure the singling-out risk created by a synthetic dataset.
 
@@ -361,8 +367,8 @@ class SinglingOutEvaluator(BaseModel):
         avoid excessively long running calculations. If ``max_attempts`` is None,
         no limit will be imposed.
     categorical_threshold: int, default is 20
-        If the number of unique values in any numerically valued colums does not exceed this tthreshold,
-        the corresponding column dtype will be set as categorical values columns
+        If the number of unique values in any numerically valued colums does not exceed this threshold,
+        the corresponding column dtype will be set (and treated) as category.
     main_queries: UniqueSinglingOutQueries, optional
         UniqueSinglingOutQueries object holding main attack queries and count.
         Parameter will be set in evaluate method.
@@ -382,10 +388,7 @@ class SinglingOutEvaluator(BaseModel):
     n_attacks: int = 2_000
     confidence_level: float = 0.95
     max_attempts: Optional[int] = 10_000_000
-
-    # New parameter for the unique count threshold
     categorical_threshold: int = 20
-
     #Following parameters are set in evaluate method
     main_queries: Optional[UniqueSinglingOutQueries] = None
     naive_queries: Optional[UniqueSinglingOutQueries] = None
@@ -395,18 +398,9 @@ class SinglingOutEvaluator(BaseModel):
         super().__init__(**kwargs)
         self.ori = self.ori.drop_duplicates()
         self.syn = self.syn.drop_duplicates()
-
         # Convert numeric columns with low unique counts (<= categorical_threshold) to categorical
         for df in [self.ori, self.syn]:
-            for col in df.columns:
-                if pd.api.types.is_numeric_dtype(df[col]):
-                    unique_vals = set(df[col].dropna().unique())
-                    # first, convert binary columns (values exactly {0, 1}) to boolean.
-                    if unique_vals == {0, 1}:
-                        df[col] = df[col].astype(bool)
-                    # convert numeric columns with low unique counts (<= categorical_threshold) to categorical.
-                    elif df[col].nunique() <= self.categorical_threshold:
-                        df[col] = df[col].astype("category")
+            convert_df_numerical_columns_to_categories_with_threshold(df=df, threshold=self.categorical_threshold)
 
     def evaluate(self: Self) -> EvaluationResults:
         """Run the singling-out attacks (main and naive) and set and return results."""
