@@ -334,7 +334,7 @@ def convert_df_numerical_columns_to_categories_with_threshold(*, df: pd.DataFram
     """Auxiliary function that converts numerical columns in a DataFrame to categories, if number of unique values are lower than threshold.""" # noqa: E501
     for col in df.columns:
         if pd.api.types.is_numeric_dtype(df[col]) and (df[col].nunique() <= threshold):
-            df[col] = df[col].astype("category")
+            df.loc[:, col] = df[col].astype("category")
 
 class SinglingOutEvaluator(BaseModel):
     """Measure the singling-out risk created by a synthetic dataset.
