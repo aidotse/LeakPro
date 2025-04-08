@@ -214,7 +214,7 @@ class AttackOSLO(AbstractMIA):
                                       total = len(data_loader),
                                       desc="Optimizing queries",
                                       leave=False):
-            xprime = self._generate_adversarial_example(data.to(device_name), labels)
+            xprime = self._generate_adversarial_example(data.to(device_name), labels.to(device_name))
 
             lprime = np.array([self.target_model.get_logits(xprime[j]) for j in range(xprime.shape[0])])
             lprime = 1 * (lprime > 0) if self.binary_output else np.argmax(lprime, axis = 2)
