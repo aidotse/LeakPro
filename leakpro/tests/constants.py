@@ -2,6 +2,7 @@ from dotmap import DotMap
 
 STORAGE_PATH = "./leakpro/tests/tmp"
 
+from leakpro.schemas import OptimizerConfig, LossConfig
 # User input handler for images
 
 
@@ -64,8 +65,8 @@ def get_shadow_model_config():
     shadow_model_config.model_class = "ConvNet"
     shadow_model_config.batch_size = 32
     shadow_model_config.epochs = 1
-    shadow_model_config.optimizer = {"name": "sgd", "lr": 0.001}
-    shadow_model_config.loss = {"name": "crossentropyloss"}
+    shadow_model_config.optimizer = OptimizerConfig(name="sgd", params= {"lr": 0.001})
+    shadow_model_config.criterion = LossConfig(name= "crossentropyloss")
     return shadow_model_config
 
 
