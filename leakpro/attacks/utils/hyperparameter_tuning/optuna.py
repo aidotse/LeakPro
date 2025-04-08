@@ -39,7 +39,8 @@ def optuna_optimal_hyperparameters(attack_object: AbstractAttack, optuna_config:
                     raise optuna.TrialPruned()
                 # save results if not pruned
                 if result_object is not None:
-                    result_object.save(name="optuna", path="./leakpro_output/results", config=attack_object.get_configs())
+                    result_object.save(name="optuna"+"trial"+str(trial.number), path="./leakpro_output/results",
+                                       config=attack_object.get_configs())
                     return intermediary_results
         elif isinstance(result, MIAResult):
             # Retrieve configuration and result metric
