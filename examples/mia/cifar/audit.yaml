@@ -5,7 +5,7 @@ audit:  # Configurations for auditing
       online: False
       num_shadow_models: 2
       gamma: 1
-    # population:
+     population:
     lira:
       online: True
       num_shadow_models: 3
@@ -15,7 +15,12 @@ audit:  # Configurations for auditing
     # HSJ:
     #   verbose: False
     # yoqo:
-
+    oslo:
+      n_audits: 500
+      training_data_fraction: 0.5  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
+      online: True # perform online or offline attack
+      max_iterations: 5
+      
   output_dir: "./leakpro_output"
   attack_type: "mia" #mia, gia
   data_modality: "image" #image, tabular
