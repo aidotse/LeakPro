@@ -4,6 +4,7 @@ audit:  # Configurations for auditing
   data_modality: "image" #image, tabular
   attack_list:
     plgmi:
+      top_n: 10 # Integer number for indicating the top n classes to select
       n_dis: 2 # Integer number for indicating the number of discriminator updates per generator update
       n_iter: 10 # Integer number for indicating the iterations for training the GAN
       batch_size: 32 # Integer number for indicating batch size for training the GAN
