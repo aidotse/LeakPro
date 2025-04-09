@@ -204,7 +204,8 @@ class AttackPLGMI(AbstractMINV):
                                         device = self.device,
                                         alpha = self.alpha,
                                         log_interval = self.log_interval,
-                                        sample_from_generator = self.gan_handler.sample_from_generator)
+                                        sample_from_generator = lambda: \
+                                            self.gan_handler.sample_from_generator(batch_size=self.batch_size))
             # Save generator
             # self.gan_handler.save_generator(self.generator,
             #                                 self.output_dir + "/trained_models/plgmi_generator.pth")  # noqa: ERA001
