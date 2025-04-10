@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 
 from pydantic import BaseModel
 
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.metrics.attack_result import AttackResult
 from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import List, Self, Union
@@ -30,7 +30,7 @@ class AbstractMINV(ABC):
 
     def __init__(
         self:Self,
-        handler: AbstractInputHandler
+        handler: MINVHandler,
     )->None:
         """Initialize the AttackAbstract class.
 

@@ -6,7 +6,7 @@ audit:  # Configurations for auditing
     plgmi:
       top_n: 10 # Integer number for indicating the top n classes to select
       n_dis: 2 # Integer number for indicating the number of discriminator updates per generator update
-      n_iter: 10 # Integer number for indicating the iterations for training the GAN
+      n_iter: 1000 # Integer number for indicating the iterations for training the GAN
       batch_size: 32 # Integer number for indicating batch size for training the GAN
       gen_lr: 0.0005 # Float number for indicating learning rate for training the generator
       dis_lr: 0.0002 # Float number for indicating learning rate for training the discriminator
@@ -22,14 +22,14 @@ audit:  # Configurations for auditing
       generator:
         module_path: "./utils/generator.py"
         model_class: "ResNetGenerator"
-        checkpoint_path: "gen.pth"
+        checkpoint_path: #"gen.pth"
         init_params:
           dim_z: *dim_z
           bottom_width: 4
       discriminator:
         module_path: "./utils/discriminator.py"
         model_class: "SNResNetProjectionDiscriminator"
-        checkpoint_path: "dis.pth"
+        checkpoint_path: #"dis.pth"
   reconstruction:
     batch_size: 32 # Integer number for indicating batch size for training the GAN
     num_class_samples: 1 # Number of samples to generate for each class
@@ -40,12 +40,11 @@ audit:  # Configurations for auditing
 
   output_dir: "./leakpro_output"
   attack_type: "minv" #mia, gia
-  modality: "image" #image, tabular
 
 target:
   # Target model path
-  module_path: "../../mia/celebA_HQ/utils/celeb_hq_model.py"
-  model_class: "ResNet18" 
+  module_path: "utils/resnet152_model.py"
+  model_class: "ResNet152" 
   # Data paths
   target_folder: "./target"
   data_path: "./data/celebA_private_data.pkl"

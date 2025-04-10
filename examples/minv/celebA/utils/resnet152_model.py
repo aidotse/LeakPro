@@ -6,7 +6,7 @@ from torchvision.models import ResNet152_Weights, resnet152
 from tqdm import tqdm
 
 from leakpro.schemas import MIAMetaDataSchema, OptimizerConfig, LossConfig, EvalOutput, DataLoaderConfig
-
+from leakpro.utils.conversion import _loss_to_config, _optimizer_to_config, _dataloader_to_config
 
 class ResNet152(nn.Module):
     def __init__(self, num_classes):
@@ -91,11 +91,6 @@ def create_trained_model_and_metadata(model,
     for key, value in model.init_params.items():
         init_params[key] = value
     
-    optimizer_data = {
-        "name": optimizer.__class__.__name__.lower(),
-        "params": optimizer.param_groups[0],
-    }
-    
     train_result = EvalOutput(accuracy=train_accuracies[-1],
                              loss=train_losses[-1],
                              extra={"accuracy_history": train_accuracies, "loss_history": train_losses})
@@ -104,22 +99,14 @@ def create_trained_model_and_metadata(model,
                              loss=test_losses[-1],
                              extra={"accuracy_history": test_accuracies, "loss_history": test_losses})
     
-    data_loader_config = DataLoaderConfig(
-        params={
-            "batch_size": train_loader.batch_size,
-        }
-    )
-    
-    loss_data = {"name": criterion.__class__.__name__.lower()}
-    
     meta_data = MIAMetaDataSchema(
             train_indices=train_loader.dataset.indices,
             test_indices=test_loader.dataset.indices,
             num_train=len(train_loader.dataset.indices),
             init_params=init_params,
-            optimizer=OptimizerConfig(**optimizer_data),
-            criterion=LossConfig(**loss_data),
-            data_loader=data_loader_config,
+            optimizer=_optimizer_to_config(optimizer),
+            criterion=_loss_to_config(criterion),
+            data_loader=_dataloader_to_config(train_loader),
             epochs=epochs,
             train_result=train_result,
             test_result=test_result,
