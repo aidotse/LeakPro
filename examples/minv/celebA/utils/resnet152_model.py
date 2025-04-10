@@ -5,7 +5,7 @@ from torch import cuda, device, nn, no_grad, optim, save
 from torchvision.models import ResNet152_Weights, resnet152
 from tqdm import tqdm
 
-from leakpro.schemas import MIAMetaDataSchema, OptimizerConfig, LossConfig
+from leakpro.schemas import MIAMetaDataSchema, OptimizerConfig, LossConfig, EvalOutput, DataLoaderConfig
 
 
 class ResNet152(nn.Module):
@@ -93,12 +93,22 @@ def create_trained_model_and_metadata(model,
     
     optimizer_data = {
         "name": optimizer.__class__.__name__.lower(),
-        "lr": optimizer.param_groups[0].get("lr", 0),
-        "weight_decay": optimizer.param_groups[0].get("weight_decay", 0),
-        "momentum": optimizer.param_groups[0].get("momentum", 0),
-        "dampening": optimizer.param_groups[0].get("dampening", 0),
-        "nesterov": optimizer.param_groups[0].get("nesterov", False)
+        "params": optimizer.param_groups[0],
     }
+    
+    train_result = EvalOutput(accuracy=train_accuracies[-1],
+                             loss=train_losses[-1],
+                             extra={"accuracy_history": train_accuracies, "loss_history": train_losses})
+    
+    test_result = EvalOutput(accuracy=test_accuracies[-1],
+                             loss=test_losses[-1],
+                             extra={"accuracy_history": test_accuracies, "loss_history": test_losses})
+    
+    data_loader_config = DataLoaderConfig(
+        params={
+            "batch_size": train_loader.batch_size,
+        }
+    )
     
     loss_data = {"name": criterion.__class__.__name__.lower()}
     
@@ -108,13 +118,11 @@ def create_trained_model_and_metadata(model,
             num_train=len(train_loader.dataset.indices),
             init_params=init_params,
             optimizer=OptimizerConfig(**optimizer_data),
-            loss=LossConfig(**loss_data),
-            batch_size=train_loader.batch_size,
+            criterion=LossConfig(**loss_data),
+            data_loader=data_loader_config,
             epochs=epochs,
-            train_acc=train_acc,
-            test_acc=test_acc,
-            train_loss=train_loss,
-            test_loss=test_loss,
+            train_result=train_result,
+            test_result=test_result,
             dataset="mimiciii"
         )
 
