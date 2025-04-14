@@ -158,7 +158,7 @@ class CelebA_InputHandler(AbstractInputHandler):
                     # Generator update
                     fake, fake_labels, _ = sample_from_generator()
                     fake_aug = aug_list(fake).to(device)
-                    dis_fake = dis(fake_aug, fake_labels)
+                    dis_fake = dis(fake, fake_labels)
                     inv_loss = inv_criterion(target_model(fake_aug), fake_labels)
 
                     inv_losses.append(inv_loss.item())
