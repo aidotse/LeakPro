@@ -119,10 +119,11 @@ class AttackPLGMI(AbstractMINV):
         # TODO: This does not scale well. Consider creating a class for the dataloader and implementing the __getitem__ method.
         logger.info("Performing top-n selection for pseudo labels")
         self.target_model.eval()
+        self.target_model.to(self.device)
         all_confidences = []
-        for images, _ in self.public_dataloader:
+        for entry, _ in self.public_dataloader:
             with torch.no_grad():
-                outputs = self.target_model(images)
+                outputs = self.target_model(entry.to(self.device))
                 confidences = F.softmax(outputs, dim=1)
                 all_confidences.append(confidences)
         # Concatenate all confidences
@@ -204,7 +205,8 @@ class AttackPLGMI(AbstractMINV):
                                         device = self.device,
                                         alpha = self.alpha,
                                         log_interval = self.log_interval,
-                                        sample_from_generator = self.gan_handler.sample_from_generator)
+                                        sample_from_generator = lambda: \
+                                            self.gan_handler.sample_from_generator(batch_size=self.batch_size))
             # Save generator
             # self.gan_handler.save_generator(self.generator,
             #                                 self.output_dir + "/trained_models/plgmi_generator.pth")  # noqa: ERA001
