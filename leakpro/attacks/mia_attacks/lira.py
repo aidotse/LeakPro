@@ -304,8 +304,6 @@ class AttackLiRA(AbstractMIA):
         signal_values = np.concatenate([self.in_member_signals, self.out_member_signals])
 
         # Return a result object containing predictions, true labels, and the signal values for further evaluation
-        return MIAResult(
-            true_membership=true_labels,
-            signal_values=signal_values,
-            result_name="LiRA",
-        )
+        return MIAResult.from_full_scores(true_membership=true_labels,
+                                    signal_values=signal_values,
+                                    result_name="LiRA")

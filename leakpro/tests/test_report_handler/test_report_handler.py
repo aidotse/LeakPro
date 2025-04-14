@@ -22,7 +22,7 @@ class TestReportHandler:
         result_name = "dummy"
         id = "dummy-test"
 
-        miaresult = MIAResult(true_membership = true_labels,
+        miaresult = MIAResult.from_full_scores(true_membership = true_labels,
                                     signal_values = signal_values,
                                     result_name = result_name,
                                     id = id)

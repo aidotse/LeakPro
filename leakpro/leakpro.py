@@ -148,18 +148,8 @@ class LeakPro:
     def run_audit(self:Self, create_pdf: bool = False, use_optuna: bool = False) -> list[Any]:
         """Run the audit."""
 
-        audit_results = self.attack_scheduler.run_attacks(use_optuna=use_optuna)
-        results = []
-
-        for attack_name in audit_results:
-            logger.info(f"Saving results for attack: {attack_name} to {self.report_dir}")
-            result = audit_results[attack_name]["result_object"]
-            result.save(name=attack_name, path=self.report_dir, config=self.handler.configs.audit)
-
-            result.attack_name = attack_name
-            result.configs = self.handler.configs.audit
-
-            results.append(result)
+        audit_results = self.attack_scheduler.run_attacks(report_dir=self.report_dir, use_optuna=use_optuna)
+        results = [entry["result_object"] for entry in audit_results.values()]
 
         if create_pdf:
             logger.info("Creating PDF report")

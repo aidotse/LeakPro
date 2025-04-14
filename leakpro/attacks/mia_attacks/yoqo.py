@@ -289,10 +289,12 @@ class AttackYOQO(AbstractMIA):
 
         logger.info(f"Accuracy: {np.sum(predictions == true_labels)/predictions.size}")
 
-        # Return a result object containing predictions, true labels, and the signal values for further evaluation
-        return MIAResult(
+        # Return the results, only a single confusion matrix is obtained from the attack
+        return MIAResult.from_confusion_counts(
             true_membership=true_labels,
-            signal_values=None,
-            result_name="YOQO",
-            tp_fp_tn_fn=(tp, fp, tn, fn),
-        )
+            tp=tp,
+            fp=fp,
+            tn=tn,
+            fn=fn,
+            result_name="YOQO")
+

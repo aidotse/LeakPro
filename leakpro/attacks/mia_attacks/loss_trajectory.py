@@ -418,8 +418,6 @@ class AttackLossTrajectory(AbstractMIA):
         self.mia_classifier()
         true_labels, signals = self.mia_attack(self.mia_classifer)
 
-        return MIAResult(
-            true_membership=true_labels,
-            signal_values=signals,
-            result_name="LossTrajectory",
-        )
+        return MIAResult.from_full_scores(true_membership=true_labels,
+                                          signal_values=signals,
+                                          result_name="LossTrajectory")

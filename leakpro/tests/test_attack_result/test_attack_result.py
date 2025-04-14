@@ -24,10 +24,24 @@ class TestMIAResult:
         result_name = "dummy"
         id = "dummy-test"
 
-        self.miaresult = MIAResult(true_membership = true_labels,
-                                    signal_values = signal_values,
-                                    result_name = result_name,
-                                    id = id)
+        self.miaresult_full = MIAResult.from_full_scores(true_membership = true_labels,
+                                                        signal_values = signal_values,
+                                                        result_name = result_name,
+                                                        id = id + "-full",)
+        
+        self.miaresult_fixed = MIAResult.from_fixed_thresholds(true_membership = true_labels,
+                                                            signal_values = signal_values,
+                                                            result_name = result_name,
+                                                            id = id + "-fixed",
+                                                            thresholds = [signal_values[-1], signal_values[0]])
+        
+        self.miaresult_confusion = MIAResult.from_confusion_counts(true_membership = true_labels,
+                                                                result_name = result_name,
+                                                                id = id + "-confusion",
+                                                                tp= 3,
+                                                                fp= 3,
+                                                                tn= 2,
+                                                                fn= 1,)
 
         self.config = {"random_seed": 1234, "attack_list":
                             {"lira":
@@ -53,6 +67,12 @@ class TestMIAResult:
         self.tpr_array = np.array([0.0, 0.0,0.33333333, 0.66666667, 1.0, 1.0])
         self.fp = [1,2,2,2,2,3]
         self.tn = [2,1,1,1,1,0]
+        
+        self.fixed_fpr = [self.fpr_array[0], self.fpr_array[-1]]
+        self.fixed_tpr = [self.tpr_array[0], self.tpr_array[-1]]
+        self.fixed_fp = [self.fp[0], self.fp[-1]]
+        self.fixed_tn = [self.tn[0], self.tn[-1]]
+        
 
     def teardown_method(self:Self) -> None:
         """Clean up temporary directory."""
@@ -60,15 +80,25 @@ class TestMIAResult:
 
     def test_miaresult_init(self:Self) -> None:
         """Test the initialization of MIAResult."""
-        assert self.miaresult.id is "dummy-test"
+        assert self.miaresult_full.id == "dummy-test-full"
+        assert self.miaresult_fixed.id == "dummy-test-fixed"
+        assert self.miaresult_confusion.id == "dummy-test-confusion"
 
     def test_check_tpr_fpr(self:Self) -> None:
         """Test fpr and tpr."""
 
-        assert np.allclose(self.miaresult.fpr, self.fpr_array)
-        assert np.allclose(self.miaresult.tpr, self.tpr_array)
-        np.testing.assert_array_equal(self.miaresult.fp, self.fp)
-        np.testing.assert_array_equal(self.miaresult.tn, self.tn)
+        # Check the full version
+        assert np.allclose(self.miaresult_full.fpr, self.fpr_array)
+        assert np.allclose(self.miaresult_full.tpr, self.tpr_array)
+        np.testing.assert_array_equal(self.miaresult_full.fp, self.fp)
+        np.testing.assert_array_equal(self.miaresult_full.tn, self.tn)
+        
+        # Check the fixed version
+        assert np.allclose(self.miaresult_fixed.fpr, self.fixed_fpr)
+        assert np.allclose(self.miaresult_fixed.tpr, self.fixed_tpr)
+        np.testing.assert_array_equal(self.miaresult_fixed.fp, self.fixed_fp)
+        np.testing.assert_array_equal(self.miaresult_fixed.tn, self.fixed_tn)
+        
 
     def test_save_load_miaresult(self:Self) -> None:
         """Test load and save functionality."""
@@ -78,15 +108,7 @@ class TestMIAResult:
         save_path = f"{self.temp_dir}/{name}/{name}{config_name}"
 
         # Test saving
-        config = {}
-        config["random_seed"] = 1234
-        config["attack_list"] = self.config["attack_list"]
-        config["attack_type"] = "mia"
-        config["data_modality"] = "tabular"
-        config["output_dir"] = save_path
-        config_schema = AuditConfig(**config)
-
-        self.miaresult.save(self.temp_dir, name, config_schema)
+        self.miaresult_full.save(self.temp_dir, name, self.config["attack_list"][name])
 
         assert os.path.isdir(save_path)
         assert os.path.exists(f"{save_path}/data.json")
@@ -116,7 +138,7 @@ class TestMIAResult:
         """Test if the LaTeX content is generated correctly."""
 
         result = [mocker.Mock(id="attack-config-1", result_name="test_attack_1",\
-                     fixed_fpr_table={"TPR@10.0%FPR": 0.90, "TPR@1.0%FPR": 0.80, "TPR@0.1%FPR": 0.70, "TPR@0.0%FPR": 0.60},
+                     fixed_fpr_table={"TPR@10%FPR": 0.90, "TPR@1%FPR": 0.80, "TPR@0.1%FPR": 0.70, "TPR@0%FPR": 0.60},
                      config={"training_data_fraction": 0.5, "num_shadow_models": 3, "online": True})]
 
         name = "attack_comparison"

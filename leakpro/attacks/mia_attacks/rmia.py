@@ -432,12 +432,10 @@ class AttackRMIA(AbstractMIA):
         # Ensure we use the stored quantities from now
         self.load_for_optuna = True
 
-        # compute ROC, TP, TN etc
-        return MIAResult(
-            true_membership=true_labels,
-            signal_values=signal_values,
-            result_name="RMIA"
-        )
+        # Save the results
+        return MIAResult.from_full_scores(true_membership=true_labels,
+                                          signal_values=signal_values,
+                                          result_name="RMIA")
 
     def reset_attack(self: Self, config:BaseModel) -> None:
         """Reset attack to initial state."""

@@ -162,7 +162,7 @@ class PytorchModel(Model):
             The loss value, as defined by the loss_fn attribute.
 
         """
-        batch_samples_tensor = tensor(batch_samples)
+        batch_samples_tensor = batch_samples.clone().detach() if isinstance(batch_samples, Tensor) else tensor(batch_samples)
         batch_labels_tensor = batch_labels.clone().detach()
 
         with no_grad():

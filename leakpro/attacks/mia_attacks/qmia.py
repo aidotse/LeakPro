@@ -368,11 +368,13 @@ class AttackQMIA(AbstractMIA):
         logger.info("Attack completed")
 
         # compute ROC, TP, TN etc
-        return MIAResult(
+        return MIAResult.from_confusion_counts(
             true_membership = true_labels,
-            signal_values = self.target_logits,
-            result_name = "QMIA",
-            tp_fp_tn_fn = (tp, fp, tn, fn)
-        )
+            tp = tp,
+            fp = fp,
+            tn = tn,
+            fn = fn,
+            result_name = "QMIA")
+
 
 

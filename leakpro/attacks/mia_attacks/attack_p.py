@@ -115,23 +115,11 @@ class AttackP(AbstractMIA):
         true_labels = np.concatenate([np.ones(len(self.audit_dataset["in_members"])),
                                       np.zeros(len(self.audit_dataset["out_members"]))])
 
-        # compute the true positive, false positive, true negative, and false negative
-        tp = np.zeros(len(thresholds))
-        fp = np.zeros(len(thresholds))
-        tn = np.zeros(len(thresholds))
-        fn = np.zeros(len(thresholds))
-
-        for i, threshold in enumerate(thresholds):
-            # compute the signal values
-            signal_values = np.less(audit_signal, threshold)
-            tp[i] = np.sum(np.logical_and(signal_values, true_labels))
-            fp[i] = np.sum(np.logical_and(signal_values, np.logical_not(true_labels)))
-            tn[i] = np.sum(np.logical_and(np.logical_not(signal_values), np.logical_not(true_labels)))
-            fn[i] = np.sum(np.logical_and(np.logical_not(signal_values), true_labels))
-
         logger.info("Attack completed")
 
-        return MIAResult(true_membership = true_labels,
-                         signal_values = audit_signal,
-                         result_name = "P-attack",
-                         tp_fp_tn_fn = (tp, fp, tn, fn))
+        return MIAResult.from_fixed_thresholds(
+            thresholds = thresholds,
+            true_membership = true_labels,
+            signal_values = audit_signal,
+            result_name = "P-attack",
+        )

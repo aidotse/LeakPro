@@ -9,23 +9,27 @@ from sklearn.metrics import auc
 
 from leakpro.reporting.report_utils import get_config_name, reduce_to_unique_labels
 from leakpro.schemas import MIAResultSchema
-from leakpro.utils.import_helper import Self
+from leakpro.utils.import_helper import Self, Union
 from leakpro.utils.logger import logger
 
 
 class MIAResult:
     """Contains results related to the performance of the metric."""
 
-    def __init__(  # noqa: PLR0913
-        self:Self,
-        true_membership: list=None,
-        signal_values:list=None,
-        metadata: dict = None,
-        result_name: str = None,
-        id: str = None,
-        tp_fp_tn_fn: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] = None
-    )-> None:
-        """Compute and store the accuracy, ROC AUC score, and the confusion matrix for a metric.
+    def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003, ARG002
+        raise RuntimeError(
+            "Use one of the constructors: "
+            "from_full_scores(), from_fixed_thresholds(), or from_confusion_counts()"
+        )
+
+    @classmethod
+    def from_full_scores(cls,
+                         true_membership:list,
+                         signal_values:list,
+                         result_name:str=None,
+                         id:str=None,
+                         metadata:dict=None) -> Self:
+        """Create MIAResult from full scores.
 
         Args:
         ----
@@ -34,125 +38,237 @@ class MIAResult:
             id: The identity of the attack
             metadata: Metadata about the results
             result_name: The name of the attack and result
-            tp_fp_tn_fn: Tuple containing the true positives, false positives, true negatives, and false negatives
-                         (this is used if the attack does not support arbitrary threshold value or does not create signal values).
+
+        Returns:
+        -------
+            MIAResult: An instance of MIAResult with the computed metrics.
 
         """
+        if metadata is None:
+            metadata = {}
+        obj = object.__new__(cls)
+        obj._init_common(true_membership, result_name, id, metadata)
+        obj.roc_mode = "full"
+        obj.signal_values = np.ravel(signal_values)
+        obj._compute_confusion_arrays()
+        obj._compute_metrics()
+        return obj
+
+    @classmethod
+    def from_fixed_thresholds(cls,
+                              true_membership: list,
+                              signal_values: list,
+                              thresholds: list,
+                              result_name: str = None,
+                              id: str = None,
+                              metadata: dict = None) -> Self:
+        """Create MIAResult from fixed threshold scores.
+
+        Args:
+        ----
+            true_membership: True membership labels.
+            signal_values: Signal values output by the attack.
+            thresholds: A list of fixed thresholds at which to evaluate confusion values.
+            result_name: The name of the attack and result.
+            id: The identity of the attack.
+            metadata: Metadata about the result.
+
+        Returns:
+        -------
+            MIAResult: An instance with metrics based on fixed thresholds.
+
+        """
+        if metadata is None:
+            metadata = {}
+        obj = object.__new__(cls)
+        obj._init_common(true_membership, result_name, id, metadata)
+        obj.roc_mode = "fixed"
+        obj.signal_values = np.ravel(signal_values)
+        obj._compute_fixed_threshold_confusions(thresholds)
+        obj._compute_metrics()
+        return obj
+
+    @classmethod
+    def from_confusion_counts(cls,
+                              true_membership: list,
+                              tp: Union[list[int], int],
+                              fp: Union[list[int], int],
+                              tn: Union[list[int], int],
+                              fn: Union[list[int], int],
+                              result_name: str = None,
+                              id: str = None,
+                              metadata: dict = None) -> Self:
+        """Create MIAResult directly from precomputed confusion values.
+
+        Args:
+        ----
+            true_membership: True membership labels (used only to compute accuracy).
+            tp: Number of true positives.
+            fp: Number of false positives.
+            tn: Number of true negatives.
+            fn: Number of false negatives.
+            result_name: The name of the attack and result.
+            id: The identity of the attack.
+            metadata: Metadata about the result.
+
+        Returns:
+        -------
+            MIAResult: An instance with metrics based on given confusion values.
+
+        """
+        if metadata is None:
+            metadata = {}
+        obj = object.__new__(cls)
+        obj._init_common(true_membership, result_name, id, metadata)
+        obj.signal_values = None
+        obj.tp = np.atleast_1d(tp)
+        obj.fp = np.atleast_1d(fp)
+        obj.tn = np.atleast_1d(tn)
+        obj.fn = np.atleast_1d(fn)
+
+        if len(obj.tp) == 1:
+            obj.roc_mode = "none"
+        else:
+            obj.roc_mode = "fixed"
+
+        obj._compute_metrics()
+        return obj
+
+    def _init_common(self, true_membership: list, result_name: str, id: str, metadata: dict) -> None:
+        """Initialize common attributes."""
         self.true = np.ravel(true_membership)
-        self.signal_values = signal_values
-        self.metadata = metadata
         self.result_name = result_name
         self.id = id
+        self.metadata = metadata
 
-        if tp_fp_tn_fn is not None:
-            self.tp = tp_fp_tn_fn[0]
-            self.fp = tp_fp_tn_fn[1]
-            self.tn = tp_fp_tn_fn[2]
-            self.fn = tp_fp_tn_fn[3]
-        else:
-            # Compute results
-            # Sort signal_values in descending order and align labels
-            sorted_indices = np.argsort(-np.ravel(self.signal_values))
-            sorted_labels = self.true[sorted_indices]
-            sorted_scores = self.signal_values[sorted_indices]
+    def _compute_confusion_arrays(self) -> None:
+        """Compute confusion arrays for a full ROC sweep from signal values."""
 
-            # Cumulative true positives and false positives as we move threshold from high to low
-            tp_cumsum = np.cumsum(sorted_labels == 1)
-            fp_cumsum = np.cumsum(sorted_labels == 0)
+        # Sort signal_values in descending order and align labels
+        sorted_indices = np.argsort(-self.signal_values)
+        sorted_labels = self.true[sorted_indices]
+        sorted_scores = self.signal_values[sorted_indices]
 
-            # Unique thresholds (indices returned start from low values)
-            thresholds, first_indices = np.unique(sorted_scores, return_index=True)
-            # Reverse the order to start from high values
-            thresholds = thresholds[::-1]
-            first_indices = first_indices[::-1]
+        # check that sorted_scores are descending
+        assert np.all(np.diff(sorted_scores) <= 0), "sorted_scores are not in descending order"
 
-            # Collect values at points where threshold changes
-            self.tp = tp_cumsum[first_indices]
-            self.fp = fp_cumsum[first_indices]
-            self.fn = (np.sum(sorted_labels == 1) - tp_cumsum[first_indices])
-            self.tn = (np.sum(sorted_labels == 0) - fp_cumsum[first_indices])
+        tp_cumsum = np.cumsum(sorted_labels == 1)
+        fp_cumsum = np.cumsum(sorted_labels == 0)
+
+        # Remove duplicates in sorted_scores and keep the first occurrence
+        _, first_indices = np.unique(sorted_scores, return_index=True)
+        first_indices = first_indices[::-1]
+
+        self.tp = tp_cumsum[first_indices]
+        self.fp = fp_cumsum[first_indices]
+        self.fn = np.sum(sorted_labels == 1) - self.tp
+        self.tn = np.sum(sorted_labels == 0) - self.fp
+
+        if len(self.tp) == 1:
+            self.roc_mode = "none"
+
+    def _compute_fixed_threshold_confusions(self, thresholds: list) -> None:
+        """Compute confusion values at fixed thresholds."""
+        signal_values = self.signal_values
+        labels = self.true
+
+        tp_list, fp_list, tn_list, fn_list = [], [], [], []
+
+        for thresh in thresholds:
+            preds = (signal_values >= thresh).astype(int)
+            tp = np.sum((preds == 1) & (labels == 1))
+            fp = np.sum((preds == 1) & (labels == 0))
+            tn = np.sum((preds == 0) & (labels == 0))
+            fn = np.sum((preds == 0) & (labels == 1))
+
+            tp_list.append(tp)
+            fp_list.append(fp)
+            tn_list.append(tn)
+            fn_list.append(fn)
+
+        self.tp = np.array(tp_list)
+        self.fp = np.array(fp_list)
+        self.tn = np.array(tn_list)
+        self.fn = np.array(fn_list)
+
+    def _compute_metrics(self) -> None:
+        """Compute evaluation metrics such as accuracy, ROC AUC, and FPR/TPR."""
+        total = self.tp + self.fp + self.tn + self.fn
+        self.accuracy = (self.tp + self.tn) / np.maximum(total, 1)
+
+        if self.roc_mode == "none":
+            self.fpr = None
+            self.tpr = None
+            self.roc_auc = None
+            self.fixed_fpr_table = None
+            return
 
         self.fpr = np.where(self.fp + self.tn != 0, self.fp / (self.fp + self.tn), 0.0)
         self.tpr = np.where(self.tp + self.fn != 0, self.tp / (self.tp + self.fn), 0.0)
 
-        self.accuracy = (self.tp + self.tn) / (self.tp + self.fp + self.fn + self.tn)
+        if np.sum(np.diff(self.fpr) < 0) > 0 or np.sum(np.diff(self.tpr) < 0) > 0:
+            logger.warning("FPR or TPR values are not monotonically increasing. ROC AUC may be inaccurate.")
+            self.roc_auc = None
+            self.fixed_fpr_table = None
+            return
 
-        def _get_length(x: np.ndarray) -> int:
-            """Get the length of the input."""
-            try:
-                return len(x)
-            except TypeError:
-                return 1  # Single value
-        # if too few unique values, it is not possible to compute ROC AUC
+        self.roc_auc = auc(self.fpr, self.tpr)
+        self.fixed_fpr_table = self._get_result_fixed_fpr([0.0, 0.0001, 0.001, 0.01, 0.1])
 
-        if _get_length(self.fpr) < 2:
-            logger.warning("Too few unique values to compute ROC AUC")
-            self.roc_auc = 0.0
-            self.fixed_fpr_table = {}
-            self.fpr = [0.0, 1.0]
-            self.tpr = [0.0, 1.0]
+    def _get_result_fixed_fpr(self, fpr_targets: list[float]) -> dict[str, float]:
+        """Return TPR values at selected FPR thresholds."""
 
-        else:
-            self.roc_auc = auc(self.fpr, self.tpr)
+        def format_percent(f: float) -> str:
+            percentage = f * 100
+            # Format with enough precision and strip trailing zeros
+            formatted = f"{percentage:.8f}".rstrip("0").rstrip(".")
+            return f"TPR@{formatted}%FPR"
 
-            fpr_targets = [0.0, 0.0001, 0.001, 0.01, 0.1]
-            self.fixed_fpr_table = self._get_result_fixed_fpr(fpr_targets)
-
-
-
-    def _get_result_fixed_fpr(self: Self, fpr_targets: list[float]) -> dict:
-        """Find TPR values for fixed FPRs.
-
-        Args:
-        ----
-            fpr_targets: List of FPR targets to compute TPR for.
-
-        """
-        results = {}
-
-        for fpr_target in fpr_targets:
-            # Get indices where FPR is less than or equal to the target
-            valid_indices = np.where(self.fpr <= fpr_target)[0]
-
-            if len(valid_indices) > 0:
-                valid_index = valid_indices[-1]
-                tpr = self.tpr[valid_index]
-            else:
-                tpr = 0.0
-
-            results[f"TPR@{fpr_target:.1%}FPR"] = tpr
-
-        return results
+        return {
+            format_percent(fpr_target): max(
+                (tpr for fpr, tpr in zip(self.fpr, self.tpr) if fpr <= fpr_target),
+                default=0.0
+            ) for fpr_target in fpr_targets
+        }
 
     def _get_roc_auc_in_fpr_interval(self:Self, ub:float) -> float:
-        """Calculate the average TPR for FPR values below fpr_threshold.
+        """Calculate the average TPR for FPR values below fpr_threshold."""
 
-        Args:
-        ----
-            ub: The upper bound of the FPR interval.
+        assert ub > 0.0, "Upper bound must be greater than 0.0"
+        assert ub < 1.0, "Upper bound must be less than 1.0"
 
-        """
-        # Check if the FPR values are less than or equal to the upper bound
-        if len(self.fpr) <= 2:
+        if self.roc_mode == "none":
+            logger.warning("ROC mode is 'none', cannot compute ROC AUC in FPR interval, returning zero.")
             return 0.0
-        mask = self.fpr < ub
-        return float(np.mean(self.tpr[mask]))
+        return float(np.mean(self.tpr[self.fpr < ub]))
+
+    def _safe_model_dump(self, obj:object) -> dict:
+        """Safely dump the object to a dictionary."""
+        if isinstance(obj, dict):
+            return obj
+        if hasattr(obj, "model_dump"):
+            return obj.model_dump()
+        return {}
+
+    def _create_dir(self, path: str) -> None:
+        if not os.path.exists(path):
+            os.makedirs(path)
+
+    def _has_roc(self) -> bool:
+        """Return True if this result supports a meaningful ROC curve."""
+        return self.roc_mode != "none" and self.fpr is not None and len(self.fpr) > 1
 
     def save(self:Self, path: str, name: str, config:dict = None) -> None:
         """Save the MIAResults to disk."""
 
-        result_config = config.attack_list[name]
-        if not isinstance(result_config, dict):
-            if hasattr(result_config, "model_dump"):
-                result_config = result_config.model_dump()
-            elif result_config is None:
-                result_config = {}
+        result_config = self._safe_model_dump(config)
 
         # Get the name for the attack configuration
         config_name = get_config_name(result_config)
 
         self.id = f"{name}{config_name}".replace("/", "__")
         save_path = f"{path}/{name}/{self.id}"
+        self._create_dir(save_path)
 
         # Data to be saved
         mia_data = MIAResultSchema(
@@ -164,22 +280,18 @@ class MIAResult:
             accuracy = self.accuracy,
             config = result_config,
             fixed_fpr = self.fixed_fpr_table,
-            signal_values = self.signal_values if self.signal_values is not None else [0.0],
-            true_labels = self.true if self.true is not None else [0],
+            signal_values = self.signal_values,
+            true_labels = self.true,
             id = self.id,
             tp_fp_tn_fn=(self.tp, self.fp, self.tn, self.fn) if self.signal_values is None else None
         )
-
-        # Check if path exists, otherwise create it.
-        if not os.path.exists(save_path):
-            os.makedirs(save_path)
 
         # Save the results to a file
         with open(f"{save_path}/data.json", "wb") as f:
             pickle.dump(mia_data, f)
 
         # Create ROC plot
-        if len(self.fpr) > 1:
+        if self._has_roc():
             logger.info(f"Creating ROC plot for {name}")
             self.create_roc_plot([self], save_dir = save_path, save_name = name)
 
@@ -187,24 +299,6 @@ class MIAResult:
         if self.signal_values is not None:
             logger.info(f"Creating SignalHistogram plot for {name}")
             self.create_signal_histogram(save_path = save_path)
-
-    @staticmethod
-    def load(mia_data:MIAResultSchema) -> Self:
-        """Load MIAResults from disk."""
-
-        assert isinstance(mia_data, MIAResultSchema), "mia_data must be of type MIAResultSchema"
-
-        mia_data.true_labels = np.array(mia_data.true_labels)
-        mia_data.signal_values = np.array(mia_data.signal_values)
-
-        return MIAResult(
-            true_membership = mia_data.true_labels,
-            signal_values = mia_data.signal_values,
-            metadata = mia_data.config,
-            result_name = mia_data.result_name,
-            id = mia_data.id,
-            tp_fp_tn_fn = mia_data.tp_fp_tn_fn
-        )
 
     def create_signal_histogram(self:Self, save_path: str) -> None:
         """Method to create Signal Histogram."""
@@ -232,6 +326,42 @@ class MIAResult:
         plt.tight_layout()
         plt.savefig(fname=filename + ".png", dpi=1000)
         plt.clf()
+
+    @classmethod
+    def load(cls, mia_data:MIAResultSchema) -> Self:
+        """Load MIAResults from disk.
+
+        Args:
+        ----
+            mia_data: MIAResultSchema object containing the results.
+
+        Returns:
+        -------
+            MIAResult: An instance of MIAResult with the loaded data.
+
+        """
+
+        assert isinstance(mia_data, MIAResultSchema), "mia_data must be of type MIAResultSchema"
+
+        mia_data.true_labels = np.array(mia_data.true_labels)
+        mia_data.signal_values = np.array(mia_data.signal_values)
+
+        obj = cls.__new__(cls)  # create instance without calling __init__
+
+        # manually set attributes
+        obj.true_membership = mia_data.true_labels
+        obj.signal_values = mia_data.signal_values
+        obj.metadata = mia_data.config
+        obj.result_name = mia_data.result_name
+        obj.id = mia_data.id
+        obj.tp_fp_tn_fn = mia_data.tp_fp_tn_fn
+        obj.roc_auc = mia_data.roc_auc
+        obj.accuracy = mia_data.accuracy
+        obj.fixed_fpr_table = mia_data.fixed_fpr
+        obj.fpr = mia_data.fpr
+        obj.tpr = mia_data.tpr
+
+        return obj
 
     @staticmethod
     def create_roc_plot(result_objects:list, save_dir: str = "", save_name: str = "") -> None:
@@ -356,7 +486,7 @@ class MIAResult:
         for res in results:
             config = config_latex_style(res.id)
             latex_content += f"""
-            {"-".join(res.result_name.split("_"))} & {config} & {res.fixed_fpr_table["TPR@10.0%FPR"]} & {res.fixed_fpr_table["TPR@1.0%FPR"]} & {res.fixed_fpr_table["TPR@0.1%FPR"]} & {res.fixed_fpr_table["TPR@0.0%FPR"]} \\\\ \\hline """ # noqa: E501
+            {"-".join(res.result_name.split("_"))} & {config} & {res.fixed_fpr_table["TPR@10%FPR"]} & {res.fixed_fpr_table["TPR@1%FPR"]} & {res.fixed_fpr_table["TPR@0.1%FPR"]} & {res.fixed_fpr_table["TPR@0%FPR"]} \\\\ \\hline """ # noqa: E501
         latex_content += """
         \\end{tabularx}
         }
