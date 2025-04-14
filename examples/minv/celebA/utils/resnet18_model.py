@@ -1,17 +1,19 @@
+"""
+This file contains the implementation of a ResNet18 model for image classification."""
 import os
 import pickle
 
 from torch import cuda, device, nn, no_grad, optim, save
-from torchvision.models import ResNet152_Weights, resnet152
+from torchvision.models import ResNet18_Weights, resnet18
 from tqdm import tqdm
 
-from leakpro.schemas import MIAMetaDataSchema, OptimizerConfig, LossConfig, EvalOutput, DataLoaderConfig
+from leakpro.schemas import MIAMetaDataSchema, EvalOutput
 from leakpro.utils.conversion import _loss_to_config, _optimizer_to_config, _dataloader_to_config
 
-class ResNet152(nn.Module):
+class ResNet18(nn.Module):
     def __init__(self, num_classes):
         super().__init__()
-        self.model = resnet152(weights=ResNet152_Weights.IMAGENET1K_V2)
+        self.model = resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
         self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
         self.init_params = {"num_classes": num_classes}
 
@@ -38,7 +40,6 @@ def create_trained_model_and_metadata(model,
                                       test_loader,
                                       train_config):
     lr = train_config["train"]["learning_rate"]
-    momentum = train_config["train"]["momentum"]
     epochs = train_config["train"]["epochs"]
     weight_decay = train_config["train"]["weight_decay"]
 
@@ -113,7 +114,7 @@ def create_trained_model_and_metadata(model,
             dataset="mimiciii"
         )
 
-    with open("target/model_metadata.pkl", "wb") as f:
+    with open(train_config["run"]["log_dir"]+"/model_metadata.pkl", "wb") as f:
         pickle.dump(meta_data, f)
 
     return train_accuracies, train_losses, test_accuracies, test_losses
