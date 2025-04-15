@@ -1,6 +1,6 @@
 """Module that contains the schema definitions for the input handler."""
 
-from typing import Annotated, Any, Callable, Dict, List, Literal, Optional, Tuple, Union
+from typing import Annotated, Any, Callable, Dict, List, Literal, Optional, Union
 
 import numpy as np
 import optuna
