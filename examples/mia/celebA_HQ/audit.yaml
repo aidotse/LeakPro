@@ -2,15 +2,23 @@
 audit:  # Configurations for auditing
   random_seed: 1234  # Integer specifying the random seed
   attack_list:
-    rmia:
-      training_data_fraction: 0.5  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
-      attack_data_fraction: 0.5 # Fraction of auxiliary dataset to sample from during attack
-      num_shadow_models: 3 # Number of shadow models to train
-      online: True # perform online or offline attack
-      temperature: 2
-      gamma: 2.0
-      offline_a: 0.33 # parameter from which we compute p(x) from p_OUT(x) such that p_IN(x) = a p_OUT(x) + b.
-      offline_b: 0.66
+    # rmia:
+    #   training_data_fraction: 0.5  # Fraction of the auxilary dataset to use for this attack (in each shadow model training)
+    #   attack_data_fraction: 0.5 # Fraction of auxiliary dataset to sample from during attack
+    #   num_shadow_models: 3 # Number of shadow models to train
+    #   online: True # perform online or offline attack
+    #   temperature: 2
+    #   gamma: 2.0
+    #   offline_a: 0.33 # parameter from which we compute p(x) from p_OUT(x) such that p_IN(x) = a p_OUT(x) + b.
+    #   offline_b: 0.66
+    # rmia:
+      # online: False
+      # num_shadow_models: 2
+      # gamma: 1
+    lira:
+      online: True
+      num_shadow_models: 2
+      training_data_fraction: 0.6
 
   output_dir: "./leakpro_output"
   attack_type: "mia" #mia, gia

@@ -5,6 +5,7 @@ import pickle
 
 from opacus import PrivacyEngine
 from opacus.accountants.utils import get_noise_multiplier
+from opacus.utils.batch_memory_manager import BatchMemoryManager
 from opacus.validators import ModuleValidator
 
 import torch
@@ -16,26 +17,41 @@ from tqdm import tqdm
 from leakpro import AbstractInputHandler
 from leakpro.schemas import TrainingOutput, EvalOutput
 from leakpro.utils.import_helper import Self
+from leakpro.utils.logger import logger
 
 class CifarInputHandlerDPsgd(AbstractInputHandler):
     """Class to handle the user input for the CIFAR100 dataset."""
 
     def train(
-        self,
+        self: Self,
         dataloader: DataLoader,
-        model: torch.nn.Module = None,
-        criterion: torch.nn.Module = None,
-        optimizer: optim.Optimizer = None,
-        epochs: int = None,
+        model: torch.nn.Module,
+        criterion: torch.nn.Module,
+        optimizer: optim.Optimizer,
+        epochs: int,
         do_dpsgd: bool = True,
     ) -> TrainingOutput:
-        """Model training procedure."""
+        """
+        Train a DP-SGD compliant model.
+
+        Args:
+            dataloader (DataLoader): DataLoader for the training dataset.
+            model (torch.nn.Module, optional): The model to be trained.
+            criterion (torch.nn.Module, optional): Loss function to optimize.
+            optimizer (optim.Optimizer, optional): Optimizer for training.
+            epochs (int, optional): Number of training epochs.
+            do_dpsgd (bool, optional): Whether to use DP-SGD for training. Defaults to True.
+
+        Returns:
+            TrainingOutput: Contains the trained model and training metrics, including accuracy and loss history.
+        """
+        batch_size = dataloader.batch_size
 
         if do_dpsgd:
             # Check if the model is compatible with DP-SGD
             errors = ModuleValidator.validate(model, strict=False)
             if len(errors) > 0:
-                print("Model has privacy violations. Fixing...")
+                logger.info("Model has privacy violations. Fixing...")
                 # Use ModuleValidator.fix to fix the models privacy violations
                 model = ModuleValidator.fix(model)
                 
@@ -54,10 +70,10 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
                 
                 # Create new optimizer with the same configuration but updated model parameters
                 optimizer = optimizer_class(model.parameters(), **optimizer_config)
-                print(f"Model fixed and {optimizer_class.__name__} re-instantiated.")
+                logger.info(f"Model fixed and {optimizer_class.__name__} re-instantiated.")
 
             # Send the model, optimizer, and dataloader to be DP-sgd-compliant 
-            model, optimizer, dataloader, _ = dpsgd(model, optimizer, dataloader)
+            model, optimizer, dataloader, privacyengine = dpsgd(model, optimizer, dataloader)
 
         # read hyperparams for training (the parameters for the dataloader are defined in get_dataloader):
         if epochs is None:
@@ -70,31 +86,39 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
         accuracy_history = []
         loss_history = []
 
-        # training loop
-        for epoch in range(epochs):
-            train_loss, train_acc = 0, 0
-            model.train()
-            for inputs, labels in tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}"):
-                labels = labels.long()
-                inputs, labels = inputs.to(gpu_or_cpu, non_blocking=True), labels.to(gpu_or_cpu, non_blocking=True)
-                
-                model.zero_grad()
-                optimizer.zero_grad()
+        # Use BatchMemoryManager to handle large batch sizes by splitting them into smaller sub-batches
+        # Helpful with limited-memory hardware while maintaining the same overall batch size
+        with BatchMemoryManager(
+            data_loader=dataloader, 
+            max_physical_batch_size=batch_size,
+            optimizer=optimizer
+        ) as memory_safe_data_loader:
 
-                outputs = model(inputs)
-                loss = criterion(outputs, labels)
-                pred = outputs.argmax(dim=1) 
-                loss.backward()
-                optimizer.step()
+            # training loop
+            for epoch in range(epochs):
+                train_loss, train_acc = 0, 0
+                model.train()
+                for inputs, labels in tqdm(memory_safe_data_loader, desc=f"Epoch {epoch+1}/{epochs}"):
+                    labels = labels.long()
+                    inputs, labels = inputs.to(gpu_or_cpu, non_blocking=True), labels.to(gpu_or_cpu, non_blocking=True)
 
-                # Accumulate performance of shadow model
-                train_acc += pred.eq(labels.view_as(pred)).sum().item()
-                train_loss += loss.item()
-                
-            avg_train_loss = train_loss / len(dataloader.dataset)
-            train_accuracy = train_acc / len(dataloader.dataset) 
-            accuracy_history.append(train_accuracy) 
-            loss_history.append(avg_train_loss)
+                    model.zero_grad()
+                    optimizer.zero_grad()
+
+                    outputs = model(inputs)
+                    loss = criterion(outputs, labels)
+                    pred = outputs.argmax(dim=1) 
+                    loss.backward()
+                    optimizer.step()
+
+                    # Accumulate performance of shadow model
+                    train_acc += pred.eq(labels.view_as(pred)).sum().item()
+                    train_loss += loss.item()
+
+                avg_train_loss = train_loss / len(dataloader.dataset)
+                train_accuracy = train_acc / len(dataloader.dataset) 
+                accuracy_history.append(train_accuracy) 
+                loss_history.append(avg_train_loss)
 
         model.to("cpu")
 
@@ -168,7 +192,7 @@ def dpsgd(
     ) -> None:
     """Set the model, optimizer and dataset using DPsgd."""
 
-    print("Training with DP-SGD")
+    logger.info("Training with DP-SGD")
     dpsgd_path = "./target_dpsgd/dpsgd_dic.pkl"
 
     sample_rate = 1/len(dataloader)
@@ -177,8 +201,7 @@ def dpsgd(
         # Open and read the pickle file
         with open(dpsgd_path, "rb") as file:
             privacy_engine_dict = pickle.load(file)
-        print("Pickle file loaded successfully!")
-        print("Data:", privacy_engine_dict)
+        logger.info("Pickle file loaded successfully, using DPsgd config:", privacy_engine_dict)
     else:
         raise Exception(f"File not found at: {dpsgd_path}")
 
