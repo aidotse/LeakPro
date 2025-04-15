@@ -296,5 +296,5 @@ class AttackYOQO(AbstractMIA):
             fp=fp,
             tn=tn,
             fn=fn,
-            result_name="YOQO")
-
+            result_name="YOQO",
+            metadata=self.configs.model_dump())

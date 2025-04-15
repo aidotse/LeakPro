@@ -99,8 +99,8 @@ class AttackRMIA(AbstractMIA):
         self.shadow_model_indices = None
 
         # Folder to store intermediate results
-        self.attack_folder_path = "leakpro_output/attacks/rmia"
-        os.makedirs(self.attack_folder_path, exist_ok=True)
+        self.attack_cache_folder_path = f"leakpro_output/attack_cache/{self.attack_id}"
+        os.makedirs(self.attack_cache_folder_path, exist_ok=True)
         self.load_for_optuna = False
 
 
@@ -153,19 +153,19 @@ class AttackRMIA(AbstractMIA):
         if not np.issubdtype(z_true_labels.dtype, np.integer):
             z_true_labels = z_true_labels.astype(int)
         # save the true labels
-        f_z_true_labels = f"{self.attack_folder_path}/z_true_labels.npy"
+        f_z_true_labels = f"{self.attack_cache_folder_path}/z_true_labels.npy"
         np.save(f_z_true_labels, z_true_labels)
 
         # run points through real model to collect the logits
         logits_theta = np.array(self.signal([self.target_model], self.handler, chosen_attack_data_indices))
 
         # Store the ratio of p(z|theta) to p(z) for the audit dataset to be used in other optuna
-        f_logits_theta = f"{self.attack_folder_path}/logits_theta.npy"
+        f_logits_theta = f"{self.attack_cache_folder_path}/logits_theta.npy"
         np.save(f_logits_theta, logits_theta)
 
         # run points through shadow models and collect the logits
         logits_shadow_models = self.signal(self.shadow_models, self.handler, chosen_attack_data_indices)
-        f_logits_sm = f"{self.attack_folder_path}/logits_shadow_models.npy"
+        f_logits_sm = f"{self.attack_cache_folder_path}/logits_shadow_models.npy"
         np.save(f_logits_sm, logits_shadow_models)
 
         return logits_theta, logits_shadow_models, z_true_labels
@@ -189,9 +189,9 @@ class AttackRMIA(AbstractMIA):
             if not self.load_for_optuna:
                 logits_theta, logits_shadow_models, z_true_labels = self._prepare_offline_aux_attack_logits()
             else:
-                logits_theta = np.load(f"{self.attack_folder_path}/logits_theta.npy")
-                logits_shadow_models = np.load(f"{self.attack_folder_path}/logits_shadow_models.npy")
-                z_true_labels = np.load(f"{self.attack_folder_path}/z_true_labels.npy")
+                logits_theta = np.load(f"{self.attack_cache_folder_path}/logits_theta.npy")
+                logits_shadow_models = np.load(f"{self.attack_cache_folder_path}/logits_shadow_models.npy")
+                z_true_labels = np.load(f"{self.attack_cache_folder_path}/z_true_labels.npy")
 
             # collect the softmax output of the correct class
             n_attack_points = len(z_true_labels)
@@ -241,17 +241,17 @@ class AttackRMIA(AbstractMIA):
         # run points through shadow models to get logits
         logits_shadow_models = self.signal(self.shadow_models, self.handler, audit_data_indices)
 
-        f_logits_theta = f"{self.attack_folder_path}/logits_audit_theta.npy"
+        f_logits_theta = f"{self.attack_cache_folder_path}/logits_audit_theta.npy"
         np.save(f_logits_theta, logits_theta)
-        f_logits_sm = f"{self.attack_folder_path}/logits_audit_shadow_models.npy"
+        f_logits_sm = f"{self.attack_cache_folder_path}/logits_audit_shadow_models.npy"
         np.save(f_logits_sm, logits_shadow_models)
-        f_ground_truth_indices = f"{self.attack_folder_path}/ground_truth_indices.npy"
+        f_ground_truth_indices = f"{self.attack_cache_folder_path}/ground_truth_indices.npy"
         np.save(f_ground_truth_indices, ground_truth_indices)
-        f_out_model_indices = f"{self.attack_folder_path}/out_model_indices.npy"
+        f_out_model_indices = f"{self.attack_cache_folder_path}/out_model_indices.npy"
         np.save(f_out_model_indices, out_model_indices)
-        f_in_members = f"{self.attack_folder_path}/in_members.npy"
+        f_in_members = f"{self.attack_cache_folder_path}/in_members.npy"
         np.save(f_in_members, in_members)
-        f_out_members = f"{self.attack_folder_path}/out_members.npy"
+        f_out_members = f"{self.attack_cache_folder_path}/out_members.npy"
         np.save(f_out_members, out_members)
 
         return logits_theta, logits_shadow_models, ground_truth_indices, out_model_indices, in_members, out_members
@@ -282,11 +282,11 @@ class AttackRMIA(AbstractMIA):
         # run points through shadow models and collect the logits
         logits_shadow_models = self.signal(self.shadow_models, self.handler, self.attack_data_index)
 
-        f_logits_target_model = f"{self.attack_folder_path}/logits_aux_target_model.npy"
+        f_logits_target_model = f"{self.attack_cache_folder_path}/logits_aux_target_model.npy"
         np.save(f_logits_target_model, logits_target_model)
-        f_logits_shadow_models = f"{self.attack_folder_path}/logits_aux_shadow_models.npy"
+        f_logits_shadow_models = f"{self.attack_cache_folder_path}/logits_aux_shadow_models.npy"
         np.save(f_logits_shadow_models, logits_shadow_models)
-        f_z_true_labels = f"{self.attack_folder_path}/z_true_labels.npy"
+        f_z_true_labels = f"{self.attack_cache_folder_path}/z_true_labels.npy"
         np.save(f_z_true_labels, z_true_labels)
 
         return logits_target_model, logits_shadow_models, z_true_labels
@@ -296,12 +296,12 @@ class AttackRMIA(AbstractMIA):
 
         # run target points through real model to get logits
         logits_theta = np.array(self.signal([self.target_model], self.handler, self.audit_dataset["data"]))
-        f_logits_theta = f"{self.attack_folder_path}/logits_audit_theta.npy"
+        f_logits_theta = f"{self.attack_cache_folder_path}/logits_audit_theta.npy"
         np.save(f_logits_theta, logits_theta)
 
         # run points through shadow models and collect the logits
         logits_shadow_models = self.signal(self.shadow_models, self.handler, self.audit_dataset["data"])
-        f_logits_sm = f"{self.attack_folder_path}/logits_audit_shadow_models.npy"
+        f_logits_sm = f"{self.attack_cache_folder_path}/logits_audit_shadow_models.npy"
         np.save(f_logits_sm, logits_shadow_models)
 
         return logits_theta, logits_shadow_models
@@ -311,12 +311,12 @@ class AttackRMIA(AbstractMIA):
         if not self.load_for_optuna:
             logits_theta, logits_shadow_models, ground_truth_indices, out_model_indices, in_members, out_members = self._prepare_online_audit_logits()  # noqa: E501
         else:
-            logits_theta = np.load(f"{self.attack_folder_path}/logits_audit_theta.npy")
-            logits_shadow_models = np.load(f"{self.attack_folder_path}/logits_audit_shadow_models.npy")
-            ground_truth_indices = np.load(f"{self.attack_folder_path}/ground_truth_indices.npy")
-            out_model_indices = np.load(f"{self.attack_folder_path}/out_model_indices.npy")
-            in_members = np.load(f"{self.attack_folder_path}/in_members.npy")
-            out_members = np.load(f"{self.attack_folder_path}/out_members.npy")
+            logits_theta = np.load(f"{self.attack_cache_folder_path}/logits_audit_theta.npy")
+            logits_shadow_models = np.load(f"{self.attack_cache_folder_path}/logits_audit_shadow_models.npy")
+            ground_truth_indices = np.load(f"{self.attack_cache_folder_path}/ground_truth_indices.npy")
+            out_model_indices = np.load(f"{self.attack_cache_folder_path}/out_model_indices.npy")
+            in_members = np.load(f"{self.attack_cache_folder_path}/in_members.npy")
+            out_members = np.load(f"{self.attack_cache_folder_path}/out_members.npy")
 
         # STEP 3: Run the attack
         # collect the softmax output of the correct class
@@ -334,9 +334,9 @@ class AttackRMIA(AbstractMIA):
         if not self.load_for_optuna:
             logits_target_model, logits_shadow_models, z_true_labels = self._prepare_online_aux_attack_logits()
         else:
-            logits_target_model = np.load(f"{self.attack_folder_path}/logits_aux_target_model.npy")
-            logits_shadow_models = np.load(f"{self.attack_folder_path}/logits_aux_shadow_models.npy")
-            z_true_labels = np.load(f"{self.attack_folder_path}/z_true_labels.npy")
+            logits_target_model = np.load(f"{self.attack_cache_folder_path}/logits_aux_target_model.npy")
+            logits_shadow_models = np.load(f"{self.attack_cache_folder_path}/logits_aux_shadow_models.npy")
+            z_true_labels = np.load(f"{self.attack_cache_folder_path}/z_true_labels.npy")
 
         # collect the softmax output of the correct class
         n_attack_points = len(self.attack_data_index)
@@ -367,8 +367,8 @@ class AttackRMIA(AbstractMIA):
         if not self.load_for_optuna:
             logits_theta, logits_shadow_models = self._prepare_offline_audit_logits()
         else:
-            logits_theta = np.load(f"{self.attack_folder_path}/logits_audit_theta.npy")
-            logits_shadow_models = np.load(f"{self.attack_folder_path}/logits_audit_shadow_models.npy")
+            logits_theta = np.load(f"{self.attack_cache_folder_path}/logits_audit_theta.npy")
+            logits_shadow_models = np.load(f"{self.attack_cache_folder_path}/logits_audit_shadow_models.npy")
 
         # collect the softmax output of the correct class
         ground_truth_indices = self.handler.get_labels(self.audit_dataset["data"])
@@ -435,7 +435,8 @@ class AttackRMIA(AbstractMIA):
         # Save the results
         return MIAResult.from_full_scores(true_membership=true_labels,
                                           signal_values=signal_values,
-                                          result_name="RMIA")
+                                          result_name="RMIA",
+                                          metadata=self.configs.model_dump())
 
     def reset_attack(self: Self, config:BaseModel) -> None:
         """Reset attack to initial state."""

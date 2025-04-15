@@ -1,7 +1,7 @@
 """Contains the Result classes for MIA, MiNVA, and GIA attacks."""
 
+import json
 import os
-import pickle
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,7 +9,7 @@ from sklearn.metrics import auc
 
 from leakpro.reporting.report_utils import get_config_name, reduce_to_unique_labels
 from leakpro.schemas import MIAResultSchema
-from leakpro.utils.import_helper import Self, Union
+from leakpro.utils.import_helper import Any, Self, Union
 from leakpro.utils.logger import logger
 
 
@@ -52,6 +52,7 @@ class MIAResult:
         obj.signal_values = np.ravel(signal_values)
         obj._compute_confusion_arrays()
         obj._compute_metrics()
+        obj.result = obj._make_result_object()
         return obj
 
     @classmethod
@@ -86,6 +87,7 @@ class MIAResult:
         obj.signal_values = np.ravel(signal_values)
         obj._compute_fixed_threshold_confusions(thresholds)
         obj._compute_metrics()
+        obj.result = obj._make_result_object()
         return obj
 
     @classmethod
@@ -132,6 +134,7 @@ class MIAResult:
             obj.roc_mode = "fixed"
 
         obj._compute_metrics()
+        obj.result = obj._make_result_object()
         return obj
 
     def _init_common(self, true_membership: list, result_name: str, id: str, metadata: dict) -> None:
@@ -140,6 +143,28 @@ class MIAResult:
         self.result_name = result_name
         self.id = id
         self.metadata = metadata
+        result_config = self._safe_model_dump(self.metadata)
+        readable_name = get_config_name(result_config) # concatenate config params to name
+        self.id = f"{self.result_name}{readable_name}".replace("/", "__")
+
+    def _make_result_object(self) -> MIAResultSchema:
+        return MIAResultSchema(
+            result_name = self.result_name,
+            result_type = self.__class__.__name__,
+            id = self.id,
+            tpr = self.tpr,
+            fpr = self.fpr,
+            roc_auc = self.roc_auc,
+            accuracy = self.accuracy,
+            config = self.metadata,
+            fixed_fpr = self.fixed_fpr_table,
+            signal_values = self.signal_values,
+            true_labels = self.true,
+            tp = self.tp,
+            fp = self.fp,
+            tn = self.tn,
+            fn = self.fn,
+        )
 
     def _compute_confusion_arrays(self) -> None:
         """Compute confusion arrays for a full ROC sweep from signal values."""
@@ -258,46 +283,40 @@ class MIAResult:
         """Return True if this result supports a meaningful ROC curve."""
         return self.roc_mode != "none" and self.fpr is not None and len(self.fpr) > 1
 
-    def save(self:Self, path: str, name: str, config:dict = None) -> None:
+    def save(self:Self, attack_obj: Any, output_dir: str) -> None:
         """Save the MIAResults to disk."""
 
-        result_config = self._safe_model_dump(config)
-
-        # Get the name for the attack configuration
-        config_name = get_config_name(result_config)
-
-        self.id = f"{name}{config_name}".replace("/", "__")
-        save_path = f"{path}/{name}/{self.id}"
+        attack_name = attack_obj.__class__.__name__.lower()
+        save_path = f"{output_dir}/results/{self.id}"
         self._create_dir(save_path)
 
-        # Data to be saved
-        mia_data = MIAResultSchema(
-            result_name = self.result_name,
-            result_type = self.__class__.__name__,
-            tpr = self.tpr,
-            fpr = self.fpr,
-            roc_auc = self.roc_auc,
-            accuracy = self.accuracy,
-            config = result_config,
-            fixed_fpr = self.fixed_fpr_table,
-            signal_values = self.signal_values,
-            true_labels = self.true,
-            id = self.id,
-            tp_fp_tn_fn=(self.tp, self.fp, self.tn, self.fn) if self.signal_values is None else None
-        )
+        # Create directory for saving data objects
+        data_obj_storage = f"{output_dir}/data_objects/"
 
-        # Save the results to a file
-        with open(f"{save_path}/data.json", "wb") as f:
-            pickle.dump(mia_data, f)
+        def json_fallback(obj: Any) -> Any:
+            """Fallback function for JSON serialization."""
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            if isinstance(obj, (np.integer, np.floating)):
+                return obj.item()
+            raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
+        # Save the results to a file in data objects using attack hash
+        with open(f"{data_obj_storage}{attack_obj.attack_id}.json", "w") as f:
+            json.dump(self.result.model_dump(), f, default=json_fallback)
+
+        # Store results for user output
+        with open(f"{save_path}/result.txt", "w") as f:
+            f.write(str(self.result.model_dump()))
 
         # Create ROC plot
         if self._has_roc():
-            logger.info(f"Creating ROC plot for {name}")
-            self.create_roc_plot([self], save_dir = save_path, save_name = name)
+            logger.info(f"Creating ROC plot for {attack_name}")
+            self.create_roc_plot([self], save_dir = save_path)
 
         # Create SignalHistogram plot for MIAResult
         if self.signal_values is not None:
-            logger.info(f"Creating SignalHistogram plot for {name}")
+            logger.info(f"Creating SignalHistogram plot for {attack_name}")
             self.create_signal_histogram(save_path = save_path)
 
     def create_signal_histogram(self:Self, save_path: str) -> None:
@@ -328,61 +347,61 @@ class MIAResult:
         plt.clf()
 
     @classmethod
-    def load(cls, mia_data:MIAResultSchema) -> Self:
+    def load(cls, data_path:str) -> Self:
         """Load MIAResults from disk.
 
         Args:
         ----
-            mia_data: MIAResultSchema object containing the results.
+            data_path: Path to the JSON file containing the MIAResults.
 
         Returns:
         -------
             MIAResult: An instance of MIAResult with the loaded data.
 
         """
+        with open(data_path, "r") as f:
+            mia_data = json.load(f)
+        mia_data = MIAResultSchema(**mia_data) # validate and parse the data
 
-        assert isinstance(mia_data, MIAResultSchema), "mia_data must be of type MIAResultSchema"
+        # Create a new instance of MIAResult
+        obj = object.__new__(cls)
 
-        mia_data.true_labels = np.array(mia_data.true_labels)
-        mia_data.signal_values = np.array(mia_data.signal_values)
-
-        obj = cls.__new__(cls)  # create instance without calling __init__
-
-        # manually set attributes
-        obj.true_membership = mia_data.true_labels
-        obj.signal_values = mia_data.signal_values
-        obj.metadata = mia_data.config
         obj.result_name = mia_data.result_name
         obj.id = mia_data.id
-        obj.tp_fp_tn_fn = mia_data.tp_fp_tn_fn
-        obj.roc_auc = mia_data.roc_auc
+        obj.tpr = mia_data.tpr if mia_data.tpr else None
+        obj.fpr = mia_data.fpr if mia_data.fpr else None
+        obj.roc_auc = mia_data.roc_auc if mia_data.roc_auc else None
         obj.accuracy = mia_data.accuracy
-        obj.fixed_fpr_table = mia_data.fixed_fpr
-        obj.fpr = mia_data.fpr
-        obj.tpr = mia_data.tpr
+        obj.metadata = mia_data.config
+        obj.fixed_fpr_table = mia_data.fixed_fpr if mia_data.fixed_fpr else None
+        obj.signal_values = mia_data.signal_values if mia_data.signal_values else None
+        obj.true = mia_data.true_labels
+        obj.tp = mia_data.tp
+        obj.fp = mia_data.fp
+        obj.tn = mia_data.tn
+        obj.fn = mia_data.fn
 
         return obj
 
+
     @staticmethod
-    def create_roc_plot(result_objects:list, save_dir: str = "", save_name: str = "") -> None:
+    def create_roc_plot(result_objects:list, save_dir: str) -> None:
         """Plot method for MIAResult. This method can be used by individual result objects or multiple.
 
         Args:
         ----
             result_objects (list): List of MIAResult objects to plot.
             save_dir (str): Directory to save the plot.
-            save_name (str): Name of the plot.
 
         """
 
-        filename = f"{save_dir}/{save_name}"
+        filename = f"{save_dir}/ROC"
 
         # Create plot for results
         assert isinstance(result_objects, list), "Results must be a list of MIAResult objects"
 
         reduced_labels = reduce_to_unique_labels(result_objects)
         for res, label in zip(result_objects, reduced_labels):
-
             plt.fill_between(res.fpr, res.tpr, alpha=0.15)
             plt.plot(res.fpr, res.tpr, label=label)
 
@@ -401,7 +420,7 @@ class MIAResult:
 
         plt.xlabel("False positive rate (FPR)")
         plt.ylabel("True positive rate (TPR)")
-        plt.title(save_name+" ROC Curve")
+        plt.title("ROC Curve")
         plt.savefig(fname=f"{filename}.png", dpi=1000, bbox_inches="tight")
         plt.clf()
 
@@ -435,21 +454,21 @@ class MIAResult:
         latex = ""
 
         # Create plot for all results
-        MIAResult.create_roc_plot(results, save_dir, save_name="all_results")
+        MIAResult.create_roc_plot(results, save_dir)
         latex += MIAResult._latex(results, save_dir, save_name="all_results")
 
         # Create plot for results grouped by name
         all_attack_names = MIAResult._get_all_attacknames(results)
         for name in all_attack_names:
             results_name_grouped = MIAResult._get_results_of_name(results, name)
-            MIAResult.create_roc_plot(results_name_grouped, save_dir, save_name=name)
+            MIAResult.create_roc_plot(results_name_grouped, save_dir)
             latex += MIAResult._latex(results_name_grouped, save_dir, save_name=name)
 
         # Create plot for results grouped by name
         grouped_results = [MIAResult._get_results_of_name(results, name) for name
                            in all_attack_names]
         strongest_results = [MIAResult.get_strongest(result) for result in grouped_results]
-        MIAResult.create_roc_plot(strongest_results, save_dir, save_name="strongest")
+        MIAResult.create_roc_plot(strongest_results, save_dir)
         latex += MIAResult._latex(strongest_results, save_dir, save_name="strongest")
 
         return latex
