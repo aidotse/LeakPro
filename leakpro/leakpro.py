@@ -31,7 +31,7 @@ class LeakPro:
 
     def __init__(self:Self, user_input_handler:AbstractInputHandler, configs_path:str) -> None:
 
-        assert issubclass(user_input_handler, AbstractInputHandler), "handler must be an instance of AbstractInputHandler"
+        assert issubclass(user_input_handler, AbstractInputHandler), "handler must be a subclass of AbstractInputHandler"
 
         # Read configs from path and ensure it adheres to the schema
         try:
