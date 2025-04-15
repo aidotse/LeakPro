@@ -132,7 +132,6 @@ class ModelHandler():
             model = self.model_blueprint(**self.init_params)
             optimizer = self.optimizer_class(model.parameters(), **self.optimizer_config)
             criterion = self.criterion_class(**self.loss_config)
-        print("\n\n_get_model_criterion_optimizer", model)
         return model, criterion, optimizer
 
     def get_criterion(self:Self) -> Module:

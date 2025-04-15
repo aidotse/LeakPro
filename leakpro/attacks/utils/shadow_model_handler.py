@@ -15,7 +15,6 @@ from leakpro.schemas import ShadowModelTrainingSchema, TrainingOutput
 from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import Self, Tuple
 from leakpro.utils.logger import logger
-from leakpro.target_model_class import ResNet18
 
 
 def singleton(cls):  # noqa: ANN001, ANN201
@@ -142,17 +141,6 @@ class ShadowModelHandler(ModelHandler):
 
             # Get shadow model blueprint
             model, criterion, optimizer = self._get_model_criterion_optimizer()
-            
-            resmodel = ResNet18()
-            print("\n\ncreate_shadow_models", resmodel)
-            print(resmodel == model)
-
-            print("\n\ncreate_shadow_models", model)
-            from opacus.validators import ModuleValidator
-            errors = ModuleValidator.validate(model, strict=False)
-            for err in errors:
-                print(err)
-            model = ModuleValidator.fix(model)
 
             # Train shadow model
             logger.info(f"Training shadow model {i} on {len(data_loader.dataset)} points")

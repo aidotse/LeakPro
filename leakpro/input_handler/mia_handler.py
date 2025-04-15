@@ -104,12 +104,8 @@ class MIAHandler:
         init_params = self.target_model_metadata.init_params
         try:
             with open(self.model_path, "rb") as f:
-                print("\n\n_load_trained_target_model")
-                print(type(self.target_model_blueprint), self.target_model_blueprint)
                 self.target_model = self.target_model_blueprint(**init_params)
                 self.target_model.load_state_dict(torch.load(f), strict=True)
-                print("loaded target model", type(self.target_model), self.target_model)
-
             logger.info(f"Loaded target model from {model_path}")
         except FileNotFoundError as e:
             raise FileNotFoundError(f"Could not find the trained target model at {model_path}") from e
@@ -236,7 +232,6 @@ class MIAHandler:
         init_params = self.target_model_metadata.init_params
         try:
             model_replica = self.target_model_blueprint(**init_params)
-            print(type(model_replica))
             return model_replica, self.get_criterion(), self.get_optimizer(model_replica)
         except Exception as e:
             raise ValueError("Failed to create an instance of the target model.") from e
