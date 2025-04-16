@@ -16,7 +16,6 @@ class MIMICInputHandler(AbstractInputHandler):
         train_fn_map = {
             "LR": self.train_LR,
             "GRUD": self.train_GRUD,
-            # "GRU": self.train_GRU
         }
 
         if model_name not in train_fn_map:
@@ -32,7 +31,6 @@ class MIMICInputHandler(AbstractInputHandler):
         eval_fn_map = {
             "LR": self.eval_LR,
             "GRUD": self.eval_GRUD,
-            # "GRU": self.eval_GRU,
         }
 
         if model_name not in eval_fn_map:
@@ -40,7 +38,6 @@ class MIMICInputHandler(AbstractInputHandler):
 
         return eval_fn_map[model_name](loader, model, criterion)
 
-        
 
     def train_GRUD(self):
         pass
@@ -122,6 +119,8 @@ class MIMICInputHandler(AbstractInputHandler):
         np_3D = np.dstack([df.loc[idx[:, :, :, i], :].values for i in sorted(set(df.index.get_level_values("hours_in")))])
         return from_numpy(np_3D)
 
+
+
     class UserDataset(AbstractInputHandler.UserDataset):
         """
         A custom dataset class for handling user data.
@@ -159,8 +158,13 @@ class MIMICInputHandler(AbstractInputHandler):
             y = self.targets[idx]
             return x, y.squeeze(0)
         
-        # def subset(self, indices):
-        #     return UserDataset(self.x[indices], self.y[indices])
+from leakpro.input_handler.mia_handler import MIAHandler
+
+MIAHandler.train_LR = MIMICInputHandler.train_LR
+MIAHandler.eval_LR = MIMICInputHandler.eval_LR
+MIAHandler.train_GRUD = MIMICInputHandler.train_GRUD
+MIAHandler.eval_GRUD = MIMICInputHandler.eval_GRUD
+
         
 
 

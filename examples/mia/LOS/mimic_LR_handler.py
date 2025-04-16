@@ -1,71 +1,89 @@
-
-import torch
-from torch import cuda, device, optim, sigmoid
-from torch.nn import BCELoss
+from typing import Self
+from torch import Tensor, cuda, device, optim, no_grad, from_numpy, unique
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import pandas as pd
+import numpy as np
+from torch import nn
 
 from leakpro import AbstractInputHandler
-from leakpro.schemas import TrainingOutput
+from leakpro.schemas import TrainingOutput, EvalOutput
+from mimic_data_handler import MIMICUserDataset
 
+class MIMICLRHandler(AbstractInputHandler):
+    UserDataset = MIMICUserDataset
 
-class MimicInputHandler(AbstractInputHandler):
-    """Class to handle the user input for the MIMICIII dataset."""
-
-    def __init__(self, configs: dict) -> None:
-        super().__init__(configs = configs)
-
-
-    def get_criterion(self)->None:
-        """Set the Binary Cross Entropy Loss for the model."""
-        return BCELoss()
-
-    def get_optimizer(self, model:torch.nn.Module) -> None:
-        """Set the optimizer for the model."""
-        learning_rate = 0.1
-        momentum = 0.8
-        return optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
-
-    def train(
-        self,
+    def train(self: Self,
         dataloader: DataLoader,
-        model: torch.nn.Module = None,
-        criterion: torch.nn.Module = None,
+        model: nn.Module = None,
+        criterion: nn.Module = None,
         optimizer: optim.Optimizer = None,
         epochs: int = None,
     ) -> TrainingOutput:
         """Model training procedure."""
 
-        compute_device = device("cuda" if cuda.is_available() else "cpu")
-        model.to(compute_device)
-        model.train()
+        if epochs is None:
+            raise ValueError("epochs not found in configs")
 
-        criterion = self.get_criterion()
-        optimizer = self.get_optimizer(model)
+        # prepare training
+        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        model.to(gpu_or_cpu)
 
-        for e in tqdm(range(epochs), desc="Training Progress"):
+        accuracy_history = []
+        loss_history = []
+
+        # training loop
+        for epoch in range(epochs):
+            train_loss, train_acc, total_samples = 0, 0, 0
             model.train()
-            train_acc, train_loss, total_samples = 0.0, 0.0, 0
+            for inputs, labels in tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}"):
+                labels = labels.float().unsqueeze(1)
+                inputs, labels = inputs.to(gpu_or_cpu, non_blocking=True), labels.to(gpu_or_cpu, non_blocking=True)
 
-            for data, target in dataloader:
-                target = target.float().unsqueeze(1)
-                data, target = data.to(compute_device, non_blocking=True), target.to(compute_device, non_blocking=True)
                 optimizer.zero_grad()
-                output = model(data)
-
-                loss = criterion(output, target)
-                pred = sigmoid(output) >= 0.5
-                train_acc += pred.eq(target).sum().item()
-                total_samples += target.numel()
-
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+                pred = outputs >= 0.5
                 loss.backward()
                 optimizer.step()
-                train_loss += loss.item()
 
-        train_acc = train_acc/total_samples
-        train_loss = train_loss/len(dataloader)
-        
-        output_dict = {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}
-        output = TrainingOutput(**output_dict)
-        
-        return output
+                # Accumulate performance of shadow model
+                train_acc += pred.eq(labels.view_as(pred)).sum().item()
+                total_samples += labels.size(0)
+                train_loss += loss.item() * labels.size(0)
+
+            avg_train_loss = train_loss / total_samples
+            train_accuracy = train_acc / total_samples
+
+            accuracy_history.append(train_accuracy)
+            loss_history.append(avg_train_loss)
+
+        results = EvalOutput(accuracy = train_accuracy,
+                             loss = avg_train_loss,
+                             extra = {"accuracy_history": accuracy_history, "loss_history": loss_history})
+        return TrainingOutput(model = model, metrics=results)
+
+    def eval(self: Self,
+             loader: DataLoader,
+             model: nn.Module,
+             criterion: nn.Module) -> EvalOutput:
+        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        model.to(gpu_or_cpu)
+        model.eval()
+        loss, acc = 0, 0
+        total_samples = 0
+
+        with no_grad():
+            for data, target in loader:
+                data, target = data.to(gpu_or_cpu), target.to(gpu_or_cpu)
+                target = target.float().unsqueeze(1)
+                output = model(data)
+                loss += criterion(output, target).item()
+                pred = (output) >= 0.5
+                acc += pred.eq(target).sum().item()
+                total_samples += target.size(0)
+            loss /= len(loader)
+            acc = float(acc) / total_samples
+
+        output_dict = {"accuracy": acc, "loss": loss}
+        return EvalOutput(**output_dict)

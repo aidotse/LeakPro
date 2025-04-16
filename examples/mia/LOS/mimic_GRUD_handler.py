@@ -6,21 +6,10 @@ from tqdm import tqdm
 
 from leakpro import AbstractInputHandler
 from leakpro.schemas import TrainingOutput
+from mimic_data_handler import MIMICUserDataset
 
 class MimicInputHandlerGRU(AbstractInputHandler):
-    """Class to handle the user input for the MIMICIII dataset."""
-
-    def __init__(self, configs: dict) -> None:
-        super().__init__(configs = configs)
-
-    def get_criterion(self)->BCEWithLogitsLoss:
-        """Set the BCEWithLogitsLoss for the model."""
-        return BCEWithLogitsLoss()
-
-    def get_optimizer(self, model:nn.Module) -> optim.Optimizer:
-        """Set the optimizer for the model."""
-        learning_rate = 0.01
-        return optim.Adam(model.parameters(), lr=learning_rate)
+    UserDataset = MIMICUserDataset
 
     def train(
         self,
