@@ -1,5 +1,7 @@
 run: # Configurations for a specific run
   random_seed: 1236 # Integer number of specifying random seed
+  log_dir: target # String for indicating where to save all the information, including models and computed signals. We can reuse the models saved in the same log_dir.
+
 
 train: 
   training_method : LR # LR, GRUD, dpsgdGRUD
@@ -13,7 +15,8 @@ train:
 
 data: # Configuration for data
   dataset: mimiciiii # String indicates the name of the dataset
-  f_train: 0.6 # Float number from 0 to 1 indicating the fraction of the train dataset
+  f_train: 0.5 # Float number from 0 to 1 indicating the fraction of the train dataset
   f_test: 0.4 # Float number from 0 to 1 indicating the size of the test set
+  f_early_stop: 0.1 # Float number from 0 to 1 indicating the fraction of the early stop dataset
   batch_size: 128 # Integer number for indicating batch size for training the target model. For speedyresnet, it uses its own batch size.
   data_dir: ./data/ # String about where to save the data.
