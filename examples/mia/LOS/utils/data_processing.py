@@ -193,41 +193,6 @@ def data_splitter(statics,
     ]
     return train_data, holdout_data, y_train, y_holdout
 
-# def simple_imputer(dataframe,
-#                    ID_COLS):
-#     idx = pd.IndexSlice
-#     df = dataframe.copy()
-#     if len(df.columns.names) > 2: df.columns = df.columns.droplevel(("label", "LEVEL1", "LEVEL2"))
-
-#     df_out = df.loc[:, idx[:, ["mean", "count"]]]
-#     icustay_means = df_out.loc[:, idx[:, "mean"]].groupby(ID_COLS).mean()
-
-#     df_out.loc[:, idx[:, "mean"]] = (
-#             df_out.loc[:, idx[:, "mean"]]
-#             .groupby(ID_COLS)
-#             .ffill()  # Replace forward fill method
-#             .groupby(ID_COLS)
-#             .fillna(icustay_means)  # Fill remaining NaNs with icustay_means
-#             .fillna(0)  # Fill any remaining NaNs with 0
-#         )
-
-#     # df_out.loc[:,idx[:,"mean"]] = df_out.loc[:,idx[:,"mean"]].groupby(ID_COLS).fillna(
-#     #     method="ffill"
-#     # ).groupby(ID_COLS).fillna(icustay_means).fillna(0)
-
-#     df_out.loc[:, idx[:, "count"]] = (df.loc[:, idx[:, "count"]] > 0).astype(float)
-#     df_out.rename(columns={"count": "mask"}, level="Aggregation Function", inplace=True)
-
-#     is_absent = (1 - df_out.loc[:, idx[:, "mask"]])
-#     hours_of_absence = is_absent.cumsum()
-#     time_since_measured = hours_of_absence - hours_of_absence[is_absent==0].fillna(method="ffill")
-#     time_since_measured.rename(columns={"mask": "time_since_measured"}, level="Aggregation Function", inplace=True)
-
-#     df_out = pd.concat((df_out, time_since_measured), axis=1)
-#     df_out.loc[:, idx[:, "time_since_measured"]] = df_out.loc[:, idx[:, "time_since_measured"]].fillna(100)
-
-#     df_out.sort_index(axis=1, inplace=True)
-#     return df_out
 
 def simple_imputer(dataframe, ID_COLS):
     idx = pd.IndexSlice
@@ -272,10 +237,6 @@ def simple_imputer(dataframe, ID_COLS):
     df_out.sort_index(axis=1, inplace=True)
 
     return df_out
-
-
-
-
 
 def data_indices(dataset,
                  train_frac,
