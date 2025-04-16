@@ -3,21 +3,13 @@ audit:  # Configurations for auditing
   attack_list:
     - attack: rmia
       online: False
-      num_shadow_models: 2
+      num_shadow_models: 4
       gamma: 1
-    - attack: rmia
-      online: True
-      num_shadow_models: 2
-      gamma: 1
-    - attack: population
-    - attack: lira
-      online: True
-      num_shadow_models: 3
-      training_data_fraction: 0.6
-    - attack: loss_traj
-    - attack: qmia
-    #HSJ:
-    # - attack: yoqo
+    - attack: lset_laplace
+      online: False
+    - attack: mca
+      num_shadow_models: 4
+      online: False
 
   output_dir: "./leakpro_output"
   attack_type: "mia" #mia, gia
