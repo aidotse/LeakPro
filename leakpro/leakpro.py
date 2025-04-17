@@ -60,7 +60,7 @@ class LeakPro:
 
         # Initialize handler and attack scheduler
         self.handler = self.setup_handler(user_input_handler, configs)
-        self.attack_scheduler = AttackScheduler(self.handler)
+        self.attack_scheduler = AttackScheduler(self.handler, output_dir=configs.audit.output_dir)
 
     def setup_handler(self:Self, user_input_handler:AbstractInputHandler, configs:dict) -> None:
         """Prepare the handler using dynamic composition to merge the user-input handler and modality extension.
@@ -148,8 +148,8 @@ class LeakPro:
     def run_audit(self:Self, create_pdf: bool = False, use_optuna: bool = False) -> list[Any]:
         """Run the audit."""
 
-        audit_results = self.attack_scheduler.run_attacks(report_dir=self.report_dir, use_optuna=use_optuna)
-        results = [entry["result_object"] for entry in audit_results.values()]
+        audit_results = self.attack_scheduler.run_attacks(use_optuna=use_optuna)
+        results = [entry["result_object"] for entry in audit_results]
 
         if create_pdf:
             logger.info("Creating PDF report")

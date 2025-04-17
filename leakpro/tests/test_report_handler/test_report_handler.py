@@ -24,8 +24,7 @@ class TestReportHandler:
 
         miaresult = MIAResult.from_full_scores(true_membership = true_labels,
                                     signal_values = signal_values,
-                                    result_name = result_name,
-                                    id = id)
+                                    result_name = result_name)
         
         
         self.temp_dir = tempfile.TemporaryDirectory()

@@ -29,7 +29,7 @@ def test_rmia_setup(image_handler:ImageInputHandler) -> None:
     
     # Try custom params
     audit_config = get_audit_config()
-    rmia_params = audit_config.attack_list.rmia
+    rmia_params = audit_config.attack_list[1]
     rmia_obj = AttackRMIA(image_handler, rmia_params)
 
     assert rmia_obj is not None
@@ -44,7 +44,7 @@ def test_rmia_setup(image_handler:ImageInputHandler) -> None:
 
 def test_rmia_prepare_online_attack(image_handler:ImageInputHandler) -> None:
     audit_config = get_audit_config()
-    rmia_params = audit_config.attack_list.rmia
+    rmia_params = audit_config.attack_list[1]
     rmia_params.online = True
 
     image_handler.configs.shadow_model = get_shadow_model_config()
@@ -63,7 +63,7 @@ def test_rmia_prepare_online_attack(image_handler:ImageInputHandler) -> None:
 
 def test_rmia_prepare_offline_attack(image_handler:ImageInputHandler) -> None:
     audit_config = get_audit_config()
-    rmia_params = audit_config.attack_list.rmia
+    rmia_params = audit_config.attack_list[1]
     rmia_params.online = False
 
     image_handler.configs.shadow_model = get_shadow_model_config()
@@ -89,7 +89,7 @@ def test_rmia_prepare_offline_attack(image_handler:ImageInputHandler) -> None:
 def test_rmia_online_attack(image_handler:ImageInputHandler):
     # Set up for testing
     audit_config = get_audit_config()
-    rmia_params = audit_config.attack_list.rmia
+    rmia_params = audit_config.attack_list[1]
     rmia_params.online = True
     image_handler.configs.shadow_model = get_shadow_model_config()
     rmia_obj = AttackRMIA(image_handler, rmia_params)
@@ -118,7 +118,7 @@ def test_rmia_online_attack(image_handler:ImageInputHandler):
 def test_rmia_offline_attack(image_handler:ImageInputHandler):
     # Set up for testing
     audit_config = get_audit_config()
-    rmia_params = audit_config.attack_list.rmia
+    rmia_params = audit_config.attack_list[1]
     rmia_params.online = False
     image_handler.configs.shadow_model = get_shadow_model_config()
     rmia_obj = AttackRMIA(image_handler, rmia_params)

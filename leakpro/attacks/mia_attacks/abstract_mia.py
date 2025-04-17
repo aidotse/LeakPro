@@ -17,6 +17,7 @@ from leakpro.schemas import OptunaConfig
 from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import List, Self, Union
 from leakpro.utils.logger import logger
+from leakpro.utils.save_load import hash_attack
 
 
 class AbstractMIA(AbstractAttack):
@@ -71,6 +72,12 @@ class AbstractMIA(AbstractAttack):
         # These objects are instance specific
         self.signal_data = []
         self.optuna_params = 0
+        # Create an ID for the attack based on config + target model
+        self._hash_attack()
+
+    def _hash_attack(self:Self)->None:
+        """Hash the attack based on the config and target model."""
+        self.attack_id = hash_attack(self.configs.model_dump(), AbstractMIA.handler.target_model)
 
     @classmethod
     def get_default_attack_config(cls) -> BaseModel:
