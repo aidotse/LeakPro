@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 from leakpro.attacks.attack_base import AbstractAttack
 from leakpro.attacks.utils.hyperparameter_tuning.optuna import optuna_optimal_hyperparameters
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
-from leakpro.metrics.attack_result import AttackResult
+from leakpro.reporting.mia_result import MIAResult
 from leakpro.schemas import OptunaConfig
 from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import List, Self, Union
@@ -151,7 +151,9 @@ class AbstractMIA(AbstractAttack):
             Dataloader: The sampled data.
 
         """
-        return self.handler.get_dataloader(data) if batch_size is None else self.handler.get_dataloader(data, batch_size)
+        if batch_size is None:
+            return self.handler.get_dataloader(dataset_indices = data)
+        return self.handler.get_dataloader(dataset_indices = data, batch_size = batch_size)
 
     def sample_data_from_dataset(self:Self, data:np.ndarray, size:int)->DataLoader:
         """Function to sample from the dataset.
@@ -176,6 +178,11 @@ class AbstractMIA(AbstractAttack):
         if optuna_config is None:
             # Use default valiues for config
             optuna_config = OptunaConfig()
+
+        def objective(result: MIAResult) -> float:
+            return result._get_roc_auc_in_fpr_interval(1e-2)
+
+        optuna_config.objective = objective
         return optuna_optimal_hyperparameters(self, optuna_config)
 
     def suggest_parameters(self:Self, trial: Trial) -> BaseModel:
@@ -332,7 +339,7 @@ class AbstractMIA(AbstractAttack):
         pass
 
     @abstractmethod
-    def run_attack(self:Self) -> Union[AttackResult, List[AttackResult]]:
+    def run_attack(self:Self) -> Union[MIAResult, List[MIAResult]]:
         """Run the metric on the target model and dataset. This method handles all the computations related to the audit dataset.
 
         Args:

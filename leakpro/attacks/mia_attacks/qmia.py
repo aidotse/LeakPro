@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.input_handler.mia_handler import MIAHandler
-from leakpro.metrics.attack_result import MIAResult
+from leakpro.reporting.mia_result import MIAResult
 from leakpro.signals.signal import ModelRescaledLogits
 from leakpro.utils.import_helper import Any, Self, Tuple
 from leakpro.utils.logger import logger
@@ -322,36 +322,59 @@ class AttackQMIA(AbstractMIA):
 
         audit_dataloader = self.get_dataloader(self.audit_dataset["data"])
         logger.info("Running the attack on the target model")
-        score = []
-        for data, _ in audit_dataloader:
-            score.extend(self.quantile_regressor(data).detach().numpy())
-        score = np.array(score).T
 
-        logger.info("Attack completed")
-
-        # pick out the in-members and out-members signals
-        self.in_member_signals = self.target_logits[self.audit_dataset["in_members"]]
-        self.out_member_signals = self.target_logits[self.audit_dataset["out_members"]]
-
-        predictions = np.less(score, self.target_logits[np.newaxis, :])
-
-        # set true labels for being in the training dataset
+        # set true labels for being in the training datasetz
         true_labels = np.concatenate(
             [
                 np.ones(len(self.audit_dataset["in_members"])),
                 np.zeros(len(self.audit_dataset["out_members"])),
             ]
         )
-        signal_values = np.hstack(
-            [self.in_member_signals, self.out_member_signals]
-        )
+
+        preds = []
+        start_idx = 0
+        for data, _ in audit_dataloader:
+            batch_size = data.shape[0]
+            end_idx = start_idx + batch_size
+
+            # Select the correct slice of logits
+            batch_logits = self.target_logits[start_idx:end_idx][:, np.newaxis]  # (batch_size, 1)
+
+            # Run the quantile regressor
+            score = self.quantile_regressor(data).detach().numpy()  # (batch_size, n_quantiles)
+
+            # Compare
+            pred_batch = batch_logits > score  # (batch_size, n_quantiles)
+            preds.append(pred_batch)
+
+            start_idx = end_idx  # move the index forward
+
+        # Stack into a final prediction array
+        preds = np.vstack(preds)  # shape: (total_samples, n_quantiles)
+        true_labels = np.asarray(true_labels).astype(bool)
+
+        # Compute confusion matrix for each quantile
+        tp = np.zeros(len(self.quantiles))
+        fp = np.zeros(len(self.quantiles))
+        tn = np.zeros(len(self.quantiles))
+        fn = np.zeros(len(self.quantiles))
+        for i in range(len(self.quantiles)):
+            pred_col = preds[:, i]
+            tp[i] = np.sum(pred_col & true_labels)
+            fp[i] = np.sum(pred_col & ~true_labels)
+            tn[i] = np.sum(~pred_col & ~true_labels)
+            fn[i] = np.sum(~pred_col & true_labels)
+
+        logger.info("Attack completed")
 
         # compute ROC, TP, TN etc
-        return MIAResult(
-            predicted_labels=predictions,
-            true_labels=true_labels,
-            predictions_proba=None,
-            signal_values=signal_values,
-        )
+        return MIAResult.from_confusion_counts(
+            true_membership = true_labels,
+            tp = tp,
+            fp = fp,
+            tn = tn,
+            fn = fn,
+            result_name = "QMIA")
+
 
 
