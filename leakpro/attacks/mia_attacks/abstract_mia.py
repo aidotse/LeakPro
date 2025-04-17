@@ -18,7 +18,7 @@ from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import List, Self, Union
 from leakpro.utils.logger import logger
 from leakpro.utils.save_load import hash_attack
-
+from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 
 class AbstractMIA(AbstractAttack):
     """Interface to construct and perform a membership inference attack on a target model and dataset.
@@ -250,6 +250,38 @@ class AbstractMIA(AbstractAttack):
                 self.configs.model_fields[field_name].json_schema_extra = None
                 self.optuna_params -= 1 # remove one parameter going into optuna
                 logger.info(f"User provided value for {field_name}, it won't be optimized by optuna.")
+
+    def _filter_audit_data_for_online_attack(self:Self, shadow_model_indices:list[int])->None:
+        """Filter the audit data for online attacks."""
+
+        if not self.online:
+            raise ValueError("This method should only be called for online attacks.")
+
+        # STEP 1: find out which audit data points can actually be audited
+        # find the shadow models that are trained on what points in the audit dataset
+        num_shadow_models = len(shadow_model_indices)
+        in_indices_mask = ShadowModelHandler().get_in_indices_mask(shadow_model_indices, self.audit_dataset["data"]).T
+        # filter out the points that no shadow model has seen and points that all shadow models have seen
+        num_shadow_models_seen_points = np.sum(in_indices_mask, axis=0)
+        # make sure that the audit points are included in the shadow model training (but not all)
+        mask = (num_shadow_models_seen_points > 0) & (num_shadow_models_seen_points < num_shadow_models)
+
+        # STEP 2: Select datapoints that are auditable
+        audit_data_indices = self.audit_dataset["data"][mask]
+        # find out how many in-members survived the filtering
+        in_members = np.arange(np.sum(mask[self.audit_dataset["in_members"]]))
+        # find out how many out-members survived the filtering
+        num_out_members = np.sum(mask[self.audit_dataset["out_members"]])
+        out_members = np.arange(len(in_members), len(in_members) + num_out_members)
+
+        assert len(audit_data_indices) == len(in_members) + len(out_members)
+
+        if len(audit_data_indices) == 0:
+            raise ValueError("No points in the audit dataset are used for the shadow models")
+
+        logger.info(f"Number of points in the audit dataset that are used for online attack: {len(audit_data_indices)}")
+
+        return audit_data_indices, in_members, out_members
 
     @property
     def population(self:Self)-> List:

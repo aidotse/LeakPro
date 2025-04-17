@@ -419,15 +419,8 @@ class AttackRMIA(AbstractMIA):
             self._offline_attack()
 
         # set true labels for being in the training dataset
-        true_labels = np.concatenate(
-            [
-                np.ones(len(self.in_member_signals)),
-                np.zeros(len(self.out_member_signals)),
-            ]
-        )
-        signal_values = np.concatenate(
-            [self.in_member_signals, self.out_member_signals]
-        )
+        true_labels = np.concatenate([np.ones(len(self.in_member_signals)), np.zeros(len(self.out_member_signals)),])
+        signal_values = np.concatenate([self.in_member_signals, self.out_member_signals])
 
         # Ensure we use the stored quantities from now
         self.load_for_optuna = True

@@ -6,6 +6,7 @@ from leakpro.attacks.mia_attacks.attack_p import AttackP
 from leakpro.attacks.mia_attacks.HSJ import AttackHopSkipJump
 from leakpro.attacks.mia_attacks.lira import AttackLiRA
 from leakpro.attacks.mia_attacks.loss_trajectory import AttackLossTrajectory
+from leakpro.attacks.mia_attacks.lset import AttackLSET
 from leakpro.attacks.mia_attacks.lset_laplace import AttackLSETLaplace
 from leakpro.attacks.mia_attacks.mca import AttackMCA
 from leakpro.attacks.mia_attacks.qmia import AttackQMIA
@@ -28,6 +29,7 @@ class AttackFactoryMIA:
         "lira": AttackLiRA,
         "HSJ" : AttackHopSkipJump,
         "yoqo": AttackYOQO,
+        "lset": AttackLSET,
         "lset_laplace": AttackLSETLaplace,
         "mca": AttackMCA,
     }
