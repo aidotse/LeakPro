@@ -84,3 +84,33 @@ def test_cifar10_input_handler(image_handler:ImageInputHandler) -> None:
     after_weights = train_dict.model.state_dict()
     weights_changed = [equal(before_weights[key], after_weights[key]) for key in before_weights]
     assert any(weights_changed) is False
+
+    def test_dataloader(image_handler:ImageInputHandler) -> None:
+        """Test the dataloader."""
+        test_loader = image_handler.get_dataloader(image_handler.test_indices, shuffle=False)
+        assert test_loader is not None
+        assert len(test_loader.dataset) == parameters.test_data_points
+        assert test_loader.batch_size == parameters.batch_size
+        # Check that shuffle = false in dataloader
+        assert isinstance(test_loader.sampler, SequentialSampler)
+        
+        population_data = image_handler.population.data
+        population_labels = image_handler.population.targets
+        bs = parameters.batch_size
+        for i, (data, label) in enumerate(test_loader):
+            assert data == population_data[image_handler.test_indices[i * bs:(i + 1) * bs]]
+            assert label == population_labels[image_handler.test_indices[i * bs:(i + 1) * bs]]
+            assert data.shape == parameters.img_size
+            assert label.shape == (parameters.batch_size,)
+            assert np.all(label < parameters.num_classes)
+            assert np.all(label >= 0)
+            assert np.issubdtype(label.dtype, np.integer)
+            
+    def test_get_labels(image_handler:ImageInputHandler) -> None:
+        """Test the get_labels method."""
+        labels = image_handler.get_labels(image_handler.test_indices)
+        assert len(labels) == parameters.test_data_points
+        assert np.all(labels < parameters.num_classes)
+        assert np.all(labels >= 0)
+        assert np.issubdtype(labels.dtype, np.integer)
+        assert np.array_equal(labels, image_handler.population.targets[image_handler.test_indices])
