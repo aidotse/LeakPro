@@ -87,7 +87,7 @@ class AttackLSETLaplace(AbstractMIA):
         logger.info("Preparing attack data for training the LSET Laplace attack")
 
         # Get all available indices for attack dataset, if self.online = True, include training and test data
-        self.attack_data_indices = self.sample_indices_from_population(include_train_indices = self.online,
+        self.attack_data_indices = self.sample_indices_from_population(include_train_indices = False,
                                                                        include_test_indices = self.online)
 
         # train shadow models
@@ -125,11 +125,10 @@ class AttackLSETLaplace(AbstractMIA):
         in_members = self.audit_dataset["in_members"]
         out_members = self.audit_dataset["out_members"]
 
-        logger.info("Running LSET offline attack")
+        logger.info("Running LSET-Laplace attack")
 
         n_audit_points = len(audit_data_indices)
         ground_truth_indices = self.handler.get_labels(audit_data_indices)
-        assert np.issubdtype(ground_truth_indices.dtype, np.integer)
 
         # run target points through real model to get logits
         logits_target = np.array(self.signal([self.target_model], self.handler, self.audit_dataset["data"])).squeeze(axis=0)

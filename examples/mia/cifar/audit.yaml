@@ -3,18 +3,25 @@ audit:  # Configurations for auditing
   attack_list:
     - attack: rmia
       online: True
-      num_shadow_models: 3
-      training_data_fraction: 0.4
+      num_shadow_models: 5
+      training_data_fraction: 0.5
       attack_data_fraction: 0.1
       gamma: 1.0
     - attack: lset
       online: True
-      num_shadow_models: 3
+      num_shadow_models: 5
       training_data_fraction: 0.5
-    # - attack: lira
-    #   online: True
-    #   num_shadow_models: 3
-    #   training_data_fraction: 0.5
+    - attack: lset_laplace
+      online: True
+      training_data_fraction: 0.5
+    - attack: mca
+      online: True
+      num_shadow_models: 5
+      training_data_fraction: 0.5
+    - attack: lira
+      online: True
+      num_shadow_models: 5
+      training_data_fraction: 0.5
     # - attack: loss_traj
     # - attack: qmia
     #HSJ:

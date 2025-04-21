@@ -115,8 +115,7 @@ class AttackLSET(AbstractMIA):
             out_members = self.audit_dataset["out_members"]
 
         n_audit_points = len(audit_data_indices)
-        ground_truth_indices = self.handler.get_labels(audit_data_indices)
-        assert np.issubdtype(ground_truth_indices.dtype, np.integer)
+        ground_truth_indices = self.handler.get_labels(audit_data_indices).astype(int)
 
         # run target points through real model to get logits
         logits_target = np.array(self.signal([self.target_model], self.handler, audit_data_indices)).squeeze(axis=0)
