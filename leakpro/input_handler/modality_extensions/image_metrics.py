@@ -1,4 +1,6 @@
 """ImageMetrics class for computing image metrics."""
+import os
+
 import numpy as np
 import torch
 from scipy.linalg import sqrtm
@@ -33,6 +35,7 @@ class ImageMetrics:
             "accuracy": self.compute_accuracy,
             "fid" : self.compute_fid,
             "knn": self.compute_knn_dist,
+            "save_images": self.save_images,
         }
         logger.info(configs)
         self.results = {}
@@ -259,3 +262,42 @@ class ImageMetrics:
 
     pass
 
+
+    def save_images(self) -> None:
+        """Save generated images to disk."""
+        self.evaluation_model.eval()
+        self.evaluation_model.to(self.device)
+        self.generator.eval()
+        self.generator.to(self.device)
+
+        n_images = self.configs.metrics["save_images"]["n_images"]
+        save_path = self.configs.metrics["save_images"]["save_dir"]
+
+        generated_images = []
+
+        i = 0
+        labels = set()
+        for label_i, z_i in zip(self.labels, self.z):
+            if label_i.item() in labels:
+                # Skip iteration if it has already been generated
+                continue
+
+            if i < n_images:
+                # generate samples for each pair of label and z
+                generated_sample = self.generator_handler.sample_from_generator(batch_size=1,
+                                                                                label=label_i,
+                                                                                z=z_i)
+                # Save the generated image
+                generated_images.append((generated_sample[0], label_i.item(), i))
+                i += 1
+                labels.add(label_i.item())
+
+        logger.info(f"Generated {len(generated_images)} images from labels {labels}.")
+        os.makedirs(save_path, exist_ok=True)
+        for img, label, i in generated_images:
+            img = img.squeeze(0)
+            img = self.tensor_to_pil(img)
+
+            img.save(f"{save_path}/label_{label}_image_{i}.png")
+
+        pass

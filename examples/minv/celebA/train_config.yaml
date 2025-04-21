@@ -1,6 +1,6 @@
 run: # Configurations for a specific run
   random_seed: 1234 # Integer number of specifying random seed
-  log_dir: target/resnet50 # String for indicating where to save all the information, including models and computed signals. We can reuse the models saved in the same log_dir.
+  log_dir: target/resnet152 # String for indicating where to save all the information, including models and computed signals. We can reuse the models saved in the same log_dir.
 
 train: # Configuration for training
   epochs: 30 # Integer number for indicating the epochs for training target model. For speedyresnet, it uses its own number of epochs.

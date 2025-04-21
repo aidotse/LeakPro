@@ -4,12 +4,12 @@ audit:  # Configurations for auditing
   data_modality: "image" #image, tabular
   attack_list:
     plgmi:
-      top_n: 10 # Integer number for indicating the top n classes to select
-      n_dis: 5 # Integer number for indicating the number of discriminator updates per generator update
-      n_iter: 10000 # Integer number for indicating the iterations for training the GAN
-      batch_size: 32 # Integer number for indicating batch size for training the GAN
-      gen_lr: 0.00002 # Float number for indicating learning rate for training the generator
-      dis_lr: 0.00002 # Float number for indicating learning rate for training the discriminator
+      top_n: 30 # Integer number for indicating the top n classes to select
+      n_dis: 2 # Integer number for indicating the number of discriminator updates per generator update
+      n_iter: 30000 # Integer number for indicating the iterations for training the GAN
+      batch_size: 64 # Integer number for indicating batch size for training the GAN
+      gen_lr: 0.0002 # Float number for indicating learning rate for training the generator
+      dis_lr: 0.0002 # Float number for indicating learning rate for training the discriminator
       gen_beta1: 0.0 # Float number for indicating beta1 for Adam optimizer
       gen_beta2: 0.9 # Float number for indicating beta2 for Adam optimizer
       dis_beta1: 0.0 # Float number for indicating beta1 for Adam optimizer
@@ -33,20 +33,21 @@ audit:  # Configurations for auditing
   reconstruction:
     batch_size: 32 # Integer number for indicating batch size for training the GAN
     num_class_samples: 1 # Number of samples to generate for each class
-    num_audited_classes: 100 # Number of classes to audit
+    num_audited_classes: 200 # Number of classes to audit
     metrics:
       accuracy:
       knn:
+      save_images:
 
   output_dir: "./leakpro_output"
   attack_type: "minv" #mia, gia
 
 target:
   # Target model path
-  module_path: "utils/resnet18_model.py"
-  model_class: "ResNet18" 
+  module_path: "utils/resnet_model.py"
+  model_class: "ResNet152" 
   # Data paths
-  target_folder: "./target"
+  target_folder: "./target/resnet152"
   data_path: "./data/celebA_private_data.pkl"
   public_data_path: "./data/celebA_public_data.pkl"
 
