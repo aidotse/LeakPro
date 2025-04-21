@@ -114,8 +114,8 @@ def test_get_labels(image_handler:ImageInputHandler) -> None:
     """Test the get_labels method."""
     parameters = get_image_handler_config()
     labels = image_handler.get_labels(np.arange(parameters.data_points))
-    assert len(labels) == parameters.test_data_points
-    assert all(labels < parameters.num_classes)
-    assert all(labels >= 0)
-    assert labels.dtype in (int8, int16, int32, int64)
+    assert len(labels) == parameters.data_points
+    assert np.all(labels < parameters.num_classes)
+    assert np.all(labels >= 0)
+    assert np.issubdtype(labels.dtype, np.integer)
     assert np.array_equal(labels, image_handler.population.targets)
