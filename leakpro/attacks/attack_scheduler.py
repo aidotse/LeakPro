@@ -76,7 +76,7 @@ class AttackScheduler:
         """Add an attack to the list of attacks."""
         self.attacks.append(attack)
 
-    def run_attacks(self: Self, use_optuna:bool=False) -> Dict[str, Any]:
+    def run_attacks(self: Self, report_dir:str, use_optuna:bool=False) -> Dict[str, Any]:
         """Run the attacks and return the results."""
         results = {}
         for attack, attack_type in zip(self.attacks, self.attack_list):
@@ -92,7 +92,9 @@ class AttackScheduler:
             result = attack.run_attack()
             results[attack_type] = {"attack_object": attack, "result_object": result}
 
-            logger.info(f"Finished attack: {attack_type}")
+            logger.info(f"Saving results for attack: {attack_type} to {report_dir}")
+            result.save(name=attack_type, path=report_dir, config=attack.configs)
+
         return results
 
     def map_setting_to_attacks(self:Self) -> None:

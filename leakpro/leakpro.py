@@ -15,9 +15,10 @@ from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.input_handler.modality_extensions.image_extension import ImageExtension
 from leakpro.input_handler.modality_extensions.tabular_extension import TabularExtension
+from leakpro.reporting.report_handler import ReportHandler
 from leakpro.schemas import EvalOutput, LeakProConfig, MIAMetaDataSchema, TrainingOutput
 from leakpro.utils.conversion import _dataloader_to_config, _get_model_init_params, _loss_to_config, _optimizer_to_config
-from leakpro.utils.import_helper import Self
+from leakpro.utils.import_helper import Any, Self
 from leakpro.utils.logger import add_file_handler, logger
 
 modality_extensions = {"tabular": TabularExtension,
@@ -30,6 +31,14 @@ class LeakPro:
     """Main class for LeakPro."""
 
     def __init__(self:Self, user_input_handler:AbstractInputHandler, configs_path:str) -> None:
+        """Initialize LeakPro.
+
+        Args:
+        ----
+            user_input_handler (AbstractInputHandler): The user-defined input handler
+            configs_path (str): The path to the configuration file
+
+        """
 
         assert issubclass(user_input_handler, AbstractInputHandler), "handler must be an instance of AbstractInputHandler"
 
@@ -54,7 +63,14 @@ class LeakPro:
         self.attack_scheduler = AttackScheduler(self.handler)
 
     def setup_handler(self:Self, user_input_handler:AbstractInputHandler, configs:dict) -> None:
-        """Prepare the handler using dynamic composition to merge the user-input handler and modality extension."""
+        """Prepare the handler using dynamic composition to merge the user-input handler and modality extension.
+
+        Args:
+        ----
+            user_input_handler (AbstractInputHandler): The user-defined input handler
+            configs (dict): The configuration object
+
+        """
 
         if configs.audit.attack_type == "mia":
             handler = MIAHandler(configs, user_input_handler)
@@ -129,27 +145,17 @@ class LeakPro:
             test_result = test_result
         )
 
-    def run_audit(self:Self, return_results: bool = False, use_optuna: bool = False) -> None:
+    def run_audit(self:Self, create_pdf: bool = False, use_optuna: bool = False) -> list[Any]:
         """Run the audit."""
 
-        audit_results = self.attack_scheduler.run_attacks(use_optuna=use_optuna)
-        results = [] if return_results else None
+        audit_results = self.attack_scheduler.run_attacks(report_dir=self.report_dir, use_optuna=use_optuna)
+        results = [entry["result_object"] for entry in audit_results.values()]
 
-        for attack_name in audit_results:
-            logger.info(f"Preparing results for attack: {attack_name}")
-
-            # Return the result object, dont save it
-            if return_results:
-
-                result = audit_results[attack_name]["result_object"]
-                result.attack_name = attack_name
-                result.configs = self.handler.configs.audit
-
-                # Append
-                results.append(result)
-            else:
-                result = audit_results[attack_name]["result_object"]
-                result.save(name=attack_name, path=self.report_dir, config=self.handler.configs.audit)
+        if create_pdf:
+            logger.info("Creating PDF report")
+            report_handler = ReportHandler(results=results, report_dir=self.report_dir)
+            # Create the report by compiling the latex text
+            report_handler.create_report()
 
         logger.info("Auditing completed")
         return results
