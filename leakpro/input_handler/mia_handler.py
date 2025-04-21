@@ -213,7 +213,7 @@ class MIAHandler:
 
     def get_labels(self:Self, dataset_indices: np.ndarray) -> np.ndarray:
         """Get the labels for given indices in the population."""
-        dataloader = self.get_dataloader(dataset_indices)
+        dataloader = self.get_dataloader(dataset_indices, shuffle=False)
         # Initialize an empty list to store the labels
         all_labels = []
 

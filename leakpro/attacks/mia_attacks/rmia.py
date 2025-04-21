@@ -258,8 +258,8 @@ class AttackRMIA(AbstractMIA):
 
     def _prepare_online_aux_attack_logits(self:Self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
                # Make a "random sample" to compute p(z) for points in attack dataset on the OUT shadow models for each audit point
-        self.attack_data_index = self.sample_indices_from_population(include_train_indices = False,
-                                                                     include_test_indices = False)
+        self.attack_data_index = self.sample_indices_from_population(include_train_indices = self.online,
+                                                                     include_test_indices = self.online)
         if len(self.attack_data_index) == 0:
             raise ValueError("There are no auxilliary points to use for the attack.")
 

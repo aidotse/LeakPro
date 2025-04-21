@@ -106,13 +106,13 @@ class AttackLSET(AbstractMIA):
         """
         # perform the attack
         if self.online:
+            logger.info("Running LSET online attack")
             audit_data_indices, in_members, out_members = self._filter_audit_data_for_online_attack(self.shadow_model_indices)
         else:
+            logger.info("Running LSET offline attack")
             audit_data_indices = self.audit_dataset["data"]
             in_members = self.audit_dataset["in_members"]
             out_members = self.audit_dataset["out_members"]
-
-        logger.info("Running LSET offline attack")
 
         n_audit_points = len(audit_data_indices)
         ground_truth_indices = self.handler.get_labels(audit_data_indices)
