@@ -44,6 +44,13 @@ class DataLoaderConfig(BaseModel):
     params: Dict[str, Any]
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields
 
+class EvalModelConfig(BaseModel):
+    """Schema for evaluation model parameters."""
+
+    model_class: str = Field(..., description="Class name of the model")
+    module_path: str = Field(..., description="Path to the model module")
+    eval_folder: str = Field(..., description="Directory where evaluation model data is stored")
+
 class ReconstructionConfig(BaseModel):
     """Configuration for reconstruction attacks."""
 
@@ -51,6 +58,7 @@ class ReconstructionConfig(BaseModel):
     num_class_samples: int = Field(1, description="Number of samples to generate for each class")
     num_audited_classes: int = Field(100, description="Number of classes to audit")
     metrics: Dict[str, Any] = Field(default_factory=dict)
+    eval_model: Optional[EvalModelConfig] = Field(None, description="Evaluation model configuration")
 
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields
 
@@ -81,7 +89,7 @@ class TargetConfig(BaseModel):
     module_path: Annotated[str, Field(pattern=r".*\.py$", description="Path to the target model module")]
     model_class: str = Field(..., description="Class name of the model")
     target_folder: str = Field(..., description="Directory where target model data is stored")
-    data_path: str = Field(..., description="Path to dataset file")
+    data_path: Optional[str] = Field(..., description="Path to dataset file")
     # TODO: Change data_path description to be more descriptive, i.e path to target (or private) dataset.
 
     # MINV-specific field - optional

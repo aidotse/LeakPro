@@ -242,7 +242,7 @@ class AttackPLGMI(AbstractMINV):
                                      z=opt_z)
         logger.info(image_metrics.results)
         # TODO: Implement a class with a .save function.
-        return image_metrics.results
+        return image_metrics
 
     def optimize_z(self:Self,
                    y: torch.tensor,
