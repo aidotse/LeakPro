@@ -17,7 +17,7 @@ from leakpro.input_handler.modality_extensions.image_extension import ImageExten
 from leakpro.input_handler.modality_extensions.tabular_extension import TabularExtension
 from leakpro.reporting.report_handler import ReportHandler
 from leakpro.schemas import EvalOutput, LeakProConfig, MIAMetaDataSchema, TrainingOutput
-from leakpro.utils.conversion import _dataloader_to_config, _get_model_init_params, _loss_to_config, _optimizer_to_config
+from leakpro.utils.conversion import dataloader_to_config, get_model_init_params, loss_to_config, optimizer_to_config
 from leakpro.utils.import_helper import Any, Self
 from leakpro.utils.logger import add_file_handler, logger
 
@@ -132,10 +132,10 @@ class LeakPro:
         """
 
         return MIAMetaDataSchema(
-            init_params = _get_model_init_params(train_result.model),
-            optimizer = _optimizer_to_config(optimizer),
-            criterion = _loss_to_config(loss_fn),
-            data_loader = _dataloader_to_config(dataloader),
+            init_params = get_model_init_params(train_result.model),
+            optimizer = optimizer_to_config(optimizer),
+            criterion = loss_to_config(loss_fn),
+            data_loader = dataloader_to_config(dataloader),
             epochs = epochs,
             train_indices = train_indices,
             test_indices = test_indices,

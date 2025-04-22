@@ -34,7 +34,7 @@ audit:  # Configurations for auditing
 target:
   # Target model path
   module_path: "./target_model_class.py"
-  model_class: "ResNet18" 
+  model_class: "WideResNet" 
   target_folder: "./target"
   # Data paths
   data_path: "./data/cifar10.pkl"
