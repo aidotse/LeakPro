@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from pydantic import BaseModel
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
-from leakpro.metrics.attack_result import AttackResult
+from leakpro.reporting.attack_result import AttackResult
 from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import List, Self, Union
 

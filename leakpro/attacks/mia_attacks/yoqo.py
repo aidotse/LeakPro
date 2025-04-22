@@ -10,7 +10,7 @@ from tqdm import tqdm
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
-from leakpro.metrics.attack_result import CombinedMetricResult
+from leakpro.reporting.mia_result import MIAResult
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
@@ -21,11 +21,11 @@ class AttackYOQO(AbstractMIA):
     class AttackConfig(BaseModel):
         """Configuration for the RMIA attack."""
 
-        training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Fraction of auxilary dataset to use for each shadow model training")  # noqa: E501
-        num_shadow_models: int = Field(default=8, ge=1, description="Number of shadow models to train")
+        training_data_fraction: float = Field(default=0.01, ge=0.0, le=1.0, description="Fraction of auxilary dataset to use for each shadow model training")  # noqa: E501
+        num_shadow_models: int = Field(default=1, ge=1, description="Number of shadow models to train")
         online: bool = Field(default=False, description="Perform online or offline attack")
         lr_xprime_optimization: float = Field(default=1e-3, ge=0.0, description="Learning rate for optimization of xprime")
-        max_iterations: int = Field(default=35, ge=1, description="Maximum number of iterations for optimization of xprime")
+        max_iterations: int = Field(default=1, ge=1, description="Maximum number of iterations for optimization of xprime")
 
     def __init__(self:Self,
                  handler: MIAHandler,
@@ -238,7 +238,7 @@ class AttackYOQO(AbstractMIA):
 
         return (x0 + dx)
 
-    def run_attack(self:Self) -> CombinedMetricResult:
+    def run_attack(self:Self) -> MIAResult:
         """Runs the attack on the target model and dataset and assess privacy risks or data leakage.
 
         This method evaluates how the target model's output (logits) for a specific dataset
@@ -255,7 +255,6 @@ class AttackYOQO(AbstractMIA):
         data_loader = self.handler.get_dataloader(self.audit_data_indices, batch_size=1)
 
         predictions = []
-        signal_values = []
 
         device_name = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -278,24 +277,24 @@ class AttackYOQO(AbstractMIA):
             predictions.extend(batch_predictions)
 
         predictions = np.array(predictions).reshape(1,-1)
-        signal_values = predictions.copy().reshape(-1,1)
 
         # Prepare true labels array, marking 1 for training data and 0 for non-training data
-        true_labels = np.concatenate(
-            [np.ones(len(self.in_members)), np.zeros(len(self.out_members))]
-        )
+        true_labels = np.concatenate([np.ones(len(self.in_members)), np.zeros(len(self.out_members))])
+
+        # Must evaluate attack performance here as it does not adhere to different thresholds
+        tp = np.sum(np.logical_and(predictions == 1, true_labels == 1))
+        tn = np.sum(np.logical_and(predictions == 0, true_labels == 0))
+        fp = np.sum(np.logical_and(predictions == 1, true_labels == 0))
+        fn = np.sum(np.logical_and(predictions == 0, true_labels == 1))
 
         logger.info(f"Accuracy: {np.sum(predictions == true_labels)/predictions.size}")
 
-        # Output in a format that can be used to generate ROC curve.
-        predictions = np.concatenate(
-            [np.zeros((1,predictions.size)), predictions, np.ones((1,predictions.size))], axis = 0
-        )
-
-        # Return a result object containing predictions, true labels, and the signal values for further evaluation
-        return CombinedMetricResult(
-            predicted_labels=predictions,
-            true_labels=true_labels,
-            predictions_proba=None,  # Note: Direct probability predictions are not computed here
-            signal_values=signal_values,
-        )
+        # Return the results, only a single confusion matrix is obtained from the attack
+        return MIAResult.from_confusion_counts(
+            true_membership=true_labels,
+            tp=tp,
+            fp=fp,
+            tn=tn,
+            fn=fn,
+            result_name="YOQO",
+            metadata=self.configs.model_dump())

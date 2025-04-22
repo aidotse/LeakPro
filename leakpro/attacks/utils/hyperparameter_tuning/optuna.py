@@ -5,7 +5,7 @@ import optuna
 from torch import Tensor
 
 from leakpro.attacks.attack_base import AbstractAttack
-from leakpro.metrics.attack_result import MIAResult
+from leakpro.reporting.mia_result import MIAResult
 from leakpro.schemas import OptunaConfig
 from leakpro.utils.logger import logger
 from leakpro.utils.seed import seed_everything
@@ -66,7 +66,7 @@ def optuna_optimal_hyperparameters(attack_object: AbstractAttack, optuna_config:
     logger.info(f"Best hyperparameters: {study.best_params}")
     logger.info(f"Best optimized value: {study.best_value}")
 
-    f_results_file = attack_object.attack_folder_path + "/optuna_results.txt"
+    f_results_file = attack_object.attack_cache_folder_path + "/optuna_results.txt"
     with open(f_results_file, "w") as f:
         f.write("Best hyperparameters:\n")
         for key, value in study.best_params.items():

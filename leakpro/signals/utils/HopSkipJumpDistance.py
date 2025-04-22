@@ -92,6 +92,26 @@ class HopSkipJumpDistance:
                  epsilon_threshold: float =1e-6,
                  verbose: bool =True,
                  ) -> None:
+        """Create a HopSkipJumpDistance instance.
+
+        Args:
+        ----
+            model (Module): The model to attack.
+            data_loader (DataLoader): The data loader for the model.
+            norm (int, optional): The norm to use for the attack. Defaults to 2.
+            y_target (np.ndarray, optional): The target labels for the attack. Defaults to None.
+            image_target (np.ndarray, optional): The target
+            initial_num_evals (int, optional): The initial number of evaluations for gradient estimation. Defaults to 100.
+            max_num_evals (int, optional): The maximum number of evaluations for gradient estimation. Defaults to 100.
+            stepsize_search (str, optional): How to search for stepsize. Defaults to "geometric_progression".
+            num_iterations (int, optional): The number of iterations. Defaults to 10.
+            gamma (float, optional): The binary search threshold theta. Defaults to .0.
+            constraint (int, optional): The constraint. Defaults to 2.
+            batch_size (int, optional): The batch size for model prediction. Defaults to 128.
+            epsilon_threshold (float, optional): The threshold for epsilon. Defaults to 1e-6.
+            verbose (bool, optional): Whether to print the distance at each step. Defaults to True.
+
+        """
 
         self.model = model
         self.data_loader = data_loader
@@ -534,7 +554,7 @@ class HopSkipJumpDistance:
                                            perturbed: Tensor,
                                            current_iteration: int,
                                            active_indices: np.ndarray, b_i:int) -> Tensor:
-        """Calculates the step size for geometric progression in the HopSkipJumpDistance algorithm.
+        """Calculate the step size for geometric progression in the HopSkipJumpDistance algorithm.
 
         Args:
         ----
@@ -592,7 +612,7 @@ class HopSkipJumpDistance:
     def select_delta(self: Self,
                      samples: Tensor,
                      previous_perturbed: Tensor) -> Tensor:
-        """Selects the delta value based on the given distance post update and current iteration.
+        """Select the delta value based on the given distance post update and current iteration.
 
         Args:
         ----

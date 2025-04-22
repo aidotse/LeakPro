@@ -57,7 +57,7 @@ include = ["leakpro*"]
 line-length = 130
 target-version = "py39"
 
-select = [
+lint.select = [
   "ANN", "ARG", "B", "C4", "C90", "D", "DTZ", "E", "ERA", "F", "I", "N", "PD", "PGH", "PLC",
   "PLE", "PLR", "PLW", "PT", "Q", "RET", "S", "SIM", "T20", "TID", "W",
 ]
