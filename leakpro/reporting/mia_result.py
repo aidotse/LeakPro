@@ -424,6 +424,10 @@ class MIAResult:
             save_dir: str = "./",
         ) -> str:
         """Result method for MIAResult."""
+        # create folder if it does not exist
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
         latex = ""
 
         seen_ids = set()
@@ -434,8 +438,11 @@ class MIAResult:
 
         # Create individual plot for results
         for res in attack_results:
-            MIAResult.create_roc_plot([res], f"{save_dir}/{res.id}")
-            latex += MIAResult._latex([res], save_dir = f"{save_dir}/{res.id}", section_title = res.id)
+            attack_folder = f"{save_dir}/{res.id}"
+            if not os.path.exists(attack_folder):
+                os.makedirs(attack_folder)
+            MIAResult.create_roc_plot([res], attack_folder)
+            latex += MIAResult._latex([res], save_dir = attack_folder, section_title = res.id)
 
         return latex
 
