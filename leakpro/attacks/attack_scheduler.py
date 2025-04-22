@@ -50,6 +50,9 @@ class AttackScheduler:
         self.report_dir = Path(output_dir) / "results"
 
         self.data_object_dir = Path(output_dir) / "data_objects"
+
+    def _read_attack_hashes(self:Self) -> None:
+        """Read all previous hashed attack objects from the report directory."""
         if self.data_object_dir.exists() and self.data_object_dir.is_dir():
             self.attack_hashes = [file.stem for file in self.data_object_dir.glob("*.json")]
         else:
@@ -110,6 +113,7 @@ class AttackScheduler:
                 attack_obj._hash_attack() # update hash with new config
 
             # Check if the attack has been run before and load the result if it has
+            self._read_attack_hashes()
             if attack_obj.attack_id in self.attack_hashes:
                 data_path = f"{self.data_object_dir}/{attack_obj.attack_id}.json"
                 result = MIAResult.load(data_path)
