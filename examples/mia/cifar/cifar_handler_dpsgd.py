@@ -28,8 +28,7 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
         model: torch.nn.Module,
         criterion: torch.nn.Module,
         optimizer: optim.Optimizer,
-        epochs: int,
-        do_dpsgd: bool = True,
+        epochs: int
     ) -> TrainingOutput:
         """
         Train a DP-SGD compliant model.
@@ -45,9 +44,13 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
         Returns:
             TrainingOutput: Contains the trained model and training metrics, including accuracy and loss history.
         """
-        batch_size = dataloader.batch_size
 
-        if do_dpsgd:
+        print(model._dpsgd)
+        if model._dpsgd:
+
+            # Get targeted batch_size from the dataloader
+            batch_size = dataloader.batch_size
+
             # Check if the model is compatible with DP-SGD
             errors = ModuleValidator.validate(model, strict=False)
             if len(errors) > 0:
@@ -86,19 +89,19 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
         accuracy_history = []
         loss_history = []
 
-        # Use BatchMemoryManager to handle large batch sizes by splitting them into smaller sub-batches
-        # Helpful with limited-memory hardware while maintaining the same overall batch size
-        with BatchMemoryManager(
+                    # Use BatchMemoryManager to handle large batch sizes by splitting them into smaller sub-batches
+            # Helpful with limited-memory hardware while maintaining the same overall batch size
+        with  BatchMemoryManager(
             data_loader=dataloader, 
             max_physical_batch_size=batch_size,
             optimizer=optimizer
-        ) as memory_safe_data_loader:
+        ) as dataloader:
 
-            # training loop
+            # Training loop
             for epoch in range(epochs):
                 train_loss, train_acc = 0, 0
                 model.train()
-                for inputs, labels in tqdm(memory_safe_data_loader, desc=f"Epoch {epoch+1}/{epochs}"):
+                for inputs, labels in tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}"):
                     labels = labels.long()
                     inputs, labels = inputs.to(gpu_or_cpu, non_blocking=True), labels.to(gpu_or_cpu, non_blocking=True)
 
@@ -119,8 +122,12 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
                 train_accuracy = train_acc / len(dataloader.dataset) 
                 accuracy_history.append(train_accuracy) 
                 loss_history.append(avg_train_loss)
-
+        
         model.to("cpu")
+        
+        # Remove the GradSampleModule wrapper.
+        if hasattr(model, '_module'):
+            model = model._module
 
         results = EvalOutput(accuracy = train_accuracy,
                              loss = avg_train_loss,
