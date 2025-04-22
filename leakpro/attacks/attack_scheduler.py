@@ -1,6 +1,9 @@
 """Module that contains the AttackScheduler class, which is responsible for creating and executing attacks."""
 
+from pathlib import Path
+
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.reporting.mia_result import MIAResult
 from leakpro.utils.import_helper import Any, Dict, Self
 from leakpro.utils.logger import logger
 
@@ -13,12 +16,14 @@ class AttackScheduler:
     def __init__(
         self:Self,
         handler: AbstractInputHandler,
+        output_dir: str
     ) -> None:
         """Initialize the AttackScheduler class.
 
         Args:
         ----
             handler (AbstractInputHandler): The handler object that contains the user inputs.
+            output_dir (str): The directory where the results will be saved.
 
         """
         configs = handler.configs
@@ -27,17 +32,32 @@ class AttackScheduler:
         attack_type = configs.audit.attack_type
         self._initialize_factory(attack_type)
 
-        # Create the attacks
-        self.attack_list = list(configs.audit.attack_list.keys())
+        self.attack_names = [entry["attack"] for entry in configs.audit.attack_list]
+        self.attack_configs = [{k: v for k, v in entry.items() if k != "attack"} for entry in configs.audit.attack_list]
+
         self.attacks = []
-        for attack_name in self.attack_list:
+        for attack_name, attack_config in zip(self.attack_names, self.attack_configs):
             try:
-                attack = self.attack_factory.create_attack(attack_name, handler)
+                attack = self.attack_factory.create_attack(attack_name, attack_config, handler)
                 self.add_attack(attack)
                 logger.info(f"Added attack: {attack_name}")
             except ValueError as e:
                 logger.info(e)
                 logger.info(f"Failed to create attack: {attack_name}, supported attacks: {self.attack_factory.attack_classes.keys()}")  # noqa: E501
+
+        # Read all previous hashed attack objects from the report directory
+        self.output_dir = output_dir
+        self.report_dir = Path(output_dir) / "results"
+
+        self.data_object_dir = Path(output_dir) / "data_objects"
+
+    def _read_attack_hashes(self:Self) -> None:
+        """Read all previous hashed attack objects from the report directory."""
+        if self.data_object_dir.exists() and self.data_object_dir.is_dir():
+            self.attack_hashes = [file.stem for file in self.data_object_dir.glob("*.json")]
+        else:
+            self.data_object_dir.mkdir(parents=True, exist_ok=True)
+            self.attack_hashes = []
 
     def _initialize_factory(self:Self, attack_type:str) -> None:
         """Conditionally import attack factories based on attack."""
@@ -76,24 +96,37 @@ class AttackScheduler:
         """Add an attack to the list of attacks."""
         self.attacks.append(attack)
 
-    def run_attacks(self: Self, report_dir:str, use_optuna:bool=False) -> Dict[str, Any]:
+    def run_attacks(self: Self, use_optuna:bool=False) -> Dict[str, Any]:
         """Run the attacks and return the results."""
-        results = {}
-        for attack, attack_type in zip(self.attacks, self.attack_list):
+        results = []
+        for attack_obj, attack_type in zip(self.attacks, self.attack_names):
+            run_with_optuna = use_optuna and attack_obj.optuna_params > 0
 
-            logger.info(f"Preparing attack: {attack_type}")
-            attack.prepare_attack()
+            # If Optuna is used, the attack should not be loaded even if it already exists
+            if run_with_optuna:
+                logger.info(f"Preparing attack: {attack_type}")
+                attack_obj.prepare_attack()
+                logger.info(f"Running attack with Optuna: {attack_type}")
+                study = attack_obj.run_with_optuna()
+                best_config = attack_obj.configs.model_copy(update=study.best_params)
+                attack_obj.reset_attack(best_config)
+                attack_obj._hash_attack() # update hash with new config
 
-            logger.info(f"Running attack: {attack_type}")
-            if use_optuna and attack.optuna_params > 0:
-                study = attack.run_with_optuna()
-                best_config = attack.configs.model_copy(update=study.best_params)
-                attack.reset_attack(best_config)
-            result = attack.run_attack()
-            results[attack_type] = {"attack_object": attack, "result_object": result}
-
-            logger.info(f"Saving results for attack: {attack_type} to {report_dir}")
-            result.save(name=attack_type, path=report_dir, config=attack.configs)
+            # Check if the attack has been run before and load the result if it has
+            self._read_attack_hashes()
+            if attack_obj.attack_id in self.attack_hashes:
+                data_path = f"{self.data_object_dir}/{attack_obj.attack_id}.json"
+                result = MIAResult.load(data_path)
+                logger.info(f"Loaded previous results for attack: {attack_type}")
+            else:
+                if not run_with_optuna:
+                    logger.info(f"Preparing attack: {attack_type}")
+                    attack_obj.prepare_attack()
+                logger.info(f"Running attack: {attack_type}")
+                result = attack_obj.run_attack()
+                logger.info(f"Saving results for attack: {attack_type} to {self.report_dir}")
+                result.save(attack_obj = attack_obj, output_dir = self.output_dir)
+            results.append({"attack_type": attack_type, "attack_object": attack_obj, "result_object": result})
 
         return results
 

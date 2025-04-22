@@ -420,4 +420,5 @@ class AttackLossTrajectory(AbstractMIA):
 
         return MIAResult.from_full_scores(true_membership=true_labels,
                                           signal_values=signals,
-                                          result_name="LossTrajectory")
+                                          result_name="LossTrajectory",
+                                          metadata=self.configs.model_dump())
