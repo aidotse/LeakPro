@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from pydantic import BaseModel
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
-from leakpro.reporting.attack_result import AttackResult
+from leakpro.reporting.minva_result import MinvResult
 from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import List, Self, Union
 
@@ -71,7 +71,7 @@ class AbstractMINV(ABC):
         pass
 
     @abstractmethod
-    def run_attack(self:Self) -> Union[AttackResult, List[AttackResult]]:
+    def run_attack(self:Self) -> Union[MinvResult, List[MinvResult]]:
         """Run the metric on the target model and dataset. This method handles all the computations related to the audit dataset.
 
         Args:
