@@ -45,8 +45,7 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
             TrainingOutput: Contains the trained model and training metrics, including accuracy and loss history.
         """
 
-        print(model._dpsgd)
-        if model._dpsgd:
+        if model.dpsgd:
 
             # Get targeted batch_size from the dataloader
             batch_size = dataloader.batch_size
@@ -76,7 +75,12 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
                 logger.info(f"Model fixed and {optimizer_class.__name__} re-instantiated.")
 
             # Send the model, optimizer, and dataloader to be DP-sgd-compliant 
-            model, optimizer, dataloader, privacyengine = dpsgd(model, optimizer, dataloader)
+            model, optimizer, dataloader, privacyengine = dpsgd(
+                                                        model,
+                                                        optimizer,
+                                                        dataloader,
+                                                        dpsgd_path = "./target_dpsgd/dpsgd_dic.pkl"
+                                                        )
 
         # read hyperparams for training (the parameters for the dataloader are defined in get_dataloader):
         if epochs is None:
@@ -196,11 +200,11 @@ def dpsgd(
         model: torch.nn.Module = None,
         optimizer: optim.Optimizer = None,
         dataloader: DataLoader = None,
+        dpsgd_path: str = None,
     ) -> None:
     """Set the model, optimizer and dataset using DPsgd."""
 
     logger.info("Training with DP-SGD")
-    dpsgd_path = "./target_dpsgd/dpsgd_dic.pkl"
 
     sample_rate = 1/len(dataloader)
     # Check if the file exists

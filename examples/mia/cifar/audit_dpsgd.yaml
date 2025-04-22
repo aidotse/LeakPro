@@ -3,9 +3,9 @@ audit:  # Configurations for auditing
   attack_list:
     # rmia:
     # population:
-    lira:
+    - attack: lira
       online: True
-      num_shadow_models: 4
+      num_shadow_models: 2
       training_data_fraction: 0.1
 
     # loss_traj:
