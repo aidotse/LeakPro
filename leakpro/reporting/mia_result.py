@@ -453,12 +453,14 @@ class MIAResult:
             section_title: str
         ) -> str:
         """Latex method for MIAResult."""
+        image_path = os.path.abspath(os.path.join(save_dir, "ROC.png")).replace("_", "\\_")
 
         # Input mia results image
         latex_content = f"""
         \\subsection{{{" ".join(section_title.split("_"))}}}
         \\begin{{figure}}[ht]
-        \\includegraphics[width=0.8\\textwidth]{{{save_dir + "/ROC"}.png}}
+        \\centering
+        \\includegraphics[width=0.8\\textwidth]{{{image_path}}}
         \\end{{figure}}
         """
 
