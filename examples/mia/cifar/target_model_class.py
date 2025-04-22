@@ -17,23 +17,23 @@ class ResNet18_DPsgd(nn.Module):
     def __init__(self, num_classes=10, dpsgd=True):
         super(ResNet18_DPsgd, self).__init__()
 
-        print(dpsgd)
         self.dpsgd = dpsgd
         self.num_classes = num_classes
 
-        # Use _dpsgd to 
-        self._dpsgd = dpsgd
-        self.reset()
+        self.init_model()
         
-        if self._dpsgd:
+        if self.dpsgd:
             self.validate()
 
     def forward(self, x):
         return self.model(x)
 
-    def reset(self,):
+    def init_model(self,):
         self.model = models.resnet18(pretrained=False)
         self.model.fc = nn.Linear(self.model.fc.in_features, self.num_classes)
 
     def validate(self,):
         self.model = ModuleValidator.fix(self.model)
+
+    def reset_validation(self,):
+        self.init_model()
