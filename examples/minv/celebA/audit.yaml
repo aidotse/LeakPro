@@ -5,7 +5,7 @@ audit:  # Configurations for auditing
   attack_list:
     plgmi:
       top_n: 30 # Integer number for indicating the top n classes to select
-      n_dis: 2 # Integer number for indicating the number of discriminator updates per generator update
+      n_dis: 5 # Integer number for indicating the number of discriminator updates per generator update
       n_iter: 30000 # Integer number for indicating the iterations for training the GAN
       batch_size: 64 # Integer number for indicating batch size for training the GAN
       gen_lr: 0.0002 # Float number for indicating learning rate for training the generator

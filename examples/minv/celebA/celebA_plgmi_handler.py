@@ -131,6 +131,9 @@ class CelebA_InputHandler(AbstractInputHandler):
         dis_losses = []
         inv_losses = []
         
+        gen.load_state_dict(torch.load('./checks/gen.pth'))
+        dis.load_state_dict(torch.load('./checks/dis.pth'))
+        
         # Augmentations for generated images. TODO: Move this to a image modality extension and have it as an input
         aug_list = kornia.augmentation.container.ImageSequential(
             kornia.augmentation.RandomResizedCrop((64, 64), scale=(0.8, 1.0), ratio=(1.0, 1.0)),
@@ -207,7 +210,7 @@ class CelebA_InputHandler(AbstractInputHandler):
                             i, n_iter, _l_g, cumulative_loss_dis / n_dis, cumulative_inv_loss,
                             cumulative_target_acc / n_dis, time.strftime("%H:%M:%S")))
                 
-            if i % 5000 == 0:
+            if (i+1) % 5000 == 0:
                 # Save the model every 1000 iterations
                 torch.save(gen.state_dict(), f'./checks/gen_all_c_{i}.pth')
                 torch.save(dis.state_dict(), f'./checks/dis_all_c_{i}.pth')
