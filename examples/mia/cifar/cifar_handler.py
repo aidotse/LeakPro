@@ -57,7 +57,7 @@ class CifarInputHandler(AbstractInputHandler):
             accuracy_history.append(train_accuracy) 
             loss_history.append(avg_train_loss)
 
-        model.to(device="cpu")
+        model.to("cpu")
 
         results = EvalOutput(accuracy = train_accuracy,
                              loss = avg_train_loss,
