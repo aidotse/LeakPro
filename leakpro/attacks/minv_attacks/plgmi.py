@@ -39,6 +39,7 @@ class AttackPLGMI(AbstractMINV):
         top_n : int = Field(10, ge=1, description="Number of pseudo-labels to select")
         alpha: float = Field(0.1, ge=0.0, description="Regularization parameter for inversion optimization")
         n_iter: int = Field(1000, ge=1, description="Number of iterations for optimization")
+        checkpoint_interval: int = Field(10000, ge=1, description="Checkpoint interval for saving models")
         log_interval: int = Field(10, ge=1, description="Log interval")
 
         # Generator parameters
@@ -201,6 +202,7 @@ class AttackPLGMI(AbstractMINV):
                                         opt_gen = self.gen_optimizer,
                                         opt_dis = self.dis_optimizer,
                                         n_iter = self.n_iter,
+                                        checkpoint_interval = self.checkpoint_interval,
                                         n_dis  = self.n_dis,
                                         device = self.device,
                                         alpha = self.alpha,

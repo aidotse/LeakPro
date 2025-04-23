@@ -7,6 +7,7 @@ audit:  # Configurations for auditing
       top_n: 30 # Integer number for indicating the top n classes to select
       n_dis: 5 # Integer number for indicating the number of discriminator updates per generator update
       n_iter: 30000 # Integer number for indicating the iterations for training the GAN
+      checkpoint_interval: 10000 # Integer number for indicating the interval for saving the model
       batch_size: 64 # Integer number for indicating batch size for training the GAN
       gen_lr: 0.0002 # Float number for indicating learning rate for training the generator
       dis_lr: 0.0002 # Float number for indicating learning rate for training the discriminator
@@ -14,7 +15,7 @@ audit:  # Configurations for auditing
       gen_beta2: 0.9 # Float number for indicating beta2 for Adam optimizer
       dis_beta1: 0.0 # Float number for indicating beta1 for Adam optimizer
       dis_beta2: 0.9 # Float number for indicating beta2 for Adam optimizer
-      dim_z: &dim_z 256 # Integer number for indicating the dimension of the latent space
+      dim_z: &dim_z 128 # Integer number for indicating the dimension of the latent space
       alpha: 0.2 # Float number for indicating the weight of the gradient penalty
       log_interval: 10 # Integer number for indicating the interval for logging the information
       z_optimization_iter: 2000 # Integer number for indicating the iterations for optimizing the latent code
@@ -36,8 +37,8 @@ audit:  # Configurations for auditing
     num_audited_classes: 200 # Number of classes to audit
     eval_model:
       module_path: "utils/resnet_model.py"
-      model_class: "ResNet50" # Class name of the model
-      eval_folder: "./target/resnet50" # Path to the model checkpoint
+      model_class: "ResNet152" # Class name of the model
+      eval_folder: "./target/resnet152" # Path to the model checkpoint
     metrics:
       accuracy:
       knn:
