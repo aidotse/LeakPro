@@ -123,8 +123,8 @@ def get_celebA_train_test_loader(train_config):
     train_subset = Subset(population_dataset, train_indices)
     test_subset = Subset(population_dataset, test_indices)
 
-    train_loader = DataLoader(train_subset, batch_size =batch_size, shuffle=False)
-    test_loader = DataLoader(test_subset, batch_size= batch_size, shuffle=False)
+    train_loader = DataLoader(train_subset, batch_size =batch_size, shuffle=True)
+    test_loader = DataLoader(test_subset, batch_size= batch_size, shuffle=True)
 
     return train_loader, test_loader
 

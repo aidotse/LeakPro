@@ -15,11 +15,11 @@ audit:  # Configurations for auditing
       gen_beta2: 0.9 # Float number for indicating beta2 for Adam optimizer
       dis_beta1: 0.0 # Float number for indicating beta1 for Adam optimizer
       dis_beta2: 0.9 # Float number for indicating beta2 for Adam optimizer
-      dim_z: &dim_z 128 # Integer number for indicating the dimension of the latent space
+      dim_z: &dim_z 256 # Integer number for indicating the dimension of the latent space
       alpha: 0.2 # Float number for indicating the weight of the gradient penalty
       log_interval: 10 # Integer number for indicating the interval for logging the information
       z_optimization_iter: 2000 # Integer number for indicating the iterations for optimizing the latent code
-      z_optimization_lr: 0.0002 # Float number for indicating the learning rate for optimizing the latent code
+      z_optimization_lr: 0.1 # Float number for indicating the learning rate for optimizing the latent code
       generator:
         module_path: "./utils/generator.py"
         model_class: "ResNetGenerator"
