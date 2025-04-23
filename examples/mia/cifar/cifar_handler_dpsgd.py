@@ -200,7 +200,7 @@ def dpsgd(
         model: torch.nn.Module = None,
         optimizer: optim.Optimizer = None,
         dataloader: DataLoader = None,
-        dpsgd_path: str = None,
+        dpsgd_path: str = "./target_dpsgd/dpsgd_dic.pkl",
     ) -> None:
     """Set the model, optimizer and dataset using DPsgd."""
 
