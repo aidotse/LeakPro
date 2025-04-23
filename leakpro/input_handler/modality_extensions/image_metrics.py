@@ -13,7 +13,6 @@ from leakpro.attacks.utils.generator_handler import GeneratorHandler
 from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.input_handler.user_imports import get_class_from_module, import_module_from_file
 from leakpro.schemas import MIAMetaDataSchema
-from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 

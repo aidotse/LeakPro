@@ -209,7 +209,7 @@ class CelebA_InputHandler(AbstractInputHandler):
                             cumulative_target_acc / n_dis, time.strftime("%H:%M:%S")))
                 
             if i % checkpoint_interval == 0 and i > 0:
-                # Save the model every 1000 iterations
+                # Save the model every checkpoint_interval iterations
                 torch.save(gen.state_dict(), f'./checks/gen_checkpoint_{i}.pth')
                 torch.save(dis.state_dict(), f'./checks/dis_checkpoint_{i}.pth')
 

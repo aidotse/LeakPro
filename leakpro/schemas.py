@@ -89,7 +89,7 @@ class TargetConfig(BaseModel):
     module_path: Annotated[str, Field(pattern=r".*\.py$", description="Path to the target model module")]
     model_class: str = Field(..., description="Class name of the model")
     target_folder: str = Field(..., description="Directory where target model data is stored")
-    data_path: Optional[str] = Field(..., description="Path to dataset file")
+    data_path: str = Field(..., description="Path to dataset file")
     # TODO: Change data_path description to be more descriptive, i.e path to target (or private) dataset.
 
     # MINV-specific field - optional
