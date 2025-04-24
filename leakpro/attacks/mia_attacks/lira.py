@@ -306,4 +306,5 @@ class AttackLiRA(AbstractMIA):
         # Return a result object containing predictions, true labels, and the signal values for further evaluation
         return MIAResult.from_full_scores(true_membership=true_labels,
                                     signal_values=signal_values,
-                                    result_name="LiRA")
+                                    result_name="LiRA",
+                                    metadata=self.configs.model_dump())

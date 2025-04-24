@@ -1,13 +1,13 @@
 """Module that contains the schema definitions for the input handler."""
 
-from typing import Annotated, Any, Callable, Dict, List, Literal, Optional, Tuple, Union
+from typing import Annotated, Any, Callable, Dict, List, Literal, Optional, Union
 
 import numpy as np
 import optuna
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from torch.nn import Module
 
-ArrayOrScalar = Union[np.ndarray, np.integer, int]
+ArrayOrScalar = Union[np.ndarray, np.integer, int, list]
 
 class OptimizerConfig(BaseModel):
     """Schema for optimizer parameters."""
@@ -59,7 +59,7 @@ class AuditConfig(BaseModel):
 
     random_seed: int = Field(default=42, description="Random seed for reproducibility")
     attack_type: Literal["mia", "gia", "minv", "synthetic"] = Field(..., description="Type of attack: must be one of ['mia', 'gia', 'minv', 'synthetic]")  # noqa: E501
-    attack_list: Dict[str, Any] = Field(..., min_length=1, description="Must have at least one attack")
+    attack_list: List[Dict[str, Any]] = Field(..., min_length=1, description="Must have at least one attack")
     hyper_param_search: bool = Field(default=False, description="Whether to perform hyperparameter search")
     data_modality: Literal["image", "tabular", "text", "graph", "timeseries"] = Field(..., description="Type of data modality: must be one of ['image', 'tabular', 'text', 'graph', 'timeseries']")  # noqa: E501
     output_dir: str = Field(..., description="Output directory for audit results")
@@ -212,6 +212,7 @@ class MIAResultSchema(BaseModel):
 
     result_name: str = Field(..., description="Name of the result")
     result_type: str = Field(..., description="Type of the result")
+    id: str = Field(..., description="Unique identifier for the result")
     tpr: Union[List[float], None] = Field(..., description="True positive rate")
     fpr: Union[List[float], None] = Field(..., description="False positive rate")
     roc_auc: Union[float, None] = Field(..., description="Area under the ROC curve")
@@ -219,9 +220,10 @@ class MIAResultSchema(BaseModel):
     fixed_fpr: Union[Dict[str, float], None] = Field(..., description="Fixed FPR values")
     signal_values: Union[List[float], None] = Field(..., description="Signal values")
     true_labels: List[int] = Field(..., description="True labels")
-    id: str = Field(..., description="Identity of the attack")
     config: Dict[str, Any] = Field(..., description="Configuration of the attack")
-    tp_fp_tn_fn: Union[Tuple[ArrayOrScalar, ArrayOrScalar, ArrayOrScalar, ArrayOrScalar], None] = Field(None,
-                                                                                            description="TP, FP, TN, FN values")
+    tp: Union[ArrayOrScalar, None] = Field(None, description="TP alues")
+    fp: Union[ArrayOrScalar, None] = Field(None, description="FP values")
+    tn: Union[ArrayOrScalar, None] = Field(None, description="TN values")
+    fn: Union[ArrayOrScalar, None] = Field(None, description="FN values")
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # Prevent extra fields

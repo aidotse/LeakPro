@@ -374,7 +374,8 @@ class AttackQMIA(AbstractMIA):
             fp = fp,
             tn = tn,
             fn = fn,
-            result_name = "QMIA")
+            result_name = "QMIA",
+            metadata=self.configs.model_dump())
 
 
 

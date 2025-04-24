@@ -26,8 +26,6 @@ def get_config_name(config: BaseModel) -> str:
     for key, value in zip(list(config.keys()), list(config.values())):
         if key in exclude:
             pass
-        elif type(value) is bool:
-            config_name += f"-{key}"
         else:
             config_name += f"-{key}={value}"
     return config_name

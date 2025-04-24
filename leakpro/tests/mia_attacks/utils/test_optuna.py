@@ -13,7 +13,7 @@ from leakpro.schemas import OptunaConfig
 def test_rmia_optuna_attack_change_default_objective(image_handler:ImageInputHandler) -> None:
     audit_config = get_audit_config()
     # Note: this does not include gamma and a_offline
-    rmia_params = audit_config.attack_list.rmia
+    rmia_params = audit_config.attack_list[1]
     rmia_params.online = False
 
     # Set up attack object
@@ -54,7 +54,7 @@ def test_rmia_optuna_attack_change_default_objective(image_handler:ImageInputHan
 def test_rmia_optuna_selective_attack(image_handler:ImageInputHandler) -> None:
     audit_config = get_audit_config()
     # Note: this does not include gamma and a_offline
-    rmia_params = audit_config.attack_list.rmia
+    rmia_params =  audit_config.attack_list[1]
     rmia_params.online = False
     start_offline_a = 0.9999
     rmia_params.offline_a = start_offline_a
@@ -89,7 +89,7 @@ def test_rmia_optuna_selective_attack(image_handler:ImageInputHandler) -> None:
 def test_rmia_optuna_no_params(image_handler:ImageInputHandler) -> None:
     audit_config = get_audit_config()
     # Note: this does not include gamma and a_offline
-    rmia_params = audit_config.attack_list.rmia
+    rmia_params = audit_config.attack_list[1]
     rmia_params.online = False
     start_offline_a = 0.9999
     start_gamma = 9

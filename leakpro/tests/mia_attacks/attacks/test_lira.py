@@ -11,7 +11,7 @@ from leakpro.tests.input_handler.image_input_handler import ImageInputHandler
 def test_lira_setup(image_handler:ImageInputHandler) -> None:
     """Test the initialization of LiRA."""
     audit_config = get_audit_config()
-    lira_params = audit_config.attack_list.lira
+    lira_params = audit_config.attack_list[0]
     lira_obj = AttackLiRA(image_handler, lira_params)
 
     assert lira_obj is not None
@@ -28,7 +28,7 @@ def test_lira_setup(image_handler:ImageInputHandler) -> None:
 
 def test_lira_prepare_online_attack(image_handler:ImageInputHandler) -> None:
     audit_config = get_audit_config()
-    lira_params = audit_config.attack_list.lira
+    lira_params = audit_config.attack_list[0]
     lira_params.online = True
 
     image_handler.configs.shadow_model = get_shadow_model_config()
@@ -54,7 +54,7 @@ def test_lira_prepare_online_attack(image_handler:ImageInputHandler) -> None:
 
 def test_lira_prepare_offline_attack(image_handler:ImageInputHandler) -> None:
     audit_config = get_audit_config()
-    lira_params = audit_config.attack_list.lira
+    lira_params = audit_config.attack_list[0]
     lira_params.online = False
 
     image_handler.configs.shadow_model = get_shadow_model_config()
@@ -82,7 +82,7 @@ def test_lira_prepare_offline_attack(image_handler:ImageInputHandler) -> None:
 def test_lira_online_attack(image_handler:ImageInputHandler):
     # Set up for testing
     audit_config = get_audit_config()
-    lira_params = audit_config.attack_list.lira
+    lira_params = audit_config.attack_list[0]
     lira_params.online = True
     image_handler.configs.shadow_model = get_shadow_model_config()
     lira_obj = AttackLiRA(image_handler, lira_params)
@@ -121,7 +121,7 @@ def test_lira_online_attack(image_handler:ImageInputHandler):
 def test_lira_offline_attack(image_handler:ImageInputHandler):
     # Set up for testing
     audit_config = get_audit_config()
-    lira_params = audit_config.attack_list.lira
+    lira_params = audit_config.attack_list[0]
     lira_params.online = False
     image_handler.configs.shadow_model = get_shadow_model_config()
     lira_obj = AttackLiRA(image_handler, lira_params)
