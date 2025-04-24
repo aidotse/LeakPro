@@ -20,4 +20,4 @@ config_path = "audit.yaml"
 leakpro = LeakPro(CelebA_InputHandler, config_path)
 
 # Run the audit
-results = leakpro.run_audit(return_results=True)
+results = leakpro.run_audit()

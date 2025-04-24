@@ -77,6 +77,7 @@ class AttackPLGMI(AbstractMINV):
         """
         logger.info("Configuring PLG-MI attack")
         self.configs = self.Config() if configs is None else self.Config(**configs)
+        self.attack_id = 1 # Workaround for now - required by attack scheduler
 
         # Call the parent class constructor
         super().__init__(handler)
