@@ -43,17 +43,25 @@ def get_audit_config():
     audit_config = DotMap()
     audit_config.output_dir = STORAGE_PATH
     audit_config.attack_type = "mia"
+    audit_config.attack_list = []
     # Lira parameters
-    audit_config.attack_list.lira.training_data_fraction = 0.1
-    audit_config.attack_list.lira.num_shadow_models = 3
-    audit_config.attack_list.lira.online = False
-    audit_config.attack_list.lira.fixed_variance = True
+    lira_config = DotMap()
+    lira_config.attack = "lira"
+    lira_config.training_data_fraction = 0.1
+    lira_config.num_shadow_models = 3
+    lira_config.online = False
+    lira_config.fixed_variance = True
+    audit_config.attack_list.append(lira_config)
     
     # RMIA parameters
-    audit_config.attack_list.rmia.training_data_fraction = 0.1
-    audit_config.attack_list.rmia.num_shadow_models = 3
-    audit_config.attack_list.rmia.online = False
-    audit_config.attack_list.rmia.attack_data_fraction = 0.1
+    rmia_config = DotMap()
+    rmia_config.attack = "rmia"
+    rmia_config.training_data_fraction = 0.1
+    rmia_config.num_shadow_models = 3
+    rmia_config.online = False
+    rmia_config.attack_data_fraction = 0.1
+    audit_config.attack_list.append(rmia_config)
+ 
     return audit_config
 
 

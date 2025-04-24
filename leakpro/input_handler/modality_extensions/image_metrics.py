@@ -277,6 +277,7 @@ class ImageMetrics:
             transform (callable): A function or transform to apply to the images.
 
         Returns:
+        -------
             torch.tensor: A tensor containing the extracted features.
 
         """
@@ -301,6 +302,7 @@ class ImageMetrics:
             transform (callable): A function or transform to apply to the generated images.
 
         Returns:
+        -------
             torch.tensor: A tensor containing the extracted features.
 
         """

@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.threshold_computation import linear_itp_threshold_func
 from leakpro.input_handler.mia_handler import MIAHandler
-from leakpro.metrics.attack_result import MIAResult
+from leakpro.reporting.mia_result import MIAResult
 from leakpro.signals.signal import ModelLoss
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
@@ -107,41 +107,20 @@ class AttackP(AbstractMIA):
         # obtain the threshold values based on the reference dataset
         thresholds = self.hypothesis_test_func(self.attack_signal, self.quantiles)[:, np.newaxis]
 
-        num_threshold = len(self.quantiles)
-
         logger.info("Running the Population attack on the target model")
         # get the loss for the audit dataset
         audit_signal = np.array(self.signal([self.target_model], self.handler, self.audit_dataset["data"])).squeeze()
 
-        # pick out the in-members and out-members
-        self.in_member_signals =  audit_signal[self.audit_dataset["in_members"]]
-        self.out_member_signals = audit_signal[self.audit_dataset["out_members"]]
-
-        # compute the signals for the in-members and out-members
-        member_signals = (self.in_member_signals.reshape(-1, 1).repeat(num_threshold, 1).T)
-        non_member_signals = (self.out_member_signals.reshape(-1, 1).repeat(num_threshold, 1).T)
-        member_preds = np.less(member_signals, thresholds)
-        non_member_preds = np.less(non_member_signals, thresholds)
+        # set true labels for being in the training dataset
+        true_labels = np.concatenate([np.ones(len(self.audit_dataset["in_members"])),
+                                      np.zeros(len(self.audit_dataset["out_members"]))])
 
         logger.info("Attack completed")
 
-        # what does the attack predict on test and train dataset
-        predictions = np.concatenate([member_preds, non_member_preds], axis=1)
-        # set true labels for being in the training dataset
-        true_labels = np.concatenate(
-            [
-                np.ones(len(self.in_member_signals)),
-                np.zeros(len(self.out_member_signals)),
-            ]
-        )
-        signal_values = np.concatenate(
-            [self.in_member_signals, self.out_member_signals]
-        )
-
-        # compute ROC, TP, TN etc
-        return MIAResult(
-            predicted_labels=predictions,
-            true_labels=true_labels,
-            predictions_proba=None,
-            signal_values=signal_values,
+        return MIAResult.from_fixed_thresholds(
+            thresholds = thresholds,
+            true_membership = true_labels,
+            signal_values = audit_signal,
+            result_name = "P-attack",
+            metadata=self.configs.model_dump()
         )
