@@ -23,7 +23,7 @@ audit:  # Configurations for auditing
       generator:
         module_path: "./utils/generator.py"
         model_class: "ResNetGenerator"
-        checkpoint_path: "checks/gen_checkpoint_10000.pth"
+        checkpoint_path: #"gen.pth"
         init_params:
           dim_z: *dim_z
           bottom_width: 4
