@@ -126,6 +126,7 @@ def get_celebA_train_test_loader(train_config):
     train_loader = DataLoader(train_subset, batch_size =batch_size, shuffle=True)
     test_loader = DataLoader(test_subset, batch_size= batch_size, shuffle=True)
 
+
     return train_loader, test_loader
 
 
