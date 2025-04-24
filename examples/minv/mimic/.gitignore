@@ -1,0 +1,10 @@
+data/*
+!data/.gitkeep
+
+leakpro_output/*
+target/*
+
+.pt_tmp/*
+lightning_logs/*
+saved_models/*
+*.pkl

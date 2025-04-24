@@ -39,6 +39,7 @@ class AttackPLGMI(AbstractMINV):
         top_n : int = Field(10, ge=1, description="Number of pseudo-labels to select")
         alpha: float = Field(0.1, ge=0.0, description="Regularization parameter for inversion optimization")
         n_iter: int = Field(1000, ge=1, description="Number of iterations for optimization")
+        checkpoint_interval: int = Field(10000, ge=1, description="Checkpoint interval for saving models")
         log_interval: int = Field(10, ge=1, description="Log interval")
 
         # Generator parameters
@@ -76,6 +77,7 @@ class AttackPLGMI(AbstractMINV):
         """
         logger.info("Configuring PLG-MI attack")
         self.configs = self.Config() if configs is None else self.Config(**configs)
+        self.attack_id = 1 # Workaround for now - required by attack scheduler
 
         # Call the parent class constructor
         super().__init__(handler)
@@ -201,6 +203,7 @@ class AttackPLGMI(AbstractMINV):
                                         opt_gen = self.gen_optimizer,
                                         opt_dis = self.dis_optimizer,
                                         n_iter = self.n_iter,
+                                        checkpoint_interval = self.checkpoint_interval,
                                         n_dis  = self.n_dis,
                                         device = self.device,
                                         alpha = self.alpha,
@@ -242,7 +245,7 @@ class AttackPLGMI(AbstractMINV):
                                      z=opt_z)
         logger.info(image_metrics.results)
         # TODO: Implement a class with a .save function.
-        return image_metrics.results
+        return image_metrics
 
     def optimize_z(self:Self,
                    y: torch.tensor,

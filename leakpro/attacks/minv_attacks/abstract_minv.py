@@ -30,7 +30,9 @@ class AbstractMINV(ABC):
 
     def __init__(
         self:Self,
+
         handler: AbstractInputHandler,
+
     )->None:
         """Initialize the AttackAbstract class.
 
