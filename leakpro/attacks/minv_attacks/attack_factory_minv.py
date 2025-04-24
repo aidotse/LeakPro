@@ -22,6 +22,7 @@ class AttackFactoryMINV:
         Args:
         ----
             name (str): The name of the attack.
+            attack_config (dict): Configuration dictionary for the attack.
             handler (AbstractInputHandler): The input handler object.
 
         Returns:
