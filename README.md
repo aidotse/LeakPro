@@ -147,7 +147,7 @@ LeakPro has contributed to the research community by enabling empirical studies 
 
 ## Credits
 LeakPro draws inspiration from other works including
-- [Murakonda S. K.,  Shokri .R, *ML Privacy Meter: Aiding Regulatory Compliance by Quantifying the Privacy Risks of Machine Learning*, arXiv, 2020] (https://github.com/privacytrustlab/ml_privacy_meter)
+- [Murakonda S. K.,  Shokri .R, *ML Privacy Meter: Aiding Regulatory Compliance by Quantifying the Privacy Risks of Machine Learning*, arXiv, 2020](https://github.com/privacytrustlab/ml_privacy_meter)
 - [Giomi, M. et al., *A Unified Framework for Quantifying Privacy Risk in Synthetic Data, arXiv, 2022*](https://github.com/statice/anonymeter)
 
 ## Funding  
