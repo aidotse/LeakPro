@@ -145,5 +145,10 @@ LeakPro has contributed to the research community by enabling empirical studies 
 - [Brännvall et al., *Targeted Obfuscation for Machine Learning*, arXiv, 2024](https://arxiv.org/abs/2501.11525)
 - [Reimer A., *Privacy Risks in Text Masking Models for Anonymization*, MSc Thesis, Chalmers University of Technology, 2025](https://odr.chalmers.se/server/api/core/bitstreams/3c2efd19-5440-43f7-a25f-051313f99c60/content)
 
+## Credits
+LeakPro draws inspiration from other works including
+- [Murakonda S. K.,  Shokri .R, *ML Privacy Meter: Aiding Regulatory Compliance by Quantifying the Privacy Risks of Machine Learning*, arXiv, 2020] (https://github.com/privacytrustlab/ml_privacy_meter)
+- [Giomi, M. et al., *A Unified Framework for Quantifying Privacy Risk in Synthetic Data, arXiv, 2022*](https://github.com/statice/anonymeter)
+
 ## Funding  
 LeakPro is funded by Sweden's innovation agency, Vinnova, under grant 2023-03000. The project is a collaboration between AI Sweden, RISE, Scaleout AB, Syndata AB, AstraZeneca AB, Sahlgrenska University Hopsital, and Region Halland, with the goal of advancing privacy-preserving machine learning and responsible AI deployment.  
