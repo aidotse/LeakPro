@@ -1,4 +1,4 @@
-"""Module containing the class to handle the user input for the CIFAR100 dataset."""
+"""Module containing the class to handle the user input for the CelebAHQ dataset."""
 
 import os
 from torch import cat
@@ -11,8 +11,8 @@ from tqdm import tqdm
 from leakpro import AbstractInputHandler
 from leakpro.schemas import TrainingOutput, EvalOutput
 
-class CelebAInputHandler(AbstractInputHandler):
-    """Class to handle the user input for the CIFAR100 dataset."""
+class CelebAHQInputHandler(AbstractInputHandler):
+    """Class to handle the user input for the CelebA_HQ dataset."""
 
     def train(
         self,
@@ -89,28 +89,28 @@ class CelebAInputHandler(AbstractInputHandler):
         return EvalOutput(**output_dict)
 
     class UserDataset(AbstractInputHandler.UserDataset):
-        def __init__(self, x, y, transform=None,  indices=None):
+        def __init__(self, data, targets, transform=None,  indices=None):
             """
-            Custom dataset for CIFAR data.
+            Custom dataset for CelebAHQ data.
 
             Args:
-                x (torch.Tensor): Tensor of input images.
-                y (torch.Tensor): Tensor of labels.
+                data (torch.Tensor): Tensor of input images.
+                targets (torch.Tensor): Tensor of labels.
                 transform (callable, optional): Optional transform to be applied on the image tensors.
             """
-            self.x = x
-            self.y = y
+            self.data = data
+            self.targets = targets
             self.transform = transform
             self.indices = indices
 
         def __len__(self):
             """Return the total number of samples."""
-            return len(self.y)
+            return len(self.targets)
 
         def __getitem__(self, idx):
             """Retrieve the image and its corresponding label at index 'idx'."""
-            image = self.x[idx]
-            label = self.y[idx]
+            image = self.data[idx]
+            label = self.targets[idx]
 
             # Apply transformations to the image if any
             if self.transform:
