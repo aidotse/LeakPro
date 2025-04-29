@@ -45,11 +45,13 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
             TrainingOutput: Contains the trained model and training metrics, including accuracy and loss history.
         """
 
-        if model.dpsgd:
+        # Get targeted batch_size from the dataloader
+        batch_size = dataloader.batch_size
+        
+        # Get dpsgd flag from the model
+        RUN_DPSGD = model.dpsgd
 
-            # Get targeted batch_size from the dataloader
-            batch_size = dataloader.batch_size
-
+        if RUN_DPSGD:
             # Check if the model is compatible with DP-SGD
             errors = ModuleValidator.validate(model, strict=False)
             if len(errors) > 0:
@@ -87,46 +89,57 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
             raise ValueError("epochs not found in configs")
 
         # prepare training
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
-        model.to(gpu_or_cpu)
+        _device_ = device("cuda" if cuda.is_available() else "cpu")
+        model.to(_device_)
 
         accuracy_history = []
         loss_history = []
 
-                    # Use BatchMemoryManager to handle large batch sizes by splitting them into smaller sub-batches
+        if RUN_DPSGD:
+            logger.info("Training with DP-SGD")
+
+            # Use BatchMemoryManager to handle large batch sizes by splitting them into smaller sub-batches
             # Helpful with limited-memory hardware while maintaining the same overall batch size
-        with  BatchMemoryManager(
-            data_loader=dataloader, 
-            max_physical_batch_size=batch_size,
-            optimizer=optimizer
-        ) as dataloader:
+            with  BatchMemoryManager(
+                data_loader=dataloader, 
+                max_physical_batch_size=int(max(batch_size/2, 4)), # Set max pyhsical batch size
+                optimizer=optimizer
+            ) as dataloader:
 
-            # Training loop
+                for epoch in range(epochs):
+                    train_loss, train_acc = train_loop(
+                                dataloader,
+                                model,
+                                criterion,
+                                optimizer,
+                                _device_,
+                                epoch,
+                                epochs,
+                                )
+
+                    avg_train_loss = train_loss / len(dataloader.dataset)
+                    train_accuracy = train_acc / len(dataloader.dataset) 
+                    accuracy_history.append(train_accuracy) 
+                    loss_history.append(avg_train_loss)
+                
+        else:
+            logger.info("Training without DP-SGD")
             for epoch in range(epochs):
-                train_loss, train_acc = 0, 0
-                model.train()
-                for inputs, labels in tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}"):
-                    labels = labels.long()
-                    inputs, labels = inputs.to(gpu_or_cpu, non_blocking=True), labels.to(gpu_or_cpu, non_blocking=True)
-
-                    model.zero_grad()
-                    optimizer.zero_grad()
-
-                    outputs = model(inputs)
-                    loss = criterion(outputs, labels)
-                    pred = outputs.argmax(dim=1) 
-                    loss.backward()
-                    optimizer.step()
-
-                    # Accumulate performance of shadow model
-                    train_acc += pred.eq(labels.view_as(pred)).sum().item()
-                    train_loss += loss.item()
+                train_loss, train_acc = train_loop(
+                                        dataloader,
+                                        model,
+                                        criterion,
+                                        optimizer,
+                                        _device_,
+                                        epoch,
+                                        epochs
+                                        )
 
                 avg_train_loss = train_loss / len(dataloader.dataset)
                 train_accuracy = train_acc / len(dataloader.dataset) 
                 accuracy_history.append(train_accuracy) 
                 loss_history.append(avg_train_loss)
-        
+
         model.to("cpu")
         
         # Remove the GradSampleModule wrapper.
@@ -195,6 +208,28 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
 
         def __len__(self):
             return len(self.targets)
+
+def train_loop(dataloader, model, criterion, optimizer, device, epoch, epochs):
+
+    train_loss, train_acc = 0, 0
+    for inputs, labels in tqdm(dataloader, desc=f"Epoch {epoch}/{epochs}"):
+        labels = labels.long()
+        inputs, labels = inputs.to(device, non_blocking=True), labels.to(device, non_blocking=True)
+
+        model.zero_grad()
+        optimizer.zero_grad()
+
+        outputs = model(inputs)
+        loss = criterion(outputs, labels)
+        pred = outputs.argmax(dim=1) 
+        loss.backward()
+        optimizer.step()
+
+        # Accumulate performance of shadow model
+        train_acc += pred.eq(labels.view_as(pred)).sum().item()
+        train_loss += loss.item()
+    
+    return train_acc, train_loss
 
 def dpsgd(
         model: torch.nn.Module = None,
