@@ -327,8 +327,6 @@ class ImageMetrics:
 
     def save_images(self) -> None:
         """Save generated images to disk."""
-        self.evaluation_model.eval()
-        self.evaluation_model.to(self.device)
         self.generator.eval()
         self.generator.to(self.device)
 
