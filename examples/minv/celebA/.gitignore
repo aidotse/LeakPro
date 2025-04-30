@@ -1,5 +1,6 @@
 data/*
 !data/.gitkeep
+checks/*
 
 leakpro_output/*
 target/*

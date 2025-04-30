@@ -7,8 +7,8 @@ import os
 import pickle
 
 from torch import cuda, device, nn, no_grad, optim, save
-from torchvision.models import resnet18, resnet50, resnet152, vgg16
-from torchvision.models import ResNet18_Weights, ResNet50_Weights, ResNet152_Weights, VGG16_Weights
+from torchvision.models import resnet18, resnet50, resnet152
+from torchvision.models import ResNet18_Weights, ResNet50_Weights, ResNet152_Weights
 from tqdm import tqdm
 
 from leakpro.schemas import MIAMetaDataSchema, EvalOutput
@@ -47,15 +47,6 @@ class ResNet152(BaseCNN):
         self.model = resnet152(weights=ResNet152_Weights.IMAGENET1K_V2)
         # Replace the final fully-connected layer to match the desired number of classes
         self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
-
-
-class VGG16(BaseCNN):
-    def __init__(self, num_classes):
-        super().__init__(num_classes)
-        self.model = vgg16(weights=VGG16_Weights.IMAGENET1K_V1)
-        # In VGG16, the classifier is a Sequential model.
-        # Replace the last layer (typically at index 6) to match the desired number of classes.
-        self.model.classifier[6] = nn.Linear(self.model.classifier[6].in_features, num_classes)
 
 
 def evaluate(model, loader, criterion, device):
