@@ -12,7 +12,8 @@ class ResNet18(nn.Module):
         super(ResNet18, self).__init__()
         self.num_classes = num_classes
         self.model = models.resnet18(pretrained=False)
-        self.model.fc = nn.Linear(self.model.fc.in_features, self.num_classes)
+        self.fc = nn.Linear(self.model.fc.in_features, self.num_classes)
+        self.model.fc = self.fc
     
     def forward(self, x):
         return self.model(x)
@@ -91,6 +92,8 @@ class WideResNet(nn.Module):
                 m.bias.data.zero_()
             elif isinstance(m, nn.Linear):
                 m.bias.data.zero_()
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+
     def forward(self, x):
         out = self.conv1(x)
         out = self.block1(out)

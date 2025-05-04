@@ -87,13 +87,13 @@ class AttackLSETLaplace(AbstractMIA):
         logger.info("Preparing attack data for training the LSET Laplace attack")
 
         # Get all available indices for attack dataset, if self.online = True, include training and test data
-        self.attack_data_indices = self.sample_indices_from_population(include_train_indices = False,
+        self.attack_data_indices = self.sample_indices_from_population(include_train_indices = self.online,
                                                                        include_test_indices = self.online)
 
         # train shadow models
         logger.info(f"Check for 1 shadow model (dataset: {len(self.attack_data_indices)} points)")
         self.shadow_model_indices = ShadowModelHandler().create_shadow_models(
-            num_models = 1,
+            num_models = 2,
             shadow_population = self.attack_data_indices,
             training_fraction = self.training_data_fraction,
             online = self.online)
@@ -128,14 +128,14 @@ class AttackLSETLaplace(AbstractMIA):
         logger.info("Running LSET-Laplace attack")
 
         n_audit_points = len(audit_data_indices)
-        ground_truth_indices = self.handler.get_labels(audit_data_indices)
+        ground_truth_indices = self.handler.get_labels(audit_data_indices).astype(int)
 
         # run target points through real model to get logits
-        logits_target = np.array(self.signal([self.target_model], self.handler, self.audit_dataset["data"])).squeeze(axis=0)
+        logits_target = np.array(self.signal([self.target_model], self.handler, audit_data_indices)).squeeze(axis=0)
         # collect the log confidence output of the correct class (which is the negative cross-entropy loss)
         log_conf_target = np.log(softmax_logits(logits_target, self.temperature)[np.arange(n_audit_points),ground_truth_indices])
 
-        data_loader = self.handler.get_dataloader(self.audit_dataset["data"], shuffle=False)
+        data_loader = self.handler.get_dataloader(audit_data_indices, shuffle=False)
         # Get predictions using laplace approximation
         pred_la = []
         for x, _ in data_loader:

@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader
 
 from leakpro.attacks.attack_base import AbstractAttack
 from leakpro.attacks.utils.hyperparameter_tuning.optuna import optuna_optimal_hyperparameters
+from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.reporting.mia_result import MIAResult
 from leakpro.schemas import OptunaConfig
@@ -18,7 +19,7 @@ from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import List, Self, Union
 from leakpro.utils.logger import logger
 from leakpro.utils.save_load import hash_attack
-from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
+
 
 class AbstractMIA(AbstractAttack):
     """Interface to construct and perform a membership inference attack on a target model and dataset.
@@ -67,7 +68,7 @@ class AbstractMIA(AbstractAttack):
             }
             AbstractMIA.handler = handler
             self._validate_shared_quantities()
-            AbstractMIA._initialized = True
+            AbstractMIA._initialized = False
 
         # These objects are instance specific
         self.signal_data = []

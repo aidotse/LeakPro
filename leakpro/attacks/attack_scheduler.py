@@ -110,18 +110,18 @@ class AttackScheduler:
                 attack_obj._hash_attack() # update hash with new config
 
             # Check if the attack has been run before and load the result if it has
-            if attack_obj.attack_id in self.attack_hashes:
-                data_path = f"{self.data_object_dir}/{attack_obj.attack_id}.json"
-                result = MIAResult.load(data_path)
-                logger.info(f"Loaded previous results for attack: {attack_type}")
-            else:
-                if not run_with_optuna:
-                    logger.info(f"Preparing attack: {attack_type}")
-                    attack_obj.prepare_attack()
-                logger.info(f"Running attack: {attack_type}")
-                result = attack_obj.run_attack()
-                logger.info(f"Saving results for attack: {attack_type} to {self.report_dir}")
-                result.save(attack_obj = attack_obj, output_dir = self.output_dir)
+            # if attack_obj.attack_id in self.attack_hashes:
+            #     data_path = f"{self.data_object_dir}/{attack_obj.attack_id}.json"
+            #     result = MIAResult.load(data_path)
+            #     logger.info(f"Loaded previous results for attack: {attack_type}")
+            # else:
+            if not run_with_optuna:
+                logger.info(f"Preparing attack: {attack_type}")
+                attack_obj.prepare_attack()
+            logger.info(f"Running attack: {attack_type}")
+            result = attack_obj.run_attack()
+            logger.info(f"Saving results for attack: {attack_type} to {self.report_dir}")
+            result.save(attack_obj = attack_obj, output_dir = self.output_dir)
             results.append({"attack_type": attack_type, "attack_object": attack_obj, "result_object": result})
 
         return results

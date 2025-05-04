@@ -35,7 +35,8 @@ class CifarInputHandler(AbstractInputHandler):
         for epoch in range(epochs):
             train_loss, train_acc, total_samples = 0, 0, 0
             model.train()
-            for inputs, labels in tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}"):
+            pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}")
+            for inputs, labels in pbar:
                 labels = labels.long()
                 inputs, labels = inputs.to(gpu_or_cpu, non_blocking=True), labels.to(gpu_or_cpu, non_blocking=True)
                 
@@ -50,6 +51,11 @@ class CifarInputHandler(AbstractInputHandler):
                 train_acc += pred.eq(labels.view_as(pred)).sum().item()
                 total_samples += labels.size(0)
                 train_loss += loss.item() * labels.size(0)
+
+                running_acc = train_acc / total_samples
+                running_loss = train_loss / total_samples
+                pbar.set_postfix(loss=f"{running_loss:.4f}", acc=f"{running_acc:.4f}")
+
                 
             avg_train_loss = train_loss / total_samples
             train_accuracy = train_acc / total_samples 

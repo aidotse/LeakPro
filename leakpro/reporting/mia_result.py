@@ -182,6 +182,8 @@ class MIAResult:
         self.fn = np.sum(sorted_labels == 1) - self.tp
         self.tn = np.sum(sorted_labels == 0) - self.fp
 
+        assert np.all(self.tp + self.fp + self.tn + self.fn == len(self.true)), "Confusion counts do not sum to total samples"
+
         if len(self.tp) == 1:
             self.roc_mode = "none"
 

@@ -8,6 +8,7 @@ from leakpro.attacks.mia_attacks.lira import AttackLiRA
 from leakpro.attacks.mia_attacks.loss_trajectory import AttackLossTrajectory
 from leakpro.attacks.mia_attacks.lset import AttackLSET
 from leakpro.attacks.mia_attacks.lset_laplace import AttackLSETLaplace
+from leakpro.attacks.mia_attacks.bmia import AttackBMIA
 from leakpro.attacks.mia_attacks.mca import AttackMCA
 from leakpro.attacks.mia_attacks.qmia import AttackQMIA
 from leakpro.attacks.mia_attacks.rmia import AttackRMIA
@@ -32,6 +33,7 @@ class AttackFactoryMIA:
         "lset": AttackLSET,
         "lset_laplace": AttackLSETLaplace,
         "mca": AttackMCA,
+        "bmia": AttackBMIA
     }
 
     # Shared variables for all attacks

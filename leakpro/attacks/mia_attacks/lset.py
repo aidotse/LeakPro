@@ -2,14 +2,12 @@
 
 import numpy as np
 from pydantic import BaseModel, Field
-from scipy.special import logsumexp
+from scipy.special import log_softmax, logsumexp
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
-from leakpro.attacks.utils.utils import softmax_logits
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.reporting.mia_result import MIAResult
-from leakpro.signals.signal import ModelLogits
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
@@ -53,7 +51,6 @@ class AttackLSET(AbstractMIA):
             setattr(self, key, value)
 
         self.shadow_models = []
-        self.signal = ModelLogits()
         self.epsilon = 1e-6
         self.shadow_models = None
         self.shadow_model_indices = None
@@ -83,8 +80,8 @@ class AttackLSET(AbstractMIA):
         logger.info("Preparing shadow models for LSET attack")
 
         # Get all available indices for attack dataset, if self.online = True, include training and test data
-        self.attack_data_indices = self.sample_indices_from_population(include_train_indices = self.online,
-                                                                       include_test_indices = self.online)
+        self.attack_data_indices = self.sample_indices_from_population(include_train_indices = True,
+                                                                       include_test_indices = True)
 
         # train shadow models
         logger.info(f"Check for {self.num_shadow_models} shadow models (dataset: {len(self.attack_data_indices)} points)")
@@ -95,6 +92,8 @@ class AttackLSET(AbstractMIA):
             online = self.online)
         # load shadow models
         self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)
+        if self.online is False:
+            self.out_indices = ~ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"]).T
 
     def run_attack(self:Self) -> MIAResult:
         """Run the attack on the target model and dataset.
@@ -105,34 +104,47 @@ class AttackLSET(AbstractMIA):
 
         """
         # perform the attack
-        if self.online:
-            logger.info("Running LSET online attack")
-            audit_data_indices, in_members, out_members = self._filter_audit_data_for_online_attack(self.shadow_model_indices)
-        else:
-            logger.info("Running LSET offline attack")
-            audit_data_indices = self.audit_dataset["data"]
-            in_members = self.audit_dataset["in_members"]
-            out_members = self.audit_dataset["out_members"]
+        online_or_offline = "online" if self.online else "offline"
+        attack_info = f"Running {online_or_offline} LSET attack with {self.num_shadow_models} shadow models"
+        logger.info(attack_info)
 
-        n_audit_points = len(audit_data_indices)
-        ground_truth_indices = self.handler.get_labels(audit_data_indices).astype(int)
+        # Load the logits for the target model and shadow models
+        ground_truth_indices = self.handler.get_labels(self.audit_dataset["data"])
+        n_audit_points = len(self.audit_dataset["data"])
+        logits_target = ShadowModelHandler().load_logits(name="target")
+        logits_shadow_models = []
+        for indx in self.shadow_model_indices:
+            logits_shadow_models.append(ShadowModelHandler().load_logits(indx=indx))
 
-        # run target points through real model to get logits
-        logits_target = np.array(self.signal([self.target_model], self.handler, audit_data_indices)).squeeze(axis=0)
         # collect the log confidence output of the correct class (which is the negative cross-entropy loss)
-        log_conf_target = np.log(softmax_logits(logits_target, self.temperature)[np.arange(n_audit_points),ground_truth_indices])
+        # log_conf_target = np.log(softmax_logits(logits_target, self.temperature)[np.arange(n_audit_points),ground_truth_indices])
+        log_conf_target = log_softmax(logits_target / self.temperature, axis=-1)[np.arange(n_audit_points),ground_truth_indices]
 
         # run points through shadow models and collect the log confidence values
-        logits_shadow_models = self.signal(self.shadow_models, self.handler, self.audit_dataset["data"])
-        log_conf_shadow_models = np.array([np.log(softmax_logits(x, self.temperature)[np.arange(n_audit_points),ground_truth_indices]) for x in logits_shadow_models])
+        # log_conf_shadow_models = np.array([np.log(softmax_logits(x, self.temperature)[np.arange(n_audit_points),ground_truth_indices]) for x in logits_shadow_models])
+        log_conf_shadow_models = np.array([log_softmax(x / self.temperature, axis=-1)[np.arange(n_audit_points),ground_truth_indices] for x in logits_shadow_models])
 
-        # the threshold is relative to a Monte Carlo approximation to the logarithm of the expected exponential of the negative loss, over shadow models
         # subtracting the log(num_shadow_models) is not necessary if we sweep thresholds, but should be there if we want to get the probabilities using sigmoid
-        threshold = logsumexp(log_conf_shadow_models, axis=0) - np.log(self.num_shadow_models)
+        if self.online is True:
+            threshold = logsumexp(log_conf_shadow_models, axis=0) - np.log(self.num_shadow_models)
+        else:
+            n_out_models = np.sum(self.out_indices, axis=0)
+            assert np.all(n_out_models == self.num_shadow_models//2), "Number of OUT models is wrong"
+
+            out_logits = np.where(self.out_indices, log_conf_shadow_models, -np.inf)
+            # # filter out to only use out model values
+            # rows, cols = np.where(self.out_indices)
+            # idx = np.argsort(cols)
+            # rows = rows[idx].reshape(2, -1)
+            # cols = cols[idx].reshape(2, -1)
+            # out_logits = log_conf_shadow_models[rows, cols]
+            threshold = logsumexp(out_logits, axis=0) - np.log(n_out_models)
 
         score = log_conf_target - threshold
 
         # pick out the in-members and out-members signals
+        in_members = self.audit_dataset["in_members"]
+        out_members = self.audit_dataset["out_members"]
         self.in_member_signals = score[in_members].reshape(-1,1)
         self.out_member_signals = score[out_members].reshape(-1,1)
 

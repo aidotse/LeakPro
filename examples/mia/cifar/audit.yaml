@@ -2,25 +2,37 @@ audit:  # Configurations for auditing
   random_seed: 1236  # Integer specifying the random seed
   attack_list:
     - attack: rmia
-      online: True
-      num_shadow_models: 5
+      online: False
+      num_shadow_models: 32
       training_data_fraction: 0.5
-      attack_data_fraction: 0.1
+      attack_data_fraction: 1.0
+      gamma: 1.0
+    - attack: rmia
+      online: True
+      num_shadow_models: 32 # NOTE: this will result in n/2 out models!
+      training_data_fraction: 0.5
+      attack_data_fraction: 1.0
       gamma: 1.0
     - attack: lset
       online: True
-      num_shadow_models: 5
+      num_shadow_models: 32
       training_data_fraction: 0.5
-    - attack: lset_laplace
-      online: True
+    - attack: lset
+      online: False
+      num_shadow_models: 32
       training_data_fraction: 0.5
-    - attack: mca
-      online: True
-      num_shadow_models: 5
-      training_data_fraction: 0.5
+    - attack: bmia
+      training_data_fraction: 1.0
+    # # - attack: lset_laplace
+    # #   online: True
+    # #   training_data_fraction: 0.5
     - attack: lira
       online: True
-      num_shadow_models: 5
+      num_shadow_models: 32
+      training_data_fraction: 0.5
+    - attack: lira
+      online: False
+      num_shadow_models: 32
       training_data_fraction: 0.5
     # - attack: loss_traj
     # - attack: qmia
@@ -34,7 +46,7 @@ audit:  # Configurations for auditing
 target:
   # Target model path
   module_path: "./target_model_class.py"
-  model_class: "WideResNet" 
+  model_class: "ResNet18" #"WideResNet" #"ResNet18" 
   target_folder: "./target"
   # Data paths
   data_path: "./data/cifar10.pkl"
