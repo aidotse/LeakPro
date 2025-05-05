@@ -1,3 +1,4 @@
+import os
 import torch
 from torch import cuda, device, optim
 from torch.nn import CrossEntropyLoss
@@ -7,6 +8,7 @@ from leakpro import AbstractInputHandler
 from leakpro.schemas import TrainingOutput
 import kornia
 import time
+
 
 class CelebA_InputHandler(AbstractInputHandler):
     """Class to handle the user input for the CelebA dataset for plgmi attack."""
@@ -100,6 +102,7 @@ class CelebA_InputHandler(AbstractInputHandler):
                     opt_gen: optim.Optimizer,
                     opt_dis: optim.Optimizer,
                     n_iter: int,
+                    checkpoint_interval: int,
                     n_dis: int,
                     device: torch.device,
                     alpha: float,
@@ -158,7 +161,7 @@ class CelebA_InputHandler(AbstractInputHandler):
                     # Generator update
                     fake, fake_labels, _ = sample_from_generator()
                     fake_aug = aug_list(fake).to(device)
-                    dis_fake = dis(fake_aug, fake_labels)
+                    dis_fake = dis(fake, fake_labels)
                     inv_loss = inv_criterion(target_model(fake_aug), fake_labels)
 
                     inv_losses.append(inv_loss.item())
@@ -206,6 +209,14 @@ class CelebA_InputHandler(AbstractInputHandler):
                         'iteration: {:05d}/{:05d}, loss gen: {:05f}, loss dis {:05f}, inv loss {:05f}, target acc {:04f}, time {}'.format(
                             i, n_iter, _l_g, cumulative_loss_dis / n_dis, cumulative_inv_loss,
                             cumulative_target_acc / n_dis, time.strftime("%H:%M:%S")))
+                
+            if i % checkpoint_interval == 0 and i > 0:
+                # Save the model every checkpoint_interval iterations
+                
+                if not os.path.exists('./gan_checks'):
+                    os.makedirs('./gan_checks')
+                torch.save(gen.state_dict(), f'./gan_checks/gen_checkpoint_{i}.pth')
+                torch.save(dis.state_dict(), f'./gan_checks/dis_checkpoint_{i}.pth')
 
         torch.save(gen.state_dict(), './gen.pth')
         torch.save(dis.state_dict(), './dis.pth')

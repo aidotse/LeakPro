@@ -12,7 +12,7 @@ from leakpro.attacks.utils import gan_losses
 from leakpro.attacks.utils.gan_handler import GANHandler
 from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.input_handler.modality_extensions.image_metrics import ImageMetrics
-from leakpro.reporting.attack_result import MinvResult
+from leakpro.reporting.minva_result import MinvResult
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
@@ -39,6 +39,7 @@ class AttackPLGMI(AbstractMINV):
         top_n : int = Field(10, ge=1, description="Number of pseudo-labels to select")
         alpha: float = Field(0.1, ge=0.0, description="Regularization parameter for inversion optimization")
         n_iter: int = Field(1000, ge=1, description="Number of iterations for optimization")
+        checkpoint_interval: int = Field(10000, ge=1, description="Checkpoint interval for saving models")
         log_interval: int = Field(10, ge=1, description="Log interval")
 
         # Generator parameters
@@ -76,6 +77,7 @@ class AttackPLGMI(AbstractMINV):
         """
         logger.info("Configuring PLG-MI attack")
         self.configs = self.Config() if configs is None else self.Config(**configs)
+        self.attack_id = 1 # Workaround for now - required by attack scheduler
 
         # Call the parent class constructor
         super().__init__(handler)
@@ -119,10 +121,11 @@ class AttackPLGMI(AbstractMINV):
         # TODO: This does not scale well. Consider creating a class for the dataloader and implementing the __getitem__ method.
         logger.info("Performing top-n selection for pseudo labels")
         self.target_model.eval()
+        self.target_model.to(self.device)
         all_confidences = []
-        for images, _ in self.public_dataloader:
+        for entry, _ in self.public_dataloader:
             with torch.no_grad():
-                outputs = self.target_model(images)
+                outputs = self.target_model(entry.to(self.device))
                 confidences = F.softmax(outputs, dim=1)
                 all_confidences.append(confidences)
         # Concatenate all confidences
@@ -200,11 +203,13 @@ class AttackPLGMI(AbstractMINV):
                                         opt_gen = self.gen_optimizer,
                                         opt_dis = self.dis_optimizer,
                                         n_iter = self.n_iter,
+                                        checkpoint_interval = self.checkpoint_interval,
                                         n_dis  = self.n_dis,
                                         device = self.device,
                                         alpha = self.alpha,
                                         log_interval = self.log_interval,
-                                        sample_from_generator = self.gan_handler.sample_from_generator)
+                                        sample_from_generator = lambda: \
+                                            self.gan_handler.sample_from_generator(batch_size=self.batch_size))
             # Save generator
             # self.gan_handler.save_generator(self.generator,
             #                                 self.output_dir + "/trained_models/plgmi_generator.pth")  # noqa: ERA001
@@ -240,7 +245,7 @@ class AttackPLGMI(AbstractMINV):
                                      z=opt_z)
         logger.info(image_metrics.results)
         # TODO: Implement a class with a .save function.
-        return image_metrics.results
+        return image_metrics
 
     def optimize_z(self:Self,
                    y: torch.tensor,

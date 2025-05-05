@@ -60,21 +60,28 @@ class celebADataset(Dataset):
            transforms.ToTensor(),
         ])
 
-        train_dataset = datasets.ImageFolder(os.path.join(data_dir, subfolder), train_transform)
-    
-        train_dataset.class_to_idx = {cls_name: int(cls_name) for cls_name in train_dataset.class_to_idx.keys()}
+        train_dataset = datasets.ImageFolder(
+            os.path.join(data_dir, subfolder),
+            transform=train_transform
+        )
 
-        # Prepare data loader to iterate over combined_dataset
+        # Override the labels in the dataset.samples by extracting the folder name 
+        # and converting it to an integer to represent the class index
+        # This is necessary because the labels in ImageFolder are based on the folder names
+        # and we want to ensure they are consistent with the class indices
+        for i, (path, _) in enumerate(train_dataset.samples):
+            folder_name = os.path.basename(os.path.dirname(path))
+            train_dataset.samples[i] = (path, int(folder_name))
+
+        # Proceed with preparing the loader and collecting the data
         loader = DataLoader(train_dataset, batch_size=1, shuffle=False)
 
-        # Collect all data and targets
         data_list = []
         target_list = []
         for data, target in loader:
             data_list.append(data)  # Remove batch dimension
             target_list.append(target)
 
-        # Concatenate data and targets into large tensors
         data = cat(data_list, dim=0)  # Shape: (N, C, H, W)
         targets = cat(target_list, dim=0)  # Shape: (N,)
 
@@ -117,7 +124,8 @@ def get_celebA_train_test_loader(train_config):
     test_subset = Subset(population_dataset, test_indices)
 
     train_loader = DataLoader(train_subset, batch_size =batch_size, shuffle=True)
-    test_loader = DataLoader(test_subset, batch_size= batch_size, shuffle=False)
+    test_loader = DataLoader(test_subset, batch_size= batch_size, shuffle=True)
+
 
     return train_loader, test_loader
 
