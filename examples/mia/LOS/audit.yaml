@@ -18,7 +18,7 @@ audit:  # Configurations for auditing
 
 target:
   # Target model path
-  module_path: "./target_model_class.py" # either model_GRUD.py or model_LR.py for logestic regression
+  module_path: "./target_models.py" # either model_GRUD.py or model_LR.py for logestic regression
   model_class: "LR" #  LR/GRUD/GRUD_DPSGD
   # Data paths
   target_folder: "./target_LR" # either target_GRUD or target_LR or target_GRUD_dpsgd
