@@ -3,6 +3,7 @@ import os
 from collections.abc import Generator
 from copy import deepcopy
 from dataclasses import dataclass, field
+from typing import Optional
 
 import torch
 from optuna.trial import Trial
@@ -11,10 +12,11 @@ from torch.nn import CrossEntropyLoss, Module
 from torch.utils.data import DataLoader
 
 from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
-from leakpro.fl_utils.data_utils import GiaImageClassifictaionExtension
+from leakpro.fl_utils.data_utils import GiaImageExtension
 from leakpro.fl_utils.gia_optimizers import MetaSGD
-from leakpro.fl_utils.similarity_measurements import cosine_similarity_weights, total_variation, l2_distance
-from leakpro.reporting.attack_result import GIAResults
+from leakpro.fl_utils.gia_train import train
+from leakpro.fl_utils.similarity_measurements import cosine_similarity_weights, total_variation
+from leakpro.metrics.attack_result import GIAResults
 from leakpro.utils.import_helper import Callable, Self
 from leakpro.utils.logger import logger
 from leakpro.fl_utils.data_utils import get_used_tokens
@@ -35,7 +37,7 @@ class InvertingConfig:
     # Client loss function
     criterion: object = field(default_factory=lambda: CrossEntropyLoss())
     # Data modality extension
-    data_extension: object = field(default_factory=lambda: GiaImageClassifictaionExtension())
+    data_extension: object = field(default_factory=lambda: GiaImageExtension())
     # Number of epochs for the client attack
     epochs: int = 1
     # if to use median pool 2d on images, can improve attack on high higher resolution (100+)
@@ -48,17 +50,17 @@ class InvertingConfig:
 class InvertingGradients(AbstractGIA):
     """Gradient inversion attack by Geiping et al."""
 
-    def __init__(self: Self, model: Module, client_loader: DataLoader, train_fn: Callable,
-                 data_mean: Tensor, data_std: Tensor, configs: InvertingConfig) -> None:
+    def __init__(self: Self, model: Module, client_loader: DataLoader, data_mean: Tensor, data_std: Tensor,
+                 train_fn: Optional[Callable] = None, configs: Optional[InvertingConfig] = None) -> None:
         super().__init__()
         self.original_model = model
         self.model = deepcopy(self.original_model)
         self.client_loader = client_loader
-        self.train_fn = train_fn
+        self.train_fn = train_fn if train_fn is not None else train
         self.data_mean = data_mean
         self.data_std = data_std
-        self.configs = configs
-        self.best_loss = torch.tensor(float("inf"))
+        self.configs = configs if configs is not None else InvertingConfig()
+        self.best_loss = float("inf")
         self.best_reconstruction = None
         self.best_reconstruction_round = None
         # required for optuna to save the best hyperparameters
@@ -95,6 +97,8 @@ class InvertingGradients(AbstractGIA):
 
         """
         self.model.eval()
+        self.reconstruction, self.reconstruction_loader = self.configs.data_extension.get_at_data(self.client_loader)
+        self.reconstruction.requires_grad = True
         client_gradient = self.train_fn(self.model, self.client_loader, self.configs.optimizer,
                                         self.configs.criterion, self.configs.epochs)
         self.client_gradient = [p.detach() for p in client_gradient]
@@ -244,7 +248,7 @@ class InvertingGradients(AbstractGIA):
 
     def suggest_parameters(self: Self, trial: Trial) -> None:
         """Suggest parameters to chose and range for optimization for the Inverting Gradient attack."""
-        total_variation = trial.suggest_float("total_variation", 1e-6, 1e-1, log=True)
+        total_variation = trial.suggest_float("total_variation", 1e-7, 1e-1, log=True)
         self.configs.tv_reg = total_variation
 
     def reset_attack(self: Self, new_config:dict) -> None:  # noqa: ARG002

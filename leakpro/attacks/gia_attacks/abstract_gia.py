@@ -169,7 +169,7 @@ class AbstractGIA(AbstractAttack):
                 logger.info(f"New best loss: {loss_} on round: {i}")
                 validate_tokens(client_loader,self.best_reconstruction,'best.npy')
             if i % 250 == 0:
-                logger.info(f"Iteration {i}, loss {loss_}")
+                logger.info(f"Iteration {i}, loss {loss}")
                 yield i, i, None#dataloaders_ssim_ignite(client_loader, self.best_reconstruction), None
 
         ssim_score = dataloaders_ssim_ignite(client_loader, self.best_reconstruction)

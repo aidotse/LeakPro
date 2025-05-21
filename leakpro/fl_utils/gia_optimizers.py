@@ -1,5 +1,4 @@
 """Optimizer objects used for GIA training to allow graph utilization through multiple epochs."""
-import time
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 

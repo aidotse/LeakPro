@@ -3,6 +3,9 @@ import math
 import time
 import torch
 from torch.nn.functional import cross_entropy, one_hot
+from torch.nn.utils.rnn import pad_sequence
+import yaml
+import os
 
 def make_anchors(x, strides, offset=0.5):
     """
@@ -188,11 +191,14 @@ class Head(torch.nn.Module):
         self.box = torch.nn.ModuleList(torch.nn.Sequential(Conv(x, c2, 3),
                                                            Conv(c2, c2, 3),
                                                            torch.nn.Conv2d(c2, 4 * self.ch, 1)) for x in filters)
+        self.simulate_train_on_eval = False
 
     def forward(self, x):
         for i in range(self.nl):
             x[i] = torch.cat((self.box[i](x[i]), self.cls[i](x[i])), 1)
         if self.training:
+            return x
+        if self.simulate_train_on_eval:
             return x
         self.anchors, self.strides = (x.transpose(0, 1) for x in make_anchors(x, self.stride, 0.5))
 
@@ -211,8 +217,7 @@ class Head(torch.nn.Module):
         for a, b, s in zip(m.box, m.cls, m.stride):
             a[-1].bias.data[:] = 1.0  # box
             # cls (.01 objects, 80 classes, 640 img)
-            b[-1].bias.data[:m.nc] = math.log(5 / m.nc / (640 / s) ** 2)
-
+            b[-1].bias.data[:m.nc] = math.log(5 / m.nc / (256 / s) ** 2)
 
 class YOLO(torch.nn.Module):
     def __init__(self, width, depth, num_classes):
@@ -238,9 +243,12 @@ class YOLO(torch.nn.Module):
                 m.forward = m.fuse_forward
                 delattr(m, 'norm')
         return self
+    
+    def set_eval(self, on):
+        self.head.set_eval(on)
 
 
-def yolo_v8_n(num_classes: int = 90):
+def yolo_v8_n(num_classes: int = 80):
     depth = [1, 2, 2]
     width = [3, 16, 32, 64, 128, 256]
     return YOLO(width, depth, num_classes)
@@ -278,8 +286,10 @@ def wh2xy(x):
     return y
 
 class ComputeLoss:
-    def __init__(self, model, box= 7.5, cls= 0.5, dfl= 1.5):
+    def __init__(self, model):
         super().__init__()
+        with open(os.path.join('args.yaml'), errors='ignore') as f:
+            params = yaml.safe_load(f)
         if hasattr(model, 'module'):
             model = model.module
 
@@ -291,9 +301,7 @@ class ComputeLoss:
         self.nc = m.nc  # number of classes
         self.no = m.no
         self.device = device
-        self.box = box
-        self.cls = cls
-        self.dfl = dfl
+        self.params = params
 
         # task aligned assigner
         self.top_k = 10
@@ -320,21 +328,21 @@ class ComputeLoss:
 
         anchor_points, stride_tensor = make_anchors(x, self.stride, 0.5)
 
-        # Process targets from list of dictionaries
-        gt_list = []
-        for img_idx, annotations in enumerate(targets):
-            bbox = torch.tensor(annotations["bbox"], dtype=torch.float32, device=self.device)
-            category_id = torch.tensor([annotations["category_id"]], dtype=torch.float32, device=self.device)
-            xyxy_bbox = wh2xy(bbox)  # Convert COCO format (x, y, w, h) to (x1, y1, x2, y2)
-            gt_list.append(torch.cat((category_id, xyxy_bbox)))
-        
-        if len(gt_list) == 0:
+        # targets
+        if targets.shape[0] == 0:
             gt = torch.zeros(pred_scores.shape[0], 0, 5, device=self.device)
         else:
-            gt = torch.stack(gt_list).view(-1, 5)
-        
-        gt_labels, gt_bboxes = gt.split((1, 4), 1)  # cls, xyxy
-        gt_labels, gt_bboxes = gt_labels.unsqueeze(0), gt_bboxes.unsqueeze(0)
+            i = targets[:, 0]  # image index
+            _, counts = i.unique(return_counts=True)
+            gt = torch.zeros(pred_scores.shape[0], counts.max(), 5, device=self.device)
+            for j in range(pred_scores.shape[0]):
+                matches = i == j
+                n = matches.sum()
+                if n:
+                    gt[j, :n] = targets[matches, 1:]
+            gt[..., 1:5] = wh2xy(gt[..., 1:5].mul_(size[[1, 0, 1, 0]]))
+
+        gt_labels, gt_bboxes = gt.split((1, 4), 2)  # cls, xyxy
         mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0)
 
         # boxes
@@ -373,9 +381,9 @@ class ComputeLoss:
             loss_dfl = self.df_loss(pred_output[fg_mask].view(-1, self.dfl_ch), target_lt_rb[fg_mask])
             loss_dfl = (loss_dfl * weight).sum() / target_scores_sum
 
-        loss_cls *= self.cls
-        loss_box *= self.box
-        loss_dfl *= self.dfl
+        loss_cls *= self.params['cls']
+        loss_box *= self.params['box']
+        loss_dfl *= self.params['dfl']
         return loss_cls + loss_box + loss_dfl  # loss(cls, box, dfl)
 
     @torch.no_grad()
