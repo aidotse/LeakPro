@@ -1,11 +1,13 @@
 """Huang, Yangisibo, et al. "Evaluating Gradient Inversion Attacks and Defenses in Federated Learning."."""
+
+import os
 from collections.abc import Generator
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Optional
 
-import optuna
 import torch
+from optuna.trial import Trial
 from torch import Tensor
 from torch.nn import CrossEntropyLoss, Module
 from torch.utils.data import DataLoader
@@ -16,7 +18,7 @@ from leakpro.fl_utils.gia_optimizers import MetaSGD
 from leakpro.fl_utils.gia_train import train, train3
 from leakpro.fl_utils.model_utils import BNFeatureHook
 from leakpro.fl_utils.similarity_measurements import cosine_similarity_weights, l2_norm, total_variation
-from leakpro.metrics.attack_result import GIAResults
+from leakpro.reporting.attack_result import GIAResults
 from leakpro.utils.import_helper import Callable, Self
 from leakpro.utils.logger import logger
 
@@ -67,6 +69,10 @@ class Huang(AbstractGIA):
         self.train_fn = train_fn if train_fn is not None else train
         self.data_mean = data_mean
         self.data_std = data_std
+
+        # required for optuna to save the best hyperparameters
+        self.attack_folder_path = "leakpro_output/attacks/huang"
+        os.makedirs(self.attack_folder_path, exist_ok=True)
 
         self.prepare_attack()
         logger.info("Evaluating with Huang. et al initialized.")
@@ -170,14 +176,14 @@ class Huang(AbstractGIA):
     def _configure_attack(self: Self, configs: dict) -> None:
         pass
 
-    def suggest_parameters(self: Self, trial: optuna.trial.Trial) -> None:
+    def suggest_parameters(self: Self, trial: Trial) -> None:
         """Suggest parameters to chose and range for optimization for the Huang attack."""
         total_variation = trial.suggest_float("total_variation", 1e-6, 1e-1, log=True)
         bn_reg = trial.suggest_float("bn_reg", 1e-4, 1e-1, log=True)
         self.configs.tv_reg = total_variation
         self.configs.bn_reg = bn_reg
 
-    def reset_attack(self: Self) -> None:
+    def reset_attack(self: Self, new_config:dict) -> None:  # noqa: ARG002
         """Reset attack to initial state."""
         self.best_loss = float("inf")
         self.best_reconstruction = None
@@ -185,7 +191,3 @@ class Huang(AbstractGIA):
         self.model = deepcopy(self.original_model)
         self.prepare_attack()
         logger.info("Huang attack reset to initial state.")
-
-    def get_configs(self: Self) -> dict:
-        """Return configs used for attack."""
-        return self.configs

@@ -5,14 +5,16 @@ import pickle
 import numpy as np
 import torch.nn.functional as F  # noqa: N812
 from dotmap import DotMap
-from torch import Tensor, flatten, long, nn, save, stack, tensor
+from torch import Tensor, flatten, long, nn, save, stack, tensor, optim
 from torch.nn import Module
-from torch.utils.data import TensorDataset
+from torch.utils.data import DataLoader
 from torchvision import transforms
 
 from leakpro.tests.constants import STORAGE_PATH, get_image_handler_config
 from leakpro.utils.import_helper import Self
-
+from leakpro.schemas import MIAMetaDataSchema, EvalOutput, TrainingOutput
+from leakpro.tests.input_handler.image_input_handler import ImageInputHandler
+from leakpro import LeakPro
 
 class ConvNet(Module):
     """Convolutional Neural Network model."""
@@ -43,14 +45,7 @@ class ConvNet(Module):
         x = flatten(x, 1) # flatten all dimensions except batch
         return self.fc1(x)
 
-class DatasetWithSubset(TensorDataset):
-    """Dataset with a subset method."""
 
-    def subset(self:Self, indices:np.ndarray) -> Self:
-        """Extract a subset of the dataset based on the given indices."""
-
-        subsets = [tensor[indices] for tensor in self.tensors]
-        return DatasetWithSubset(*subsets)
 
 def setup_image_test()->None:
     """Setup for the input handler test."""
@@ -68,9 +63,8 @@ def setup_image_test()->None:
 
     # Ensure the dataset has the correct size and shape
     assert len(dataset) == parameters.data_points
-    assert dataset.tensors[0][0].shape == parameters.img_size
+    assert dataset[0][0].shape == parameters.img_size
 
-    del dataset
     config.data_path = dataset_path
 
     # Set up the model and add path to config
@@ -78,7 +72,7 @@ def setup_image_test()->None:
     config.model_class = "ConvNet"
     config.target_folder = parameters.target_folder
 
-    model_path, metadata_path = create_mock_model_and_metadata()
+    model_path, metadata_path = create_mock_model_and_metadata(dataset)
 
     # ensure mock dataset is correct
     assert os.path.exists(model_path)
@@ -116,7 +110,7 @@ def create_mock_image_dataset() -> str:
     images_tensor = stack(images)
     # Convert labels list to a tensor
     labels_tensor = tensor(labels, dtype=long)
-    dataset = DatasetWithSubset(images_tensor, labels_tensor)
+    dataset = ImageInputHandler.UserDataset(images_tensor, labels_tensor)
 
     # Save the dataset to a .pkg file
     pkg_file_path = STORAGE_PATH + "/" + dataset_name
@@ -125,7 +119,7 @@ def create_mock_image_dataset() -> str:
 
     return pkg_file_path
 
-def create_mock_model_and_metadata() -> str:
+def create_mock_model_and_metadata(dataset) -> str:
     """Creates a mock model and saves it to a file."""
     parameters = get_image_handler_config()
 
@@ -139,23 +133,29 @@ def create_mock_model_and_metadata() -> str:
         save(model.state_dict(), f)
 
     # Create metadata
-    metadata = {
-        "init_params": {},
-        "train_indices": np.arange(parameters.train_data_points).tolist(),
-        "test_indices": np.arange(parameters.train_data_points,
-                                  parameters.train_data_points + parameters.test_data_points).tolist(),
-        "num_train": parameters.data_points,
-        "optimizer": {
-            "name": parameters.optimizer,
-            "lr": parameters.learning_rate,
-        },
-        "loss": {"name": parameters.loss},
-        "batch_size": parameters.batch_size,
-        "epochs": parameters.epochs,
-    }
+    train_result = TrainingOutput(model= model, metrics = EvalOutput(accuracy=0.9, loss=0.1))
+    test_result = EvalOutput(accuracy=0.8, loss=0.2)
+    optimizer = optim.SGD(model.parameters(), lr=parameters.learning_rate)
+    criterion = nn.CrossEntropyLoss()
+    train_loader = DataLoader(dataset, batch_size=parameters.batch_size, shuffle=False)
+    train_indices = np.arange(parameters.train_data_points).tolist()
+    test_indices = np.arange(parameters.train_data_points,parameters.train_data_points + parameters.test_data_points).tolist()
+    dataset_name = "CIFAR-10"
+    meta_data = LeakPro.make_mia_metadata(train_result=train_result,
+                                      optimizer=optimizer,
+                                      loss_fn=criterion,
+                                      dataloader=train_loader,
+                                      test_result=test_result,
+                                      epochs=parameters.epochs,
+                                      train_indices=train_indices,
+                                      test_indices=test_indices,
+                                      dataset_name=dataset_name)
+    
+    assert isinstance(meta_data, MIAMetaDataSchema)
+    
     metadata_path = parameters.target_folder + "/model_metadata.pkl"
 
     with open(metadata_path, "wb") as f:
-        pickle.dump(metadata, f)
+        pickle.dump(meta_data, f)
 
     return model_path, metadata_path

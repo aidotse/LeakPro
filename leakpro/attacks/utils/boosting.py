@@ -4,7 +4,7 @@ import numpy as np
 from tqdm import tqdm
 
 from leakpro.attacks.utils.utils import softmax_logits
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.signals.signal import ModelLogits, ModelRescaledLogits
 from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import Self
@@ -29,9 +29,8 @@ class Memorization():
             audit_data_indices: list,
             audit_data_labels: list,
             org_audit_data_length: int,
-            handler: AbstractInputHandler,
+            handler: MIAHandler,
             online: bool,
-            batch_size: int = 32,
         ) -> None:
         """Initialize the memorization boosting.
 
@@ -47,9 +46,8 @@ class Memorization():
             audit_data_indices (list): List of all audit data indices.
             audit_data_labels (list): List of corresponding labels.
             org_audit_data_length (int): Length of the original audit dataset, before any filtering.
-            handler (AbstractInputHandler): Data handler to manage data.
+            handler (MIAHandler): Data handler to manage data.
             online (bool): Flag if the attack is online or not.
-            batch_size (int): Integer to set batch size when loading data (will effect performance).
 
         Returns:
         -------
@@ -70,7 +68,6 @@ class Memorization():
         self.org_audit_data_length = org_audit_data_length
         self.handler = handler
         self.online = online
-        self.batch_size = batch_size
 
         self.audit_data_length = len(self.audit_data_indices)
         if self.org_audit_data_length*(1-self.memorization_threshold) < self.min_num_memorization_audit_points:
@@ -113,7 +110,7 @@ class Memorization():
         """
 
         logits_function = ModelLogits()
-        logits = np.swapaxes(logits_function(self.shadow_models, self.handler, self.audit_data_indices, self.batch_size), 0, 1)
+        logits = np.swapaxes(logits_function(self.shadow_models, self.handler, self.audit_data_indices), 0, 1)
 
         logits = softmax_logits(logits)
 
@@ -130,8 +127,8 @@ class Memorization():
             # 2. Given that memorization scores of the target model will likely be higher for IN-samples
             #       and low for OUT-samples, the offline version does more directly impact the
             #       filtering of IN- vs. OUT-samples.
-            target_logits = np.swapaxes(logits_function([self.target_model], self.handler, self.audit_data_indices,\
-                                        self.batch_size), 0, 1).squeeze()
+            target_logits = np.swapaxes(logits_function([self.target_model], self.handler, self.audit_data_indices,),
+                                        0, 1).squeeze()
             target_logits = softmax_logits(target_logits)
             for i, (logit, target_logit, label) in tqdm(enumerate(zip(logits, target_logits, self.audit_data_labels)),
                                                 total=len(logits),
@@ -148,8 +145,8 @@ class Memorization():
         """
 
         logits_function = ModelRescaledLogits()
-        logits = np.swapaxes(logits_function(self.shadow_models, self.handler, self.audit_data_indices, self.batch_size), 0, 1)
-        target_logits = np.swapaxes(logits_function([self.target_model], self.handler, self.audit_data_indices, self.batch_size),\
+        logits = np.swapaxes(logits_function(self.shadow_models, self.handler, self.audit_data_indices), 0, 1)
+        target_logits = np.swapaxes(logits_function([self.target_model], self.handler, self.audit_data_indices),
                                     0, 1).squeeze()
 
         privacy_score = []

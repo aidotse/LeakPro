@@ -1,0 +1,62 @@
+
+audit:  # Configurations for auditing
+  random_seed: 1234  # Integer specifying the random seed
+  data_modality: "image" #image, tabular
+  attack_list:
+    - attack: plgmi
+      top_n: 30 # Integer number for indicating the top n classes to select
+      n_dis: 5 # Integer number for indicating the number of discriminator updates per generator update
+      n_iter: 30000 # Integer number for indicating the iterations for training the GAN
+      checkpoint_interval: 10000 # Integer number for indicating the interval for saving the model
+      batch_size: 64 # Integer number for indicating batch size for training the GAN
+      gen_lr: 0.0002 # Float number for indicating learning rate for training the generator
+      dis_lr: 0.0002 # Float number for indicating learning rate for training the discriminator
+      gen_beta1: 0.0 # Float number for indicating beta1 for Adam optimizer
+      gen_beta2: 0.9 # Float number for indicating beta2 for Adam optimizer
+      dis_beta1: 0.0 # Float number for indicating beta1 for Adam optimizer
+      dis_beta2: 0.9 # Float number for indicating beta2 for Adam optimizer
+      dim_z: &dim_z 128 # Integer number for indicating the dimension of the latent space
+      alpha: 0.2 # Float number for indicating the weight of the gradient penalty
+      log_interval: 10 # Integer number for indicating the interval for logging the information
+      z_optimization_iter: 500 # Integer number for indicating the iterations for optimizing the latent code
+      z_optimization_lr: 0.1 # Float number for indicating the learning rate for optimizing the la
+      generator:
+        module_path: "./utils/generator.py"
+        model_class: "ResNetGenerator"
+        checkpoint_path: #"gen.pth"
+        init_params:
+          dim_z: *dim_z
+          bottom_width: 4
+      discriminator:
+        module_path: "./utils/discriminator.py"
+        model_class: "SNResNetProjectionDiscriminator"
+        checkpoint_path: #"dis.pth"
+  reconstruction:
+    batch_size: 32 # Integer number for indicating batch size for training the GAN
+    num_class_samples: 1 # Number of samples to generate for each class
+    num_audited_classes: 200 # Number of classes to audit
+    eval_model:
+      module_path: "utils/resnet_model.py"
+      model_class: "ResNet152" # Class name of the model
+      eval_folder: "./target/resnet152" # Path to the model checkpoint
+    metrics:
+      accuracy:
+      knn:
+      fid:
+      save_images:
+        n_images: 50 # Number of images to save
+        save_dir: "./leakpro_output/results/img" # Directory to save the images
+
+  output_dir: "./leakpro_output"
+  attack_type: "minv" #mia, gia
+
+target:
+  # Target model path
+  module_path: "utils/resnet_model.py"
+  model_class: "ResNet152" 
+  # Data paths
+  target_folder: "./target/resnet152"
+  data_path: "./data/celebA_private_data.pkl"
+  public_data_path: "./data/celebA_public_data.pkl"
+
+

@@ -2,6 +2,7 @@ from dotmap import DotMap
 
 STORAGE_PATH = "./leakpro/tests/tmp"
 
+from leakpro.schemas import OptimizerConfig, LossConfig
 # User input handler for images
 
 
@@ -42,11 +43,25 @@ def get_audit_config():
     audit_config = DotMap()
     audit_config.output_dir = STORAGE_PATH
     audit_config.attack_type = "mia"
+    audit_config.attack_list = []
     # Lira parameters
-    audit_config.attack_list.lira.training_data_fraction = 0.1
-    audit_config.attack_list.lira.num_shadow_models = 3
-    audit_config.attack_list.lira.online = False
-    audit_config.attack_list.lira.fixed_variance = True
+    lira_config = DotMap()
+    lira_config.attack = "lira"
+    lira_config.training_data_fraction = 0.1
+    lira_config.num_shadow_models = 3
+    lira_config.online = False
+    lira_config.fixed_variance = True
+    audit_config.attack_list.append(lira_config)
+    
+    # RMIA parameters
+    rmia_config = DotMap()
+    rmia_config.attack = "rmia"
+    rmia_config.training_data_fraction = 0.1
+    rmia_config.num_shadow_models = 3
+    rmia_config.online = False
+    rmia_config.attack_data_fraction = 0.1
+    audit_config.attack_list.append(rmia_config)
+ 
     return audit_config
 
 
@@ -58,8 +73,8 @@ def get_shadow_model_config():
     shadow_model_config.model_class = "ConvNet"
     shadow_model_config.batch_size = 32
     shadow_model_config.epochs = 1
-    shadow_model_config.optimizer = {"name": "sgd", "lr": 0.001}
-    shadow_model_config.loss = {"name": "crossentropyloss"}
+    shadow_model_config.optimizer = OptimizerConfig(name="sgd", params= {"lr": 0.001})
+    shadow_model_config.criterion = LossConfig(name= "crossentropyloss")
     return shadow_model_config
 
 

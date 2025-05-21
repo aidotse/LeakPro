@@ -5,6 +5,7 @@ import pickle
 
 import numpy as np
 import torch.nn.functional as F  # noqa: N812
+from pydantic import BaseModel, Field
 from torch import cuda, device, load, nn, no_grad, optim, save, tensor
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
@@ -12,8 +13,8 @@ from tqdm import tqdm
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.distillation_model_handler import DistillationModelHandler
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
-from leakpro.metrics.attack_result import MIAResult
+from leakpro.input_handler.mia_handler import MIAHandler
+from leakpro.reporting.mia_result import MIAResult
 from leakpro.signals.signal import ModelLogits
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
@@ -22,41 +23,49 @@ from leakpro.utils.logger import logger
 class AttackLossTrajectory(AbstractMIA):
     """Implementation of the loss trajectory attack."""
 
+    class AttackConfig(BaseModel):
+        """Configuration for the RMIA attack."""
+
+        distillation_data_fraction: float = Field(default = 0.5, ge = 0.0, le=1.0, description="Fraction of auxiliary data used for distillation")  # noqa: E501
+        train_mia_batch_size: int = Field(default=64, ge=1, description="Batch size for training the MIA classifier")
+        number_of_traj: int = Field(default=1, ge=1, description="Number of trajectories to consider")
+        mia_classifier_epochs: int = Field(default=100, ge=1, description="Number of epochs for training the MIA classifier")
+        label_only: bool = Field(default=False, description="Whether to use only the labels for the attack")
+        temperature: float = Field(default=2.0, ge=0.0, description="Temperature for the softmax")
+
     def __init__(self: Self,
-                 handler: AbstractInputHandler,
+                 handler: MIAHandler,
                  configs: dict
                 ) -> None:
         """Initialize the LossTrajectoryAttack class.
 
         Args:
         ----
-            handler (AbstractInputHandler): The input handler object.
+            handler (MIAHandler): The input handler object.
             configs (dict): A dictionary containing the attack loss_traj configurations.
 
         """
+        logger.info("Configuring Loss trajectory attack")
+        self.configs = self.AttackConfig() if configs is None else self.AttackConfig(**configs)
+
         super().__init__(handler)
 
-        logger.info("Configuring Loss trajecatory attack")
-        self._configure_attack(configs)
+        # Assign the configuration parameters to the object
+        for key, value in self.configs.model_dump().items():
+            setattr(self, key, value)
 
-        output_dir = self.handler.configs["audit"]["output_dir"]
-        self.storage_dir = f"{output_dir}/attack_objects/loss_traj"
+        if self.population_size == self.audit_size:
+            raise ValueError("The audit dataset is the same size as the population dataset. \
+                    There is no data left for the shadow and distillation models.")
 
-
-    def _configure_attack(self: Self, configs: dict) -> None:
         self.num_shadow_models = 1
-        self.distillation_data_fraction = configs.get("training_distill_data_fraction", 0.5)
         self.shadow_data_fraction = 1 - self.distillation_data_fraction
 
-        self.configs = configs
-        self.train_mia_batch_size = configs.get("mia_batch_size", 64)
-        self.number_of_traj = configs.get("number_of_traj", 10)
-        self.mia_classifier_epoch = configs.get("mia_classifier_epochs", 100)
-        self.label_only = configs.get("label_only", False)
-        assert isinstance(self.label_only, bool), "Expected 'self.label_only' to be of type bool"
+        output_dir = self.handler.configs.audit.output_dir
+        self.storage_dir = f"{output_dir}/attack_objects/loss_traj"
 
+        # set up mia classifier
         self.read_from_file = False
-        self.temperature = 2.0 # temperature for the softmax
         self.signal = ModelLogits()
         self.mia_train_data_loader = None
         self.mia_test_data_loader = None
@@ -119,7 +128,7 @@ class AttackLossTrajectory(AbstractMIA):
         logger.info(f"Training shadow models on {len(shadow_training_indices)} points")
         self.shadow_model_indices = ShadowModelHandler().create_shadow_models(self.num_shadow_models,
                                                                          shadow_training_indices,
-                                                                         training_fraction = 1.0)
+                                                                         training_fraction = 0.99)
 
         # load shadow models
         self.shadow_model, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)
@@ -329,7 +338,7 @@ class AttackLossTrajectory(AbstractMIA):
         num_correct = 0
         mia_train_loader = self.mia_train_data_loader
         gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
-        for _ in  tqdm(range(self.mia_classifier_epoch), total=self.mia_classifier_epoch):
+        for _ in  tqdm(range(self.mia_classifier_epochs), total=self.mia_classifier_epochs):
             for _batch_idx, (data, label) in enumerate(mia_train_loader):
                 data = data.to(gpu_or_cpu) # noqa: PLW2901
                 label = label.to(gpu_or_cpu).long() # noqa: PLW2901
@@ -364,7 +373,7 @@ class AttackLossTrajectory(AbstractMIA):
         -------
             A tuple containing the ground truth labels and the predicted membership probabilities for each data point.
             - auc_ground_truth: The ground truth labels for the data points.
-            - member_preds: The predicted membership probabilities for each data point.
+            - auc_pred: The predicted membership probabilities for each data point.
 
         """
         logger.info("Running the MIA attack")
@@ -395,32 +404,21 @@ class AttackLossTrajectory(AbstractMIA):
                      auc_pred = np.concatenate((auc_pred, auc_pred_current.cpu().detach().numpy()),axis=0)
 
         test_loss /= len(self.mia_test_data_loader.dataset)
-        accuracy = 100. * correct / len(self.mia_test_data_loader.dataset)  # noqa: F841
 
-        thresholds = np.linspace(0, 1, 1000)
-        member_preds = np.array([(auc_pred < threshold).astype(int) for threshold in thresholds])
-
-        return auc_ground_truth, member_preds
+        return auc_ground_truth, auc_pred
 
     def run_attack(self:Self) -> MIAResult:
         """Run the attack and return the combined metric result.
 
         Returns
         -------
-            CombinedMetricResult: The combined metric result containing predicted labels, true labels,
-            predictions probabilities, and signal values.
+            MIAResult: The result of the attack.
 
         """
         self.mia_classifier()
-        true_labels, predictions = self.mia_attack(self.mia_classifer)
+        true_labels, signals = self.mia_attack(self.mia_classifer)
 
-        #TODO: We don't have signals in this attack, unlike RMIA. I set it to random to pass the PR before refactoring.
-        signals = np.random.rand(*true_labels.shape)
-
-        # compute ROC, TP, TN etc
-        return MIAResult(
-            predicted_labels=predictions,
-            true_labels=true_labels,
-            predictions_proba=None,
-            signal_values=signals,
-        )
+        return MIAResult.from_full_scores(true_membership=true_labels,
+                                          signal_values=signals,
+                                          result_name="LossTrajectory",
+                                          metadata=self.configs.model_dump())

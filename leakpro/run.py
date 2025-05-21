@@ -14,8 +14,8 @@ from leakpro.utils.logger import logger
 def run_huang(model: Module, client_data: DataLoader, train_fn: Callable,
                 data_mean:Tensor, data_std: Tensor, config: dict, experiment_name: str = "Huang",
                 path:str = "./leakpro_output/results", save:bool = True) -> None:
-    """Runs Huang."""
-    attack = Huang(model, client_data, data_mean, data_std, train_fn, config)
+    """Run Huang."""
+    attack = Huang(model, client_data, train_fn, data_mean, data_std, config)
     result_gen = attack.run_attack()
     for _, _, result_object in result_gen:
         if result_object is not None:
@@ -27,7 +27,7 @@ def run_huang(model: Module, client_data: DataLoader, train_fn: Callable,
 def run_inverting(model: Module, client_data: DataLoader, train_fn: Callable,
                 data_mean:Tensor, data_std: Tensor, config: dict, experiment_name: str = "InvertingGradients",
                 path:str = "./leakpro_output/results", save:bool = True) -> None:
-    """Runs InvertingGradients."""
+    """Run InvertingGradients."""
     attack = InvertingGradients(model, client_data, train_fn, data_mean, data_std, config)
     result_gen = attack.run_attack()
     for _, _, result_object in result_gen:
@@ -42,7 +42,7 @@ def run_inverting(model: Module, client_data: DataLoader, train_fn: Callable,
 def run_inverting_audit(model: Module, dataset: Dataset,
                         train_fn: Callable, data_mean: torch.Tensor, data_std: torch.Tensor
                         ) -> None:
-    """Runs a thourough audit for InvertingGradients with different parameters and pre-training.
+    """Run a thourough audit for InvertingGradients with different parameters and pre-training.
 
     Parameters
     ----------

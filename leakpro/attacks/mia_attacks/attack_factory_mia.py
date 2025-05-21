@@ -1,5 +1,6 @@
 """Module that contains the AttackFactory class which is responsible for creating the attack objects."""
 
+
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.mia_attacks.attack_p import AttackP
 from leakpro.attacks.mia_attacks.HSJ import AttackHopSkipJump
@@ -10,7 +11,7 @@ from leakpro.attacks.mia_attacks.rmia import AttackRMIA
 from leakpro.attacks.mia_attacks.yoqo import AttackYOQO
 from leakpro.attacks.utils.distillation_model_handler import DistillationModelHandler
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.utils.logger import logger
 
 
@@ -24,7 +25,7 @@ class AttackFactoryMIA:
         "loss_traj":AttackLossTrajectory,
         "lira": AttackLiRA,
         "HSJ" : AttackHopSkipJump,
-        "yoqo": AttackYOQO
+        "yoqo": AttackYOQO,
     }
 
     # Shared variables for all attacks
@@ -32,13 +33,14 @@ class AttackFactoryMIA:
     distillation_model_handler = None
 
     @classmethod
-    def create_attack(cls, name: str, handler: AbstractInputHandler) -> AbstractMIA:  # noqa: ANN102
+    def create_attack(cls, name: str, attack_config: dict, handler: MIAHandler) -> AbstractMIA:  # noqa: ANN102
         """Create the attack object.
 
         Args:
         ----
             name (str): The name of the attack.
-            handler (AbstractInputHandler): The input handler object.
+            attack_config (dict): The configuration for the attack.
+            handler (MIAHandler): The input handler object.
 
         Returns:
         -------
@@ -53,11 +55,19 @@ class AttackFactoryMIA:
         if AttackFactoryMIA.shadow_model_handler is None:
             logger.info("Creating shadow model handler singleton")
             AttackFactoryMIA.shadow_model_handler = ShadowModelHandler(handler)
+        else:
+            logger.info("Shadow model handler singleton already exists, updating state")
+            AttackFactoryMIA.shadow_model_handler = ShadowModelHandler(handler)
 
         if AttackFactoryMIA.distillation_model_handler is None:
             logger.info("Creating distillation model handler singleton")
             AttackFactoryMIA.distillation_model_handler = DistillationModelHandler(handler)
+        else:
+            logger.info("Distillation model handler singleton already exists, updating state")
+            AttackFactoryMIA.distillation_model_handler = DistillationModelHandler(handler)
 
         if name in cls.attack_classes:
-            return cls.attack_classes[name](handler, handler.configs["audit"]["attack_list"][name])
+            attack_object = cls.attack_classes[name](handler, attack_config)
+            attack_object.set_effective_optuna_metadata(attack_config) # remove optuna metadata if params not will be optimized
+            return attack_object
         raise ValueError(f"Unknown attack type: {name}")

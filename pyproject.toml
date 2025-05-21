@@ -20,12 +20,14 @@ dependencies = [
   "joblib",
   "pyyaml",
   "scikit-learn",
+  "pydantic",  
 ]
 
 [project.optional-dependencies]
 mia = ["torch", "torchvision", "optuna"]
 synthetic = ["numba", "pydantic", "transformers", "sentence-transformers"]
 federated = ["torch", "torchvision", "torchmetrics", "pytorch-ignite", "optuna"]
+minv = ["torch", "torchvision", "optuna", "kornia"]
 
 dev = [
   "pytest",
@@ -37,11 +39,11 @@ dev = [
   "torchvision",  # from mia & federated
   "torchmetrics",  # from federated
   "numba",  # from synthetic
-  "pydantic",  # from synthetic
   "transformers",  # from synthetic
   "sentence-transformers",  # from synthetic
   "pytorch-ignite", # from federated
   "optuna", # federated and mia
+  "kornia", # from minv
 ]
 
 [tool.setuptools]
@@ -55,7 +57,7 @@ include = ["leakpro*"]
 line-length = 130
 target-version = "py39"
 
-select = [
+lint.select = [
   "ANN", "ARG", "B", "C4", "C90", "D", "DTZ", "E", "ERA", "F", "I", "N", "PD", "PGH", "PLC",
   "PLE", "PLR", "PLW", "PT", "Q", "RET", "S", "SIM", "T20", "TID", "W",
 ]

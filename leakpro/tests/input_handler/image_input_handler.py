@@ -8,6 +8,7 @@ from tqdm import tqdm
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
+from leakpro.schemas import TrainingOutput, EvalOutput
 
 
 class ImageInputHandler(AbstractInputHandler):
@@ -16,16 +17,23 @@ class ImageInputHandler(AbstractInputHandler):
     def __init__(self:Self, configs: dict) -> None:
         super().__init__(configs = configs)
 
-
-    def get_criterion(self:Self)->None:
-        """Set the CrossEntropyLoss for the model."""
-        return torch.nn.CrossEntropyLoss()
-
-    def get_optimizer(self: Self, model:torch.nn.Module) -> None:
-        """Set the optimizer for the model."""
-        learning_rate = 0.1
-        momentum = 0.8
-        return optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
+    def eval(self, dataloader, model, criterion):
+        """Model evaluation procedure."""
+        gpu_or_cpu = "cpu"
+        model.eval()
+        test_loss, acc, total = 0, 0, 0
+        with torch.no_grad():
+            for inputs, labels in dataloader:
+                inputs, labels = inputs.to(gpu_or_cpu), labels.to(gpu_or_cpu)
+                outputs = model(inputs)
+                test_loss += criterion(outputs, labels).item()
+                pred = outputs.data.max(1, keepdim=True)[1]
+                acc += pred.eq(labels.data.view_as(pred)).sum()
+                total += len(labels)
+        test_loss /= len(dataloader)
+        test_acc = acc / total
+        model.to("cpu")
+        return EvalOutput(loss=test_loss, accuracy=test_acc)
 
     def train(
         self: Self,
@@ -34,7 +42,7 @@ class ImageInputHandler(AbstractInputHandler):
         criterion: torch.nn.Module = None,
         optimizer: optim.Optimizer = None,
         epochs: int = None,
-    ) -> dict:
+    ) -> TrainingOutput:
         """Model training procedure."""
 
         # read hyperparams for training (the parameters for the dataloader are defined in get_dataloader):
@@ -47,7 +55,7 @@ class ImageInputHandler(AbstractInputHandler):
 
         # training loop
         for epoch in range(epochs):
-            train_loss, train_acc = 0, 0
+            train_loss, train_acc, total_samples = 0, 0, 0
             model.train()
             for inputs, labels in tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}"):
                 labels = labels.long()
@@ -62,11 +70,31 @@ class ImageInputHandler(AbstractInputHandler):
                 # Accumulate performance of shadow model
                 train_acc += pred.eq(labels.data.view_as(pred)).sum()
                 train_loss += loss.item()
+                total_samples += len(labels)
+                
+            train_loss /= len(dataloader)
+            train_acc = train_acc / total_samples
 
-            log_train_str = (
-                f"Epoch: {epoch+1}/{epochs} | Train Loss: {train_loss/len(dataloader):.8f} | "
-                f"Train Acc: {float(train_acc)/len(dataloader.dataset):.8f}")
+            log_train_str = (f"Epoch: {epoch+1}/{epochs} | Train Loss: {train_loss} | "f"Train Acc: {train_acc}")
             logger.info(log_train_str)
         model.to("cpu")
 
-        return {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}
+        eval_output = EvalOutput(accuracy=train_acc, loss=train_loss)
+        training_output = TrainingOutput(model=model, metrics=eval_output)
+        return training_output
+
+    class UserDataset(AbstractInputHandler.UserDataset):
+        """Dataset with a subset method."""
+
+        def __init__(self, data, targets, **kwargs):
+            super().__init__(data, targets, **kwargs)
+            self.data = data
+            self.targets = targets
+
+        def __getitem__(self, index: int) -> tuple:
+            """Return a sample from the dataset."""
+            return self.data[index], self.targets[index]
+
+        def __len__(self) -> int:
+            """Return the length of the dataset."""
+            return len(self.targets)

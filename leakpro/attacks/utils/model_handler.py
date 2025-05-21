@@ -1,13 +1,12 @@
 """Abstract class for the model handler."""
 
 import os
-from copy import deepcopy
 
 import joblib
 from torch import load
 from torch.nn import Module
 
-from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.input_handler.user_imports import (
     get_class_from_module,
     get_criterion_mapping,
@@ -16,6 +15,7 @@ from leakpro.input_handler.user_imports import (
 )
 from leakpro.utils.import_helper import Self, Tuple
 from leakpro.utils.logger import logger
+from leakpro.utils.save_load import hash_model
 
 
 class ModelHandler():
@@ -23,51 +23,52 @@ class ModelHandler():
 
     def __init__(
         self:Self,
-        handler: AbstractInputHandler,
+        handler: MIAHandler,
         caller:str=None
     )->None:
         """Initialize the ModelHandler class."""
 
         self.handler = handler
 
-        caller_configs =  handler.configs.get(caller, None)
-        if caller_configs is None:
-            caller_configs = {}
+        caller_configs = getattr(handler.configs, caller) if caller is not None else None
+        self.use_target_model_setup = caller_configs is None
 
-        self.model_path = caller_configs.get("module_path", None)
-        self.model_class = caller_configs.get("model_class", None)
-
-        self.use_target_model_setup = self.model_path is None or self.model_class is None
-
-        # Get the model blueprint
+        # get the bluepring for the model
         if self.use_target_model_setup:
+            self.model_class = handler.target_model_blueprint.__name__
             self.model_blueprint = handler.target_model_blueprint
         else:
-            self.model_blueprint = self._import_model_from_path(self.model_path, self.model_class)
+            try:
+                self.model_path = caller_configs.module_path
+                self.model_class = caller_configs.model_class
+            except AttributeError as e:
+                raise ValueError("Model path or class not provided in shadow model config") from e
+            try:
+                self.model_blueprint = self._import_model_from_path(self.model_path, self.model_class)
+            except Exception as e:
+                raise ValueError(f"Failed to create model blueprint from {self.model_class} in {self.model_path}") from e
 
         # Pick either target config or caller config
-        setup_config = deepcopy(handler.target_model_metadata) if self.use_target_model_setup else caller_configs
-
-        self.init_params = setup_config.get("init_params", {})
+        setup_config = handler.target_model_metadata if self.use_target_model_setup else caller_configs
+        # extract the init params
+        self.init_params = setup_config.init_params
 
         # Get optimizer class
-        self.optimizer_config = setup_config["optimizer"]
-        optimizer_name = self.optimizer_config.pop("name").lower() # pop to only have input parameters left
+        optimizer_name = setup_config.optimizer.name
         self.optimizer_class = self._get_optimizer_class(optimizer_name)
+        # copy to only have parameters left
+        self.optimizer_config = setup_config.optimizer.params
 
         # Get criterion class
-        self.loss_config = setup_config["loss"]
-        criterion_class = self.loss_config.pop("name").lower() # pop to only have input parameters left
+        criterion_class = setup_config.criterion.name
         self.criterion_class = self._get_criterion_class(criterion_class)
+        # copy to only have parameters left
+        self.loss_config = setup_config.criterion.params
 
-        self.batch_size = setup_config.get("batch_size", 32)
-        assert self.batch_size > 0, "Batch size must be greater than 0"
-
-        self.epochs = setup_config.get("epochs", 40)
-        assert self.epochs > 0, "Epochs must be greater than 0"
+        self.epochs = setup_config.epochs
 
         # Set the storage paths for objects created by the handler
-        storage_path = handler.configs["audit"].get("output_dir", None)
+        storage_path = handler.configs.audit.output_dir
         if storage_path is not None:
             self.storage_path = f"{storage_path}/attack_objects/{caller}"
             if not os.path.exists(self.storage_path):
@@ -76,6 +77,9 @@ class ModelHandler():
                 logger.info(f"Created folder {self.storage_path}")
         else:
             raise ValueError("Storage path not provided")
+
+        # Create the hash for the target model
+        self.target_model_hash = hash_model(self.handler.target_model)
 
     def _import_model_from_path(self:Self, module_path:str, model_class:str)->None:
         """Import the model from the given path.
@@ -177,8 +181,10 @@ class ModelHandler():
             dict: The loaded metadata.
 
         """
+
         try:
             with open(metadata_path, "rb") as f:
                 return joblib.load(f)
         except FileNotFoundError as e:
             raise FileNotFoundError(f"Metadata at {metadata_path} not found") from e
+
