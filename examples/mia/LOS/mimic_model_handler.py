@@ -109,10 +109,10 @@ class GRUHandler(BaseMIMICHandler):
               criterion: nn.Module ,
               optimizer: optim.Optimizer ,
               early_stop_loader:DataLoader,
-              epochs: int = None,
-              patience_early_stopping: int = 5,
-              patience_lr: float = 0.01,
-              min_delta: float = 0.0,
+              epochs: int,
+              patience_early_stopping: int,
+              patience_lr: float,
+              min_delta: float,
               ) -> TrainingOutput:
 
         device_name = device("cuda" if cuda.is_available() else "cpu")
@@ -121,7 +121,7 @@ class GRUHandler(BaseMIMICHandler):
         # Early Stopping
         min_loss_epoch_valid = float("inf")  # Initialize to infinity for comparison
         patient_epoch = 0  # Initialize patient counter
-        scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.2, patience=patience_lr, min_lr=1e-12, verbose=True)
+        scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.2, patience=patience_lr)
 
         accuracy_history = []
         loss_history = []
@@ -194,10 +194,12 @@ class GRUHandler(BaseMIMICHandler):
                 break
 
             # Print training parameters
-            print("Epoch: {}, train_loss: {}, valid_loss: {}".format( \
+            print("Epoch: {}, train_loss: {}, valid_loss: {}, train_acc: {}".format( \
                         epoch, \
                         np.around(train_loss, decimals=8),\
-                        np.around(test_loss, decimals=8) ))
+                        np.around(test_loss, decimals=8),\
+                        np.around(train_acc, decimals=8) \
+                          ))
             
 
         results = EvalOutput(accuracy = train_acc,
