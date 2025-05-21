@@ -4,7 +4,7 @@ from cifar import get_cifar10_loader
 from model import ResNet
 from torchvision.models.resnet import BasicBlock
 
-from leakpro.attacks.gia_attacks.invertinggradients import InvertingGradients
+from leakpro.attacks.gia_attacks.invertinggradients import InvertingConfig, InvertingGradients
 from leakpro.fl_utils.gia_train import train
 from leakpro.run import run_gia_attack
 
@@ -14,6 +14,7 @@ if __name__ == "__main__":
 
     # meta train function designed to work with GIA
     train_fn = train
-    attack_object = InvertingGradients(model, client_dataloader, data_mean, data_std)
+    configs = InvertingConfig()
+    attack_object = InvertingGradients(model, client_dataloader, data_mean, data_std, configs=configs)
 
     result = run_gia_attack(attack_object)

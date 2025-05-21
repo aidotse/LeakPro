@@ -1,14 +1,19 @@
 """Util functions relating to data."""
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from torch import Tensor, cat, mean, randn, std, tensor
-from torch.utils.data import DataLoader, Dataset, TensorDataset
+
 import torch
-import numpy as np
+from torch import Tensor, cat, mean, randn, std
+from torch.utils.data import DataLoader, Dataset
+
+from leakpro.utils.import_helper import Any, Self
+
 
 class GiaDataModalityExtension(ABC):
+    """Abstract class for data modality extensions for GIA."""
+
     @abstractmethod
-    def get_at_data():
+    def get_at_data() -> Tensor:
         """Get a dataloader mimicing the shape of the original data used for recreating."""
         pass
 
@@ -63,39 +68,78 @@ class GiaNERExtension(GiaDataModalityExtension):
         return reconstruction, reconstruction_loader
 
 class CustomTensorDataset(Dataset):
-    def __init__(self, reconstruction: torch.Tensor, labels: list):
+    """Custom generic tensor dataset."""
+
+    def __init__(self:Self, reconstruction: torch.Tensor, labels: list) -> None:
         self.reconstruction = reconstruction
         self.labels = labels
 
-    def __len__(self):
+    def __len__(self: Self) -> int:
+        """Dataset length."""
         return self.reconstruction.size(0)
 
-    def __getitem__(self, index):
+    def __getitem__(self: Self, index: int) -> tuple[Tensor, Any]:
+        """Get item from index."""
         return self.reconstruction[index], self.labels[index]
 
-class GiaImageDetectionExtension(GiaDataModalityExtension):
+class CustomYoloTensorDataset(Dataset):
+    """Custom generic tensor dataset."""
 
-    def get_at_data(self, client_loader: DataLoader) -> DataLoader:
+    def __init__(self:Self, reconstruction: torch.Tensor, labels: list) -> None:
+        self.reconstruction = reconstruction
+        self.labels = labels
+
+    def __len__(self: Self) -> int:
+        """Dataset length."""
+        return self.reconstruction.size(0)
+
+    def __getitem__(self: Self, index: int) -> tuple[Tensor, Any]:
+        """Get item from index."""
+        return self.reconstruction[index], self.labels[index], 1
+
+class GiaImageExtension(GiaDataModalityExtension):
+    """Image extension for GIA."""
+
+    def get_at_data(self: Self, client_loader: DataLoader) -> DataLoader:
         """DataLoader with random noise images of the same shape as the client_loader's dataset, using the same COCO labels."""
         img_shape = client_loader.dataset[0][0].shape
         num_images = len(client_loader.dataset)
         reconstruction = randn((num_images, *img_shape))
         labels = []
         for _, label in client_loader:
-            labels.append(deepcopy(label))
+            if isinstance(label, Tensor):
+                labels.extend(deepcopy(label))
+            else:
+                labels.append(deepcopy(label))
         reconstruction_dataset = CustomTensorDataset(reconstruction, labels)
         reconstruction_loader = DataLoader(reconstruction_dataset, batch_size=32, shuffle=True)
 
         return reconstruction, labels, reconstruction_loader
 
-class GiaTextMaskingExtension(GiaDataModalityExtension):
-    def get_at_data():
-        pass
+class GiaImageYoloExtension(GiaDataModalityExtension):
+    """Image extension for GIA."""
+
+    def get_at_data(self: Self, client_loader: DataLoader) -> DataLoader:
+        """DataLoader with random noise images of the same shape as the client_loader's dataset, using the same COCO labels."""
+        img_shape = client_loader.dataset[0][0].shape
+        num_images = len(client_loader.dataset)
+        reconstruction = randn((num_images, *img_shape))
+        labels = []
+        for _, label, _ in client_loader:
+            if isinstance(label, Tensor):
+                labels.extend(deepcopy(label))
+            else:
+                labels.append(deepcopy(label))
+        reconstruction_dataset = CustomYoloTensorDataset(reconstruction, labels)
+        reconstruction_loader = DataLoader(reconstruction_dataset, batch_size=32, shuffle=True)
+
+        return reconstruction, labels, reconstruction_loader
 
 
 def get_meanstd(trainset: Dataset, axis_to_reduce: tuple=(-2,-1)) -> tuple[Tensor, Tensor]:
     """Get mean and std of a dataset."""
     cc = cat([trainset[i][0].unsqueeze(0) for i in range(len(trainset))], dim=0)
+    cc = cc.float()
     axis_to_reduce += (0,)
     data_mean = mean(cc, dim=axis_to_reduce).tolist()
     data_std = std(cc, dim=axis_to_reduce).tolist()

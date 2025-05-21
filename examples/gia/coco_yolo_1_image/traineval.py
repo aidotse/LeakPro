@@ -6,16 +6,7 @@ import tqdm
 import numpy as np
 import time
 import torchvision
-from coco import batch_targets_to_tensor
-from model import ComputeLoss
-
-def wh2xy(x):
-    y = x.clone()
-    y[..., 0] = x[..., 0] - x[..., 2] / 2  # top left x
-    y[..., 1] = x[..., 1] - x[..., 3] / 2  # top left y
-    y[..., 2] = x[..., 0] + x[..., 2] / 2  # bottom right x
-    y[..., 3] = x[..., 1] + x[..., 3] / 2  # bottom right y
-    return y
+from model import ComputeLoss, wh2xy
 
 def smooth(y, f=0.05):
     # Box filter of fraction f
@@ -172,7 +163,7 @@ def test_eval(model, loader):
     model.to(device)
     model.set_eval(True)
     model.eval()
-    # model.half()
+    model.half()
 
     # Configure
     iou_v = torch.linspace(0.5, 0.95, 10).cuda()  # iou vector for mAP@0.5:0.95
@@ -184,12 +175,13 @@ def test_eval(model, loader):
     mean_ap = 0.
     metrics = []
     p_bar = tqdm.tqdm(loader, desc=('%10s' * 3) % ('precision', 'recall', 'mAP'))
-    for samples, targets in p_bar:
+    for samples, targets, shapes in p_bar:
         samples = samples.cuda()
-        targets = batch_targets_to_tensor(targets)
-        # samples = samples.half()  # uint8 to fp16/32
-        # samples = samples / 255  # 0 - 255 to 0.0 - 1.0
+        targets = targets.cuda()
+        samples = samples.half()  # uint8 to fp16/32
+        samples = samples / 255  # 0 - 255 to 0.0 - 1.0
         _, _, height, width = samples.shape  # batch size, channels, height, width
+
 
         # Inference
         outputs = model(samples)
@@ -209,6 +201,7 @@ def test_eval(model, loader):
                 continue
 
             detections = output.clone()
+            scale(detections[:, :4], samples[i].shape[1:], shapes[i][0], shapes[i][1])
 
             # Evaluate
             if labels.shape[0]:
@@ -217,6 +210,7 @@ def test_eval(model, loader):
                 tbox[:, 1] = labels[:, 2] - labels[:, 4] / 2  # top left y
                 tbox[:, 2] = labels[:, 1] + labels[:, 3] / 2  # bottom right x
                 tbox[:, 3] = labels[:, 2] + labels[:, 4] / 2  # bottom right y
+                scale(tbox, samples[i].shape[1:], shapes[i][0], shapes[i][1])
 
                 correct = np.zeros((detections.shape[0], iou_v.shape[0]))
                 correct = correct.astype(bool)
@@ -228,7 +222,7 @@ def test_eval(model, loader):
                     x = torch.where((iou >= iou_v[j]) & correct_class)
                     if x[0].shape[0]:
                         matches = torch.cat((torch.stack(x, 1), iou[x[0], x[1]][:, None]), 1)
-                        matches = matches.cpu().numpy()
+                        matches = matches.cpu().detach().numpy()
                         if x[0].shape[0] > 1:
                             matches = matches[matches[:, 2].argsort()[::-1]]
                             matches = matches[np.unique(matches[:, 1], return_index=True)[1]]
@@ -238,13 +232,15 @@ def test_eval(model, loader):
             metrics.append((correct, output[:, 4], output[:, 5], labels[:, 0]))
 
     # Compute metrics
-    # metrics = [torch.cat(x, 0).cpu().numpy() for x in zip(*metrics)]  # to numpy
-    metrics = [torch.cat(x, 0).detach().cpu().numpy() for x in zip(*metrics)]
+    metrics = [torch.cat(x, 0).cpu().detach().numpy() for x in zip(*metrics)]  # to numpy
     if len(metrics) and metrics[0].any():
         tp, fp, m_pre, m_rec, map50, mean_ap = compute_ap(*metrics)
 
     # Print results
     print('%10.3g' * 3 % (m_pre, m_rec, mean_ap))
+
+    # Return results
+    model.float()  # for training
     return map50, mean_ap
 
 def learning_rate(epochs, lrf):
@@ -252,6 +248,24 @@ def learning_rate(epochs, lrf):
         return (1 - x / epochs) * (1.0 - lrf) + lrf
 
     return fn
+
+def scale(coords, shape1, shape2, ratio_pad=None):
+    if ratio_pad is None:  # calculate from img0_shape
+        gain = min(shape1[0] / shape2[0], shape1[1] / shape2[1])  # gain  = old / new
+        pad = (shape1[1] - shape2[1] * gain) / 2, (shape1[0] - shape2[0] * gain) / 2  # wh padding
+    else:
+        gain = ratio_pad[0][0]
+        pad = ratio_pad[1]
+
+    coords[:, [0, 2]] -= pad[0]  # x padding
+    coords[:, [1, 3]] -= pad[1]  # y padding
+    coords[:, :4] /= gain
+
+    coords[:, 0].clamp_(0, shape2[1])  # x1
+    coords[:, 1].clamp_(0, shape2[0])  # y1
+    coords[:, 2].clamp_(0, shape2[1])  # x2
+    coords[:, 3].clamp_(0, shape2[0])  # y2
+    return coords
 
 class EMA:
     """
@@ -300,7 +314,7 @@ def clip_gradients(model, max_norm=10.0):
     torch.nn.utils.clip_grad_norm_(parameters, max_norm=max_norm)
 
 def test_train(model, loader, loader_test):
-    batch_size = 32
+    batch_size = 16
     # Optimizer
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
@@ -332,7 +346,6 @@ def test_train(model, loader, loader_test):
 
     # EMA
     ema = EMA(model)
-    sampler = None
 
     # Start training
     best = 0
@@ -357,10 +370,10 @@ def test_train(model, loader, loader_test):
         warmup_bias_lr = 0.10
         warmup_momentum = 0.8
 
-        for i, (samples, targets) in p_bar:
+        for i, (samples, targets, _) in p_bar:
             x = i + num_batch * epoch  # number of iterations
-            samples = samples.cuda()
-            targets = batch_targets_to_tensor(targets)
+            samples = samples.cuda().float() / 255
+            targets = targets.cuda()
 
             # Warmup
             if x <= num_warmup:
@@ -378,8 +391,8 @@ def test_train(model, loader, loader_test):
                         y['momentum'] = np.interp(x, xp, fp)
 
             # Forward
-            # with torch.cuda.amp.autocast():
-            outputs = model(samples)  # forward
+            with torch.cuda.amp.autocast():
+                outputs = model(samples)  # forward
             loss = criterion(outputs, targets)
 
             m_loss.update(loss.item(), samples.size(0))
@@ -409,7 +422,7 @@ def test_train(model, loader, loader_test):
 
         # # Scheduler
         scheduler.step()
-        # # mAP
+        # # mAP 
         last = test_eval(model, loader_test)
         print({'mAP': str(f'{last[1]:.3f}'),
                             'epoch': str(epoch + 1).zfill(3),

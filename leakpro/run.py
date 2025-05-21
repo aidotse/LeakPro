@@ -2,7 +2,6 @@
 from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
 
 
-
 def run_gia_attack(attack_object: AbstractGIA, experiment_name: str = "GIA",
                 path:str = "./leakpro_output/results", save:bool = True) -> None:
     """Runs InvertingGradients."""

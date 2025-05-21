@@ -1,8 +1,11 @@
 """Re-implemented code to fit new standard COCO structure and GIA, from repository: https://github.com/jahongir7174/YOLOv8-pt, reference to Ultralytics"""
 import math
+import time
 import torch
 from torch.nn.functional import cross_entropy, one_hot
 from torch.nn.utils.rnn import pad_sequence
+import yaml
+import os
 
 def make_anchors(x, strides, offset=0.5):
     """
@@ -180,7 +183,6 @@ class Head(torch.nn.Module):
 
         c1 = max(filters[0], self.nc)
         c2 = max((filters[0] // 4, self.ch * 4))
-        self.evaluating = False
 
         self.dfl = DFL(self.ch)
         self.cls = torch.nn.ModuleList(torch.nn.Sequential(Conv(x, c1, 3),
@@ -189,14 +191,14 @@ class Head(torch.nn.Module):
         self.box = torch.nn.ModuleList(torch.nn.Sequential(Conv(x, c2, 3),
                                                            Conv(c2, c2, 3),
                                                            torch.nn.Conv2d(c2, 4 * self.ch, 1)) for x in filters)
-    
-    def set_eval(self, on):
-        self.evaluating = on
+        self.simulate_train_on_eval = False
 
     def forward(self, x):
         for i in range(self.nl):
             x[i] = torch.cat((self.box[i](x[i]), self.cls[i](x[i])), 1)
-        if not self.evaluating: #self.training:
+        if self.training:
+            return x
+        if self.simulate_train_on_eval:
             return x
         self.anchors, self.strides = (x.transpose(0, 1) for x in make_anchors(x, self.stride, 0.5))
 
@@ -216,7 +218,6 @@ class Head(torch.nn.Module):
             a[-1].bias.data[:] = 1.0  # box
             # cls (.01 objects, 80 classes, 640 img)
             b[-1].bias.data[:m.nc] = math.log(5 / m.nc / (256 / s) ** 2)
-
 
 class YOLO(torch.nn.Module):
     def __init__(self, width, depth, num_classes):
@@ -247,7 +248,7 @@ class YOLO(torch.nn.Module):
         self.head.set_eval(on)
 
 
-def yolo_v8_n(num_classes: int = 90):
+def yolo_v8_n(num_classes: int = 80):
     depth = [1, 2, 2]
     width = [3, 16, 32, 64, 128, 256]
     return YOLO(width, depth, num_classes)
@@ -285,8 +286,10 @@ def wh2xy(x):
     return y
 
 class ComputeLoss:
-    def __init__(self, model, box= 7.5, cls= 0.5, dfl= 1.5):
+    def __init__(self, model):
         super().__init__()
+        with open(os.path.join('args.yaml'), errors='ignore') as f:
+            params = yaml.safe_load(f)
         if hasattr(model, 'module'):
             model = model.module
 
@@ -298,9 +301,7 @@ class ComputeLoss:
         self.nc = m.nc  # number of classes
         self.no = m.no
         self.device = device
-        self.box = box
-        self.cls = cls
-        self.dfl = dfl
+        self.params = params
 
         # task aligned assigner
         self.top_k = 10
@@ -327,29 +328,21 @@ class ComputeLoss:
 
         anchor_points, stride_tensor = make_anchors(x, self.stride, 0.5)
 
-        batch_size = pred_scores.shape[0]
-        gt_labels_list = []
-        gt_bboxes_list = []
+        # targets
+        if targets.shape[0] == 0:
+            gt = torch.zeros(pred_scores.shape[0], 0, 5, device=self.device)
+        else:
+            i = targets[:, 0]  # image index
+            _, counts = i.unique(return_counts=True)
+            gt = torch.zeros(pred_scores.shape[0], counts.max(), 5, device=self.device)
+            for j in range(pred_scores.shape[0]):
+                matches = i == j
+                n = matches.sum()
+                if n:
+                    gt[j, :n] = targets[matches, 1:]
+            gt[..., 1:5] = wh2xy(gt[..., 1:5].mul_(size[[1, 0, 1, 0]]))
 
-        for img_idx in range(batch_size):
-            # Select annotations belonging to the current image
-            inds = targets[:, 0] == img_idx  
-            if inds.sum() > 0:
-                ann = targets[inds]
-                category_ids = ann[:, 1:2]          # shape: [n, 1]
-                bboxes_wh = ann[:, 2:6]              # shape: [n, 4]
-                xyxy_bboxes = wh2xy(bboxes_wh)       # shape: [n, 4]
-            else:
-                # No annotations for this image: create empty tensors
-                category_ids = torch.empty((0, 1), device=self.device)
-                xyxy_bboxes = torch.empty((0, 4), device=self.device)
-            
-            gt_labels_list.append(category_ids)
-            gt_bboxes_list.append(xyxy_bboxes)
-
-        gt_labels = pad_sequence(gt_labels_list, batch_first=True, padding_value=0)
-        gt_bboxes = pad_sequence(gt_bboxes_list, batch_first=True, padding_value=0)
-
+        gt_labels, gt_bboxes = gt.split((1, 4), 2)  # cls, xyxy
         mask_gt = gt_bboxes.sum(2, keepdim=True).gt_(0)
 
         # boxes
@@ -388,9 +381,9 @@ class ComputeLoss:
             loss_dfl = self.df_loss(pred_output[fg_mask].view(-1, self.dfl_ch), target_lt_rb[fg_mask])
             loss_dfl = (loss_dfl * weight).sum() / target_scores_sum
 
-        loss_cls *= self.cls
-        loss_box *= self.box
-        loss_dfl *= self.dfl
+        loss_cls *= self.params['cls']
+        loss_box *= self.params['box']
+        loss_dfl *= self.params['dfl']
         return loss_cls + loss_box + loss_dfl  # loss(cls, box, dfl)
 
     @torch.no_grad()
@@ -409,7 +402,7 @@ class ComputeLoss:
                     torch.zeros_like(pred_scores[..., 0]).to(device))
 
         i = torch.zeros([2, self.bs, self.num_max_boxes], dtype=torch.long)
-        i[0] = torch.arange(end=self.bs, dtype=torch.long, device=true_labels.device).view(-1, 1).repeat(1, self.num_max_boxes)
+        i[0] = torch.arange(end=self.bs).view(-1, 1).repeat(1, self.num_max_boxes)
         i[1] = true_labels.long().squeeze(-1)
 
         overlaps = self.iou(true_bboxes.unsqueeze(2), pred_bboxes.unsqueeze(1))
