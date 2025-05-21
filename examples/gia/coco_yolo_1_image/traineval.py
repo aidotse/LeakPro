@@ -161,7 +161,6 @@ def compute_ap(tp, conf, pred_cls, target_cls, eps=1e-16):
 def test_eval(model, loader):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
-    model.set_eval(True)
     model.eval()
     model.half()
 
@@ -174,7 +173,7 @@ def test_eval(model, loader):
     map50 = 0.
     mean_ap = 0.
     metrics = []
-    p_bar = tqdm.tqdm(loader, desc=('%10s' * 3) % ('precision', 'recall', 'mAP'))
+    p_bar = tqdm.tqdm(loader, desc=('%10s' * 3) % ('precision', 'recall', 'mAP'), disable=True, leave=True)
     for samples, targets, shapes in p_bar:
         samples = samples.cuda()
         targets = targets.cuda()
@@ -313,8 +312,8 @@ def clip_gradients(model, max_norm=10.0):
     parameters = model.parameters()
     torch.nn.utils.clip_grad_norm_(parameters, max_norm=max_norm)
 
-def test_train(model, loader, loader_test):
-    batch_size = 16
+def test_train(model, loader, loader_test, save = True):
+    batch_size = 32
     # Optimizer
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
@@ -323,7 +322,7 @@ def test_train(model, loader, loader_test):
     weight_decay = 0.0005
     weight_decay *= batch_size * accumulate / 64
     momentum = 0.93700000
-    epochs = 200
+    epochs = 1000
 
     p = [], [], []
     for v in model.modules():
@@ -356,7 +355,6 @@ def test_train(model, loader, loader_test):
     num_warmup = max(round(warmup_epochs * num_batch), 1000)
     for epoch in range(epochs):
         model.train()
-        model.set_eval(False)
 
         if epochs - epoch == 10:
             loader.dataset.mosaic = False
@@ -364,7 +362,9 @@ def test_train(model, loader, loader_test):
         m_loss = AverageMeter()
         p_bar = enumerate(loader)
         print(('\n' + '%10s' * 3) % ('epoch', 'memory', 'loss'))
-        p_bar = tqdm.tqdm(p_bar, total=num_batch)  # progress bar
+        p_bar = tqdm.tqdm(p_bar, total=num_batch,
+                              disable=True,
+                                leave=True )
 
         optimizer.zero_grad()
         warmup_bias_lr = 0.10
@@ -432,16 +432,20 @@ def test_train(model, loader, loader_test):
         if last[1] > best:
             best = last[1]
 
-        # Ensure the directory exists
-        os.makedirs('./weights', exist_ok=True)
-        # Save model
-        ckpt = {'model': deepcopy(ema.ema).half()}
+        if save:
+            print("Saving weights")
+            # Ensure the directory exists
+            os.makedirs('./weights', exist_ok=True)
+            # Save model
+            ckpt = {'model': deepcopy(ema.ema).half()}
 
-        # Save last, best and delete
-        torch.save(ckpt, './weights/last.pt')
-        if best == last[1]:
-            torch.save(ckpt, './weights/best.pt')
-        del ckpt
+            # Save last, best and delete
+            torch.save(ckpt, './weights/last.pt')
+            if best == last[1]:
+                torch.save(ckpt, './weights/best.pt')
+            del ckpt
+        else:
+            print("Not saving weights")
+
 
     torch.cuda.empty_cache()
-

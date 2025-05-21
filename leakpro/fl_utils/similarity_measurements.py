@@ -6,6 +6,52 @@ from torch.utils.data import DataLoader
 from torchmetrics.functional import peak_signal_noise_ratio
 
 
+def l2_distance_linear_only(client_grads: torch.Tensor,
+                            recon_grads: torch.Tensor) -> torch.Tensor:
+    """Computes the average L2 distance between client and reconstruction gradients,
+    but only over the parameters of the overcomplete linear layer.
+    Assumes those are the first `linear_param_count` entries in the gradient lists.
+    """  # noqa: D205
+    # number of params in your OvercompleteLinear (weight + bias = 2)
+    linear_param_count = 2
+
+    # pick out just the linear‐layer gradients
+    lin_client = client_grads[:linear_param_count]
+    lin_recon  = recon_grads[:linear_param_count]
+
+    # compute L2 norm differences
+    costs = [torch.norm(c - r, p=2) for c, r in zip(lin_client, lin_recon)]
+    return torch.stack(costs).mean()
+
+
+def l2_distance_weights(client_gradient: torch.Tensor, reconstruction_gradient: torch.Tensor,
+                        top10norms: bool) -> torch.Tensor:
+    """Computes the reconstruction costs between client gradients and the reconstruction gradient using L2 distance.
+
+    This function calculates the pairwise costs between each client gradient and the reconstruction gradient
+    using the L2 distance measure. The costs are accumulated and averaged over all client gradients.
+
+    Returns
+    -------
+        torch.Tensor: The average reconstruction cost.
+
+    """
+    with torch.no_grad():
+        if top10norms:
+            # Calculate norms for each gradient
+            norms = torch.stack([p.norm() for p in reconstruction_gradient], dim=0)
+            _, indices = torch.topk(norms, 10)
+        else:
+            indices = torch.arange(len(reconstruction_gradient))
+
+        # Filtered gradients
+        filtered_trial_gradients = [reconstruction_gradient[i] for i in indices]
+        filtered_input_gradients = [client_gradient[i] for i in indices]
+
+    # Calculate L2 distance (as tensors, not detached)
+    costs = sum(torch.norm(x - y, p=2) for x, y in zip(filtered_input_gradients, filtered_trial_gradients))
+    return costs / len(filtered_input_gradients)
+
 def cosine_similarity_weights(client_gradient: torch.Tensor, reconstruction_gradient: torch.Tensor,
                                 top10norms: bool) -> torch.Tensor:
     """Computes the reconstruction costs between client gradients and the reconstruction gradient.
@@ -25,14 +71,13 @@ def cosine_similarity_weights(client_gradient: torch.Tensor, reconstruction_grad
             indices = torch.arange(len(reconstruction_gradient))
         filtered_trial_gradients = [reconstruction_gradient[i] for i in indices]
         filtered_input_gradients = [client_gradient[i] for i in indices]
-    costs = sum((x * y).sum() for x, y in zip(filtered_input_gradients,
-                                                filtered_trial_gradients))
+    cg = torch.cat([g.flatten() for g in filtered_input_gradients])
+    rg = torch.cat([g.flatten() for g in filtered_trial_gradients])
 
-    trial_norm = sum(x.pow(2).sum()
-                        for x in filtered_trial_gradients).sqrt()
-    input_norm = sum(y.pow(2).sum()
-                        for y in filtered_input_gradients).sqrt()
-    return 1 - (costs / trial_norm / input_norm)
+    # compute the cosine similarity in double precision
+    cos = torch.nn.functional.cosine_similarity(cg.unsqueeze(0).double(),
+                              rg.unsqueeze(0).double()).clamp(-1.0, 1.0)
+    return (1.0 - cos).float()
 
 def total_variation(x: Tensor) -> Tensor:
         """Anisotropic TV."""

@@ -5,6 +5,7 @@ import torch
 from torch.nn.functional import cross_entropy, one_hot
 from torch.nn.utils.rnn import pad_sequence
 import yaml
+from torch import nn
 import os
 
 def make_anchors(x, strides, offset=0.5):
@@ -102,7 +103,135 @@ class SPP(torch.nn.Module):
         y1 = self.res_m(x)
         y2 = self.res_m(y1)
         return self.conv2(torch.cat([x, y1, y2, self.res_m(y2)], 1))
+    
+class YOLOClassifier(torch.nn.Module):
+    def __init__(self, width, depth, num_classes):
+        super().__init__()
+        # Backbone and neck
+        self.net = ResDarkNet(width, depth)
+        self.fpn = DarkFPN(width, depth)
 
+        # Classification head: use the deepest FPN feature (width[5] channels)
+        c5 = width[5]
+        self.global_avg = torch.nn.AdaptiveAvgPool2d(1)
+        self.classifier = torch.nn.Sequential(
+            torch.nn.Flatten(),              # -> (B, c5)
+            torch.nn.Linear(c5, 256),
+            torch.nn.ReLU(),
+            torch.nn.Dropout(0.2),
+            torch.nn.Linear(256, num_classes)  # -> (B, num_classes)
+        )
+
+    def forward(self, x):
+        # Extract features
+        features = self.net(x)
+        p3, p4, p5 = self.fpn(features)
+
+        # Pool and classify using the deepest scale
+        z = self.global_avg(p5)       # (B, c5, 1, 1)
+        logits = self.classifier(z)   # (B, num_classes)
+        return logits
+
+    def fuse(self):
+        # Fuse Conv+Norm for faster inference
+        for m in self.modules():
+            if isinstance(m, Conv) and hasattr(m, 'norm'):
+                m.conv = fuse_conv(m.conv, m.norm)
+                m.forward = m.fuse_forward
+                delattr(m, 'norm')
+        return self
+
+
+def yolo_v8_n_class(num_classes: int = 80):
+    depth = [1, 2, 2]
+    width = [3, 16, 32, 64, 128, 256]
+    return YOLOClassifier(width, depth, num_classes)
+
+def _make_resnet_layer(block, in_planes, out_planes, blocks, stride=1):
+    """
+    block: the block class (BasicBlock)
+    in_planes: number of channels coming in
+    out_planes: number of channels for this stage
+    blocks: how many blocks to stack (ResNet-18 uses 2)
+    stride: stride for the *first* block in this stage
+    """
+    downsample = None
+    # if we need to change #channels or spatial resolution, apply a 1×1 conv
+    if stride != 1 or in_planes != out_planes:
+        downsample = torch.nn.Sequential(
+            torch.nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False),
+            torch.nn.BatchNorm2d(out_planes),
+        )
+
+    layers = []
+    # first block: may downsample / change channels
+    layers.append(block(in_planes, out_planes, stride=stride, downsample=downsample))
+    # remaining blocks: keep same size
+    for _ in range(1, blocks):
+        layers.append(block(out_planes, out_planes))
+
+    return torch.nn.Sequential(*layers)
+
+class ResNetStem(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.conv = nn.Conv2d(in_channels,
+                              out_channels,
+                              kernel_size=7,
+                              stride=2,
+                              padding=3,
+                              bias=False)
+        self.bn   = nn.BatchNorm2d(out_channels)
+        self.relu = nn.ReLU(inplace=True)
+        self.pool = nn.MaxPool2d(kernel_size=3,
+                                 stride=2,
+                                 padding=1)
+
+    def forward(self, x):
+        x = self.conv(x)
+        x = self.bn(x)
+        x = self.relu(x)
+        x = self.pool(x)
+        return x
+
+class ResDarkNet(torch.nn.Module):
+    def __init__(self, width, depth):
+        super().__init__()
+        self.p1 = ResNetStem(in_channels=width[0], out_channels=width[1])
+        self.layer1 = _make_resnet_layer(BasicBlock,
+                                    in_planes=width[1],
+                                    out_planes=width[2],
+                                    blocks=2,
+                                         stride=1)
+
+        # Stage 2: 64→128 channels, downsample once
+        self.layer2 = _make_resnet_layer(BasicBlock,
+                                         in_planes=width[2],
+                                         out_planes=width[3],
+                                         blocks=2,
+                                         stride=2)
+
+        # Stage 3: 128→256 channels, downsample once
+        self.layer3 = _make_resnet_layer(BasicBlock,
+                                         in_planes=width[3],
+                                         out_planes=width[4],
+                                         blocks=2,
+                                         stride=2)
+
+        # Stage 4: 256→512 channels, downsample once
+        self.layer4 = _make_resnet_layer(BasicBlock,
+                                         in_planes=width[4],
+                                         out_planes=width[5],
+                                         blocks=2,
+                                         stride=2)
+
+    def forward(self, x):
+        x = self.p1(x)          # 7×7 stem
+        x = self.layer1(x)      # 64
+        p3 = self.layer2(x)      # 128
+        p4 = self.layer3(p3)      # 256
+        p5 = self.layer4(p4)      # 512
+        return p3, p4, p5        
 
 class DarkNet(torch.nn.Module):
     def __init__(self, width, depth):
@@ -150,6 +279,104 @@ class DarkFPN(torch.nn.Module):
         h2 = self.h2(torch.cat([self.up(h1), p3], 1))
         h4 = self.h4(torch.cat([self.h3(h2), h1], 1))
         h6 = self.h6(torch.cat([self.h5(h4), p5], 1))
+        return h2, h4, h6
+    
+class ResDarkFPN(nn.Module):
+    def __init__(self, width, depth):
+        """
+        width: list of channel dims, e.g. [C0, C1, C2, C3, C4, C5]
+        depth: list of #blocks for each Res-layer, e.g. [n1, n2, n3, n4]
+        """
+        super().__init__()
+        # upsample by factor 2 (nearest by default)
+        self.up = nn.Upsample(scale_factor=2, mode='nearest')
+
+        # replace CSPs with ResNet BasicBlock stacks
+        # h1: from (C4 + C5) -> C4
+        self.h1 = _make_resnet_layer(
+            BasicBlock, 
+            in_planes=width[4] + width[5], 
+            out_planes=width[4], 
+            blocks=2, 
+            stride=1
+        )
+
+        # h2: from (C3 + C4) -> C3
+        self.h2 = _make_resnet_layer(
+            BasicBlock, 
+            in_planes=width[3] + width[4], 
+            out_planes=width[3], 
+            blocks=2, 
+            stride=1
+        )
+
+        # keep these as plain convs
+        self.h3 = Conv(width[3], width[3], 3, 2)
+        self.h5 = Conv(width[4], width[4], 3, 2)
+
+        # h4: from (C3 + C4) -> C4
+        self.h4 = _make_resnet_layer(
+            BasicBlock, 
+            in_planes=width[3] + width[4], 
+            out_planes=width[4], 
+            blocks=2, 
+            stride=1
+        )
+
+        # h6: from (C4 + C5) -> C5
+        self.h6 = _make_resnet_layer(
+            BasicBlock, 
+            in_planes=width[4] + width[5], 
+            out_planes=width[5], 
+            blocks=2, 
+            stride=1
+        )
+
+    def forward(self, x):
+        p3, p4, p5 = x
+
+        # top-down path
+        h1 = self.h1(torch.cat([self.up(p5), p4], dim=1))
+        h2 = self.h2(torch.cat([self.up(h1), p3], dim=1))
+
+        # bottom-up path
+        h4 = self.h4(torch.cat([self.h3(h2), h1], dim=1))
+        h6 = self.h6(torch.cat([self.h5(h4), p5], dim=1))
+
+        return h2, h4, h6
+
+class HalfResDarkFPN(nn.Module):
+    def __init__(self, width, depth):
+        super().__init__()
+        self.up = nn.Upsample(scale_factor=2, mode='nearest')
+        # Swap two CSP layers (h1, h4) with ResNet BasicBlock stacks
+        self.r1 = _make_resnet_layer(
+            BasicBlock,
+            in_planes=width[4] + width[5],
+            out_planes=width[4],
+            blocks=depth[0],
+            stride=1
+        )
+        self.h2 = CSP(width[3] + width[4], width[3], depth[0], False)
+        self.h3 = Conv(width[3], width[3], 3, 2)
+        self.r4 = _make_resnet_layer(
+            BasicBlock,
+            in_planes=width[3] + width[4],
+            out_planes=width[4],
+            blocks=depth[0],
+            stride=1
+        )
+        self.h5 = Conv(width[4], width[4], 3, 2)
+        self.h6 = CSP(width[4] + width[5], width[5], depth[0], False)
+
+    def forward(self, x):
+        p3, p4, p5 = x
+        # swapped layer r1 in place of h1
+        h1 = self.r1(torch.cat([self.up(p5), p4], dim=1))
+        h2 = self.h2(torch.cat([self.up(h1), p3], dim=1))
+        # swapped layer r4 in place of h4
+        h4 = self.r4(torch.cat([self.h3(h2), h1], dim=1))
+        h6 = self.h6(torch.cat([self.h5(h4), p5], dim=1))
         return h2, h4, h6
 
 
@@ -243,9 +470,6 @@ class YOLO(torch.nn.Module):
                 m.forward = m.fuse_forward
                 delattr(m, 'norm')
         return self
-    
-    def set_eval(self, on):
-        self.head.set_eval(on)
 
 
 def yolo_v8_n(num_classes: int = 80):
@@ -380,7 +604,12 @@ class ComputeLoss:
             target_lt_rb = target_lt_rb.clamp(0, self.dfl_ch - 1.01)  # distance (left_top, right_bottom)
             loss_dfl = self.df_loss(pred_output[fg_mask].view(-1, self.dfl_ch), target_lt_rb[fg_mask])
             loss_dfl = (loss_dfl * weight).sum() / target_scores_sum
-
+        # print(
+        #     f"YOLO losses → cls {loss_cls.item():.4f}, "
+        #     f"box {loss_box.item():.4f}, "
+        #     f"dfl {loss_dfl.item():.4f}, "
+        #     f"anchors pos {fg_mask.sum().item()}"
+        # )
         loss_cls *= self.params['cls']
         loss_box *= self.params['box']
         loss_dfl *= self.params['dfl']
@@ -506,3 +735,138 @@ class ComputeLoss:
         with torch.no_grad():
             alpha = v / (v - iou + (1 + eps))
         return iou - (rho2 / c2 + v * alpha)  # CIoU
+    
+import torch
+import torch.nn as nn
+from torchvision.models import resnet18
+
+# Assuming you already have these from your YOLO codebase:
+#   Conv, DFL, make_anchors, Head
+
+class ResNetBackbone(nn.Module):
+    """ResNet-18 truncated to return the three feature maps at strides 8, 16, 32."""
+    def __init__(self, weights=None):
+        super().__init__()
+        resnet = resnet18(weights=weights)
+        # Stem: conv1→bn1→relu→maxpool
+        self.stem = nn.Sequential(
+            resnet.conv1, resnet.bn1, resnet.relu, resnet.maxpool
+        )
+        # Each layer i doubles the stride (after pool):
+        # layer1: stride stays 4,  channels=64
+        # layer2: stride→8,    channels=128
+        # layer3: stride→16,   channels=256
+        # layer4: stride→32,   channels=512
+        self.layer1 = resnet.layer1   # → (B, 64,  H/4,  W/4)
+        self.layer2 = resnet.layer2   # → (B,128,  H/8,  W/8)
+        self.layer3 = resnet.layer3   # → (B,256, H/16, W/16)
+        self.layer4 = resnet.layer4   # → (B,512, H/32, W/32)
+
+    def forward(self, x):
+        x = self.stem(x)
+        _ = self.layer1(x)      # stride=4, 64 channels (we won’t use this one)
+        f8  = self.layer2(_ )   # stride=8, 128 ch
+        f16 = self.layer3(f8)   # stride=16,256 ch
+        f32 = self.layer4(f16)  # stride=32,512 ch
+        return [f8, f16, f32]
+
+class YOLOResNet18(nn.Module):
+    """Combine ResNet-18 backbone + your YOLO Head."""
+    def __init__(self, num_classes=80, weights=None):
+        super().__init__()
+        # 1) Backbone
+        self.backbone = ResNetBackbone(weights=None)
+        # 2) YOLO head: filters must match the channels of [f8, f16, f32]
+        filters = (128, 256, 512)
+        self.head = Head(nc=num_classes, filters=filters)
+
+    def forward(self, x):
+        # 1) get the 3 feature maps
+        feats = self.backbone(x)
+        # 2) run through head
+        outputs = self.head(feats)
+        return outputs
+    
+
+
+"""ResNet model."""
+from typing import Optional
+
+import torch
+import torchvision
+from torch import nn
+from torchvision.models.resnet import BasicBlock, Bottleneck
+
+from leakpro.utils.import_helper import Self
+
+
+class ResNet(torchvision.models.ResNet):
+    """ResNet generalization for CIFAR thingies."""
+
+    def __init__(self: Self, block: BasicBlock, layers: list, num_classes: int=10, zero_init_residual: bool=False,  # noqa: C901
+                 groups: int=1, base_width: int=64, replace_stride_with_dilation: list=None,
+                 norm_layer: Optional[nn.Module]=None, strides: list=[1, 2, 2, 2], pool: str="avg") -> None:  # noqa: B006
+        """Initialize as usual. Layers and strides are scriptable."""
+        super(torchvision.models.ResNet, self).__init__()  # nn.Module
+        if norm_layer is None:
+            norm_layer = nn.BatchNorm2d
+        self._norm_layer = norm_layer
+
+
+        self.dilation = 1
+        if replace_stride_with_dilation is None:
+            # each element in the tuple indicates if we should replace
+            # the 2x2 stride with a dilated convolution instead
+            replace_stride_with_dilation = [False, False, False, False]
+        if len(replace_stride_with_dilation) != 4:
+            raise ValueError("replace_stride_with_dilation should be None "
+                             "or a 4-element tuple, got {}".format(replace_stride_with_dilation))
+        self.groups = groups
+
+        self.inplanes = base_width
+        self.base_width = 64  # Do this to circumvent BasicBlock errors. The value is not actually used.
+        self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn1 = norm_layer(self.inplanes)
+        self.relu = nn.ReLU(inplace=True)
+
+        self.layers = torch.nn.ModuleList()
+        width = self.inplanes
+        for idx, layer in enumerate(layers):
+            self.layers.append(self._make_layer(block, width, layer, stride=strides[idx], dilate=replace_stride_with_dilation[idx]))
+            width *= 2
+
+        self.pool = nn.AdaptiveAvgPool2d((1, 1)) if pool == "avg" else nn.AdaptiveMaxPool2d((1, 1))
+        self.fc = nn.Linear(width // 2 * block.expansion, num_classes)
+
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+            elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+
+        # Zero-initialize the last BN in each residual branch,
+        # so that the residual branch starts with zeros, and each residual block behaves like an identity.
+        # This improves the model by 0.2~0.3% according to https://arxiv.org/abs/1706.02677
+        if zero_init_residual:
+            for m in self.modules():
+                if isinstance(m, Bottleneck):
+                    nn.init.constant_(m.bn3.weight, 0)
+                elif isinstance(m, torchvision.models.resnet.BasicBlock):
+                    nn.init.constant_(m.bn2.weight, 0)
+
+
+    def _forward_impl(self: Self, x: torch.Tensor) -> None:
+        # See note [TorchScript super()]
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+
+        for layer in self.layers:
+            x = layer(x)
+
+        x = self.pool(x)
+        x = torch.flatten(x, 1)
+        x = self.fc(x)
+
+        return x
