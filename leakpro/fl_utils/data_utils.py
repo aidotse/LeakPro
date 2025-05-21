@@ -52,6 +52,8 @@ class GiaNERExtension(GiaDataModalityExtension):
             # make tokens with labels != 0 trainable
             mask = torch.zeros_like(d.embedding)
             mask[ind] = 1 
+            print("mask shape: ", mask.shape)
+            print("mask sum: ", torch.sum(mask))
             #d.embedding = PartialTrainableTensor.apply(d.embedding, mask).detach().requires_grad_(True)
             def mask_grad(grad):
                 return grad * mask  # Apply the mask to the gradient

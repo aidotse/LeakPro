@@ -116,14 +116,13 @@ class OneHotBERT(nn.Module):
         if self.norm_data:
             
             #print("torch.sum(batch[embedding], dim=-1): ", torch.sum(batch["embedding"], dim=-1))
-            print("batch[embedding] shape: ", batch["embedding"].shape)
             normalized = batch["embedding"]/torch.sum(batch["embedding"], dim=-1)[:,:, None]
         else:
            
             normalized = batch["embedding"]
         #print("normalized sum shape: ", torch.sum(normalized, dim=-1).shape)
         #print("normalized sum:", torch.sum(normalized, dim=-1))
-
+       
         embeddings = self.embedding_layer(normalized * self.token_mask)
         
         b = self.bert(inputs_embeds=embeddings, attention_mask=batch["attention_masks"])

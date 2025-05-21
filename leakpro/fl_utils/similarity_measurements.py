@@ -46,9 +46,9 @@ def l2_distance(client_gradient: torch.Tensor, reconstruction_gradient: torch.Te
         torch.Tensor: The average reconstruction cost.
 
     """
-    with torch.no_grad():
+    #with torch.no_grad():
 
-        costs = sum(torch.norm(p1 - p2, p=2) for p1, p2 in zip(client_gradient, reconstruction_gradient))
+    costs = sum(torch.norm(p1 - p2, p=2) for p1, p2 in zip(client_gradient, reconstruction_gradient))
 
     return costs
 
