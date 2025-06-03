@@ -17,10 +17,10 @@ audit:  # Configurations for auditing
 
 target:
   # Target model path
-  module_path: "./utils/celeb_hq_model.py"
-  model_class: "ResNet18" 
+  module_path: "./target_model_class.py"
+  model_class: "ResNet18_DPsgd" 
+  target_folder: "./target_dpsgd"
   # Data paths
-  target_folder: "./target"
   data_path: "./data/celeba_hq_data.pkl"
 
 shadow_model:
