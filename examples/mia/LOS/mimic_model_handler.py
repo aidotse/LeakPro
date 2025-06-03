@@ -104,15 +104,15 @@ class LRHandler(BaseMIMICHandler):
 
 class GRUHandler(BaseMIMICHandler):
     def train(self,
-              model: nn.Module,
               dataloader: DataLoader,
-              criterion: nn.Module ,
-              optimizer: optim.Optimizer ,
-              early_stop_loader:DataLoader,
+              model: nn.Module,
+              criterion: nn.Module,
+              optimizer: optim.Optimizer,
               epochs: int,
-              patience_early_stopping: int,
-              patience_lr: float,
-              min_delta: float,
+              early_stop_loader:DataLoader = None,
+              patience_early_stopping: int= 5,
+              patience_lr: float = 2,
+              min_delta: float = 0.00001,
               ) -> TrainingOutput:
 
         device_name = device("cuda" if cuda.is_available() else "cpu")
@@ -163,41 +163,43 @@ class GRUHandler(BaseMIMICHandler):
             train_acc = accuracy_score(all_labels, all_predictions)
             accuracy_history.append(train_acc)
 
-            # Test the model
-            results = self.eval( early_stop_loader, model, criterion)
-            test_loss = results.loss
+            # if there is a dataloader for warly stopping
+            if early_stop_loader is not None:
 
-            # Early stopping
-            # Assume test_loss is computed for validation set
-            if test_loss < min_loss_epoch_valid - min_delta:  # Improvement condition
-                min_loss_epoch_valid = test_loss
-                patient_epoch = 0
-                print(f"Epoch {epoch}: Validation loss improved to {test_loss:.4f}")
-            else:
-                patient_epoch += 1
-                print(f"Epoch {epoch}: No improvement. Patience counter: {patient_epoch}/{patience_early_stopping}")
+                # Test the model
+                results = self.eval( early_stop_loader, model, criterion)
+                test_loss = results.loss
 
-                if patient_epoch >= patience_early_stopping:
-                    print(f"Early stopping at epoch {epoch}. Best validation loss: {min_loss_epoch_valid:.4f}")
+                # Early stopping
+                # Assume test_loss is computed for validation set
+                if test_loss < min_loss_epoch_valid - min_delta:  # Improvement condition
+                    min_loss_epoch_valid = test_loss
+                    patient_epoch = 0
+                    print(f"Epoch {epoch}: Validation loss improved to {test_loss:.4f}")
+                else:
+                    patient_epoch += 1
+                    print(f"Epoch {epoch}: No improvement. Patience counter: {patient_epoch}/{patience_early_stopping}")
+
+                    if patient_epoch >= patience_early_stopping:
+                        print(f"Early stopping at epoch {epoch}. Best validation loss: {min_loss_epoch_valid:.4f}")
+                        break
+
+                # Step the scheduler
+                scheduler.step(test_loss)
+
+                # Check the learning rate
+                current_lr =  optimizer.param_groups[0]["lr"]
+                print(f"Learning Rate: {current_lr:.12f}")
+
+                # Stop if learning rate becomes too small
+                if current_lr < 1e-12:
+                    print("Learning rate too small, stopping training.")
                     break
 
-            # Step the scheduler
-            scheduler.step(test_loss)
-
-            # Check the learning rate
-            current_lr =  optimizer.param_groups[0]["lr"]
-            print(f"Learning Rate: {current_lr:.12f}")
-
-            # Stop if learning rate becomes too small
-            if current_lr < 1e-12:
-                print("Learning rate too small, stopping training.")
-                break
-
             # Print training parameters
-            print("Epoch: {}, train_loss: {}, valid_loss: {}, train_acc: {}".format( \
+            print("Epoch: {}, train_loss: {}, train_acc: {}".format( \
                         epoch, \
                         np.around(train_loss, decimals=8),\
-                        np.around(test_loss, decimals=8),\
                         np.around(train_acc, decimals=8) \
                           ))
             

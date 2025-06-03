@@ -128,6 +128,8 @@ class GRUD(nn.Module):
             "bn_flag": bn_flag,
         }
 
+        self.input_size = input_size
+        self.batch_size = batch_size
         self.hidden_size = hidden_size
         self.delta_size = input_size
         self.mask_size = input_size
