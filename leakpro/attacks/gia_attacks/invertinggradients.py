@@ -15,7 +15,7 @@ from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
 from leakpro.fl_utils.data_utils import GiaImageExtension
 from leakpro.fl_utils.gia_optimizers import MetaSGD
 from leakpro.fl_utils.gia_train import train
-from leakpro.fl_utils.similarity_measurements import cosine_similarity_weights, total_variation
+from leakpro.fl_utils.similarity_measurements import cosine_similarity_weights, total_variation, l2_distance
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.utils.import_helper import Callable, Self
 from leakpro.utils.logger import logger
@@ -68,7 +68,10 @@ class InvertingGradients(AbstractGIA):
         os.makedirs(self.attack_folder_path, exist_ok=True)
 
         logger.info("Inverting gradient initialized.")
+
         self.prepare_attack()
+        print("self.configs: ", self.configs)
+        
         
     def description(self:Self) -> dict:
         """Return a description of the attack."""
@@ -97,15 +100,14 @@ class InvertingGradients(AbstractGIA):
 
         """
         self.model.eval()
-        self.reconstruction, self.reconstruction_loader = self.configs.data_extension.get_at_data(self.client_loader)
-        self.reconstruction.requires_grad = True
         client_gradient = self.train_fn(self.model, self.client_loader, self.configs.optimizer,
                                         self.configs.criterion, self.configs.epochs)
         self.client_gradient = [p.detach() for p in client_gradient]
-
         used_tokens = get_used_tokens(self.model, self.client_gradient)
+        print("used_tokens: ", used_tokens)
+        print("self.configs.data_extension: ", self.configs.data_extension)
         self.reconstruction, self.reconstruction_loader = self.configs.data_extension.get_at_data(self.client_loader, used_tokens)
-        
+                
         if isinstance(self.reconstruction, list):
             for r in self.reconstruction:
                 r.requieres_grad = True
@@ -192,18 +194,7 @@ class InvertingGradients(AbstractGIA):
                                      self.configs.criterion, self.configs.epochs)
             
             rec_loss = l2_distance(gradient, self.client_gradient)
-            #rec_loss = cosine_similarity_weights(gradient, self.client_gradient, False)
-
-            #rec_loss = torch.stack(self.reconstruction).sum()
-          
-            #rec_loss = torch.sum(torch.tensor([torch.sum(torch.abs(g)) for g in gradient]))
-            #rec_loss = 0
-            #for d in self.reconstruction_loader:
-            #    rec_loss += torch.sum(d['embedding'])
-            # Add Penalties for negative data points
-            #for r in self.reconstruction:
-            #    rec_loss += 0.01 * torch.sum(torch.relu(-r) ** 2)
-                #rec_loss += torch.sum(r)
+            
             # Add Penalties for negative data points
             for r in self.reconstruction:
                 rec_loss += 0.01 * torch.sum(torch.relu(-r) ** 2)

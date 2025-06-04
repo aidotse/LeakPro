@@ -15,7 +15,7 @@ from leakpro.attacks.attack_base import AbstractAttack
 from leakpro.attacks.utils.hyperparameter_tuning.optuna import optuna_optimal_hyperparameters
 from leakpro.fl_utils.model_utils import MedianPool2d
 from leakpro.fl_utils.similarity_measurements import dataloaders_psnr, dataloaders_ssim_ignite
-from leakpro.reporting.attack_result import GIAResults
+from leakpro.metrics.attack_result import GIAResults
 from leakpro.schemas import OptunaConfig
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
@@ -109,6 +109,7 @@ class AbstractGIA(AbstractAttack):
         else:
             optimizer = torch.optim.Adam([reconstruction], lr=attack_lr)
             
+        
         # reduce LR every 1/3 of total iterations
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
                                                             milestones=[at_iterations // 2.667,
@@ -125,7 +126,7 @@ class AbstractGIA(AbstractAttack):
             #previous_optimizer_state = deepcopy(optimizer.state_dict())
             last_loss = optimizer.step(closure)
             loss_ = self.inference_closure()
-            print("loss: ", np.round(last_loss.item(),5), ", best_loss: ", np.round(self.best_loss.item(),5), 
+            print("loss: ", np.round(last_loss.item(),5), ", best_loss: ", np.round(self.best_loss,5), 
                   ", loss_: ", np.round(loss_.numpy(),5))
             tryout = 0
             while loss_ > last_loss and tryout<6:
@@ -136,7 +137,6 @@ class AbstractGIA(AbstractAttack):
 
                 #optimizer.load_state_dict(previous_optimizer_state)
                     
-                #print("reconstruction sum abstract: ", reconstruction[0].sum())
                 for param_group in optimizer.param_groups:
                     param_group['lr'] = param_group['lr']/2
                 closure = gradient_closure(optimizer)
@@ -167,9 +167,10 @@ class AbstractGIA(AbstractAttack):
                 self.best_reconstruction = deepcopy(reconstruction_loader)
                 self.best_reconstruction_round = i
                 logger.info(f"New best loss: {loss_} on round: {i}")
+
                 validate_tokens(client_loader,self.best_reconstruction,'best.npy')
             if i % 250 == 0:
-                logger.info(f"Iteration {i}, loss {loss}")
+                logger.info(f"Iteration {i}, loss {loss_}")
                 yield i, i, None#dataloaders_ssim_ignite(client_loader, self.best_reconstruction), None
 
         ssim_score = dataloaders_ssim_ignite(client_loader, self.best_reconstruction)
