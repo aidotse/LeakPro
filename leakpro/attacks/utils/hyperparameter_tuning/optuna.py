@@ -33,13 +33,16 @@ def optuna_optimal_hyperparameters(attack_object: AbstractAttack, optuna_config:
         result = attack_object.run_attack()
         if isinstance(result, Generator):
             for step, intermediary_results, result_object in result:
-                trial.report(intermediary_results, step)
+                # check every 3000 results
+                if step%3000==0:
+                    trial.report(intermediary_results, step)
 
-                if trial.should_prune():
-                    raise optuna.TrialPruned()
-                # save results if not pruned
+                    if trial.should_prune():
+                        raise optuna.TrialPruned()
+                    # save results if not pruned
                 if result_object is not None:
-                    result_object.save(name="optuna", path="./leakpro_output/results", config=attack_object.get_configs())
+                    result_object.save(name="optuna"+"trial"+str(trial.number), path="./leakpro_output/results",
+                                    config=attack_object.get_configs())
                     return intermediary_results
         elif isinstance(result, MIAResult):
             # Retrieve configuration and result metric

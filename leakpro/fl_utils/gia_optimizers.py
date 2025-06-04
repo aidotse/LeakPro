@@ -51,8 +51,25 @@ class MetaSGD(MetaOptimizer):
             OrderedDict[str, torch.Tensor]: A new set of parameters which have been updated.
 
         """
-        grads = grad(loss, params.values(), retain_graph=True, create_graph=True, only_inputs=True)
-        return OrderedDict((name, param - self.lr * grad_part) for ((name, param), grad_part) in zip (params.items(), grads))
+        grad_params = [(name, param) for name, param in params.items() if param.requires_grad]
+
+        # Compute gradients only for grad params
+        grads = grad(
+            loss, [param for _, param in grad_params],
+            retain_graph=True, create_graph=True, only_inputs=True
+        )
+
+        grad_iter = iter(grads)
+        updated_params = OrderedDict()
+
+        for name, param in params.items():
+            if param.requires_grad:
+                grad_value = next(grad_iter)
+                updated_params[name] = param - self.lr * grad_value
+            else:
+                # Leave params that does not require grad as they are
+                updated_params[name] = param
+        return updated_params
 
 class MetaAdam(MetaOptimizer):
     """Implementation of Adam which perform step to a new set of parameters."""
@@ -92,7 +109,8 @@ class MetaAdam(MetaOptimizer):
             OrderedDict[str, torch.Tensor]: A new set of parameters which have been updated.
 
         """
-        gradients = grad(loss, params.values(), retain_graph=True, create_graph=True, only_inputs=True)
+        gradients = grad(loss, [p for p in params.values() if p.requires_grad],
+                         retain_graph=True, create_graph=True, only_inputs=True)
 
         if self.weight_decay != 0:
             gradients = [grad + self.weight_decay * param for grad, param in zip(gradients, params.values())]
