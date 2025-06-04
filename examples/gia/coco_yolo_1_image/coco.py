@@ -1,9 +1,6 @@
-from copy import deepcopy
-import json
-import time
+"""Re-implemented code to fit new standard COCO structure and GIA, from repository: https://github.com/jahongir7174/YOLOv8-pt, reference to Ultralytics"""
 from torch import Tensor, as_tensor
 from torch.utils.data import DataLoader, Subset
-from torchvision import transforms
 import yaml
 from leakpro.fl_utils.data_utils import get_meanstd
 from random import sample
@@ -11,13 +8,9 @@ import numpy as np
 import random
 
 import os
-from pathlib import Path
-from typing import Optional, Callable, Union, List, Tuple
 from PIL import Image
 import torch
-from pycocotools.coco import COCO
 from torch.utils import data
-from torchvision import transforms
 import cv2
 import math
 
