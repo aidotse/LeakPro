@@ -112,8 +112,6 @@ class InvertingGradients(AbstractGIA):
                                         self.configs.criterion, self.configs.epochs)
         self.client_gradient = [p.detach() for p in client_gradient]
         used_tokens = get_used_tokens(self.model, self.client_gradient)
-        print("used_tokens: ", used_tokens)
-        print("self.configs.data_extension: ", self.configs.data_extension)
         self.reconstruction, self.reconstruction_loader = self.configs.data_extension.get_at_data(self.client_loader, used_tokens)
                 
         if isinstance(self.reconstruction, list):
@@ -137,7 +135,7 @@ class InvertingGradients(AbstractGIA):
         else:   
             grad_closure = self.gradient_closure_text
             
-        return self.generic_attack_loop(self.configs, grad_closure, self.configs.at_iterations, self.reconstruction,
+        return self.generic_attack_loop_text(self.configs, grad_closure, self.configs.at_iterations, self.reconstruction,
                                 self.data_mean, self.data_std, self.configs.attack_lr, self.configs.median_pooling,
                                 self.client_loader, self.reconstruction_loader,self.configs.image_data)
 

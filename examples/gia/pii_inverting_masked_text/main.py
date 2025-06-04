@@ -4,7 +4,7 @@
 from torchvision.models.resnet import BasicBlock
 
 from data.pii_data import get_pii_dataset
-from leakpro.attacks.gia_attacks.invertinggradients import InvertingGradients, InvertingConfig
+from leakpro.attacks.gia_attacks.invertinggradients_text import InvertingGradients, InvertingConfig
 from leakpro.run import run_gia_attack
 from leakpro.fl_utils.data_utils import GiaNERExtension
 #from leakpro.fl_utils.gia_train import train
