@@ -40,8 +40,38 @@ class Dataset(data.Dataset):
         self.indices = range(self.n)
         # Albumentations (optional, only used if package is installed)
         self.albumentations = Albumentations()
+        self.debug = False
 
     def __getitem__(self, index):
+        if self.debug:
+            H, W = self.input_size, self.input_size
+            # 1) build a uniform BGR image such that after our BGR→RGB flip it becomes (150,150,30)
+            img = np.zeros((H, W, 3), dtype=np.uint8)
+            # assign in BGR order: (Blue,Green,Red) = (30,150,150)
+            img[:, :, :] = (0, 255, 0)
+
+            # 2) convert HWC BGR→RGB and HWC→CHW, then scale to [0,1]
+            #    transpose to (C,H,W) and reverse channels:
+            img = img.transpose(2, 0, 1)[::-1].copy()
+            img_tensor = torch.from_numpy(img).float().div(255.0)
+
+            # 3) a single integer label (e.g. class 1)
+            label = torch.tensor(1, dtype=torch.long)
+
+            # 2) build the single label in YOLO format [class, x_c, y_c, w, h]
+            #    here the box covers the right half:
+            #      x_center = 0.75, y_center = 0.5, w = 0.5, h = 1.0
+            labzzz = np.array([[0, 0.75, 0.5, 0.5, 1.0]], dtype=np.float32)
+
+            # 3) package into targets of shape (n,6): [img_idx, class, x, y, w, h]
+            targs = torch.zeros((1, 6), dtype=torch.float32)
+            targs[0, 1:] = torch.from_numpy(labzzz[0])
+
+            # 5) shapes tuple for COCO rescaling: (orig_shape, ((sy, sx), pad))
+            if False:
+                targs = torch.tensor(1, dtype=torch.long)
+            return img_tensor, targs, []
+
         index = self.indices[index]
 
         params = self.params
@@ -101,6 +131,7 @@ class Dataset(data.Dataset):
         sample = image.transpose((2, 0, 1))[::-1]
         sample = np.ascontiguousarray(sample)
         img = torch.from_numpy(sample).float() / 255
+        # return img, target, shapes
         return img, target, shapes
 
     def __len__(self):
@@ -192,10 +223,18 @@ class Dataset(data.Dataset):
 
     @staticmethod
     def collate_fn(batch):
-        samples, targets, shapes = zip(*batch)
-        for i, item in enumerate(targets):
-            item[:, 0] = i  # add target image index
-        return torch.stack(samples, 0), torch.cat(targets, 0), shapes
+        try:
+            samples, targets, shapes = zip(*batch)
+            for i, item in enumerate(targets):
+                item[:, 0] = i  # add target image index
+            return torch.stack(samples, 0), torch.cat(targets, 0), shapes
+        except Exception as e:
+            try:
+                samples, targets, shapes = zip(*batch)
+                return torch.stack(samples, dim=0), torch.tensor(targets, dtype=torch.long), shapes
+            except Exception as e:
+                samples, targets = zip(*batch)
+                return torch.stack(samples, dim=0), torch.tensor(targets, dtype=torch.long)
 
     @staticmethod
     def load_label(filenames):
@@ -417,10 +456,13 @@ def get_coco_detection_loader(num_images: int = 1, img_size=256, start_idx=0, ba
             filenames.append('COCO/images/train2017/' + filename)
 
     dataset = Dataset(filenames, img_size, params, aug)
-    subset_indices = sample(range(len(dataset)), min(len(dataset), 10000))
+    subset_indices = sample(range(len(dataset)), min(len(dataset), 2500))
     asd = Subset(dataset, subset_indices)
     data_mean, data_std = get_meanstd(asd)
+    # data_mean = [0.49139968, 0.48215827, 0.44653124]
+    # data_std  = [0.24703233, 0.24348505, 0.26158768]
 
+    dataset.debug = False
     total_examples = len(dataset)
     filtered_indices = []
     current_idx = start_idx

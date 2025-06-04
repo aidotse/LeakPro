@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 
 from leakpro.fl_utils.gia_module_to_functional import MetaModule
 from leakpro.fl_utils.gia_optimizers import MetaOptimizer
+from leakpro.utils.seed import seed_everything
 
 
 def train(
@@ -68,7 +69,6 @@ def trainyolo(
         for inputs, labels, _ in data:
             inputs, labels = inputs.to(gpu_or_cpu, non_blocking=True), (labels.to(gpu_or_cpu, non_blocking=True) if
                                                                         isinstance(labels, Tensor) else labels)
-            inputs = inputs.float() / 255
             outputs = patched_model(inputs, patched_model.parameters)
             loss = criterion(outputs, labels).sum()
             patched_model.parameters = optimizer.step(loss, patched_model.parameters)
