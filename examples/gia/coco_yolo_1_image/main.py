@@ -35,25 +35,29 @@ if __name__ == "__main__":
     configs.data_extension = GiaImageYoloExtension()
     gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
     # need to put model on cuda before initializing the loss function 118287
-    client_loader, data_mean, data_std = get_coco_detection_loader(start_idx=98000, num_images=1, batch_size=1, aug=False)#, img_size=224)
-    # train_loader, data_mean, data_std = get_coco_detection_loader(start_idx=0, num_images=96000, batch_size=32)
-    # test_train(model, train_loader, client_loader)
+    client_loader, data_mean, data_std = get_coco_detection_loader(start_idx=108000, num_images=1, batch_size=1, aug=False)#, img_size=224)
+    # train_loader, data_mean, data_std = get_coco_detection_loader(start_idx=0, num_images=107000, batch_size=32)
+    # test_train(model, train_loader, client_loader, epochs=200)
     # test_eval(model, client_loader)
 
     # 2. Load the saved EMA module
-    ckpt = torch.load('weights/best.pt', map_location='cpu', weights_only=False)
-    ema_module = ckpt['model']            # nn.Module in .half()
+    # ckpt = torch.load('weights/best.pt', map_location='cpu', weights_only=False)
+    # ema_module = ckpt['model']            # nn.Module in .half()
 
-    # 3. Copy weights into your fresh 
-    model.load_state_dict(ema_module.state_dict())
+    # # 3. Copy weights into your fresh 
+    # model.load_state_dict(ema_module.state_dict())
     model.to(gpu_or_cpu)
     configs.criterion = ComputeLoss(model)
     try:
         model.head.simulate_train_on_eval = True
     except Exception as e:
         pass
-    attack_object = InvertingGradients(model, client_loader, data_mean, data_std, configs=configs, train_fn=trainyolo)
+    trial_data = []
+    for i in range(5):
+        client_loader, _, _ = get_coco_detection_loader(start_idx=108000+i, num_images=1, batch_size=1, aug=False)#, img_size=224)
+        trial_data.append(client_loader)
+    attack_object = InvertingGradients(model, client_loader, data_mean, data_std, configs=configs, train_fn=trainyolo,optuna_trial_data=trial_data)
     optuna_config = OptunaConfig()
-    optuna_config.n_trials = 300
+    optuna_config.n_trials = 100
     attack_object.run_with_optuna(optuna_config=optuna_config)
     # run_gia_attack(attack_object, "TestInverting")

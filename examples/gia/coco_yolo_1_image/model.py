@@ -7,6 +7,14 @@ from torch.nn.utils.rnn import pad_sequence
 import yaml
 from torch import nn
 import os
+from typing import Optional
+
+import torch
+import torchvision
+from torch import nn
+from torchvision.models.resnet import BasicBlock, Bottleneck
+
+from leakpro.utils.import_helper import Self
 
 def make_anchors(x, strides, offset=0.5):
     """
@@ -280,7 +288,70 @@ class DarkFPN(torch.nn.Module):
         h4 = self.h4(torch.cat([self.h3(h2), h1], 1))
         h6 = self.h6(torch.cat([self.h5(h4), p5], 1))
         return h2, h4, h6
-    
+
+class ResDarkFPNShallow(nn.Module):
+    def __init__(self, width, depth):
+        """
+        width: list of channel dims, e.g. [C0, C1, C2, C3, C4, C5]
+        This version uses only one BasicBlock per stage to reduce depth,
+        while preserving input/output shapes.
+        """
+        super().__init__()
+        # upsample by factor 2 (nearest by default)
+        self.up = nn.Upsample(scale_factor=2, mode='nearest')
+
+        # Each residual layer now has just one BasicBlock
+        self.h1 = _make_resnet_layer(
+            BasicBlock,
+            in_planes=width[4] + width[5],
+            out_planes=width[4],
+            blocks=1,
+            stride=1
+        )
+
+        self.h2 = _make_resnet_layer(
+            BasicBlock,
+            in_planes=width[3] + width[4],
+            out_planes=width[3],
+            blocks=1,
+            stride=1
+        )
+
+        # plain convs for downsampling
+        self.h3 = Conv(width[3], width[3], 3, 2)
+        self.h5 = Conv(width[4], width[4], 3, 2)
+
+        self.h4 = _make_resnet_layer(
+            BasicBlock,
+            in_planes=width[3] + width[4],
+            out_planes=width[4],
+            blocks=1,
+            stride=1
+        )
+
+        self.h6 = _make_resnet_layer(
+            BasicBlock,
+            in_planes=width[4] + width[5],
+            out_planes=width[5],
+            blocks=1,
+            stride=1
+        )
+
+    def forward(self, x):
+        # x: tuple of feature maps (p3, p4, p5)
+        p3, p4, p5 = x
+
+        # top-down path
+        h1 = self.h1(torch.cat([self.up(p5), p4], dim=1))
+        h2 = self.h2(torch.cat([self.up(h1), p3], dim=1))
+
+        # bottom-up path
+        h4 = self.h4(torch.cat([self.h3(h2), h1], dim=1))
+        h6 = self.h6(torch.cat([self.h5(h4), p5], dim=1))
+
+        return h2, h4, h6
+
+
 class ResDarkFPN(nn.Module):
     def __init__(self, width, depth):
         """
@@ -449,8 +520,8 @@ class Head(torch.nn.Module):
 class YOLO(torch.nn.Module):
     def __init__(self, width, depth, num_classes):
         super().__init__()
-        self.net = DarkNet(width, depth)
-        self.fpn = DarkFPN(width, depth)
+        self.net = ResDarkNet(width, depth)
+        self.fpn = ResDarkFPNShallow(width, depth)
 
         img_dummy = torch.zeros(1, 3, 256, 256)
         self.head = Head(num_classes, (width[3], width[4], width[5]))
@@ -786,19 +857,6 @@ class YOLOResNet18(nn.Module):
         # 2) run through head
         outputs = self.head(feats)
         return outputs
-    
-
-
-"""ResNet model."""
-from typing import Optional
-
-import torch
-import torchvision
-from torch import nn
-from torchvision.models.resnet import BasicBlock, Bottleneck
-
-from leakpro.utils.import_helper import Self
-
 
 class ResNet(torchvision.models.ResNet):
     """ResNet generalization for CIFAR thingies."""

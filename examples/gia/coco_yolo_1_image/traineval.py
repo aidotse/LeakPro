@@ -312,7 +312,7 @@ def clip_gradients(model, max_norm=10.0):
     parameters = model.parameters()
     torch.nn.utils.clip_grad_norm_(parameters, max_norm=max_norm)
 
-def test_train(model, loader, loader_test, save = True):
+def test_train(model, loader, loader_test, save = True, epochs=300):
     batch_size = 32
     # Optimizer
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -322,7 +322,7 @@ def test_train(model, loader, loader_test, save = True):
     weight_decay = 0.0005
     weight_decay *= batch_size * accumulate / 64
     momentum = 0.93700000
-    epochs = 1000
+    epochs = epochs
 
     p = [], [], []
     for v in model.modules():
