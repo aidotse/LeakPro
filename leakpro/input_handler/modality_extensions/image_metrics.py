@@ -1,12 +1,18 @@
 """ImageMetrics class for computing image metrics."""
+import os
+
+import joblib
 import numpy as np
 import torch
+from pydantic import BaseModel
 from scipy.linalg import sqrtm
 from torch.utils.data import DataLoader
 from torchvision import models, transforms
 
 from leakpro.attacks.utils.generator_handler import GeneratorHandler
 from leakpro.input_handler.minv_handler import MINVHandler
+from leakpro.input_handler.user_imports import get_class_from_module, import_module_from_file
+from leakpro.schemas import MIAMetaDataSchema
 from leakpro.utils.logger import logger
 
 
@@ -23,7 +29,7 @@ class ImageMetrics:
         self.handler = handler
         self.generator_handler = generator_handler
         self.generator = self.generator_handler.get_generator()
-        self.evaluation_model = self.handler.target_model # TODO: Change to evaluation model from configs
+
         self.target_model = self.handler.target_model
         self.labels = labels
         self.z = z
@@ -33,9 +39,13 @@ class ImageMetrics:
             "accuracy": self.compute_accuracy,
             "fid" : self.compute_fid,
             "knn": self.compute_knn_dist,
+            "save_images": self.save_images,
         }
         logger.info(configs)
         self.results = {}
+
+        self.load_evaluation_model()
+
         # TODO: This loading functionality should not be in generator_handler
         self.private_dataloader = self.handler.get_private_dataloader(self.batch_size)
         # Compute desired metrics from configs
@@ -54,6 +64,55 @@ class ImageMetrics:
         self.num_class_samples = configs.num_class_samples
         self.num_audited_classes = configs.num_audited_classes
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    def load_evaluation_model(self) -> None:
+        """Load the evaluation model."""
+        model_class = self.configs.eval_model.model_class
+        if model_class is None:
+            raise ValueError("model_class not found in configs.")
+
+        module_path=self.configs.eval_model.module_path
+        if module_path is None:
+            raise ValueError("module_path not found in configs.")
+
+        try:
+            eval_module = import_module_from_file(module_path)
+            self.eval_model_blueprint = get_class_from_module(eval_module, model_class)
+            logger.info(f"Eval model blueprint created from {model_class} in {module_path}.")
+        except Exception as e:
+            raise ValueError(f"Failed to create the eval model blueprint from {model_class} in {module_path}") from e
+
+        """Get the eval model metadata from the trained model metadata file."""
+        model_path = self.configs.eval_model.eval_folder
+        if model_path is None:
+            raise ValueError("Trained model metadata path not found in configs.")
+        try:
+            self.eval_model_metadata_path = f"{model_path}/model_metadata.pkl"
+            with open(self.eval_model_metadata_path, "rb") as f:
+                eval_model_metadata = joblib.load(f)
+
+                # check if the metadata is a schema or a dict, initate a schema
+                if not isinstance(eval_model_metadata, BaseModel):
+                    self.eval_model_metadata = MIAMetaDataSchema(**eval_model_metadata)
+                else:
+                    self.eval_model_metadata = eval_model_metadata
+            logger.info(f"Loaded eval model metadata from {self.eval_model_metadata_path}")
+        except FileNotFoundError as e:
+            raise FileNotFoundError(f"Could not find the eval model metadata at {self.eval_model_metadata_path}") from e
+
+        """Get the trained eval model."""
+        if model_path is None:
+            raise ValueError("Trained model path not found in configs.")
+        self.model_path = f"{model_path}/target_model.pkl"
+        init_params = self.eval_model_metadata.init_params
+        try:
+            with open(self.model_path, "rb") as f:
+                self.evaluation_model = self.eval_model_blueprint(**init_params)
+                self.evaluation_model.load_state_dict(torch.load(f))
+            logger.info(f"Loaded eval model from {model_path}")
+        except FileNotFoundError as e:
+            raise FileNotFoundError(f"Could not find the trained eval model at {model_path}") from e
+
 
     def metric_scheduler(self) -> None:
         """Schedule the metrics to be computed."""
@@ -122,8 +181,8 @@ class ImageMetrics:
         ])
 
         # Extract features from real and generated images
-        real_features = self.get_features(self.private_dataloader, inception_model, transform).numpy()
-        fake_features = self.get_generated_features(inception_model, transform).numpy()
+        real_features = self.get_features(self.private_dataloader, inception_model, transform).detach().cpu().numpy()
+        fake_features = self.get_generated_features(inception_model, transform).detach().cpu().numpy()
 
         # Compute mean and covariance of features
         mu_real, sigma_real = real_features.mean(axis=0), np.cov(real_features, rowvar=False)
@@ -218,10 +277,13 @@ class ImageMetrics:
             transform (callable): A function or transform to apply to the images.
 
         Returns:
+        -------
             torch.tensor: A tensor containing the extracted features.
 
         """
         features = []
+        model.to(self.device)
+        model.eval()
         with torch.no_grad():
             for images, _ in dataloader:
                 images = images.to(self.device)
@@ -240,15 +302,18 @@ class ImageMetrics:
             transform (callable): A function or transform to apply to the generated images.
 
         Returns:
+        -------
             torch.tensor: A tensor containing the extracted features.
 
         """
         self.generator.eval()
         features = []
         with torch.no_grad():
-            for _ in range(len(self.private_dataloader)):  # Match number of batches
-                # TODO: Check if this is correct, should use optimized z
-                fake_images = self.generator_handler.sample_from_generator()[0]
+              for label_i, z_i in zip(self.labels, self.z):
+                # generate samples for each pair of label and z
+                fake_images, _, _ = self.generator_handler.sample_from_generator(batch_size=self.num_class_samples,
+                                                                                label=label_i,
+                                                                                z=z_i)
 
                 pil_images = [self.tensor_to_pil(img) for img in fake_images]
                 transformed_images = torch.stack([transform(img) for img in pil_images]).to(self.device)
@@ -259,3 +324,40 @@ class ImageMetrics:
 
     pass
 
+
+    def save_images(self) -> None:
+        """Save generated images to disk."""
+        self.generator.eval()
+        self.generator.to(self.device)
+
+        n_images = self.configs.metrics["save_images"]["n_images"]
+        save_path = self.configs.metrics["save_images"]["save_dir"]
+
+        generated_images = []
+
+        i = 0
+        labels = set()
+        for label_i, z_i in zip(self.labels, self.z):
+            if label_i.item() in labels:
+                # Skip iteration if it has already been generated
+                continue
+
+            if i < n_images:
+                # generate samples for each pair of label and z
+                generated_sample = self.generator_handler.sample_from_generator(batch_size=1,
+                                                                                label=label_i,
+                                                                                z=z_i)
+                # Save the generated image
+                generated_images.append((generated_sample[0], label_i.item(), i))
+                i += 1
+                labels.add(label_i.item())
+
+        logger.info(f"Generated {len(generated_images)} images from labels {labels}.")
+        os.makedirs(save_path, exist_ok=True)
+        for img, label, i in generated_images:
+            img = img.squeeze(0)
+            img = self.tensor_to_pil(img)
+
+            img.save(f"{save_path}/label_{label}_image_{i}.png")
+
+        pass

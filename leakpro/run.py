@@ -11,6 +11,4 @@ def run_gia_attack(attack_object: AbstractGIA, experiment_name: str = "GIA",
             break
     if save:
         result_object.save(name=experiment_name, path=path, config=attack_object.get_configs())
-    if save:
-        result_object.save(name=experiment_name, path=path, config=attack_object.get_configs())
     return result_object

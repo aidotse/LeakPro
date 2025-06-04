@@ -1,6 +1,5 @@
 """Abstract class for the model handler."""
 
-import hashlib
 import os
 
 import joblib
@@ -16,6 +15,7 @@ from leakpro.input_handler.user_imports import (
 )
 from leakpro.utils.import_helper import Self, Tuple
 from leakpro.utils.logger import logger
+from leakpro.utils.save_load import hash_model
 
 
 class ModelHandler():
@@ -57,15 +57,14 @@ class ModelHandler():
         optimizer_name = setup_config.optimizer.name
         self.optimizer_class = self._get_optimizer_class(optimizer_name)
         # copy to only have parameters left
-        self.optimizer_config = setup_config.optimizer.model_copy().model_dump(exclude={"name"})
+        self.optimizer_config = setup_config.optimizer.params
 
         # Get criterion class
-        criterion_class = setup_config.loss.name
+        criterion_class = setup_config.criterion.name
         self.criterion_class = self._get_criterion_class(criterion_class)
         # copy to only have parameters left
-        self.loss_config = setup_config.loss.model_copy().model_dump(exclude={"name"})
+        self.loss_config = setup_config.criterion.params
 
-        self.batch_size = setup_config.batch_size
         self.epochs = setup_config.epochs
 
         # Set the storage paths for objects created by the handler
@@ -80,7 +79,7 @@ class ModelHandler():
             raise ValueError("Storage path not provided")
 
         # Create the hash for the target model
-        self.target_model_hash = self._hash_model(self.handler.target_model)
+        self.target_model_hash = hash_model(self.handler.target_model)
 
     def _import_model_from_path(self:Self, module_path:str, model_class:str)->None:
         """Import the model from the given path.
@@ -182,28 +181,10 @@ class ModelHandler():
             dict: The loaded metadata.
 
         """
+
         try:
             with open(metadata_path, "rb") as f:
                 return joblib.load(f)
         except FileNotFoundError as e:
             raise FileNotFoundError(f"Metadata at {metadata_path} not found") from e
 
-
-    def _hash_model(self:Self, model: Module) -> str:
-        """Generate a SHA-256 hash of a PyTorch model's state dictionary.
-
-        This function takes into account the model weights by iterating
-        over the state dictionary (which includes both parameters and buffers)
-        and updating the hash with both the key names and the corresponding tensor values.
-        """
-        hasher = hashlib.sha256()
-        state_dict = model.state_dict()
-
-        # Sort keys to ensure consistent ordering across models
-        for key in sorted(state_dict.keys()):
-            hasher.update(key.encode("utf-8"))
-            # Convert tensor to CPU, detach, convert to numpy and then to bytes
-            tensor_bytes = state_dict[key].detach().cpu().numpy().tobytes()
-            hasher.update(tensor_bytes)
-
-        return hasher.hexdigest()

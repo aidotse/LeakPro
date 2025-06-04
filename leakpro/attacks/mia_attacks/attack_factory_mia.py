@@ -25,7 +25,7 @@ class AttackFactoryMIA:
         "loss_traj":AttackLossTrajectory,
         "lira": AttackLiRA,
         "HSJ" : AttackHopSkipJump,
-        "yoqo": AttackYOQO
+        "yoqo": AttackYOQO,
     }
 
     # Shared variables for all attacks
@@ -33,12 +33,13 @@ class AttackFactoryMIA:
     distillation_model_handler = None
 
     @classmethod
-    def create_attack(cls, name: str, handler: MIAHandler) -> AbstractMIA:  # noqa: ANN102
+    def create_attack(cls, name: str, attack_config: dict, handler: MIAHandler) -> AbstractMIA:  # noqa: ANN102
         """Create the attack object.
 
         Args:
         ----
             name (str): The name of the attack.
+            attack_config (dict): The configuration for the attack.
             handler (MIAHandler): The input handler object.
 
         Returns:
@@ -66,7 +67,6 @@ class AttackFactoryMIA:
             AttackFactoryMIA.distillation_model_handler = DistillationModelHandler(handler)
 
         if name in cls.attack_classes:
-            attack_config = handler.configs.audit.attack_list.get(name)
             attack_object = cls.attack_classes[name](handler, attack_config)
             attack_object.set_effective_optuna_metadata(attack_config) # remove optuna metadata if params not will be optimized
             return attack_object

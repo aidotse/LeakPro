@@ -11,7 +11,7 @@ from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.boosting import Memorization
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
-from leakpro.metrics.attack_result import MIAResult
+from leakpro.reporting.mia_result import MIAResult
 from leakpro.signals.signal import ModelRescaledLogits
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
@@ -161,15 +161,13 @@ class AttackLiRA(AbstractMIA):
         logger.info(f"Calculating the logits for all {self.num_shadow_models} shadow models")
         self.shadow_models_logits = np.swapaxes(self.signal(self.shadow_models,
                                                             self.handler,
-                                                            self.audit_data_indices,
-                                                            self.eval_batch_size), 0, 1)
+                                                            self.audit_data_indices), 0, 1)
 
         # Calculate logits for the target model
         logger.info("Calculating the logits for the target model")
         self.target_logits = np.swapaxes(self.signal([self.target_model],
                                                      self.handler,
-                                                     self.audit_data_indices,
-                                                     self.eval_batch_size), 0, 1).squeeze()
+                                                     self.audit_data_indices), 0, 1).squeeze()
 
         # Using Memorizationg boosting
         if self.memorization:
@@ -192,7 +190,6 @@ class AttackLiRA(AbstractMIA):
                 org_audit_data_length,
                 self.handler,
                 self.online,
-                self.eval_batch_size,
             )
             memorization_mask, _, _ = memorization.run()
 
@@ -280,13 +277,13 @@ class AttackLiRA(AbstractMIA):
             target_logit = self.target_logits[i]
 
             # Calculate the log probability density function value
-            pr_out = -norm.logpdf(target_logit, out_mean, out_std + 1e-30)
+            pr_out = norm.logpdf(target_logit, out_mean, out_std + 1e-30)
 
             if self.online:
                 in_mean = np.mean(shadow_models_logits[mask])
                 in_std = self.get_std(shadow_models_logits, mask, True, self.var_calculation)
 
-                pr_in = -norm.logpdf(target_logit, in_mean, in_std + 1e-30)
+                pr_in = norm.logpdf(target_logit, in_mean, in_std + 1e-30)
             else:
                 pr_in = 0
 
@@ -294,19 +291,9 @@ class AttackLiRA(AbstractMIA):
             if np.isnan(score[i]):
                 raise ValueError("Score is NaN")
 
-        # Generate thresholds based on the range of computed scores for decision boundaries
-        self.thresholds = np.linspace(np.min(score), np.max(score), 1000)
-
         # Split the score array into two parts based on membership: in (training) and out (non-training)
         self.in_member_signals = score[self.in_members].reshape(-1,1)  # Scores for known training data members
         self.out_member_signals = score[self.out_members].reshape(-1,1)  # Scores for non-training data members
-
-        # Create prediction matrices by comparing each score against all thresholds
-        member_preds = np.less(self.in_member_signals, self.thresholds).T  # Predictions for training data members
-        non_member_preds = np.less(self.out_member_signals, self.thresholds).T  # Predictions for non-members
-
-        # Concatenate the prediction results for a full dataset prediction
-        predictions = np.concatenate([member_preds, non_member_preds], axis=1)
 
         # Prepare true labels array, marking 1 for training data and 0 for non-training data
         true_labels = np.concatenate(
@@ -317,10 +304,7 @@ class AttackLiRA(AbstractMIA):
         signal_values = np.concatenate([self.in_member_signals, self.out_member_signals])
 
         # Return a result object containing predictions, true labels, and the signal values for further evaluation
-        return MIAResult(
-            predicted_labels=predictions,
-            true_labels=true_labels,
-            predictions_proba=None,
-            signal_values=signal_values,
-            audit_indices=self.audit_data_indices,
-        )
+        return MIAResult.from_full_scores(true_membership=true_labels,
+                                    signal_values=signal_values,
+                                    result_name="LiRA",
+                                    metadata=self.configs.model_dump())

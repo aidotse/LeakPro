@@ -3,7 +3,7 @@
 from copy import deepcopy
 
 import numpy as np
-from torch import equal
+from torch import equal, all, int8, int16, int32, int64
 from torch.utils.data import SequentialSampler
 
 from leakpro.tests.constants import get_image_handler_config
@@ -30,13 +30,13 @@ def test_abstract_handler_setup(image_handler:ImageInputHandler) -> None:
 
     assert image_handler.target_model_metadata.optimizer is not None
     assert image_handler.target_model_metadata.optimizer.name == parameters.optimizer
-    assert image_handler.target_model_metadata.optimizer.lr == parameters.learning_rate
+    assert image_handler.target_model_metadata.optimizer.params["lr"] == parameters.learning_rate
 
-    assert image_handler.target_model_metadata.loss is not None
-    assert image_handler.target_model_metadata.loss.name == parameters.loss
+    assert image_handler.target_model_metadata.criterion is not None
+    assert image_handler.target_model_metadata.criterion.name == parameters.loss
 
     assert image_handler.target_model_metadata.epochs == parameters.epochs
-    assert image_handler.target_model_metadata.batch_size == parameters.batch_size
+    assert image_handler.target_model_metadata.data_loader.params["batch_size"] == parameters.batch_size
     assert image_handler.population is not None
 
     # Check data-related methods
@@ -67,7 +67,7 @@ def test_cifar10_input_handler(image_handler:ImageInputHandler) -> None:
     """Test the CIFAR10 input handler."""
     parameters = get_image_handler_config()
     # get dataloader for training
-    train_loader = image_handler.get_dataloader(image_handler.train_indices, parameters.batch_size)
+    train_loader = image_handler.get_dataloader(image_handler.train_indices)
     assert train_loader is not None
     assert len(train_loader.dataset) == parameters.train_data_points
     assert train_loader.batch_size == parameters.batch_size
@@ -84,3 +84,38 @@ def test_cifar10_input_handler(image_handler:ImageInputHandler) -> None:
     after_weights = train_dict.model.state_dict()
     weights_changed = [equal(before_weights[key], after_weights[key]) for key in before_weights]
     assert any(weights_changed) is False
+
+def test_dataloader(image_handler:ImageInputHandler) -> None:
+    """Test the dataloader."""
+    parameters = get_image_handler_config()
+    test_loader = image_handler.get_dataloader(image_handler.test_indices, shuffle=False)
+    assert test_loader is not None
+    assert len(test_loader.dataset) == parameters.test_data_points
+    assert test_loader.batch_size == parameters.batch_size
+    # Check that shuffle = false in dataloader
+    assert isinstance(test_loader.sampler, SequentialSampler)
+    
+    population_data = image_handler.population.data
+    population_labels = image_handler.population.targets
+    bs = parameters.batch_size
+    for i, (data, label) in enumerate(test_loader):
+        assert np.array_equal(data, population_data[image_handler.test_indices[i * bs:(i + 1) * bs]])
+        assert np.array_equal(label, population_labels[image_handler.test_indices[i * bs:(i + 1) * bs]])
+        assert all(label < parameters.num_classes)
+        assert all(label >= 0)
+        assert label.dtype in (int8, int16, int32, int64)
+    
+    test_loader2 = image_handler.get_dataloader(image_handler.test_indices, shuffle=True)
+    assert not isinstance(test_loader2.sampler, SequentialSampler)
+
+
+            
+def test_get_labels(image_handler:ImageInputHandler) -> None:
+    """Test the get_labels method."""
+    parameters = get_image_handler_config()
+    labels = image_handler.get_labels(np.arange(parameters.data_points))
+    assert len(labels) == parameters.data_points
+    assert np.all(labels < parameters.num_classes)
+    assert np.all(labels >= 0)
+    assert np.issubdtype(labels.dtype, np.integer)
+    assert np.array_equal(labels, image_handler.population.targets)
