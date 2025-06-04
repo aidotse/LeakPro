@@ -15,7 +15,11 @@ from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
 from leakpro.fl_utils.data_utils import GiaImageExtension
 from leakpro.fl_utils.gia_optimizers import MetaSGD
 from leakpro.fl_utils.gia_train import train
-from leakpro.fl_utils.similarity_measurements import cosine_similarity_weights, total_variation, l2_distance
+from leakpro.fl_utils.similarity_measurements import (
+    cosine_similarity_weights, 
+    total_variation,
+    l2_distance
+)
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.utils.import_helper import Callable, Self
 from leakpro.utils.logger import logger
@@ -51,7 +55,7 @@ class InvertingGradients(AbstractGIA):
     """Gradient inversion attack by Geiping et al."""
 
     def __init__(self: Self, model: Module, client_loader: DataLoader, data_mean: Tensor, data_std: Tensor,
-                 train_fn: Optional[Callable] = None, configs: Optional[InvertingConfig] = None) -> None:
+                 train_fn: Optional[Callable] = None, configs: Optional[InvertingConfig] = None, optuna_trial_data: list = None) -> None:
         super().__init__()
         self.original_model = model
         self.model = deepcopy(self.original_model)
@@ -66,6 +70,8 @@ class InvertingGradients(AbstractGIA):
         # required for optuna to save the best hyperparameters
         self.attack_folder_path = "leakpro_output/attacks/inverting_grad"
         os.makedirs(self.attack_folder_path, exist_ok=True)
+        # optuna trial data
+        self.optuna_trial_data = optuna_trial_data
 
         logger.info("Inverting gradient initialized.")
 
@@ -100,6 +106,9 @@ class InvertingGradients(AbstractGIA):
 
         """
         self.model.eval()
+        self.reconstruction, self.reconstruction_labels, self.reconstruction_loader = self.configs.data_extension.get_at_data(
+            self.client_loader)
+        self.reconstruction.requires_grad = True
         client_gradient = self.train_fn(self.model, self.client_loader, self.configs.optimizer,
                                         self.configs.criterion, self.configs.epochs)
         self.client_gradient = [p.detach() for p in client_gradient]
@@ -159,11 +168,10 @@ class InvertingGradients(AbstractGIA):
             gradient = self.train_fn(self.model, self.reconstruction_loader, self.configs.optimizer,
                                      self.configs.criterion, self.configs.epochs)
             rec_loss = cosine_similarity_weights(gradient, self.client_gradient, self.configs.top10norms)
-
+            tv_reg = (self.configs.tv_reg * total_variation(self.reconstruction))
             # Add the TV loss term to penalize large variations between pixels, encouraging smoother images.
-            rec_loss += (self.configs.tv_reg * total_variation(self.reconstruction))
+            rec_loss += tv_reg
             rec_loss.backward()
-            self.reconstruction.grad.sign_()
             return rec_loss
         return closure
     # TODO: A better solution to handle different gradient closure functions
@@ -239,8 +247,23 @@ class InvertingGradients(AbstractGIA):
 
     def suggest_parameters(self: Self, trial: Trial) -> None:
         """Suggest parameters to chose and range for optimization for the Inverting Gradient attack."""
-        total_variation = trial.suggest_float("total_variation", 1e-7, 1e-1, log=True)
+        total_variation = trial.suggest_float("total_variation", 1e-8, 1e-1, log=True)
+        attack_lr = trial.suggest_float("attack_lr", 1e-4, 100.0, log=True)
+        median_pooling = trial.suggest_int("median_pooling", 0, 1)
+        top10norms = trial.suggest_int("top10norms", 0, 1)
+        self.configs.attack_lr = attack_lr
         self.configs.tv_reg = total_variation
+        self.configs.median_pooling = median_pooling
+        self.configs.top10norms = top10norms
+        if self.optuna_trial_data is not None:
+            trial_data_idx = trial.suggest_int("trial_data", 0, len(self.optuna_trial_data) - 1)
+            self.client_loader = self.optuna_trial_data[trial_data_idx]
+            logger.info(f"Next experiment on trial data idx: {trial_data_idx}")
+        logger.info(f"Chosen parameters:\
+                    total_variation: {total_variation} \
+                    attack_lr: {attack_lr} \
+                    median_pooling: {median_pooling} \
+                    top10norms: {top10norms}")
 
     def reset_attack(self: Self, new_config:dict) -> None:  # noqa: ARG002
         """Reset attack to initial state."""

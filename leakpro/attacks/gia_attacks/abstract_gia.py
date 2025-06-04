@@ -105,7 +105,6 @@ class AbstractGIA(AbstractAttack):
         if isinstance(self.reconstruction, list):
             optimizer = torch.optim.Adam(reconstruction, lr=attack_lr)
             #optimizer = torch.optim.SGD(reconstruction, lr=attack_lr)
-
         else:
             optimizer = torch.optim.Adam([reconstruction], lr=attack_lr)
             
