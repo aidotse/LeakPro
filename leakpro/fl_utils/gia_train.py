@@ -7,7 +7,6 @@ from torch.utils.data import DataLoader
 
 from leakpro.fl_utils.gia_module_to_functional import MetaModule
 from leakpro.fl_utils.gia_optimizers import MetaOptimizer
-from leakpro.utils.seed import seed_everything
 
 
 def train(
