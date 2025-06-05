@@ -14,12 +14,12 @@ from torch.utils.data import DataLoader
 from leakpro.attacks.attack_base import AbstractAttack
 from leakpro.attacks.utils.hyperparameter_tuning.optuna import optuna_optimal_hyperparameters
 from leakpro.fl_utils.model_utils import MedianPool2d
+from leakpro.fl_utils.save_text import validate_tokens
 from leakpro.fl_utils.similarity_measurements import dataloaders_psnr, dataloaders_ssim_ignite
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.schemas import OptunaConfig
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
-from leakpro.fl_utils.save_text import validate_tokens
 
 
 class AbstractGIA(AbstractAttack):
@@ -148,51 +148,45 @@ class AbstractGIA(AbstractAttack):
                         image_data: bool=True
                         ) -> Generator[tuple[int, Tensor, GIAResults]]:
         """Generic attack loop for GIA's."""
-        
+
         optimizer = torch.optim.Adam(reconstruction, lr=attack_lr)
-            
+
         # reduce LR every 1/3 of total iterations
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
                                                             milestones=[at_iterations // 2.667,
                                                                         at_iterations // 1.6,
                                                                         at_iterations // 1.142], gamma=0.1)
         for i in range(at_iterations):
-            print("itteration: ", i)
-        
+            logger.info("itteration: ", i)
+
                     # loss function which does training and compares distance from reconstruction training to the real training.
             closure = gradient_closure(optimizer)
-            
-        
+
             previous_reconstruction_data = deepcopy(reconstruction_loader)
-            #previous_optimizer_state = deepcopy(optimizer.state_dict())
+            previous_optimizer_state = deepcopy(optimizer.state_dict())
             last_loss = optimizer.step(closure)
-            loss_ = self.inference_closure()
-            print("loss: ", np.round(last_loss.item(),5), ", best_loss: ", np.round(self.best_loss,5), 
-                ", loss_: ", np.round(loss_.numpy(),5))
+            loss = self.inference_closure()
             tryout = 0
-            while loss_ > last_loss and tryout<6:
-                
+            while loss > last_loss and tryout<6:
+                # reset reconstruction with previous version until better performance
                 with torch.no_grad():
                         for j in range(len(reconstruction)):
                             reconstruction[j].copy_(previous_reconstruction_data.dataset[j].embedding)
 
-                #optimizer.load_state_dict(previous_optimizer_state)
-                    
+                optimizer.load_state_dict(previous_optimizer_state)
                 for param_group in optimizer.param_groups:
-                    param_group['lr'] = param_group['lr']/2
+                    param_group["lr"] = param_group["lr"]/2
                 closure = gradient_closure(optimizer)
-                loss = optimizer.step(closure)
-                loss_ = self.inference_closure()
-                
-                print("loss_: ", loss_, ", loss: ", loss)
+                _ = optimizer.step(closure)
+                loss = self.inference_closure()
+
                 tryout += 1
-            
+
             for param_group in optimizer.param_groups:
-                param_group['lr'] = attack_lr
+                param_group["lr"] = attack_lr
 
 
-            
-            
+
             scheduler.step()
             if image_data:
                 with torch.no_grad():
@@ -203,15 +197,15 @@ class AbstractGIA(AbstractAttack):
                     if (i +1) % 500 == 0 and median_pooling:
                         reconstruction.data = MedianPool2d(kernel_size=3, stride=1, padding=1, same=False)(reconstruction)
             # Choose image who has given least loss
-            if loss_ < self.best_loss:
-                self.best_loss = loss_
+            if loss < self.best_loss:
+                self.best_loss = loss
                 self.best_reconstruction = deepcopy(reconstruction_loader)
                 self.best_reconstruction_round = i
-                logger.info(f"New best loss: {loss_} on round: {i}")
+                logger.info(f"New best loss: {loss} on round: {i}")
 
-                validate_tokens(client_loader,self.best_reconstruction,'best.npy')
+                validate_tokens(client_loader,self.best_reconstruction,"best.npy")
             if i % 250 == 0:
-                logger.info(f"Iteration {i}, loss {loss_}")
+                logger.info(f"Iteration {i}, loss {loss}")
                 yield i, i, None#dataloaders_ssim_ignite(client_loader, self.best_reconstruction), None
 
         ssim_score = dataloaders_ssim_ignite(client_loader, self.best_reconstruction)
