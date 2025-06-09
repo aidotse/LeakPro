@@ -21,7 +21,7 @@ target:
   module_path: "./target_models.py" 
   model_class: "GRUD" #  LR/GRUD/GRUD_DPSGD
   # Data paths
-  target_folder: "./target_GRUD" # either target_GRUD or target_LR or target_GRUD_dpsgd
+  target_folder: "./target_GRUD_dpsgd" # either target_GRUD or target_LR or target_GRUD_dpsgd
   data_path: "./data/GRUD_data/dataset.pkl" #unflattened dataset for GRUD in GRUD_data direcotry and flattened dataset for LR in LR_data directory
-  # dpsgd_path:  #"./target_GRUD_dpsgd/dpsgd_dic.pkl"
+  dpsgd_path:  "./target_GRUD_dpsgd/dpsgd_dic.pkl"
 

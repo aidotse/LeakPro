@@ -233,18 +233,18 @@ class GRUHandler(BaseMIMICHandler):
         acc = float(acc) / total_samples
         return EvalOutput(accuracy=acc, loss=loss)
 
-
-class GRUDDPHandler(BaseMIMICHandler):
-    def train(self,
+    def train_with_dpsgd(self,
               dataloader: DataLoader,
-              model: nn.Module = None,
-              criterion: nn.Module = None,
-              optimizer: optim.Optimizer = None,
-              epochs: int = None,
-              early_stop_loader: DataLoader = None,
-              patience: int = 5,
-              min_delta: float = 0.0) -> TrainingOutput:
-
+              model: nn.Module,
+              criterion: nn.Module,
+              optimizer: optim.Optimizer,
+              epochs: int,
+              early_stop_loader:DataLoader = None,
+              patience_early_stopping: int= 5,
+              patience_lr: float = 2,
+              min_delta: float = 0.00001,
+              ) -> TrainingOutput:
+        
         print("Training shadow models with DP-SGD")
         dpsgd_path = "./target_GRUD_dpsgd/dpsgd_dic.pkl"
         sample_rate = 1 / len(dataloader)
@@ -276,82 +276,98 @@ class GRUDDPHandler(BaseMIMICHandler):
 
         device_name = device("cuda" if cuda.is_available() else "cpu")
         model.to(device_name)
-        model.train()
 
-        criterion = self.get_criterion()
-        best_loss = float("inf")
-        epochs_no_improve = 0
-        best_model_state = None
+        # Early Stopping
+        min_loss_epoch_valid = float("inf")  # Initialize to infinity for comparison
+        patient_epoch = 0  # Initialize patient counter
+        scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.2, patience=patience_lr)
 
-        for e in tqdm(range(epochs), desc="Training Progress"):
-            train_loss = 0.0
-            for _, (x, labels) in enumerate(tqdm(dataloader, desc="Training Batches")):
-                x = x.to(device_name)
-                labels = labels.to(device_name).float()
+        accuracy_history = []
+        loss_history = []
 
+
+        for epoch in tqdm(range(epochs), desc="Training Progress"):
+            train_loss, train_acc, total_samples = 0, 0, 0
+            model.train()
+            all_predictions = []
+            all_labels = []
+
+            for inputs, labels in tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}"):
+                inputs = inputs.to(device_name, non_blocking=True)
+                labels = labels.to(device_name, non_blocking=True)
+                labels = labels.long().float()
+
+                prediction = model(inputs).squeeze(dim =1)
+
+                all_labels.append(to_numpy(labels))
+                all_predictions.append(to_numpy(prediction))
+
+                loss = criterion(prediction, labels)
                 optimizer.zero_grad()
-                output = model(x)
-                loss = criterion(output.squeeze(), labels.squeeze())
                 loss.backward()
                 optimizer.step()
-                train_loss += loss.item()
+                train_loss += loss.item()* labels.size(0)
+                total_samples += labels.size(0)
+             
+            train_loss /= total_samples
+            loss_history.append(train_loss)
 
-            train_loss /= len(dataloader)
+            # Concatenate all accumulated predictions and labels
+            all_predictions = np.concatenate(all_predictions, axis=0)
+            # Convert predictions to class indices
+            all_predictions = (all_predictions > 0)
+            all_labels = np.concatenate(all_labels, axis=0).astype(int)
 
+            # Compute accuracy
+            train_acc = accuracy_score(all_labels, all_predictions)
+            accuracy_history.append(train_acc)
+
+            # if there is a dataloader for warly stopping
             if early_stop_loader is not None:
-                val_loss = 0.0
-                model.eval()
-                with no_grad():
-                    for val_x, val_y in early_stop_loader:
-                        val_x = val_x.to(device_name)
-                        val_y = val_y.to(device_name).float()
-                        val_output = model(val_x)
-                        val_loss += criterion(val_output.squeeze(), val_y.squeeze()).item()
-                val_loss /= len(early_stop_loader)
-                model.train()
 
-                if best_loss - val_loss > min_delta:
-                    best_loss = val_loss
-                    best_model_state = model.state_dict()
-                    epochs_no_improve = 0
+                # Test the model
+                results = self.eval( early_stop_loader, model, criterion)
+                test_loss = results.loss
+
+                # Early stopping
+                # Assume test_loss is computed for validation set
+                if test_loss < min_loss_epoch_valid - min_delta:  # Improvement condition
+                    min_loss_epoch_valid = test_loss
+                    patient_epoch = 0
+                    print(f"Epoch {epoch}: Validation loss improved to {test_loss:.4f}")
                 else:
-                    epochs_no_improve += 1
-                    if epochs_no_improve >= patience:
-                        print(f"Early stopping at epoch {e+1}")
+                    patient_epoch += 1
+                    print(f"Epoch {epoch}: No improvement. Patience counter: {patient_epoch}/{patience_early_stopping}")
+
+                    if patient_epoch >= patience_early_stopping:
+                        print(f"Early stopping at epoch {epoch}. Best validation loss: {min_loss_epoch_valid:.4f}")
                         break
 
-        if best_model_state:
-            model.load_state_dict(best_model_state)
+                # Step the scheduler
+                scheduler.step(test_loss)
 
-        binary_predictions = sigmoid(output).squeeze().round().cpu().detach().numpy()
-        binary_labels = labels.squeeze().cpu().numpy().astype(int)
-        train_acc = accuracy_score(binary_labels, binary_predictions)
+                # Check the learning rate
+                current_lr =  optimizer.param_groups[0]["lr"]
+                print(f"Learning Rate: {current_lr:.12f}")
 
-        return TrainingOutput(model=model, metrics={"accuracy": train_acc, "loss": train_loss})
+                # Stop if learning rate becomes too small
+                if current_lr < 1e-12:
+                    print("Learning rate too small, stopping training.")
+                    break
 
+            # Print training parameters
+            print("Epoch: {}, train_loss: {}, train_acc: {}".format( \
+                        epoch, \
+                        np.around(train_loss, decimals=8),\
+                        np.around(train_acc, decimals=8) \
+                          ))
+            
 
-    def eval(self: Self,
-             loader: DataLoader,
-             model: nn.Module,
-             criterion: nn.Module) -> EvalOutput:
-        device_name = device("cuda" if cuda.is_available() else "cpu")
-        model.to(device_name)
-        model.eval()
-        loss, acc, total_samples = 0, 0, 0
+        results = EvalOutput(accuracy = train_acc,
+                            loss = train_loss,
+                            extra={"accuracy_history": accuracy_history, "loss_history": loss_history})
+        return TrainingOutput(model=model, metrics=results)
 
-        with no_grad():
-            for data, target in loader:
-                data, target = data.to(device_name), target.to(device_name)
-                target = target.float()
-                output = model(data)
-                loss += criterion(output.squeeze(), target.squeeze()).item()
-                pred = sigmoid(output).squeeze().round()
-                acc += pred.eq(target.squeeze()).sum().item()
-                total_samples += target.size(0)
-
-        loss /= len(loader)
-        acc = float(acc) / total_samples
-        return EvalOutput(accuracy=acc, loss=loss)
 
 def to_numpy(tensor):
     return tensor.detach().cpu().numpy() if tensor.is_cuda else tensor.detach().numpy()

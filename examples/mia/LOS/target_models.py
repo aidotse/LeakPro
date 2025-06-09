@@ -91,7 +91,8 @@ class FilterLinear(nn.Module):
 
 class GRUD(nn.Module):
     def __init__(self, input_size, hidden_size, X_mean, batch_size,
-                 bn_flag = True, output_last = False):
+                 bn_flag = False, output_last = False, batch_first = True,
+                 loss_reduction = "mean", force_functorch = False):
         """With minor modifications from https://github.com/zhiyongc/GRU-D/
 
         Recurrent Neural Networks for Multivariate Times Series with Missing Values
@@ -126,6 +127,9 @@ class GRUD(nn.Module):
             "batch_size": batch_size,
             "output_last": output_last,
             "bn_flag": bn_flag,
+            "batch_first": batch_first,
+            "loss_reduction": loss_reduction,
+            "force_functorch": force_functorch,
         }
 
         self.input_size = input_size
@@ -134,6 +138,9 @@ class GRUD(nn.Module):
         self.delta_size = input_size
         self.mask_size = input_size
         self.bn_flag = bn_flag
+        self.batch_first = batch_first
+        self.loss_reduction = loss_reduction
+        self.force_functorch = force_functorch
 
         self.device = device("cuda" if cuda.is_available() else "cpu")
         self.identity = eye(input_size).to(self.device)

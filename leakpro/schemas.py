@@ -82,6 +82,7 @@ class TargetConfig(BaseModel):
     model_class: str = Field(..., description="Class name of the model")
     target_folder: str = Field(..., description="Directory where target model data is stored")
     data_path: str = Field(..., description="Path to dataset file")
+    dpsgd_path: str = Field(..., description="Path to the DP-SGD dictionary file")
     # TODO: Change data_path description to be more descriptive, i.e path to target (or private) dataset.
 
     # MINV-specific field - optional
