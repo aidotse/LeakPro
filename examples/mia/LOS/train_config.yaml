@@ -4,7 +4,7 @@ run: # Configurations for a specific run
 
 
 train: 
-  training_method : GRUD_DPSGD # LR, GRUD, GRUD_DPSGD
+  training_method : GRUD # LR, GRUD
   LR: 
     epochs: 20 # Integer number for indicating the epochs for training target model. For speedyresnet, it uses its own number of epochs.
     # batch_size: 128 # Integer number for indicating batch size for training the target model. For speedyresnet, it uses its own batch size.
