@@ -1,27 +1,50 @@
 audit:  # Configurations for auditing
   random_seed: 1234  # Integer specifying the random seed
   attack_list:
-    rmia:
+    - attack: rmia
       online: False
-      num_shadow_models: 5
+      num_shadow_models: 2
       gamma: 1
-    # population:
-    lira:
-      online: False
-    # loss_traj:
-    # HSJ:
-    # yoqo:
+    - attack: lira
+      online: True
+      num_shadow_models: 3
+      training_data_fraction: 0.6
 
   output_dir: "./leakpro_output"
   attack_type: "mia" #mia, gia
   data_modality: "tabular" #image, tabular
 
+## LR model configurations
+# target:
+#   # Target model path
+#   module_path: "./target_models.py" 
+#   model_class: "LR" 
+#   target_folder: "./target_LR" 
+#   # Data paths
+#   data_path: "./data/LR_data/dataset.pkl" #unflattened dataset for GRUD in GRUD_data direcotry and flattened dataset for LR in LR_data directory
+#   dpsgd_path: "./target_LR/dpsgd_dic.pkl"
+
+
+### GRUD model configurations
+# target:
+#   # Target model path
+#   module_path: "./target_models.py" 
+#   model_class: "GRUD"
+#   target_folder: "./target_GRUD"
+#   # Data paths
+#   data_path: "./data/GRUD_data/dataset.pkl" #unflattened dataset for GRUD in GRUD_data direcotry and flattened dataset for LR in LR_data directory
+#   dpsgd_path: "./target_GRUD/dpsgd_dic.pkl"
+
+### GRUD model configurations
 target:
   # Target model path
   module_path: "./target_models.py" 
-  model_class: "GRUD" #  LR/GRUD/GRUD_DPSGD
+  model_class: "GRUD"
+  target_folder: "./target_GRUD_dpsgd"
   # Data paths
-  target_folder: "./target_GRUD_dpsgd" # either target_GRUD or target_LR or target_GRUD_dpsgd
   data_path: "./data/GRUD_data/dataset.pkl" #unflattened dataset for GRUD in GRUD_data direcotry and flattened dataset for LR in LR_data directory
-  dpsgd_path:  "./target_GRUD_dpsgd/dpsgd_dic.pkl"
+  dpsgd_path: "./target_GRUD_dpsgd/dpsgd_dic.pkl"
 
+shadow_model:
+
+distillation_model:

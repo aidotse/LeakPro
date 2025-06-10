@@ -209,7 +209,6 @@ class GRUHandler(BaseMIMICHandler):
                             extra={"accuracy_history": accuracy_history, "loss_history": loss_history})
         return TrainingOutput(model=model, metrics=results)
 
-
     def eval(self: Self,
              loader: DataLoader,
              model: nn.Module,
