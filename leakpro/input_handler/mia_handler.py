@@ -127,11 +127,10 @@ class MIAHandler:
         if loss_cls is None:
             raise ValueError(f"Criterion {criterion_config.name} not found in torch.nn.modules.loss")
 
-        # Retrieve only valid __init__ parameters
-        valid_params = inspect.signature(loss_cls.__init__).parameters
-        filtered_params = {k: v for k, v in criterion_config.params.items() if k in valid_params}
+        # Overwrite with parameters that are relevant to the loss function
+        self.target_model_metadata.criterion = LossConfig(name=criterion_config.name, params=criterion_config.params)
 
-        self._criterion = loss_cls(**filtered_params)  # Instantiate the loss function
+        self._criterion = loss_cls(**criterion_config.params)  # Instantiate the loss function
 
     def _load_dataloader_params(self:Self) -> None:
         dataloader_config = self.target_model_metadata.data_loader
@@ -214,7 +213,7 @@ class MIAHandler:
 
     def get_labels(self:Self, dataset_indices: np.ndarray) -> np.ndarray:
         """Get the labels for given indices in the population."""
-        dataloader = self.get_dataloader(dataset_indices)
+        dataloader = self.get_dataloader(dataset_indices, shuffle=False)
         # Initialize an empty list to store the labels
         all_labels = []
 
@@ -304,8 +303,4 @@ class MIAHandler:
         if optimizer_cls is None:
             raise ValueError(f"Optimizer {self.name} not found in torch.optim")
 
-        # Retrieve only valid __init__ parameters
-        valid_params = inspect.signature(optimizer_cls.__init__).parameters
-        filtered_params = {k: v for k, v in optimizer_config.params.items() if k in valid_params}
-
-        return optimizer_cls(model.parameters(), **filtered_params)
+        return optimizer_cls(model.parameters(), **optimizer_config.params)

@@ -16,12 +16,13 @@ class AttackFactoryMINV:
     generator_handler = None # TODO: Implement this if needed
 
     @classmethod
-    def create_attack(cls, name: str, handler: MINVHandler) -> AbstractMINV:
+    def create_attack(cls, name: str, attack_config: dict, handler: MINVHandler) -> AbstractMINV:
         """Create the attack object.
 
         Args:
         ----
             name (str): The name of the attack.
+            attack_config (dict): Configuration dictionary for the attack.
             handler (AbstractInputHandler): The input handler object.
 
         Returns:
@@ -35,5 +36,5 @@ class AttackFactoryMINV:
         """
 
         if name in cls.attack_classes:
-            return cls.attack_classes[name](handler, handler.configs.audit.attack_list.get(name))
+            return cls.attack_classes[name](handler, attack_config)
         raise ValueError(f"Unknown attack type: {name}")

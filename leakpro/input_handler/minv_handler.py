@@ -1,12 +1,15 @@
 """Parent class for user inputs."""
 
+import inspect
+
 import joblib
 import torch
 from pydantic import BaseModel
+from torch import nn
 from torch.utils.data import DataLoader
 
 from leakpro.input_handler.user_imports import get_class_from_module, import_module_from_file
-from leakpro.schemas import MIAMetaDataSchema
+from leakpro.schemas import LossConfig, MIAMetaDataSchema
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
@@ -21,6 +24,7 @@ class MINVHandler:
         self._load_trained_target_model()
         self._load_public_data()
         self._load_private_data()
+        self._load_criterion()
 
     def _load_public_data(self) -> None:
         """Load the public dataset."""
@@ -110,3 +114,30 @@ class MINVHandler:
         """Return the number of classes in the target model."""
         # TODO: Implement this to work with different types of datasets (where the label is not always called y)
         return self.private_dataset.y.unique().shape[0]
+
+    def _load_criterion(self:Self) -> None:
+        """Get the criterion for the target model."""
+
+        criterion_config = self.target_model_metadata.criterion
+        if not isinstance(criterion_config, LossConfig):
+            raise ValueError("Criterion is not a valid schema.")
+
+        # create dict of losses as {name (lower-case): Class}
+        loss_classes = {
+            cls.__name__.lower(): cls for cls in vars(nn.modules.loss).values()
+            if isinstance(cls, type) and issubclass(cls, nn.Module)
+        }
+
+        loss_cls = loss_classes.get(criterion_config.name.lower())  # Retrieve correct case-sensitive name
+        if loss_cls is None:
+            raise ValueError(f"Criterion {criterion_config.name} not found in torch.nn.modules.loss")
+
+        # Retrieve only valid __init__ parameters
+        valid_params = inspect.signature(loss_cls.__init__).parameters
+        filtered_params = {k: v for k, v in criterion_config.params.items() if k in valid_params}
+
+        self._criterion = loss_cls(**filtered_params)  # Instantiate the loss function
+
+    def get_criterion(self:Self) -> nn.modules.loss._Loss:
+        """Get the criterion for the target model."""
+        return self._criterion
