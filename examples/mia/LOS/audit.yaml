@@ -35,7 +35,7 @@ audit:  # Configurations for auditing
 #   data_path: "./data/GRUD_data/dataset.pkl" #unflattened dataset for GRUD in GRUD_data direcotry and flattened dataset for LR in LR_data directory
 #   dpsgd_path: "./target_GRUD/dpsgd_dic.pkl"
 
-### GRUD model configurations
+### GRUD model configurations with DP-SGD
 target:
   # Target model path
   module_path: "./target_models.py" 

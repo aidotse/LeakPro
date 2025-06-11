@@ -1,14 +1,15 @@
 import os
 import pickle
-from typing import Self
+from typing import Optional, Self
 
 import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score
-from torch import Tensor, cuda, device, from_numpy, no_grad, nn, optim, sigmoid, unique
+from torch import  cuda, device,  no_grad, nn, optim, sigmoid
 from torch.nn import BCEWithLogitsLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+
 
 from opacus import PrivacyEngine
 from opacus.accountants.utils import get_noise_multiplier
@@ -103,110 +104,126 @@ class LRHandler(BaseMIMICHandler):
 
 
 class GRUHandler(BaseMIMICHandler):
+
     def train(self,
               dataloader: DataLoader,
               model: nn.Module,
               criterion: nn.Module,
               optimizer: optim.Optimizer,
               epochs: int,
-              early_stop_loader:DataLoader = None,
-              patience_early_stopping: int= 5,
+              early_stop_loader: Optional[DataLoader] = None,
+              patience_early_stopping: int = 5,
               patience_lr: float = 2,
               min_delta: float = 0.00001,
               ) -> TrainingOutput:
 
         device_name = device("cuda" if cuda.is_available() else "cpu")
-        model.to(device_name)
 
-        # Early Stopping
-        min_loss_epoch_valid = float("inf")  # Initialize to infinity for comparison
-        patient_epoch = 0  # Initialize patient counter
+        if model.dpsgd_path is not None:
+
+            print("Training with DP-SGD...")
+            with open( model.dpsgd_path, "rb") as f:
+                config = pickle.load(f)
+
+            sample_rate = 1 / len(dataloader)
+            noise_multiplier = get_noise_multiplier(
+                target_epsilon=config["target_epsilon"],
+                target_delta=config["target_delta"],
+                sample_rate=sample_rate,
+                epochs=config["epochs"],
+                epsilon_tolerance=config["epsilon_tolerance"],
+                accountant="prv",
+                eps_error=config["eps_error"]
+            )
+
+            privacy_engine = PrivacyEngine(accountant="prv")
+            model, optimizer, dataloader = privacy_engine.make_private(
+                module=model,
+                optimizer=optimizer,
+                data_loader=dataloader,
+                noise_multiplier=noise_multiplier,
+                max_grad_norm=config["max_grad_norm"]
+            )
+            print("DP-SGD training enabled.")
+
+        model.to(device_name)
         scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.2, patience=patience_lr)
 
-        accuracy_history = []
-        loss_history = []
-
+        min_val_loss = float("inf")
+        patience_counter = 0
+        accuracy_history, loss_history = [], []
 
         for epoch in tqdm(range(epochs), desc="Training Progress"):
-            train_loss, train_acc, total_samples = 0, 0, 0
+            # TRAINING LOOP
             model.train()
-            all_predictions = []
-            all_labels = []
+            total_loss, total_samples = 0.0, 0
+            all_preds, all_labels = [], []
 
-            for inputs, labels in tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}"):
-                inputs = inputs.to(device_name, non_blocking=True)
-                labels = labels.to(device_name, non_blocking=True)
-                labels = labels.long().float()
+            for inputs, labels in dataloader:
+                inputs = inputs.to(device_name)
+                labels = labels.to(device_name).long().float()
 
-                prediction = model(inputs).squeeze(dim =1)
-
-                all_labels.append(to_numpy(labels))
-                all_predictions.append(to_numpy(prediction))
-
+                prediction = model(inputs).squeeze(1)
                 loss = criterion(prediction, labels)
+
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-                train_loss += loss.item()* labels.size(0)
+
+                total_loss += loss.item() * labels.size(0)
                 total_samples += labels.size(0)
-             
-            train_loss /= total_samples
-            loss_history.append(train_loss)
 
-            # Concatenate all accumulated predictions and labels
-            all_predictions = np.concatenate(all_predictions, axis=0)
-            # Convert predictions to class indices
-            all_predictions = (all_predictions > 0)
-            all_labels = np.concatenate(all_labels, axis=0).astype(int)
+                all_preds.append(prediction.detach().cpu().numpy())
+                all_labels.append(labels.detach().cpu().numpy())
 
-            # Compute accuracy
-            train_acc = accuracy_score(all_labels, all_predictions)
+            avg_loss = total_loss / total_samples
+            preds = (np.concatenate(all_preds) > 0)
+            labels = np.concatenate(all_labels).astype(int)
+            train_acc = accuracy_score(labels, preds)
+
+            loss_history.append(avg_loss)
             accuracy_history.append(train_acc)
 
-            # if there is a dataloader for warly stopping
+            print(f"Epoch {epoch}: train_loss={avg_loss:.6f}, train_acc={train_acc:.4f}")
+
+            # EARLY STOPPING
             if early_stop_loader is not None:
+                model.eval()
+                val_loss, val_acc, total_samples = 0, 0, 0
+                with no_grad():
+                    for val_data, val_target in early_stop_loader:
+                        val_data = val_data.to(device_name)
+                        val_target = val_target.to(device_name).float()
+                        val_output = model(val_data)
+                        val_loss += criterion(val_output.squeeze(), val_target.squeeze()).item()
+                        val_pred = sigmoid(val_output).squeeze().round()
+                        val_acc += val_pred.eq(val_target.squeeze()).sum().item()
+                        total_samples += val_target.size(0)
 
-                # Test the model
-                results = self.eval( early_stop_loader, model, criterion)
-                test_loss = results.loss
+                val_loss /= len(early_stop_loader)
 
-                # Early stopping
-                # Assume test_loss is computed for validation set
-                if test_loss < min_loss_epoch_valid - min_delta:  # Improvement condition
-                    min_loss_epoch_valid = test_loss
-                    patient_epoch = 0
-                    print(f"Epoch {epoch}: Validation loss improved to {test_loss:.4f}")
+                if val_loss < min_val_loss - min_delta:
+                    print(f"Epoch {epoch}: Validation loss improved to {val_loss:.6f}")
+                    min_val_loss = val_loss
+                    patience_counter = 0
                 else:
-                    patient_epoch += 1
-                    print(f"Epoch {epoch}: No improvement. Patience counter: {patient_epoch}/{patience_early_stopping}")
+                    patience_counter += 1
+                    print(f"Epoch {epoch}: No improvement. Patience {patience_counter}/{patience_early_stopping}")
+                    scheduler.step(val_loss)
 
-                    if patient_epoch >= patience_early_stopping:
-                        print(f"Early stopping at epoch {epoch}. Best validation loss: {min_loss_epoch_valid:.4f}")
+                    if patience_counter >= patience_early_stopping:
+                        print(f"Early stopping at epoch {epoch}. Best val loss: {min_val_loss:.6f}")
                         break
 
-                # Step the scheduler
-                scheduler.step(test_loss)
+                    if scheduler.optimizer.param_groups[0]["lr"] < 1e-12:
+                        print("Learning rate too small. Stopping training.")
+                        break
 
-                # Check the learning rate
-                current_lr =  optimizer.param_groups[0]["lr"]
-                print(f"Learning Rate: {current_lr:.12f}")
-
-                # Stop if learning rate becomes too small
-                if current_lr < 1e-12:
-                    print("Learning rate too small, stopping training.")
-                    break
-
-            # Print training parameters
-            print("Epoch: {}, train_loss: {}, train_acc: {}".format( \
-                        epoch, \
-                        np.around(train_loss, decimals=8),\
-                        np.around(train_acc, decimals=8) \
-                          ))
-            
-
-        results = EvalOutput(accuracy = train_acc,
-                            loss = train_loss,
-                            extra={"accuracy_history": accuracy_history, "loss_history": loss_history})
+        results = EvalOutput(
+            accuracy=accuracy_history[-1],
+            loss=loss_history[-1],
+            extra={"accuracy_history": accuracy_history, "loss_history": loss_history}
+        )
         return TrainingOutput(model=model, metrics=results)
 
     def eval(self: Self,
@@ -231,141 +248,6 @@ class GRUHandler(BaseMIMICHandler):
         loss /= len(loader)
         acc = float(acc) / total_samples
         return EvalOutput(accuracy=acc, loss=loss)
-
-    def train_with_dpsgd(self,
-              dataloader: DataLoader,
-              model: nn.Module,
-              criterion: nn.Module,
-              optimizer: optim.Optimizer,
-              epochs: int,
-              early_stop_loader:DataLoader = None,
-              patience_early_stopping: int= 5,
-              patience_lr: float = 2,
-              min_delta: float = 0.00001,
-              ) -> TrainingOutput:
-        
-        print("Training shadow models with DP-SGD")
-        dpsgd_path = "./target_GRUD_dpsgd/dpsgd_dic.pkl"
-        sample_rate = 1 / len(dataloader)
-
-        if not os.path.exists(dpsgd_path):
-            raise FileNotFoundError(f"DP config not found at: {dpsgd_path}")
-
-        with open(dpsgd_path, "rb") as file:
-            privacy_engine_dict = pickle.load(file)
-
-        noise_multiplier = get_noise_multiplier(
-            target_epsilon=privacy_engine_dict["target_epsilon"],
-            target_delta=privacy_engine_dict["target_delta"],
-            sample_rate=sample_rate,
-            epochs=privacy_engine_dict["epochs"],
-            epsilon_tolerance=privacy_engine_dict["epsilon_tolerance"],
-            accountant="prv",
-            eps_error=privacy_engine_dict["eps_error"],
-        )
-
-        privacy_engine = PrivacyEngine(accountant="prv")
-        model, optimizer, dataloader = privacy_engine.make_private(
-            module=model,
-            optimizer=optimizer,
-            data_loader=dataloader,
-            noise_multiplier=noise_multiplier,
-            max_grad_norm=privacy_engine_dict["max_grad_norm"],
-        )
-
-        device_name = device("cuda" if cuda.is_available() else "cpu")
-        model.to(device_name)
-
-        # Early Stopping
-        min_loss_epoch_valid = float("inf")  # Initialize to infinity for comparison
-        patient_epoch = 0  # Initialize patient counter
-        scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.2, patience=patience_lr)
-
-        accuracy_history = []
-        loss_history = []
-
-
-        for epoch in tqdm(range(epochs), desc="Training Progress"):
-            train_loss, train_acc, total_samples = 0, 0, 0
-            model.train()
-            all_predictions = []
-            all_labels = []
-
-            for inputs, labels in tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}"):
-                inputs = inputs.to(device_name, non_blocking=True)
-                labels = labels.to(device_name, non_blocking=True)
-                labels = labels.long().float()
-
-                prediction = model(inputs).squeeze(dim =1)
-
-                all_labels.append(to_numpy(labels))
-                all_predictions.append(to_numpy(prediction))
-
-                loss = criterion(prediction, labels)
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-                train_loss += loss.item()* labels.size(0)
-                total_samples += labels.size(0)
-             
-            train_loss /= total_samples
-            loss_history.append(train_loss)
-
-            # Concatenate all accumulated predictions and labels
-            all_predictions = np.concatenate(all_predictions, axis=0)
-            # Convert predictions to class indices
-            all_predictions = (all_predictions > 0)
-            all_labels = np.concatenate(all_labels, axis=0).astype(int)
-
-            # Compute accuracy
-            train_acc = accuracy_score(all_labels, all_predictions)
-            accuracy_history.append(train_acc)
-
-            # if there is a dataloader for warly stopping
-            if early_stop_loader is not None:
-
-                # Test the model
-                results = self.eval( early_stop_loader, model, criterion)
-                test_loss = results.loss
-
-                # Early stopping
-                # Assume test_loss is computed for validation set
-                if test_loss < min_loss_epoch_valid - min_delta:  # Improvement condition
-                    min_loss_epoch_valid = test_loss
-                    patient_epoch = 0
-                    print(f"Epoch {epoch}: Validation loss improved to {test_loss:.4f}")
-                else:
-                    patient_epoch += 1
-                    print(f"Epoch {epoch}: No improvement. Patience counter: {patient_epoch}/{patience_early_stopping}")
-
-                    if patient_epoch >= patience_early_stopping:
-                        print(f"Early stopping at epoch {epoch}. Best validation loss: {min_loss_epoch_valid:.4f}")
-                        break
-
-                # Step the scheduler
-                scheduler.step(test_loss)
-
-                # Check the learning rate
-                current_lr =  optimizer.param_groups[0]["lr"]
-                print(f"Learning Rate: {current_lr:.12f}")
-
-                # Stop if learning rate becomes too small
-                if current_lr < 1e-12:
-                    print("Learning rate too small, stopping training.")
-                    break
-
-            # Print training parameters
-            print("Epoch: {}, train_loss: {}, train_acc: {}".format( \
-                        epoch, \
-                        np.around(train_loss, decimals=8),\
-                        np.around(train_acc, decimals=8) \
-                          ))
-            
-
-        results = EvalOutput(accuracy = train_acc,
-                            loss = train_loss,
-                            extra={"accuracy_history": accuracy_history, "loss_history": loss_history})
-        return TrainingOutput(model=model, metrics=results)
 
 
 def to_numpy(tensor):
