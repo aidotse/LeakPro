@@ -9,8 +9,7 @@ from opacus.utils.batch_memory_manager import BatchMemoryManager
 from opacus.validators import ModuleValidator
 
 import torch
-from torch import cuda, device, optim
-from torch.nn import CrossEntropyLoss
+from torch import cuda, optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -20,7 +19,7 @@ from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 class CifarInputHandlerDPsgd(AbstractInputHandler):
-    """Class to handle the user input for the CIFAR100 dataset."""
+    """Class to handle the user input for the CIFAR10 and CIFAR100 dataset."""
 
     def train(
         self: Self,
@@ -28,18 +27,21 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
         model: torch.nn.Module,
         criterion: torch.nn.Module,
         optimizer: optim.Optimizer,
-        epochs: int
+        epochs: int,
+        dpsgd_metadata_path: str = "./target_dpsgd/dpsgd_dic.pkl",
+        virtual_batch_size: int = 16,
     ) -> TrainingOutput:
         """
         Train a DP-SGD compliant model.
 
         Args:
             dataloader (DataLoader): DataLoader for the training dataset.
-            model (torch.nn.Module, optional): The model to be trained.
-            criterion (torch.nn.Module, optional): Loss function to optimize.
-            optimizer (optim.Optimizer, optional): Optimizer for training.
-            epochs (int, optional): Number of training epochs.
-            do_dpsgd (bool, optional): Whether to use DP-SGD for training. Defaults to True.
+            model (torch.nn.Module): The model to be trained.
+            criterion (torch.nn.Module): Loss function to optimize.
+            optimizer (optim.Optimizer): Optimizer for training.
+            epochs (int): Number of training epochs.
+            dpsgd_meta_data_path (str): Path to the DP-SGD metadata file containing privacy parameters.
+            virtual_batch_size (int): Virtual batch size for DP-SGD training.
 
         Returns:
             TrainingOutput: Contains the trained model and training metrics, including accuracy and loss history.
@@ -77,20 +79,20 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
                 logger.info(f"Model fixed and {optimizer_class.__name__} re-instantiated.")
 
             # Send the model, optimizer, and dataloader to be DP-sgd-compliant 
-            model, optimizer, dataloader, privacyengine = dpsgd(
-                                                        model,
-                                                        optimizer,
-                                                        dataloader,
-                                                        dpsgd_path = "./target_dpsgd/dpsgd_dic.pkl"
-                                                        )
+            model, optimizer, dataloader, _ = dpsgd(
+                                                model,
+                                                optimizer,
+                                                dataloader,
+                                                dpsgd_path = dpsgd_metadata_path
+                                                )
 
         # read hyperparams for training (the parameters for the dataloader are defined in get_dataloader):
         if epochs is None:
             raise ValueError("epochs not found in configs")
 
         # prepare training
-        _device_ = device("cuda" if cuda.is_available() else "cpu")
-        model.to(_device_)
+        device = torch.device("cuda" if cuda.is_available() else "cpu")
+        model.to(device)
 
         accuracy_history = []
         loss_history = []
@@ -102,7 +104,7 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
             # Helpful with limited-memory hardware while maintaining the same overall batch size
             with  BatchMemoryManager(
                 data_loader=dataloader, 
-                max_physical_batch_size=int(max(batch_size/2, 4)), # Set max pyhsical batch size
+                max_physical_batch_size=virtual_batch_size, # Set max pyhsical batch size
                 optimizer=optimizer
             ) as dataloader:
 
@@ -112,7 +114,7 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
                                 model,
                                 criterion,
                                 optimizer,
-                                _device_,
+                                device,
                                 epoch,
                                 epochs,
                                 )
@@ -130,7 +132,7 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
                                         model,
                                         criterion,
                                         optimizer,
-                                        _device_,
+                                        device,
                                         epoch,
                                         epochs
                                         )
@@ -152,7 +154,7 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
         return TrainingOutput(model = model, metrics=results)
 
     def eval(self, loader, model, criterion):
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = torch.device("cuda" if cuda.is_available() else "cpu")
         model.to(gpu_or_cpu)
         model.eval()
         loss, acc = 0, 0

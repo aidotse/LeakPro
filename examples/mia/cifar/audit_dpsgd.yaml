@@ -1,17 +1,10 @@
 audit:  # Configurations for auditing
   random_seed: 1236  # Integer specifying the random seed
   attack_list:
-    # rmia:
-    # population:
     - attack: lira
       online: True
       num_shadow_models: 2
       training_data_fraction: 0.1
-
-    # loss_traj:
-    # HSJ:
-    #   verbose: False
-    # yoqo:
 
   output_dir: "./leakpro_output"
   attack_type: "mia" #mia, gia
