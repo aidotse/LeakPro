@@ -20,7 +20,8 @@ dependencies = [
   "joblib",
   "pyyaml",
   "scikit-learn",
-  "pydantic",  
+  "pydantic",
+  "ts2vec"  
 ]
 
 [project.optional-dependencies]
