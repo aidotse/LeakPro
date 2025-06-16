@@ -18,6 +18,7 @@
 | pydantic              | MIT                 | [License](https://github.com/pydantic/pydantic/blob/main/LICENSE)              |
 | transformers          | Apache 2.0          | [License](https://github.com/huggingface/transformers/blob/main/LICENSE)       |
 | sentence-transformers | Apache 2.0          | [License](https://github.com/UKPLab/sentence-transformers/blob/master/LICENSE) |
+| ts2vec 		        | MIT          	      | [License](https://github.com/zhihanyue/ts2vec/blob/main/LICENSE) 	           |
 
 
 Packages we partially use or draw inspiration from
