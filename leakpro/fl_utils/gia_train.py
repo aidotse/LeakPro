@@ -30,14 +30,23 @@ def train(
     model.to(gpu_or_cpu)
     patched_model = MetaModule(model)
     outputs = None
+    losses_per_epoch = []
     for _ in range(epochs):
+        total_loss = 0.0
+        total_samples = 0
         for inputs, labels in data:
             inputs, labels = inputs.to(gpu_or_cpu, non_blocking=True), labels.to(gpu_or_cpu, non_blocking=True)
             outputs = patched_model(inputs, patched_model.parameters)
             loss = criterion(outputs, labels).sum()
+            ## --tracking loss --##
+            total_loss += loss.item()
+            total_samples += labels.size(0)
             patched_model.parameters = optimizer.step(loss, patched_model.parameters)
+        
+        mean_loss = total_loss / total_samples 
+        losses_per_epoch.append(mean_loss)
     model_delta = OrderedDict((name, param - param_origin)
                                             for ((name, param), (name_origin, param_origin))
                                             in zip(patched_model.parameters.items(),
                                                     OrderedDict(model.named_parameters()).items()))
-    return list(model_delta.values())
+    return list(model_delta.values()), losses_per_epoch
