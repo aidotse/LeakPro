@@ -45,8 +45,8 @@ class Signal(ABC):
     def _is_shuffling(self:Self, dataloader:DataLoader)->bool:
         """Check if the DataLoader is shuffling the data."""
         return not isinstance(dataloader.sampler, SequentialSampler)
-    
-    def get_model_output(  # noqa: ANN204
+
+    def _get_model_output(  # noqa: ANN204
         self: Self,
         model: Model,
         handler: AbstractInputHandler,
@@ -90,7 +90,7 @@ class ModelLogits(Signal):
 
         results = []
         for model in tqdm(models, desc="Getting Model Logits"):
-            model_logits, _ = self.get_model_output(model, handler, indices)
+            model_logits, _ = self._get_model_output(model, handler, indices)
             results.append(model_logits)
         return np.array(results)
 
@@ -248,11 +248,11 @@ class HopSkipJumpDistance(Signal):
                                                     )
 
         return perturbed_imgs, perturbed_distance
-    
-def get_seasonality_coefficients(Y):
-    Z = fft(Y, axis=2) # column-wise 1D-DFT over variables
-    C = fft(Z, axis=1) # row-wise 1D-DFT over horizon
-    return C
+
+def get_seasonality_coefficients(Y: np.ndarray) -> np.ndarray:  # noqa: N803
+    """Extract seasonality coefficients from a multivariate time series using 2D DFT."""
+    Z = fft(Y, axis=2)      # column-wise 1D-DFT over variables  # noqa: N806
+    return fft(Z, axis=1)   # row-wise 1D-DFT over horizon
 
 class Seasonality(Signal):
     """Used to represent any type of signal that can be obtained from a Model and/or a Dataset.
@@ -280,24 +280,27 @@ class Seasonality(Signal):
             The signal value.
 
         """
-        
+
         results = []
         for model in tqdm(models, desc="Getting Model Seasonality loss"):
-            model_outputs, model_targets = self.get_model_output(model, handler, indices)
+            model_outputs, model_targets = self._get_model_output(model, handler, indices)
 
             seasonality_pred = get_seasonality_coefficients(model_outputs)
             seasonality_true = get_seasonality_coefficients(model_targets)
             seasonality_loss = norm(seasonality_true - seasonality_pred, axis=(1, 2))
             results.append(seasonality_loss)
         return np.array(results)
-    
-def get_trend_coefficients(Y, polynomial_degree=4):
+
+def get_trend_coefficients(
+        Y: np.ndarray,  # noqa: N803
+        polynomial_degree: int = 4
+    ) -> np.ndarray:
+    """Extract trend coefficients from a multivariate time series by fitting a polynomial to each variable."""
     horizon = Y.shape[1]
     t = np.arange(horizon) / horizon
-    P = np.vander(t, polynomial_degree, increasing=True)    # Vandermonde matrix of specified degree
-    A = inv(P.T @ P) @ P.T @ Y                              # least squares solution to polynomial fit
-    return A
-    
+    P = np.vander(t, polynomial_degree, increasing=True)    # Vandermonde matrix of specified degree  # noqa: N806
+    return inv(P.T @ P) @ P.T @ Y                           # least squares solution to polynomial fit
+
 class Trend(Signal):
     """Used to represent any type of signal that can be obtained from a Model and/or a Dataset.
 
@@ -326,7 +329,7 @@ class Trend(Signal):
         """
         results = []
         for model in tqdm(models, desc="Getting Model Trend loss"):
-            model_outputs, model_targets = self.get_model_output(model, handler, indices)
+            model_outputs, model_targets = self._get_model_output(model, handler, indices)
 
             trend_pred = get_trend_coefficients(model_outputs)
             trend_true = get_trend_coefficients(model_targets)
@@ -362,7 +365,7 @@ class MSE(Signal):
 
         results = []
         for model in tqdm(models, desc="Getting Model MSE"):
-            model_outputs, model_targets = self.get_model_output(model, handler, indices)
+            model_outputs, model_targets = self._get_model_output(model, handler, indices)
             model_mse_loss = np.mean(np.square(model_outputs - model_targets), axis=(1,2))
             results.append(model_mse_loss)
         return np.array(results)
@@ -395,7 +398,7 @@ class MAE(Signal):
         """
         results = []
         for model in tqdm(models, desc="Getting Model MAE"):
-            model_outputs, model_targets = self.get_model_output(model, handler, indices)
+            model_outputs, model_targets = self._get_model_output(model, handler, indices)
             model_mae_loss = np.mean(np.abs(model_outputs - model_targets), axis=(1,2))
             results.append(model_mae_loss)
         return np.array(results)
@@ -428,9 +431,9 @@ class SMAPE(Signal):
 
         results = []
         for model in tqdm(models, desc="Getting Model SMAPE"):
-            model_outputs, model_targets = self.get_model_output(model, handler, indices)
-            
-            numerator = np.abs(model_outputs - model_targets) 
+            model_outputs, model_targets = self._get_model_output(model, handler, indices)
+
+            numerator = np.abs(model_outputs - model_targets)
             denominator = np.abs(model_outputs) + np.abs(model_targets) + 1e-30
             fraction = numerator / denominator
             smape_loss = np.mean(fraction, axis=(1,2))
@@ -438,12 +441,13 @@ class SMAPE(Signal):
             results.append(smape_loss)
         return np.array(results)
 
-    
+
 class RescaledSMAPE(Signal):
     """Used to represent any type of signal that can be obtained from a Model and/or a Dataset.
 
     This particular class is used to get the Rescaled SMAPE of a time series model.
-    We define this by applying a logit-like transformation to the original SMAPE, mapping the signal range from [0, 1] to an undbounded scale.
+    We define this by applying a logit-like transformation to the original SMAPE,
+    mapping the signal range from [0, 1] to an undbounded scale.
     """
 
     def __call__(
@@ -468,9 +472,9 @@ class RescaledSMAPE(Signal):
 
         results = []
         for model in tqdm(models, desc="Getting Model Rescaled SMAPE"):
-            model_outputs, model_targets = self.get_model_output(model, handler, indices)
-            
-            numerator = np.abs(model_outputs - model_targets) 
+            model_outputs, model_targets = self._get_model_output(model, handler, indices)
+
+            numerator = np.abs(model_outputs - model_targets)
             denominator = np.abs(model_outputs) + np.abs(model_targets) + 1e-30
             fraction = numerator / denominator
             smape_loss = np.mean(fraction, axis=(1,2))
@@ -485,9 +489,10 @@ class TS2Vec(Signal):
     This particular class is used to get the TS2Vec loss of a time series model.
     We define this as the distance (L2 norm) between the TS2Vec representations of the true and predicted values.
 
-    TS2Vec (https://arxiv.org/abs/2106.10466) is an unsupervised representation learning method for time series. 
-    Here, we train a TS2Vec model on the shadow population’s target time series. 
-    This representation model is then used to encode both predicted and true sequences, and we compute the per-sample distance between their representations.
+    TS2Vec (https://arxiv.org/abs/2106.10466) is an unsupervised representation learning method for time series.
+    Here, we train a TS2Vec model on the shadow population’s target time series.
+    This representation model is then used to encode both predicted and true sequences,
+    and we compute the per-sample distance between their representations.
     """
 
     def __call__(
@@ -504,6 +509,7 @@ class TS2Vec(Signal):
             models: List of models that can be queried.
             handler: The input handler object.
             indices: List of indices in population dataset that can be queried from handler.
+            shadow_population_indices: List of indices in population dataset used to train the shadow models.
 
         Returns:
         -------
@@ -515,11 +521,15 @@ class TS2Vec(Signal):
         ts2vec_model = get_ts2vec_model(handler, shadow_population_indices, batch_size)
 
         # Get signals
-        ts2vec_true = ts2vec_model.encode(np.array(handler.population.targets)[indices], encoding_window='full_series', batch_size=batch_size)
+        ts2vec_true = ts2vec_model.encode(
+            np.array(handler.population.targets)[indices],
+            encoding_window="full_series",
+            batch_size=batch_size
+        )
         results = []
         for model in tqdm(models, desc="Getting Model TS2Vec loss"):
-            model_outputs, _ = self.get_model_output(model, handler, indices)
-            ts2vec_pred = ts2vec_model.encode(model_outputs, encoding_window='full_series', batch_size=batch_size)
+            model_outputs, _ = self._get_model_output(model, handler, indices)
+            ts2vec_pred = ts2vec_model.encode(model_outputs, encoding_window="full_series", batch_size=batch_size)
             ts2vec_loss = norm(ts2vec_true - ts2vec_pred, axis=1)
             results.append(ts2vec_loss)
 
