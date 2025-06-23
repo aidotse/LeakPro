@@ -21,7 +21,7 @@ dependencies = [
   "pyyaml",
   "scikit-learn",
   "pydantic",
-  "ts2vec"  
+  "ts2vec",
 ]
 
 [project.optional-dependencies]
