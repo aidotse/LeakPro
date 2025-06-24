@@ -16,7 +16,7 @@ audit:  # Configurations for auditing
       training_data_fraction: 0.6
     - attack: loss_traj
     - attack: qmia
-    #HSJ:
+    - attack: HSJ
     # - attack: yoqo
 
   output_dir: "./leakpro_output"
