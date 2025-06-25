@@ -25,7 +25,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-mia = ["torch", "torchvision", "optuna"]
+mia = ["torch", "torchvision", "optuna", "opacus<1.5.4"]
 synthetic = ["numba", "pydantic", "transformers", "sentence-transformers"]
 federated = ["torch", "torchvision", "torchmetrics", "pytorch-ignite", "optuna"]
 minv = ["torch", "torchvision", "optuna", "kornia"]
@@ -45,6 +45,7 @@ dev = [
   "pytorch-ignite", # from federated
   "optuna", # federated and mia
   "kornia", # from minv
+  "opacus<1.5.4", # from mia
 ]
 
 [tool.setuptools]

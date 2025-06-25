@@ -5,12 +5,15 @@ import pickle
 
 from opacus import PrivacyEngine
 from opacus.accountants.utils import get_noise_multiplier
+from opacus.optimizers.optimizer import DPOptimizer
 from opacus.utils.batch_memory_manager import BatchMemoryManager
 from opacus.validators import ModuleValidator
 
 import torch
-from torch import cuda, optim
-from torch.utils.data import DataLoader
+from torch import cuda, device, optim, cat
+from torch.nn import CrossEntropyLoss
+from torch.utils.data import DataLoader, ConcatDataset
+from torchvision import datasets, transforms
 from tqdm import tqdm
 
 from leakpro import AbstractInputHandler
@@ -18,8 +21,8 @@ from leakpro.schemas import TrainingOutput, EvalOutput
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
-class CifarInputHandlerDPsgd(AbstractInputHandler):
-    """Class to handle the user input for the CIFAR10 and CIFAR100 dataset."""
+class CelebAInputHandlerDPsgd(AbstractInputHandler):
+    """Class to handle the user input for the CIFAR100 dataset."""
 
     def train(
         self: Self,
@@ -36,10 +39,10 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
 
         Args:
             dataloader (DataLoader): DataLoader for the training dataset.
-            model (torch.nn.Module): The model to be trained.
-            criterion (torch.nn.Module): Loss function to optimize.
-            optimizer (optim.Optimizer): Optimizer for training.
-            epochs (int): Number of training epochs.
+            model (torch.nn.Module, optional): The model to be trained.
+            criterion (torch.nn.Module, optional): Loss function to optimize.
+            optimizer (optim.Optimizer, optional): Optimizer for training.
+            epochs (int, optional): Number of training epochs.
             dpsgd_meta_data_path (str): Path to the DP-SGD metadata file containing privacy parameters.
             virtual_batch_size (int): Virtual batch size for DP-SGD training.
 
@@ -79,12 +82,12 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
                 logger.info(f"Model fixed and {optimizer_class.__name__} re-instantiated.")
 
             # Send the model, optimizer, and dataloader to be DP-sgd-compliant 
-            model, optimizer, dataloader, _ = dpsgd(
-                                                model,
-                                                optimizer,
-                                                dataloader,
-                                                dpsgd_path = dpsgd_metadata_path
-                                                )
+            model, optimizer, dataloader, privacyengine = dpsgd(
+                                                        model,
+                                                        optimizer,
+                                                        dataloader,
+                                                        dpsgd_path = dpsgd_metadata_path
+                                                        )
 
         # read hyperparams for training (the parameters for the dataloader are defined in get_dataloader):
         if epochs is None:
@@ -126,6 +129,7 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
                 
         else:
             logger.info("Training without DP-SGD")
+
             for epoch in range(epochs):
                 train_loss, train_acc = train_loop(
                                         dataloader,
@@ -141,7 +145,7 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
                 train_accuracy = train_acc / len(dataloader.dataset) 
                 accuracy_history.append(train_accuracy) 
                 loss_history.append(avg_train_loss)
-
+        
         model.to("cpu")
         
         # Remove the GradSampleModule wrapper.
@@ -154,7 +158,7 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
         return TrainingOutput(model = model, metrics=results)
 
     def eval(self, loader, model, criterion):
-        gpu_or_cpu = torch.device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
         model.to(gpu_or_cpu)
         model.eval()
         loss, acc = 0, 0
@@ -175,41 +179,71 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
         return EvalOutput(**output_dict)
 
     class UserDataset(AbstractInputHandler.UserDataset):
-        def __init__(self, data, targets, **kwargs):
+        def __init__(self, data, targets, transform=None,  indices=None):
             """
+            Custom dataset for CelebAHQ data.
+
             Args:
-                data (Tensor): Image data of shape (N, H, W, C) or (N, C, H, W)
-                               Expected to be in range [0,1] (normalized).
-                targets (Tensor): Corresponding labels.
-                mean (Tensor, optional): Precomputed mean for normalization.
-                std (Tensor, optional): Precomputed std for normalization.
+                data (torch.Tensor): Tensor of input images.
+                targets (torch.Tensor): Tensor of labels.
+                transform (callable, optional): Optional transform to be applied on the image tensors.
             """
-            assert data.shape[0] == targets.shape[0], "Data and targets must have the same length"
-            assert data.max() <= 1.0 and data.min() >= 0.0, "Data should be in range [0,1]"
-
-            self.data = data.float()  # Ensure float type
+            self.data = data
             self.targets = targets
-
-            for key, value in kwargs.items():
-                setattr(self, key, value)
-                
-            if not hasattr(self, "mean") or not hasattr(self, "std"):
-                # Reshape to (C, 1, 1) for broadcasting
-                self.mean = self.data.mean(dim=(0, 2, 3)).view(-1, 1, 1)
-                self.std = self.data.std(dim=(0, 2, 3)).view(-1, 1, 1)
-
-        def transform(self, x):
-            """Normalize using stored mean and std."""
-            return (x - self.mean) / self.std 
-
-        def __getitem__(self, index):
-            x = self.data[index]
-            y = self.targets[index]
-            x = self.transform(x)
-            return x, y
+            self.transform = transform
+            self.indices = indices
 
         def __len__(self):
+            """Return the total number of samples."""
             return len(self.targets)
+
+        def __getitem__(self, idx):
+            """Retrieve the image and its corresponding label at index 'idx'."""
+            image = self.data[idx]
+            label = self.targets[idx]
+
+            # Apply transformations to the image if any
+            if self.transform:
+                image = self.transform(image)
+
+            return image, label
+        
+        @classmethod
+        def from_celebHq(cls, config):
+            data_dir = config["data"]["data_dir"]
+            train_transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+            ])
+
+            test_transform = transforms.Compose([
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+                transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+            ])
+
+            train_dataset = datasets.ImageFolder(os.path.join(data_dir, 'train'), train_transform)
+            test_dataset = datasets.ImageFolder(os.path.join(data_dir, 'test'), test_transform)
+            combined_dataset = ConcatDataset([train_dataset, test_dataset])
+
+            # Prepare data loader to iterate over combined_dataset
+            loader = DataLoader(combined_dataset, batch_size=1, shuffle=False)
+
+            # Collect all data and targets
+            data_list = []
+            target_list = []
+            for data, target in loader:
+                data_list.append(data)  # Remove batch dimension
+                target_list.append(target)
+
+            # Concatenate data and targets into large tensors
+            data = cat(data_list, dim=0)  # Shape: (N, C, H, W)
+            targets = cat(target_list, dim=0)  # Shape: (N,)
+
+
+            return cls(data, targets)
 
 def train_loop(dataloader, model, criterion, optimizer, device, epoch, epochs):
 
@@ -267,6 +301,10 @@ def dpsgd(
             f"This may be due to a large target_epsilon ({privacy_engine_dict['target_epsilon']}). "
             f"Consider reducing epsilon or switching to a different accountant (e.g., 'rdp'). "
             f"Original error: {e}")
+
+    if model.dpsgd == False:
+        logger.info("DP-SGD flag set to False, Using vanilla training and setting noise_multiplier to 0.0")
+        noise_multiplier = 0.0
 
     # make the model private
     privacy_engine = PrivacyEngine(accountant = "prv")
