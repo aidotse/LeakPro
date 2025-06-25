@@ -8,7 +8,7 @@ from leakpro.fl_utils.data_utils import get_meanstd
 
 DEVICE = device("cuda" if cuda.is_available() else "cpu")
 
-def get_cifar100_loader(num_images:int = 16, client_batch_size:int = 32, pre_train_batch_size: int=64,
+def get_cifar100_loader(start_idx:int = None, num_images:int = 16, client_batch_size:int = 32, pre_train_batch_size: int=64,
                         num_workers:int = 2 ) -> tuple[DataLoader, DataLoader, Tensor, Tensor]:
     """Get the full dataset for CIFAR10."""
     trainset = torchvision.datasets.CIFAR100(root="./data", train=True, download=True, transform=transforms.ToTensor())
@@ -26,8 +26,11 @@ def get_cifar100_loader(num_images:int = 16, client_batch_size:int = 32, pre_tra
     valset.transform = transform_train
 
     total_examples = len(valset)
-    random_indices = randperm(total_examples)[:num_images]
-    subset_client_trainset = Subset(valset, random_indices)
+    if start_idx is None:
+        indices = randperm(total_examples)[:num_images]
+    else:
+        indices = list(range(start_idx, min(start_idx + num_images, total_examples)))
+    subset_client_trainset = Subset(valset, indices)
     client_trainloader = DataLoader(subset_client_trainset, batch_size=client_batch_size,
                                             shuffle=False, drop_last=True, num_workers=num_workers)
     pre_train_loader = DataLoader(trainset, batch_size=pre_train_batch_size,

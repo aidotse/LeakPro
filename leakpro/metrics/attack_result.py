@@ -586,6 +586,8 @@ class GIAResults:
 
         # Get the name for the attack configuration
         config_name = get_config_name(result_config)
+        # prevent too long config name bad hack..
+        config_name = config_name[:len(config_name)//2]
         self.id = f"{name}{config_name}"
         path = f"{path}/gradient_inversion/{self.id}"
 
@@ -620,7 +622,8 @@ class GIAResults:
             "resulttype": self.__class__.__name__,
             "original": original,
             "recreated": recreated,
-            "result_config": result_config,
+            # Can not save config anymore since it contains objects. Need workaround.
+            # "result_config": result_config,  # noqa: ERA001
             "id": self.id,
         }
 
