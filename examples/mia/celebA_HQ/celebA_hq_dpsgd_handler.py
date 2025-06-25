@@ -30,7 +30,9 @@ class CelebAInputHandlerDPsgd(AbstractInputHandler):
         model: torch.nn.Module,
         criterion: torch.nn.Module,
         optimizer: optim.Optimizer,
-        epochs: int
+        epochs: int,
+        dpsgd_metadata_path: str = "./target_dpsgd/dpsgd_dic.pkl",
+        virtual_batch_size: int = 16,
     ) -> TrainingOutput:
         """
         Train a DP-SGD compliant model.
@@ -41,7 +43,8 @@ class CelebAInputHandlerDPsgd(AbstractInputHandler):
             criterion (torch.nn.Module, optional): Loss function to optimize.
             optimizer (optim.Optimizer, optional): Optimizer for training.
             epochs (int, optional): Number of training epochs.
-            do_dpsgd (bool, optional): Whether to use DP-SGD for training. Defaults to True.
+            dpsgd_meta_data_path (str): Path to the DP-SGD metadata file containing privacy parameters.
+            virtual_batch_size (int): Virtual batch size for DP-SGD training.
 
         Returns:
             TrainingOutput: Contains the trained model and training metrics, including accuracy and loss history.
@@ -83,7 +86,7 @@ class CelebAInputHandlerDPsgd(AbstractInputHandler):
                                                         model,
                                                         optimizer,
                                                         dataloader,
-                                                        dpsgd_path = "./target_dpsgd/dpsgd_dic.pkl"
+                                                        dpsgd_path = dpsgd_metadata_path
                                                         )
 
         # read hyperparams for training (the parameters for the dataloader are defined in get_dataloader):
@@ -91,8 +94,8 @@ class CelebAInputHandlerDPsgd(AbstractInputHandler):
             raise ValueError("epochs not found in configs")
 
         # prepare training
-        _device_ = device("cuda" if cuda.is_available() else "cpu")
-        model.to(_device_)
+        device = torch.device("cuda" if cuda.is_available() else "cpu")
+        model.to(device)
 
         accuracy_history = []
         loss_history = []
@@ -104,7 +107,7 @@ class CelebAInputHandlerDPsgd(AbstractInputHandler):
             # Helpful with limited-memory hardware while maintaining the same overall batch size
             with  BatchMemoryManager(
                 data_loader=dataloader, 
-                max_physical_batch_size=int(min(batch_size/2, 4)),
+                max_physical_batch_size=virtual_batch_size, # Set max physical batch size
                 optimizer=optimizer
             ) as dataloader:
 
@@ -114,7 +117,7 @@ class CelebAInputHandlerDPsgd(AbstractInputHandler):
                                 model,
                                 criterion,
                                 optimizer,
-                                _device_,
+                                device,
                                 epoch,
                                 epochs,
                                 )
@@ -133,7 +136,7 @@ class CelebAInputHandlerDPsgd(AbstractInputHandler):
                                         model,
                                         criterion,
                                         optimizer,
-                                        _device_,
+                                        device,
                                         epoch,
                                         epochs
                                         )
@@ -268,7 +271,7 @@ def dpsgd(
         model: torch.nn.Module = None,
         optimizer: optim.Optimizer = None,
         dataloader: DataLoader = None,
-        dpsgd_path: str = None,
+        dpsgd_path: str = "./target_dpsgd/dpsgd_dic.pkl",
     ) -> None:
     """Set the model, optimizer and dataset using DPsgd."""
 

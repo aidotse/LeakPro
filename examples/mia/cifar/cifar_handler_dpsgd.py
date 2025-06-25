@@ -104,7 +104,7 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
             # Helpful with limited-memory hardware while maintaining the same overall batch size
             with  BatchMemoryManager(
                 data_loader=dataloader, 
-                max_physical_batch_size=virtual_batch_size, # Set max pyhsical batch size
+                max_physical_batch_size=virtual_batch_size, # Set max physical batch size
                 optimizer=optimizer
             ) as dataloader:
 
