@@ -35,7 +35,7 @@ if __name__ == "__main__":
         logger.info(f"Model loaded from {model_path}")
     else:
         logger.info("No saved model found. Training from scratch...")
-        pre_train(model, pre_train_loader, epochs=10)
+        pre_train(model, pre_train_loader, epochs=pre_train_epochs)
         torch.save(model.state_dict(), model_path)
         logger.info(f"Model trained and saved to {model_path}")
     # lower total variation scale for larger batch sizes.
