@@ -25,14 +25,21 @@ def run_huang(model: Module, client_data: DataLoader, train_fn: Callable,
     return result_object
 
 def run_inverting(model: Module, client_data: DataLoader, train_fn: Callable,
-                data_mean:Tensor, data_std: Tensor, config: dict, experiment_name: str = "InvertingGradients",
-                path:str = "./leakpro_output/results", save:bool = True) -> None:
+                  data_mean: Tensor, data_std: Tensor, config: dict,
+                  experiment_name: str = "InvertingGradients",
+                  path: str = "./leakpro_output/results", save: bool = True) -> None:
     """Run InvertingGradients."""
     attack = InvertingGradients(model, client_data, train_fn, data_mean, data_std, config)
-    result = attack.run_attack()
-    if save:
+    
+    # Consume the generator fully and get the last yielded result
+    result = None
+    for res in attack.run_attack():
+        result = res
+    
+    if save and result is not None:
         result.save(name=experiment_name, path=path, config=config)
     return result
+
 
 def run_inverting_audit(model: Module, dataset: Dataset,
                         train_fn: Callable, data_mean: torch.Tensor, data_std: torch.Tensor

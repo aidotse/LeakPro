@@ -14,7 +14,7 @@ from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
 from leakpro.fl_utils.data_utils import get_at_images
 from leakpro.fl_utils.gia_optimizers import MetaSGD
 from leakpro.fl_utils.similarity_measurements import cosine_similarity_weights, total_variation
-from leakpro.reporting.attack_result import GIAResults
+from leakpro.reporting.gia_result import GIAResults
 from leakpro.utils.import_helper import Callable, Self
 from leakpro.utils.logger import logger
 
@@ -94,7 +94,21 @@ class InvertingGradients(AbstractGIA):
         self.reconstruction.requires_grad = True
         client_gradient = self.train_fn(self.model, self.client_loader, self.configs.optimizer,
                                         self.configs.criterion, self.configs.epochs)
-        self.client_gradient = [p.detach() for p in client_gradient]
+        # self.client_gradient = [p.detach() for p in client_gradient]
+        self.client_gradient = []
+        for item in client_gradient:
+            if isinstance(item, (list, tuple)):
+                for p in item:
+                    if hasattr(p, 'detach'):
+                        self.client_gradient.append(p.detach())
+                    else:
+                        self.client_gradient.append(torch.tensor(p))  # safely convert float to tensor
+            else:
+                if hasattr(item, 'detach'):
+                    self.client_gradient.append(item.detach())
+                else:
+                    self.client_gradient.append(torch.tensor(item))
+
 
     def run_attack(self:Self) -> Generator[tuple[int, Tensor, GIAResults]]:
         """Run the attack and return the combined metric result.
