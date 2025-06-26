@@ -5,6 +5,27 @@ from torch import Tensor, abs, cuda, mean, no_grad, norm
 from torch.utils.data import DataLoader
 from torchmetrics.functional import peak_signal_noise_ratio
 
+def flatten_client_gradient(client_gradient):
+    flattened_parts = []
+    for elem in client_gradient:
+        if isinstance(elem, list):
+            if len(elem) == 0:
+                continue
+            if isinstance(elem[0], torch.Tensor):
+                # elem is a list of tensors, flatten each and concat them
+                part = torch.cat([t.flatten() for t in elem])
+                flattened_parts.append(part)
+            else:
+                # elem is a list of floats or numbers
+                part = torch.tensor(elem).flatten()
+                flattened_parts.append(part)
+        elif isinstance(elem, torch.Tensor):
+            flattened_parts.append(elem.flatten())
+        else:
+            # if it is a scalar or unsupported type, try to convert to tensor
+            flattened_parts.append(torch.tensor([elem]))
+
+    return torch.cat(flattened_parts)
 
 def cosine_similarity_weights(client_gradient: torch.Tensor, reconstruction_gradient: torch.Tensor,
                                 top10norms: bool) -> torch.Tensor:
@@ -24,7 +45,10 @@ def cosine_similarity_weights(client_gradient: torch.Tensor, reconstruction_grad
         else:
             indices = torch.arange(len(reconstruction_gradient))
         filtered_trial_gradients = [reconstruction_gradient[i] for i in indices]
-        filtered_input_gradients = [client_gradient[i] for i in indices]
+        
+        client_grad_flat = flatten_client_gradient(client_gradient)
+        filtered_input_gradients = client_grad_flat[indices]
+
     costs = sum((x * y).sum() for x, y in zip(filtered_input_gradients,
                                                 filtered_trial_gradients))
 
