@@ -36,7 +36,7 @@ dev = [
   "pytest-mock",
   "coverage-badge",
   "ruff",
-  "torch" >= 2.6.0,  # from mia & federated
+  "torch >= 2.6.0",  # from mia & federated
   "torchvision",  # from mia & federated
   "torchmetrics",  # from federated
   "numba",  # from synthetic
