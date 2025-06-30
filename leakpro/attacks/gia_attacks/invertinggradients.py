@@ -1,3 +1,4 @@
+
 """Geiping, Jonas, et al. "Inverting gradients-how easy is it to break privacy in federated learning?."."""
 import os
 from collections.abc import Generator
@@ -14,7 +15,7 @@ from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
 from leakpro.fl_utils.data_utils import get_at_images
 from leakpro.fl_utils.gia_optimizers import MetaSGD
 from leakpro.fl_utils.similarity_measurements import cosine_similarity_weights, total_variation
-from leakpro.reporting.attack_result import GIAResults
+from leakpro.reporting.gia_result import GIAResults
 from leakpro.utils.import_helper import Callable, Self
 from leakpro.utils.logger import logger
 

@@ -17,10 +17,25 @@ from leakpro.utils.import_helper import Any, Dict, Self
 # of module-based representations to their corresponding functional API calls.
 # Below is a mapping of common layers and their respective parameters.
 
+def has_inner_modules(net_module: nn.Module) -> bool:
+    """
+    Checks if the given PyTorch module contains inner submodules.
+
+    Args:
+        net_module (nn.Module): The PyTorch module to check.
+
+    Returns:
+        bool: True if the module contains inner submodules, otherwise False.
+    """
+    return any(isinstance(submodule, nn.Module) for submodule in net_module.children())
+
+
 functional_params = {
     "conv2d": ["weight", "bias", "stride", "padding", "dilation", "groups"],
     "batch_norm": ["weight", "bias", "eps", "momentum", "training", "running_mean", "running_var"],
     "linear": ["weight", "bias"],
+    "layer_norm": ["weight", "bias", "normalized_shape", "eps"],
+    "embedding": ["weight"],
 }
 
 name_to_functional_mapping = {
@@ -29,6 +44,8 @@ name_to_functional_mapping = {
     "batchnorm2d": "batch_norm",
     "batchnorm3d": "batch_norm",
     "linear": "linear",
+    "layernorm": "layer_norm",
+    "embedding": "embedding",
 }
 
 
