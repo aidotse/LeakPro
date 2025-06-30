@@ -41,7 +41,8 @@ if __name__ == "__main__":
     trial_data = []
     for i in range(5):
         trial_ds, _, _ = get_pii_dataset(num_docs=1, example_id=44+i)
-        trial_data.append(trial_ds)
+        trial_loader = torch.utils.data.DataLoader(trial_ds, collate_fn=TrainingBatch, batch_size=1, shuffle=False)
+        trial_data.append(trial_loader)
 
     # baseline config
     attack_object = InvertingGradients(model, client_dataloader, data_mean, data_std, configs=configs, train_fn=train, optuna_trial_data=trial_data)
