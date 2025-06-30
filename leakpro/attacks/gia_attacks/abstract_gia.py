@@ -5,7 +5,6 @@ from collections.abc import Generator
 from copy import deepcopy
 from typing import Callable, Optional
 
-import numpy as np
 import optuna
 import torch
 from torch import Tensor
