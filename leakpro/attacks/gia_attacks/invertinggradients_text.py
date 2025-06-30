@@ -228,7 +228,7 @@ class InvertingGradients(AbstractGIA):
     def suggest_parameters(self: Self, trial: Trial) -> None:
         """Suggest parameters to chose and range for optimization for the Inverting Gradient attack."""
         total_variation = trial.suggest_float("total_variation", 1e-8, 1e-1, log=True)
-        attack_lr = trial.suggest_float("attack_lr", 1e-4, 100.0, log=True)
+        attack_lr = trial.suggest_float("attack_lr", 1e-6, 1.0, log=True)
         top10norms = trial.suggest_int("top10norms", 0, 1)
         tryouts = trial.suggest_int("tryouts", 0, 10)
         self.configs.attack_lr = attack_lr
