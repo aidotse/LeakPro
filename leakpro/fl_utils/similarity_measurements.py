@@ -1,4 +1,5 @@
 """Diverse util functions."""
+import numpy as np
 import torch
 from ignite.metrics import SSIM
 from torch import Tensor, abs, cuda, mean, no_grad, norm
@@ -152,3 +153,37 @@ def dataloaders_ssim_ignite(original_dataloader: DataLoader, recreated_dataloade
 
     # Compute average SSIM
     return ssim_metric.compute()
+
+def text_reconstruciton_score(original_dataloader: DataLoader, recreated_dataloader: DataLoader, token_used: Tensor) -> float:
+    """Calculate the reconstruction text statistics from two dataloaders (original and recreated).
+
+    Args:
+    ----
+        original_dataloader (torch.utils.data.DataLoader): Dataloader containing original text.
+        recreated_dataloader (torch.utils.data.DataLoader): Dataloader containing recreated text.
+        token_used (torch.Tensor): Tensor for token used.
+
+    Returns:
+    -------
+        avg_sim (float): Average SIM value over the dataset.
+
+    """
+    pred_orders = []
+    for orig_x, rec_x in zip(original_dataloader, recreated_dataloader):
+
+        true_tokens = orig_x["embedding"][0].cpu().numpy()
+        true_labels = orig_x["labels"][0].cpu().numpy()
+
+        predict_tokens = rec_x["embedding"][0].detach().cpu().numpy()
+        _ = rec_x["labels"][0].cpu().numpy()
+        ind = np.where(np.array(true_labels)!=0)[0]
+        predict_tokens = predict_tokens[ind]
+        true_tokens = true_tokens[ind]
+
+        for i in range(len(true_tokens)):
+            true_token = np.argmax(true_tokens[i,token_used])
+            pred_order = np.where(np.argsort(-predict_tokens[i,token_used])==true_token)[0][0]
+            pred_orders.append(pred_order)
+
+
+    return np.mean(pred_orders)

@@ -56,7 +56,7 @@ class MetaSGD(MetaOptimizer):
         # Compute gradients only for grad params
         grads = grad(
             loss, [param for _, param in grad_params],
-            retain_graph=True, create_graph=True, only_inputs=True
+            retain_graph=True, create_graph=True, only_inputs=True, allow_unused=True
         )
 
         grad_iter = iter(grads)
@@ -65,6 +65,8 @@ class MetaSGD(MetaOptimizer):
         for name, param in params.items():
             if param.requires_grad:
                 grad_value = next(grad_iter)
+                if grad_value is None:
+                    grad_value = 1
                 updated_params[name] = param - self.lr * grad_value
             else:
                 # Leave params that does not require grad as they are
@@ -132,30 +134,3 @@ class MetaAdam(MetaOptimizer):
 
             new_params[name] = param - self.lr * adam_grad
         return new_params
-
-class MetaSGDText(MetaOptimizer):
-    """Implementation of SGD which perform step to a new set of parameters."""
-
-    def __init__(self: Self, lr: float=1e-2) -> None:
-        """Init."""
-        self.lr = lr
-
-    def step(self: Self, loss: Tensor, params: Dict[str, Tensor]) -> OrderedDict[str, Tensor]:
-        """Perform a single optimization step.
-
-        Args:
-        ----
-            loss (torch.Tensor): The loss value calculated from the model's output.
-            params (Dict[str, torch.Tensor]): A dictionary of model parameters to be updated.
-
-        Returns:
-        -------
-            OrderedDict[str, torch.Tensor]: A new set of parameters which have been updated.
-
-        """
-
-        # Compute gradients only for grad params
-        grads = grad(loss, params.values(), retain_graph=True, create_graph=True, only_inputs=True, allow_unused=True)
-        return OrderedDict(
-    (name, param - self.lr * (grad_part if grad_part is not None else param))
-    for ((name, param), grad_part) in zip(params.items(), grads))
