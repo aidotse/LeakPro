@@ -63,18 +63,10 @@ class GiaImageExtension(GiaDataModalityExtension):
                 org_labels.extend(deepcopy(label))
             else:
                 org_labels.append(deepcopy(label))
-        color = torch.tensor([150, 150, 30], dtype=original.dtype, device=original.device) / 255.
-        color = color.view(1, 3, 1, 1)
-
-        # 2) expand to (N,3,H,W)
-        N, C, H, W = original.shape
-        constant_images = color.expand(N, C, H, W).clone()
 
         # 3) re-make your dataset & loader
-        org_dataset = CustomTensorDataset(constant_images, org_labels)
+        org_dataset = CustomTensorDataset(original, org_labels)
         org_loader  = DataLoader(org_dataset, batch_size=32, shuffle=True)
-        # org_dataset = CustomTensorDataset(original, org_labels)
-        # org_loader = DataLoader(org_dataset, batch_size=32, shuffle=True)
         img_shape = client_loader.dataset[0][0].shape
         num_images = len(client_loader.dataset)
         reconstruction = randn((num_images, *img_shape))
@@ -88,7 +80,7 @@ class GiaImageExtension(GiaDataModalityExtension):
         reconstruction_loader = DataLoader(reconstruction_dataset, batch_size=32, shuffle=True)
 
 
-        return org_loader, constant_images, reconstruction, labels, reconstruction_loader
+        return org_loader, original, reconstruction, labels, reconstruction_loader
 
 class GiaImageYoloExtension(GiaDataModalityExtension):
     """Image extension for GIA."""
@@ -98,13 +90,6 @@ class GiaImageYoloExtension(GiaDataModalityExtension):
         img_shape = client_loader.dataset[0][0].shape
         num_images = len(client_loader.dataset)
         reconstruction = randn((num_images, *img_shape))
-        # reconstruction = torch.stack([
-        #     img.clone()
-        #     for img, _, _ in client_loader.dataset
-        # ], dim=0)
-        # o = 1.5
-        # noise = torch.randn_like(reconstruction) * o
-        # reconstruction = (reconstruction + noise).clamp(0.0, 1.0)
         labels = []
         for _, label, _ in client_loader:
             if isinstance(label, Tensor):

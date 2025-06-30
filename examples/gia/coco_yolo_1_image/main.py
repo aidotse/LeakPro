@@ -28,6 +28,7 @@ if __name__ == "__main__":
     for i in range(5):
         client_loader, _, _ = get_coco_detection_loader(start_idx=108000+i, num_images=1, batch_size=1, aug=False)
         trial_data.append(client_loader)
+    # Initialize attack object and run with optuna.
     attack_object = InvertingGradients(model, client_loader, data_mean, data_std, configs=configs, train_fn=trainyolo,optuna_trial_data=trial_data)
     optuna_config = OptunaConfig()
     optuna_config.n_trials = 100

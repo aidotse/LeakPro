@@ -44,8 +44,14 @@ class InvertingConfig:
 class InvertingGradients(AbstractGIA):
     """Gradient inversion attack by Geiping et al."""
 
+<<<<<<< HEAD
     def __init__(self: Self, model: Module, client_loader: DataLoader, train_fn: Callable,
                  data_mean: Tensor, data_std: Tensor, configs: InvertingConfig) -> None:
+=======
+    def __init__(self: Self, model: Module, client_loader: DataLoader, data_mean: Tensor, data_std: Tensor,
+                 train_fn: Optional[Callable] = None, configs: Optional[InvertingConfig] = None, optuna_trial_data: list = None
+                 ) -> None:
+>>>>>>> 5ca9f57 (cleanup)
         super().__init__()
         self.original_model = model
         self.model = deepcopy(self.original_model)
@@ -91,7 +97,17 @@ class InvertingGradients(AbstractGIA):
 
         """
         self.model.eval()
+<<<<<<< HEAD
         self.reconstruction, self.reconstruction_loader = get_at_images(self.client_loader)
+=======
+        (
+            self.client_loader,
+            self.original,
+            self.reconstruction,
+            self.reconstruction_labels,
+            self.reconstruction_loader
+        ) = self.configs.data_extension.get_at_data(self.client_loader)
+>>>>>>> 5ca9f57 (cleanup)
         self.reconstruction.requires_grad = True
         client_gradient = self.train_fn(self.model, self.client_loader, self.configs.optimizer,
                                         self.configs.criterion, self.configs.epochs)

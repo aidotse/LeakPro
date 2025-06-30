@@ -18,7 +18,7 @@ from leakpro.fl_utils.gia_optimizers import MetaSGD
 from leakpro.fl_utils.gia_train import train
 from leakpro.fl_utils.model_utils import BNFeatureHook
 from leakpro.fl_utils.similarity_measurements import cosine_similarity_weights, l2_norm, total_variation
-from leakpro.reporting.attack_result import GIAResults
+from leakpro.metrics.attack_result import GIAResults
 from leakpro.utils.import_helper import Callable, Self
 from leakpro.utils.logger import logger
 
@@ -55,7 +55,8 @@ class Huang(AbstractGIA):
     """Gradient inversion attack by Huang et al."""
 
     def __init__(self: Self, model: Module, client_loader: DataLoader, data_mean: Tensor, data_std: Tensor,
-                train_fn: Optional[Callable] = None, configs: Optional[HuangConfig] = None) -> None:
+                train_fn: Optional[Callable] = None, configs: Optional[HuangConfig] = None, optuna_trial_data: list = None
+                ) -> None:
         super().__init__()
         self.original_model = model
         self.model = deepcopy(self.original_model)
@@ -64,6 +65,7 @@ class Huang(AbstractGIA):
         self.best_reconstruction_round = None
 
         self.configs = configs if configs is not None else HuangConfig()
+        self.optuna_trial_data = optuna_trial_data
 
         self.client_loader = client_loader
         self.train_fn = train_fn if train_fn is not None else train
@@ -118,8 +120,14 @@ class Huang(AbstractGIA):
             if isinstance(module, torch.nn.BatchNorm2d):
                 module.momentum = 0
 
-        self.reconstruction, self.reconstruction_labels, self.reconstruction_loader = self.configs.data_extension.get_at_data(
-            self.client_loader)
+        (
+            self.client_loader,
+            self.original,
+            self.reconstruction,
+            self.reconstruction_labels,
+            self.reconstruction_loader
+        ) = self.configs.data_extension.get_at_data(self.client_loader)
+
         self.reconstruction.requires_grad = True
         self.client_gradient = [p.detach() for p in client_gradient]
 
@@ -176,10 +184,25 @@ class Huang(AbstractGIA):
 
     def suggest_parameters(self: Self, trial: Trial) -> None:
         """Suggest parameters to chose and range for optimization for the Huang attack."""
-        total_variation = trial.suggest_float("total_variation", 1e-6, 1e-1, log=True)
+        total_variation = trial.suggest_float("total_variation", 1e-8, 1e-1, log=True)
         bn_reg = trial.suggest_float("bn_reg", 1e-4, 1e-1, log=True)
-        self.configs.tv_reg = total_variation
+        attack_lr = trial.suggest_float("attack_lr", 1e-4, 100.0, log=True)
+        median_pooling = trial.suggest_int("median_pooling", 0, 1)
+        top10norms = trial.suggest_int("top10norms", 0, 1)
         self.configs.bn_reg = bn_reg
+        self.configs.attack_lr = attack_lr
+        self.configs.tv_reg = total_variation
+        self.configs.median_pooling = median_pooling
+        self.configs.top10norms = top10norms
+        if self.optuna_trial_data is not None:
+            trial_data_idx = trial.suggest_int("trial_data", 0, len(self.optuna_trial_data) - 1)
+            self.client_loader = self.optuna_trial_data[trial_data_idx]
+            logger.info(f"Next experiment on trial data idx: {trial_data_idx}")
+        logger.info(f"Chosen parameters:\
+                    total_variation: {total_variation} \
+                    attack_lr: {attack_lr} \
+                    median_pooling: {median_pooling} \
+                    top10norms: {top10norms}")
 
     def reset_attack(self: Self, new_config:dict) -> None:  # noqa: ARG002
         """Reset attack to initial state."""
