@@ -1,19 +1,6 @@
-from typing_extensions import TypedDict
-import torch.nn.functional as F
-from typing import List,Any
 from transformers import LongformerModel
-from tokenizers import Encoding
 from torch import nn
-from dataclasses import dataclass
-from torch.utils.data import Dataset
-from transformers import PreTrainedTokenizerFast
-from torch.utils.data.dataloader import DataLoader
-from transformers import get_linear_schedule_with_warmup
-from sklearn.metrics import classification_report
-import numpy as np
-import matplotlib.pyplot as plt
-import torch.nn as nn
-
+import torch
 
 class Model(nn.Module):
     """
@@ -188,12 +175,6 @@ class Model2(nn.Module):
         )
         pooler = b.last_hidden_state
         return self.classifier(pooler)
-
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from transformers import BertModel, BertTokenizer
 
 class OneHotBERT(nn.Module):
     def __init__(self, model, num_labels, token_mask=None, norm_data=False):

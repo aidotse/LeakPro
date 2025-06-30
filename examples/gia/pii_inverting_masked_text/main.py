@@ -1,31 +1,20 @@
 """Inverting on a single document."""
 from data_.pii_data import get_pii_dataset
+from data_.data_extension import GiaNERExtension
 from leakpro.attacks.gia_attacks.invertinggradients_text import InvertingGradients, InvertingConfig
 from leakpro.run import run_gia_attack
-from leakpro.fl_utils.data_utils import GiaNERExtension
+from leakpro.utils.seed import seed_everything
 from train import train
 from transformers import LongformerTokenizerFast
 from longformer_model import OneHotBERT
 import torch
 from torch import device
 from data_.data import LabelSet, TrainingBatch
-import random
-import numpy as np
-
-def set_seed(seed=42):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)  # If using GPU
-    torch.cuda.manual_seed_all(seed)  # If using multi-GPU
-    torch.backends.cudnn.deterministic = True  # Makes CuDNN deterministic
-    torch.backends.cudnn.benchmark = False  # Slows down but ensures consistency
-
 
 if __name__ == "__main__":
    
  
-    set_seed(42)
+    seed_everything(42)
 
     # define model
     bert = "allenai/longformer-base-4096"
@@ -41,7 +30,7 @@ if __name__ == "__main__":
     configs.median_pooling = False
     configs.at_iterations = 10000
     configs.tv_reg = 1.0e-06
-    configs.attack_lr = 0.001#0.00001
+    configs.attack_lr = 0.001
     configs.data_extension = GiaNERExtension()
     configs.image_data = False
     
@@ -50,13 +39,7 @@ if __name__ == "__main__":
     client_dataset, data_mean, data_std = get_pii_dataset(num_docs=1)
     client_dataloader = torch.utils.data.DataLoader(client_dataset, collate_fn=TrainingBatch, batch_size=1, shuffle=False)
 
-    
-
-    # meta train function designed to work with GIA
-   
     # baseline config
-    #configs = InvertingConfig(attack_lr=0.0001)#, optimizer = field(default_factory=lambda: MetaSGD()))
-    #configs = InvertingConfig(attack_lr=0.00001, data_extension = GiaNERExtension, image_data=False)#, optimizer = field(default_factory=lambda: MetaSGD()))
     attack_object = InvertingGradients(model, client_dataloader, data_mean, data_std, configs=configs, train_fn=train)
     run_gia_attack(attack_object, "TestInverting")
 
