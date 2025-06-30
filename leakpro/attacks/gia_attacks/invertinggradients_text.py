@@ -125,7 +125,7 @@ class InvertingGradients(AbstractGIA):
 
         return self.generic_attack_loop_text(self.configs, grad_closure, self.configs.at_iterations, self.reconstruction,
                                 self.data_mean, self.data_std, self.used_tokens, self.configs.attack_lr, self.client_loader,
-                                self.reconstruction_loader, self.tryouts)
+                                self.reconstruction_loader, self.configs.tryouts)
 
 
     def gradient_closure(self: Self, optimizer: torch.optim.Optimizer) -> Callable:
