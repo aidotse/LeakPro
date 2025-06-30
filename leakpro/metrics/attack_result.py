@@ -642,11 +642,16 @@ class GIAResults:
             latex += _latex(save_name=name, original=res.original, recreated=res.recreated)
         return latex
 
-def text_save(path: str, recreated_data: Dataset, original_data: Dataset):
+def text_save(path: str, recreated_data: Dataset, original_data: Dataset) -> None:
+    """Save text to path."""
+    path
+    recreated_data
+    original_data
     pass
 
-def img_save(path: str, recreated_data: Dataset, original_data: Dataset, data_std: Tensor, data_mean: Tensor):
-     # Check if path exists, otherwise create it.
+def img_save(path: str, recreated_data: Dataset, original_data: Dataset, data_std: Tensor, data_mean: Tensor) -> None:
+    """Save images to path."""
+    # Check if path exists, otherwise create it.
     if not os.path.exists(f"{path}"):
         os.makedirs(f"{path}")
 

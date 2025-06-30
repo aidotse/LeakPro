@@ -76,9 +76,7 @@ def l2_distance(client_gradient: torch.Tensor, reconstruction_gradient: torch.Te
     """
     #with torch.no_grad():
 
-    costs = sum(torch.norm(p1 - p2, p=2) for p1, p2 in zip(client_gradient, reconstruction_gradient))
-
-    return costs
+    return sum(torch.norm(p1 - p2, p=2) for p1, p2 in zip(client_gradient, reconstruction_gradient))
 
 def total_variation(x: Tensor) -> Tensor:
         """Anisotropic TV."""

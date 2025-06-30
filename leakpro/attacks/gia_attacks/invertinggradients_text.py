@@ -50,7 +50,8 @@ class InvertingGradients(AbstractGIA):
     """Gradient inversion attack by Geiping et al."""
 
     def __init__(self: Self, model: Module, client_loader: DataLoader, data_mean: Tensor, data_std: Tensor,
-                 train_fn: Optional[Callable] = None, configs: Optional[InvertingConfig] = None, optuna_trial_data: list = None) -> None:
+                 train_fn: Optional[Callable] = None, configs: Optional[InvertingConfig] = None, optuna_trial_data: list = None
+                 ) -> None:
         super().__init__()
         self.original_model = model
         self.model = deepcopy(self.original_model)
@@ -254,8 +255,3 @@ class InvertingGradients(AbstractGIA):
         self.model = deepcopy(self.original_model)
         self.prepare_attack()
         logger.info("Inverting attack reset to initial state.")
-
-    def get_configs(self: Self) -> dict:
-        """Return configs used for attack."""
-        return self.configs
-
