@@ -12,8 +12,8 @@ import os
 sys.path.append(os.path.abspath("examples/gia/pii_inverting_1_image"))
 
 
-from data.data_manipulation import training_raw
-from data.data import pre_process_data, Dataset, LabelSet, TrainingBatch
+from data_.data_manipulation import training_raw
+from data_.data import pre_process_data, Dataset, LabelSet, TrainingBatch
 
 
 from leakpro.fl_utils.data_utils import get_meanstd

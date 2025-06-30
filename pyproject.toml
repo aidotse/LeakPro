@@ -45,6 +45,7 @@ dev = [
   "optuna", # federated and mia
   "kornia", # from minv
   "albumentations", # federated example
+  "transformers", # federated example
 ]
 
 [tool.setuptools]
