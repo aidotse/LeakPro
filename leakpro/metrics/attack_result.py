@@ -816,5 +816,3 @@ def reduce_to_unique_labels(results: list) -> list:
             result.append(f"{name}")
 
     return result
-
-
