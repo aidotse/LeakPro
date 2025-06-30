@@ -34,7 +34,7 @@ def optuna_optimal_hyperparameters(attack_object: AbstractAttack, optuna_config:
         if isinstance(result, Generator):
             for step, intermediary_results, result_object in result:
                 # check every 3000 results
-                if step%5000==0:
+                if step%3000==0:
                     trial.report(intermediary_results, step)
 
                     if trial.should_prune():

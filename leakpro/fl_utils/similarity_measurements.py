@@ -6,24 +6,6 @@ from torch.utils.data import DataLoader
 from torchmetrics.functional import peak_signal_noise_ratio
 
 
-def l2_distance_linear_only(client_grads: torch.Tensor,
-                            recon_grads: torch.Tensor) -> torch.Tensor:
-    """Computes the average L2 distance between client and reconstruction gradients,
-    but only over the parameters of the overcomplete linear layer.
-    Assumes those are the first `linear_param_count` entries in the gradient lists.
-    """  # noqa: D205
-    # number of params in your OvercompleteLinear (weight + bias = 2)
-    linear_param_count = 2
-
-    # pick out just the linear‐layer gradients
-    lin_client = client_grads[:linear_param_count]
-    lin_recon  = recon_grads[:linear_param_count]
-
-    # compute L2 norm differences
-    costs = [torch.norm(c - r, p=2) for c, r in zip(lin_client, lin_recon)]
-    return torch.stack(costs).mean()
-
-
 def l2_distance_weights(client_gradient: torch.Tensor, reconstruction_gradient: torch.Tensor,
                         top10norms: bool) -> torch.Tensor:
     """Computes the reconstruction costs between client gradients and the reconstruction gradient using L2 distance.

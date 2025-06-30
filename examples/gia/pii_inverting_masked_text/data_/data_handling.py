@@ -1,22 +1,10 @@
-from typing_extensions import TypedDict
-import torch.nn.functional as F
 from typing import List,Any
-from transformers import BatchEncoding
 from tokenizers import Encoding
 import itertools
-from torch import nn
 from dataclasses import dataclass
 from torch.utils.data import Dataset
 from transformers import PreTrainedTokenizerFast
-import json
 import torch
-from torch.utils.data.dataloader import DataLoader
-from transformers import BertForTokenClassification, AdamW
-from transformers import get_linear_schedule_with_warmup
-from sklearn.metrics import classification_report
-import tqdm
-import numpy as np
-import matplotlib.pyplot as plt
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
