@@ -1,8 +1,6 @@
 """Module with functions for preparing the dataset for training the target models."""
-import torchvision
-from torch import Tensor, as_tensor, randperm
-from torch.utils.data import DataLoader, Subset
-from torchvision import transforms
+from torch import Tensor
+from torch.utils.data import DataLoader
 from transformers import LongformerTokenizerFast
 
 import sys
@@ -15,8 +13,6 @@ sys.path.append(os.path.abspath("examples/gia/pii_inverting_1_image"))
 from data_.data_manipulation import training_raw
 from data_.data import pre_process_data, Dataset, LabelSet, TrainingBatch
 
-
-from leakpro.fl_utils.data_utils import get_meanstd
 
 
 def get_pii_dataset(num_docs:int =1, example_id:int = 44) -> tuple[DataLoader, Tensor, Tensor]:

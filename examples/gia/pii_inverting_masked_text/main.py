@@ -1,20 +1,14 @@
-"""Inverting on a single image."""
-
-#from model import ResNet
-from torchvision.models.resnet import BasicBlock
-
+"""Inverting on a single document."""
 from data_.pii_data import get_pii_dataset
 from leakpro.attacks.gia_attacks.invertinggradients_text import InvertingGradients, InvertingConfig
 from leakpro.run import run_gia_attack
 from leakpro.fl_utils.data_utils import GiaNERExtension
 from train import train
 from transformers import LongformerTokenizerFast
-from longformer_model import Model, OneHotBERT
+from longformer_model import OneHotBERT
 import torch
-from torch import cuda, device
-from data_.data import pre_process_data, Dataset, LabelSet, TrainingBatch
-from dataclasses import dataclass, field
-from leakpro.fl_utils.gia_optimizers import MetaAdam, MetaSGD
+from torch import device
+from data_.data import LabelSet, TrainingBatch
 import random
 import numpy as np
 
