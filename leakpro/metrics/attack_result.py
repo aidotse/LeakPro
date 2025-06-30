@@ -644,10 +644,10 @@ class GIAResults:
 
 def text_save(path: str, recreated_data: Dataset, original_data: Dataset) -> None:
     """Save text to path."""
-    path
-    recreated_data
-    original_data
-    pass
+    a = path
+    b = recreated_data
+    c = original_data
+    return a, b, c 
 
 def img_save(path: str, recreated_data: Dataset, original_data: Dataset, data_std: Tensor, data_mean: Tensor) -> None:
     """Save images to path."""
