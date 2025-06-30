@@ -3,18 +3,16 @@
 #from model import ResNet
 from torchvision.models.resnet import BasicBlock
 
-from data.pii_data import get_pii_dataset
+from data_.pii_data import get_pii_dataset
 from leakpro.attacks.gia_attacks.invertinggradients_text import InvertingGradients, InvertingConfig
 from leakpro.run import run_gia_attack
 from leakpro.fl_utils.data_utils import GiaNERExtension
-#from leakpro.fl_utils.gia_train import train
 from train import train
 from transformers import LongformerTokenizerFast
 from longformer_model import Model, OneHotBERT
-from leakpro.utils.seed import seed_everything
 import torch
 from torch import cuda, device
-from data.data import pre_process_data, Dataset, LabelSet, TrainingBatch
+from data_.data import pre_process_data, Dataset, LabelSet, TrainingBatch
 from dataclasses import dataclass, field
 from leakpro.fl_utils.gia_optimizers import MetaAdam, MetaSGD
 import random
@@ -31,7 +29,7 @@ def set_seed(seed=42):
 
 
 if __name__ == "__main__":
-    #seed_everything(1234)
+   
  
     set_seed(42)
 
