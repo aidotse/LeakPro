@@ -49,6 +49,7 @@ if __name__ == "__main__":
     optuna_config = OptunaConfig()
     optuna_config.n_trials = 100
     optuna_config.check_interval = 100
+    optuna_config.direction = "minimize"
     attack_object.run_with_optuna(optuna_config=optuna_config)
 
 
