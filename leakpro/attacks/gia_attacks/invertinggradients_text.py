@@ -43,14 +43,15 @@ class InvertingConfig:
     median_pooling: bool = False
     # if we compare difference only for top 10 layers with largest changes. Potentially good for larger models.
     top10norms: bool = False
-    # boolean if using image data or not (temporary solution)
-    image_data: bool = True
+    # tryouts on trial halving learning rate on attack
+    tryouts: int = 6
 
 class InvertingGradients(AbstractGIA):
     """Gradient inversion attack by Geiping et al."""
 
     def __init__(self: Self, model: Module, client_loader: DataLoader, data_mean: Tensor, data_std: Tensor,
-                 train_fn: Optional[Callable] = None, configs: Optional[InvertingConfig] = None, optuna_trial_data: list = None) -> None:
+                 train_fn: Optional[Callable] = None, configs: Optional[InvertingConfig] = None, optuna_trial_data: list = None
+                 ) -> None:
         super().__init__()
         self.original_model = model
         self.model = deepcopy(self.original_model)
@@ -102,8 +103,9 @@ class InvertingGradients(AbstractGIA):
         client_gradient = self.train_fn(self.model, self.client_loader, self.configs.optimizer,
                                         self.configs.criterion, self.configs.epochs)
         self.client_gradient = [p.detach() for p in client_gradient]
-        used_tokens = get_used_tokens(self.model, self.client_gradient)
-        self.reconstruction, self.reconstruction_loader = self.configs.data_extension.get_at_data(self.client_loader, used_tokens)
+        self.used_tokens = get_used_tokens(self.model, self.client_gradient)
+        self.reconstruction, self.reconstruction_loader = self.configs.data_extension.get_at_data(
+            self.client_loader, self.used_tokens)
 
 
         for r in self.reconstruction:
@@ -122,8 +124,8 @@ class InvertingGradients(AbstractGIA):
         grad_closure = self.gradient_closure_text
 
         return self.generic_attack_loop_text(self.configs, grad_closure, self.configs.at_iterations, self.reconstruction,
-                                self.data_mean, self.data_std, self.configs.attack_lr, self.configs.median_pooling,
-                                self.client_loader, self.reconstruction_loader,self.configs.image_data)
+                                self.data_mean, self.data_std, self.used_tokens, self.configs.attack_lr, self.client_loader,
+                                self.reconstruction_loader, self.configs.tryouts)
 
 
     def gradient_closure(self: Self, optimizer: torch.optim.Optimizer) -> Callable:
@@ -193,7 +195,7 @@ class InvertingGradients(AbstractGIA):
             return rec_loss
         return closure
 
-    def inference_closure(self) -> torch.Tensor:
+    def inference_closure(self: Self) -> torch.Tensor:
             """Computes the reconstruction loss and performs backpropagation.
 
             This function zeroes out the gradients of the optimizer and the model,
@@ -226,21 +228,23 @@ class InvertingGradients(AbstractGIA):
     def suggest_parameters(self: Self, trial: Trial) -> None:
         """Suggest parameters to chose and range for optimization for the Inverting Gradient attack."""
         total_variation = trial.suggest_float("total_variation", 1e-8, 1e-1, log=True)
-        attack_lr = trial.suggest_float("attack_lr", 1e-4, 100.0, log=True)
-        median_pooling = trial.suggest_int("median_pooling", 0, 1)
+        attack_lr = trial.suggest_float("attack_lr", 1e-6, 1.0, log=True)
         top10norms = trial.suggest_int("top10norms", 0, 1)
+        tryouts = trial.suggest_int("tryouts", 0, 10)
         self.configs.attack_lr = attack_lr
         self.configs.tv_reg = total_variation
-        self.configs.median_pooling = median_pooling
         self.configs.top10norms = top10norms
+        self.configs.tryouts = tryouts
         if self.optuna_trial_data is not None:
-            trial_data_idx = trial.suggest_int("trial_data", 0, len(self.optuna_trial_data) - 1)
+            trial_data_idx = trial.suggest_categorical(
+                "trial_data",
+                list(range(len(self.optuna_trial_data)))
+            )
             self.client_loader = self.optuna_trial_data[trial_data_idx]
             logger.info(f"Next experiment on trial data idx: {trial_data_idx}")
         logger.info(f"Chosen parameters:\
                     total_variation: {total_variation} \
                     attack_lr: {attack_lr} \
-                    median_pooling: {median_pooling} \
                     top10norms: {top10norms}")
 
     def reset_attack(self: Self, new_config:dict) -> None:  # noqa: ARG002
@@ -251,8 +255,3 @@ class InvertingGradients(AbstractGIA):
         self.model = deepcopy(self.original_model)
         self.prepare_attack()
         logger.info("Inverting attack reset to initial state.")
-
-    def get_configs(self: Self) -> dict:
-        """Return configs used for attack."""
-        return self.configs
-

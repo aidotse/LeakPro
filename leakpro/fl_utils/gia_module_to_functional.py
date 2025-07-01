@@ -18,14 +18,14 @@ from leakpro.utils.import_helper import Any, Dict, Self
 # Below is a mapping of common layers and their respective parameters.
 
 def has_inner_modules(net_module: nn.Module) -> bool:
-    """
-    Checks if the given PyTorch module contains inner submodules.
+    """Checks if the given PyTorch module contains inner submodules.
 
     Args:
         net_module (nn.Module): The PyTorch module to check.
 
     Returns:
         bool: True if the module contains inner submodules, otherwise False.
+
     """
     return any(isinstance(submodule, nn.Module) for submodule in net_module.children())
 

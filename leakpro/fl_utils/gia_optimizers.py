@@ -54,14 +54,24 @@ class MetaSGD(MetaOptimizer):
         grad_params = [(name, param) for name, param in params.items() if param.requires_grad]
 
         # Compute gradients only for grad params
-        grads = grad(loss, params.values(), retain_graph=True, create_graph=True, only_inputs=True, allow_unused=True)
-        
-           
-        return OrderedDict(
-    (name, param - self.lr * (grad_part if grad_part is not None else param))
-    for ((name, param), grad_part) in zip(params.items(), grads))
-        
+        grads = grad(
+            loss, [param for _, param in grad_params],
+            retain_graph=True, create_graph=True, only_inputs=True, allow_unused=True
+        )
 
+        grad_iter = iter(grads)
+        updated_params = OrderedDict()
+
+        for name, param in params.items():
+            if param.requires_grad:
+                grad_value = next(grad_iter)
+                if grad_value is None:
+                    grad_value = 1
+                updated_params[name] = param - self.lr * grad_value
+            else:
+                # Leave params that does not require grad as they are
+                updated_params[name] = param
+        return updated_params
 
 class MetaAdam(MetaOptimizer):
     """Implementation of Adam which perform step to a new set of parameters."""
