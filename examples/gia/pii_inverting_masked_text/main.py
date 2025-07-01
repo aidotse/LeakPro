@@ -40,7 +40,7 @@ if __name__ == "__main__":
 
     trial_data = []
     for i in range(5):
-        trial_ds, _, _ = get_pii_dataset(num_docs=1, example_id=44+i)
+        trial_ds, _, _ = get_pii_dataset(num_docs=1, example_id=40+i)
         trial_loader = torch.utils.data.DataLoader(trial_ds, collate_fn=TrainingBatch, batch_size=1, shuffle=False)
         trial_data.append(trial_loader)
 

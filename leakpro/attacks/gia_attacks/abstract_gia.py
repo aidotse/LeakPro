@@ -203,5 +203,5 @@ class AbstractGIA(AbstractAttack):
         sim_score = text_reconstruciton_score(client_loader, self.best_reconstruction, token_used=used_tokens)
         gia_result = GIAResults(client_loader, self.best_reconstruction,
                         psnr_score=0, ssim_score=sim_score,
-                        data_mean=data_mean, data_std=data_std, config=configs)
+                        data_mean=data_mean, data_std=data_std, config=configs, images=False)
         yield i, sim_score, gia_result
