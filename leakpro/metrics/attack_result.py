@@ -21,6 +21,7 @@ from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision.utils import save_image
 
 from leakpro.utils.import_helper import Any, List, Self
+from leakpro.fl_utils.save_text import save_text
 
 ########################################################################################################################
 # METRIC_RESULT CLASS
@@ -597,7 +598,7 @@ class GIAResults:
              # Check if path exists, otherwise create it.
             img_save(path, self.recreated_data, self.original_data, self.data_std, self.data_mean)
         else:
-            text_save()
+            text_save(path, self.recreated_data, self.original_data)
 
         # Data to be saved
         data = {
@@ -644,10 +645,14 @@ class GIAResults:
 
 def text_save(path: str, recreated_data: Dataset, original_data: Dataset) -> None:
     """Save text to path."""
-    a = path
-    b = recreated_data
-    c = original_data
-    return a, b, c 
+    if not os.path.exists(f"{path}"):
+        os.makedirs(f"{path}")
+    print("what path: ", path)
+    original = os.path.join(path, "original_text.txt")
+    save_text(original_data, original)
+    recreated = os.path.join(path, "recreated_text.txt")
+    save_text(recreated_data, recreated)
+
 
 def img_save(path: str, recreated_data: Dataset, original_data: Dataset, data_std: Tensor, data_mean: Tensor) -> None:
     """Save images to path."""

@@ -9,6 +9,8 @@ from leakpro.reporting.mia_result import MIAResult
 from leakpro.schemas import OptunaConfig
 from leakpro.utils.logger import logger
 from leakpro.utils.seed import seed_everything
+from leakpro.memory_tracker import print_gpu_memory
+
 
 
 def optuna_optimal_hyperparameters(attack_object: AbstractAttack, optuna_config: OptunaConfig = None) -> optuna.study.Study:
@@ -26,11 +28,16 @@ def optuna_optimal_hyperparameters(attack_object: AbstractAttack, optuna_config:
     """
     def objective(trial: optuna.trial.Trial) -> Tensor:
         # Suggest hyperparameters
+
         new_config = attack_object.suggest_parameters(trial)
+
         # Reset attack to apply new hyperparameters
         attack_object.reset_attack(new_config)
+
         seed_everything(optuna_config.seed)
+
         result = attack_object.run_attack()
+
         if isinstance(result, Generator):
             for step, intermediary_results, result_object in result:
                 # check every 3000 results
@@ -61,7 +68,6 @@ def optuna_optimal_hyperparameters(attack_object: AbstractAttack, optuna_config:
     # Define the pruner and study
     pruner = optuna_config.pruner
     study = optuna.create_study(direction=optuna_config.direction, pruner=pruner)
-
     # Run optimization
     study.optimize(objective, n_trials=optuna_config.n_trials)
 
