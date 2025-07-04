@@ -195,7 +195,10 @@ class Huang(AbstractGIA):
         self.configs.median_pooling = median_pooling
         self.configs.top10norms = top10norms
         if self.optuna_trial_data is not None:
-            trial_data_idx = trial.suggest_int("trial_data", 0, len(self.optuna_trial_data) - 1)
+            trial_data_idx = trial.suggest_categorical(
+                "trial_data",
+                list(range(len(self.optuna_trial_data)))
+            )
             self.client_loader = self.optuna_trial_data[trial_data_idx]
             logger.info(f"Next experiment on trial data idx: {trial_data_idx}")
         logger.info(f"Chosen parameters:\
