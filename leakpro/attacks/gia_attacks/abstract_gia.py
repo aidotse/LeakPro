@@ -192,7 +192,7 @@ class AbstractGIA(AbstractAttack):
                     self.best_reconstruction = deepcopy(reconstruction_loader)
                     self.best_reconstruction_round = i
                     logger.info(f"New best loss: {loss} on round: {i}")
-                if i % 250 == 0:
+                if i % 100 == 0:
                     logger.info(f"Iteration {i}, loss {loss}")
                     sim_score = text_reconstruciton_score(client_loader, self.best_reconstruction, token_used=used_tokens)
                     yield i, sim_score, None
