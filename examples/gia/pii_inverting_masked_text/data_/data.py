@@ -110,39 +110,35 @@ def pre_process_data(
 
         ###MAKE A LIST OF TRAINING EXAMPLES.
         training_examples: List[TrainingExample] = []
-        empty_label_id = "O"
         for encoding, label, identifier_type, mapping  in zip(tokenized_batch.encodings, aligned_labels, identifiers, offset_mapping):
             length = len(label)  # How long is this sequence
-            end = min(0 + tokens_per_batch, length)
-            padding_to_add = 0
-            
-            training_examples.append(
-                TrainingExample(
-                    # Record the tokens
-                    #input_ids=encoding.ids[start:end]  # The ids of the tokens
-                    #+ [self.tokenizer.pad_token_id]
-                    #* padding_to_add,  # padding if needed
-                    embedding = F.one_hot(torch.tensor(encoding.ids[0:end]), len(tokenizer.get_vocab())).float(),
-                    #embedding = bert.embeddings.word_embeddings(torch.tensor(encoding.ids[start:end])).detach(),
-                    labels=(
-                        label[0:end]
-                        + [-1] * padding_to_add  # padding if needed
-                    ),
-                    attention_masks=(
-                        encoding.attention_mask[0:end]
-                        + [0]
-                        * padding_to_add  # 0'd attention masks where we added padding
-                    ),
-                    identifier_types=(identifier_type[0:end]
-                        + [-1] * padding_to_add ##Not used 
-                    
-                    ),
-                    offsets=(mapping[0:end]
-                        + [-1] * padding_to_add
-                    ),
+            for start in range(0, length, window_stride):
+                end = min(start + tokens_per_batch, length)
+                padding_to_add = 0
+                
+                training_examples.append(
+                    TrainingExample(
+                        # Record the tokens
+                        embedding = F.one_hot(torch.tensor(encoding.ids[start:end]), len(tokenizer.get_vocab())).float(),
+                        labels=(
+                            label[start:end]
+                            + [-1] * padding_to_add  # padding if needed
+                        ),
+                        attention_masks=(
+                            encoding.attention_mask[start:end]
+                            + [0]
+                            * padding_to_add  # 0'd attention masks where we added padding
+                        ),
+                        identifier_types=(identifier_type[start:end]
+                            + [-1] * padding_to_add ##Not used 
+                        
+                        ),
+                        offsets=(mapping[start:end]
+                            + [-1] * padding_to_add
+                        ),
 
+                    )
                 )
-            )
         return training_examples
 
 def align_tokens_and_annotations_bilou(tokenized: Encoding, annotations, ids):

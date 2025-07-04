@@ -29,7 +29,7 @@ class GiaNERExtension(GiaDataModalityExtension):
             mask = torch.zeros_like(d.embedding)
             mask[ind] = 1 
             #d.embedding = PartialTrainableTensor.apply(d.embedding, mask).detach().requires_grad_(True)
-            def mask_grad(grad):
+            def mask_grad(grad, mask=mask):
                 return grad * mask  # Apply the mask to the gradient
 
             d.embedding.register_hook(mask_grad)
