@@ -21,7 +21,7 @@ def get_pii_dataset(num_docs:int =1, example_id:int = 44) -> tuple[DataLoader, T
     bert = "allenai/longformer-base-4096"    
     tokenizer = LongformerTokenizerFast.from_pretrained(bert)
     label_set = LabelSet(labels=["MASK"])
-    training_examples = pre_process_data(data=training_raw[example_id:example_id+num_docs], tokenizer=tokenizer,bert=bert, label_set=label_set, tokens_per_batch=4096)
+    training_examples = pre_process_data(data=training_raw[example_id:example_id+num_docs], tokenizer=tokenizer,bert=bert, label_set=label_set, tokens_per_batch=2048)
     train_dataset = Dataset(training_examples)
     data_mean, data_std = 0, 1
     
