@@ -9,8 +9,6 @@ from leakpro.reporting.mia_result import MIAResult
 from leakpro.schemas import OptunaConfig
 from leakpro.utils.logger import logger
 from leakpro.utils.seed import seed_everything
-from leakpro.memory_tracker import print_gpu_memory
-
 
 
 def optuna_optimal_hyperparameters(attack_object: AbstractAttack, optuna_config: OptunaConfig = None) -> optuna.study.Study:
