@@ -22,6 +22,8 @@ from torchvision.utils import save_image
 
 from leakpro.utils.import_helper import Any, List, Self
 from leakpro.fl_utils.save_text import save_text
+from leakpro.fl_utils.save_text import validate_tokens
+
 
 ########################################################################################################################
 # METRIC_RESULT CLASS
@@ -599,6 +601,7 @@ class GIAResults:
             img_save(path, self.recreated_data, self.original_data, self.data_std, self.data_mean)
         else:
             text_save(path, self.recreated_data, self.original_data)
+            validate_tokens(self.original_data, self.recreated_data, os.path.join(path,"recreated_tokens"))
 
         # Data to be saved
         data = {

@@ -58,29 +58,21 @@ def save_text_old(original_dataloader: DataLoader, recreated_dataloader: DataLoa
     print(text)
     print("text printed!")
 
+
 def validate_tokens(original_dataloader: DataLoader, recreated_dataloader: DataLoader, name: str = "examples") -> None:
 
-    
+
     for X, X_ in zip(original_dataloader, recreated_dataloader):
+
         x = X['embedding'][0].cpu().numpy()
         y = X['labels'][0].cpu().numpy()
-       
+
         x_ = X_['embedding'][0].detach().cpu().numpy()
         y_ = X_['labels'][0].cpu().numpy()
         ind = np.where(np.array(y)!=0)[0]
-    
-        #x_ = np.argmax(x_, axis=1)
-        #x = np.argmax(x, axis=1)
     examples = [x[ind],x_[ind]]
-    """ original = []
-    recreated = []
-    for i in range(len(ind)):
-        examples[i] = {'original': x[i], 'recreated': x_[i]}
-    """
-   # save example dictionary to file
-    
+
     np.save(name, examples)
-    #print("examples saved to examples.npy")
     return 0.0
 
 def save_text(tensor: Union[torch.Tensor, List[torch.Tensor]],
