@@ -110,7 +110,6 @@ def pre_process_data(
 
         ###MAKE A LIST OF TRAINING EXAMPLES.
         training_examples: List[TrainingExample] = []
-        empty_label_id = "O"
         for encoding, label, identifier_type, mapping  in zip(tokenized_batch.encodings, aligned_labels, identifiers, offset_mapping):
             length = len(label)  # How long is this sequence
             for start in range(0, length, window_stride):
@@ -120,11 +119,7 @@ def pre_process_data(
                 training_examples.append(
                     TrainingExample(
                         # Record the tokens
-                        #input_ids=encoding.ids[start:end]  # The ids of the tokens
-                        #+ [self.tokenizer.pad_token_id]
-                        #* padding_to_add,  # padding if needed
                         embedding = F.one_hot(torch.tensor(encoding.ids[start:end]), len(tokenizer.get_vocab())).float(),
-                        #embedding = bert.embeddings.word_embeddings(torch.tensor(encoding.ids[start:end])).detach(),
                         labels=(
                             label[start:end]
                             + [-1] * padding_to_add  # padding if needed
