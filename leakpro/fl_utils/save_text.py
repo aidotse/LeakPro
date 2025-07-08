@@ -62,6 +62,8 @@ def save_text_old(original_dataloader: DataLoader, recreated_dataloader: DataLoa
 def validate_tokens(original_dataloader: DataLoader, recreated_dataloader: DataLoader, name: str = "examples") -> None:
 
 
+    orig = None
+    recr = None
     for X, X_ in zip(original_dataloader, recreated_dataloader):
 
         x = X['embedding'][0].cpu().numpy()
@@ -70,10 +72,15 @@ def validate_tokens(original_dataloader: DataLoader, recreated_dataloader: DataL
         x_ = X_['embedding'][0].detach().cpu().numpy()
         y_ = X_['labels'][0].cpu().numpy()
         ind = np.where(np.array(y)!=0)[0]
-    examples = [x[ind],x_[ind]]
 
+        if orig is None:
+            orig = x[ind]
+            recr = x_[ind]
+        else:
+            orig = np.concatenate((orig, x[ind]), axis=0)
+            recr = np.concatenate((recr, x_[ind]), axis=0)
+    examples = [orig,recr]
     np.save(name, examples)
-    return 0.0
 
 def save_text(tensor: Union[torch.Tensor, List[torch.Tensor]],
     fp: Union[str, pathlib.Path, BinaryIO],
