@@ -36,6 +36,7 @@ class AbstractGIA(AbstractAttack):
             handler (AbstractInputHandler): The input handler object.
 
         """
+        self.best_sim = 0
         pass
 
     @abstractmethod
@@ -109,6 +110,7 @@ class AbstractGIA(AbstractAttack):
             for i in range(at_iterations):
                 # loss function which does training and compares distance from reconstruction training to the real training.
                 closure = gradient_closure(optimizer)
+                pre_step_loader = deepcopy(reconstruction_loader)
                 loss = optimizer.step(closure)
                 scheduler.step()
                 with torch.no_grad():
@@ -121,20 +123,23 @@ class AbstractGIA(AbstractAttack):
                 # Choose image who has given least loss
                 if loss < self.best_loss:
                     self.best_loss = loss
-                    self.best_reconstruction = deepcopy(reconstruction_loader)
+                    # the loader before the step was the one that gave the good loss value
+                    self.best_reconstruction = deepcopy(pre_step_loader)
                     self.best_reconstruction_round = i
                     logger.info(f"New best loss: {loss} on round: {i}")
                 if i % 250 == 0:
                     logger.info(f"Iteration {i}, loss {loss}")
                     ssim = dataloaders_ssim_ignite(client_loader, self.best_reconstruction)
+                    if ssim > self.best_sim:
+                        self.final_best = deepcopy(self.best_reconstruction)
                     logger.info(f"ssim: {ssim}")
                     yield i, ssim, None
         except Exception as e:
             logger.info(f"Attack stopped due to {e}. \
                         Saving results.")
-        ssim_score = dataloaders_ssim_ignite(client_loader, self.best_reconstruction)
-        psnr_score = dataloaders_psnr(client_loader, self.best_reconstruction)
-        gia_result = GIAResults(client_loader, self.best_reconstruction,
+        ssim_score = dataloaders_ssim_ignite(client_loader, self.final_best)
+        psnr_score = dataloaders_psnr(client_loader, self.final_best)
+        gia_result = GIAResults(client_loader, self.final_best,
                           psnr_score=psnr_score, ssim_score=ssim_score,
                           data_mean=data_mean, data_std=data_std, config=configs)
         yield i, ssim_score, gia_result

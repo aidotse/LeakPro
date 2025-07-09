@@ -38,6 +38,39 @@ class BNFeatureHook:
         """Remove the hook."""
         self.hook.remove()
 
+class InferredBNFeatureHook:
+    """Implementation of the forward hook to track feature statistics and compute a loss on them.
+
+    Will compute mean and variance, and will use l2 as a loss.
+    """
+
+    def __init__(self: Self, module: torch.nn.modules.BatchNorm2d, client_batch_mean: torch.tensor, client_batch_var: torch.tensor
+                 ) -> None:
+        self.hook = module.register_forward_hook(self.hook_fn)
+        self.client_batch_mean = client_batch_mean
+        self.client_batch_var = client_batch_var
+
+    def hook_fn(self: Self, _module: torch.nn.modules.BatchNorm2d, input: torch.Tensor, _: torch.Tensor) -> None:
+        """Hook to compute feature distribution regularization toward client statistics."""
+        nch = input[0].shape[1]
+        # Compute the mean of the feature maps across batch, height, and width dimensions
+        mean = input[0].mean([0, 2, 3])
+        # Compute the variance for each channel
+        var = (input[0].permute(1, 0, 2,
+                                3).contiguous().view([nch,
+                                                      -1]).var(1,
+                                                               unbiased=False))
+
+        r_feature = torch.norm(self.client_batch_var.data - var, 2) + torch.norm(
+            self.client_batch_mean.data - mean, 2)
+        self.mean = mean
+        self.var = var
+        self.r_feature = r_feature
+
+    def close(self: Self) -> None:
+        """Remove the hook."""
+        self.hook.remove()
+
 class MedianPool2d(torch.nn.Module):
     """Median pool (usable as median filter when stride=1) module.
 

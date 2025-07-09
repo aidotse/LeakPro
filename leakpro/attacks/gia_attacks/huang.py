@@ -25,7 +25,7 @@ from leakpro.utils.logger import logger
 
 @dataclass
 class HuangConfig:
-    """Possible configs for the Inverting Gradients attack."""
+    """Possible configs for the Huang Gradients attack."""
 
     # total variation scale for smoothing the reconstructions after each iteration
     tv_reg: float = 0.052
@@ -76,7 +76,6 @@ class Huang(AbstractGIA):
         self.attack_folder_path = "leakpro_output/attacks/huang"
         os.makedirs(self.attack_folder_path, exist_ok=True)
 
-        self.prepare_attack()
         logger.info("Evaluating with Huang. et al initialized.")
 
     def description(self:Self) -> dict:
@@ -203,6 +202,7 @@ class Huang(AbstractGIA):
             logger.info(f"Next experiment on trial data idx: {trial_data_idx}")
         logger.info(f"Chosen parameters:\
                     total_variation: {total_variation} \
+                    bn_reg: {bn_reg} \
                     attack_lr: {attack_lr} \
                     median_pooling: {median_pooling} \
                     top10norms: {top10norms}")

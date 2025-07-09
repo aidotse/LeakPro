@@ -123,34 +123,30 @@ def dataloaders_psnr(original_dataloader: DataLoader, recreated_dataloader: Data
 
 
 def dataloaders_ssim_ignite(original_dataloader: DataLoader, recreated_dataloader: DataLoader) -> float:
-    """Calculate the average SSIM between images from two dataloaders (original and recreated).
+    """Calculate the average max SSIM for each recreated image over all original images.
 
-    Args:
-    ----
-        original_dataloader (torch.utils.data.DataLoader): Dataloader containing original images.
-        recreated_dataloader (torch.utils.data.DataLoader): Dataloader containing recreated images.
-
-    Returns:
-    -------
-        avg_ssim (float): Average SSIM value over the dataset.
-
+    Each recreated image is compared against all original images in the current batch,
+    taking the maximum SSIM as its score.
     """
-    device = "cuda" if cuda.is_available() else "cpu"
-    ssim_metric = SSIM(data_range=1.0, device=device)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    data_range = 6.0  # adjust based on your normalization
+    ssim_metric = SSIM(data_range=data_range, device=device)
 
-    ssim_metric.reset()
+    max_ssim_scores = []
 
-    with no_grad():
-        # Zip through both dataloaders
-        for (orig_batch, rec_batch) in zip(original_dataloader, recreated_dataloader):
-            orig_images = orig_batch[0].to(device)  # Original images
-            rec_images = rec_batch[0].to(device)    # Recreated images
+    with torch.no_grad():
+        for orig_batch, rec_batch in zip(original_dataloader, recreated_dataloader):
+            orig_images = orig_batch[0].to(device)
+            rec_images = rec_batch[0].to(device)
 
-            # Update SSIM metric
-            ssim_metric.update((rec_images, orig_images))
+            for rec_image in rec_images:
+                rec_image_expanded = rec_image.unsqueeze(0).repeat(orig_images.size(0), 1, 1, 1)
+                ssim_metric.reset()
+                ssim_metric.update((rec_image_expanded, orig_images))
+                ssim_value = ssim_metric.compute()
+                max_ssim_scores.append(ssim_value)
+    return sum(max_ssim_scores) / len(max_ssim_scores) if max_ssim_scores else 0.0
 
-    # Compute average SSIM
-    return ssim_metric.compute()
 
 def text_reconstruciton_score(original_dataloader: DataLoader, recreated_dataloader: DataLoader, token_used: Tensor) -> float:
     """Calculate the reconstruction text statistics from two dataloaders (original and recreated).

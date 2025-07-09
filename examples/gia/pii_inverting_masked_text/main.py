@@ -2,6 +2,7 @@
 from data_.pii_data import get_pii_dataset
 from data_.data_extension import GiaNERExtension
 from leakpro.attacks.gia_attacks.invertinggradients_text import InvertingGradients, InvertingConfig
+from leakpro.run import run_gia_attack
 from leakpro.schemas import OptunaConfig
 from leakpro.utils.seed import seed_everything
 from train import train
@@ -51,7 +52,3 @@ if __name__ == "__main__":
     optuna_config.check_interval = 100
     optuna_config.direction = "minimize"
     attack_object.run_with_optuna(optuna_config=optuna_config)
-
-
-
-

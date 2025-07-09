@@ -71,7 +71,6 @@ class InvertingGradients(AbstractGIA):
         self.optuna_trial_data = optuna_trial_data
 
         logger.info("Inverting gradient initialized.")
-        self.prepare_attack()
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
