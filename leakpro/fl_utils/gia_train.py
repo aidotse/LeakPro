@@ -1,12 +1,10 @@
 """Train function that keeps the computational graph intact."""
 from collections import OrderedDict
-import random
 
 from torch import Tensor, cuda, device
 from torch.autograd import grad
 from torch.nn import Module
 from torch.utils.data import DataLoader
-from torchviz import make_dot
 
 from leakpro.fl_utils.gia_module_to_functional import MetaModule
 from leakpro.fl_utils.gia_optimizers import MetaOptimizer
@@ -18,7 +16,6 @@ def train(
     optimizer: MetaOptimizer,
     criterion: Module,
     epochs: int,
-    print_output = False,
 ) -> list:
     """Model training procedure for GIA.
 
@@ -39,8 +36,6 @@ def train(
             inputs, labels = inputs.to(gpu_or_cpu, non_blocking=True), (labels.to(gpu_or_cpu, non_blocking=True) if
                                                                         isinstance(labels, Tensor) else labels)
             outputs = patched_model(inputs, patched_model.parameters)
-            if print_output:
-                print(outputs)
             loss = criterion(outputs, labels).sum()
             patched_model.parameters = optimizer.step(loss, patched_model.parameters)
     model_delta = OrderedDict((name, param - param_origin)
@@ -49,13 +44,12 @@ def train(
                                                     OrderedDict(model.named_parameters()).items()))
     return list(model_delta.values())
 
-def train2(
+def train_nostep(
     model: Module,
     data: DataLoader,
-    optimizer: MetaOptimizer,
+    optimizer: MetaOptimizer,  # noqa: ARG001
     criterion: Module,
     epochs: int,
-    print_output: bool = False,
 ) -> list:
     """Model training procedure for GIA.
 
@@ -76,9 +70,6 @@ def train2(
                                                                         isinstance(labels, Tensor) else labels)
             outputs = model(inputs)
             loss = criterion(outputs, labels).sum()
-            if print_output:
-                print(outputs)
-                print(loss)
             grads = grad(
                 loss,list(model.parameters()),
                 retain_graph=True, create_graph=True, only_inputs=True, allow_unused=True

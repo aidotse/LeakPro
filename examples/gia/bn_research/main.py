@@ -7,7 +7,7 @@ from cifar100 import get_cifar100_loader
 from pre_train import pre_train
 from leakpro.attacks.gia_attacks.huang import Huang, HuangConfig
 from leakpro.attacks.gia_attacks.invertinggradients import InvertingConfig, InvertingGradients
-from leakpro.fl_utils.gia_train import train2
+from leakpro.fl_utils.gia_train import train_nostep
 from leakpro.run import run_gia_attack
 from leakpro.schemas import OptunaConfig
 from leakpro.utils.seed import seed_everything

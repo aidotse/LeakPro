@@ -1,6 +1,6 @@
 """Run optuna to find best hyperparameters."""
-from abc import ABC, abstractmethod
 import os
+from abc import ABC, abstractmethod
 
 from leakpro.utils.import_helper import Self
 

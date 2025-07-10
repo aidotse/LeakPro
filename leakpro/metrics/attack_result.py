@@ -20,10 +20,8 @@ from torch import Tensor, clamp, stack
 from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision.utils import save_image
 
+from leakpro.fl_utils.save_text import save_text, validate_tokens
 from leakpro.utils.import_helper import Any, List, Self
-from leakpro.fl_utils.save_text import save_text
-from leakpro.fl_utils.save_text import validate_tokens
-
 
 ########################################################################################################################
 # METRIC_RESULT CLASS
@@ -650,7 +648,6 @@ def text_save(path: str, recreated_data: Dataset, original_data: Dataset) -> Non
     """Save text to path."""
     if not os.path.exists(f"{path}"):
         os.makedirs(f"{path}")
-    print("what path: ", path)
     original = os.path.join(path, "original_text.txt")
     save_text(original_data, original)
     recreated = os.path.join(path, "recreated_text.txt")
