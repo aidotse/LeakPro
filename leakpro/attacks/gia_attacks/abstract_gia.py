@@ -132,8 +132,9 @@ class AbstractGIA(AbstractAttack):
                     ssim = dataloaders_ssim_ignite(client_loader, self.best_reconstruction)
                     if ssim > self.best_sim:
                         self.final_best = deepcopy(self.best_reconstruction)
-                    logger.info(f"best ssim: {self.final_best}")
-                    yield i, self.final_best, None
+                        self.best_sim = ssim
+                    logger.info(f"best ssim: {self.best_sim}")
+                    yield i, self.best_sim, None
         except Exception as e:
             logger.info(f"Attack stopped due to {e}. \
                         Saving results.")
@@ -142,7 +143,7 @@ class AbstractGIA(AbstractAttack):
         gia_result = GIAResults(client_loader, self.final_best,
                           psnr_score=psnr_score, ssim_score=ssim_score,
                           data_mean=data_mean, data_std=data_std, config=configs)
-        yield i, self.final_best, gia_result
+        yield i, self.best_sim, gia_result
 
 
     def generic_attack_loop_text(self: Self, configs:dict, gradient_closure: Callable, at_iterations: int,
