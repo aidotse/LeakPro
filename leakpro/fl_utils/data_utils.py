@@ -2,6 +2,7 @@
 from abc import ABC, abstractmethod
 from copy import deepcopy
 
+import numpy as np
 import torch
 from torch import Tensor, cat, mean, randn, std
 from torch.utils.data import DataLoader, Dataset
@@ -120,3 +121,17 @@ def get_meanstd(trainset: Dataset, axis_to_reduce: tuple=(-2,-1)) -> tuple[Tenso
     data_mean = mean(cc, dim=axis_to_reduce).tolist()
     data_std = std(cc, dim=axis_to_reduce).tolist()
     return data_mean, data_std
+
+def get_used_tokens(model: torch.nn.Module, client_gradient: Tensor) -> np.array:
+    """Get used tokens."""
+
+    # searching for layer index corresponding to the embedding layer
+    for i, name in enumerate(model.named_parameters()):
+        if name[0] == "embedding_layer.weight":
+            embedding_layer_idx = i
+
+
+    upd_embedding = client_gradient[embedding_layer_idx].detach().cpu().numpy()
+
+    diff = np.sum(abs(upd_embedding),0)
+    return np.where(diff>0)[0]
