@@ -112,7 +112,7 @@ class GIABase(AbstractGIA):
         def bn_forward_hook(module: Module, input: torch.tensor, output: torch.tensor) -> None:  # noqa: ARG001
             batch_mean = input[0].mean([0, 2, 3])
             batch_var = input[0].var([0, 2, 3], unbiased=False)
-            proxy_statistics.append(batch_mean, batch_var)
+            proxy_statistics.append((batch_mean, batch_var))
 
         hooks = []
         for module in self.model.modules():
