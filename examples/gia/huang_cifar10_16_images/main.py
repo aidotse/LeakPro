@@ -2,7 +2,7 @@
 
 from cifar import get_cifar10_loader
 
-from leakpro.attacks.gia_attacks.gia_corrected import GIABase
+from leakpro.attacks.gia_attacks.gia_running import GIABase
 from leakpro.attacks.gia_attacks.huang import Huang
 from leakpro.run import run_gia_attack
 from leakpro.schemas import OptunaConfig
@@ -25,6 +25,5 @@ if __name__ == "__main__":
     # meta train function designed to work with GIA
     # baseline config
     attack_object = Huang(model, client_dataloader, data_mean, data_std,optuna_trial_data=trial_data)
-    run_gia_attack(attack_object)
-    # optuna_config = OptunaConfig(n_trials=100)
-    # attack_object.run_with_optuna(optuna_config)
+    optuna_config = OptunaConfig(n_trials=100)
+    attack_object.run_with_optuna(optuna_config)

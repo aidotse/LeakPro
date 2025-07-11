@@ -44,11 +44,11 @@ class InferredBNFeatureHook:
     Will compute mean and variance, and will use l2 as a loss.
     """
 
-    def __init__(self: Self, module: torch.nn.modules.BatchNorm2d, client_batch_mean: torch.tensor, client_batch_var: torch.tensor
+    def __init__(self: Self, module: torch.nn.modules.BatchNorm2d, target_batch_mean: torch.tensor, target_batch_var: torch.tensor
                  ) -> None:
         self.hook = module.register_forward_hook(self.hook_fn)
-        self.client_batch_mean = client_batch_mean
-        self.client_batch_var = client_batch_var
+        self.target_batch_mean = target_batch_mean
+        self.target_batch_var = target_batch_var
 
     def hook_fn(self: Self, _module: torch.nn.modules.BatchNorm2d, input: torch.Tensor, _: torch.Tensor) -> None:
         """Hook to compute feature distribution regularization toward client statistics."""
@@ -61,8 +61,8 @@ class InferredBNFeatureHook:
                                                       -1]).var(1,
                                                                unbiased=False))
 
-        r_feature = torch.norm(self.client_batch_var.data - var, 2) + torch.norm(
-            self.client_batch_mean.data - mean, 2)
+        r_feature = torch.norm(self.target_batch_var.data - var, 2) + torch.norm(
+            self.target_batch_mean.data - mean, 2)
         self.mean = mean
         self.var = var
         self.r_feature = r_feature

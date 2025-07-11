@@ -213,5 +213,6 @@ class Huang(AbstractGIA):
         self.best_reconstruction = None
         self.best_reconstruction_round = None
         self.model = deepcopy(self.original_model)
+        super().reset_attack()
         self.prepare_attack()
         logger.info("Huang attack reset to initial state.")

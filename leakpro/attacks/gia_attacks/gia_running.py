@@ -24,7 +24,7 @@ from leakpro.utils.logger import logger
 
 
 @dataclass
-class GIABaseConfig:
+class GIABaseRunningConfig:
     """Possible configs for the Gradients attack."""
 
     # total variation scale for smoothing the reconstructions after each iteration
@@ -49,12 +49,12 @@ class GIABaseConfig:
     top10norms: bool = False
 
 
-class GIABase(AbstractGIA):
+class GIABaseRunning(AbstractGIA):
     """Gradient inversion attack by us."""
 
     def __init__(self: Self, model: Module, client_loader: DataLoader, data_mean: Tensor, data_std: Tensor,
-                train_fn: Optional[Callable] = None, configs: Optional[GIABaseConfig] = None, optuna_trial_data: list = None
-                ) -> None:
+                train_fn: Optional[Callable] = None, configs: Optional[GIABaseRunningConfig] = None,
+                optuna_trial_data: list = None) -> None:
         super().__init__()
         self.original_model = model
         self.model = deepcopy(self.original_model)
@@ -62,7 +62,7 @@ class GIABase(AbstractGIA):
         self.best_reconstruction = None
         self.best_reconstruction_round = None
 
-        self.configs = configs if configs is not None else GIABaseConfig()
+        self.configs = configs if configs is not None else GIABaseRunningConfig()
         self.optuna_trial_data = optuna_trial_data
 
         self.client_loader = client_loader
@@ -258,5 +258,6 @@ class GIABase(AbstractGIA):
         self.best_reconstruction = None
         self.best_reconstruction_round = None
         self.model = deepcopy(self.original_model)
+        super().reset_attack()
         self.prepare_attack()
-        logger.info("Huang attack reset to initial state.")
+        logger.info("GIA base attack reset to initial state.")

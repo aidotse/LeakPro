@@ -44,7 +44,7 @@ if __name__ == "__main__":
     #     trial_data.append(loader)
     config = InvertingConfig()
     config.at_iterations = 12000
-    attack_object = InvertingGradients(model, client_trainloader, data_mean, data_std, train_fn=train2)#,optuna_trial_data=trial_data)
+    attack_object = InvertingGradients(model, client_trainloader, data_mean, data_std)#,optuna_trial_data=trial_data)
     # update functions and reset attack
     attack_object.gradient_closure = gradient_closure.__get__(attack_object, InvertingGradients)
     attack_object.prepare_attack = prepare_attack.__get__(attack_object, InvertingGradients)

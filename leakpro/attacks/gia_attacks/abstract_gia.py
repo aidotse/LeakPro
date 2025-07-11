@@ -82,7 +82,7 @@ class AbstractGIA(AbstractAttack):
     @abstractmethod
     def reset_attack(self: Self) -> None:
         """Reset attack to its initial state."""
-        pass
+        self.best_sim = 0
 
     @abstractmethod
     def suggest_parameters(self: Self, trial: optuna.trial.Trial) -> None:
