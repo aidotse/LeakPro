@@ -8,7 +8,7 @@ from typing import Optional
 
 import torch
 from optuna.trial import Trial
-from torch import Tensor
+from torch import Tensor, device
 from torch.nn import CrossEntropyLoss, Module
 from torch.utils.data import DataLoader
 
@@ -16,16 +16,16 @@ from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
 from leakpro.fl_utils.data_utils import GiaDataModalityExtension, GiaImageExtension
 from leakpro.fl_utils.gia_optimizers import MetaSGD
 from leakpro.fl_utils.gia_train import train
-from leakpro.fl_utils.model_utils import BNFeatureHook
-from leakpro.fl_utils.similarity_measurements import cosine_similarity_weights, l2_norm, total_variation
+from leakpro.fl_utils.model_utils import InferredBNFeatureHook
+from leakpro.fl_utils.similarity_measurements import cosine_similarity_weights, total_variation
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.utils.import_helper import Callable, Self
 from leakpro.utils.logger import logger
 
 
 @dataclass
-class HuangConfig:
-    """Possible configs for the Huang Gradients attack."""
+class GIABaseRunningConfig:
+    """Possible configs for the Gradients attack."""
 
     # total variation scale for smoothing the reconstructions after each iteration
     tv_reg: float = 0.052
@@ -45,18 +45,16 @@ class HuangConfig:
     median_pooling: bool = False
     # bn regularizer
     bn_reg: float = 0.00016
-    # l2 scale for discouraging high overall pixel intensity
-    l2_scale: float = 0
     # if we compare difference only for top 10 layers with largest changes. Potentially good for larger models.
     top10norms: bool = False
 
 
-class Huang(AbstractGIA):
-    """Gradient inversion attack by Huang et al."""
+class GIABaseRunning(AbstractGIA):
+    """Gradient inversion attack by us."""
 
     def __init__(self: Self, model: Module, client_loader: DataLoader, data_mean: Tensor, data_std: Tensor,
-                train_fn: Optional[Callable] = None, configs: Optional[HuangConfig] = None, optuna_trial_data: list = None
-                ) -> None:
+                train_fn: Optional[Callable] = None, configs: Optional[GIABaseRunningConfig] = None,
+                optuna_trial_data: list = None) -> None:
         super().__init__()
         self.original_model = model
         self.model = deepcopy(self.original_model)
@@ -64,7 +62,7 @@ class Huang(AbstractGIA):
         self.best_reconstruction = None
         self.best_reconstruction_round = None
 
-        self.configs = configs if configs is not None else HuangConfig()
+        self.configs = configs if configs is not None else GIABaseRunningConfig()
         self.optuna_trial_data = optuna_trial_data
 
         self.client_loader = client_loader
@@ -76,13 +74,12 @@ class Huang(AbstractGIA):
         self.attack_folder_path = "leakpro_output/attacks/huang"
         os.makedirs(self.attack_folder_path, exist_ok=True)
 
-        logger.info("Evaluating with Huang. et al initialized.")
+        logger.info("Attack initialized.")
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
-        title_str = "Inverting gradients"
-        reference_str = """Huang, Yangisibo, et al. "Evaluating Gradient Inversion Attacks and Defenses in \
-            Federated Learning. Neurips, 2021."""
+        title_str = "Our attack."
+        reference_str = """"""
         summary_str = ""
         detailed_str = ""
         return {
@@ -92,7 +89,7 @@ class Huang(AbstractGIA):
             "detailed": detailed_str,
         }
 
-    def prepare_attack(self:Self) -> None:
+    def prepare_attack(self:Self) -> None:  # noqa: C901
         """Prepare the attack.
 
         Args:
@@ -104,15 +101,64 @@ class Huang(AbstractGIA):
             None
 
         """
-        # add BN feature hook
-        self.loss_r_feature_layers = []
+        gpu_or_cpu = device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model.to(gpu_or_cpu)
+        # calculate number of elements per channel to use to un-bias running var.
+        bn_channel_element_counts = []
+        def bn_capture_n_hook(module: Module, input: torch.tensor, output:torch.tensor) -> None:  # noqa: ARG001
+            input_tensor = input[0]
+            b, c, h, w = input_tensor.shape
+            n = b * h * w
+            bn_channel_element_counts.append(n)
 
+        # extract running statistics before client update
+        pre_step_running_statistics = []
+        hooks_capture_n = []
         for module in self.model.modules():
             if isinstance(module, torch.nn.BatchNorm2d):
-                self.loss_r_feature_layers.append(BNFeatureHook(module))
+                pre_step_running_statistics.append(
+                    (
+                        module.running_mean.data.clone().detach(),
+                        module.running_var.data.clone().detach()))
+                hooks_capture_n.append(module.register_forward_hook(bn_capture_n_hook))
+
         # calculate running bn statistics and get client gradient
         client_gradient = self.train_fn(self.model, self.client_loader,
                                         self.configs.optimizer, self.configs.criterion, self.configs.epochs)
+        for h in hooks_capture_n:
+            h.remove()
+        post_step_running_statistics = []
+
+        for module in self.model.modules():
+            if isinstance(module, torch.nn.BatchNorm2d):
+                post_step_running_statistics.append(
+                    (
+                        module.running_mean.data.clone().detach(),
+                        module.running_var.data.clone().detach()))
+        used_statistics = []
+
+        for (rm_pre, rv_pre), (rm_post, rv_post) in zip(pre_step_running_statistics, post_step_running_statistics):
+            used_mean = 10 * rm_post - 9 * rm_pre
+            used_var = 10 * rv_post - 9 * rv_pre
+            used_statistics.append((used_mean, used_var))
+
+        client_statistics = []
+
+        for i in range(len(used_statistics)):
+            used_mean, used_var = used_statistics[i]
+            n = bn_channel_element_counts[i]
+            correction_factor = (n - 1) / n
+            client_statistics.append((used_mean, used_var * correction_factor))
+        # add feature hook
+        self.loss_r_feature_layers = []
+        start_idx = 0
+        for module in self.model.modules():
+            if isinstance(module, torch.nn.BatchNorm2d):
+                self.loss_r_feature_layers.append(InferredBNFeatureHook(
+                    module,
+                    client_statistics[start_idx][0],
+                    client_statistics[start_idx][1]))
+                start_idx += 1
 
         # Stop updating running statistics
         for module in self.model.modules():
@@ -151,7 +197,7 @@ class Huang(AbstractGIA):
 
             This function computes the gradient and reconstruction loss using cosine similarity between
             original gradients and gradients from reconstruction images. Total variation, BN update distance
-            to running statistics, and L2 norm are added to the loss based on scalars.
+            to client statistics.
 
             Returns
             -------
@@ -172,7 +218,6 @@ class Huang(AbstractGIA):
             # Add the TV loss term to penalize large variations between pixels, encouraging smoother images.
             rec_loss += self.configs.tv_reg * total_variation(self.reconstruction)
             rec_loss += self.configs.bn_reg * loss_r_feature
-            rec_loss += self.configs.l2_scale * l2_norm(self.reconstruction)
             rec_loss.backward()
             self.reconstruction.grad.sign_()
             return rec_loss
@@ -215,4 +260,4 @@ class Huang(AbstractGIA):
         self.model = deepcopy(self.original_model)
         super().reset_attack()
         self.prepare_attack()
-        logger.info("Huang attack reset to initial state.")
+        logger.info("GIA base attack reset to initial state.")

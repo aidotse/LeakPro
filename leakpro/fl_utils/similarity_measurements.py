@@ -1,4 +1,5 @@
 """Diverse util functions."""
+import numpy as np
 import torch
 from ignite.metrics import SSIM
 from torch import Tensor, abs, cuda, mean, no_grad, norm
@@ -61,6 +62,22 @@ def cosine_similarity_weights(client_gradient: torch.Tensor, reconstruction_grad
                               rg.unsqueeze(0).double()).clamp(-1.0, 1.0)
     return (1.0 - cos).float()
 
+
+def l2_distance(client_gradient: torch.Tensor, reconstruction_gradient: torch.Tensor) -> torch.Tensor:
+    """Computes the reconstruction costs between client gradients and the reconstruction gradient.
+
+    This function calculates the pairwise costs between each client gradient and the reconstruction gradient
+    using the l2 norm measure. The costs are accumulated and averaged over all client gradients.
+
+    Returns
+    -------
+        torch.Tensor: The average reconstruction cost.
+
+    """
+    #with torch.no_grad():
+
+    return sum(torch.norm(p1 - p2, p=2) for p1, p2 in zip(client_gradient, reconstruction_gradient))
+
 def total_variation(x: Tensor) -> Tensor:
         """Anisotropic TV."""
         dx = mean(abs(x[:, :, :, :-1] - x[:, :, :, 1:]))
@@ -106,31 +123,61 @@ def dataloaders_psnr(original_dataloader: DataLoader, recreated_dataloader: Data
 
 
 def dataloaders_ssim_ignite(original_dataloader: DataLoader, recreated_dataloader: DataLoader) -> float:
-    """Calculate the average SSIM between images from two dataloaders (original and recreated).
+    """Calculate the average max SSIM for each recreated image over all original images.
+
+    Each recreated image is compared against all original images in the current batch,
+    taking the maximum SSIM as its score.
+    """
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    data_range = 6.0  # adjust based on your normalization
+    ssim_metric = SSIM(data_range=data_range, device=device)
+
+    max_ssim_scores = []
+
+    with torch.no_grad():
+        for orig_batch, rec_batch in zip(original_dataloader, recreated_dataloader):
+            orig_images = orig_batch[0].to(device)
+            rec_images = rec_batch[0].to(device)
+
+            for rec_image in rec_images:
+                rec_image_expanded = rec_image.unsqueeze(0).repeat(orig_images.size(0), 1, 1, 1)
+                ssim_metric.reset()
+                ssim_metric.update((rec_image_expanded, orig_images))
+                ssim_value = ssim_metric.compute()
+                max_ssim_scores.append(ssim_value)
+    return sum(max_ssim_scores) / len(max_ssim_scores) if max_ssim_scores else 0.0
+
+
+def text_reconstruciton_score(original_dataloader: DataLoader, recreated_dataloader: DataLoader, token_used: Tensor) -> float:
+    """Calculate the reconstruction text statistics from two dataloaders (original and recreated).
 
     Args:
     ----
-        original_dataloader (torch.utils.data.DataLoader): Dataloader containing original images.
-        recreated_dataloader (torch.utils.data.DataLoader): Dataloader containing recreated images.
+        original_dataloader (torch.utils.data.DataLoader): Dataloader containing original text.
+        recreated_dataloader (torch.utils.data.DataLoader): Dataloader containing recreated text.
+        token_used (torch.Tensor): Tensor for token used.
 
     Returns:
     -------
-        avg_ssim (float): Average SSIM value over the dataset.
+        avg_sim (float): Average SIM value over the dataset.
 
     """
-    device = "cuda" if cuda.is_available() else "cpu"
-    ssim_metric = SSIM(data_range=1.0, device=device)
+    pred_orders = []
+    for orig_x, rec_x in zip(original_dataloader, recreated_dataloader):
 
-    ssim_metric.reset()
+        true_tokens = orig_x["embedding"][0].cpu().numpy()
+        true_labels = orig_x["labels"][0].cpu().numpy()
 
-    with no_grad():
-        # Zip through both dataloaders
-        for (orig_batch, rec_batch) in zip(original_dataloader, recreated_dataloader):
-            orig_images = orig_batch[0].to(device)  # Original images
-            rec_images = rec_batch[0].to(device)    # Recreated images
+        predict_tokens = rec_x["embedding"][0].detach().cpu().numpy()
+        _ = rec_x["labels"][0].cpu().numpy()
+        ind = np.where(np.array(true_labels)!=0)[0]
+        predict_tokens = predict_tokens[ind]
+        true_tokens = true_tokens[ind]
 
-            # Update SSIM metric
-            ssim_metric.update((rec_images, orig_images))
+        for i in range(len(true_tokens)):
+            true_token = np.argmax(true_tokens[i,token_used])
+            pred_order = np.where(np.argsort(-predict_tokens[i,token_used])==true_token)[0][0]
+            pred_orders.append(pred_order)
 
-    # Compute average SSIM
-    return ssim_metric.compute()
+
+    return np.mean(pred_orders)
