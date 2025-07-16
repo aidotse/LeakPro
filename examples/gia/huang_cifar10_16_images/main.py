@@ -2,15 +2,13 @@
 
 from cifar import get_cifar10_loader
 
-from leakpro.attacks.gia_attacks.gia_running import GIABase
 from leakpro.attacks.gia_attacks.huang import Huang
-from leakpro.run import run_gia_attack
 from leakpro.schemas import OptunaConfig
 from leakpro.utils.seed import seed_everything
 from model import ResNet, PreActBlock
 
 if __name__ == "__main__":
-    seed_everything(1236)
+    seed_everything(1234)
     # This attack needs pre activation batch normalization to function properly
     model = ResNet(PreActBlock, [2, 2, 2, 2], num_classes=10)
     client_dataloader, data_mean, data_std = get_cifar10_loader(num_images=16, batch_size=16, num_workers=2)

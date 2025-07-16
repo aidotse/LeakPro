@@ -1,7 +1,8 @@
+import time
 import torch
 from cifar import get_cifar10_loader
 
-from attack_modifications import gradient_closure, prepare_attack, prepare_attack2
+from attack_modifications import gradient_closure, prepare_attack
 from leakpro.attacks.gia_attacks.huang import Huang, HuangConfig
 from leakpro.attacks.gia_attacks.invertinggradients import InvertingConfig, InvertingGradients
 from leakpro.run import run_gia_attack
@@ -17,16 +18,14 @@ if __name__ == "__main__":
     bn_channel_element_counts = []
     def bn_forward_hook(module, input, output):
         # input[0]: shape [B, C, H, W]
-        input_tensor = input[0]
-        B, C, H, W = input_tensor.shape
-        n = B * H * W  # elements per channel
-        bn_channel_element_counts.append(n)
-
         batch_mean = input[0].mean([0, 2, 3])
         batch_var = input[0].var([0, 2, 3], unbiased=False)
         # batch_var = input[0].var([0, 2, 3], unbiased=True)
-        module.running_mean.data.copy_(batch_mean)
-        module.running_var.data.copy_(batch_var)
+        rm = module.running_mean.data
+        rv = module.running_var.data
+        print(batch_var)
+        print(rv)
+        time.sleep(10000)
     # Register hooks
     hooks = []
     pre_step_running_statistics = []

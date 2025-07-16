@@ -46,5 +46,5 @@ if __name__ == "__main__":
     optuna_config = OptunaConfig()
     run_gia_attack(attack_object)
     optuna_config.n_trials = 100
-    attack_object.run_with_optuna()
+    attack_object.run_with_optuna(optuna_config)
     

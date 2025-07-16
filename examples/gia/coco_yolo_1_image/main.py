@@ -31,5 +31,5 @@ if __name__ == "__main__":
     # Initialize attack object and run with optuna.
     attack_object = InvertingGradients(model, client_loader, data_mean, data_std, configs=configs, train_fn=trainyolo,optuna_trial_data=trial_data)
     optuna_config = OptunaConfig()
-    optuna_config.n_trials = 100
+    optuna_config.n_trials = 30
     attack_object.run_with_optuna(optuna_config=optuna_config)
