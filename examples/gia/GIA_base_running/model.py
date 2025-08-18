@@ -37,32 +37,32 @@ class ResNet(nn.Module):
         self.layer4 = self._make_layer(block, 512 * width_factor, num_blocks[3], stride=2)
         self.linear = nn.Linear(512 * width_factor * block.expansion, num_classes)
 
-    # def _make_layer(self, block, planes, num_blocks, stride):
-    #     strides = [stride] + [1] * (num_blocks - 1)
-    #     layers = []
-    #     for stride in strides:
-    #         layers.append(block(self.in_planes, planes, stride))
-    #         self.in_planes = planes * block.expansion
-    #     return nn.Sequential(*layers)
-
     def _make_layer(self, block, planes, num_blocks, stride):
-        downsample = None
-        norm_layer = nn.BatchNorm2d
-        if stride != 1 or self.in_planes != planes * block.expansion:
-            downsample = nn.Sequential(
-                nn.Conv2d(self.in_planes, planes * block.expansion,
-                        kernel_size=1, stride=stride, bias=False),
-                norm_layer(planes * block.expansion),
-            )
-
+        strides = [stride] + [1] * (num_blocks - 1)
         layers = []
-        layers.append(block(self.in_planes, planes, stride,
-                            downsample, groups=1, base_width=64, dilation=1, norm_layer=norm_layer))
-        self.in_planes = planes * block.expansion
-        for _ in range(1, num_blocks):
-            layers.append(block(self.in_planes, planes,
-                                groups=1, base_width=64, dilation=1, norm_layer=norm_layer))
+        for stride in strides:
+            layers.append(block(self.in_planes, planes, stride))
+            self.in_planes = planes * block.expansion
         return nn.Sequential(*layers)
+
+    # def _make_layer(self, block, planes, num_blocks, stride):
+    #     downsample = None
+    #     norm_layer = nn.BatchNorm2d
+    #     if stride != 1 or self.in_planes != planes * block.expansion:
+    #         downsample = nn.Sequential(
+    #             nn.Conv2d(self.in_planes, planes * block.expansion,
+    #                     kernel_size=1, stride=stride, bias=False),
+    #             norm_layer(planes * block.expansion),
+    #         )
+
+    #     layers = []
+    #     layers.append(block(self.in_planes, planes, stride,
+    #                         downsample, groups=1, base_width=64, dilation=1, norm_layer=norm_layer))
+    #     self.in_planes = planes * block.expansion
+    #     for _ in range(1, num_blocks):
+    #         layers.append(block(self.in_planes, planes,
+    #                             groups=1, base_width=64, dilation=1, norm_layer=norm_layer))
+    #     return nn.Sequential(*layers)
 
     def forward(self, x, lin=0, lout=5):
         out = x
