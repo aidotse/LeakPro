@@ -53,7 +53,7 @@ class GIABase(AbstractGIA):
     """Gradient inversion attack by us."""
 
     def __init__(self: Self, model: Module, client_loader: DataLoader, data_mean: Tensor, data_std: Tensor,
-                 proxy_loader: DataLoader,train_fn: Optional[Callable] = None, 
+                 proxy_loader: DataLoader,train_fn: Optional[Callable] = None,
                  configs: Optional[GIABaseConfig] = None, optuna_trial_data: list = None) -> None:
         super().__init__()
         self.original_model = model
