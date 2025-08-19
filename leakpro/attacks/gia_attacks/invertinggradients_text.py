@@ -12,13 +12,10 @@ from torch.nn import CrossEntropyLoss, Module
 from torch.utils.data import DataLoader
 
 from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
-from leakpro.fl_utils.data_utils import GiaImageExtension
+from leakpro.fl_utils.data_utils import GiaImageExtension, get_used_tokens
 from leakpro.fl_utils.gia_optimizers import MetaSGD
 from leakpro.fl_utils.gia_train import train
-from leakpro.fl_utils.similarity_measurements import (
-    cosine_similarity_weights,
-    total_variation,
-)
+from leakpro.fl_utils.similarity_measurements import cosine_similarity_weights, l2_distance, total_variation
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.utils.import_helper import Callable, Self
 from leakpro.utils.logger import logger
@@ -46,6 +43,8 @@ class InvertingConfig:
     median_pooling: bool = False
     # if we compare difference only for top 10 layers with largest changes. Potentially good for larger models.
     top10norms: bool = False
+    # tryouts on trial halving learning rate on attack
+    tryouts: int = 6
 
 class InvertingGradients(AbstractGIA):
     """Gradient inversion attack by Geiping et al."""
@@ -71,6 +70,8 @@ class InvertingGradients(AbstractGIA):
         self.optuna_trial_data = optuna_trial_data
 
         logger.info("Inverting gradient initialized.")
+
+        self.prepare_attack()
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
@@ -99,17 +100,17 @@ class InvertingGradients(AbstractGIA):
 
         """
         self.model.eval()
-        (
-            self.client_loader,
-            self.original,
-            self.reconstruction,
-            self.reconstruction_labels,
-            self.reconstruction_loader
-        ) = self.configs.data_extension.get_at_data(self.client_loader)
-        self.reconstruction.requires_grad = True
         client_gradient = self.train_fn(self.model, self.client_loader, self.configs.optimizer,
                                         self.configs.criterion, self.configs.epochs)
         self.client_gradient = [p.detach() for p in client_gradient]
+        self.used_tokens = get_used_tokens(self.model, self.client_gradient)
+        self.reconstruction, self.reconstruction_loader = self.configs.data_extension.get_at_data(
+            self.client_loader, self.used_tokens)
+
+
+        for r in self.reconstruction:
+            r.requieres_grad = True
+
 
     def run_attack(self:Self) -> Generator[tuple[int, Tensor, GIAResults]]:
         """Run the attack and return the combined metric result.
@@ -119,9 +120,12 @@ class InvertingGradients(AbstractGIA):
             GIAResults: Container for results on GIA attacks.
 
         """
-        return self.generic_attack_loop(self.configs, self.gradient_closure, self.configs.at_iterations, self.reconstruction,
-                                self.data_mean, self.data_std, self.configs.attack_lr, self.configs.median_pooling,
-                                self.client_loader, self.reconstruction_loader)
+
+        grad_closure = self.gradient_closure_text
+
+        return self.generic_attack_loop_text(self.configs, grad_closure, self.configs.at_iterations, self.reconstruction,
+                                self.data_mean, self.data_std, self.used_tokens, self.configs.attack_lr, self.client_loader,
+                                self.reconstruction_loader, self.configs.tryouts)
 
 
     def gradient_closure(self: Self, optimizer: torch.optim.Optimizer) -> Callable:
@@ -155,6 +159,68 @@ class InvertingGradients(AbstractGIA):
             rec_loss.backward()
             return rec_loss
         return closure
+    # TODO: A better solution to handle different gradient closure functions
+    def gradient_closure_text(self: Self, optimizer: torch.optim.Optimizer) -> Callable:
+        """Returns a closure function that performs a gradient descent step.
+
+        The closure function computes the gradients, calculates the reconstruction loss,
+        adds a total variation regularization term, and then performs backpropagation.
+        """
+        def closure() -> torch.Tensor:
+            """Computes the reconstruction loss and performs backpropagation.
+
+            This function zeroes out the gradients of the optimizer and the model,
+            computes the gradient and reconstruction loss, logs the reconstruction loss,
+            optionally adds a total variation term, performs backpropagation, and optionally
+            modifies the gradient of the input image.
+
+            Returns
+            -------
+                torch.Tensor: The reconstruction loss.
+
+            """
+
+            optimizer.zero_grad()
+            self.model.zero_grad()
+            gradient = self.train_fn(self.model, self.reconstruction_loader, self.configs.optimizer,
+                                     self.configs.criterion, self.configs.epochs)
+            rec_loss = l2_distance(gradient, self.client_gradient)
+
+            # Add Penalties for negative data points
+            for r in self.reconstruction:
+                rec_loss += 0.01 * torch.sum(torch.relu(-r) ** 2)
+
+            rec_loss.backward()
+
+            return rec_loss
+        return closure
+
+    def inference_closure(self: Self) -> torch.Tensor:
+            """Computes the reconstruction loss and performs backpropagation.
+
+            This function zeroes out the gradients of the optimizer and the model,
+            computes the gradient and reconstruction loss, logs the reconstruction loss,
+            optionally adds a total variation term, performs backpropagation, and optionally
+            modifies the gradient of the input image.
+
+            Returns
+            -------
+                torch.Tensor: The reconstruction loss.
+
+            """
+
+            self.model.zero_grad()
+
+            gradient = self.train_fn(self.model, self.reconstruction_loader, self.configs.optimizer,
+                                     self.configs.criterion, self.configs.epochs)
+            rec_loss = l2_distance(gradient, self.client_gradient)
+
+            # Add Penalties for negative data points
+            for r in self.reconstruction:
+                rec_loss += 0.01 * torch.sum(torch.relu(-r) ** 2)
+
+
+            return rec_loss.detach().cpu()
 
     def _configure_attack(self: Self, configs: dict) -> None:
         pass
@@ -162,13 +228,13 @@ class InvertingGradients(AbstractGIA):
     def suggest_parameters(self: Self, trial: Trial) -> None:
         """Suggest parameters to chose and range for optimization for the Inverting Gradient attack."""
         total_variation = trial.suggest_float("total_variation", 1e-8, 1e-1, log=True)
-        attack_lr = trial.suggest_float("attack_lr", 1e-4, 100.0, log=True)
-        median_pooling = trial.suggest_int("median_pooling", 0, 1)
+        attack_lr = trial.suggest_float("attack_lr", 1e-6, 1.0, log=True)
         top10norms = trial.suggest_int("top10norms", 0, 1)
+        tryouts = trial.suggest_int("tryouts", 0, 10)
         self.configs.attack_lr = attack_lr
         self.configs.tv_reg = total_variation
-        self.configs.median_pooling = median_pooling
         self.configs.top10norms = top10norms
+        self.configs.tryouts = tryouts
         if self.optuna_trial_data is not None:
             trial_data_idx = trial.suggest_categorical(
                 "trial_data",
@@ -179,7 +245,6 @@ class InvertingGradients(AbstractGIA):
         logger.info(f"Chosen parameters:\
                     total_variation: {total_variation} \
                     attack_lr: {attack_lr} \
-                    median_pooling: {median_pooling} \
                     top10norms: {top10norms}")
 
     def reset_attack(self: Self, new_config:dict) -> None:  # noqa: ARG002

@@ -8,7 +8,7 @@ import yaml
 from torch import nn
 import os
 from typing import Optional
-
+import torch.nn.functional as F
 import torch
 import torchvision
 from torch import nn
@@ -111,49 +111,6 @@ class SPP(torch.nn.Module):
         y1 = self.res_m(x)
         y2 = self.res_m(y1)
         return self.conv2(torch.cat([x, y1, y2, self.res_m(y2)], 1))
-    
-class YOLOClassifier(torch.nn.Module):
-    def __init__(self, width, depth, num_classes):
-        super().__init__()
-        # Backbone and neck
-        self.net = ResDarkNet(width, depth)
-        self.fpn = DarkFPN(width, depth)
-
-        # Classification head: use the deepest FPN feature (width[5] channels)
-        c5 = width[5]
-        self.global_avg = torch.nn.AdaptiveAvgPool2d(1)
-        self.classifier = torch.nn.Sequential(
-            torch.nn.Flatten(),              # -> (B, c5)
-            torch.nn.Linear(c5, 256),
-            torch.nn.ReLU(),
-            torch.nn.Dropout(0.2),
-            torch.nn.Linear(256, num_classes)  # -> (B, num_classes)
-        )
-
-    def forward(self, x):
-        # Extract features
-        features = self.net(x)
-        p3, p4, p5 = self.fpn(features)
-
-        # Pool and classify using the deepest scale
-        z = self.global_avg(p5)       # (B, c5, 1, 1)
-        logits = self.classifier(z)   # (B, num_classes)
-        return logits
-
-    def fuse(self):
-        # Fuse Conv+Norm for faster inference
-        for m in self.modules():
-            if isinstance(m, Conv) and hasattr(m, 'norm'):
-                m.conv = fuse_conv(m.conv, m.norm)
-                m.forward = m.fuse_forward
-                delattr(m, 'norm')
-        return self
-
-
-def yolo_v8_n_class(num_classes: int = 80):
-    depth = [1, 2, 2]
-    width = [3, 16, 32, 64, 128, 256]
-    return YOLOClassifier(width, depth, num_classes)
 
 def _make_resnet_layer(block, in_planes, out_planes, blocks, stride=1):
     """
@@ -203,31 +160,31 @@ class ResNetStem(nn.Module):
         return x
 
 class ResDarkNet(torch.nn.Module):
-    def __init__(self, width, depth):
+    def __init__(self, width, depth, block):
         super().__init__()
         self.p1 = ResNetStem(in_channels=width[0], out_channels=width[1])
-        self.layer1 = _make_resnet_layer(BasicBlock,
+        self.layer1 = _make_resnet_layer(block,
                                     in_planes=width[1],
                                     out_planes=width[2],
                                     blocks=2,
                                          stride=1)
 
         # Stage 2: 64→128 channels, downsample once
-        self.layer2 = _make_resnet_layer(BasicBlock,
+        self.layer2 = _make_resnet_layer(block,
                                          in_planes=width[2],
                                          out_planes=width[3],
                                          blocks=2,
                                          stride=2)
 
         # Stage 3: 128→256 channels, downsample once
-        self.layer3 = _make_resnet_layer(BasicBlock,
+        self.layer3 = _make_resnet_layer(block,
                                          in_planes=width[3],
                                          out_planes=width[4],
                                          blocks=2,
                                          stride=2)
 
         # Stage 4: 256→512 channels, downsample once
-        self.layer4 = _make_resnet_layer(BasicBlock,
+        self.layer4 = _make_resnet_layer(block,
                                          in_planes=width[4],
                                          out_planes=width[5],
                                          blocks=2,
@@ -290,7 +247,7 @@ class DarkFPN(torch.nn.Module):
         return h2, h4, h6
 
 class ResDarkFPNShallow(nn.Module):
-    def __init__(self, width, depth):
+    def __init__(self, width, depth, block):
         """
         width: list of channel dims, e.g. [C0, C1, C2, C3, C4, C5]
         This version uses only one BasicBlock per stage to reduce depth,
@@ -300,9 +257,8 @@ class ResDarkFPNShallow(nn.Module):
         # upsample by factor 2 (nearest by default)
         self.up = nn.Upsample(scale_factor=2, mode='nearest')
 
-        # Each residual layer now has just one BasicBlock
         self.h1 = _make_resnet_layer(
-            BasicBlock,
+            block,
             in_planes=width[4] + width[5],
             out_planes=width[4],
             blocks=1,
@@ -310,7 +266,7 @@ class ResDarkFPNShallow(nn.Module):
         )
 
         self.h2 = _make_resnet_layer(
-            BasicBlock,
+            block,
             in_planes=width[3] + width[4],
             out_planes=width[3],
             blocks=1,
@@ -322,7 +278,7 @@ class ResDarkFPNShallow(nn.Module):
         self.h5 = Conv(width[4], width[4], 3, 2)
 
         self.h4 = _make_resnet_layer(
-            BasicBlock,
+            block,
             in_planes=width[3] + width[4],
             out_planes=width[4],
             blocks=1,
@@ -330,7 +286,7 @@ class ResDarkFPNShallow(nn.Module):
         )
 
         self.h6 = _make_resnet_layer(
-            BasicBlock,
+            block,
             in_planes=width[4] + width[5],
             out_planes=width[5],
             blocks=1,
@@ -517,11 +473,11 @@ class Head(torch.nn.Module):
             # cls (.01 objects, 80 classes, 640 img)
             b[-1].bias.data[:m.nc] = math.log(5 / m.nc / (256 / s) ** 2)
 
-class YOLO(torch.nn.Module):
-    def __init__(self, width, depth, num_classes):
+class YOLORes(torch.nn.Module):
+    def __init__(self, width, depth, num_classes, block):
         super().__init__()
-        self.net = ResDarkNet(width, depth)
-        self.fpn = ResDarkFPNShallow(width, depth)
+        self.net = ResDarkNet(width, depth, block=block)
+        self.fpn = ResDarkFPNShallow(width, depth, block=block)
 
         img_dummy = torch.zeros(1, 3, 256, 256)
         self.head = Head(num_classes, (width[3], width[4], width[5]))
@@ -542,11 +498,84 @@ class YOLO(torch.nn.Module):
                 delattr(m, 'norm')
         return self
 
+class YOLO(torch.nn.Module):
+    def __init__(self, width, depth, num_classes):
+        super().__init__()
+        self.net = DarkNet(width, depth)
+        self.fpn = DarkFPN(width, depth)
+
+        img_dummy = torch.zeros(1, 3, 256, 256)
+        self.head = Head(num_classes, (width[3], width[4], width[5]))
+        self.head.stride = torch.tensor([256 / x.shape[-2] for x in self.forward(img_dummy)])
+        self.stride = self.head.stride
+        self.head.initialize_biases()
+
+    def forward(self, x):
+        x = self.net(x)
+        x = self.fpn(x)
+        return self.head(list(x))
+
+    def fuse(self):
+        for m in self.modules():
+            if type(m) is Conv and hasattr(m, 'norm'):
+                m.conv = fuse_conv(m.conv, m.norm)
+                m.forward = m.fuse_forward
+                delattr(m, 'norm')
+        return self
+
+def conv3x3(in_planes, out_planes, stride=1):
+    return nn.Conv2d(in_planes,
+                     out_planes,
+                     kernel_size=3,
+                     stride=stride,
+                     padding=1,
+                     bias=False)
+
+class PreActBlock(nn.Module):
+    """Pre-activation version of the BasicBlock."""
+    expansion = 1
+
+    def __init__(self, in_planes, planes, stride=1, downsample=None):
+        super(PreActBlock, self).__init__()
+        self.bn1 = nn.BatchNorm2d(in_planes)
+        self.conv1 = conv3x3(in_planes, planes, stride)
+        self.bn2 = nn.BatchNorm2d(planes)
+        self.conv2 = conv3x3(planes, planes)
+
+        self.shortcut = nn.Sequential()
+        if stride != 1 or in_planes != self.expansion * planes:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(
+                    in_planes,
+                    self.expansion * planes,
+                    kernel_size=1,
+                    stride=stride,
+                    bias=False,
+                ))
+
+    def forward(self, x):
+        out = F.relu(self.bn1(x))
+        shortcut = self.shortcut(out)
+        out = self.conv1(out)
+        out = self.conv2(F.relu(self.bn2(out)))
+        out += shortcut
+        return out
 
 def yolo_v8_n_basicblock(num_classes: int = 80):
     depth = [1, 2, 2]
     width = [3, 16, 32, 64, 128, 256]
+    return YOLORes(width, depth, num_classes, block=BasicBlock)
+
+def yolo_v8_n(num_classes: int = 80):
+    depth = [1, 2, 2]
+    width = [3, 16, 32, 64, 128, 256]
     return YOLO(width, depth, num_classes)
+
+def yolo_v8_n_preactblock(num_classes: int = 80):
+    depth = [1, 2, 2]
+    width = [3, 16, 32, 64, 128, 256]
+    return YOLORes(width, depth, num_classes, block=PreActBlock)
+    
 
 def wh2xy(x):
     y = x.clone()
@@ -833,74 +862,3 @@ class YOLOResNet18(nn.Module):
         # 2) run through head
         outputs = self.head(feats)
         return outputs
-
-class ResNet(torchvision.models.ResNet):
-    """ResNet generalization for CIFAR thingies."""
-
-    def __init__(self: Self, block: BasicBlock, layers: list, num_classes: int=10, zero_init_residual: bool=False,  # noqa: C901
-                 groups: int=1, base_width: int=64, replace_stride_with_dilation: list=None,
-                 norm_layer: Optional[nn.Module]=None, strides: list=[1, 2, 2, 2], pool: str="avg") -> None:  # noqa: B006
-        """Initialize as usual. Layers and strides are scriptable."""
-        super(torchvision.models.ResNet, self).__init__()  # nn.Module
-        if norm_layer is None:
-            norm_layer = nn.BatchNorm2d
-        self._norm_layer = norm_layer
-
-
-        self.dilation = 1
-        if replace_stride_with_dilation is None:
-            # each element in the tuple indicates if we should replace
-            # the 2x2 stride with a dilated convolution instead
-            replace_stride_with_dilation = [False, False, False, False]
-        if len(replace_stride_with_dilation) != 4:
-            raise ValueError("replace_stride_with_dilation should be None "
-                             "or a 4-element tuple, got {}".format(replace_stride_with_dilation))
-        self.groups = groups
-
-        self.inplanes = base_width
-        self.base_width = 64  # Do this to circumvent BasicBlock errors. The value is not actually used.
-        self.conv1 = nn.Conv2d(3, self.inplanes, kernel_size=3, stride=1, padding=1, bias=False)
-        self.bn1 = norm_layer(self.inplanes)
-        self.relu = nn.ReLU(inplace=True)
-
-        self.layers = torch.nn.ModuleList()
-        width = self.inplanes
-        for idx, layer in enumerate(layers):
-            self.layers.append(self._make_layer(block, width, layer, stride=strides[idx], dilate=replace_stride_with_dilation[idx]))
-            width *= 2
-
-        self.pool = nn.AdaptiveAvgPool2d((1, 1)) if pool == "avg" else nn.AdaptiveMaxPool2d((1, 1))
-        self.fc = nn.Linear(width // 2 * block.expansion, num_classes)
-
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
-            elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
-
-        # Zero-initialize the last BN in each residual branch,
-        # so that the residual branch starts with zeros, and each residual block behaves like an identity.
-        # This improves the model by 0.2~0.3% according to https://arxiv.org/abs/1706.02677
-        if zero_init_residual:
-            for m in self.modules():
-                if isinstance(m, Bottleneck):
-                    nn.init.constant_(m.bn3.weight, 0)
-                elif isinstance(m, torchvision.models.resnet.BasicBlock):
-                    nn.init.constant_(m.bn2.weight, 0)
-
-
-    def _forward_impl(self: Self, x: torch.Tensor) -> None:
-        # See note [TorchScript super()]
-        x = self.conv1(x)
-        x = self.bn1(x)
-        x = self.relu(x)
-
-        for layer in self.layers:
-            x = layer(x)
-
-        x = self.pool(x)
-        x = torch.flatten(x, 1)
-        x = self.fc(x)
-
-        return x

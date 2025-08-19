@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader
 from leakpro.attacks.attack_base import AbstractAttack
 from leakpro.attacks.utils.hyperparameter_tuning.optuna import optuna_optimal_hyperparameters
 from leakpro.fl_utils.model_utils import MedianPool2d
-from leakpro.fl_utils.similarity_measurements import dataloaders_psnr, dataloaders_ssim_ignite
+from leakpro.fl_utils.similarity_measurements import dataloaders_psnr, dataloaders_ssim_ignite, text_reconstruciton_score
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.schemas import OptunaConfig
 from leakpro.utils.import_helper import Self
@@ -36,6 +36,7 @@ class AbstractGIA(AbstractAttack):
             handler (AbstractInputHandler): The input handler object.
 
         """
+        self.best_sim = 0
         pass
 
     @abstractmethod
@@ -81,7 +82,7 @@ class AbstractGIA(AbstractAttack):
     @abstractmethod
     def reset_attack(self: Self) -> None:
         """Reset attack to its initial state."""
-        pass
+        self.best_sim = 0
 
     @abstractmethod
     def suggest_parameters(self: Self, trial: optuna.trial.Trial) -> None:
@@ -109,6 +110,7 @@ class AbstractGIA(AbstractAttack):
             for i in range(at_iterations):
                 # loss function which does training and compares distance from reconstruction training to the real training.
                 closure = gradient_closure(optimizer)
+                pre_step_loader = deepcopy(reconstruction_loader)
                 loss = optimizer.step(closure)
                 scheduler.step()
                 with torch.no_grad():
@@ -121,20 +123,91 @@ class AbstractGIA(AbstractAttack):
                 # Choose image who has given least loss
                 if loss < self.best_loss:
                     self.best_loss = loss
-                    self.best_reconstruction = deepcopy(reconstruction_loader)
+                    # the loader before the step was the one that gave the good loss value
+                    self.best_reconstruction = deepcopy(pre_step_loader)
                     self.best_reconstruction_round = i
                     logger.info(f"New best loss: {loss} on round: {i}")
                 if i % 250 == 0:
                     logger.info(f"Iteration {i}, loss {loss}")
                     ssim = dataloaders_ssim_ignite(client_loader, self.best_reconstruction)
-                    logger.info(f"ssim: {ssim}")
-                    yield i, ssim, None
+                    if ssim > self.best_sim:
+                        self.final_best = deepcopy(self.best_reconstruction)
+                        self.best_sim = ssim
+                    logger.info(f"best ssim: {self.best_sim}")
+                    yield i, self.best_sim, None
         except Exception as e:
             logger.info(f"Attack stopped due to {e}. \
                         Saving results.")
-        ssim_score = dataloaders_ssim_ignite(client_loader, self.best_reconstruction)
-        psnr_score = dataloaders_psnr(client_loader, self.best_reconstruction)
-        gia_result = GIAResults(client_loader, self.best_reconstruction,
+        ssim_score = dataloaders_ssim_ignite(client_loader, self.final_best)
+        psnr_score = dataloaders_psnr(client_loader, self.final_best)
+        gia_result = GIAResults(client_loader, self.final_best,
                           psnr_score=psnr_score, ssim_score=ssim_score,
                           data_mean=data_mean, data_std=data_std, config=configs)
-        yield i, ssim_score, gia_result
+        yield i, self.best_sim, gia_result
+
+
+    def generic_attack_loop_text(self: Self, configs:dict, gradient_closure: Callable, at_iterations: int,
+                        reconstruction: Tensor, data_mean: Tensor, data_std: Tensor, used_tokens: Tensor, attack_lr: float,
+                        client_loader: DataLoader, reconstruction_loader: DataLoader, tryouts: int = 6
+                        ) -> Generator[tuple[int, Tensor, GIAResults]]:
+        """Generic attack loop for GIA's."""
+
+        optimizer = torch.optim.Adam(reconstruction, lr=attack_lr)
+
+        # reduce LR every 1/3 of total iterations
+        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
+                                                            milestones=[at_iterations // 2.667,
+                                                                        at_iterations // 1.6,
+                                                                        at_iterations // 1.142], gamma=0.1)
+        try:
+            for i in range(at_iterations):
+                logger.info(f"iteration: {i}")
+
+                # loss function which does training and compares distance from reconstruction training to the real training.
+                closure = gradient_closure(optimizer)
+
+                previous_reconstruction_data = deepcopy(reconstruction_loader)
+                previous_optimizer_state = deepcopy(optimizer.state_dict())
+                last_loss = optimizer.step(closure)
+                loss = self.inference_closure()
+                tryout = 0
+                while loss > last_loss and tryout < tryouts:
+                    # reset reconstruction with previous version until better performance
+                    with torch.no_grad():
+                            for j in range(len(reconstruction)):
+                                reconstruction[j].copy_(previous_reconstruction_data.dataset[j].embedding)
+
+                    optimizer.load_state_dict(previous_optimizer_state)
+                    for param_group in optimizer.param_groups:
+                        param_group["lr"] = param_group["lr"]/2
+                    closure = gradient_closure(optimizer)
+                    _ = optimizer.step(closure)
+                    loss = self.inference_closure()
+
+                    tryout += 1
+
+                for param_group in optimizer.param_groups:
+                    param_group["lr"] = attack_lr
+
+
+
+                scheduler.step()
+                # Choose image who has given least loss
+                if loss < self.best_loss:
+                    self.best_loss = loss
+                    self.best_reconstruction = deepcopy(reconstruction_loader)
+                    self.best_reconstruction_round = i
+                    logger.info(f"New best loss: {loss} on round: {i}")
+                if i % 100 == 0:
+                    logger.info(f"Iteration {i}, loss {loss}")
+                    sim_score = text_reconstruciton_score(client_loader, self.best_reconstruction, token_used=used_tokens)
+                    yield i, sim_score, None
+        except Exception as e:
+            logger.info(f"Attack stopped due to {e}. \
+                        Saving results.")
+
+        sim_score = text_reconstruciton_score(client_loader, self.best_reconstruction, token_used=used_tokens)
+        gia_result = GIAResults(client_loader, self.best_reconstruction,
+                        psnr_score=0, ssim_score=sim_score,
+                        data_mean=data_mean, data_std=data_std, config=configs, images=False)
+        yield i, sim_score, gia_result

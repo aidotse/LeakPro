@@ -1,4 +1,5 @@
-"""Geiping, Jonas, et al. "Inverting gradients-how easy is it to break privacy in federated learning?."."""
+"""Huang, Yangisibo, et al. "Evaluating Gradient Inversion Attacks and Defenses in Federated Learning."."""
+
 import os
 from collections.abc import Generator
 from copy import deepcopy
@@ -7,76 +8,79 @@ from typing import Optional
 
 import torch
 from optuna.trial import Trial
-from torch import Tensor
+from torch import Tensor, device
 from torch.nn import CrossEntropyLoss, Module
 from torch.utils.data import DataLoader
 
 from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
-from leakpro.fl_utils.data_utils import GiaImageExtension
+from leakpro.fl_utils.data_utils import GiaDataModalityExtension, GiaImageExtension
 from leakpro.fl_utils.gia_optimizers import MetaSGD
 from leakpro.fl_utils.gia_train import train
-from leakpro.fl_utils.similarity_measurements import (
-    cosine_similarity_weights,
-    total_variation,
-)
+from leakpro.fl_utils.model_utils import InferredBNFeatureHook
+from leakpro.fl_utils.similarity_measurements import cosine_similarity_weights, total_variation
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.utils.import_helper import Callable, Self
 from leakpro.utils.logger import logger
 
 
 @dataclass
-class InvertingConfig:
-    """Possible configs for the Inverting Gradients attack."""
+class GIABaseConfig:
+    """Possible configs for the Gradients attack."""
 
     # total variation scale for smoothing the reconstructions after each iteration
-    tv_reg: float = 1.0e-06
+    tv_reg: float = 0.052
     # learning rate on the attack optimizer
     attack_lr: float = 0.1
     # iterations for the attack steps
-    at_iterations: int = 8000
+    at_iterations: int = 10000
     # MetaOptimizer, see MetaSGD for implementation
     optimizer: object = field(default_factory=lambda: MetaSGD())
     # Client loss function
-    criterion: object = field(default_factory=lambda: CrossEntropyLoss())
+    criterion: object = field(default_factory=lambda: CrossEntropyLoss(reduction="mean"))
     # Data modality extension
-    data_extension: object = field(default_factory=lambda: GiaImageExtension())
+    data_extension: GiaDataModalityExtension = field(default_factory=lambda: GiaImageExtension())
     # Number of epochs for the client attack
     epochs: int = 1
     # if to use median pool 2d on images, can improve attack on high higher resolution (100+)
     median_pooling: bool = False
+    # bn regularizer
+    bn_reg: float = 0.00016
     # if we compare difference only for top 10 layers with largest changes. Potentially good for larger models.
     top10norms: bool = False
 
-class InvertingGradients(AbstractGIA):
-    """Gradient inversion attack by Geiping et al."""
+
+class GIABase(AbstractGIA):
+    """Gradient inversion attack by us."""
 
     def __init__(self: Self, model: Module, client_loader: DataLoader, data_mean: Tensor, data_std: Tensor,
-                 train_fn: Optional[Callable] = None, configs: Optional[InvertingConfig] = None, optuna_trial_data: list = None
-                 ) -> None:
+                 proxy_loader: DataLoader,train_fn: Optional[Callable] = None,
+                 configs: Optional[GIABaseConfig] = None, optuna_trial_data: list = None) -> None:
         super().__init__()
         self.original_model = model
         self.model = deepcopy(self.original_model)
-        self.client_loader = client_loader
-        self.train_fn = train_fn if train_fn is not None else train
-        self.data_mean = data_mean
-        self.data_std = data_std
-        self.configs = configs if configs is not None else InvertingConfig()
         self.best_loss = float("inf")
         self.best_reconstruction = None
         self.best_reconstruction_round = None
-        # required for optuna to save the best hyperparameters
-        self.attack_folder_path = "leakpro_output/attacks/inverting_grad"
-        os.makedirs(self.attack_folder_path, exist_ok=True)
-        # optuna trial data
+
+        self.configs = configs if configs is not None else GIABaseConfig()
         self.optuna_trial_data = optuna_trial_data
 
-        logger.info("Inverting gradient initialized.")
+        self.client_loader = client_loader
+        self.proxy_loader = proxy_loader
+        self.train_fn = train_fn if train_fn is not None else train
+        self.data_mean = data_mean
+        self.data_std = data_std
+
+        # required for optuna to save the best hyperparameters
+        self.attack_folder_path = "leakpro_output/attacks/huang"
+        os.makedirs(self.attack_folder_path, exist_ok=True)
+
+        logger.info("Attack initialized.")
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
-        title_str = "Inverting gradients"
-        reference_str = """Geiping, Jonas, et al. Inverting gradients-how easy is it to
-            break privacy in federated learning? Neurips, 2020."""
+        title_str = "Our most realistic attack."
+        reference_str = """"""
         summary_str = ""
         detailed_str = ""
         return {
@@ -86,7 +90,7 @@ class InvertingGradients(AbstractGIA):
             "detailed": detailed_str,
         }
 
-    def prepare_attack(self:Self) -> None:
+    def prepare_attack(self:Self) -> None:  # noqa: C901
         """Prepare the attack.
 
         Args:
@@ -98,7 +102,46 @@ class InvertingGradients(AbstractGIA):
             None
 
         """
-        self.model.eval()
+        gpu_or_cpu = device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model.to(gpu_or_cpu)
+        # get client gradient
+        client_gradient = self.train_fn(self.model, self.client_loader,
+                                        self.configs.optimizer, self.configs.criterion, self.configs.epochs)
+        # get proxy statistics from proxy data
+        proxy_statistics = []
+        def bn_forward_hook(module: Module, input: torch.tensor, output: torch.tensor) -> None:  # noqa: ARG001
+            batch_mean = input[0].mean([0, 2, 3])
+            batch_var = input[0].var([0, 2, 3], unbiased=False)
+            proxy_statistics.append((batch_mean, batch_var))
+
+        hooks = []
+        for module in self.model.modules():
+            if isinstance(module, torch.nn.BatchNorm2d):
+                hooks.append(module.register_forward_hook(bn_forward_hook))
+
+        _ = self.train_fn(self.model, self.proxy_loader,
+                                        self.configs.optimizer, self.configs.criterion, self.configs.epochs)
+
+        # Remove hooks
+        for h in hooks:
+            h.remove()
+
+        # add feature hook, regularizing toward proxy data.
+        self.loss_r_feature_layers = []
+        start_idx = 0
+        for module in self.model.modules():
+            if isinstance(module, torch.nn.BatchNorm2d):
+                self.loss_r_feature_layers.append(InferredBNFeatureHook(
+                    module,
+                    proxy_statistics[start_idx][0],
+                    proxy_statistics[start_idx][1]))
+                start_idx += 1
+
+        # Stop updating running statistics
+        for module in self.model.modules():
+            if isinstance(module, torch.nn.BatchNorm2d):
+                module.momentum = 0
+
         (
             self.client_loader,
             self.original,
@@ -106,10 +149,10 @@ class InvertingGradients(AbstractGIA):
             self.reconstruction_labels,
             self.reconstruction_loader
         ) = self.configs.data_extension.get_at_data(self.client_loader)
+
         self.reconstruction.requires_grad = True
-        client_gradient = self.train_fn(self.model, self.client_loader, self.configs.optimizer,
-                                        self.configs.criterion, self.configs.epochs)
         self.client_gradient = [p.detach() for p in client_gradient]
+
 
     def run_attack(self:Self) -> Generator[tuple[int, Tensor, GIAResults]]:
         """Run the attack and return the combined metric result.
@@ -120,23 +163,18 @@ class InvertingGradients(AbstractGIA):
 
         """
         return self.generic_attack_loop(self.configs, self.gradient_closure, self.configs.at_iterations, self.reconstruction,
-                                self.data_mean, self.data_std, self.configs.attack_lr, self.configs.median_pooling,
-                                self.client_loader, self.reconstruction_loader)
+                                        self.data_mean, self.data_std, self.configs.attack_lr, self.configs.median_pooling,
+                                        self.client_loader, self.reconstruction_loader)
 
 
     def gradient_closure(self: Self, optimizer: torch.optim.Optimizer) -> Callable:
-        """Returns a closure function that performs a gradient descent step.
-
-        The closure function computes the gradients, calculates the reconstruction loss,
-        adds a total variation regularization term, and then performs backpropagation.
-        """
+        """Returns a closure function that calculates loss and gradients."""
         def closure() -> torch.Tensor:
             """Computes the reconstruction loss and performs backpropagation.
 
-            This function zeroes out the gradients of the optimizer and the model,
-            computes the gradient and reconstruction loss, logs the reconstruction loss,
-            optionally adds a total variation term, performs backpropagation, and optionally
-            modifies the gradient of the input image.
+            This function computes the gradient and reconstruction loss using cosine similarity between
+            original gradients and gradients from reconstruction images. Total variation, BN update distance
+            to client statistics.
 
             Returns
             -------
@@ -145,14 +183,20 @@ class InvertingGradients(AbstractGIA):
             """
             optimizer.zero_grad()
             self.model.zero_grad()
-
             gradient = self.train_fn(self.model, self.reconstruction_loader, self.configs.optimizer,
                                      self.configs.criterion, self.configs.epochs)
             rec_loss = cosine_similarity_weights(gradient, self.client_gradient, self.configs.top10norms)
-            tv_reg = (self.configs.tv_reg * total_variation(self.reconstruction))
+
+            loss_r_feature = sum([
+                mod.r_feature
+                for (idx, mod) in enumerate(self.loss_r_feature_layers)
+            ])
+
             # Add the TV loss term to penalize large variations between pixels, encouraging smoother images.
-            rec_loss += tv_reg
+            rec_loss += self.configs.tv_reg * total_variation(self.reconstruction)
+            rec_loss += self.configs.bn_reg * loss_r_feature
             rec_loss.backward()
+            self.reconstruction.grad.sign_()
             return rec_loss
         return closure
 
@@ -160,11 +204,13 @@ class InvertingGradients(AbstractGIA):
         pass
 
     def suggest_parameters(self: Self, trial: Trial) -> None:
-        """Suggest parameters to chose and range for optimization for the Inverting Gradient attack."""
+        """Suggest parameters to chose and range for optimization for the Huang attack."""
         total_variation = trial.suggest_float("total_variation", 1e-8, 1e-1, log=True)
+        bn_reg = trial.suggest_float("bn_reg", 1e-4, 1e-1, log=True)
         attack_lr = trial.suggest_float("attack_lr", 1e-4, 100.0, log=True)
         median_pooling = trial.suggest_int("median_pooling", 0, 1)
         top10norms = trial.suggest_int("top10norms", 0, 1)
+        self.configs.bn_reg = bn_reg
         self.configs.attack_lr = attack_lr
         self.configs.tv_reg = total_variation
         self.configs.median_pooling = median_pooling
@@ -174,10 +220,11 @@ class InvertingGradients(AbstractGIA):
                 "trial_data",
                 list(range(len(self.optuna_trial_data)))
             )
-            self.client_loader = self.optuna_trial_data[trial_data_idx]
+            self.client_loader, self.proxy_loader = self.optuna_trial_data[trial_data_idx]
             logger.info(f"Next experiment on trial data idx: {trial_data_idx}")
         logger.info(f"Chosen parameters:\
                     total_variation: {total_variation} \
+                    bn_reg: {bn_reg} \
                     attack_lr: {attack_lr} \
                     median_pooling: {median_pooling} \
                     top10norms: {top10norms}")
@@ -190,4 +237,4 @@ class InvertingGradients(AbstractGIA):
         self.model = deepcopy(self.original_model)
         super().reset_attack()
         self.prepare_attack()
-        logger.info("Inverting attack reset to initial state.")
+        logger.info("GIA base attack reset to initial state.")
