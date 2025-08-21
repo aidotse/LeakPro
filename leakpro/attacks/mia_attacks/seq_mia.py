@@ -35,6 +35,9 @@ class AttackSeqMIA(AbstractMIA):
         train_mia_batch_size: int = Field(default=64, ge=1, description="Batch size for training the MIA classifier")
         number_of_traj: int = Field(default=1, ge=1, description="Number of trajectories to consider")
         mia_classifier_epochs: int = Field(default=100, ge=1, description="Number of epochs for training the MIA classifier")
+        mia_classifier_lr: float = Field(default = 0.0001, ge = 0.0, description="Learning rate for training the MIA classifier")
+        mia_classifier_momentum: float = Field(default = 0.9, ge = 0.0, le = 1.0, description="Momentum for training the MIA classifier")
+        mia_classifier_weight_decay: float = Field(default = 0.0, ge = 0.0, le = 1.0, description="Weight decay for training the MIA classifier")
         label_only: bool = Field(default=False, description="Whether to use only the labels for the attack")
         temperature: float = Field(default=2.0, ge=0.0, description="Temperature for the softmax")
 
@@ -129,7 +132,7 @@ class AttackSeqMIA(AbstractMIA):
         # create auxiliary dataset
         aux_data_size = len(aux_data_index)
         shadow_data_size = int(aux_data_size * self.shadow_data_fraction)
-        shadow_data_indices = np.random.choice(aux_data_size, shadow_data_size, replace=False)
+        shadow_data_indices = np.random.choice(aux_data_index, shadow_data_size, replace=False)
         # Split the shadow data into two equal parts
         split_index = len(shadow_data_indices) // 2
         shadow_training_indices = shadow_data_indices[:split_index]
@@ -172,7 +175,7 @@ class AttackSeqMIA(AbstractMIA):
         # Prepare data to train and test the MIA classifier
         #--------------------------------------------------------
         # shadow data (train and test) is used as training data for MIA_classifier in the paper
-        train_mask = np.isin(shadow_data_indices,shadow_not_used_indices)
+        train_mask = np.isin(shadow_data_indices,shadow_training_indices)
         self.prepare_mia_data(shadow_data_indices,
                               train_mask,
                               student_model = self.distill_shadow_models,
@@ -180,8 +183,9 @@ class AttackSeqMIA(AbstractMIA):
                               train_mode = True)
 
         # Data used in the target (train and test) is used as test data for MIA_classifier
-        mia_test_data_indices = np.concatenate( (self.train_indices , self.test_indices))
-        test_mask = np.isin(mia_test_data_indices, self.train_indices)
+        mia_test_data_indices = self.audit_dataset['data']
+        train_indices = mia_test_data_indices[self.audit_dataset['in_members']]
+        test_mask = np.isin(mia_test_data_indices, train_indices)
         self.prepare_mia_data(mia_test_data_indices,
                               test_mask,
                               student_model = self.distill_target_models,
@@ -245,7 +249,7 @@ class AttackSeqMIA(AbstractMIA):
                         ) -> dict:
         logger.info(f"Preparing MIA {dataset_name}: {len(data_indices)} points")
         gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
-        data_loader = self.get_dataloader(data_indices, batch_size=self.train_mia_batch_size)
+        data_loader = self.get_dataloader(data_indices, batch_size=self.train_mia_batch_size, shuffle = False)
 
         teacher_model_loss = np.array([])
         model_trajectory = np.array([])
@@ -276,8 +280,22 @@ class AttackSeqMIA(AbstractMIA):
                     loss_i = stack([criterion(logit_target_i, target_i), max(p_target_i), std(p_target_i), sum(p_target_i * log(p_target_i))])
                     loss.append(loss_i)
                 loss = stack(loss).detach().cpu().numpy()
-                #print(f"{loss.shape}")
                 trajectory_current = loss[:,np.newaxis,:] if d == 0 else np.concatenate((trajectory_current, loss[:,np.newaxis,:]), 1)
+
+            # Append output of teacher model at the end.
+            teacher_model.to(gpu_or_cpu)
+            teacher_model.eval()
+            model_soft_output = teacher_model(data).squeeze()
+            
+            # Calculate the loss
+            loss = []
+            for logit_target_i, target_i in zip(model_soft_output, target):
+                p_target_i = exp(logit_target_i)
+                p_target_i = p_target_i / sum(p_target_i)
+                loss_i = stack([criterion(logit_target_i, target_i), max(p_target_i), std(p_target_i), sum(p_target_i * log(p_target_i))])
+                loss.append(loss_i)
+            loss = stack(loss).detach().cpu().numpy()
+            trajectory_current = np.concatenate((trajectory_current, loss[:,np.newaxis,:]), 1)
 
             if loader_idx == 0:
                 model_trajectory = trajectory_current
@@ -299,7 +317,9 @@ class AttackSeqMIA(AbstractMIA):
         if not os.path.exists(f"{self.storage_dir}/trajectory_mia_model.pkl"):
             gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
             attack_optimizer = optim.SGD(attack_model.parameters(),
-                                            lr=0.01, momentum=0.9, weight_decay=0.0001)
+                                            lr=self.mia_classifier_lr, 
+                                            momentum=self.mia_classifier_momentum, 
+                                            weight_decay=self.mia_classifier_weight_decay)
             attack_model = attack_model.to(gpu_or_cpu)
             loss_fn = nn.CrossEntropyLoss()
 
@@ -427,8 +447,7 @@ class AttackSeqMIA(AbstractMIA):
         self.mia_classifier()
         true_labels, signals = self.mia_attack(self.mia_classifer)
 
-        return true_labels, signals
-        #return MIAResult.from_full_scores(true_membership=true_labels,
-        #                                  signal_values=signals,
-        #                                  result_name="LossTrajectory",
-        #                                  metadata=self.configs.model_dump())
+        return MIAResult.from_full_scores(true_membership=true_labels,
+                                          signal_values=signals,
+                                          result_name="LossTrajectory",
+                                          metadata=self.configs.model_dump())
