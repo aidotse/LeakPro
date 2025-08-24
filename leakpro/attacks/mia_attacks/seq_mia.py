@@ -1,4 +1,4 @@
-"""Implementation of the loss trajectory attack."""
+"""Implementation of the sequential MIA attack."""
 
 import os
 import pickle
@@ -7,7 +7,7 @@ import numpy as np
 import torch.nn.functional as F  # noqa: N812
 from pydantic import BaseModel, Field
 from torch import cuda, device, load, nn, no_grad, optim, save, tensor
-from torch import max, sum, std, exp, log, stack, zeros, permute, squeeze
+from torch import max, sum, std, exp, log, stack, zeros, permute, squeeze, cat
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
@@ -26,10 +26,10 @@ from leakpro.utils.logger import logger
 
 
 class AttackSeqMIA(AbstractMIA):
-    """Implementation of the loss trajectory attack."""
+    """Implementation of the sequential MIA attack."""
 
     class AttackConfig(BaseModel):
-        """Configuration for the RMIA attack."""
+        """Configuration for the sequential MIA attack."""
 
         distillation_data_fraction: float = Field(default = 0.5, ge = 0.0, le=1.0, description="Fraction of auxiliary data used for distillation")  # noqa: E501
         train_mia_batch_size: int = Field(default=64, ge=1, description="Batch size for training the MIA classifier")
@@ -63,7 +63,7 @@ class AttackSeqMIA(AbstractMIA):
                  handler: MIAHandler,
                  configs: dict
                 ) -> None:
-        """Initialize the LossTrajectoryAttack class.
+        """Initialize the AttackSeqMIA class.
 
         Args:
         ----
@@ -71,7 +71,7 @@ class AttackSeqMIA(AbstractMIA):
             configs (dict): A dictionary containing the attack loss_traj configurations.
 
         """
-        logger.info("Configuring Loss trajectory attack")
+        logger.info("Configuring SeqMIA attack")
         self.configs = self.AttackConfig() if configs is None else self.AttackConfig(**configs)
 
         super().__init__(handler)
@@ -96,7 +96,7 @@ class AttackSeqMIA(AbstractMIA):
         self.mia_train_data_loader = None
         self.mia_test_data_loader = None
         self.dim_in_mia = (self.number_of_traj + 1 )
-        self.mia_classifer = self.AttackModel(4)
+        self.mia_classifer = self.AttackModel(5)
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
@@ -216,7 +216,7 @@ class AttackSeqMIA(AbstractMIA):
 
         """
 
-        dataset_name = "trajectory_train_data.pkl" if train_mode else "trajectory_test_data.pkl"
+        dataset_name = "seqmia_train_data.pkl" if train_mode else "seqmia_test_data.pkl"
         if os.path.exists(f"{self.storage_dir}/{dataset_name}"):
             logger.info(f"Loading MIA {dataset_name}: {len(data_indices)} points")
             with open(f"{self.storage_dir}/{dataset_name}", "rb") as file:
@@ -234,7 +234,6 @@ class AttackSeqMIA(AbstractMIA):
             pickle.dump(data, file)
 
         mia_input = data["model_trajectory"]
-        print(f"bcwib {tensor(mia_input).shape}, {tensor(data["member_status"]).shape}")
         mia_dataset = TensorDataset(tensor(mia_input), tensor(data["member_status"]))
         if train_mode:
             self.mia_train_data_loader = DataLoader(mia_dataset, batch_size=self.train_mia_batch_size, shuffle=True)
@@ -249,7 +248,7 @@ class AttackSeqMIA(AbstractMIA):
                         ) -> dict:
         logger.info(f"Preparing MIA {dataset_name}: {len(data_indices)} points")
         gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
-        data_loader = self.get_dataloader(data_indices, batch_size=self.train_mia_batch_size, shuffle = False)
+        data_loader = self.handler.get_dataloader(data_indices, batch_size=self.train_mia_batch_size, shuffle = False)
 
         teacher_model_loss = np.array([])
         model_trajectory = np.array([])
@@ -277,7 +276,9 @@ class AttackSeqMIA(AbstractMIA):
                 for logit_target_i, target_i in zip(distill_model_soft_output, target):
                     p_target_i = exp(logit_target_i)
                     p_target_i = p_target_i / sum(p_target_i)
-                    loss_i = stack([criterion(logit_target_i, target_i), max(p_target_i), std(p_target_i), sum(p_target_i * log(p_target_i))])
+                    entropy = -sum(p_target_i * log(p_target_i))
+                    mentropy = -(1 - p_target_i[target_i]) * log(p_target_i[target_i]) - cat(p_target_i[:target_i],p_target_i[(target_i+1):]) * log(1 - cat(p_target_i[:target_i],p_target_i[(target_i+1):]))
+                    loss_i = stack([criterion(logit_target_i, target_i), max(p_target_i), std(p_target_i), entropy, mentropy])
                     loss.append(loss_i)
                 loss = stack(loss).detach().cpu().numpy()
                 trajectory_current = loss[:,np.newaxis,:] if d == 0 else np.concatenate((trajectory_current, loss[:,np.newaxis,:]), 1)
@@ -292,7 +293,9 @@ class AttackSeqMIA(AbstractMIA):
             for logit_target_i, target_i in zip(model_soft_output, target):
                 p_target_i = exp(logit_target_i)
                 p_target_i = p_target_i / sum(p_target_i)
-                loss_i = stack([criterion(logit_target_i, target_i), max(p_target_i), std(p_target_i), sum(p_target_i * log(p_target_i))])
+                entropy = -sum(p_target_i * log(p_target_i))
+                mentropy = -(1 - p_target_i[target_i]) * log(p_target_i[target_i]) - cat(p_target_i[:target_i],p_target_i[(target_i+1):]) * log(1 - cat(p_target_i[:target_i],p_target_i[(target_i+1):]))
+                loss_i = stack([criterion(logit_target_i, target_i), max(p_target_i), std(p_target_i), entropy, mentropy])
                 loss.append(loss_i)
             loss = stack(loss).detach().cpu().numpy()
             trajectory_current = np.concatenate((trajectory_current, loss[:,np.newaxis,:]), 1)
@@ -302,7 +305,6 @@ class AttackSeqMIA(AbstractMIA):
             else:
                 model_trajectory = np.concatenate((model_trajectory, trajectory_current), axis=0)
 
-        print(f"Dimensions: {model_trajectory.shape}")
         return {"model_trajectory": model_trajectory}
 
     def mia_classifier(self:Self)-> nn.Module:
@@ -314,7 +316,7 @@ class AttackSeqMIA(AbstractMIA):
 
         """
         attack_model = self.mia_classifer
-        if not os.path.exists(f"{self.storage_dir}/trajectory_mia_model.pkl"):
+        if not os.path.exists(f"{self.storage_dir}/seqmia_model.pkl"):
             gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
             attack_optimizer = optim.SGD(attack_model.parameters(),
                                             lr=self.mia_classifier_lr, 
@@ -326,14 +328,14 @@ class AttackSeqMIA(AbstractMIA):
             train_loss, train_prec1 = self._train_mia_classifier(attack_model, attack_optimizer, loss_fn)
             train_info = [train_loss, train_prec1]
 
-            save(attack_model.state_dict(), self.storage_dir + "/trajectory_mia_model.pkl")
+            save(attack_model.state_dict(), self.storage_dir + "/seqmia_model.pkl")
 
             with open(f"{self.storage_dir}/mia_model_losses.pkl", "wb") as file:
                 pickle.dump(train_info, file)
         else:
-            with open(f"{self.storage_dir}/trajectory_mia_model.pkl", "rb") as model:
+            with open(f"{self.storage_dir}/seqmia_model.pkl", "rb") as model:
                 attack_model.load_state_dict(load(model))
-            logger.info("Loading Loss Trajectory classifier")
+            logger.info("Loading SeqMIA classifier")
 
         return attack_model
 
@@ -370,7 +372,6 @@ class AttackSeqMIA(AbstractMIA):
 
                 pred = model(permute(data,(1,0,2)))
                 pred = squeeze(pred)
-                #print(data.shape, pred.shape, label.shape)
                 loss = loss_fn(pred, label)
 
                 attack_optimizer.zero_grad()
@@ -449,5 +450,5 @@ class AttackSeqMIA(AbstractMIA):
 
         return MIAResult.from_full_scores(true_membership=true_labels,
                                           signal_values=signals,
-                                          result_name="LossTrajectory",
+                                          result_name="SeqMIA",
                                           metadata=self.configs.model_dump())
