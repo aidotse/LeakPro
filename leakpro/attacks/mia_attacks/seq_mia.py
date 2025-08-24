@@ -4,16 +4,13 @@ import os
 import pickle
 
 import numpy as np
+import torch
 import torch.nn.functional as F  # noqa: N812
 from pydantic import BaseModel, Field
-from torch import cuda, device, load, nn, no_grad, optim, save, tensor
-from torch import max, sum, std, exp, log, stack, zeros, permute, squeeze, cat
+from torch import nn
+from torch.autograd import Variable
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
-
-
-import torch.nn as nn
-from torch.autograd import Variable
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.distillation_model_handler import DistillationModelHandler
@@ -31,18 +28,23 @@ class AttackSeqMIA(AbstractMIA):
     class AttackConfig(BaseModel):
         """Configuration for the sequential MIA attack."""
 
-        distillation_data_fraction: float = Field(default = 0.5, ge = 0.0, le=1.0, description="Fraction of auxiliary data used for distillation")  # noqa: E501
+        distillation_data_fraction: float = \
+            Field(default = 0.5, ge = 0.0, le=1.0, description="Fraction of auxiliary data used for distillation")  # noqa: E501
         train_mia_batch_size: int = Field(default=64, ge=1, description="Batch size for training the MIA classifier")
         number_of_traj: int = Field(default=1, ge=1, description="Number of trajectories to consider")
         mia_classifier_epochs: int = Field(default=100, ge=1, description="Number of epochs for training the MIA classifier")
         mia_classifier_lr: float = Field(default = 0.0001, ge = 0.0, description="Learning rate for training the MIA classifier")
-        mia_classifier_momentum: float = Field(default = 0.9, ge = 0.0, le = 1.0, description="Momentum for training the MIA classifier")
-        mia_classifier_weight_decay: float = Field(default = 0.0, ge = 0.0, le = 1.0, description="Weight decay for training the MIA classifier")
+        mia_classifier_momentum: float = \
+            Field(default = 0.9, ge = 0.0, le = 1.0, description="Momentum for training the MIA classifier")
+        mia_classifier_weight_decay: float = \
+            Field(default = 0.0, ge = 0.0, le = 1.0, description="Weight decay for training the MIA classifier")
         label_only: bool = Field(default=False, description="Whether to use only the labels for the attack")
         temperature: float = Field(default=2.0, ge=0.0, description="Temperature for the softmax")
 
     class AttackModel(nn.Module):
-        def __init__(self, input_size = 2, hidden_size = 4, num_layers = 1, num_classes = 2):
+        """SeqMIA classifier model."""
+
+        def __init__(self, input_size: int = 2, hidden_size: int = 4, num_layers: int = 1, num_classes: int = 2) -> None:
             super().__init__()
             self.input_size = input_size
             self.hidden_size = hidden_size
@@ -50,14 +52,13 @@ class AttackSeqMIA(AbstractMIA):
             self.lstm = nn.LSTM(input_size, hidden_size, num_layers)
             self.label = nn.Linear(hidden_size, num_classes)
 
-        def forward(self, x):
-            h0 = Variable(zeros(self.num_layers, x.size(1), self.hidden_size))
-            c0 = Variable(zeros(self.num_layers, x.size(1), self.hidden_size))
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            """Forward call."""
+            h0 = Variable(torch.zeros(self.num_layers, x.size(1), self.hidden_size))
+            c0 = Variable(torch.zeros(self.num_layers, x.size(1), self.hidden_size))
 
             out, (h1, c1) = self.lstm(x, (h0, c0))
-            out = self.label(h1)
-
-            return out
+            return self.label(h1)
 
     def __init__(self: Self,
                  handler: MIAHandler,
@@ -136,7 +137,6 @@ class AttackSeqMIA(AbstractMIA):
         # Split the shadow data into two equal parts
         split_index = len(shadow_data_indices) // 2
         shadow_training_indices = shadow_data_indices[:split_index]
-        shadow_not_used_indices = shadow_data_indices[split_index:]
         # Distillation on target and shadow model happen on the same dataset
         distill_data_indices = np.setdiff1d(aux_data_index, shadow_data_indices)
 
@@ -183,8 +183,8 @@ class AttackSeqMIA(AbstractMIA):
                               train_mode = True)
 
         # Data used in the target (train and test) is used as test data for MIA_classifier
-        mia_test_data_indices = self.audit_dataset['data']
-        train_indices = mia_test_data_indices[self.audit_dataset['in_members']]
+        mia_test_data_indices = self.audit_dataset["data"]
+        train_indices = mia_test_data_indices[self.audit_dataset["in_members"]]
         test_mask = np.isin(mia_test_data_indices, train_indices)
         self.prepare_mia_data(mia_test_data_indices,
                               test_mask,
@@ -234,7 +234,7 @@ class AttackSeqMIA(AbstractMIA):
             pickle.dump(data, file)
 
         mia_input = data["model_trajectory"]
-        mia_dataset = TensorDataset(tensor(mia_input), tensor(data["member_status"]))
+        mia_dataset = TensorDataset(torch.tensor(mia_input), torch.tensor(data["member_status"]))
         if train_mode:
             self.mia_train_data_loader = DataLoader(mia_dataset, batch_size=self.train_mia_batch_size, shuffle=True)
         else:
@@ -247,10 +247,9 @@ class AttackSeqMIA(AbstractMIA):
                         dataset_name: str,
                         ) -> dict:
         logger.info(f"Preparing MIA {dataset_name}: {len(data_indices)} points")
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         data_loader = self.handler.get_dataloader(data_indices, batch_size=self.train_mia_batch_size, shuffle = False)
 
-        teacher_model_loss = np.array([])
         model_trajectory = np.array([])
 
         for loader_idx, (data, target) in tqdm(enumerate(data_loader),
@@ -274,30 +273,49 @@ class AttackSeqMIA(AbstractMIA):
                 # Calculate the loss
                 loss = []
                 for logit_target_i, target_i in zip(distill_model_soft_output, target):
-                    p_target_i = exp(logit_target_i)
-                    p_target_i = p_target_i / sum(p_target_i)
-                    entropy = -sum(p_target_i * log(p_target_i))
-                    mentropy = -(1 - p_target_i[target_i]) * log(p_target_i[target_i]) - cat(p_target_i[:target_i],p_target_i[(target_i+1):]) * log(1 - cat(p_target_i[:target_i],p_target_i[(target_i+1):]))
-                    loss_i = stack([criterion(logit_target_i, target_i), max(p_target_i), std(p_target_i), entropy, mentropy])
+                    p_target_i = torch.exp(logit_target_i)
+                    p_target_i = p_target_i / torch.sum(p_target_i)
+                    entropy = -torch.sum(p_target_i * torch.log(p_target_i))
+                    p_except_target = torch.cat(p_target_i[:target_i],p_target_i[(target_i+1):])
+                    mentropy = -(1 - p_target_i[target_i]) * torch.log(p_target_i[target_i]) - \
+                        p_except_target * torch.log(1 - p_except_target)
+                    loss_i = torch.stack([
+                        criterion(logit_target_i, target_i),
+                        torch.max(p_target_i),
+                        torch.std(p_target_i),
+                        entropy,
+                        mentropy
+                        ])
                     loss.append(loss_i)
-                loss = stack(loss).detach().cpu().numpy()
-                trajectory_current = loss[:,np.newaxis,:] if d == 0 else np.concatenate((trajectory_current, loss[:,np.newaxis,:]), 1)
+                loss = torch.stack(loss).detach().cpu().numpy()
+                if d == 0:
+                    trajectory_current = loss[:,np.newaxis,:]
+                else:
+                    trajectory_current = np.concatenate((trajectory_current, loss[:,np.newaxis,:]), 1)
 
             # Append output of teacher model at the end.
             teacher_model.to(gpu_or_cpu)
             teacher_model.eval()
             model_soft_output = teacher_model(data).squeeze()
-            
+
             # Calculate the loss
             loss = []
             for logit_target_i, target_i in zip(model_soft_output, target):
-                p_target_i = exp(logit_target_i)
-                p_target_i = p_target_i / sum(p_target_i)
-                entropy = -sum(p_target_i * log(p_target_i))
-                mentropy = -(1 - p_target_i[target_i]) * log(p_target_i[target_i]) - cat(p_target_i[:target_i],p_target_i[(target_i+1):]) * log(1 - cat(p_target_i[:target_i],p_target_i[(target_i+1):]))
-                loss_i = stack([criterion(logit_target_i, target_i), max(p_target_i), std(p_target_i), entropy, mentropy])
+                p_target_i = torch.exp(logit_target_i)
+                p_target_i = p_target_i / torch.sum(p_target_i)
+                entropy = -torch.sum(p_target_i * torch.log(p_target_i))
+                p_except_target = torch.cat(p_target_i[:target_i],p_target_i[(target_i+1):])
+                mentropy = -(1 - p_target_i[target_i]) * torch.log(p_target_i[target_i]) - \
+                    p_except_target * torch.log(1 - p_except_target)
+                loss_i = torch.stack([
+                    criterion(logit_target_i, target_i),
+                    torch.max(p_target_i),
+                    torch.std(p_target_i),
+                    entropy,
+                    mentropy
+                    ])
                 loss.append(loss_i)
-            loss = stack(loss).detach().cpu().numpy()
+            loss = torch.stack(loss).detach().cpu().numpy()
             trajectory_current = np.concatenate((trajectory_current, loss[:,np.newaxis,:]), 1)
 
             if loader_idx == 0:
@@ -317,10 +335,10 @@ class AttackSeqMIA(AbstractMIA):
         """
         attack_model = self.mia_classifer
         if not os.path.exists(f"{self.storage_dir}/seqmia_model.pkl"):
-            gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
-            attack_optimizer = optim.SGD(attack_model.parameters(),
-                                            lr=self.mia_classifier_lr, 
-                                            momentum=self.mia_classifier_momentum, 
+            gpu_or_cpu = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            attack_optimizer = torch.optim.SGD(attack_model.parameters(),
+                                            lr=self.mia_classifier_lr,
+                                            momentum=self.mia_classifier_momentum,
                                             weight_decay=self.mia_classifier_weight_decay)
             attack_model = attack_model.to(gpu_or_cpu)
             loss_fn = nn.CrossEntropyLoss()
@@ -328,19 +346,19 @@ class AttackSeqMIA(AbstractMIA):
             train_loss, train_prec1 = self._train_mia_classifier(attack_model, attack_optimizer, loss_fn)
             train_info = [train_loss, train_prec1]
 
-            save(attack_model.state_dict(), self.storage_dir + "/seqmia_model.pkl")
+            torch.save(attack_model.state_dict(), self.storage_dir + "/seqmia_model.pkl")
 
             with open(f"{self.storage_dir}/mia_model_losses.pkl", "wb") as file:
                 pickle.dump(train_info, file)
         else:
             with open(f"{self.storage_dir}/seqmia_model.pkl", "rb") as model:
-                attack_model.load_state_dict(load(model))
+                attack_model.load_state_dict(torch.load(model))
             logger.info("Loading SeqMIA classifier")
 
         return attack_model
 
     def _train_mia_classifier(self:Self, model:nn.Module,
-                        attack_optimizer:optim.Optimizer,
+                        attack_optimizer:torch.optim.Optimizer,
                         loss_fn:nn.functional) -> tuple:
         """Trains the model using the MIA (Membership Inference Attack) method for one step.
 
@@ -364,14 +382,14 @@ class AttackSeqMIA(AbstractMIA):
         train_loss = 0
         num_correct = 0
         mia_train_loader = self.mia_train_data_loader
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         for _ in  tqdm(range(self.mia_classifier_epochs), total=self.mia_classifier_epochs):
             for _batch_idx, (data, label) in enumerate(mia_train_loader):
                 data = data.to(gpu_or_cpu) # noqa: PLW2901
                 label = label.to(gpu_or_cpu).long() # noqa: PLW2901
 
-                pred = model(permute(data,(1,0,2)))
-                pred = squeeze(pred)
+                pred = model(torch.permute(data,(1,0,2)))
+                pred = torch.squeeze(pred)
                 loss = loss_fn(pred, label)
 
                 attack_optimizer.zero_grad()
@@ -405,7 +423,7 @@ class AttackSeqMIA(AbstractMIA):
 
         """
         logger.info("Running the MIA attack")
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         attack_model.to(gpu_or_cpu)
         attack_model.eval()
         test_loss = 0
@@ -413,14 +431,13 @@ class AttackSeqMIA(AbstractMIA):
         auc_ground_truth = None
         auc_pred = None
 
-        with no_grad():
+        with torch.no_grad():
             for batch_idx, (data, target) in tqdm(enumerate(self.mia_test_data_loader), total=len(self.mia_test_data_loader)):
                 data = data.to(gpu_or_cpu) # noqa: PLW2901
                 target = target.to(gpu_or_cpu) # noqa: PLW2901
                 target = target.long() # noqa: PLW2901
-                pred = attack_model(permute(data,(1,0,2)))
-                pred = squeeze(pred)
-                #print(data.shape, pred.shape, target.shape)
+                pred = attack_model(torch.permute(data,(1,0,2)))
+                pred = torch.squeeze(pred)
 
                 test_loss += F.cross_entropy(pred, target).item()
                 pred0, pred1 = pred.max(1, keepdim=True)

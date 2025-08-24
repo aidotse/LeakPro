@@ -6,9 +6,9 @@ from leakpro.attacks.mia_attacks.attack_p import AttackP
 from leakpro.attacks.mia_attacks.HSJ import AttackHopSkipJump
 from leakpro.attacks.mia_attacks.lira import AttackLiRA
 from leakpro.attacks.mia_attacks.loss_trajectory import AttackLossTrajectory
-from leakpro.attacks.mia_attacks.seq_mia import AttackSeqMIA
 from leakpro.attacks.mia_attacks.qmia import AttackQMIA
 from leakpro.attacks.mia_attacks.rmia import AttackRMIA
+from leakpro.attacks.mia_attacks.seq_mia import AttackSeqMIA
 from leakpro.attacks.mia_attacks.yoqo import AttackYOQO
 from leakpro.attacks.utils.distillation_model_handler import DistillationModelHandler
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
