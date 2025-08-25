@@ -275,7 +275,7 @@ class AttackSeqMIA(AbstractMIA):
                 for logit_target_i, target_i in zip(distill_model_soft_output, target):
                     p_target_i = torch.exp(logit_target_i - torch.max(logit_target_i))
                     p_target_i = p_target_i / torch.sum(p_target_i)
-                    entropy = -torch.sum(p_target_i * torch.log(p_target_i))
+                    entropy = -torch.sum(p_target_i * torch.log(torch.clamp(p_target_i, min=1e-10)))
                     p_except_target = torch.cat((p_target_i[:target_i],p_target_i[(target_i+1):]))
                     mentropy = \
                         -(1 - p_target_i[target_i]) * torch.log(torch.clamp(p_target_i[target_i],min=1e-10)) - \
@@ -304,7 +304,7 @@ class AttackSeqMIA(AbstractMIA):
             for logit_target_i, target_i in zip(model_soft_output, target):
                 p_target_i = torch.exp(logit_target_i - torch.max(logit_target_i))
                 p_target_i = p_target_i / torch.sum(p_target_i)
-                entropy = -torch.sum(p_target_i * torch.log(p_target_i))
+                entropy = -torch.sum(p_target_i * torch.log(torch.clamp(p_target_i, min=1e-10)))
                 p_except_target = torch.cat((p_target_i[:target_i],p_target_i[(target_i+1):]))
                 mentropy = \
                     -(1 - p_target_i[target_i]) * torch.log(torch.clamp(p_target_i[target_i],min=1e-10)) - \
