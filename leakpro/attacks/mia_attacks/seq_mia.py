@@ -74,15 +74,12 @@ class AttackSeqMIA(AbstractMIA):
             self.layer3 = nn.Linear(hidden_size * 2, num_classes)
             self.relu = nn.ReLU()
 
-        def forward(self, x, len_of_oneTr):
+        def forward(self, x):
             """Forward call."""
-            h0 = Variable(torch.zeros(self.num_layers, x.size(0), self.hidden_size)).cuda()
-            c0 = Variable(torch.zeros(self.num_layers, x.size(0), self.hidden_size)).cuda()
-            batch_x_pack = rnn_utils.pack_padded_sequence(x,
-                                                        len_of_oneTr, batch_first=True).cuda()
-            out, (h1, c1) = self.layer1(batch_x_pack, (h0, c0))
-            outputs, lengths = rnn_utils.pad_packed_sequence(out, batch_first=True)
-            permute_outputs = outputs.permute(1, 0, 2)
+            h0 = Variable(torch.zeros(self.num_layers, x.size(0), self.hidden_size))
+            c0 = Variable(torch.zeros(self.num_layers, x.size(0), self.hidden_size))
+            out, (h1, c1) = self.layer1(x, (h0, c0))
+            permute_outputs = out.permute(1, 0, 2)
             atten_energies = torch.sum(h1 * permute_outputs,
                                     dim=2)
 
