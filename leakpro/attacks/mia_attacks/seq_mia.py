@@ -65,7 +65,7 @@ class AttackSeqMIA(AbstractMIA):
         
     class LSTM_Attention(nn.Module):
         """LSTM model with attention"""
-        def __init__(self, input_size=2, hidden_size=4, num_layers=1, num_classes=2):
+        def __init__(self, input_size: int = 2, hidden_size: int = 4, num_layers: int = 1, num_classes: int = 2) -> None:
             super().__init__()
             self.input_size = input_size
             self.hidden_size = hidden_size
@@ -74,7 +74,7 @@ class AttackSeqMIA(AbstractMIA):
             self.layer3 = nn.Linear(hidden_size * 2, num_classes)
             self.relu = nn.ReLU()
 
-        def forward(self, x):
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
             """Forward call."""
             h0 = Variable(torch.zeros(self.num_layers, x.size(0), self.hidden_size))
             c0 = Variable(torch.zeros(self.num_layers, x.size(0), self.hidden_size))
