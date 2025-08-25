@@ -273,7 +273,7 @@ class AttackSeqMIA(AbstractMIA):
                 # Calculate the loss
                 loss = []
                 for logit_target_i, target_i in zip(distill_model_soft_output, target):
-                    p_target_i = torch.exp(logit_target_i)
+                    p_target_i = torch.exp(logit_target_i - torch.max(logit_target_i))
                     p_target_i = p_target_i / torch.sum(p_target_i)
                     entropy = -torch.sum(p_target_i * torch.log(p_target_i))
                     p_except_target = torch.cat(p_target_i[:target_i],p_target_i[(target_i+1):])
@@ -301,7 +301,7 @@ class AttackSeqMIA(AbstractMIA):
             # Calculate the loss
             loss = []
             for logit_target_i, target_i in zip(model_soft_output, target):
-                p_target_i = torch.exp(logit_target_i)
+                p_target_i = torch.exp(logit_target_i - torch.max(logit_target_i))
                 p_target_i = p_target_i / torch.sum(p_target_i)
                 entropy = -torch.sum(p_target_i * torch.log(p_target_i))
                 p_except_target = torch.cat(p_target_i[:target_i],p_target_i[(target_i+1):])
