@@ -6,6 +6,7 @@ import pickle
 import numpy as np
 import torch
 import torch.nn.functional as F  # noqa: N812
+import torch.nn.utils.rnn as rnn_utils
 from pydantic import BaseModel, Field
 from torch import nn
 from torch.autograd import Variable
@@ -38,11 +39,13 @@ class AttackSeqMIA(AbstractMIA):
             Field(default = 0.9, ge = 0.0, le = 1.0, description="Momentum for training the MIA classifier")
         mia_classifier_weight_decay: float = \
             Field(default = 0.0, ge = 0.0, le = 1.0, description="Weight decay for training the MIA classifier")
+        attention_model: bool = Field(default=True, description="Whether to use an LSTM with or without attention")
         label_only: bool = Field(default=False, description="Whether to use only the labels for the attack")
         temperature: float = Field(default=2.0, ge=0.0, description="Temperature for the softmax")
 
-    class AttackModel(nn.Module):
-        """SeqMIA classifier model."""
+    # Attack model classes are taken directly from the GitHub of the original paper.
+    class LSTM(nn.Module):
+        """LSTM model"""
 
         def __init__(self, input_size: int = 2, hidden_size: int = 4, num_layers: int = 1, num_classes: int = 2) -> None:
             super().__init__()
@@ -59,6 +62,44 @@ class AttackSeqMIA(AbstractMIA):
 
             out, (h1, c1) = self.lstm(x, (h0, c0))
             return self.label(h1)
+        
+    class LSTM_Attention(nn.Module):
+        """LSTM model with attention"""
+        def __init__(self, input_size=2, hidden_size=4, num_layers=1, num_classes=2):
+            super().__init__()
+            self.input_size = input_size
+            self.hidden_size = hidden_size
+            self.num_layers = num_layers
+            self.layer1 = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
+            self.layer3 = nn.Linear(hidden_size * 2, num_classes)
+            self.relu = nn.ReLU()
+
+        def forward(self, x, len_of_oneTr):
+            """Forward call."""
+            h0 = Variable(torch.zeros(self.num_layers, x.size(0), self.hidden_size)).cuda()
+            c0 = Variable(torch.zeros(self.num_layers, x.size(0), self.hidden_size)).cuda()
+            batch_x_pack = rnn_utils.pack_padded_sequence(x,
+                                                        len_of_oneTr, batch_first=True).cuda()
+            out, (h1, c1) = self.layer1(batch_x_pack, (h0, c0))
+            outputs, lengths = rnn_utils.pad_packed_sequence(out, batch_first=True)
+            permute_outputs = outputs.permute(1, 0, 2)
+            atten_energies = torch.sum(h1 * permute_outputs,
+                                    dim=2)
+
+            atten_energies = atten_energies.t()
+
+            scores = F.softmax(atten_energies, dim=1)
+
+            scores = scores.unsqueeze(0)
+
+            permute_permute_outputs = permute_outputs.permute(2, 1, 0)
+            context_vector = torch.sum(scores * permute_permute_outputs,
+                                    dim=2)
+            context_vector = context_vector.t()
+            context_vector = context_vector.unsqueeze(0)
+            out2 = torch.cat((h1, context_vector), 2)
+            out = self.layer3(out2)
+            return out, out2
 
     def __init__(self: Self,
                  handler: MIAHandler,
@@ -97,7 +138,10 @@ class AttackSeqMIA(AbstractMIA):
         self.mia_train_data_loader = None
         self.mia_test_data_loader = None
         self.dim_in_mia = (self.number_of_traj + 1 )
-        self.mia_classifer = self.AttackModel(5)
+        if self.attention_model:
+            self.mia_classifer = self.LSTM_Attention(5)
+        else:
+            self.mia_classifer = self.LSTM(5)
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
