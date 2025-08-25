@@ -278,7 +278,7 @@ class AttackSeqMIA(AbstractMIA):
                     entropy = -torch.sum(p_target_i * torch.log(p_target_i))
                     p_except_target = torch.cat((p_target_i[:target_i],p_target_i[(target_i+1):]))
                     mentropy = -(1 - p_target_i[target_i]) * torch.log(p_target_i[target_i]) - \
-                        p_except_target * torch.log(1 - p_except_target)
+                        torch.sum(p_except_target * torch.log(1 - p_except_target))
                     loss_i = torch.stack([
                         criterion(logit_target_i, target_i),
                         torch.max(p_target_i),
@@ -306,7 +306,7 @@ class AttackSeqMIA(AbstractMIA):
                 entropy = -torch.sum(p_target_i * torch.log(p_target_i))
                 p_except_target = torch.cat((p_target_i[:target_i],p_target_i[(target_i+1):]))
                 mentropy = -(1 - p_target_i[target_i]) * torch.log(p_target_i[target_i]) - \
-                    p_except_target * torch.log(1 - p_except_target)
+                    torch.sum(p_except_target * torch.log(1 - p_except_target))
                 loss_i = torch.stack([
                     criterion(logit_target_i, target_i),
                     torch.max(p_target_i),
