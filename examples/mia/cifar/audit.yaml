@@ -18,6 +18,9 @@ audit:  # Configurations for auditing
     - attack: qmia
     - attack: HSJ
     # - attack: yoqo
+    - attack: seqmia
+      number_of_traj: 50
+      mia_classifier_epochs: 1000
 
   output_dir: "./leakpro_output"
   attack_type: "mia" #mia, gia
