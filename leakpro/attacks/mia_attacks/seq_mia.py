@@ -70,32 +70,24 @@ class AttackSeqMIA(AbstractMIA):
             self.input_size = input_size
             self.hidden_size = hidden_size
             self.num_layers = num_layers
-            self.layer1 = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)
+            self.layer1 = nn.LSTM(input_size, hidden_size, num_layers)
             self.layer3 = nn.Linear(hidden_size * 2, num_classes)
-            self.relu = nn.ReLU()
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             """Forward call."""
-            h0 = Variable(torch.zeros(self.num_layers, x.size(0), self.hidden_size))
-            c0 = Variable(torch.zeros(self.num_layers, x.size(0), self.hidden_size))
+            h0 = Variable(torch.zeros(self.num_layers, x.size(1), self.hidden_size))
+            c0 = Variable(torch.zeros(self.num_layers, x.size(1), self.hidden_size))
             out, (h1, c1) = self.layer1(x, (h0, c0))
-            permute_outputs = out.permute(1, 0, 2)
-            atten_energies = torch.sum(h1 * permute_outputs,
-                                    dim=2)
 
-            atten_energies = atten_energies.t()
+            atten_energies = torch.sum(h1 * out, dim=2)
+            scores = F.softmax(atten_energies, dim=0)
+            scores = scores.unsqueeze(2)
 
-            scores = F.softmax(atten_energies, dim=1)
-
-            scores = scores.unsqueeze(0)
-
-            permute_permute_outputs = permute_outputs.permute(2, 1, 0)
-            context_vector = torch.sum(scores * permute_permute_outputs,
-                                    dim=2)
-            context_vector = context_vector.t()
+            context_vector = torch.sum(scores * out, dim=0)
             context_vector = context_vector.unsqueeze(0)
-            out2 = torch.cat((h1, context_vector), 2)
-            return self.layer3(out2)
+
+            out = torch.cat((h1, context_vector), 2)
+            return self.layer3(out)
 
     def __init__(self: Self,
                  handler: MIAHandler,
