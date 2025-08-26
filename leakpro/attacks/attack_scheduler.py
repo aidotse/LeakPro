@@ -63,7 +63,7 @@ class AttackScheduler:
         """Conditionally import attack factories based on attack."""
         if attack_type == "mia":
             try:
-                from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
+                from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA  # noqa: I001, PLC0415
                 self.attack_factory = AttackFactoryMIA
                 logger.info("MIA attack factory loaded.")
             except ImportError as e:
@@ -72,7 +72,7 @@ class AttackScheduler:
 
         elif attack_type == "gia":
             try:
-                from leakpro.attacks.gia_attacks.attack_factory_gia import AttackFactoryGIA
+                from leakpro.attacks.gia_attacks.attack_factory_gia import AttackFactoryGIA # noqa: I001, PLC0415
                 self.attack_factory = AttackFactoryGIA
                 logger.info("GIA attack factory loaded.")
             except ImportError as e:
@@ -81,7 +81,7 @@ class AttackScheduler:
 
         elif attack_type == "minv":
             try:
-                from leakpro.attacks.minv_attacks.attack_factory_minv import AttackFactoryMINV
+                from leakpro.attacks.minv_attacks.attack_factory_minv import AttackFactoryMINV # noqa: I001, PLC0415
                 self.attack_factory = AttackFactoryMINV
                 logger.info("MINV attack factory loaded.")
             except ImportError as e:
