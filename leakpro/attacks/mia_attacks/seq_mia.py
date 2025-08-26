@@ -6,7 +6,6 @@ import pickle
 import numpy as np
 import torch
 import torch.nn.functional as F  # noqa: N812
-import torch.nn.utils.rnn as rnn_utils
 from pydantic import BaseModel, Field
 from torch import nn
 from torch.autograd import Variable
@@ -45,7 +44,7 @@ class AttackSeqMIA(AbstractMIA):
 
     # Attack model classes are taken directly from the GitHub of the original paper.
     class LSTM(nn.Module):
-        """LSTM model"""
+        """LSTM model."""
 
         def __init__(self, input_size: int = 2, hidden_size: int = 4, num_layers: int = 1, num_classes: int = 2) -> None:
             super().__init__()
@@ -62,9 +61,10 @@ class AttackSeqMIA(AbstractMIA):
 
             out, (h1, c1) = self.lstm(x, (h0, c0))
             return self.label(h1)
-        
-    class LSTM_Attention(nn.Module):
-        """LSTM model with attention"""
+
+    class LSTMAttention(nn.Module):
+        """LSTM model with attention."""
+
         def __init__(self, input_size: int = 2, hidden_size: int = 4, num_layers: int = 1, num_classes: int = 2) -> None:
             super().__init__()
             self.input_size = input_size
@@ -95,8 +95,7 @@ class AttackSeqMIA(AbstractMIA):
             context_vector = context_vector.t()
             context_vector = context_vector.unsqueeze(0)
             out2 = torch.cat((h1, context_vector), 2)
-            out = self.layer3(out2)
-            return out, out2
+            return self.layer3(out2)
 
     def __init__(self: Self,
                  handler: MIAHandler,
@@ -136,7 +135,7 @@ class AttackSeqMIA(AbstractMIA):
         self.mia_test_data_loader = None
         self.dim_in_mia = (self.number_of_traj + 1 )
         if self.attention_model:
-            self.mia_classifer = self.LSTM_Attention(5)
+            self.mia_classifer = self.LSTMAttention(5)
         else:
             self.mia_classifer = self.LSTM(5)
 
