@@ -1,5 +1,6 @@
 """Module for handling shadow models."""
 
+import copy
 import pickle
 
 import numpy as np
@@ -149,7 +150,7 @@ class DistillationModelHandler(ModelHandler):
             with open(f"{self.storage_path}/{model_pair_name}_{d}.pkl", "wb") as f:
                 save(student_model.state_dict(), f)
                 logger.info(f"Saved distillation model for epoch {d} to {self.storage_path}")
-            distillation_checkpoints.append(student_model)
+            distillation_checkpoints.append(copy.deepcopy(student_model))
 
             logger.info("Storing metadata for distillation model")
             meta_data = {
