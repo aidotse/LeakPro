@@ -19,7 +19,9 @@ class LSETConfig(BaseModel):
     temperature: float = Field(default=2.0, ge=0.0, description="Softmax temperature")
     training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow models")  # noqa: E501
     online: bool = Field(default=False, description="Online vs offline attack")
-
+    offline_scale_factor: float = Field(default=0.33,
+                                        description="Rescale the LogSumExp threshold to compensate for the lack of in-models",
+                                        json_schema_extra = {"optuna": {"type": "float", "low": 0.0, "high": 1.0,"enabled_if": lambda model: not model.online}})  # noqa: E501
 
 class AttackLSET(AbstractMIA):
     """Implementation of the LSET attack."""
@@ -54,6 +56,7 @@ class AttackLSET(AbstractMIA):
         self.epsilon = 1e-6
         self.shadow_models = None
         self.shadow_model_indices = None
+        self.attack_cache_folder_path = ShadowModelHandler().attack_cache_folder_path
 
 
     def description(self:Self) -> dict:
@@ -140,7 +143,7 @@ class AttackLSET(AbstractMIA):
             # out_logits = log_conf_shadow_models[rows, cols]
             threshold = logsumexp(out_logits, axis=0) - np.log(n_out_models)
 
-        score = log_conf_target - threshold
+        score = log_conf_target - threshold if self.online else log_conf_target - self.offline_scale_factor * threshold
 
         # pick out the in-members and out-members signals
         in_members = self.audit_dataset["in_members"]
@@ -157,3 +160,11 @@ class AttackLSET(AbstractMIA):
                                     signal_values=signal_values,
                                     result_name="LSET",
                                     metadata=self.configs.model_dump())
+
+    def reset_attack(self: Self, config:BaseModel) -> None:
+        """Reset attack to initial state."""
+
+        # Assign the new configuration parameters to the object
+        self.configs = config
+        for key, value in config.model_dump().items():
+            setattr(self, key, value)

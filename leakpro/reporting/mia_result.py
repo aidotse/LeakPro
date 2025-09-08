@@ -167,6 +167,8 @@ class MIAResult:
         sorted_labels = self.true[sorted_indices]
         sorted_scores = self.signal_values[sorted_indices]
 
+        assert np.all(np.diff(sorted_scores) <= 0), "sorted_scores are not in descending order"
+
         # check that sorted_scores are descending
         assert np.all(np.diff(sorted_scores) <= 0), "sorted_scores are not in descending order"
 
@@ -179,6 +181,8 @@ class MIAResult:
 
         self.tp = tp_cumsum[first_indices]
         self.fp = fp_cumsum[first_indices]
+        self.thresholds = sorted_scores[first_indices]
+
         self.fn = np.sum(sorted_labels == 1) - self.tp
         self.tn = np.sum(sorted_labels == 0) - self.fp
 
@@ -225,6 +229,12 @@ class MIAResult:
 
         self.fpr = np.where(self.fp + self.tn != 0, self.fp / (self.fp + self.tn), 0.0)
         self.tpr = np.where(self.tp + self.fn != 0, self.tp / (self.tp + self.fn), 0.0)
+
+        # FPR = 0.001
+        # threshold = 1-FPR
+        # positives = self.signal_values >= threshold
+        # fpr = np.sum(positives & (self.true == 0)) / np.sum(self.true == 0)
+        # tpr = np.sum(positives & (self.true == 1)) / np.sum(self.true == 1)
 
         if np.sum(np.diff(self.fpr) < 0) > 0 or np.sum(np.diff(self.tpr) < 0) > 0:
             logger.warning("FPR or TPR values are not monotonically increasing. ROC AUC may be inaccurate.")

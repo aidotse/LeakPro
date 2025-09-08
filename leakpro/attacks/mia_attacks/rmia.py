@@ -91,6 +91,8 @@ class AttackRMIA(AbstractMIA):
         self.shadow_model_indices = None
 
         self.load_for_optuna = False
+        self.attack_cache_folder_path = ShadowModelHandler().attack_cache_folder_path
+        self.bayesian_optimization = False
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
@@ -139,20 +141,20 @@ class AttackRMIA(AbstractMIA):
         if not self.load_for_optuna:
             self._prepare_shadow_models()
 
-        z_true_labels = self.handler.get_labels(self.audit_dataset["data"])
-        logits_theta = ShadowModelHandler().load_logits(name="target")
-        logits_shadow_models = []
-        for indx in self.shadow_model_indices:
-            logits_shadow_models.append(ShadowModelHandler().load_logits(indx=indx))
+            self.ground_truth_indices = self.handler.get_labels(self.audit_dataset["data"])
+            self.logits_theta = ShadowModelHandler().load_logits(name="target")
+            self.logits_shadow_models = []
+            for indx in self.shadow_model_indices:
+                self.logits_shadow_models.append(ShadowModelHandler().load_logits(indx=indx))
 
         # collect the softmax output of the correct class
-        n_attack_points = len(z_true_labels)
-        p_z_given_theta = softmax_logits(logits_theta, self.temperature)[np.arange(n_attack_points),z_true_labels]
+        n_attack_points = len(self.ground_truth_indices)
+        p_z_given_theta = softmax_logits(self.logits_theta, self.temperature)[np.arange(n_attack_points),self.ground_truth_indices]
         p_z_given_theta = np.atleast_2d(p_z_given_theta)
 
         # collect the softmax output of the correct class for each shadow model
-        sm_logits_shadow_models = [softmax_logits(x, self.temperature) for x in logits_shadow_models]
-        p_z_given_shadow_models = np.array([x[np.arange(n_attack_points),z_true_labels] for x in sm_logits_shadow_models])
+        sm_logits_shadow_models = [softmax_logits(x, self.temperature) for x in self.logits_shadow_models]
+        p_z_given_shadow_models = np.array([x[np.arange(n_attack_points),self.ground_truth_indices] for x in sm_logits_shadow_models])
 
         # evaluate the marginal p(z)
         if self.online is True:
@@ -169,20 +171,20 @@ class AttackRMIA(AbstractMIA):
         logger.info("Running RMIA online attack")
 
         # Load the logits for the target model and shadow models
-        ground_truth_indices = self.handler.get_labels(self.audit_dataset["data"])
-        logits_theta = ShadowModelHandler().load_logits(name="target")
-        logits_shadow_models = []
-        for indx in self.shadow_model_indices:
-            logits_shadow_models.append(ShadowModelHandler().load_logits(indx=indx))
+        # ground_truth_indices = self.handler.get_labels(self.audit_dataset["data"])
+        # logits_theta = ShadowModelHandler().load_logits(name="target")
+        # logits_shadow_models = []
+        # for indx in self.shadow_model_indices:
+        #     logits_shadow_models.append(ShadowModelHandler().load_logits(indx=indx))
 
         # collect the softmax output of the correct class
-        n_audit_points = len(ground_truth_indices)
-        p_x_given_theta = softmax_logits(logits_theta, self.temperature)[np.arange(n_audit_points),ground_truth_indices]
+        n_audit_points = len(self.ground_truth_indices)
+        p_x_given_theta = softmax_logits(self.logits_theta, self.temperature)[np.arange(n_audit_points),self.ground_truth_indices]
         p_x_given_theta = np.atleast_2d(p_x_given_theta)
 
         # run points through shadow models, colelct logits and compute p(x)
-        sm_shadow_models = [softmax_logits(x, self.temperature) for x in logits_shadow_models]
-        p_x_given_shadow_models = np.array([x[np.arange(n_audit_points),ground_truth_indices] for x in sm_shadow_models])
+        sm_shadow_models = [softmax_logits(x, self.temperature) for x in self.logits_shadow_models]
+        p_x_given_shadow_models = np.array([x[np.arange(n_audit_points),self.ground_truth_indices] for x in sm_shadow_models])
 
         if self.online is True:
             p_x = np.mean(p_x_given_shadow_models, axis=0, keepdims=True)
@@ -235,6 +237,7 @@ class AttackRMIA(AbstractMIA):
         """Reset attack to initial state."""
 
         # Assign the new configuration parameters to the object
+        self.configs = config
         for key, value in config.model_dump().items():
             setattr(self, key, value)
 

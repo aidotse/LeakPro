@@ -12,11 +12,25 @@ class ResNet18(nn.Module):
         super(ResNet18, self).__init__()
         self.num_classes = num_classes
         self.model = models.resnet18(pretrained=False)
-        self.fc = nn.Linear(self.model.fc.in_features, self.num_classes)
-        self.model.fc = self.fc
+        self.model.fc = nn.Linear(self.model.fc.in_features, self.num_classes)
     
     def forward(self, x):
         return self.model(x)
+    
+    def forward_bmia(self, x):
+        x = self.model.conv1(x)
+        x = self.model.bn1(x)
+        x = self.model.relu(x)
+        x = self.model.maxpool(x)
+
+        x = self.model.layer1(x)
+        x = self.model.layer2(x)
+        x = self.model.layer3(x)
+        x = self.model.layer4(x)
+
+        x = self.model.avgpool(x)
+        x = torch.flatten(x, 1)  # <-- output before fc
+        return x
 
 class BasicBlock(nn.Module):
     def __init__(self, in_planes, out_planes, stride, dropRate=0.0):
@@ -103,3 +117,13 @@ class WideResNet(nn.Module):
         out = F.avg_pool2d(out, 8)
         out = out.view(-1, self.nChannels)
         return self.fc(out)
+    
+    def forward_bmia(self,x):
+        out = self.conv1(x)
+        out = self.block1(out)
+        out = self.block2(out)
+        out = self.block3(out)
+        out = self.relu(self.bn1(out))
+        out = F.avg_pool2d(out, 8)
+        out = out.view(-1, self.nChannels)
+        return out

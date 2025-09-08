@@ -102,6 +102,7 @@ class AttackScheduler:
             # If Optuna is used, the attack should not be loaded even if it already exists
             if run_with_optuna:
                 logger.info(f"Preparing attack: {attack_type}")
+                attack_obj.bayesian_optimization = True
                 attack_obj.prepare_attack()
                 logger.info(f"Running attack with Optuna: {attack_type}")
                 study = attack_obj.run_with_optuna()
@@ -117,6 +118,7 @@ class AttackScheduler:
             # else:
             if not run_with_optuna:
                 logger.info(f"Preparing attack: {attack_type}")
+                attack_obj.bayesian_optimization = False
                 attack_obj.prepare_attack()
             logger.info(f"Running attack: {attack_type}")
             result = attack_obj.run_attack()

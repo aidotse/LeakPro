@@ -3,6 +3,62 @@ audit:  # Configurations for auditing
   attack_list:
     - attack: rmia
       online: False
+      num_shadow_models: 2
+      training_data_fraction: 0.5
+      attack_data_fraction: 1.0
+      gamma: 1.0
+    - attack: rmia
+      online: True
+      num_shadow_models: 4 # NOTE: this will result in n/2 out models!
+      training_data_fraction: 0.5
+      attack_data_fraction: 1.0
+      gamma: 1.0
+    - attack: lset
+      online: True
+      num_shadow_models: 4
+      training_data_fraction: 0.5
+    - attack: lset
+      online: False
+      num_shadow_models: 4
+      training_data_fraction: 0.5
+    - attack: lira
+      online: True
+      num_shadow_models: 4
+      training_data_fraction: 0.5
+    - attack: lira
+      online: False
+      num_shadow_models: 4
+      training_data_fraction: 0.5
+    - attack: rmia
+      online: False
+      num_shadow_models: 8
+      training_data_fraction: 0.5
+      attack_data_fraction: 1.0
+      gamma: 1.0
+    - attack: rmia
+      online: True
+      num_shadow_models: 8 # NOTE: this will result in n/2 out models!
+      training_data_fraction: 0.5
+      attack_data_fraction: 1.0
+      gamma: 1.0
+    - attack: lset
+      online: True
+      num_shadow_models: 8
+      training_data_fraction: 0.5
+    - attack: lset
+      online: False
+      num_shadow_models: 8
+      training_data_fraction: 0.5
+    - attack: lira
+      online: True
+      num_shadow_models: 8
+      training_data_fraction: 0.5
+    - attack: lira
+      online: False
+      num_shadow_models: 8
+      training_data_fraction: 0.5
+    - attack: rmia
+      online: False
       num_shadow_models: 32
       training_data_fraction: 0.5
       attack_data_fraction: 1.0
@@ -23,9 +79,6 @@ audit:  # Configurations for auditing
       training_data_fraction: 0.5
     - attack: bmia
       training_data_fraction: 1.0
-    # # - attack: lset_laplace
-    # #   online: True
-    # #   training_data_fraction: 0.5
     - attack: lira
       online: True
       num_shadow_models: 32
@@ -34,19 +87,25 @@ audit:  # Configurations for auditing
       online: False
       num_shadow_models: 32
       training_data_fraction: 0.5
+    # - attack: lset_laplace
+    #   online: True
+    #   training_data_fraction: 0.5
+    # - attack: lset_laplace
+    #   online: True
+    #   training_data_fraction: 0.5
     # - attack: loss_traj
     # - attack: qmia
     #HSJ:
     # - attack: yoqo
 
-  output_dir: "./leakpro_output"
+  output_dir: "./cifar10/leakpro_output"
   attack_type: "mia" #mia, gia
   data_modality: "image" #image, tabular
 
 target:
   # Target model path
   module_path: "./target_model_class.py"
-  model_class: "ResNet18" #"WideResNet" #"ResNet18" 
+  model_class: "WideResNet" #"WideResNet" #"ResNet18" 
   target_folder: "./target"
   # Data paths
   data_path: "./data/cifar10.pkl"

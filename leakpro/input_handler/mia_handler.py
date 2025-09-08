@@ -174,7 +174,7 @@ class MIAHandler:
             return True
         raise ValueError("Object is not indexable.")
 
-    def get_dataset(self:Self, dataset_indices: np.ndarray, params:dict=None) -> np.ndarray:
+    def get_dataset(self:Self, dataset_indices: np.ndarray, params:dict=None, augment=False) -> np.ndarray:
         """Get the dataset from the population."""
 
         if params is None:
@@ -188,17 +188,21 @@ class MIAHandler:
         targets = self.population.targets[dataset_indices]
 
         params = {} if params is None else params
-        return self.UserDataset(data, targets, **params)
+        data = self.UserDataset(data, targets, **params)
+        if augment is False:
+            data.augment = None
+        return data
 
     def get_dataloader(self: Self,
                        dataset_indices: np.ndarray,
                        params:dict=None,
                        batch_size:int=None,
-                       shuffle:bool=None) -> DataLoader:
+                       shuffle:bool=None,
+                       augment:bool=False) -> DataLoader:
         """Default implementation of the dataloader."""
         if params is None:
             params = {}
-        dataset = self.get_dataset(dataset_indices, params)
+        dataset = self.get_dataset(dataset_indices, params, augment=augment)
 
         # Get default parameters from stored config (includes batch size, collate_fn, shuffle etc.)
         dataloader_params = self.dataloader_config.params.copy()

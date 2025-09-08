@@ -6,6 +6,7 @@ from laplace import Laplace
 from pydantic import BaseModel, Field
 from scipy.special import logsumexp
 from scipy.stats import t as t_dist
+from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
@@ -20,7 +21,7 @@ from leakpro.utils.logger import logger
 class BMIAConfig(BaseModel):
     """Configuration for the BMIA attack."""
 
-    n_samples: int = Field(default=50, description="Number of Laplace approximation samples")
+    n_samples: int = Field(default=100, description="Number of Laplace approximation samples")
     training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow model")  # noqa: E501
 
 
@@ -108,14 +109,14 @@ class AttackBMIA(AbstractMIA):
             idx += numel
         layer.load_state_dict(state_dict)
 
-    def sample_models(self:Self) -> list:
-        sampled_weights = self.la.sample(self.n_samples)
+    def sample_models(self:Self, sampled_weights:np.ndarray) -> list:
+        # sampled_weights = self.la.sample(self.n_samples)
         sampled_models = []
         for i in range(self.n_samples):
             sampled_model, criterion, _ = ShadowModelHandler()._get_model_criterion_optimizer()
             sampled_model.load_state_dict(self.shadow_model.model_obj.state_dict())
             # Update weights in last layer, which is assumed to be named fc
-            self.write_flat_params_to_layer(sampled_weights[i], sampled_model.fc)
+            self.write_flat_params_to_layer(sampled_weights[i], sampled_model.model.fc)
             sampled_models.append(PytorchModel(sampled_model, criterion))
         return sampled_models
 
@@ -146,12 +147,10 @@ class AttackBMIA(AbstractMIA):
         self.shadow_model = shadow_models[0]
         train_indices = ShadowModelHandler().get_shadow_model_metadata(shadow_model_indices)[0].train_indices
         train_loader = self.handler.get_dataloader(train_indices, shuffle=False)
-        self.la = Laplace(self.shadow_model.model_obj,
-            "classification",
-            subset_of_weights="last_layer",
-            hessian_structure="kron")
+        self.la = Laplace(self.shadow_model.model_obj, "classification", subset_of_weights="last_layer", hessian_structure="kron")
         self.la.fit(train_loader)
-        self.la.optimize_prior_precision(pred_type='glm', link_approx='probit')
+        self.la.optimize_prior_precision(pred_type="glm", link_approx="mc", method="marglik")
+
 
     def run_attack(self:Self) -> MIAResult:
         """Run the attack on the target model and dataset.
@@ -176,14 +175,46 @@ class AttackBMIA(AbstractMIA):
         target_scores = self.hinge_loss(logits_target, ground_truth_indices)
 
         # Sample models using Laplace approximation
-        sampled_models = self.sample_models()
-
         # Compute hinge values for all sampled models
-        sampled_logits = np.array(self.signal(sampled_models, self.handler, self.audit_dataset["data"]))
-        ground_truth = np.tile(ground_truth_indices, (self.n_samples, 1))
-        sampled_scores = self.hinge_loss(sampled_logits, ground_truth)
+        audit_data_loader = self.handler.get_dataloader(audit_data_indices, batch_size=100, shuffle=False)
+        logits = []
+        # move to GPU if available
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.shadow_model.model_obj.to(device)
+        self.shadow_model.model_obj.eval()
 
-        # Compute t distributed statistic
+        logits = []
+        with torch.no_grad():
+            for batch in tqdm(audit_data_loader, desc="BMIA: Compute logits for shadow model"):
+                x, _ = batch
+                x = x.to(device)
+                output = self.shadow_model.model_obj.forward_bmia(x)
+                logits.append(output.cpu())  # store on CPU to save GPU memory
+
+        activation = torch.cat(logits, dim=0)
+        self.shadow_model.model_obj.to("cpu")
+
+        in_features = activation.shape[1]
+        out_features = self.shadow_model.model_obj.num_classes
+        weight_size = in_features * out_features
+
+        # sample one model at a time
+        sampled_scores = []
+        for _ in range(self.n_samples):
+            sampled_weights = self.la.sample(1)
+            weight = sampled_weights[0,:weight_size].reshape(out_features, in_features)  # (512, 10)
+            bias = sampled_weights[0,weight_size:]
+            sampled_logits = torch.matmul(activation, weight.T) + bias
+            sampled_logits = sampled_logits.detach().cpu().numpy()  # (60256, 10)
+            sampled_scores.append(self.hinge_loss(sampled_logits, ground_truth_indices))
+
+        # sampled_weights = self.la.sample(self.n_samples)
+        # sampled_models = self.sample_models(sampled_weights)
+        # sampled_logits = np.array(self.signal(sampled_models, self.handler, audit_data_indices))
+        # ground_truth = np.tile(ground_truth_indices, (self.n_samples, 1))
+        # sampled_scores = self.hinge_loss(sampled_logits, ground_truth)
+
+        # Compute t distributed statis  tic
         diff = target_scores - sampled_scores
         diff_mean = diff.mean(axis=0)
         diff_stdn = diff.std(axis=0) / np.sqrt(self.n_samples)

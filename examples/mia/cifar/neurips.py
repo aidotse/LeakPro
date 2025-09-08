@@ -13,6 +13,8 @@ from leakpro import LeakPro
 from cifar_handler import CifarInputHandler
 import pickle
 import matplotlib.pyplot as plt
+import re
+import csv
 
 def prepare_cifar_data(dataset_name):
 
@@ -98,17 +100,19 @@ def train_target_model(train_config, train_loader, test_loader, train_indices, t
         raise ValueError("Invalid dataset name")
 
     # Create instance of target model
-    model = ResNet18(num_classes = num_classes)
-    #model =  WideResNet(depth=28, num_classes=num_classes, widen_factor=2)
+    #model = ResNet18(num_classes = num_classes)
+    model =  WideResNet(depth=28, num_classes=num_classes, widen_factor=2, dropRate=0.3)
 
     # Read out the relevant parameters for training
     lr = train_config["train"]["learning_rate"]
     weight_decay = train_config["train"]["weight_decay"]
+    momentum = train_config["train"]["momentum"]
+    nesterov = train_config["train"]["nesterov"]
     epochs = train_config["train"]["epochs"]
         
     # Create optimizer and loss function
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    optimizer = optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay, momentum=momentum, nesterov=nesterov)
 
     # train target model
     train_result = CifarInputHandler().train(dataloader=train_loader,
@@ -143,9 +147,160 @@ def train_target_model(train_config, train_loader, test_loader, train_indices, t
     
     return meta_data
         
+        
+def parse_info(res_id):
+    attack = res_id.split("-")[0]
+    num_shadow = int(re.search(r'num_shadow_models=(\d+)', res_id).group(1))
+    online = re.search(r'online=(True|False)', res_id).group(1) == "True"
+    label = f"{attack} (offline)" if not online else attack
+    return num_shadow, label
+
+def fmt(val, std):
+    return f"${val * 100:.2f}\% \pm {std * 100:.2f}\%$"
+
+def fmt2(val, std):
+    return f"${val:.5f} \pm {std:.5f}$"
+
+def fmt3(val, std):
+    return f"${val:.5f}\% \pm {std:.5f}\%$"
+
+def extract_metrics(mia_results):
+    table = {}
+    table1 = {}
+    table2 = {}
+    for res_id, metrics in mia_results.items():
+        if res_id == "target":
+            continue
+
+        try:
+            N, attack_label = parse_info(res_id)
+        except Exception as e:
+            print(f"Could not parse {res_id}: {e}")
+            continue
+
+        fpr = np.array(metrics["fpr"])
+        tpr = np.array(metrics["tpr"])
+        tpr_std = np.array(metrics.get("tpr_std", [0.0] * len(fpr)))
+
+
+        auc = metrics["roc_auc"]
+        auc_std = metrics["roc_auc_std"]
+        
+        fpr_targets = [0.01, 0.001]
+        tpr_at_fpr = {}
+        for target in fpr_targets:
+            mask = fpr <= target
+            indx = np.where(mask)[0][-1]
+            if np.any(mask):
+                tpr_at_fpr[f"tpr_at_fpr_{target}"] = tpr[indx]
+                tpr_at_fpr[f"tpr_std_at_fpr_{target}"] = tpr_std[indx]
+            else:
+                tpr_at_fpr[f"tpr_at_fpr_{target}"] = np.nan
+                tpr_at_fpr[f"tpr_std_at_fpr_{target}"] = np.nan
+
+        row = {
+            "auc": fmt(auc, auc_std),
+            "tpr_0.01": fmt(tpr_at_fpr["tpr_at_fpr_0.01"], tpr_at_fpr["tpr_std_at_fpr_0.01"]),
+            "tpr_0.001": fmt(tpr_at_fpr["tpr_at_fpr_0.001"], tpr_at_fpr["tpr_std_at_fpr_0.001"]),
+        }
+        
+        # get index o
+        row2 = {            
+            "fpr_0.01": fmt2(metrics["threshold_at_fpr_targets"]["thres_at_fpr_0.01"], metrics["threshold_at_fpr_targets"]["thres_at_fpr_0.01_std"]),
+            "fpr_0.001": fmt2(metrics["threshold_at_fpr_targets"]["thres_at_fpr_0.001"], metrics["threshold_at_fpr_targets"]["thres_at_fpr_0.001_std"]),
+        }
+        
+        row3 = {
+            "fpr_thres_0.99": fmt3(metrics["metrics_at_threshold_target"]["fpr_at_threshold_0.99"], metrics["metrics_at_threshold_target"]["fpr_at_threshold_0.99_std"]),
+            "tpr_thres_0.99": fmt3(metrics["metrics_at_threshold_target"]["tpr_at_threshold_0.99"], metrics["metrics_at_threshold_target"]["tpr_at_threshold_0.99_std"]),
+            "fpr_thres_0.999": fmt3(metrics["metrics_at_threshold_target"]["fpr_at_threshold_0.999"], metrics["metrics_at_threshold_target"]["fpr_at_threshold_0.999_std"]),
+            "tpr_thres_0.999": fmt3(metrics["metrics_at_threshold_target"]["tpr_at_threshold_0.999"], metrics["metrics_at_threshold_target"]["tpr_at_threshold_0.999_std"]),
+        }
+
+        table.setdefault(N, {})[attack_label] = row
+        table1.setdefault(N, {})[attack_label] = row2
+        table2.setdefault(N, {})[attack_label] = row3
+
+    return table, table1, table2
+
+def build_latex_table(table_c10, table_c100):
+        # --- Build LaTeX table rows ---
+    Ns = sorted(set(table_c10.keys()) | set(table_c100.keys()), reverse=True)
+
+    attack_sets = []
+    for N in Ns:
+        keys_c10 = set(table_c10.get(N, {}).keys())
+        keys_c100 = set(table_c100.get(N, {}).keys())
+        attack_sets.append(keys_c10 | keys_c100)
+
+    all_attacks = sorted(set().union(*attack_sets))
+
+    latex_rows = []
+    for N in Ns:
+        rows = []
+        for attack in all_attacks:
+            c10 = table_c10.get(N, {}).get(attack, {"auc": "$0.000 \pm 0.000$", "tpr_0.01": "$0.000 \pm 0.000$", "tpr_0.001": "$0.000 \pm 0.000$"})
+            c100 = table_c100.get(N, {}).get(attack, {"auc": "$0.000 \pm 0.000$", "tpr_0.01": "$0.000 \pm 0.000$", "tpr_0.001": "$0.000 \pm 0.000$"})
+            row = f"& {attack} & {c10['auc']} & {c10['tpr_0.01']} & {c10['tpr_0.001']} & {c100['auc']} & {c100['tpr_0.01']} & {c100['tpr_0.001']} \\"
+            rows.append(row)
+
+        latex_rows.append(f"\multirow{{{len(rows)}}}{{*}}{{{N}}}")
+        latex_rows.extend(rows)
+        latex_rows.append("\midrule")
+
+    latex_string = "\n".join(latex_rows)
+    
+    return latex_string
+
+def build_latex_table_threshold_at_fpr(table_c10, table_c100):
+    Ns = sorted(set(table_c10.keys()) | set(table_c100.keys()), reverse=True)
+
+    attack_sets = []
+    for N in Ns:
+        keys_c10 = set(table_c10.get(N, {}).keys())
+        keys_c100 = set(table_c100.get(N, {}).keys())
+        attack_sets.append(keys_c10 | keys_c100)
+
+    all_attacks = sorted(set().union(*attack_sets))
+
+    latex_rows = []
+    for N in Ns:
+        rows = []
+        for attack in all_attacks:
+            c10 = table_c10.get(N, {}).get(attack, {"fpr_0.01": "$0.000 \pm 0.000$", "fpr_0.001": "$0.000 \pm 0.000$"})
+            c100 = table_c100.get(N, {}).get(attack, {"fpr_0.01": "$0.000 \pm 0.000$", "fpr_0.001": "$0.000 \pm 0.000$"})
+            row = f"& {attack} & {c10['fpr_0.01']} & {c10['fpr_0.001']} & {c100['fpr_0.01']} & {c100['fpr_0.001']} \\"
+            rows.append(row)
+
+        latex_rows.append(f"\multirow{{{len(rows)}}}{{*}}{{{N}}}")
+        latex_rows.extend(rows)
+        latex_rows.append("\midrule")
+
+    latex_string = "\n".join(latex_rows)
+    
+    return latex_string
+
+
+def make_table():
+    # --- Load both datasets ---
+    with open("mia_results_cifar10.pkl", "rb") as f:
+        mia_c10 = pickle.load(f)
+    with open("mia_results_cifar100.pkl", "rb") as f:
+        mia_c100 = pickle.load(f)
+
+    table_c10, table_c10_threshold_at_fpr, table_c10_fpr_at_threshold = extract_metrics(mia_c10)
+    table_c100, table_c100_threshold_at_fpr, table_c100_fpr_at_threshold  = extract_metrics(mia_c100)
+
+    latex_1 = build_latex_table(table_c10, table_c100)
+    latex_2 = build_latex_table_threshold_at_fpr(table_c10_threshold_at_fpr, table_c100_threshold_at_fpr)
+    #latex_3 = build_latex_table_fpr_at_threshold(table_c10_fpr_at_threshold, table_c100_fpr_at_threshold)
+
+    return latex_1, latex_2
 # define the main function
 if __name__ == "__main__":
     os.chdir(os.path.dirname(__file__))
+
+    make_table()
     n_train_models = 10
     
     # Load the config.yaml file
@@ -161,6 +316,7 @@ if __name__ == "__main__":
     mia_results = {}
     mia_results["target"] = {"train_acc": [], "test_acc": []}
     for i in range(n_train_models):
+        print(f"Running MIA for run {i}")
         train_loader, test_loader, train_indices, test_indices = get_datasets(train_config, data, targets, seed=i)
         meta_data = train_target_model(train_config, train_loader, test_loader, train_indices, test_indices, dataset_name)
         print(f"Target model trained and metadata saved for run {i}")
@@ -173,14 +329,15 @@ if __name__ == "__main__":
         leakpro = LeakPro(CifarInputHandler, audit_path)
 
         # Run the audit 
-        result = leakpro.run_audit(create_pdf=False)
+        result = leakpro.run_audit(create_pdf=False, use_optuna=False)
         
         for res in result:
             if res.id not in mia_results:
-                mia_results[res.id] = {"roc_auc": [], "tpr": [], "fpr": []}
+                mia_results[res.id] = {"roc_auc": [], "tpr": [], "fpr": [], "thresholds": []}
             mia_results[res.id]["roc_auc"].append(res.roc_auc)
             mia_results[res.id]["tpr"].append(res.tpr)
             mia_results[res.id]["fpr"].append(res.fpr)
+            mia_results[res.id]["thresholds"].append(res.thresholds)
         
         # Remove the cached logits in leakpro_output/attack_cache to store new ones matching the new train indices
         for file in os.listdir("leakpro_output/attack_cache"):
@@ -213,7 +370,42 @@ for res_id, metrics in mia_results.items():
         interp_tpr = np.interp(mean_fpr, fpr, tpr)
         interp_tpr[0] = 0.0  # Ensure starts at (0,0)
         interpolated_tprs.append(interp_tpr)
+        
+    #-----------
+    # Compute mean and std of thresholds at specific FPR targets
+    fpr_targets = [0.01, 0.001]
+    threshold_at_fpr_targets = {}
+    for target in fpr_targets:
+        thresholds_at_fpr = []
+        for fpr, thresholds in zip(metrics["fpr"], metrics["thresholds"]):
+            mask = fpr <= target
+            if np.any(mask):
+                thresholds_at_fpr.append(thresholds[mask].min())
+            else:
+                thresholds_at_fpr.append(np.nan) 
+        threshold_at_fpr_targets[f"thres_at_fpr_{target}"] = np.mean(thresholds_at_fpr)
+        threshold_at_fpr_targets[f"thres_at_fpr_{target}_std"] = np.std(thresholds_at_fpr)
+    
+    #-----------
+    metrics_at_threshold_target = {}
+    threshold_targets = [1 - x for x in fpr_targets]  # if this is your intent
 
+    for threshold_target in threshold_targets:
+        tmp_fpr = []
+        tmp_tpr = []
+        for fpr, tpr, thresholds in zip(metrics["fpr"], metrics["tpr"], metrics["thresholds"]):
+            thresholds = np.array(thresholds)
+            idx = (np.abs(thresholds - threshold_target)).argmin()
+            tmp_fpr.append(fpr[idx])
+            tmp_tpr.append(tpr[idx])
+        
+        label = f"{threshold_target:.3f}".rstrip("0").rstrip(".")  # clean label
+        metrics_at_threshold_target[f"fpr_at_threshold_{label}"] = np.mean(tmp_fpr)
+        metrics_at_threshold_target[f"fpr_at_threshold_{label}_std"] = np.std(tmp_fpr)
+        metrics_at_threshold_target[f"tpr_at_threshold_{label}"] = np.mean(tmp_tpr)
+        metrics_at_threshold_target[f"tpr_at_threshold_{label}_std"] = np.std(tmp_tpr)
+            
+        
     tpr_array = np.stack(interpolated_tprs, axis=0)  # (n_runs, 100)
     tpr_avg = np.mean(tpr_array, axis=0)
     tpr_std = np.std(tpr_array, axis=0)
@@ -224,6 +416,8 @@ for res_id, metrics in mia_results.items():
         "fpr": mean_fpr,
         "tpr": tpr_avg,
         "tpr_std": tpr_std,
+        "metrics_at_threshold_target": metrics_at_threshold_target,
+        "threshold_at_fpr_targets": threshold_at_fpr_targets,
     }
 
 # Save the results
@@ -249,8 +443,9 @@ for res_id, metrics in mia_averages.items():
     tpr = metrics["tpr"]
     tpr_std = metrics.get("tpr_std", None)
     auc = metrics["roc_auc"]
-
-    label = f"{wrap_label(res_id)}\n(AUC = {auc:.3f})"
+    std = metrics["roc_auc_std"]
+    # add std
+    label = f"{wrap_label(res_id)}\n(AUC = {auc:.3f} ± {std:.3f})"
     plt.plot(fpr, tpr, label=label)
 
     # Add confidence band if available
@@ -279,3 +474,28 @@ if save_path:
 print(f"ROC curve saved to: {save_path}")
 
 plt.show()
+
+import os
+import csv
+
+os.makedirs("mia_csv_per_attack", exist_ok=True)
+
+for res_id, metrics in mia_averages.items():
+    if res_id == "target":
+        #store target model results
+        filename = f"mia_csv_per_attack/{res_id}.csv"
+        with open(filename, "w", newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(["train_acc", "test_acc", "std_train_acc", "std_test_acc"])
+            writer.writerow([metrics["train_acc"], metrics["test_acc"], metrics["std_train_acc"], metrics["std_test_acc"]])
+        continue
+    fpr = metrics["fpr"]
+    tpr = metrics["tpr"]
+    tpr_std = metrics.get("tpr_std", None)
+
+    filename = f"mia_csv_per_attack/{res_id}.csv"
+    with open(filename, "w", newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(["fpr", "tpr", "tpr_std"])
+        for f_val, t_val, s_val in zip(fpr, tpr, tpr_std):
+            writer.writerow([f_val, t_val, s_val])

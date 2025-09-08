@@ -58,11 +58,12 @@ class AbstractMIA(AbstractAttack):
             AbstractMIA.population = handler.population
             AbstractMIA.population_size = handler.population_size
             AbstractMIA.target_model = PytorchModel(handler.target_model, handler.get_criterion())
+
             AbstractMIA.audit_dataset = {
                 # Assuming train_indices and test_indices are arrays of indices, not the actual data
                 "data": np.concatenate((handler.train_indices, handler.test_indices)),
                 # in_members will be an array from 0 to the number of training indices - 1
-                "in_members": np.arange(len(handler.train_indices)),
+                "in_members": np.arange(len(handler.train_indices)//2),
                 # out_members will start after the last training index and go up to the number of test indices - 1
                 "out_members": np.arange(len(handler.train_indices),len(handler.train_indices)+len(handler.test_indices)),
             }
@@ -188,7 +189,7 @@ class AbstractMIA(AbstractAttack):
             optuna_config = OptunaConfig()
 
         def objective(result: MIAResult) -> float:
-            return result._get_roc_auc_in_fpr_interval(1e-2)
+            return result.roc_auc
 
         optuna_config.objective = objective
         return optuna_optimal_hyperparameters(self, optuna_config)

@@ -158,7 +158,8 @@ class ShadowModelHandler(ModelHandler):
 
         if n_existing_models >= num_models:
             logger.info("Number of existing models exceeds or equals the number of models to create")
-            return filtered_indices[:num_models]
+            # sort the filtered indices
+            return np.sort(filtered_indices)[:num_models]
 
         indices_to_use = []
         next_index = max(all_indices) + 1 if all_indices else 0
@@ -174,7 +175,7 @@ class ShadowModelHandler(ModelHandler):
             # Get dataloader
             #data_indices = np.random.choice(shadow_population, data_size, replace=False)
             data_indices = shadow_population[np.where(A[i,:] == 1)]
-            data_loader = self.handler.get_dataloader(data_indices, params=None)
+            data_loader = self.handler.get_dataloader(data_indices, params=None, augment=True)
 
             # Get shadow model blueprint
             model, criterion, optimizer = self._get_model_criterion_optimizer()
