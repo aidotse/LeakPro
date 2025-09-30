@@ -1,8 +1,9 @@
-"""Implementation of the LSET attack."""
+"""Implementation of the BASE attack."""
 
 import numpy as np
 from pydantic import BaseModel, Field
 from scipy.special import log_softmax, logsumexp
+from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
@@ -12,8 +13,8 @@ from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 
-class LSETConfig(BaseModel):
-    """Configuration for the LSET attack."""
+class BASEConfig(BaseModel):
+    """Configuration for the BASE attack."""
 
     num_shadow_models: int = Field(default=1, ge=1, description="Number of shadow models")
     temperature: float = Field(default=2.0, ge=0.0, description="Softmax temperature")
@@ -23,16 +24,16 @@ class LSETConfig(BaseModel):
                                         description="Rescale the LogSumExp threshold to compensate for the lack of in-models",
                                         json_schema_extra = {"optuna": {"type": "float", "low": 0.0, "high": 1.0,"enabled_if": lambda model: not model.online}})  # noqa: E501
 
-class AttackLSET(AbstractMIA):
-    """Implementation of the LSET attack."""
+class AttackBASE(AbstractMIA):
+    """Implementation of the BASE attack."""
 
-    AttackConfig = LSETConfig # required config for attack
+    AttackConfig = BASEConfig # required config for attack
 
     def __init__(self:Self,
                  handler: AbstractInputHandler,
                  configs: dict
                  ) -> None:
-        """Initialize the LSET attack.
+        """Initialize the BASE attack.
 
         Args:
         ----
@@ -40,10 +41,10 @@ class AttackLSET(AbstractMIA):
             configs (dict): Configuration parameters for the attack.
 
         """
-        logger.info("Configuring the LSET attack")
+        logger.info("Configuring the BASE attack")
         # Initializes the pydantic object using the user-provided configs
         # This will ensure that the user-provided configs are valid
-        self.configs = LSETConfig() if configs is None else LSETConfig(**configs)
+        self.configs = BASEConfig() if configs is None else BASEConfig(**configs)
 
         # Call the parent class constructor. It will check the configs.
         super().__init__(handler)
@@ -61,12 +62,12 @@ class AttackLSET(AbstractMIA):
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
-        title_str = "LSET attack"
-        reference_str = "No reference"
-        summary_str = "A simple loss based attack with a log-sum-exponential approximation of the threshold"
+        title_str = "BASE attack"
+        reference_str = "Lassila, Marcus, Johan Östman, and Khac-Hoang Ngo. Practical Bayes-Optimal Membership Inference Attacks. arXiv preprint arXiv:2505.24089 (2025)."  # noqa: E501
+        summary_str = "A loss based attack with a log-sum-exponential approximation of the threshold"
         detailed_str = "The attack is executed according to: \
             1. Compute the loss value of the target model on the target node, L(target_model, target_point).\
-            2. Compute the LogSumExp over the negative loss value over N shadow models on the target point, LogSumExp(-L(shadow_model, target_point)). \
+            2. Compute the LogSumExp over the negative loss value over N shadow models on the target point. \
             3. The score is -L(target_model, target_point) - LogSumExp(-L(shadow_model, target_point))."
         return {
             "title_str": title_str,
@@ -80,7 +81,7 @@ class AttackLSET(AbstractMIA):
 
         Signals are computed on the auxiliary model(s) and dataset.
         """
-        logger.info("Preparing shadow models for LSET attack")
+        logger.info("Preparing shadow models for BASE attack")
 
         # Get all available indices for attack dataset, if self.online = True, include training and test data
         self.attack_data_indices = self.sample_indices_from_population(include_train_indices = True,
@@ -98,6 +99,80 @@ class AttackLSET(AbstractMIA):
         if self.online is False:
             self.out_indices = ~ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"]).T
 
+    def score_samples(self:Self, dataloader:list, audit_indices:list) -> np.ndarray:
+        """Score samples in the dataloader.
+
+        Args:
+        ----
+            dataloader (list): A dataloader to score samples from.
+            audit_indices (list): The indices of the audit dataset.
+
+        Returns:
+        -------
+            np.ndarray: The scores for the samples in the dataloader.
+
+        """
+        from leakpro.signals.signal import ModelLogits
+
+        n_points = len(dataloader.dataset)
+        ground_truth_indices = dataloader.dataset.targets.numpy()
+        assert n_points == len(ground_truth_indices), "Number of points and labels must be the same"
+        logger.info(f"Scoring {n_points} points with BASE attack")
+        logits_target = np.array(ModelLogits()([self.target_model], None, None, dataloader)).squeeze()
+        log_conf_target = log_softmax(logits_target / self.temperature, axis=-1)[np.arange(n_points), ground_truth_indices]
+        # run points through shadow models and collect the log confidence values
+        logits_sm = []
+        for m in tqdm(self.shadow_models, desc="Scoring with shadow models"):
+            logits_sm.append( np.array(ModelLogits()([m], self.handler, None, dataloader)).squeeze() )
+        log_conf_shadow_models = np.array([log_softmax(x / self.temperature, axis=-1)[np.arange(n_points), ground_truth_indices] for x in logits_sm])  # noqa: E501
+
+        if self.online is True:
+            threshold = logsumexp(log_conf_shadow_models, axis=0) - np.log(self.num_shadow_models)
+        else:
+            # ensure that each point has been trained on by half of the shadow models
+            n_out_models = np.sum(self.out_indices, axis=0)
+            assert np.all(n_out_models == self.num_shadow_models//2), "Number of OUT models is wrong"
+
+            # get what shadow models have seen the audit indices
+            index_map = np.array([np.where(self.audit_dataset["data"] == val)[0][0] for val in audit_indices])
+            out_indices_audit = self.out_indices[:, index_map]
+            n_out_models = np.sum(out_indices_audit, axis=0)
+            # make the "in-model" logits -inf so they are not included in the logsumexp
+            out_logits = np.where(out_indices_audit, log_conf_shadow_models, -np.inf)
+            threshold = logsumexp(out_logits, axis=0) - np.log(n_out_models)
+
+        score = log_conf_target - threshold if self.online else log_conf_target - self.offline_scale_factor * threshold
+        
+        ##
+        ground_truth_indices = self.handler.get_labels(self.audit_dataset["data"])
+        n_audit_points = len(self.audit_dataset["data"])
+        logits_target2 = ShadowModelHandler().load_logits(name="target")
+        logits_shadow_models = []
+        for indx in self.shadow_model_indices:
+            logits_shadow_models.append(ShadowModelHandler().load_logits(indx=indx))
+
+        # collect the log confidence output of the correct class (which is the negative cross-entropy loss)
+        log_conf_target2 = log_softmax(logits_target2 / self.temperature, axis=-1)[np.arange(n_audit_points),ground_truth_indices]
+
+        # run points through shadow models and collect the log confidence values
+        log_conf_shadow_models2 = np.array([log_softmax(x / self.temperature, axis=-1)[np.arange(n_audit_points),ground_truth_indices] for x in logits_shadow_models])  # noqa: E501
+
+        if self.online is True:
+            threshold = logsumexp(log_conf_shadow_models2, axis=0) - np.log(self.num_shadow_models)
+        else:
+            n_out_models = np.sum(self.out_indices, axis=0)
+            assert np.all(n_out_models == self.num_shadow_models//2), "Number of OUT models is wrong"
+
+            out_logits2 = np.where(self.out_indices, log_conf_shadow_models2, -np.inf)
+            threshold2 = logsumexp(out_logits2, axis=0) - np.log(n_out_models)
+
+        score2 = log_conf_target2 - threshold2 if self.online else log_conf_target2 - self.offline_scale_factor * threshold2
+
+        ##
+        from scipy.special import expit  # numerically stable sigmoid
+
+        return expit(score)  # noqa: RET504
+
     def run_attack(self:Self) -> MIAResult:
         """Run the attack on the target model and dataset.
 
@@ -108,7 +183,7 @@ class AttackLSET(AbstractMIA):
         """
         # perform the attack
         online_or_offline = "online" if self.online else "offline"
-        attack_info = f"Running {online_or_offline} LSET attack with {self.num_shadow_models} shadow models"
+        attack_info = f"Running {online_or_offline} BASE attack with {self.num_shadow_models} shadow models"
         logger.info(attack_info)
 
         # Load the logits for the target model and shadow models
@@ -120,14 +195,11 @@ class AttackLSET(AbstractMIA):
             logits_shadow_models.append(ShadowModelHandler().load_logits(indx=indx))
 
         # collect the log confidence output of the correct class (which is the negative cross-entropy loss)
-        # log_conf_target = np.log(softmax_logits(logits_target, self.temperature)[np.arange(n_audit_points),ground_truth_indices])
         log_conf_target = log_softmax(logits_target / self.temperature, axis=-1)[np.arange(n_audit_points),ground_truth_indices]
 
         # run points through shadow models and collect the log confidence values
-        # log_conf_shadow_models = np.array([np.log(softmax_logits(x, self.temperature)[np.arange(n_audit_points),ground_truth_indices]) for x in logits_shadow_models])
-        log_conf_shadow_models = np.array([log_softmax(x / self.temperature, axis=-1)[np.arange(n_audit_points),ground_truth_indices] for x in logits_shadow_models])
+        log_conf_shadow_models = np.array([log_softmax(x / self.temperature, axis=-1)[np.arange(n_audit_points),ground_truth_indices] for x in logits_shadow_models])  # noqa: E501
 
-        # subtracting the log(num_shadow_models) is not necessary if we sweep thresholds, but should be there if we want to get the probabilities using sigmoid
         if self.online is True:
             threshold = logsumexp(log_conf_shadow_models, axis=0) - np.log(self.num_shadow_models)
         else:
@@ -135,12 +207,6 @@ class AttackLSET(AbstractMIA):
             assert np.all(n_out_models == self.num_shadow_models//2), "Number of OUT models is wrong"
 
             out_logits = np.where(self.out_indices, log_conf_shadow_models, -np.inf)
-            # # filter out to only use out model values
-            # rows, cols = np.where(self.out_indices)
-            # idx = np.argsort(cols)
-            # rows = rows[idx].reshape(2, -1)
-            # cols = cols[idx].reshape(2, -1)
-            # out_logits = log_conf_shadow_models[rows, cols]
             threshold = logsumexp(out_logits, axis=0) - np.log(n_out_models)
 
         score = log_conf_target - threshold if self.online else log_conf_target - self.offline_scale_factor * threshold
@@ -158,13 +224,5 @@ class AttackLSET(AbstractMIA):
         # compute ROC, TP, TN etc
         return MIAResult.from_full_scores(true_membership=true_labels,
                                     signal_values=signal_values,
-                                    result_name="LSET",
+                                    result_name="BASE",
                                     metadata=self.configs.model_dump())
-
-    def reset_attack(self: Self, config:BaseModel) -> None:
-        """Reset attack to initial state."""
-
-        # Assign the new configuration parameters to the object
-        self.configs = config
-        for key, value in config.model_dump().items():
-            setattr(self, key, value)

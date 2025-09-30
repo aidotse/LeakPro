@@ -3,7 +3,7 @@ run: # Configurations for a specific run
   log_dir: ./target # String for indicating where to save all the information, including models and computed signals. We can reuse the models saved in the same log_dir.
 
 train:
-  epochs: 100
+  epochs: 20
   batch_size: 256
   optimizer: SGD
   learning_rate: 0.1

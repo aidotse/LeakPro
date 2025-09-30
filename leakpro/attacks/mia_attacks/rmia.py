@@ -170,13 +170,6 @@ class AttackRMIA(AbstractMIA):
     def _run_attack(self:Self) -> None:
         logger.info("Running RMIA online attack")
 
-        # Load the logits for the target model and shadow models
-        # ground_truth_indices = self.handler.get_labels(self.audit_dataset["data"])
-        # logits_theta = ShadowModelHandler().load_logits(name="target")
-        # logits_shadow_models = []
-        # for indx in self.shadow_model_indices:
-        #     logits_shadow_models.append(ShadowModelHandler().load_logits(indx=indx))
-
         # collect the softmax output of the correct class
         n_audit_points = len(self.ground_truth_indices)
         p_x_given_theta = softmax_logits(self.logits_theta, self.temperature)[np.arange(n_audit_points),self.ground_truth_indices]

@@ -157,13 +157,42 @@ class CifarInputHandler(AbstractInputHandler):
 
             self.data = data.float()  # Ensure float type
             self.targets = targets
-            self.augment = transforms.Compose([
-                transforms.RandomCrop(32, padding=4),
+            # get augment_strength from kwargs or default to 'light'
+            augment_strength = kwargs.pop("augment_strength", "none")
+            augment_strength = "easy"
+            
+            easy = [
+                transforms.RandomCrop(32, padding=4, padding_mode="reflect"),
                 transforms.RandomHorizontalFlip(),
-                transforms.ColorJitter(0.2, 0.2, 0.2, 0.1),
-                transforms.RandomRotation(15),
-                transforms.ToTensor(),
-                ])
+            ]
+
+            # Medium = Easy + color/rotation
+            medium = easy + [
+                transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05),
+                transforms.RandomRotation(degrees=10, fill=0),
+            ]
+
+            # Strong = Medium + RandAugment + RandomErasing
+            strong = medium + [
+                transforms.RandAugment(num_ops=2, magnitude=9),
+                transforms.RandomErasing(p=0.25, scale=(0.02, 0.2),
+                                        ratio=(0.3, 3.3), value="random"),
+            ]
+
+            self.erase_post_norm = None
+            if augment_strength == "none":
+                self.augment = None
+            elif augment_strength == "easy":
+                self.augment = transforms.Compose(easy)
+            elif augment_strength == "medium":
+                self.augment = transforms.Compose(medium)
+            elif augment_strength == "strong":
+                self.augment = transforms.Compose(strong)
+                self.erase_post_norm = transforms.RandomErasing(
+                    p=0.25, scale=(0.02, 0.2), ratio=(0.3, 3.3), value=0.0, inplace=False
+                )
+            else:
+                raise ValueError(f"Unknown augment_strength: {augment_strength}")
 
             for key, value in kwargs.items():
                 setattr(self, key, value)
@@ -173,16 +202,20 @@ class CifarInputHandler(AbstractInputHandler):
                 self.mean = self.data.mean(dim=(0, 2, 3)).view(-1, 1, 1)
                 self.std = self.data.std(dim=(0, 2, 3)).view(-1, 1, 1)
 
-        def transform(self, x):
+        def _normalize(self, x):
             """Normalize using stored mean and std."""
             return (x - self.mean) / self.std 
 
         def __getitem__(self, index):
             x = self.data[index]
             y = self.targets[index]
-            x = self.transform(x) if hasattr(self, "augment") else self.transform(x)
-            if hasattr(self, "augment") and self.augment is not None:
+            if self.augment is not None:
                 x = self.augment(x)
+            x = self._normalize(x)
+            
+            # post-normalization erasing (only for strong) Ensures value = 0 is the mean.
+            if self.erase_post_norm is not None:
+                x = self.erase_post_norm(x)
             return x, y
 
         def __len__(self):

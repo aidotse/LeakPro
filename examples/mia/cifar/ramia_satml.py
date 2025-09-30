@@ -1,19 +1,15 @@
-import sys
 import os
 import yaml
 import numpy as np
 from torchvision.datasets import CIFAR10, CIFAR100
 from torch import cat, tensor
 import pickle
-from cifar_handler import CifarInputHandler
 from torch import save, optim, nn
-from cifar_handler import CifarInputHandler
-from target_model_class import ResNet18, WideResNet
+from target_model_class import WideResNet
 from leakpro import LeakPro
 from cifar_handler import CifarInputHandler
 import pickle
 import matplotlib.pyplot as plt
-import re
 import csv
 
 def prepare_cifar_data(dataset_name):
@@ -146,161 +142,12 @@ def train_target_model(train_config, train_loader, test_loader, train_indices, t
         pickle.dump(meta_data, f)
     
     return meta_data
-        
-        
-def parse_info(res_id):
-    attack = res_id.split("-")[0]
-    num_shadow = int(re.search(r'num_shadow_models=(\d+)', res_id).group(1))
-    online = re.search(r'online=(True|False)', res_id).group(1) == "True"
-    label = f"{attack} (offline)" if not online else attack
-    return num_shadow, label
 
-def fmt(val, std):
-    return f"${val * 100:.2f}\% \pm {std * 100:.2f}\%$"
-
-def fmt2(val, std):
-    return f"${val:.5f} \pm {std:.5f}$"
-
-def fmt3(val, std):
-    return f"${val:.5f}\% \pm {std:.5f}\%$"
-
-def extract_metrics(mia_results):
-    table = {}
-    table1 = {}
-    table2 = {}
-    for res_id, metrics in mia_results.items():
-        if res_id == "target":
-            continue
-
-        try:
-            N, attack_label = parse_info(res_id)
-        except Exception as e:
-            print(f"Could not parse {res_id}: {e}")
-            continue
-
-        fpr = np.array(metrics["fpr"])
-        tpr = np.array(metrics["tpr"])
-        tpr_std = np.array(metrics.get("tpr_std", [0.0] * len(fpr)))
-
-
-        auc = metrics["roc_auc"]
-        auc_std = metrics["roc_auc_std"]
-        
-        fpr_targets = [0.01, 0.001]
-        tpr_at_fpr = {}
-        for target in fpr_targets:
-            mask = fpr <= target
-            indx = np.where(mask)[0][-1]
-            if np.any(mask):
-                tpr_at_fpr[f"tpr_at_fpr_{target}"] = tpr[indx]
-                tpr_at_fpr[f"tpr_std_at_fpr_{target}"] = tpr_std[indx]
-            else:
-                tpr_at_fpr[f"tpr_at_fpr_{target}"] = np.nan
-                tpr_at_fpr[f"tpr_std_at_fpr_{target}"] = np.nan
-
-        row = {
-            "auc": fmt(auc, auc_std),
-            "tpr_0.01": fmt(tpr_at_fpr["tpr_at_fpr_0.01"], tpr_at_fpr["tpr_std_at_fpr_0.01"]),
-            "tpr_0.001": fmt(tpr_at_fpr["tpr_at_fpr_0.001"], tpr_at_fpr["tpr_std_at_fpr_0.001"]),
-        }
-        
-        # get index o
-        row2 = {            
-            "fpr_0.01": fmt2(metrics["threshold_at_fpr_targets"]["thres_at_fpr_0.01"], metrics["threshold_at_fpr_targets"]["thres_at_fpr_0.01_std"]),
-            "fpr_0.001": fmt2(metrics["threshold_at_fpr_targets"]["thres_at_fpr_0.001"], metrics["threshold_at_fpr_targets"]["thres_at_fpr_0.001_std"]),
-        }
-        
-        row3 = {
-            "fpr_thres_0.99": fmt3(metrics["metrics_at_threshold_target"]["fpr_at_threshold_0.99"], metrics["metrics_at_threshold_target"]["fpr_at_threshold_0.99_std"]),
-            "tpr_thres_0.99": fmt3(metrics["metrics_at_threshold_target"]["tpr_at_threshold_0.99"], metrics["metrics_at_threshold_target"]["tpr_at_threshold_0.99_std"]),
-            "fpr_thres_0.999": fmt3(metrics["metrics_at_threshold_target"]["fpr_at_threshold_0.999"], metrics["metrics_at_threshold_target"]["fpr_at_threshold_0.999_std"]),
-            "tpr_thres_0.999": fmt3(metrics["metrics_at_threshold_target"]["tpr_at_threshold_0.999"], metrics["metrics_at_threshold_target"]["tpr_at_threshold_0.999_std"]),
-        }
-
-        table.setdefault(N, {})[attack_label] = row
-        table1.setdefault(N, {})[attack_label] = row2
-        table2.setdefault(N, {})[attack_label] = row3
-
-    return table, table1, table2
-
-def build_latex_table(table_c10, table_c100):
-        # --- Build LaTeX table rows ---
-    Ns = sorted(set(table_c10.keys()) | set(table_c100.keys()), reverse=True)
-
-    attack_sets = []
-    for N in Ns:
-        keys_c10 = set(table_c10.get(N, {}).keys())
-        keys_c100 = set(table_c100.get(N, {}).keys())
-        attack_sets.append(keys_c10 | keys_c100)
-
-    all_attacks = sorted(set().union(*attack_sets))
-
-    latex_rows = []
-    for N in Ns:
-        rows = []
-        for attack in all_attacks:
-            c10 = table_c10.get(N, {}).get(attack, {"auc": "$0.000 \pm 0.000$", "tpr_0.01": "$0.000 \pm 0.000$", "tpr_0.001": "$0.000 \pm 0.000$"})
-            c100 = table_c100.get(N, {}).get(attack, {"auc": "$0.000 \pm 0.000$", "tpr_0.01": "$0.000 \pm 0.000$", "tpr_0.001": "$0.000 \pm 0.000$"})
-            row = f"& {attack} & {c10['auc']} & {c10['tpr_0.01']} & {c10['tpr_0.001']} & {c100['auc']} & {c100['tpr_0.01']} & {c100['tpr_0.001']} \\"
-            rows.append(row)
-
-        latex_rows.append(f"\multirow{{{len(rows)}}}{{*}}{{{N}}}")
-        latex_rows.extend(rows)
-        latex_rows.append("\midrule")
-
-    latex_string = "\n".join(latex_rows)
-    
-    return latex_string
-
-def build_latex_table_threshold_at_fpr(table_c10, table_c100):
-    Ns = sorted(set(table_c10.keys()) | set(table_c100.keys()), reverse=True)
-
-    attack_sets = []
-    for N in Ns:
-        keys_c10 = set(table_c10.get(N, {}).keys())
-        keys_c100 = set(table_c100.get(N, {}).keys())
-        attack_sets.append(keys_c10 | keys_c100)
-
-    all_attacks = sorted(set().union(*attack_sets))
-
-    latex_rows = []
-    for N in Ns:
-        rows = []
-        for attack in all_attacks:
-            c10 = table_c10.get(N, {}).get(attack, {"fpr_0.01": "$0.000 \pm 0.000$", "fpr_0.001": "$0.000 \pm 0.000$"})
-            c100 = table_c100.get(N, {}).get(attack, {"fpr_0.01": "$0.000 \pm 0.000$", "fpr_0.001": "$0.000 \pm 0.000$"})
-            row = f"& {attack} & {c10['fpr_0.01']} & {c10['fpr_0.001']} & {c100['fpr_0.01']} & {c100['fpr_0.001']} \\"
-            rows.append(row)
-
-        latex_rows.append(f"\multirow{{{len(rows)}}}{{*}}{{{N}}}")
-        latex_rows.extend(rows)
-        latex_rows.append("\midrule")
-
-    latex_string = "\n".join(latex_rows)
-    
-    return latex_string
-
-def make_table():
-    # --- Load both datasets ---
-    with open("mia_results_cifar10.pkl", "rb") as f:
-        mia_c10 = pickle.load(f)
-    with open("mia_results_cifar100.pkl", "rb") as f:
-        mia_c100 = pickle.load(f)
-
-    table_c10, table_c10_threshold_at_fpr, table_c10_fpr_at_threshold = extract_metrics(mia_c10)
-    table_c100, table_c100_threshold_at_fpr, table_c100_fpr_at_threshold  = extract_metrics(mia_c100)
-
-    latex_1 = build_latex_table(table_c10, table_c100)
-    latex_2 = build_latex_table_threshold_at_fpr(table_c10_threshold_at_fpr, table_c100_threshold_at_fpr)
-    #latex_3 = build_latex_table_fpr_at_threshold(table_c10_fpr_at_threshold, table_c100_fpr_at_threshold)
-
-    return latex_1, latex_2
 # define the main function
 if __name__ == "__main__":
     os.chdir(os.path.dirname(__file__))
 
-    make_table()
-    n_train_models = 10
+    n_train_models = 1
     
     # Load the config.yaml file
     script_dir = os.path.dirname(__file__)  # path to neurips.py
@@ -316,13 +163,13 @@ if __name__ == "__main__":
     mia_results["target"] = {"train_acc": [], "test_acc": []}
     for i in range(n_train_models):
         print(f"Running MIA for run {i}")
-        train_loader, test_loader, train_indices, test_indices = get_datasets(train_config, data, targets, seed=i)
-        meta_data = train_target_model(train_config, train_loader, test_loader, train_indices, test_indices, dataset_name)
-        print(f"Target model trained and metadata saved for run {i}")
-        print(f"Train accuracy: {meta_data.train_result.accuracy}")
-        print(f"Test accuracy: {meta_data.test_result.accuracy}")
-        mia_results["target"]["train_acc"].append(meta_data.train_result.accuracy)
-        mia_results["target"]["test_acc"].append(meta_data.test_result.accuracy)
+        # train_loader, test_loader, train_indices, test_indices = get_datasets(train_config, data, targets, seed=i)
+        # meta_data = train_target_model(train_config, train_loader, test_loader, train_indices, test_indices, dataset_name)
+        # print(f"Target model trained and metadata saved for run {i}")
+        # print(f"Train accuracy: {meta_data.train_result.accuracy}")
+        # print(f"Test accuracy: {meta_data.test_result.accuracy}")
+        # mia_results["target"]["train_acc"].append(meta_data.train_result.accuracy)
+        # mia_results["target"]["test_acc"].append(meta_data.test_result.accuracy)
 
         # Create a new instance of LeakPro
         leakpro = LeakPro(CifarInputHandler, audit_path)
@@ -430,46 +277,64 @@ import textwrap
 def wrap_label(label, width=30):
     return "\n".join(textwrap.wrap(label, width=width))
 
-plt.figure(figsize=(8, 6))
+fig, ax = plt.subplots(figsize=(8, 6), layout="constrained")  # mpl>=3.6; else use constrained_layout=True
 title = f"Average ROC Curve for {dataset_name} (n_train_models={n_train_models})"
-plt.title(title)
-# plot the random chance line
-plt.plot([0, 1], [0, 1], linestyle='--', color='gray')
+
+# random-chance line
+ax.plot([1e-4, 1.0], [1e-4, 1.0], linestyle="--", color="gray", linewidth=1)
+
 for res_id, metrics in mia_averages.items():
     if res_id == "target":
         continue
     fpr = metrics["fpr"]
     tpr = metrics["tpr"]
-    tpr_std = metrics.get("tpr_std", None)
+    tpr_std = metrics.get("tpr_std")
     auc = metrics["roc_auc"]
     std = metrics["roc_auc_std"]
-    # add std
-    label = f"{wrap_label(res_id)}\n(AUC = {auc:.3f} ± {std:.3f})"
-    plt.plot(fpr, tpr, label=label)
 
-    # Add confidence band if available
+    label = f"{wrap_label(res_id)}\n(AUC = {auc:.3f} ± {std:.3f})"
+    ax.plot(fpr, tpr, label=label)
     if tpr_std is not None:
         tpr_upper = np.minimum(tpr + tpr_std, 1)
         tpr_lower = np.maximum(tpr - tpr_std, 0)
-        plt.fill_between(fpr, tpr_lower, tpr_upper, alpha=0.2)
+        ax.fill_between(fpr, tpr_lower, tpr_upper, alpha=0.2)
 
-plt.xscale("log")
-plt.yscale("log")
-plt.xlim(1e-4, 1.0)
-plt.ylim(0.0, 1.05)
-plt.xlabel("False Positive Rate (log scale)")
-plt.ylabel("True Positive Rate")
-plt.title(title)
-plt.grid(True, which='both', linestyle='--', linewidth=0.5)
-plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.15),
-           ncol=4, fontsize="x-small", frameon=False)
-plt.subplots_adjust(bottom=0.25)
-plt.tight_layout(rect=[0, 0.05, 1, 1])  # Leave room at the bottom
-plt.tight_layout()
+# axes cosmetics
+ax.set_xscale("log")
+ax.set_yscale("log")
+ax.set_xlim(1e-4, 1.0)
+ax.set_ylim(0.0, 1.05)
+ax.set_xlabel("False Positive Rate (log scale)")
+ax.set_ylabel("True Positive Rate")
+ax.set_title(title)
+ax.grid(True, which="both", linestyle="--", linewidth=0.5)
+
+# FIGURE-LEVEL legend (so layout engine allocates space)
+# Get handles and labels from the axis
+handles, labels = ax.get_legend_handles_labels()
+
+# Put legend below plot
+fig.legend(
+    handles, labels,
+    loc="upper center",
+    bbox_to_anchor=(0.5, -0.05),   # (x, y) relative to figure
+    ncol=min(4, len(labels)),
+    fontsize="x-small",
+    frameon=False,
+    handlelength=1.3,
+    handletextpad=0.4,
+    columnspacing=0.8
+)
+
+# Adjust layout so space is reserved
+fig.subplots_adjust(bottom=0.8)  # increase if legend still overlaps
+
+
+plt.show()
 
 save_path = "average_roc_curve.png"
 if save_path:
-    plt.savefig(save_path, dpi=300)
+    fig.savefig(save_path, bbox_inches="tight", dpi=300)
 print(f"ROC curve saved to: {save_path}")
 
 plt.show()

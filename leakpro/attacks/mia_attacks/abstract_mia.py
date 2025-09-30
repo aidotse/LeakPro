@@ -63,7 +63,7 @@ class AbstractMIA(AbstractAttack):
                 # Assuming train_indices and test_indices are arrays of indices, not the actual data
                 "data": np.concatenate((handler.train_indices, handler.test_indices)),
                 # in_members will be an array from 0 to the number of training indices - 1
-                "in_members": np.arange(len(handler.train_indices)//2),
+                "in_members": np.arange(len(handler.train_indices)),
                 # out_members will start after the last training index and go up to the number of test indices - 1
                 "out_members": np.arange(len(handler.train_indices),len(handler.train_indices)+len(handler.test_indices)),
             }

@@ -13,16 +13,16 @@ from leakpro.attacks.attack_scheduler import AttackScheduler
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.input_handler.minv_handler import MINVHandler
-from leakpro.input_handler.modality_extensions.image_extension import ImageExtension
-from leakpro.input_handler.modality_extensions.tabular_extension import TabularExtension
+from leakpro.input_handler.modality_extensions.image_extension import ImageAugmentor
+# from leakpro.input_handler.modality_extensions.tabular_extension import TabularExtension
 from leakpro.reporting.report_handler import ReportHandler
 from leakpro.schemas import EvalOutput, LeakProConfig, MIAMetaDataSchema, TrainingOutput
 from leakpro.utils.conversion import dataloader_to_config, get_model_init_params, loss_to_config, optimizer_to_config
 from leakpro.utils.import_helper import Any, Self
 from leakpro.utils.logger import add_file_handler, logger
 
-modality_extensions = {"tabular": TabularExtension,
-                       "image":ImageExtension,
+modality_extensions = {"tabular": None,
+                       "image":ImageAugmentor,
                        "text":None,
                        "graph":None,
                        "timeseries":None}

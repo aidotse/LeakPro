@@ -1,102 +1,299 @@
 audit:  # Configurations for auditing
   random_seed: 1236  # Integer specifying the random seed
   attack_list:
-    - attack: rmia
+# BASE
+    - attack: base
+      online: False
+      num_shadow_models: 2
+      training_data_fraction: 0.5  
+# BASE on augmented center
+    - attack: ramia
       online: False
       num_shadow_models: 2
       training_data_fraction: 0.5
-      attack_data_fraction: 1.0
-      gamma: 1.0
-    - attack: rmia
-      online: True
-      num_shadow_models: 4 # NOTE: this will result in n/2 out models!
-      training_data_fraction: 0.5
-      attack_data_fraction: 1.0
-      gamma: 1.0
-    - attack: lset
-      online: True
-      num_shadow_models: 4
-      training_data_fraction: 0.5
-    - attack: lset
-      online: False
-      num_shadow_models: 4
-      training_data_fraction: 0.5
-    - attack: lira
-      online: True
-      num_shadow_models: 4
-      training_data_fraction: 0.5
-    - attack: lira
-      online: False
-      num_shadow_models: 4
-      training_data_fraction: 0.5
-    - attack: rmia
-      online: False
-      num_shadow_models: 8
-      training_data_fraction: 0.5
-      attack_data_fraction: 1.0
-      gamma: 1.0
-    - attack: rmia
-      online: True
-      num_shadow_models: 8 # NOTE: this will result in n/2 out models!
-      training_data_fraction: 0.5
-      attack_data_fraction: 1.0
-      gamma: 1.0
-    - attack: lset
-      online: True
-      num_shadow_models: 8
-      training_data_fraction: 0.5
-    - attack: lset
-      online: False
-      num_shadow_models: 8
-      training_data_fraction: 0.5
-    - attack: lira
-      online: True
-      num_shadow_models: 8
-      training_data_fraction: 0.5
-    - attack: lira
-      online: False
-      num_shadow_models: 8
-      training_data_fraction: 0.5
-    - attack: rmia
-      online: False
-      num_shadow_models: 32
-      training_data_fraction: 0.5
-      attack_data_fraction: 1.0
-      gamma: 1.0
-    - attack: rmia
-      online: True
-      num_shadow_models: 32 # NOTE: this will result in n/2 out models!
-      training_data_fraction: 0.5
-      attack_data_fraction: 1.0
-      gamma: 1.0
-    - attack: lset
-      online: True
-      num_shadow_models: 32
-      training_data_fraction: 0.5
-    - attack: lset
-      online: False
-      num_shadow_models: 32
-      training_data_fraction: 0.5
-    - attack: bmia
-      training_data_fraction: 1.0
-    - attack: lira
-      online: True
-      num_shadow_models: 32
-      training_data_fraction: 0.5
-    - attack: lira
-      online: False
-      num_shadow_models: 32
-      training_data_fraction: 0.5
-    # - attack: lset_laplace
-    #   online: True
+      num_transforms: 0
+      n_ops: 0
+      augment_strength: "easy"
+# 1 transform
+    # - attack: ramia
+    #   online: False
+    #   num_shadow_models: 2
     #   training_data_fraction: 0.5
-    # - attack: lset_laplace
-    #   online: True
+    #   num_transforms: 1
+    #   n_ops: 1
+    # - attack: ramia
+    #   online: False
+    #   num_shadow_models: 2
     #   training_data_fraction: 0.5
-    # - attack: loss_traj
-    # - attack: qmia
-    #HSJ:
-    # - attack: yoqo
+    #   num_transforms: 1
+    #   n_ops: 2
+    # - attack: ramia
+    #   online: False
+    #   num_shadow_models: 2
+    #   training_data_fraction: 0.5
+    #   num_transforms: 1
+    #   n_ops: 1
+    #   augment_strength: "easy"
+    # - attack: ramia
+    #   online: False
+    #   num_shadow_models: 2
+    #   training_data_fraction: 0.5
+    #   num_transforms: 1
+    #   n_ops: 1
+    #   augment_strength: "medium"
+    # - attack: ramia
+    #   online: False
+    #   num_shadow_models: 2
+    #   training_data_fraction: 0.5
+    #   num_transforms: 1
+    #   n_ops: 1
+    #   augment_strength: "strong"      
+# 8 transforms
+    # - attack: ramia
+    #   online: False
+    #   num_shadow_models: 2
+    #   training_data_fraction: 0.5
+    #   num_transforms: 8
+    #   n_ops: 1  
+    # - attack: ramia
+    #   online: False
+    #   num_shadow_models: 2
+    #   training_data_fraction: 0.5
+    #   num_transforms: 8
+    #   n_ops: 2    
+    # - attack: ramia
+    #   online: False
+    #   num_shadow_models: 2
+    #   training_data_fraction: 0.5
+    #   num_transforms: 8
+    #   n_ops: 3
+    #   strength: "low"
+# 20 transforms              
+    # - attack: ramia
+    #   online: False
+    #   num_shadow_models: 2
+    #   training_data_fraction: 0.5
+    #   num_transforms: 20
+    #   n_ops: 1
+    # - attack: ramia
+    #   online: False
+    #   num_shadow_models: 2
+    #   training_data_fraction: 0.5
+    #   num_transforms: 20
+    #   n_ops: 2
+    # - attack: ramia
+    #   online: False
+    #   num_shadow_models: 2
+    #   training_data_fraction: 0.5
+    #   num_transforms: 20
+    #   n_ops: 3
+      
+# 50 transforms            
+    # - attack: ramia
+    #   online: False
+    #   num_shadow_models: 2
+    #   training_data_fraction: 0.5
+    #   num_transforms: 50
+    #   n_ops: 1
+    # - attack: ramia
+    #   online: False
+    #   num_shadow_models: 2
+    #   training_data_fraction: 0.5
+    #   num_transforms: 50
+    #   n_ops: 2
+    # - attack: ramia
+    #   online: False
+    #   num_shadow_models: 2
+    #   training_data_fraction: 0.5
+    #   num_transforms: 50
+    #   n_ops: 3
+# # BCJR (50 transforms, 6 groups, vary n_ops {1,2,3} and groups/sample {3,4})          
+#     - attack: ramia
+#       online: False
+#       num_shadow_models: 2
+#       training_data_fraction: 0.5
+#       num_transforms: 50
+#       n_ops: 1
+#       stealth_method: "bcjr"
+#       groups: 6
+#       groups_per_sample: 3
+#     - attack: ramia
+#       online: False
+#       num_shadow_models: 2
+#       training_data_fraction: 0.5
+#       num_transforms: 50
+#       n_ops: 1
+#       stealth_method: "bcjr"
+#       groups: 6
+#       groups_per_sample: 4  
+#     - attack: ramia
+#       online: False
+#       num_shadow_models: 2
+#       training_data_fraction: 0.5
+#       num_transforms: 50
+#       n_ops: 2
+#       stealth_method: "bcjr"
+#       groups: 6
+#       groups_per_sample: 3
+#     - attack: ramia
+#       online: False
+#       num_shadow_models: 2
+#       training_data_fraction: 0.5
+#       num_transforms: 50
+#       n_ops: 2
+#       stealth_method: "bcjr"
+#       groups: 6
+#       groups_per_sample: 4 
+#     - attack: ramia
+#       online: False
+#       num_shadow_models: 2
+#       training_data_fraction: 0.5
+#       num_transforms: 50
+#       n_ops: 3
+#       stealth_method: "bcjr"
+#       groups: 6
+#       groups_per_sample: 3
+#     - attack: ramia
+#       online: False
+#       num_shadow_models: 2
+#       training_data_fraction: 0.5
+#       num_transforms: 50
+#       n_ops: 3
+#       stealth_method: "bcjr"
+#       groups: 6
+#       groups_per_sample: 4 
+# # BCJR (50 transforms, 8 groups, vary n_ops {1,2,3} and groups/sample {3,4})          
+#     - attack: ramia
+#       online: False
+#       num_shadow_models: 2
+#       training_data_fraction: 0.5
+#       num_transforms: 50
+#       n_ops: 1
+#       stealth_method: "bcjr"
+#       groups: 8
+#       groups_per_sample: 3
+#     - attack: ramia
+#       online: False
+#       num_shadow_models: 2
+#       training_data_fraction: 0.5
+#       num_transforms: 50
+#       n_ops: 1
+#       stealth_method: "bcjr"
+#       groups: 8
+#       groups_per_sample: 4  
+#     - attack: ramia
+#       online: False
+#       num_shadow_models: 2
+#       training_data_fraction: 0.5
+#       num_transforms: 50
+#       n_ops: 2
+#       stealth_method: "bcjr"
+#       groups: 8
+#       groups_per_sample: 3
+#     - attack: ramia
+#       online: False
+#       num_shadow_models: 2
+#       training_data_fraction: 0.5
+#       num_transforms: 50
+#       n_ops: 2
+#       stealth_method: "bcjr"
+#       groups: 8
+#       groups_per_sample: 4 
+#     - attack: ramia
+#       online: False
+#       num_shadow_models: 2
+#       training_data_fraction: 0.5
+#       num_transforms: 50
+#       n_ops: 3
+#       stealth_method: "bcjr"
+#       groups: 8
+#       groups_per_sample: 3
+#     - attack: ramia
+#       online: False
+#       num_shadow_models: 2
+#       training_data_fraction: 0.5
+#       num_transforms: 50
+#       n_ops: 3
+#       stealth_method: "bcjr"
+#       groups: 8
+#       groups_per_sample: 4 
+# # Agglomerative (50 transforms) 
+# # Fix groups, vary n_ops 
+# # Agglomerative (50 transforms, 4 groups, vary n_ops {1,2,3})  
+#     - attack: ramia
+#       online: False
+#       num_shadow_models: 2
+#       training_data_fraction: 0.5
+#       num_transforms: 50
+#       n_ops: 1
+#       stealth_method: "agglomerative"
+#       groups: 4               
+#     - attack: ramia
+#       online: False
+#       num_shadow_models: 2
+#       training_data_fraction: 0.5
+#       num_transforms: 50
+#       n_ops: 2
+#       stealth_method: "agglomerative"
+#       groups: 4
+#     - attack: ramia
+#       online: False
+#       num_shadow_models: 2
+#       training_data_fraction: 0.5
+#       num_transforms: 50
+#       n_ops: 3
+#       stealth_method: "agglomerative"
+#       groups: 4
+# # Agglomerative (50 transforms, 6 groups, vary n_ops)        
+#     - attack: ramia
+#       online: False
+#       num_shadow_models: 2
+#       training_data_fraction: 0.5
+#       num_transforms: 50
+#       n_ops: 1
+#       stealth_method: "agglomerative"
+#       groups: 6          
+#     - attack: ramia
+#       online: False
+#       num_shadow_models: 2
+#       training_data_fraction: 0.5
+#       num_transforms: 50
+#       n_ops: 2
+#       stealth_method: "agglomerative"
+#       groups: 6
+#     - attack: ramia
+#       online: False
+#       num_shadow_models: 2
+#       training_data_fraction: 0.5
+#       num_transforms: 50
+#       n_ops: 3
+#       stealth_method: "agglomerative"
+#       groups: 6      
+# # Agglomerative (50 transforms, 8 groups, vary n_ops)        
+#     - attack: ramia
+#       online: False
+#       num_shadow_models: 2
+#       training_data_fraction: 0.5
+#       num_transforms: 50
+#       n_ops: 1
+#       stealth_method: "agglomerative"
+#       groups: 8      
+#     - attack: ramia
+#       online: False
+#       num_shadow_models: 2
+#       training_data_fraction: 0.5
+#       num_transforms: 50
+#       n_ops: 2
+#       stealth_method: "agglomerative"
+#       groups: 8
+#     - attack: ramia
+#       online: False
+#       num_shadow_models: 2
+#       training_data_fraction: 0.5
+#       num_transforms: 50
+#       n_ops: 3
+#       stealth_method: "agglomerative"
+#       groups: 8      
 
   output_dir: "./cifar10/leakpro_output"
   attack_type: "mia" #mia, gia
