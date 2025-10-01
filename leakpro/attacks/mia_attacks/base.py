@@ -2,13 +2,18 @@
 
 import numpy as np
 from pydantic import BaseModel, Field
-from scipy.special import log_softmax, logsumexp
+from scipy.special import (
+    expit,  # numerically stable sigmoid
+    log_softmax,
+    logsumexp,
+)
 from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.reporting.mia_result import MIAResult
+from leakpro.signals.signal import ModelLogits
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
@@ -112,8 +117,6 @@ class AttackBASE(AbstractMIA):
             np.ndarray: The scores for the samples in the dataloader.
 
         """
-        from leakpro.signals.signal import ModelLogits
-
         n_points = len(dataloader.dataset)
         ground_truth_indices = dataloader.dataset.targets.numpy()
         assert n_points == len(ground_truth_indices), "Number of points and labels must be the same"
@@ -142,8 +145,6 @@ class AttackBASE(AbstractMIA):
             threshold = logsumexp(out_logits, axis=0) - np.log(n_out_models)
 
         score = log_conf_target - threshold if self.online else log_conf_target - self.offline_scale_factor * threshold
-
-        from scipy.special import expit  # numerically stable sigmoid
 
         return expit(score)  # noqa: RET504
 

@@ -6,12 +6,13 @@ from typing import Literal
 import numpy as np
 import torch
 from pydantic import BaseModel, Field
-from sklearn.cluster import KMeans
+from sklearn.cluster import AgglomerativeClustering, KMeans
 from sklearn.decomposition import PCA
 from sklearn.metrics.pairwise import euclidean_distances
 from torch import Tensor, cat, stack
 from torch.utils.data import DataLoader
 from torchvision import models
+from torchvision.utils import save_image
 from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
@@ -187,8 +188,6 @@ class AttackRaMIA(AbstractMIA):
             assignment_matrix (np.ndarray): Binary matrix indicating sample-group assignments.
 
         """
-        import numpy as np
-        from sklearn.cluster import AgglomerativeClustering
 
         x = np.asarray(features, dtype=np.float64)
         n, d = x.shape
@@ -294,7 +293,6 @@ class AttackRaMIA(AbstractMIA):
 
         # Step 1: prepare the transformed samples
         def save_img(x, x_augs, name):  # noqa: ANN001, ANN202
-            from torchvision.utils import save_image
             save_image(x, name+"_orig.png")
             for j, aug in enumerate(x_augs):
                 save_image(aug, name + f"_{j}.png") # Already normalized
