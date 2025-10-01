@@ -142,33 +142,7 @@ class AttackBASE(AbstractMIA):
             threshold = logsumexp(out_logits, axis=0) - np.log(n_out_models)
 
         score = log_conf_target - threshold if self.online else log_conf_target - self.offline_scale_factor * threshold
-        
-        ##
-        ground_truth_indices = self.handler.get_labels(self.audit_dataset["data"])
-        n_audit_points = len(self.audit_dataset["data"])
-        logits_target2 = ShadowModelHandler().load_logits(name="target")
-        logits_shadow_models = []
-        for indx in self.shadow_model_indices:
-            logits_shadow_models.append(ShadowModelHandler().load_logits(indx=indx))
 
-        # collect the log confidence output of the correct class (which is the negative cross-entropy loss)
-        log_conf_target2 = log_softmax(logits_target2 / self.temperature, axis=-1)[np.arange(n_audit_points),ground_truth_indices]
-
-        # run points through shadow models and collect the log confidence values
-        log_conf_shadow_models2 = np.array([log_softmax(x / self.temperature, axis=-1)[np.arange(n_audit_points),ground_truth_indices] for x in logits_shadow_models])  # noqa: E501
-
-        if self.online is True:
-            threshold = logsumexp(log_conf_shadow_models2, axis=0) - np.log(self.num_shadow_models)
-        else:
-            n_out_models = np.sum(self.out_indices, axis=0)
-            assert np.all(n_out_models == self.num_shadow_models//2), "Number of OUT models is wrong"
-
-            out_logits2 = np.where(self.out_indices, log_conf_shadow_models2, -np.inf)
-            threshold2 = logsumexp(out_logits2, axis=0) - np.log(n_out_models)
-
-        score2 = log_conf_target2 - threshold2 if self.online else log_conf_target2 - self.offline_scale_factor * threshold2
-
-        ##
         from scipy.special import expit  # numerically stable sigmoid
 
         return expit(score)  # noqa: RET504

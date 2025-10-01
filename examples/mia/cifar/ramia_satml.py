@@ -162,7 +162,7 @@ if __name__ == "__main__":
     mia_results = {}
     mia_results["target"] = {"train_acc": [], "test_acc": []}
     for i in range(n_train_models):
-        print(f"Running MIA for run {i}")
+        # print(f"Running MIA for run {i}")
         # train_loader, test_loader, train_indices, test_indices = get_datasets(train_config, data, targets, seed=i)
         # meta_data = train_target_model(train_config, train_loader, test_loader, train_indices, test_indices, dataset_name)
         # print(f"Target model trained and metadata saved for run {i}")

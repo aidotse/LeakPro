@@ -157,9 +157,7 @@ class CifarInputHandler(AbstractInputHandler):
 
             self.data = data.float()  # Ensure float type
             self.targets = targets
-            # get augment_strength from kwargs or default to 'light'
             augment_strength = kwargs.pop("augment_strength", "none")
-            augment_strength = "easy"
             
             easy = [
                 transforms.RandomCrop(32, padding=4, padding_mode="reflect"),

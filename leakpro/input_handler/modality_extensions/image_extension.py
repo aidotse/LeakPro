@@ -97,7 +97,14 @@ class ImageAugmentor:
         self._tiers = _policy_tiers()
         self.set_augment_strength(augment_strength)
 
-    def set_augment_strength(self, augment_strength: str):
+    def set_augment_strength(self, augment_strength: str) -> None:
+        """Set the augmentation strength level.
+
+        Args:
+            augment_strength: One of "none", "easy", "medium", "strong".
+
+        """
+
         if augment_strength not in {"none", "easy", "medium", "strong"}:
             raise ValueError(f"Unknown strength: {augment_strength}")
         self._strength = augment_strength
@@ -169,6 +176,7 @@ class ImageAugmentor:
             pil = _to_pil_from_normalized(x, self.mean, self.std, force_rgb=self.force_rgb)
             x_return = _from_pil_to_raw01(pil, x.shape[0], x.device).to(x.dtype)
             x_return = x_return.unsqueeze(0) if stack else x_return
+
             return x_return, None
 
         tf = self._augment(num_ops=num_ops)
