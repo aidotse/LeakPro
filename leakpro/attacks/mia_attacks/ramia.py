@@ -67,6 +67,7 @@ class AttackRaMIA(AbstractMIA):
         self.augment_center = False  # always augment the center point for RaMIA
         self.num_audit = 5000
         self.group_score_threshold = 0.49
+        self.debug = True
 
         # Get MIA attack object
         configs = {
@@ -202,8 +203,8 @@ class AttackRaMIA(AbstractMIA):
         agg = AgglomerativeClustering(n_clusters=k,linkage="ward")
         labels = agg.fit_predict(dist)  # shape (N,)
 
-        A = np.zeros((n,k), dtype=int)
-        A[np.arange(n), labels] = 1
+        assignment_matrix = np.zeros((n,k), dtype=int)
+        assignment_matrix[np.arange(n), labels] = 1
 
         reps = []
         for j in range(k):
@@ -219,7 +220,7 @@ class AttackRaMIA(AbstractMIA):
 
         representative_samples = [range_samples[idx] for idx in reps]
 
-        return representative_samples, A
+        return representative_samples, assignment_matrix
 
     def get_latent_features(self, dataloader:DataLoader) -> np.ndarray:
         """Extract 512-d ResNet18 features, then do per-group (per-n) 2D PCA on the augmentations.
@@ -241,7 +242,7 @@ class AttackRaMIA(AbstractMIA):
         m = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
         # keep layers up to avgpool, then flatten -> 512-d vectors
         feature_extractor = torch.nn.Sequential(*(list(m.children())[:-1]),
-                                                torch.nn.Flatten(1)).eval().to(dev) 
+                                                torch.nn.Flatten(1)).eval().to(dev)
         torch.backends.cudnn.benchmark = True  # speedup for fixed-size inputs
         # ----------------------------
         # 2) Pass all data once
@@ -275,37 +276,6 @@ class AttackRaMIA(AbstractMIA):
 
         return out
 
-
-    def store_histograms(self:Self, aug_scores)-> None:
-        # compute histograms (same bins for comparability)
-        in_scores = aug_scores[:len(self.in_indices)]
-        out_scores = aug_scores[len(self.in_indices):]
-
-        bins = 50  # adjust as needed
-        in_hist, bin_edges = np.histogram(in_scores, bins=bins, range=(min(aug_scores), max(aug_scores)))
-        out_hist, _ = np.histogram(out_scores, bins=bin_edges)
-
-        from scipy.ndimage import gaussian_filter1d
-
-        in_smooth = gaussian_filter1d(in_hist, sigma=1)
-        out_smooth = gaussian_filter1d(out_hist, sigma=1)
-
-        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-        hist_data = np.column_stack((bin_centers, in_smooth, out_smooth))
-
-        # save CSV (columns: bin_start, in_count, out_count)
-        name = f"ramia_scores_transforms_{self.num_transforms}_mode_{self.stealth_method}.csv"
-        if self.stealth_method in ["bcjr", "agglomerative"]:
-            name = f"ramia_scores_transforms_{self.num_transforms}_mode_{self.stealth_method}_groups_{self.groups}_gps_{self.groups_per_sample}.csv"
-        np.savetxt(
-            name,
-            hist_data,
-            delimiter=",",
-            header="bin_start,in_count,out_count",
-            comments="",
-            fmt="%s"
-        )
-
     def prepare_attack(self:Self)->None:
         """Prepare attack on the target model and dataset."""
 
@@ -318,7 +288,7 @@ class AttackRaMIA(AbstractMIA):
         # Prepare MIA to be used
         self.mia_attack.prepare_attack()
 
-    def run_attack(self:Self)-> MIAResult:  # noqa: C901, PLR0915
+    def run_attack(self:Self)-> MIAResult:  # noqa: C901, PLR0912, PLR0915
         """Run the RaMIA attack on the target model and dataset."""
 
 
@@ -353,8 +323,8 @@ class AttackRaMIA(AbstractMIA):
                 labels = cat((labels, y.repeat(len(augs))), dim=0)
 
             augmented_data = cat(augmented_data, dim=0)
-            # torch.save(augmented_data, f"{augmented_data_dir}/{augmented_data_file}")
-            # torch.save(labels, f"{augmented_data_dir}/labels_{augmented_data_file}")
+            torch.save(augmented_data, f"{augmented_data_dir}/{augmented_data_file}")
+            torch.save(labels, f"{augmented_data_dir}/labels_{augmented_data_file}")
         # create a list of what audit datapoint each transformed sample belongs to
         audit_indice_map = [x for x in self.audit_indices for _ in range(max(self.num_transforms, 1))]
         aug_dataset = self.handler.UserDataset(augmented_data, labels.int())
@@ -363,12 +333,13 @@ class AttackRaMIA(AbstractMIA):
         aug_dataloader = DataLoader(aug_dataset, batch_size=1024, shuffle=False)
 
         # DEBUG: check some images
-        for i, (x,y) in enumerate(aug_dataloader):
-            if i > 0:
-                break
-            img_orig = self.audit_dataloader.dataset.data[i]
-            idxs = range(i*max(self.num_transforms, 1), (i+1)*max(self.num_transforms, 1))
-            save_img(img_orig, x[idxs], f"img{i}")
+        if self.debug:
+            for i, (x,_) in enumerate(aug_dataloader):
+                if i > 0:
+                    break
+                img_orig = self.audit_dataloader.dataset.data[i]
+                idxs = range(i*max(self.num_transforms, 1), (i+1)*max(self.num_transforms, 1))
+                save_img(img_orig, x[idxs], f"img{i}")
         # END OF DEBUG: check some images
 
         # Step 2: run MIA to get logits for target and shadow models
@@ -422,12 +393,13 @@ class AttackRaMIA(AbstractMIA):
             aug_scores = np.array(aug_scores)
 
             # DEBUG
-            for i, (x,y) in enumerate(aug_dataloader):
-                if i > 0:
-                    break
-                img_orig = self.audit_dataloader.dataset.data[i]
-                idxs = range(i*self.groups, (i+1)*self.groups)
-                save_img(img_orig, x[idxs], f"img_bcjr{i}")
+            if self.debug:
+                for i, (x,_) in enumerate(aug_dataloader):
+                    if i > 0:
+                        break
+                    img_orig = self.audit_dataloader.dataset.data[i]
+                    idxs = range(i*self.groups, (i+1)*self.groups)
+                    save_img(img_orig, x[idxs], f"img_bcjr{i}")
             # END OF DEBUG
 
         elif self.stealth_method in ["agglomerative"]:
@@ -455,12 +427,13 @@ class AttackRaMIA(AbstractMIA):
             aug_dataloader = DataLoader(repr_dataset, batch_size=1024, shuffle=False)
 
             # DEBUG
-            for i, (x,y) in enumerate(aug_dataloader):
-                if i > 0:
-                    break
-                img_orig = self.audit_dataloader.dataset.data[i]
-                idxs = range(i*self.groups, (i+1)*self.groups)
-                save_img(img_orig, x[idxs], f"img_aggl{i}")
+            if self.debug:
+                for i, (x,_) in enumerate(aug_dataloader):
+                    if i > 0:
+                        break
+                    img_orig = self.audit_dataloader.dataset.data[i]
+                    idxs = range(i*self.groups, (i+1)*self.groups)
+                    save_img(img_orig, x[idxs], f"img_aggl{i}")
             # END OF DEBUG
 
             aug_scores = self.mia_attack.score_samples(aug_dataloader, audit_indice_map)

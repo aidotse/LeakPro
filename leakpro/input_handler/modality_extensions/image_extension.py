@@ -16,7 +16,7 @@ from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 
 def _build_registry_mild() -> Dict[str, transforms.Transform]:
     bil = InterpolationMode.BILINEAR
-    R = {
+    R = {  # noqa: N806
         # photometric (very mild)
         "cj_tiny": transforms.ColorJitter(0.1, 0.1, 0.1, 0.02),
         "blur_s":  transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 0.8)),
@@ -117,7 +117,7 @@ class ImageAugmentor:
         - returns raw [0,1] CHW tensor (no normalization).
         """  # noqa: D205
         if self._strength == "none":
-            def fn(x: Tensor, _seed: int):
+            def fn(x: Tensor, _seed: int) -> Tuple[Tensor, List[str]]:
                 pil = _to_pil_from_normalized(x, self.mean, self.std, force_rgb=self.force_rgb)
                 y = _from_pil_to_raw01(pil, x.shape[0], x.device).to(x.dtype)
                 return y, []
@@ -125,16 +125,15 @@ class ImageAugmentor:
 
         keys_all = self._tiers[self._strength]
         pool = [self._reg[k] for k in keys_all]
-        L = len(pool)
 
-        def fn(x: Tensor, seed: int):
+        def fn(x: Tensor, seed: int) -> Tuple[Tensor, List[str]]:
             assert x.ndim == 3, "Expected Tensor[C,H,W]"
-            C, H, W = x.shape
+            C, H, W = x.shape  # noqa: N806
 
             # deterministic start index from seed (no RNG state pollution)
-            start = (seed * 2654435761) % L
+            start = (seed * 2654435761) % len(pool)
             # choose num_ops ops cyclically from the tier
-            sel_idxs = [(start + i) % L for i in range(max(1, num_ops))]
+            sel_idxs = [(start + i) % len(pool) for i in range(max(1, num_ops))]
             sel_names = [keys_all[i] for i in sel_idxs]
             chain = transforms.Compose([pool[i] for i in sel_idxs])
 
@@ -161,6 +160,7 @@ class ImageAugmentor:
         Args:
             x: Normalized CHW tensor.
             k: Number of augmentations to produce (k=0 means return raw [0,1] version).
+            num_ops: Number of augmentation operations to chain per augmentation (default=2).
             base_seed: Base seed for RNG (not used in current deterministic ops, but kept for API symmetry).
             stack: If True, stack outputs into a single tensor of shape (k,C,H,W). If False, return a list of k tensors.
 

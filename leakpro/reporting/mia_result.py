@@ -230,12 +230,6 @@ class MIAResult:
         self.fpr = np.where(self.fp + self.tn != 0, self.fp / (self.fp + self.tn), 0.0)
         self.tpr = np.where(self.tp + self.fn != 0, self.tp / (self.tp + self.fn), 0.0)
 
-        # FPR = 0.001
-        # threshold = 1-FPR
-        # positives = self.signal_values >= threshold
-        # fpr = np.sum(positives & (self.true == 0)) / np.sum(self.true == 0)
-        # tpr = np.sum(positives & (self.true == 1)) / np.sum(self.true == 1)
-
         if np.sum(np.diff(self.fpr) < 0) > 0 or np.sum(np.diff(self.tpr) < 0) > 0:
             logger.warning("FPR or TPR values are not monotonically increasing. ROC AUC may be inaccurate.")
             self.roc_auc = None

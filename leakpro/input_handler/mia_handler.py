@@ -174,7 +174,7 @@ class MIAHandler:
             return True
         raise ValueError("Object is not indexable.")
 
-    def get_dataset(self:Self, dataset_indices: np.ndarray, params:dict=None, augment=False) -> np.ndarray:
+    def get_dataset(self:Self, dataset_indices: np.ndarray, params:dict=None) -> np.ndarray:
         """Get the dataset from the population."""
 
         if params is None:
@@ -188,10 +188,7 @@ class MIAHandler:
         targets = self.population.targets[dataset_indices]
 
         params = {} if params is None else params
-        data = self.UserDataset(data, targets, **params)
-        if augment is False:
-            data.augment = None
-        return data
+        return self.UserDataset(data, targets, **params)
 
     def get_dataloader(self: Self,
                        dataset_indices: np.ndarray,

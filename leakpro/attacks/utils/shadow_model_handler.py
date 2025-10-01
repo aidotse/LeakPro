@@ -67,7 +67,7 @@ class ShadowModelHandler(ModelHandler):
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    def _filter(self:Self, data_size:int, online:bool)->list[int]:
+    def _filter(self:Self, data_size:int)->list[int]:
         # Get the metadata for the shadow models
         entries = os.listdir(self.storage_path)
         pattern = re.compile(rf"^{self.metadata_storage_name}_\d+\.pkl$")
@@ -77,10 +77,6 @@ class ShadowModelHandler(ModelHandler):
         all_indices = [int(re.search(r"\d+", f).group()) for f in files]
 
         # Setup checks
-        # Get target model hash, this tells if the data has changed for the training
-        target_model_hash = self.target_model_hash
-        # create check list
-        #filter_checks = [data_size, online, self.model_class, target_model_hash]
         # TODO: we use the same shadow models for all targets!
         filter_checks = [data_size, self.model_class]
 
@@ -95,30 +91,30 @@ class ShadowModelHandler(ModelHandler):
 
         return all_indices, filtered_indices
 
-    def construct_balanced_assignments(self, N, n, seed=None) -> np.ndarray:
-        """Assigns each of N data points to exactly n/2 out of n datasets by partitioning.
+    def construct_balanced_assignments(self, m: int, n: int, seed: int = None) -> np.ndarray:
+        """Assigns each of m data points to exactly n/2 out of n datasets by partitioning.
 
-        Arguments:
-        ---------
-        - N (int): number of data points
-        - n (int): number of datasets (must be even)
-        - seed (int or None): random seed for reproducibility
+        Args:
+        ----
+            m (int): The number of data points.
+            n (int): The number of datasets (must be even).
+            seed (int, optional): Random seed for reproducibility. Defaults to None.
 
         Returns:
         -------
-        - A (np.ndarray): binary matrix of shape (n, N)
+            A (np.ndarray): binary matrix of shape (n, m) where A[i,j] = 1 if data point j is in dataset i.
 
         """
         assert n % 2 == 0, "n must be even"
         if seed is not None:
             np.random.seed(seed)
 
-        A = np.zeros((n, N), dtype=np.uint8)  # noqa: N806
-        all_indices = np.arange(N)
+        A = np.zeros((n, m), dtype=np.uint8)  # noqa: N806
+        all_indices = np.arange(m)
 
         for i in range(0, n, 2):
             permuted = np.random.permutation(all_indices)
-            half = N // 2
+            half = m // 2
             A[i, permuted[:half]] = 1       # First half to dataset i
             A[i+1, permuted[half:]] = 1     # Second half to dataset i+1
 
@@ -151,7 +147,7 @@ class ShadowModelHandler(ModelHandler):
 
         # Get the size of the dataset
         data_size = int(len(shadow_population)*training_fraction)
-        all_indices, filtered_indices = self._filter(data_size, online)
+        all_indices, filtered_indices = self._filter(data_size)
 
         # Create a list of indices to use for the new shadow models
         n_existing_models = len(filtered_indices)
@@ -167,13 +163,12 @@ class ShadowModelHandler(ModelHandler):
             indices_to_use.append(next_index)
             next_index += 1
 
-        A = self.construct_balanced_assignments(len(shadow_population), num_models)
+        A = self.construct_balanced_assignments(len(shadow_population), num_models)  # noqa: N806
         assert np.all(np.sum(A,axis=0) == num_models//2)
         assert np.all(np.sum(A,axis=1) == len(shadow_population)//2)
 
         for i, indx in enumerate(indices_to_use):
             # Get dataloader
-            #data_indices = np.random.choice(shadow_population, data_size, replace=False)
             data_indices = shadow_population[np.where(A[i,:] == 1)]
             data_loader = self.handler.get_dataloader(data_indices, params=None, augment=True)
 

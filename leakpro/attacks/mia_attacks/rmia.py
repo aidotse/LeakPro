@@ -149,12 +149,12 @@ class AttackRMIA(AbstractMIA):
 
         # collect the softmax output of the correct class
         n_attack_points = len(self.ground_truth_indices)
-        p_z_given_theta = softmax_logits(self.logits_theta, self.temperature)[np.arange(n_attack_points),self.ground_truth_indices]
+        p_z_given_theta = softmax_logits(self.logits_theta, self.temperature)[np.arange(n_attack_points),self.ground_truth_indices]  # noqa: E501
         p_z_given_theta = np.atleast_2d(p_z_given_theta)
 
         # collect the softmax output of the correct class for each shadow model
         sm_logits_shadow_models = [softmax_logits(x, self.temperature) for x in self.logits_shadow_models]
-        p_z_given_shadow_models = np.array([x[np.arange(n_attack_points),self.ground_truth_indices] for x in sm_logits_shadow_models])
+        p_z_given_shadow_models = np.array([x[np.arange(n_attack_points),self.ground_truth_indices] for x in sm_logits_shadow_models])  # noqa: E501
 
         # evaluate the marginal p(z)
         if self.online is True:

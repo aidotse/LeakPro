@@ -6,8 +6,6 @@ import os
 import numpy as np
 from numpy.ctypeslib import ndpointer
 
-from leakpro.utils.logger import logger
-
 
 class GroupTestDecoder:
     """Handles per-sample BCJR decoding with dynamic parity matrices."""
