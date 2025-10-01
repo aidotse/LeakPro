@@ -20,7 +20,6 @@ class TestReportHandler:
         true_labels = np.array([False,  True,  True, True,  False, False])
         signal_values =  np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
         result_name = "dummy"
-        id = "dummy-test"
 
         miaresult = MIAResult.from_full_scores(true_membership = true_labels,
                                     signal_values = signal_values,

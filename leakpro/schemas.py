@@ -44,6 +44,13 @@ class DataLoaderConfig(BaseModel):
     params: Dict[str, Any]
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields
 
+class EvalModelConfig(BaseModel):
+    """Schema for evaluation model parameters."""
+
+    model_class: str = Field(..., description="Class name of the model")
+    module_path: str = Field(..., description="Path to the model module")
+    eval_folder: str = Field(..., description="Directory where evaluation model data is stored")
+
 class ReconstructionConfig(BaseModel):
     """Configuration for reconstruction attacks."""
 
@@ -51,6 +58,7 @@ class ReconstructionConfig(BaseModel):
     num_class_samples: int = Field(1, description="Number of samples to generate for each class")
     num_audited_classes: int = Field(100, description="Number of classes to audit")
     metrics: Dict[str, Any] = Field(default_factory=dict)
+    eval_model: Optional[EvalModelConfig] = Field(None, description="Evaluation model configuration")
 
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields
 
@@ -199,6 +207,8 @@ class OptunaConfig(BaseModel):
                       description="Random seed for reproducibility")
     n_trials: int = Field(default=100,
                           description="Number of trials to find the optimal hyperparameters")
+    check_interval: int = Field(default=3000,
+                          description="Interval of steps between checks")
     direction: Literal["maximize", "minimize"] = Field("maximize",
                                                        description="Direction of the optimization, minimize or maximize")
     pruner: optuna.pruners.BasePruner = Field(default=optuna.pruners.MedianPruner(n_warmup_steps=5),

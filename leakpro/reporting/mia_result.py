@@ -425,51 +425,30 @@ class MIAResult:
         plt.clf()
 
     @staticmethod
-    def get_strongest(results: list) -> list:
-        """Method for selecting the strongest attack."""
-        return max((res for res in results), key=lambda d: d.roc_auc)
-
-    @staticmethod
-    def _get_all_attacknames(results: list) -> list:
-        attack_name_list = []
-        for result in results:
-            if result.result_name not in attack_name_list:
-                attack_name_list.append(result.result_name)
-        return attack_name_list
-
-    @staticmethod
-    def _get_results_of_name(
-            results: list,
-            result_name_value: str
-            ) -> list:
-        indices = [idx for (idx, result) in enumerate(results) if result.result_name == result_name_value]
-        return [results[idx] for idx in indices]
-
-    @staticmethod
     def create_results(
             results: list,
             save_dir: str = "./",
         ) -> str:
         """Result method for MIAResult."""
+        # create folder if it does not exist
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+
         latex = ""
 
+        seen_ids = set()
+        attack_results = [result for result in results if not (result.id in seen_ids or seen_ids.add(result.id))]
         # Create plot for all results
-        MIAResult.create_roc_plot(results, save_dir)
-        latex += MIAResult._latex(results, save_dir, save_name="all_results")
+        MIAResult.create_roc_plot(attack_results, save_dir)
+        latex += MIAResult._latex(attack_results, save_dir = save_dir, section_title = "All results")
 
-        # Create plot for results grouped by name
-        all_attack_names = MIAResult._get_all_attacknames(results)
-        for name in all_attack_names:
-            results_name_grouped = MIAResult._get_results_of_name(results, name)
-            MIAResult.create_roc_plot(results_name_grouped, save_dir)
-            latex += MIAResult._latex(results_name_grouped, save_dir, save_name=name)
-
-        # Create plot for results grouped by name
-        grouped_results = [MIAResult._get_results_of_name(results, name) for name
-                           in all_attack_names]
-        strongest_results = [MIAResult.get_strongest(result) for result in grouped_results]
-        MIAResult.create_roc_plot(strongest_results, save_dir)
-        latex += MIAResult._latex(strongest_results, save_dir, save_name="strongest")
+        # Create individual plot for results
+        for res in attack_results:
+            attack_folder = f"{save_dir}/{res.id}"
+            if not os.path.exists(attack_folder):
+                os.makedirs(attack_folder)
+            MIAResult.create_roc_plot([res], attack_folder)
+            latex += MIAResult._latex([res], save_dir = attack_folder, section_title = res.id)
 
         return latex
 
@@ -477,15 +456,17 @@ class MIAResult:
     def _latex(
             results: list,
             save_dir: str, # noqa: ARG004
-            save_name: str
+            section_title: str
         ) -> str:
         """Latex method for MIAResult."""
+        image_path = os.path.abspath(os.path.join(save_dir, "ROC.png")).replace("_", "\\_")
 
         # Input mia results image
         latex_content = f"""
-        \\subsection{{{" ".join(save_name.split("_"))}}}
+        \\subsection{{{" ".join(section_title.split("_"))}}}
         \\begin{{figure}}[ht]
-        \\includegraphics[width=0.8\\textwidth]{{{save_name}.png}}
+        \\centering
+        \\includegraphics[width=0.8\\textwidth]{{{image_path}}}
         \\end{{figure}}
         """
 

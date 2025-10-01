@@ -90,7 +90,7 @@ class InferenceResults(BaseModel):
         save_name: str = "fig.png"
     ) -> None:
         """Plot method for InferenceResults."""
-        from leakpro.synthetic_data_attacks.plots import plot_ir_base_case, plot_ir_worst_case
+        from leakpro.synthetic_data_attacks.plots import plot_ir_base_case, plot_ir_worst_case  # noqa: PLC0415
         plot_inference = plot_ir_worst_case if worst_case_flag else plot_ir_base_case
         plot_inference(
             inf_res = InferenceResults(

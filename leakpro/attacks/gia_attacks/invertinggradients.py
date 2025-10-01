@@ -3,6 +3,7 @@ import os
 from collections.abc import Generator
 from copy import deepcopy
 from dataclasses import dataclass, field
+from typing import Optional
 
 import torch
 from optuna.trial import Trial
@@ -11,10 +12,14 @@ from torch.nn import CrossEntropyLoss, Module
 from torch.utils.data import DataLoader
 
 from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
-from leakpro.fl_utils.data_utils import get_at_images
+from leakpro.fl_utils.data_utils import GiaImageExtension
 from leakpro.fl_utils.gia_optimizers import MetaSGD
-from leakpro.fl_utils.similarity_measurements import cosine_similarity_weights, total_variation
-from leakpro.reporting.attack_result import GIAResults
+from leakpro.fl_utils.gia_train import train
+from leakpro.fl_utils.similarity_measurements import (
+    cosine_similarity_weights,
+    total_variation,
+)
+from leakpro.metrics.attack_result import GIAResults
 from leakpro.utils.import_helper import Callable, Self
 from leakpro.utils.logger import logger
 
@@ -33,6 +38,8 @@ class InvertingConfig:
     optimizer: object = field(default_factory=lambda: MetaSGD())
     # Client loss function
     criterion: object = field(default_factory=lambda: CrossEntropyLoss())
+    # Data modality extension
+    data_extension: object = field(default_factory=lambda: GiaImageExtension())
     # Number of epochs for the client attack
     epochs: int = 1
     # if to use median pool 2d on images, can improve attack on high higher resolution (100+)
@@ -43,25 +50,27 @@ class InvertingConfig:
 class InvertingGradients(AbstractGIA):
     """Gradient inversion attack by Geiping et al."""
 
-    def __init__(self: Self, model: Module, client_loader: DataLoader, train_fn: Callable,
-                 data_mean: Tensor, data_std: Tensor, configs: InvertingConfig) -> None:
+    def __init__(self: Self, model: Module, client_loader: DataLoader, data_mean: Tensor, data_std: Tensor,
+                 train_fn: Optional[Callable] = None, configs: Optional[InvertingConfig] = None, optuna_trial_data: list = None
+                 ) -> None:
         super().__init__()
         self.original_model = model
         self.model = deepcopy(self.original_model)
         self.client_loader = client_loader
-        self.train_fn = train_fn
+        self.train_fn = train_fn if train_fn is not None else train
         self.data_mean = data_mean
         self.data_std = data_std
-        self.configs = configs
+        self.configs = configs if configs is not None else InvertingConfig()
         self.best_loss = float("inf")
         self.best_reconstruction = None
         self.best_reconstruction_round = None
         # required for optuna to save the best hyperparameters
         self.attack_folder_path = "leakpro_output/attacks/inverting_grad"
         os.makedirs(self.attack_folder_path, exist_ok=True)
+        # optuna trial data
+        self.optuna_trial_data = optuna_trial_data
 
         logger.info("Inverting gradient initialized.")
-        self.prepare_attack()
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
@@ -90,7 +99,13 @@ class InvertingGradients(AbstractGIA):
 
         """
         self.model.eval()
-        self.reconstruction, self.reconstruction_loader = get_at_images(self.client_loader)
+        (
+            self.client_loader,
+            self.original,
+            self.reconstruction,
+            self.reconstruction_labels,
+            self.reconstruction_loader
+        ) = self.configs.data_extension.get_at_data(self.client_loader)
         self.reconstruction.requires_grad = True
         client_gradient = self.train_fn(self.model, self.client_loader, self.configs.optimizer,
                                         self.configs.criterion, self.configs.epochs)
@@ -134,11 +149,10 @@ class InvertingGradients(AbstractGIA):
             gradient = self.train_fn(self.model, self.reconstruction_loader, self.configs.optimizer,
                                      self.configs.criterion, self.configs.epochs)
             rec_loss = cosine_similarity_weights(gradient, self.client_gradient, self.configs.top10norms)
-
+            tv_reg = (self.configs.tv_reg * total_variation(self.reconstruction))
             # Add the TV loss term to penalize large variations between pixels, encouraging smoother images.
-            rec_loss += (self.configs.tv_reg * total_variation(self.reconstruction))
+            rec_loss += tv_reg
             rec_loss.backward()
-            self.reconstruction.grad.sign_()
             return rec_loss
         return closure
 
@@ -147,8 +161,26 @@ class InvertingGradients(AbstractGIA):
 
     def suggest_parameters(self: Self, trial: Trial) -> None:
         """Suggest parameters to chose and range for optimization for the Inverting Gradient attack."""
-        total_variation = trial.suggest_float("total_variation", 1e-6, 1e-1, log=True)
+        total_variation = trial.suggest_float("total_variation", 1e-8, 1e-1, log=True)
+        attack_lr = trial.suggest_float("attack_lr", 1e-4, 100.0, log=True)
+        median_pooling = trial.suggest_int("median_pooling", 0, 1)
+        top10norms = trial.suggest_int("top10norms", 0, 1)
+        self.configs.attack_lr = attack_lr
         self.configs.tv_reg = total_variation
+        self.configs.median_pooling = median_pooling
+        self.configs.top10norms = top10norms
+        if self.optuna_trial_data is not None:
+            trial_data_idx = trial.suggest_categorical(
+                "trial_data",
+                list(range(len(self.optuna_trial_data)))
+            )
+            self.client_loader = self.optuna_trial_data[trial_data_idx]
+            logger.info(f"Next experiment on trial data idx: {trial_data_idx}")
+        logger.info(f"Chosen parameters:\
+                    total_variation: {total_variation} \
+                    attack_lr: {attack_lr} \
+                    median_pooling: {median_pooling} \
+                    top10norms: {top10norms}")
 
     def reset_attack(self: Self, new_config:dict) -> None:  # noqa: ARG002
         """Reset attack to initial state."""
@@ -156,5 +188,6 @@ class InvertingGradients(AbstractGIA):
         self.best_reconstruction = None
         self.best_reconstruction_round = None
         self.model = deepcopy(self.original_model)
+        super().reset_attack()
         self.prepare_attack()
         logger.info("Inverting attack reset to initial state.")

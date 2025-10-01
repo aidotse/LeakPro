@@ -20,13 +20,14 @@ dependencies = [
   "joblib",
   "pyyaml",
   "scikit-learn",
-  "pydantic",  
+  "pydantic",
+  "ts2vec",
 ]
 
 [project.optional-dependencies]
 mia = ["torch", "torchvision", "optuna"]
 synthetic = ["numba", "pydantic", "transformers", "sentence-transformers"]
-federated = ["torch", "torchvision", "torchmetrics", "pytorch-ignite", "optuna"]
+federated = ["torch", "torchvision", "torchmetrics", "pytorch-ignite", "optuna", "albumentations"]
 minv = ["torch", "torchvision", "optuna", "kornia"]
 
 dev = [
@@ -35,7 +36,7 @@ dev = [
   "pytest-mock",
   "coverage-badge",
   "ruff",
-  "torch",  # from mia & federated
+  "torch >= 2.6.0",  # from mia & federated
   "torchvision",  # from mia & federated
   "torchmetrics",  # from federated
   "numba",  # from synthetic
@@ -44,6 +45,8 @@ dev = [
   "pytorch-ignite", # from federated
   "optuna", # federated and mia
   "kornia", # from minv
+  "albumentations", # federated example
+  "transformers", # federated example
 ]
 
 [tool.setuptools]

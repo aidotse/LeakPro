@@ -1,6 +1,5 @@
 """Tests for the attack_result module."""
 
-import pickle
 import os
 import tempfile
 from pytest_mock import MockerFixture
@@ -8,9 +7,7 @@ from pytest_mock import MockerFixture
 import numpy as np
 
 from leakpro.reporting.mia_result import MIAResult
-from leakpro.reporting.report_utils import get_config_name
 from leakpro.utils.import_helper import Self
-from leakpro.schemas import AuditConfig
 
 class TestMIAResult:
     """Test class for MIAResult."""
@@ -118,17 +115,6 @@ class TestMIAResult:
         assert np.allclose(self.miaresult_new.fpr, self.fpr_array)
         assert np.allclose(self.miaresult_new.tpr, self.tpr_array)
 
-    def test_get_strongest_miaresult(self:Self, mocker: MockerFixture) -> None:
-        """Test selecting the strongest attack based on ROC AUC."""
-        result_1 = mocker.Mock(roc_auc=0.75)
-        result_2 = mocker.Mock(roc_auc=0.85)
-        result_3 = mocker.Mock(roc_auc=0.65)
-
-        strongest = MIAResult.get_strongest([result_1, result_2, result_3])
-        print(strongest)
-        # The strongest attack should be the one with the highest ROC AUC
-        assert strongest == result_2
-
     def test_latex(self:Self, mocker: MockerFixture) -> None:
         """Test if the LaTeX content is generated correctly."""
 
@@ -138,13 +124,13 @@ class TestMIAResult:
 
         name = "attack_comparison"
 
-        latex_content = MIAResult._latex(result, save_dir=self.temp_dir, save_name=name)
+        latex_content = MIAResult._latex(result, save_dir=self.temp_dir.name, section_title=name)
 
         # Check that the subsection is correctly included
         assert "\\subsection{attack comparison}" in latex_content
 
         # Check that the figure is correctly included
-        assert f"\\includegraphics[width=0.8\\textwidth]{{{name}.png}}" in latex_content
+        assert f"\\includegraphics[width=0.8\\textwidth]{{{self.temp_dir.name}/ROC.png}}" in latex_content
 
         # Check that the table header is correct
         assert "Attack name & attack config & TPR: 10.0\\%FPR & 1.0\\%FPR & 0.1\\%FPR & 0.0\\%FPR" in latex_content
@@ -158,29 +144,3 @@ class TestMIAResult:
 
         # Ensure the LaTeX content ends properly
         assert "\\newline\n"  in latex_content
-
-    def test_get_all_attacknames(self:Self, mocker: MockerFixture) -> None:
-        """Test retrieval of all attack names."""
-        result_mock_1 = mocker.Mock(result_name="Attack1")
-        result_mock_2 = mocker.Mock(result_name="Attack2")
-        results = [result_mock_1, result_mock_2, result_mock_1]
-
-        attack_names = MIAResult._get_all_attacknames(results)
-
-        assert attack_names == ["Attack1", "Attack2"]
-
-    def test_get_results_of_name(self:Self, mocker: MockerFixture) -> None:
-        """Test retrieval of all attack names."""
-        result_mock_1 = mocker.Mock(result_name="Attack1")
-        result_mock_2 = mocker.Mock(result_name="Attack2")
-        result_mock_3 = mocker.Mock(result_name="Attack2")
-        result_mock_4 = mocker.Mock(result_name="Attack3")
-        result_mock_5 = mocker.Mock(result_name="Attack3")
-        result_mock_6 = mocker.Mock(result_name="Attack3")
-
-        results = [result_mock_1, result_mock_2, result_mock_3,
-                                       result_mock_4, result_mock_5, result_mock_6]
-
-        assert len(MIAResult._get_results_of_name(results, "Attack1")) == 1
-        assert len(MIAResult._get_results_of_name(results, "Attack2")) == 2
-        assert len(MIAResult._get_results_of_name(results, "Attack3")) == 3

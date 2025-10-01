@@ -26,20 +26,28 @@ def optuna_optimal_hyperparameters(attack_object: AbstractAttack, optuna_config:
     """
     def objective(trial: optuna.trial.Trial) -> Tensor:
         # Suggest hyperparameters
+
         new_config = attack_object.suggest_parameters(trial)
+
         # Reset attack to apply new hyperparameters
         attack_object.reset_attack(new_config)
+
         seed_everything(optuna_config.seed)
+
         result = attack_object.run_attack()
+
         if isinstance(result, Generator):
             for step, intermediary_results, result_object in result:
-                trial.report(intermediary_results, step)
+                # check every 3000 results
+                if step%optuna_config.check_interval==0:
+                    trial.report(intermediary_results, step)
 
-                if trial.should_prune():
-                    raise optuna.TrialPruned()
-                # save results if not pruned
+                    if trial.should_prune():
+                        raise optuna.TrialPruned()
+                    # save results if not pruned
                 if result_object is not None:
-                    result_object.save(name="optuna", path="./leakpro_output/results", config=attack_object.get_configs())
+                    result_object.save(name="optuna"+"trial"+str(trial.number), path="./leakpro_output/results",
+                                    config=attack_object.get_configs())
                     return intermediary_results
         elif isinstance(result, MIAResult):
             # Retrieve configuration and result metric
@@ -58,7 +66,6 @@ def optuna_optimal_hyperparameters(attack_object: AbstractAttack, optuna_config:
     # Define the pruner and study
     pruner = optuna_config.pruner
     study = optuna.create_study(direction=optuna_config.direction, pruner=pruner)
-
     # Run optimization
     study.optimize(objective, n_trials=optuna_config.n_trials)
 
