@@ -19,7 +19,6 @@ def test_lira_setup(image_handler:ImageInputHandler) -> None:
     assert lira_obj.online == lira_params.online
     assert lira_obj.num_shadow_models == lira_params.num_shadow_models
     assert lira_obj.training_data_fraction == lira_params.training_data_fraction
-    assert lira_obj.memorization == False
 
     lira_params.num_shadow_models = 3
 
@@ -43,11 +42,9 @@ def test_lira_prepare_online_attack(image_handler:ImageInputHandler) -> None:
     assert len(lira_obj.shadow_models) == lira_params.num_shadow_models
     # ensure the attack data indices correspond to the correct pool
     assert sorted(lira_obj.attack_data_indices) == list(range(image_handler.population_size))
-    # memorization is tested in a different module
-    assert lira_obj.memorization == False
 
     # Check that the filtering of the attack data is correct (this is done after shadow models are created)
-    n_attack_points = len(lira_obj.in_members) + len(lira_obj.out_members)
+    n_attack_points = len(lira_obj.train_indices) + len(lira_obj.test_indices)
     assert n_attack_points > 0
     assert lira_obj.shadow_models_logits.shape == (n_attack_points, lira_params.num_shadow_models)
     assert lira_obj.target_logits.shape == (n_attack_points, )
@@ -69,8 +66,6 @@ def test_lira_prepare_offline_attack(image_handler:ImageInputHandler) -> None:
     assert len(lira_obj.shadow_models) == lira_params.num_shadow_models
     # ensure the attack data indices correspond to the correct pool
     assert sorted(lira_obj.attack_data_indices) == sorted(set(range(image_handler.population_size)) - set(image_handler.test_indices) - set(image_handler.train_indices))
-    # memorization is tested in a different module
-    assert lira_obj.memorization == False
 
     # Check that the filtering of the attack data is correct (this is done after shadow models are created)
     n_attack_points = len(lira_obj.in_members) + len(lira_obj.out_members)

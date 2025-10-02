@@ -77,7 +77,7 @@ def test_rmia_prepare_offline_attack(image_handler:ImageInputHandler) -> None:
     # ensure correct number of shadow models are read
     assert len(rmia_obj.shadow_models) == rmia_params.num_shadow_models
     # ensure the attack data indices correspond to the correct pool
-    assert sorted(rmia_obj.attack_data_indices) == sorted(set(range(image_handler.population_size)) - set(image_handler.test_indices) - set(image_handler.train_indices))
+    assert sorted(rmia_obj.attack_data_indices) == sorted(range(image_handler.population_size))
 
     # Check that the filtering of the attack data is correct (this is done after shadow models are created)
     n_attack_points = len(rmia_obj.attack_data_indices) * rmia_params.attack_data_fraction

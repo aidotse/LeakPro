@@ -170,7 +170,7 @@ class ShadowModelHandler(ModelHandler):
         for i, indx in enumerate(indices_to_use):
             # Get dataloader
             data_indices = shadow_population[np.where(A[i,:] == 1)]
-            data_loader = self.handler.get_dataloader(data_indices, params=None, augment=True)
+            data_loader = self.handler.get_dataloader(data_indices, params=None)
 
             # Get shadow model blueprint
             model, criterion, optimizer = self._get_model_criterion_optimizer()

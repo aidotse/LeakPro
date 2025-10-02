@@ -90,8 +90,12 @@ class ImageAugmentor:
     """Augment already-normalized inputs; return raw [0,1] tensors (later normalized by dataset)."""
 
     def __init__(self, handler: AbstractInputHandler, augment_strength: str = "easy", force_rgb: bool = True) -> None:
-        self.mean = handler.population.mean
-        self.std = handler.population.std
+        try:
+            self.mean = handler.population.mean
+            self.std = handler.population.std
+        except AttributeError:
+            self.mean = None
+            self.std = None
         self.force_rgb = force_rgb
         self._reg = _build_registry_mild()
         self._tiers = _policy_tiers()

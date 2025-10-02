@@ -342,10 +342,10 @@ class AttackRaMIA(AbstractMIA):
 
         # Step 2: run MIA to get logits for target and shadow models
         latent_files = f"{augmented_data_dir}/latent_features_{augmented_data_file}.pt"
-        if os.path.exists(latent_files) and self.stealth_method in ["bcjr", "agglomerative"]:
+        if os.path.exists(latent_files):
             logger.info("Loading existing latent features...")
             latent_features = torch.load(latent_files, weights_only=False).numpy()
-        elif self.stealth_method in ["bcjr", "agglomerative"]:
+        else:
             logger.info("Creating new latent features...")
             latent_features = self.get_latent_features(aug_dataloader)
             torch.save(torch.tensor(latent_features), latent_files)
@@ -466,6 +466,29 @@ class AttackRaMIA(AbstractMIA):
         true_labels = np.array([True]*len(self.in_indices) + [False]*len(self.out_indices))
 
         attack_name = "RaMIA" if self.stealth_method in ["none"] else f"RaMIA-{self.stealth_method}"
+
+        # DEBUG
+        tmp_name = f"ramia_{self.stealth_method}_{self.num_transforms}_{self.n_ops}_{self.augment_strength}"
+        # save the latent features in a scatter plot with color-coded membership, the index number, and the score
+        if self.debug:
+            import matplotlib.pyplot as plt
+
+            plt.figure(figsize=(10, 8))
+            for i in [0,1,2, self.num_audit+1, self.num_audit+2, self.num_audit+3]:
+                step = max(self.num_transforms, 1)
+                idxs = range(i*step, (i+1)*step)
+                member = i < self.num_audit
+                scores = aug_scores[i*step:(i+1)*step] if step > 1 else aug_scores[i]
+                # add the score and index i as a label to each point
+                plt.scatter(latent_features[idxs, 0],
+                            latent_features[idxs, 1],
+                            c="blue" if member else "red",
+                            label= f"{i} " + ", ".join([f"{s:.2f}" for s in scores]))
+
+            plt.title(f"Latent Space Representation - {tmp_name}")
+            plt.savefig(f"{tmp_name}.png")
+            plt.close()
+        # END of DEBUG
 
         return MIAResult.from_full_scores(true_membership=true_labels,
                                         signal_values=range_scores,

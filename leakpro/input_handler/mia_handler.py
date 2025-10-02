@@ -194,12 +194,11 @@ class MIAHandler:
                        dataset_indices: np.ndarray,
                        params:dict=None,
                        batch_size:int=None,
-                       shuffle:bool=None,
-                       augment:bool=False) -> DataLoader:
+                       shuffle:bool=None) -> DataLoader:
         """Default implementation of the dataloader."""
         if params is None:
             params = {}
-        dataset = self.get_dataset(dataset_indices, params, augment=augment)
+        dataset = self.get_dataset(dataset_indices, params)
 
         # Get default parameters from stored config (includes batch size, collate_fn, shuffle etc.)
         dataloader_params = self.dataloader_config.params.copy()

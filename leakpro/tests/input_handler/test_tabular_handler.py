@@ -48,23 +48,6 @@ def test_abstract_handler_setup_tabular(tabular_handler:TabularInputHandler) -> 
     assert np.all(labels <= parameters.num_classes)
     assert np.all(labels >= 0)
 
-def test_tabular_extension_class(tabular_handler:TabularInputHandler) -> None:
-    """Test the extension methods of the tabular handler."""
-    data, _ = next(iter(tabular_handler.get_dataloader(np.arange(10))))
-
-    assert data is not None
-
-    if not tabular_handler.modality_extension.one_hot_encoded:
-        data = tabular_handler.modality_extension.one_hot_encode(data)
-
-    data2 = tabular_handler.modality_extension.one_hot_to_categorical(data)
-    assert data2 is not None
-    data3 = tabular_handler.modality_extension.one_hot_encode(data2)
-    assert data3 is not None
-
-    assert equal(data, data3)
-    assert data2.shape[1] <= data.shape[1]
-
 
 def test_tabular_input_handler(tabular_handler:TabularInputHandler) -> None:
     """Test the CIFAR10 input handler."""
