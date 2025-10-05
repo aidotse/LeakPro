@@ -1,5 +1,10 @@
 """Implementation of the LiRA attack."""
 
+# -----TO BE REMOVED-----
+import os
+import time
+# -----------------------   
+
 from typing import Literal
 
 import numpy as np
@@ -34,6 +39,7 @@ class AttackLiRA(AbstractMIA):
         memorization_threshold: float = Field(default=0.8, ge=0.0, le=1.0, description="Set percentile for most vulnerable data points, use 0.0 for paper thresholds")  # noqa: E501
         min_num_memorization_audit_points: int = Field(default=10, ge=1, description="Set minimum allowed audit points after memorization")  # noqa: E501
         num_memorization_audit_points: int = Field(default=0, ge=0, description="Directly set number of most vulnerable audit data points (Overrides 'memorization_threshold')")  # noqa: E501
+        vectorized: bool = Field(default=False, description="Compute shadow-model scores in a single vectorized pass (faster) instead of per-sample loop (safer).")
 
         @model_validator(mode="after")
         def check_num_shadow_models_if_online(self) -> Self:
@@ -261,8 +267,167 @@ class AttackLiRA(AbstractMIA):
         n_audit_samples = self.shadow_models_logits.shape[0]
         score = np.zeros(n_audit_samples)  # List to hold the computed probability scores for each sample
 
+        # TODO VECTORIZE THIS PART AS WELL
         self.fixed_in_std = self.get_std(self.shadow_models_logits.flatten(), self.in_indices_masks.flatten(), True, "fixed")
         self.fixed_out_std = self.get_std(self.shadow_models_logits.flatten(), (~self.in_indices_masks).flatten(), False, "fixed")
+
+        #  Decides which score calculation method should be used
+        if(self.vectorized):
+            print("------------ if condition: ", self.vectorized)
+            #score = self.vectorized_attack()
+        else:
+            print("------------ if condition: ", self.vectorized)
+            #score = self.iterative_attack()
+
+        # Performs the vectorized attack by calculating the mean and std for all logits using tensor operations
+        start_vec = time.perf_counter()
+        self.vectorized_attack()
+        end_vec = time.perf_counter()
+        elapsed_vec = end_vec - start_vec
+
+        start_loop = time.perf_counter()
+        score = self.iterative_attack()
+        end_loop = time.perf_counter()
+        elapsed_loop = end_loop - start_loop
+
+        savePath = "compare_vec_scores"
+        os.makedirs(savePath, exist_ok=True)
+        with open(os.path.join(savePath, "elapsed.txt"), "w") as f:
+            f.write(f"Loop: {elapsed_loop:.6f} | Vec: {elapsed_vec:.6f}\n")
+
+        # Save loop scores
+        np.save(os.path.join(savePath, "lira_scores_loop.npy"), score)
+
+        # Split the score array into two parts based on membership: in (training) and out (non-training)
+        self.in_member_signals = score[self.in_members].reshape(-1,1)  # Scores for known training data members
+        self.out_member_signals = score[self.out_members].reshape(-1,1)  # Scores for non-training data members
+
+        # Prepare true labels array, marking 1 for training data and 0 for non-training data
+        true_labels = np.concatenate(
+            [np.ones(len(self.in_member_signals)), np.zeros(len(self.out_member_signals))]
+        )
+
+        # Combine all signal values for further analysis
+        signal_values = np.concatenate([self.in_member_signals, self.out_member_signals])
+
+        # Return a result object containing predictions, true labels, and the signal values for further evaluation
+        return MIAResult.from_full_scores(true_membership=true_labels,
+                                    signal_values=signal_values,
+                                    result_name="LiRA",
+                                    metadata=self.configs.model_dump())
+
+    def get_std_vectorized(self:Self, var_calculation: str) -> tuple[np.ndarray, np.ndarray]:
+        """A function to define what method to use for calculating variance for LiRA."""
+        match var_calculation:
+            case "fixed":
+                return self._vectorized_fixed_variance()
+            case "carlini":
+                return self._vectorized_carlini_variance()
+            case "individual_carlini":
+                return self._vectorized_individual_carlini()
+
+        return np.array([None])
+
+    def _vectorized_fixed_variance(self:Self) -> tuple[np.ndarray, np.ndarray]:
+        out_stds = np.nanstd(np.where(~self.in_indices_masks, self.shadow_models_logits, np.nan), axis=1)
+        in_stds  = np.nanstd(np.where(self.in_indices_masks,  self.shadow_models_logits, np.nan), axis=1)
+
+        if not self.online:
+            in_stds[:] = 0.0
+
+        return in_stds, out_stds
+
+    def _vectorized_carlini_variance(self:Self) -> tuple[np.ndarray, np.ndarray]:
+        n_samples = self.shadow_models_logits.shape[0]
+        if self.num_shadow_models >= self.fix_var_threshold * 2:
+            out_stds = np.nanstd(np.where(~self.in_indices_masks, self.shadow_models_logits, np.nan), axis=1)
+            in_stds  = np.nanstd(np.where(self.in_indices_masks,  self.shadow_models_logits, np.nan), axis=1)
+        else:
+            out_stds = np.full(n_samples, self.fixed_out_std)
+            in_stds  = np.full(n_samples, self.fixed_in_std) if self.online else np.zeros(n_samples)
+
+        return in_stds, out_stds
+
+    def _vectorized_individual_carlini(self:Self) -> tuple[np.ndarray, np.ndarray]:
+        out_stds = np.nanstd(np.where(~self.in_indices_masks, self.shadow_models_logits, np.nan), axis=1)
+        in_stds  = np.nanstd(np.where(self.in_indices_masks,  self.shadow_models_logits, np.nan), axis=1)
+
+        out_counts = np.sum(~self.in_indices_masks, axis=1)
+        in_counts  = np.sum(self.in_indices_masks,  axis=1)
+
+        out_stds = np.where(out_counts >= self.fix_var_threshold, out_stds, self.fixed_out_std)
+        in_stds  = np.where(in_counts  >= self.fix_var_threshold, in_stds,  self.fixed_in_std)
+
+        if not self.online:
+            in_stds[:] = 0.0
+
+        return in_stds, out_stds
+
+
+    def vectorized_attack(self):
+        """
+        Compute LiRA scores in a vectorized manner.
+
+        Expects:
+          - self.shadow_models_logits: numpy array shape (N, M) where N = audit samples, M = shadow models logits per sample
+          - self.in_indices_masks: boolean array shape (N, M), True for IN shadow models, False for OUT
+          - self.target_logits: numpy array shape (N,)
+          - self.online: bool (if False, pr_in is zero)
+        """
+    
+        print("--------- RUNNING VECTORIZED VERSION ---------")
+
+        n_samples = self.shadow_models_logits.shape[0]
+        
+        out_means = np.zeros(n_samples)
+        out_stds  = np.zeros(n_samples)
+        in_means  = np.zeros(n_samples)
+        in_stds   = np.zeros(n_samples)
+
+        # Vectorized mean calculation
+        out_means = np.nanmean(np.where(~self.in_indices_masks, self.shadow_models_logits, np.nan), axis=1)
+        in_means = np.nanmean(np.where(self.in_indices_masks, self.shadow_models_logits, np.nan), axis=1)
+
+        # Replace NaNs in means with 0.0 (or another neutral fallback)
+        out_means = np.where(np.isnan(out_means), 0.0, out_means)
+        in_means  = np.where(np.isnan(in_means),  0.0, in_means)
+
+        in_stds, out_stds = self.get_std_vectorized(self.var_calculation)
+
+        # Vectorized logpdf
+        pr_out = norm.logpdf(self.target_logits, out_means, out_stds + 1e-30)
+        pr_in  = norm.logpdf(self.target_logits, in_means, in_stds + 1e-30) if self.online else np.zeros(n_samples)
+
+        print("--------- END OF VECTORIZED VERSION ---------")
+
+        # Final LiRA score per audit sample
+        scores = pr_in - pr_out
+        
+        # Debug helper
+        if np.any(np.isnan(scores)):
+            nan_idx = np.where(np.isnan(scores))[0]
+            raise ValueError(f"NaN in vectorized scores at indices {nan_idx.tolist()}")
+
+        """Saves the vectorized score calculation, mask, target_logits and shadow_logits"""
+        savePath = "compare_vec_scores"
+        os.makedirs(savePath, exist_ok=True)
+        np.save(os.path.join(savePath, "lira_scores_vectorized.npy"), scores)
+
+        return scores
+
+
+    def iterative_attack(self):
+        """
+        Compute LiRA scores in an iterative manner.
+
+        Expects:
+          - self.shadow_models_logits: numpy array shape (N, M) where N = audit samples, M = shadow models logits per sample
+          - self.in_indices_masks: boolean array shape (N, M), True for IN shadow models, False for OUT
+          - self.target_logits: numpy array shape (N,)
+          - self.online: bool (if False, pr_in is zero)
+        """
+        n_audit_samples = self.shadow_models_logits.shape[0]
+        score = np.zeros(n_audit_samples)  # List to hold the computed probability scores for each sample
 
         # Iterate over and extract logits for IN and OUT shadow models for each audit sample
         for i, (shadow_models_logits, mask) in tqdm(enumerate(zip(self.shadow_models_logits, self.in_indices_masks)),
@@ -290,21 +455,5 @@ class AttackLiRA(AbstractMIA):
             score[i] = (pr_in - pr_out)  # Append the calculated probability density value to the score list
             if np.isnan(score[i]):
                 raise ValueError("Score is NaN")
+        return score
 
-        # Split the score array into two parts based on membership: in (training) and out (non-training)
-        self.in_member_signals = score[self.in_members].reshape(-1,1)  # Scores for known training data members
-        self.out_member_signals = score[self.out_members].reshape(-1,1)  # Scores for non-training data members
-
-        # Prepare true labels array, marking 1 for training data and 0 for non-training data
-        true_labels = np.concatenate(
-            [np.ones(len(self.in_member_signals)), np.zeros(len(self.out_member_signals))]
-        )
-
-        # Combine all signal values for further analysis
-        signal_values = np.concatenate([self.in_member_signals, self.out_member_signals])
-
-        # Return a result object containing predictions, true labels, and the signal values for further evaluation
-        return MIAResult.from_full_scores(true_membership=true_labels,
-                                    signal_values=signal_values,
-                                    result_name="LiRA",
-                                    metadata=self.configs.model_dump())
