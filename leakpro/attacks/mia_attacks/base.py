@@ -3,7 +3,6 @@
 import numpy as np
 from pydantic import BaseModel, Field
 from scipy.special import (
-    expit,  # numerically stable sigmoid
     log_softmax,
     logsumexp,
 )
