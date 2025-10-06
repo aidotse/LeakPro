@@ -70,7 +70,6 @@ class AttackRaMIA(AbstractMIA):
         self.augment_center = False  # always augment the center point for RaMIA
         self.num_audit = 500
         self.group_score_threshold = 0.49
-        self.debug = True
 
         # Get MIA attack object
         configs = {
@@ -335,17 +334,6 @@ class AttackRaMIA(AbstractMIA):
         aug_dataset.erase_post_norm = None
         aug_dataloader = DataLoader(aug_dataset, batch_size=1024, shuffle=False)
 
-        # DEBUG: check some images
-        if self.debug:
-            for i, (x,_) in enumerate(aug_dataloader):
-                if i > 0:
-                    break
-                img_orig = self.audit_dataloader.dataset.data[i]
-                idxs = range(i*max(self.num_transforms, 1), (i+1)*max(self.num_transforms, 1))
-                x[idxs] = (x[idxs] - self.audit_dataloader.dataset.mean) / self.audit_dataloader.dataset.std
-                save_img(img_orig, x[idxs], f"img{i}")
-        # END OF DEBUG: check some images
-
         # Step 2: run MIA to get logits for target and shadow models
         latent_files = f"{augmented_data_dir}/latent_features_{hash_str}.pt"
         if os.path.exists(latent_files):
@@ -398,17 +386,6 @@ class AttackRaMIA(AbstractMIA):
 
             aug_scores = np.array(aug_scores)
 
-            # DEBUG
-            if self.debug:
-                for i, (x,_) in enumerate(aug_dataloader):
-                    if i > 0:
-                        break
-                    img_orig = self.audit_dataloader.dataset.data[i]
-                    idxs = range(i*self.groups, (i+1)*self.groups)
-                    x[idxs] = (x[idxs] - self.audit_dataloader.dataset.mean) / self.audit_dataloader.dataset.std
-                    save_img(img_orig, x[idxs], f"img_bcjr{i}")
-            # END OF DEBUG
-
         elif self.stealth_method in ["agglomerative"]:
             # Create assignment matrix and representative samples for each group
             representative_samples = []
@@ -434,17 +411,6 @@ class AttackRaMIA(AbstractMIA):
             repr_dataset.augment = None
             repr_dataset.erase_post_norm = None
             aug_dataloader = DataLoader(repr_dataset, batch_size=1024, shuffle=False)
-
-            # DEBUG
-            if self.debug:
-                for i, (x,_) in enumerate(aug_dataloader):
-                    if i > 0:
-                        break
-                    img_orig = self.audit_dataloader.dataset.data[i]
-                    idxs = range(i*self.groups, (i+1)*self.groups)
-                    x[idxs] = (x[idxs] - self.audit_dataloader.dataset.mean) / self.audit_dataloader.dataset.std
-                    save_img(img_orig, x[idxs], f"img_aggl{i}")
-            # END OF DEBUG
             aug_scores = self.mia_attack.score_samples(aug_dataloader, audit_indice_map)
 
         elif self.stealth_method in ["none"]:
