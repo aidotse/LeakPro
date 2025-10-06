@@ -70,7 +70,6 @@ class AttackRaMIA(AbstractMIA):
         self.augment_center = False  # always augment the center point for RaMIA
         self.num_audit = 500
         self.group_score_threshold = 0.49
-        self.debug = True
 
         # Get MIA attack object
         configs = {
@@ -293,11 +292,6 @@ class AttackRaMIA(AbstractMIA):
 
 
         # Step 1: prepare the transformed samples
-        def save_img(x, x_augs, name):  # noqa: ANN001, ANN202
-            save_image(x, name+"_orig.png")
-            for j, aug in enumerate(x_augs):
-                save_image(aug, name + f"_{j}.png") # Already normalized
-
         augmented_data_dir = f"{self.handler.configs.audit.output_dir}/attack_objects/range_mia_data"
         if not os.path.exists(augmented_data_dir):
             os.makedirs(augmented_data_dir, exist_ok=True)
@@ -334,17 +328,6 @@ class AttackRaMIA(AbstractMIA):
         aug_dataset.augment = None
         aug_dataset.erase_post_norm = None
         aug_dataloader = DataLoader(aug_dataset, batch_size=1024, shuffle=False)
-
-        # DEBUG: check some images
-        if self.debug:
-            for i, (x,_) in enumerate(aug_dataloader):
-                if i > 0:
-                    break
-                img_orig = self.audit_dataloader.dataset.data[i]
-                idxs = range(i*max(self.num_transforms, 1), (i+1)*max(self.num_transforms, 1))
-                x[idxs] = (x[idxs] - self.audit_dataloader.dataset.mean) / self.audit_dataloader.dataset.std
-                save_img(img_orig, x[idxs], f"img{i}")
-        # END OF DEBUG: check some images
 
         # Step 2: run MIA to get logits for target and shadow models
         latent_files = f"{augmented_data_dir}/latent_features_{hash_str}.pt"
@@ -398,17 +381,6 @@ class AttackRaMIA(AbstractMIA):
 
             aug_scores = np.array(aug_scores)
 
-            # DEBUG
-            if self.debug:
-                for i, (x,_) in enumerate(aug_dataloader):
-                    if i > 0:
-                        break
-                    img_orig = self.audit_dataloader.dataset.data[i]
-                    idxs = range(i*self.groups, (i+1)*self.groups)
-                    x[idxs] = (x[idxs] - self.audit_dataloader.dataset.mean) / self.audit_dataloader.dataset.std
-                    save_img(img_orig, x[idxs], f"img_bcjr{i}")
-            # END OF DEBUG
-
         elif self.stealth_method in ["agglomerative"]:
             # Create assignment matrix and representative samples for each group
             representative_samples = []
@@ -435,16 +407,6 @@ class AttackRaMIA(AbstractMIA):
             repr_dataset.erase_post_norm = None
             aug_dataloader = DataLoader(repr_dataset, batch_size=1024, shuffle=False)
 
-            # DEBUG
-            if self.debug:
-                for i, (x,_) in enumerate(aug_dataloader):
-                    if i > 0:
-                        break
-                    img_orig = self.audit_dataloader.dataset.data[i]
-                    idxs = range(i*self.groups, (i+1)*self.groups)
-                    x[idxs] = (x[idxs] - self.audit_dataloader.dataset.mean) / self.audit_dataloader.dataset.std
-                    save_img(img_orig, x[idxs], f"img_aggl{i}")
-            # END OF DEBUG
             aug_scores = self.mia_attack.score_samples(aug_dataloader, audit_indice_map)
 
         elif self.stealth_method in ["none"]:
@@ -474,58 +436,6 @@ class AttackRaMIA(AbstractMIA):
         true_labels = np.array([True]*len(self.in_indices) + [False]*len(self.out_indices))
 
         attack_name = "RaMIA" if self.stealth_method in ["none"] else f"RaMIA-{self.stealth_method}"
-
-        # DEBUG
-        tmp_name = f"ramia_{self.stealth_method}_{self.num_transforms}_{self.n_ops}_{self.augment_strength}"
-        # save the latent features in a scatter plot with color-coded membership, the index number, and the score
-        if self.debug and self.num_transforms > 2:
-            import matplotlib.pyplot as plt
-
-            fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-
-            #for i in range(len(self.audit_indices)):
-            for i in [0, self.num_audit+1]:
-                step = max(self.num_transforms, 1)
-                idxs = range(i*step, (i+1)*step)
-                member = i < self.num_audit
-                scores = aug_scores[i*step:(i+1)*step] if step > 1 else aug_scores[i]
-                # add the score and index i as a label to each point
-                for j, s in zip(idxs, scores):
-                    axes[0].scatter(
-                        latent_features[j, 0],
-                        latent_features[j, 1],
-                        c="blue" if member else "red",
-                        label=f"{i}-{j}, {s:.2f}"
-                    )
-                    axes[0].annotate(
-                        f"{i}-{j}, {s:.2f}",
-                        (latent_features[j, 0], latent_features[j, 1]),
-                        fontsize=8
-                    )
-
-            axes[0].set_title("Latent Space Representation")
-            if self.stealth_method in ["agglomerative"]:
-                scores = np.array([np.mean(np.sort(aug_scores[i*self.groups:(i+1)*self.groups])[trim_start:trim_end]) for i in range(2*self.num_audit)])
-            else:
-                scores = np.array([np.mean(np.sort(aug_scores[i*self.num_transforms:(i+1)*self.num_transforms])[trim_start:trim_end]) for i in range(2*self.num_audit)])
-
-            member_mask = np.array([True]*self.num_audit + [False]*self.num_audit)
-            scores_in  = scores[member_mask]
-            scores_out = scores[~member_mask]
-
-            axes[1].hist(scores_in, bins=50, color="blue", alpha=0.6,
-                 edgecolor="black", label="Members")
-            axes[1].hist(scores_out, bins=50, color="red", alpha=0.6,
-                        edgecolor="black", label="Non-members")
-            axes[1].set_title("Score distributions")
-            axes[1].set_xlabel("Score")
-            axes[1].set_ylabel("Count")
-            axes[1].legend()
-
-            fig.tight_layout()
-            fig.savefig(tmp_name, dpi=300, bbox_inches="tight")
-            plt.close(fig)   # optional: close to free memory
-        # END of DEBUG
 
         return MIAResult.from_full_scores(true_membership=true_labels,
                                         signal_values=range_scores,
