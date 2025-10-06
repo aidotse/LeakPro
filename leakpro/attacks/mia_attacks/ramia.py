@@ -5,6 +5,7 @@ from typing import Literal
 
 import numpy as np
 import torch
+import umap
 from pydantic import BaseModel, Field
 from sklearn.cluster import AgglomerativeClustering, KMeans
 from sklearn.decomposition import PCA
@@ -22,6 +23,7 @@ from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.reporting.mia_result import MIAResult
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
+from leakpro.utils.save_load import hash_attack
 
 
 class AttackRaMIA(AbstractMIA):
@@ -66,7 +68,7 @@ class AttackRaMIA(AbstractMIA):
         self.aug = handler.modality_extension
         self.aug.set_augment_strength(self.augment_strength)
         self.augment_center = False  # always augment the center point for RaMIA
-        self.num_audit = 5000
+        self.num_audit = 500
         self.group_score_threshold = 0.49
         self.debug = True
 
@@ -205,6 +207,7 @@ class AttackRaMIA(AbstractMIA):
         assignment_matrix = np.zeros((n,k), dtype=int)
         assignment_matrix[np.arange(n), labels] = 1
 
+        # Find representative samples (medoids) for each cluster
         reps = []
         for j in range(k):
             idx = np.where(labels == j)[0]
@@ -221,7 +224,7 @@ class AttackRaMIA(AbstractMIA):
 
         return representative_samples, assignment_matrix
 
-    def get_latent_features(self, dataloader:DataLoader) -> np.ndarray:
+    def get_latent_features(self, dataloader:DataLoader, method: str = "pca") -> np.ndarray:
         """Extract 512-d ResNet18 features, then do per-group (per-n) 2D PCA on the augmentations.
 
         Args:
@@ -258,22 +261,19 @@ class AttackRaMIA(AbstractMIA):
         # Preserve original order
 
         # ----------------------------
-        # 3) Per-group PCA (2D)
-        #    - center on the first sample of the group (acts as "base")
-        #    - robust to small groups: if rank < 2, pad with zeros
+        # 3) global PCA
         # ----------------------------
-        out = np.zeros((len(dataloader.dataset), 2), dtype=np.float32)
-        step = max(1, self.num_transforms)
-        for i in range(len(self.audit_indices)):
-            idxs = range(i*step, (i+1)*step)  # indices of this group
-            x = feats[idxs]                      # [m, 512]
-            x = x - x.mean(axis=0, keepdims=True)  # center
-            n_comp = 2
-            pca = PCA(n_components=n_comp, random_state=42)
-            z = pca.fit_transform(x).astype(np.float32)   # [m, n_comp]
-            out[idxs] = z
+        n_comp = 2
+        if method == "pca":
+            reducer = PCA(n_components=n_comp, random_state=42)
+            z = reducer.fit_transform(feats)
+        elif method == "umap":
+            reducer = umap.UMAP(n_components=n_comp, random_state=42)
+            z = reducer.fit_transform(feats)
+        else:
+            raise ValueError(f"Unknown reduction method: {method}")
 
-        return out
+        return z
 
     def prepare_attack(self:Self)->None:
         """Prepare attack on the target model and dataset."""
@@ -300,12 +300,16 @@ class AttackRaMIA(AbstractMIA):
         augmented_data_dir = f"{self.handler.configs.audit.output_dir}/attack_objects/range_mia_data"
         if not os.path.exists(augmented_data_dir):
             os.makedirs(augmented_data_dir, exist_ok=True)
-        augmented_data_file = f"{self.augment_strength}_{self.num_transforms}_{self.n_ops}_{self.augment_strength}.pt"
 
-        if os.path.exists(f"{augmented_data_dir}/{augmented_data_file}"):
+        hash_config = {"augment_strength": self.augment_strength,
+                       "num_transforms": self.num_transforms,
+                       "n_ops": self.n_ops}
+        hash_str = hash_attack(hash_config, AbstractMIA.handler.target_model)
+
+        if os.path.exists(f"{augmented_data_dir}/{hash_str}"):
             logger.info("Loading existing augmented data...")
-            augmented_data = torch.load(f"{augmented_data_dir}/{augmented_data_file}", weights_only=False)
-            labels = torch.load(f"{augmented_data_dir}/labels_{augmented_data_file}", weights_only=False)
+            augmented_data = torch.load(f"{augmented_data_dir}/{hash_str}", weights_only=False)
+            labels = torch.load(f"{augmented_data_dir}/labels_{hash_str}", weights_only=False)
         else:
             logger.info("Creating new augmented data...")
             augmented_data = []
@@ -321,8 +325,8 @@ class AttackRaMIA(AbstractMIA):
                 labels = cat((labels, y.repeat(len(augs))), dim=0)
 
             augmented_data = cat(augmented_data, dim=0)
-            torch.save(augmented_data, f"{augmented_data_dir}/{augmented_data_file}")
-            torch.save(labels, f"{augmented_data_dir}/labels_{augmented_data_file}")
+            torch.save(augmented_data, f"{augmented_data_dir}/{hash_str}")
+            torch.save(labels, f"{augmented_data_dir}/labels_{hash_str}")
         # create a list of what audit datapoint each transformed sample belongs to
         audit_indice_map = [x for x in self.audit_indices for _ in range(max(self.num_transforms, 1))]
         aug_dataset = self.handler.UserDataset(augmented_data, labels.int())
@@ -337,18 +341,21 @@ class AttackRaMIA(AbstractMIA):
                     break
                 img_orig = self.audit_dataloader.dataset.data[i]
                 idxs = range(i*max(self.num_transforms, 1), (i+1)*max(self.num_transforms, 1))
+                x[idxs] = (x[idxs] - self.audit_dataloader.dataset.mean) / self.audit_dataloader.dataset.std
                 save_img(img_orig, x[idxs], f"img{i}")
         # END OF DEBUG: check some images
 
         # Step 2: run MIA to get logits for target and shadow models
-        latent_files = f"{augmented_data_dir}/latent_features_{augmented_data_file}.pt"
+        latent_files = f"{augmented_data_dir}/latent_features_{hash_str}.pt"
         if os.path.exists(latent_files):
             logger.info("Loading existing latent features...")
             latent_features = torch.load(latent_files, weights_only=False).numpy()
         else:
             logger.info("Creating new latent features...")
-            latent_features = self.get_latent_features(aug_dataloader)
-            torch.save(torch.tensor(latent_features), latent_files)
+            if self.num_transforms > 2:
+                logger.info("Extracting latent features with per-group PCA...")
+                latent_features = self.get_latent_features(aug_dataloader, method="umap")
+                torch.save(torch.tensor(latent_features), latent_files)
 
         if self.stealth_method in ["bcjr"]:
             gt_decoder = GroupTestDecoder()
@@ -378,7 +385,7 @@ class AttackRaMIA(AbstractMIA):
             aug_dataloader = DataLoader(repr_dataset, batch_size=1024, shuffle=False)
 
             cluster_scores = self.mia_attack.score_samples(aug_dataloader, audit_indice_map)
-            binary_outcomes = cluster_scores > self.group_score_threshold  # Convert scores to binary outcomes
+            binary_outcomes = cluster_scores > 0  # Convert scores to binary outcomes
 
             aug_scores = []
             for i in tqdm(range(len(assignment_matrices)), desc="Decoding group test results"):
@@ -397,6 +404,7 @@ class AttackRaMIA(AbstractMIA):
                         break
                     img_orig = self.audit_dataloader.dataset.data[i]
                     idxs = range(i*self.groups, (i+1)*self.groups)
+                    x[idxs] = (x[idxs] - self.audit_dataloader.dataset.mean) / self.audit_dataloader.dataset.std
                     save_img(img_orig, x[idxs], f"img_bcjr{i}")
             # END OF DEBUG
 
@@ -404,6 +412,7 @@ class AttackRaMIA(AbstractMIA):
             # Create assignment matrix and representative samples for each group
             representative_samples = []
             assignment_matrices = []
+            group_cardinality = []
             for i in tqdm(range(len(self.audit_indices)), "Creating group testing representatives"):
                 # get all transformed samples for this audit sample
                 range_samples = aug_dataset.data[i*self.num_transforms:(i+1)*self.num_transforms]
@@ -414,7 +423,8 @@ class AttackRaMIA(AbstractMIA):
 
                 representative_samples.extend(sample_representatives)
                 assignment_matrices.append(assignment_matrix)
-
+                group_cardinality.append(assignment_matrix.sum(axis=0))  # number of samples in each group
+            group_cardinality = np.array(group_cardinality).flatten()  # [num_audit, groups]
             audit_indice_map = [x for x in self.audit_indices for _ in range(self.groups)]
 
             repr_labels = self.audit_dataloader.dataset.targets.repeat_interleave(self.groups)
@@ -431,14 +441,13 @@ class AttackRaMIA(AbstractMIA):
                         break
                     img_orig = self.audit_dataloader.dataset.data[i]
                     idxs = range(i*self.groups, (i+1)*self.groups)
+                    x[idxs] = (x[idxs] - self.audit_dataloader.dataset.mean) / self.audit_dataloader.dataset.std
                     save_img(img_orig, x[idxs], f"img_aggl{i}")
             # END OF DEBUG
-
             aug_scores = self.mia_attack.score_samples(aug_dataloader, audit_indice_map)
 
         elif self.stealth_method in ["none"]:
             aug_scores = self.mia_attack.score_samples(aug_dataloader, audit_indice_map)
-
         else:
             raise ValueError(f"Unknown stealth_method: {self.stealth_method}. Choose from 'none', 'bcjr', or 'agglomerative'.")
 
@@ -461,8 +470,6 @@ class AttackRaMIA(AbstractMIA):
             final_scores.append(trimmed_mean)
         range_scores = np.array(final_scores)
 
-        self.store_histograms(range_scores)
-
         true_labels = np.array([True]*len(self.in_indices) + [False]*len(self.out_indices))
 
         attack_name = "RaMIA" if self.stealth_method in ["none"] else f"RaMIA-{self.stealth_method}"
@@ -470,24 +477,53 @@ class AttackRaMIA(AbstractMIA):
         # DEBUG
         tmp_name = f"ramia_{self.stealth_method}_{self.num_transforms}_{self.n_ops}_{self.augment_strength}"
         # save the latent features in a scatter plot with color-coded membership, the index number, and the score
-        if self.debug:
+        if self.debug and self.num_transforms > 2:
             import matplotlib.pyplot as plt
 
-            plt.figure(figsize=(10, 8))
-            for i in [0,1,2, self.num_audit+1, self.num_audit+2, self.num_audit+3]:
+            fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+
+            #for i in range(len(self.audit_indices)):
+            for i in [0, self.num_audit+1]:
                 step = max(self.num_transforms, 1)
                 idxs = range(i*step, (i+1)*step)
                 member = i < self.num_audit
                 scores = aug_scores[i*step:(i+1)*step] if step > 1 else aug_scores[i]
                 # add the score and index i as a label to each point
-                plt.scatter(latent_features[idxs, 0],
-                            latent_features[idxs, 1],
-                            c="blue" if member else "red",
-                            label= f"{i} " + ", ".join([f"{s:.2f}" for s in scores]))
+                for j, s in zip(idxs, scores):
+                    axes[0].scatter(
+                        latent_features[j, 0],
+                        latent_features[j, 1],
+                        c="blue" if member else "red",
+                        label=f"{i}-{j}, {s:.2f}"
+                    )
+                    axes[0].annotate(
+                        f"{i}-{j}, {s:.2f}",
+                        (latent_features[j, 0], latent_features[j, 1]),
+                        fontsize=8
+                    )
 
-            plt.title(f"Latent Space Representation - {tmp_name}")
-            plt.savefig(f"{tmp_name}.png")
-            plt.close()
+            axes[0].set_title("Latent Space Representation")
+            if self.stealth_method in ["agglomerative"]:
+                scores = np.array([np.mean(np.sort(aug_scores[i*self.groups:(i+1)*self.groups])[trim_start:trim_end]) for i in range(2*self.num_audit)])
+            else:
+                scores = np.array([np.mean(np.sort(aug_scores[i*self.num_transforms:(i+1)*self.num_transforms])[trim_start:trim_end]) for i in range(2*self.num_audit)])
+
+            member_mask = np.array([True]*self.num_audit + [False]*self.num_audit)
+            scores_in  = scores[member_mask]
+            scores_out = scores[~member_mask]
+
+            axes[1].hist(scores_in, bins=50, color="blue", alpha=0.6,
+                 edgecolor="black", label="Members")
+            axes[1].hist(scores_out, bins=50, color="red", alpha=0.6,
+                        edgecolor="black", label="Non-members")
+            axes[1].set_title("Score distributions")
+            axes[1].set_xlabel("Score")
+            axes[1].set_ylabel("Count")
+            axes[1].legend()
+
+            fig.tight_layout()
+            fig.savefig(tmp_name, dpi=300, bbox_inches="tight")
+            plt.close(fig)   # optional: close to free memory
         # END of DEBUG
 
         return MIAResult.from_full_scores(true_membership=true_labels,

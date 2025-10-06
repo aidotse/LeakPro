@@ -48,8 +48,8 @@ class GroupTestDecoder:
     def gt_decode(self,
                   H: np.ndarray,  # noqa: N803
                   binary_outcome: np.ndarray,
-                  P_MD: float = 0.05,  # noqa: N803
-                  P_FA: float = 0.05) -> float:  # noqa: N803
+                  P_MD: float = 0.2,  # noqa: N803
+                  P_FA: float = 0.2) -> float:  # noqa: N803
         """Decode one original sample's representatives."""
         # Get matrix dimensions
         n_tests, n_samples = H.shape

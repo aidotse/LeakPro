@@ -146,7 +146,7 @@ class AttackBASE(AbstractMIA):
 
         score = log_conf_target - threshold if self.online else log_conf_target - self.offline_scale_factor * threshold
 
-        return expit(score)  # noqa: RET504
+        return score  # noqa: RET504
 
     def run_attack(self:Self) -> MIAResult:
         """Run the attack on the target model and dataset.

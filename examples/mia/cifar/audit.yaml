@@ -44,32 +44,32 @@ audit:  # Configurations for auditing
 # 1 transform
     - attack: ramia
       num_transforms: 1
-      n_ops: 4
+      n_ops: 1
       augment_strength: "strong"
 # 8 transform      
     - attack: ramia
       num_transforms: 8
-      n_ops: 4
+      n_ops: 1
       augment_strength: "strong"
 # # 20 transform      
 #     - attack: ramia
 #       num_transforms: 50
-#       n_ops: 4    
+#       n_ops: 1    
 #       augment_strength: "strong"      
-# # Agglomerative (50 transforms, 8 groups)                
-#     - attack: ramia
-#       num_transforms: 50
-#       n_ops: 4
-#       augment_strength: "strong"
-#       stealth_method: "agglomerative"
-#       groups: 8   
-# # Agglomerative (50 transforms, 8 groups)                
-#     - attack: ramia
-#       num_transforms: 50
-#       n_ops: 4
-#       augment_strength: "strong"
-#       stealth_method: "bcjr"
-#       groups: 8            
+# Agglomerative (50 transforms, 8 groups)                
+    - attack: ramia
+      num_transforms: 50
+      n_ops: 1
+      augment_strength: "strong"
+      stealth_method: "agglomerative"
+      groups: 8
+# Agglomerative (50 transforms, 8 groups)
+    - attack: ramia
+      num_transforms: 50
+      n_ops: 1
+      augment_strength: "strong"
+      stealth_method: "bcjr"
+      groups: 8
       
 
   output_dir: "./cifar10/leakpro_output"
