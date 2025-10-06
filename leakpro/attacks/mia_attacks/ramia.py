@@ -13,7 +13,6 @@ from sklearn.metrics.pairwise import euclidean_distances
 from torch import Tensor, cat, stack
 from torch.utils.data import DataLoader
 from torchvision import models
-from torchvision.utils import save_image
 from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
