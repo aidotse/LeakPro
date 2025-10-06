@@ -20,8 +20,6 @@ def test_lira_setup(image_handler:ImageInputHandler) -> None:
     assert lira_obj.num_shadow_models == lira_params.num_shadow_models
     assert lira_obj.training_data_fraction == lira_params.training_data_fraction
 
-    lira_params.num_shadow_models = 3
-
     description = lira_obj.description()
     assert len(description) == 4
 
@@ -46,7 +44,7 @@ def test_lira_prepare_online_attack(image_handler:ImageInputHandler) -> None:
     # Check that the filtering of the attack data is correct (this is done after shadow models are created)
     n_attack_points = len(lira_obj.train_indices) + len(lira_obj.test_indices)
     assert n_attack_points > 0
-    assert lira_obj.shadow_models_logits.shape == (n_attack_points, lira_params.num_shadow_models)
+    assert lira_obj.shadow_models_logits.shape == (lira_params.num_shadow_models, n_attack_points)
     assert lira_obj.target_logits.shape == (n_attack_points, )
 
 def test_lira_prepare_offline_attack(image_handler:ImageInputHandler) -> None:
@@ -64,13 +62,13 @@ def test_lira_prepare_offline_attack(image_handler:ImageInputHandler) -> None:
 
     # ensure correct number of shadow models are read
     assert len(lira_obj.shadow_models) == lira_params.num_shadow_models
-    # ensure the attack data indices correspond to the correct pool
-    assert sorted(lira_obj.attack_data_indices) == sorted(set(range(image_handler.population_size)) - set(image_handler.test_indices) - set(image_handler.train_indices))
+    # ensure the attack data indices correspond to the correct pool (all of the data)
+    assert sorted(lira_obj.attack_data_indices) == list(range(image_handler.population_size))
 
     # Check that the filtering of the attack data is correct (this is done after shadow models are created)
-    n_attack_points = len(lira_obj.in_members) + len(lira_obj.out_members)
+    n_attack_points = len(lira_obj.train_indices) + len(lira_obj.test_indices)
     assert n_attack_points > 0
-    assert lira_obj.shadow_models_logits.shape == (n_attack_points, lira_params.num_shadow_models)
+    assert lira_obj.shadow_models_logits.shape == (lira_params.num_shadow_models, n_attack_points)
     assert lira_obj.target_logits.shape == (n_attack_points, )
 
 
@@ -87,19 +85,20 @@ def test_lira_online_attack(image_handler:ImageInputHandler):
 
     # Test standard deviation calculation
     std_fixed = lira_obj.get_std(lira_obj.shadow_models_logits.flatten(),
-                           lira_obj.in_indices_masks.flatten(),
+                           ~lira_obj.out_indices.flatten(),
                            True,
                            "fixed")
+
     lira_obj.fixed_in_std = std_fixed
     lira_obj.fixed_out_std = std_fixed
 
     std_carlini = lira_obj.get_std(lira_obj.shadow_models_logits.flatten(),
-                           lira_obj.in_indices_masks.flatten(),
+                           ~lira_obj.out_indices.flatten(),
                            True,
                            "carlini")
 
     std_individual = lira_obj.get_std(lira_obj.shadow_models_logits.flatten(),
-                           lira_obj.in_indices_masks.flatten(),
+                           ~lira_obj.out_indices.flatten(),
                            True,
                            "individual_carlini")
     assert std_fixed == std_carlini
@@ -108,7 +107,7 @@ def test_lira_online_attack(image_handler:ImageInputHandler):
     # Test attack
     lira_obj.run_attack()
     assert lira_obj.fixed_in_std != lira_obj.fixed_out_std
-    n_attack_points = len(lira_obj.in_members) + len(lira_obj.out_members)
+    n_attack_points = len(lira_obj.train_indices) + len(lira_obj.test_indices)
     assert len(lira_obj.in_member_signals)+len(lira_obj.out_member_signals) == n_attack_points
     assert not np.any(np.isnan(lira_obj.in_member_signals))
     assert not np.any(np.isnan(lira_obj.out_member_signals))
@@ -128,7 +127,7 @@ def test_lira_offline_attack(image_handler:ImageInputHandler):
     # Test attack
     lira_result = lira_obj.run_attack()
     assert lira_obj.fixed_in_std != lira_obj.fixed_out_std
-    n_attack_points = len(lira_obj.in_members) + len(lira_obj.out_members)
+    n_attack_points = len(lira_obj.train_indices) + len(lira_obj.test_indices)
     assert len(lira_obj.in_member_signals)+len(lira_obj.out_member_signals) == n_attack_points
     assert not np.any(np.isnan(lira_obj.in_member_signals))
     assert not np.any(np.isnan(lira_obj.out_member_signals))

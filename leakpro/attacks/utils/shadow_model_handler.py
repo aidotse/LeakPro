@@ -166,7 +166,7 @@ class ShadowModelHandler(ModelHandler):
         A = self.construct_balanced_assignments(len(shadow_population), num_models)  # noqa: N806
         assert np.all(np.sum(A,axis=0) == num_models//2)
         assert np.all(np.sum(A,axis=1) == len(shadow_population)//2)
-
+        shadow_population = np.array(shadow_population)
         for i, indx in enumerate(indices_to_use):
             # Get dataloader
             data_indices = shadow_population[np.where(A[i,:] == 1)]

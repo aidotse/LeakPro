@@ -18,7 +18,6 @@ def test_rmia_setup(image_handler:ImageInputHandler) -> None:
             "gamma": 2.0,
             "temperature": 2.0,
             "training_data_fraction": 0.5,
-            "attack_data_fraction": 0.1,
             "online": False
         }
     rmia_params = None
@@ -37,7 +36,6 @@ def test_rmia_setup(image_handler:ImageInputHandler) -> None:
     assert rmia_obj.online == rmia_params.online
     assert rmia_obj.num_shadow_models == rmia_params.num_shadow_models
     assert rmia_obj.training_data_fraction == rmia_params.training_data_fraction
-    assert rmia_obj.attack_data_fraction == rmia_params.attack_data_fraction
 
     description = rmia_obj.description()
     assert len(description) == 4
@@ -80,7 +78,7 @@ def test_rmia_prepare_offline_attack(image_handler:ImageInputHandler) -> None:
     assert sorted(rmia_obj.attack_data_indices) == sorted(range(image_handler.population_size))
 
     # Check that the filtering of the attack data is correct (this is done after shadow models are created)
-    n_attack_points = len(rmia_obj.attack_data_indices) * rmia_params.attack_data_fraction
+    n_attack_points = len(rmia_obj.attack_data_indices) * rmia_params.z_data_sample_fraction
     assert len(rmia_obj.ratio_z.squeeze()) == n_attack_points
     assert rmia_obj.ratio_z.all() >= 0.0
     assert rmia_obj.ratio_z.all() <= 1.0
@@ -97,14 +95,11 @@ def test_rmia_online_attack(image_handler:ImageInputHandler):
         ShadowModelHandler(image_handler)
     rmia_obj.prepare_attack()
     # Attack points (not shadow models) are not sampled from train/test data
-    non_train_test_points = set(range(image_handler.population_size)) - set(image_handler.test_indices) - set(image_handler.train_indices)
-    n_attack_points = len(non_train_test_points) * rmia_params.attack_data_fraction
+    n_attack_points = len(rmia_obj.attack_data_indices)
 
     # Test attack
     rmia_obj.gamma = 1.0 # model is not trained so no strong signals
     rmia_obj.run_attack()
-    
-    assert len(rmia_obj.attack_data_index) == n_attack_points
     
     n_audit_points = len(rmia_obj.audit_dataset["data"]) # Total number of points that can be audited
     assert len(rmia_obj.in_member_signals)+len(rmia_obj.out_member_signals) <= n_audit_points # Not all points will have both in and out models
@@ -129,8 +124,10 @@ def test_rmia_offline_attack(image_handler:ImageInputHandler):
     # Test attack
     rmia_obj.gamma = 1.0 # model is not trained so no strong signals
     rmia_result = rmia_obj.run_attack()
-    n_attack_points = len(rmia_obj.audit_dataset["data"])
-    assert len(rmia_obj.in_member_signals)+len(rmia_obj.out_member_signals) == n_attack_points
+    n_attack_points = len(rmia_obj.attack_data_indices) * rmia_params.z_data_sample_fraction
+
+    assert len(rmia_obj.ratio_z.squeeze()) == n_attack_points
+    assert len(rmia_obj.in_member_signals)+len(rmia_obj.out_member_signals) == rmia_obj.audit_dataset["data"].shape[0]
     assert not np.any(np.isnan(rmia_obj.in_member_signals))
     assert not np.any(np.isnan(rmia_obj.out_member_signals))
     assert not np.any(np.isinf(rmia_obj.in_member_signals))

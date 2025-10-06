@@ -14,11 +14,11 @@ def get_image_handler_config():
     parameters.learning_rate = 0.001
     parameters.optimizer = "sgd"
     parameters.loss = "crossentropyloss"
-    parameters.data_points = 130
-    parameters.train_data_points = 20
-    parameters.test_data_points = 20
+    parameters.data_points = 120
+    parameters.train_data_points = 60
+    parameters.test_data_points = 60
     parameters.img_size = (3, 32, 32)
-    parameters.num_classes = 13
+    parameters.num_classes = 12
     parameters.images_per_class = parameters.data_points // parameters.num_classes
     return parameters
 
@@ -31,8 +31,8 @@ def get_tabular_handler_config():
     parameters.optimizer = "sgd"
     parameters.loss = "BCEWithLogitsLoss"
     parameters.data_points = 500
-    parameters.train_data_points = 200
-    parameters.test_data_points = 200
+    parameters.train_data_points = 250
+    parameters.test_data_points = 250
     parameters.num_classes = 1
     parameters.n_continuous = 10
     parameters.n_categorical = 5
@@ -59,7 +59,7 @@ def get_audit_config():
     rmia_config.training_data_fraction = 0.5
     rmia_config.num_shadow_models = 2
     rmia_config.online = False
-    rmia_config.attack_data_fraction = 0.1
+    rmia_config.z_data_sample_fraction = 0.5
     audit_config.attack_list.append(rmia_config)
  
     return audit_config
@@ -76,5 +76,3 @@ def get_shadow_model_config():
     shadow_model_config.optimizer = OptimizerConfig(name="sgd", params= {"lr": 0.001})
     shadow_model_config.criterion = LossConfig(name= "crossentropyloss")
     return shadow_model_config
-
-

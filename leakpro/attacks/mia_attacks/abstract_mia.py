@@ -189,7 +189,7 @@ class AbstractMIA(AbstractAttack):
             optuna_config = OptunaConfig()
 
         def objective(result: MIAResult) -> float:
-            return result.roc_auc
+            return result.roc_auc if result.roc_auc is not None else 0.0
 
         optuna_config.objective = objective
         return optuna_optimal_hyperparameters(self, optuna_config)

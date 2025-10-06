@@ -27,13 +27,13 @@ class AttackRMIA(AbstractMIA):
                                               ge=0.0,
                                               le=1.0,
                                               description="Part of available attack data to use for shadow models")
-        attack_data_fraction: float = Field(default=0.1,
-                                            ge=0.0,
-                                            le=1.0,
-                                            description="Part of available attack data to use for attack")
         online: bool = Field(default=False,
                              description="Online vs offline attack")
         # Parameters to be used with optuna
+        z_data_sample_fraction: float = Field(default=0.5,
+                                                ge=0.0,
+                                                le=1.0,
+                                                description="Part of available attack data to use for estimating p(z)",)
         gamma: float = Field(default=2.0,
                         ge=0.0,
                         description="Parameter to threshold LLRs",
@@ -148,21 +148,25 @@ class AttackRMIA(AbstractMIA):
                 self.logits_shadow_models.append(ShadowModelHandler().load_logits(indx=indx))
 
         # collect the softmax output of the correct class
-        n_attack_points = len(self.ground_truth_indices)
-        p_z_given_theta = softmax_logits(self.logits_theta, self.temperature)[np.arange(n_attack_points),self.ground_truth_indices]  # noqa: E501
+        n_attack_points = self.z_data_sample_fraction * len(self.handler.population) # points to compute p(z)
+
+        # pick random indices sampled from the attack data
+        z_indices = np.random.choice(self.attack_data_indices, size=int(n_attack_points), replace=False)
+        z_labels = self.handler.get_labels(z_indices)
+
+        p_z_given_theta = softmax_logits(self.logits_theta, self.temperature)[z_indices,z_labels]  # noqa: E501
         p_z_given_theta = np.atleast_2d(p_z_given_theta)
 
         # collect the softmax output of the correct class for each shadow model
         sm_logits_shadow_models = [softmax_logits(x, self.temperature) for x in self.logits_shadow_models]
-        p_z_given_shadow_models = np.array([x[np.arange(n_attack_points),self.ground_truth_indices] for x in sm_logits_shadow_models])  # noqa: E501
+        p_z_given_shadow_models = np.array([x[z_indices,z_labels] for x in sm_logits_shadow_models])  # noqa: E501
 
         # evaluate the marginal p(z)
         if self.online is True:
             p_z = np.mean(p_z_given_shadow_models, axis=0, keepdims=True)
         else:
             # create a mask that checks, for each point, if it was in the training set
-            masked_values = np.where(self.out_indices, p_z_given_shadow_models, np.nan)
-            p_z = np.nanmean(masked_values, axis=0)
+            p_z = np.mean(p_z_given_shadow_models, axis=0)
             p_z = 0.5*((self.offline_a + 1) * p_z + (1-self.offline_a))
 
         self.ratio_z = p_z_given_theta / (p_z + self.epsilon)

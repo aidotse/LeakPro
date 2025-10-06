@@ -25,7 +25,7 @@ def test_abstract_handler_setup_tabular(tabular_handler:TabularInputHandler) -> 
     assert len(tabular_handler.train_indices) == parameters.train_data_points
     assert tabular_handler.test_indices is not None
     assert len(tabular_handler.test_indices) == parameters.test_data_points
-    assert len(tabular_handler.train_indices) + len(tabular_handler.test_indices) < parameters.data_points
+    assert len(tabular_handler.train_indices) + len(tabular_handler.test_indices) <= parameters.data_points
 
     assert tabular_handler.target_model_metadata.optimizer is not None
     assert tabular_handler.target_model_metadata.optimizer.name == parameters.optimizer
