@@ -54,7 +54,7 @@ class Signal(ABC):
         data_loader: Optional[DataLoader] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
         if data_loader is None:
-            data_loader = handler.get_dataloader(indices, shuffle=False)    # NOTE: Shuffle must be false to maintain indices order
+            data_loader = handler.get_dataloader(indices, shuffle=False) # NOTE: Shuffle must be false to maintain indices order
         assert self._is_shuffling(data_loader) is False, "DataLoader must not shuffle data to maintain order of indices"
         model_logits = []
         for data, _ in data_loader:

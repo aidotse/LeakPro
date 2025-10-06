@@ -230,6 +230,7 @@ class AttackRaMIA(AbstractMIA):
         Args:
         ----
             dataloader (DataLoader): DataLoader for the dataset to extract features from.
+            method (str): Dimensionality reduction method, either 'pca' or 'umap'.
 
         Returns:
         -------
@@ -473,58 +474,6 @@ class AttackRaMIA(AbstractMIA):
         true_labels = np.array([True]*len(self.in_indices) + [False]*len(self.out_indices))
 
         attack_name = "RaMIA" if self.stealth_method in ["none"] else f"RaMIA-{self.stealth_method}"
-
-        # DEBUG
-        tmp_name = f"ramia_{self.stealth_method}_{self.num_transforms}_{self.n_ops}_{self.augment_strength}"
-        # save the latent features in a scatter plot with color-coded membership, the index number, and the score
-        if self.debug and self.num_transforms > 2:
-            import matplotlib.pyplot as plt
-
-            fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-
-            #for i in range(len(self.audit_indices)):
-            for i in [0, self.num_audit+1]:
-                step = max(self.num_transforms, 1)
-                idxs = range(i*step, (i+1)*step)
-                member = i < self.num_audit
-                scores = aug_scores[i*step:(i+1)*step] if step > 1 else aug_scores[i]
-                # add the score and index i as a label to each point
-                for j, s in zip(idxs, scores):
-                    axes[0].scatter(
-                        latent_features[j, 0],
-                        latent_features[j, 1],
-                        c="blue" if member else "red",
-                        label=f"{i}-{j}, {s:.2f}"
-                    )
-                    axes[0].annotate(
-                        f"{i}-{j}, {s:.2f}",
-                        (latent_features[j, 0], latent_features[j, 1]),
-                        fontsize=8
-                    )
-
-            axes[0].set_title("Latent Space Representation")
-            if self.stealth_method in ["agglomerative"]:
-                scores = np.array([np.mean(np.sort(aug_scores[i*self.groups:(i+1)*self.groups])[trim_start:trim_end]) for i in range(2*self.num_audit)])
-            else:
-                scores = np.array([np.mean(np.sort(aug_scores[i*self.num_transforms:(i+1)*self.num_transforms])[trim_start:trim_end]) for i in range(2*self.num_audit)])
-
-            member_mask = np.array([True]*self.num_audit + [False]*self.num_audit)
-            scores_in  = scores[member_mask]
-            scores_out = scores[~member_mask]
-
-            axes[1].hist(scores_in, bins=50, color="blue", alpha=0.6,
-                 edgecolor="black", label="Members")
-            axes[1].hist(scores_out, bins=50, color="red", alpha=0.6,
-                        edgecolor="black", label="Non-members")
-            axes[1].set_title("Score distributions")
-            axes[1].set_xlabel("Score")
-            axes[1].set_ylabel("Count")
-            axes[1].legend()
-
-            fig.tight_layout()
-            fig.savefig(tmp_name, dpi=300, bbox_inches="tight")
-            plt.close(fig)   # optional: close to free memory
-        # END of DEBUG
 
         return MIAResult.from_full_scores(true_membership=true_labels,
                                         signal_values=range_scores,
