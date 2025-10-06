@@ -1,6 +1,11 @@
 audit:  # Configurations for auditing
   random_seed: 1236  # Integer specifying the random seed
   attack_list:
+# RMIA
+    - attack: rmia
+      online: False
+      num_shadow_models: 2
+      training_data_fraction: 0.5   
 # BASE
     - attack: base
       online: False
@@ -11,36 +16,6 @@ audit:  # Configurations for auditing
       num_transforms: 0
       n_ops: 0
       augment_strength: "easy"
-# # 1 transform
-#     - attack: ramia
-#       num_transforms: 1
-#       n_ops: 1
-#       augment_strength: "easy"
-# # 8 transform      
-#     - attack: ramia
-#       num_transforms: 8
-#       n_ops: 1
-#       augment_strength: "easy"
-# # 20 transform      
-#     - attack: ramia
-#       num_transforms: 50
-#       n_ops: 1      
-#       augment_strength: "easy"
-# # 1 transform
-#     - attack: ramia
-#       num_transforms: 1
-#       n_ops: 1
-#       augment_strength: "medium"
-# # 8 transform      
-#     - attack: ramia
-#       num_transforms: 8
-#       n_ops: 1
-#       augment_strength: "medium"
-# # 20 transform      
-#     - attack: ramia
-#       num_transforms: 50
-#       n_ops: 1      
-#       augment_strength: "medium"
 # 1 transform
     - attack: ramia
       num_transforms: 1
@@ -51,25 +26,6 @@ audit:  # Configurations for auditing
       num_transforms: 8
       n_ops: 1
       augment_strength: "strong"
-# # 20 transform      
-#     - attack: ramia
-#       num_transforms: 50
-#       n_ops: 1    
-#       augment_strength: "strong"      
-# Agglomerative (50 transforms, 8 groups)                
-    - attack: ramia
-      num_transforms: 50
-      n_ops: 1
-      augment_strength: "strong"
-      stealth_method: "agglomerative"
-      groups: 8
-# Agglomerative (50 transforms, 8 groups)
-    - attack: ramia
-      num_transforms: 50
-      n_ops: 1
-      augment_strength: "strong"
-      stealth_method: "bcjr"
-      groups: 8
       
 
   output_dir: "./cifar10/leakpro_output"
