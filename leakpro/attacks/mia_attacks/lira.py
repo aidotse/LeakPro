@@ -290,7 +290,7 @@ class AttackLiRA(AbstractMIA):
                                     metadata=self.configs.model_dump())
 
     def get_std_vectorized(self:Self, var_calculation: str) -> tuple[np.ndarray, np.ndarray]:
-        """A function to define what method to use for calculating variance for LiRA."""
+        """A function to decide what method to use for calculating variance for LiRA."""
         match var_calculation:
             case "fixed":
                 return self._vectorized_fixed_variance()
@@ -347,7 +347,6 @@ class AttackLiRA(AbstractMIA):
           - self.target_logits: numpy array shape (N,)
           - self.online: bool (if False, pr_in is zero)
         """
-        print("--------------- VECTORIZED LOGITS EVALUATION ---------------")
         n_samples = self.shadow_models_logits.shape[0]
         
         out_means = np.zeros(n_samples)
