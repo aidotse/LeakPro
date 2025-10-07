@@ -1,10 +1,5 @@
 """Implementation of the LiRA attack."""
 
-# -----TO BE REMOVED-----
-import os
-import time
-# -----------------------   
-
 from typing import Literal
 
 import numpy as np
@@ -267,36 +262,14 @@ class AttackLiRA(AbstractMIA):
         n_audit_samples = self.shadow_models_logits.shape[0]
         score = np.zeros(n_audit_samples)  # List to hold the computed probability scores for each sample
 
-        # TODO VECTORIZE THIS PART AS WELL
         self.fixed_in_std = self.get_std(self.shadow_models_logits.flatten(), self.in_indices_masks.flatten(), True, "fixed")
         self.fixed_out_std = self.get_std(self.shadow_models_logits.flatten(), (~self.in_indices_masks).flatten(), False, "fixed")
 
         #  Decides which score calculation method should be used
         if(self.vectorized):
-            print("------------ if condition: ", self.vectorized)
-            #score = self.vectorized_attack()
+            score = self.vectorized_attack()
         else:
-            print("------------ if condition: ", self.vectorized)
-            #score = self.iterative_attack()
-
-        # Performs the vectorized attack by calculating the mean and std for all logits using tensor operations
-        start_vec = time.perf_counter()
-        self.vectorized_attack()
-        end_vec = time.perf_counter()
-        elapsed_vec = end_vec - start_vec
-
-        start_loop = time.perf_counter()
-        score = self.iterative_attack()
-        end_loop = time.perf_counter()
-        elapsed_loop = end_loop - start_loop
-
-        savePath = "compare_vec_scores"
-        os.makedirs(savePath, exist_ok=True)
-        with open(os.path.join(savePath, "elapsed.txt"), "w") as f:
-            f.write(f"Loop: {elapsed_loop:.6f} | Vec: {elapsed_vec:.6f}\n")
-
-        # Save loop scores
-        np.save(os.path.join(savePath, "lira_scores_loop.npy"), score)
+            score = self.iterative_attack()
 
         # Split the score array into two parts based on membership: in (training) and out (non-training)
         self.in_member_signals = score[self.in_members].reshape(-1,1)  # Scores for known training data members
@@ -374,9 +347,7 @@ class AttackLiRA(AbstractMIA):
           - self.target_logits: numpy array shape (N,)
           - self.online: bool (if False, pr_in is zero)
         """
-    
-        print("--------- RUNNING VECTORIZED VERSION ---------")
-
+        print("--------------- VECTORIZED LOGITS EVALUATION ---------------")
         n_samples = self.shadow_models_logits.shape[0]
         
         out_means = np.zeros(n_samples)
@@ -388,7 +359,7 @@ class AttackLiRA(AbstractMIA):
         out_means = np.nanmean(np.where(~self.in_indices_masks, self.shadow_models_logits, np.nan), axis=1)
         in_means = np.nanmean(np.where(self.in_indices_masks, self.shadow_models_logits, np.nan), axis=1)
 
-        # Replace NaNs in means with 0.0 (or another neutral fallback)
+        # Replace NaNs in means with 0.0
         out_means = np.where(np.isnan(out_means), 0.0, out_means)
         in_means  = np.where(np.isnan(in_means),  0.0, in_means)
 
@@ -398,8 +369,6 @@ class AttackLiRA(AbstractMIA):
         pr_out = norm.logpdf(self.target_logits, out_means, out_stds + 1e-30)
         pr_in  = norm.logpdf(self.target_logits, in_means, in_stds + 1e-30) if self.online else np.zeros(n_samples)
 
-        print("--------- END OF VECTORIZED VERSION ---------")
-
         # Final LiRA score per audit sample
         scores = pr_in - pr_out
         
@@ -407,11 +376,6 @@ class AttackLiRA(AbstractMIA):
         if np.any(np.isnan(scores)):
             nan_idx = np.where(np.isnan(scores))[0]
             raise ValueError(f"NaN in vectorized scores at indices {nan_idx.tolist()}")
-
-        """Saves the vectorized score calculation, mask, target_logits and shadow_logits"""
-        savePath = "compare_vec_scores"
-        os.makedirs(savePath, exist_ok=True)
-        np.save(os.path.join(savePath, "lira_scores_vectorized.npy"), scores)
 
         return scores
 
