@@ -15,6 +15,7 @@ from leakpro.reporting.mia_result import MIAResult
 from leakpro.signals.signal import ModelRescaledLogits
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
+from lira_versions import lira_vectorized, lira_iterative
 
 
 class AttackLiRA(AbstractMIA):
@@ -267,9 +268,17 @@ class AttackLiRA(AbstractMIA):
 
         #  Decides which score calculation method should be used
         if(self.vectorized):
-            score = self.vectorized_attack()
+            score = lira_vectorized.lira_vectorized(self.shadow_models_logits,
+                                                    self.target_logits,
+                                                    self.in_indices_masks,
+                                                    self.var_calculation,
+                                                    self.online)
         else:
-            score = self.iterative_attack()
+            score = lira_iterative.lira_iterative(self.shadow_models_logits,
+                                                    self.target_logits,
+                                                    self.in_indices_masks,
+                                                    self.var_calculation,
+                                                    self.online)
 
         # Split the score array into two parts based on membership: in (training) and out (non-training)
         self.in_member_signals = score[self.in_members].reshape(-1,1)  # Scores for known training data members
@@ -288,96 +297,6 @@ class AttackLiRA(AbstractMIA):
                                     signal_values=signal_values,
                                     result_name="LiRA",
                                     metadata=self.configs.model_dump())
-
-    def get_std_vectorized(self:Self, var_calculation: str) -> tuple[np.ndarray, np.ndarray]:
-        """A function to decide what method to use for calculating variance for LiRA."""
-        match var_calculation:
-            case "fixed":
-                return self._vectorized_fixed_variance()
-            case "carlini":
-                return self._vectorized_carlini_variance()
-            case "individual_carlini":
-                return self._vectorized_individual_carlini()
-
-        return np.array([None])
-
-    def _vectorized_fixed_variance(self:Self) -> tuple[np.ndarray, np.ndarray]:
-        out_stds = np.nanstd(np.where(~self.in_indices_masks, self.shadow_models_logits, np.nan), axis=1)
-        in_stds  = np.nanstd(np.where(self.in_indices_masks,  self.shadow_models_logits, np.nan), axis=1)
-
-        if not self.online:
-            in_stds[:] = 0.0
-
-        return in_stds, out_stds
-
-    def _vectorized_carlini_variance(self:Self) -> tuple[np.ndarray, np.ndarray]:
-        n_samples = self.shadow_models_logits.shape[0]
-        if self.num_shadow_models >= self.fix_var_threshold * 2:
-            out_stds = np.nanstd(np.where(~self.in_indices_masks, self.shadow_models_logits, np.nan), axis=1)
-            in_stds  = np.nanstd(np.where(self.in_indices_masks,  self.shadow_models_logits, np.nan), axis=1)
-        else:
-            out_stds = np.full(n_samples, self.fixed_out_std)
-            in_stds  = np.full(n_samples, self.fixed_in_std) if self.online else np.zeros(n_samples)
-
-        return in_stds, out_stds
-
-    def _vectorized_individual_carlini(self:Self) -> tuple[np.ndarray, np.ndarray]:
-        out_stds = np.nanstd(np.where(~self.in_indices_masks, self.shadow_models_logits, np.nan), axis=1)
-        in_stds  = np.nanstd(np.where(self.in_indices_masks,  self.shadow_models_logits, np.nan), axis=1)
-
-        out_counts = np.sum(~self.in_indices_masks, axis=1)
-        in_counts  = np.sum(self.in_indices_masks,  axis=1)
-
-        out_stds = np.where(out_counts >= self.fix_var_threshold, out_stds, self.fixed_out_std)
-        in_stds  = np.where(in_counts  >= self.fix_var_threshold, in_stds,  self.fixed_in_std)
-
-        if not self.online:
-            in_stds[:] = 0.0
-
-        return in_stds, out_stds
-
-
-    def vectorized_attack(self):
-        """
-        Compute LiRA scores in a vectorized manner.
-
-        Expects:
-          - self.shadow_models_logits: numpy array shape (N, M) where N = audit samples, M = shadow models logits per sample
-          - self.in_indices_masks: boolean array shape (N, M), True for IN shadow models, False for OUT
-          - self.target_logits: numpy array shape (N,)
-          - self.online: bool (if False, pr_in is zero)
-        """
-        n_samples = self.shadow_models_logits.shape[0]
-        
-        out_means = np.zeros(n_samples)
-        out_stds  = np.zeros(n_samples)
-        in_means  = np.zeros(n_samples)
-        in_stds   = np.zeros(n_samples)
-
-        # Vectorized mean calculation
-        out_means = np.nanmean(np.where(~self.in_indices_masks, self.shadow_models_logits, np.nan), axis=1)
-        in_means = np.nanmean(np.where(self.in_indices_masks, self.shadow_models_logits, np.nan), axis=1)
-
-        # Replace NaNs in means with 0.0
-        out_means = np.where(np.isnan(out_means), 0.0, out_means)
-        in_means  = np.where(np.isnan(in_means),  0.0, in_means)
-
-        in_stds, out_stds = self.get_std_vectorized(self.var_calculation)
-
-        # Vectorized logpdf
-        pr_out = norm.logpdf(self.target_logits, out_means, out_stds + 1e-30)
-        pr_in  = norm.logpdf(self.target_logits, in_means, in_stds + 1e-30) if self.online else np.zeros(n_samples)
-
-        # Final LiRA score per audit sample
-        scores = pr_in - pr_out
-        
-        # Debug helper
-        if np.any(np.isnan(scores)):
-            nan_idx = np.where(np.isnan(scores))[0]
-            raise ValueError(f"NaN in vectorized scores at indices {nan_idx.tolist()}")
-
-        return scores
-
 
     def iterative_attack(self):
         """
@@ -419,4 +338,3 @@ class AttackLiRA(AbstractMIA):
             if np.isnan(score[i]):
                 raise ValueError("Score is NaN")
         return score
-

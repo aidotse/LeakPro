@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.stats import norm
 
-def vectorized_attack(shadow_models_logits,
+def lira_vectorized(shadow_models_logits,
                       target_logits,
                       in_indices_masks,
                       var_calculation,
