@@ -5,6 +5,7 @@ from torch import cuda, device, optim, no_grad
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from torchvision import transforms
+from copy import deepcopy
 
 from leakpro import AbstractInputHandler
 from leakpro.schemas import TrainingOutput, EvalOutput
@@ -28,9 +29,6 @@ class CifarInputHandler(AbstractInputHandler):
         train_size = len(dataset) - val_size
         train_subset, val_subset = torch.utils.data.random_split(dataset, [train_size, val_size])
 
-        if hasattr(dataset, "augment"):
-            val_subset.dataset.augment = None
-            
         # Disable augmentation in validation set if defined
         if hasattr(dataset, "augment"):
             val_subset.dataset.augment = None
@@ -103,7 +101,7 @@ class CifarInputHandler(AbstractInputHandler):
 
             if avg_val_loss < best_val_loss:
                 best_val_loss = avg_val_loss
-                best_model_state = model.state_dict()
+                best_model_state = deepcopy(model.state_dict())
                 patience_counter = 0
             else:
                 patience_counter += 1

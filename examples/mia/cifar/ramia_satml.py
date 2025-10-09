@@ -15,7 +15,6 @@ import csv
 def prepare_cifar_data(dataset_name):
 
     root = train_config["data"]["data_dir"]
-    path = os.path.join(os.getcwd(), root)
     # Load the CIFAR train and test datasets
     if dataset_name == "cifar10":
         trainset = CIFAR10(root=root, train=True, download=True)

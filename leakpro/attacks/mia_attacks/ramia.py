@@ -34,10 +34,18 @@ class AttackRaMIA(AbstractMIA):
         # RaMIA attack parameters
         num_transforms: int = Field(default=10, ge=0, le=100, description="Number of augmentations to apply to each sample")
         n_ops: int = Field(default=1, ge=0, le=10, description="Number of augmentation operations to apply per augmentation") # noqa: E501
-        stealth_method: Literal["none", "bcjr", "agglomerative"] = Field(default="none", description="Stealth mode using group testing. Options are 'none', 'bcjr', or 'agglomerative'")  # noqa: E501
-        groups: int = Field(default=1, ge=2, le=100, description="Number of groups to use in stealth mode (group testing)")  # noqa: E501
-        groups_per_sample: int = Field(default=3, ge=2, le=10, description="Number of groups each sample is assigned to in stealth mode (group testing)")  # noqa: E501
         augment_strength: Literal["none", "easy", "medium", "strong"] = Field(default="easy", description="Strength of augmentations to apply to center point when creating range samples. Options are 'none', 'low', 'medium', or 'high'")  # noqa: E501
+        num_audit: int = Field(default=1000, ge=10, le=10000, description="Number of in samples to use for the audit, out samples will be matched")  # noqa: E501
+        qs: float = Field(default=0.4, ge=0.0, le=0.5, description="Start quantile for trimmed averaging of transformed sample scores")  # noqa: E501
+        qe: float = Field(default=1.0, ge=0.5, le=1.0, description="End quantile for trimmed averaging of transformed sample scores")  # noqa: E501
+
+        # Used for group-testing approaches
+        stealth_method: Literal["none", "bcjr", "agglomerative"] = Field(default="none", description="Stealth mode using group testing. Options are 'none', 'bcjr', or 'agglomerative'")  # noqa: E501
+        groups: int = Field(default=8, ge=2, le=100, description="Number of groups to use in stealth mode (group testing)")  # noqa: E501
+        n_comp: int = Field(default=2, ge=2, le=10, description="Number of PCA/UMAP components to use for latent features when using group testing")  # noqa: E501
+        groups_per_sample: int = Field(default=3, ge=2, le=10, description="Number of groups each sample is assigned to in stealth mode (group testing)")  # noqa: E501
+        group_score_threshold: float = Field(default=0.5, ge=0.0, le=1.0, description="Threshold for deciding if a group contains a member when using group testing")  # noqa: E501
+
         # parameters used for the MIA attack
         online: bool = Field(default=False, description="Online vs offline attack")
         num_shadow_models: int = Field(default=2, ge=2, description="Number of shadow models")
@@ -66,9 +74,6 @@ class AttackRaMIA(AbstractMIA):
 
         self.aug = handler.modality_extension
         self.aug.set_augment_strength(self.augment_strength)
-        self.augment_center = False  # always augment the center point for RaMIA
-        self.num_audit = 500
-        self.group_score_threshold = 0.49
 
         # Get MIA attack object
         configs = {
@@ -128,7 +133,7 @@ class AttackRaMIA(AbstractMIA):
             assignment_matrix (np.ndarray): Binary matrix indicating sample-group assignments.
 
         """
-
+        # Step 1: Extract features for all samples (assumed to be provided)
         # Step 2: Run k-means to get cluster centers
         kmeans = KMeans(n_clusters=n_clusters, init="k-means++", n_init=20, random_state=1234)
         kmeans.fit(features)
@@ -148,7 +153,6 @@ class AttackRaMIA(AbstractMIA):
 
         # Step 5: Find representatives using medoids
         representative_indices = []
-        cluster_to_representative = {}  # Track which sample represents each cluster
         for j in range(n_clusters):
             samples_in_cluster = np.where(assignment_matrix[:, j] == 1)[0]
 
@@ -162,12 +166,11 @@ class AttackRaMIA(AbstractMIA):
             else:
                 representative_idx = samples_in_cluster[0]
             representative_indices.append(representative_idx)
-            cluster_to_representative[j] = representative_idx  # Store mapping
 
         # Get representative samples
         representative_samples = [range_samples[idx] for idx in representative_indices]
 
-        # Return representatives and assignment matrix
+        # Return representatives and assignment matrix (transpose to satisfy BCJR decoder)
         return representative_samples, assignment_matrix.T
 
     def create_assignment_matrix_agglomerative(self,
@@ -199,7 +202,7 @@ class AttackRaMIA(AbstractMIA):
         dist = 1.0 - sim
         np.fill_diagonal(dist, 0.0)
 
-        agg = AgglomerativeClustering(n_clusters=k,linkage="ward")
+        agg = AgglomerativeClustering(n_clusters=k,linkage="average")
         labels = agg.fit_predict(dist)  # shape (N,)
 
         assignment_matrix = np.zeros((n,k), dtype=int)
@@ -223,7 +226,7 @@ class AttackRaMIA(AbstractMIA):
         return representative_samples, assignment_matrix
 
     def get_latent_features(self, dataloader:DataLoader, method: str = "pca") -> np.ndarray:
-        """Extract 512-d ResNet18 features, then do per-group (per-n) 2D PCA on the augmentations.
+        """Extract 512-d ResNet18 features, then do (global) 2D PCA on the augmentations.
 
         Args:
         ----
@@ -257,17 +260,14 @@ class AttackRaMIA(AbstractMIA):
                 all_feats.append(f.detach().cpu())       # keep on CPU after this
         feats = torch.cat(all_feats, dim=0).numpy().astype(np.float32)   # [N, 512]
 
-        # Preserve original order
-
         # ----------------------------
         # 3) global PCA
         # ----------------------------
-        n_comp = 2
         if method == "pca":
-            reducer = PCA(n_components=n_comp, random_state=42)
+            reducer = PCA(n_components=self.n_comp, random_state=42)
             z = reducer.fit_transform(feats)
         elif method == "umap":
-            reducer = umap.UMAP(n_components=n_comp, random_state=42)
+            reducer = umap.UMAP(n_components=self.n_comp, random_state=42)
             z = reducer.fit_transform(feats)
         else:
             raise ValueError(f"Unknown reduction method: {method}")
@@ -404,6 +404,7 @@ class AttackRaMIA(AbstractMIA):
             repr_dataset = self.handler.UserDataset(representative_samples, repr_labels.int())
             repr_dataset.augment = None
             repr_dataset.erase_post_norm = None
+            # use as large batch size as possible (dont care about order here)
             aug_dataloader = DataLoader(repr_dataset, batch_size=1024, shuffle=False)
 
             aug_scores = self.mia_attack.score_samples(aug_dataloader, audit_indice_map)
@@ -414,8 +415,6 @@ class AttackRaMIA(AbstractMIA):
             raise ValueError(f"Unknown stealth_method: {self.stealth_method}. Choose from 'none', 'bcjr', or 'agglomerative'.")
 
         # Step 3: Perform trimmed averaging over the scores of transformed samples
-        qs = 0.4
-        qe = 1
         final_scores = []
         step_size = aug_scores.shape[0] // len(self.audit_indices) # number of scores per audit sample
         for i in range(len(self.audit_indices)):
@@ -426,8 +425,8 @@ class AttackRaMIA(AbstractMIA):
             sorted_scores = np.sort(current_scores)
 
             # compute trimmed mean within qs and qe
-            trim_start = int(len(sorted_scores) * qs)
-            trim_end = int(len(sorted_scores) * qe)
+            trim_start = int(len(sorted_scores) * self.qs)
+            trim_end = int(len(sorted_scores) * self.qe)
             trimmed_mean = np.mean(sorted_scores[trim_start:trim_end])
             final_scores.append(trimmed_mean)
         range_scores = np.array(final_scores)
