@@ -1,7 +1,6 @@
 import numpy as np
 from scipy.stats import norm
 
-
 def vectorized_attack(shadow_models_logits,
                       target_logits,
                       in_indices_masks,
@@ -33,6 +32,14 @@ def vectorized_attack(shadow_models_logits,
     np.ndarray
         LiRA scores per audit sample.
     """
+    
+    if shadow_models_logits.ndim != 2:
+        raise ValueError("shadow_models_logits must be a 2D array (n_samples, n_shadow_models)")
+    if in_indices_masks.shape != shadow_models_logits.shape:
+        raise ValueError("in_indices_masks must have the same shape as shadow_models_logits")
+    if target_logits.ndim != 1 or target_logits.shape[0] != shadow_models_logits.shape[0]:
+        raise ValueError("target_logits must be a 1D array with length equal to number of samples")
+
     n_samples, num_shadow_models = shadow_models_logits.shape
 
     # Computes the fixed in and out variances
@@ -46,28 +53,32 @@ def vectorized_attack(shadow_models_logits,
     out_means = np.where(np.isnan(out_means), 0.0, out_means)
     in_means  = np.where(np.isnan(in_means),  0.0, in_means)
 
-    in_stds, out_stds = np.zeros()
+    # Cast to lowercase
+    var_calc = var_calculation.lower()
 
-    match var_calculation:
-        case "fixed":
-            in_stds, out_stds = vectorized_fixed_variance(in_indices_masks,
+    if(var_calc== "fixed"):
+        in_stds, out_stds = vectorized_fixed_variance(in_indices_masks,
+                                                      shadow_models_logits,
+                                                      online)
+
+    elif(var_calc == "carlini"):
+        in_stds, out_stds = vectorized_carlini_variance(in_indices_masks,
+                                                        shadow_models_logits,
+                                                        fix_var_threshold,
+                                                        online,
+                                                        num_shadow_models,
+                                                        fixed_out_std,
+                                                        fixed_in_std)
+
+    elif(var_calc == "individual_carlini"):
+        in_stds, out_stds = vectorized_individual_carlini(in_indices_masks,
                                                           shadow_models_logits,
-                                                          online)
-        case "carlini":
-            in_stds, out_stds = vectorized_carlini_variance(in_indices_masks,
-                                                            shadow_models_logits,
-                                                            fix_var_threshold,
-                                                            online,
-                                                            num_shadow_models,
-                                                            fixed_out_std,
-                                                            fixed_in_std)
-        case "individual_carlini":
-            in_stds, out_stds = vectorized_individual_carlini(in_indices_masks,
-                                                              shadow_models_logits,
-                                                              fix_var_threshold,
-                                                              online,
-                                                              fixed_out_std,
-                                                              fixed_in_std)
+                                                          fix_var_threshold,
+                                                          online,
+                                                          fixed_out_std,
+                                                          fixed_in_std)
+    else:
+        raise ValueError(f"Unknown var_calculation: {var_calculation!r}")
 
     # Vectorized logpdf
     pr_out = norm.logpdf(target_logits, out_means, out_stds + 1e-30)
@@ -204,12 +215,12 @@ def compute_fixed_stds(shadow_models_logits, in_indices_masks):
 
     Returns
     -------
-    tuple[ndarray, ndarray]
+    tuple[float, float]
         If there are no IN or no OUT values, the corresponding std is 0.0.
     """
     in_vals  = shadow_models_logits[in_indices_masks]
     out_vals = shadow_models_logits[~in_indices_masks]
-    fixed_in_std  = np.std(in_vals)
-    fixed_out_std = np.std(out_vals)
+    fixed_in_std = np.std(in_vals) if in_vals.size > 0 else 0.0
+    fixed_out_std = np.std(out_vals) if out_vals.size > 0 else 0.0
 
     return fixed_in_std, fixed_out_std
