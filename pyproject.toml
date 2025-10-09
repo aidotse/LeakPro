@@ -22,6 +22,7 @@ dependencies = [
   "scikit-learn",
   "pydantic",
   "ts2vec",
+  "umap-learn"
 ]
 
 [project.optional-dependencies]
