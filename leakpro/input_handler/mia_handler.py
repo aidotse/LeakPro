@@ -1,7 +1,14 @@
 """Parent class for user inputs."""
 
 import inspect
+<<<<<<< HEAD
 import types
+=======
+import json
+import types
+from pathlib import Path
+from typing import Literal
+>>>>>>> 728c5b9 (Clean snapshot (history rewritten to remove secrets))
 
 import joblib
 import numpy as np
@@ -9,6 +16,10 @@ import torch
 from pydantic import BaseModel
 from torch import nn, optim
 from torch.utils.data import DataLoader
+<<<<<<< HEAD
+=======
+from transformers import AutoConfig, AutoModelForCausalLM
+>>>>>>> 728c5b9 (Clean snapshot (history rewritten to remove secrets))
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.input_handler.user_imports import get_class_from_module, import_module_from_file
@@ -16,6 +27,10 @@ from leakpro.schemas import DataLoaderConfig, LossConfig, MIAMetaDataSchema, Opt
 from leakpro.utils.import_helper import Any, Self, Tuple
 from leakpro.utils.logger import logger
 
+<<<<<<< HEAD
+=======
+ArtifactKind = Literal["hf_dir", "hf_single", "torch_state_dict", "unknown"]
+>>>>>>> 728c5b9 (Clean snapshot (history rewritten to remove secrets))
 
 class MIAHandler:
     """Parent class for user inputs."""
@@ -43,22 +58,38 @@ class MIAHandler:
     def _load_population(self:Self) -> None:
         """Default implementation of the population loading."""
         try:
+<<<<<<< HEAD
             with open(self.configs.target.data_path, "rb") as file:
+=======
+            with open(self.target_model_metadata.dataset_path, "rb") as file:
+>>>>>>> 728c5b9 (Clean snapshot (history rewritten to remove secrets))
 
                 self.population = joblib.load(file)
                 self.population_size = len(self.population)
 
                 if not self._is_indexable(self.population):
                     raise ValueError("Population dataset is not indexable.")
+<<<<<<< HEAD
                 logger.info(f"Loaded population dataset from {self.configs.target.data_path}")
         except FileNotFoundError as e:
             raise FileNotFoundError(f"Could not find the population dataset at {self.configs.target.data_path}") from e
+=======
+                logger.info(f"Loaded population dataset from {self.target_model_metadata.dataset_path}")
+        except FileNotFoundError as e:
+            raise FileNotFoundError(f"Could not find the population dataset at {self.target_model_metadata.dataset_path}") from e
+>>>>>>> 728c5b9 (Clean snapshot (history rewritten to remove secrets))
 
     def _load_model_class(self:Self) -> None:
         """Get the model class blueprint from the target module."""
         model_class=self.configs.target.model_class
         if model_class is None:
+<<<<<<< HEAD
             raise ValueError("model_class not found in configs.")
+=======
+            self.target_model_blueprint = None
+            logger.info("No model class provided in configs; skipping target model blueprint creation.")
+            return
+>>>>>>> 728c5b9 (Clean snapshot (history rewritten to remove secrets))
 
         module_path=self.configs.target.module_path
         if module_path is None:
@@ -74,7 +105,11 @@ class MIAHandler:
 
     def _load_target_metadata(self:Self) -> None:
         """Get the target model metadata from the trained model metadata file."""
+<<<<<<< HEAD
         target_model_metadata_path = self.configs.target.target_folder
+=======
+        target_model_metadata_path = self.configs.target.target_path
+>>>>>>> 728c5b9 (Clean snapshot (history rewritten to remove secrets))
         if target_model_metadata_path is None:
             raise ValueError("Trained model metadata path not found in configs.")
         try:
@@ -95,6 +130,7 @@ class MIAHandler:
         except FileNotFoundError as e:
             raise FileNotFoundError(f"Could not find the target model metadata at {self.target_model_metadata_path}") from e
 
+<<<<<<< HEAD
     def _load_trained_target_model(self:Self) -> None:
         """Get the trained target model."""
         model_path = self.configs.target.target_folder
@@ -107,6 +143,50 @@ class MIAHandler:
                 self.target_model = self.target_model_blueprint(**init_params)
                 self.target_model.load_state_dict(torch.load(f))
             logger.info(f"Loaded target model from {model_path}")
+=======
+
+    def _detect_artifact(self, path: str | Path) -> ArtifactKind:  # type: ignore  # noqa: PGH003, PLR0911
+        """Detect the kind of model artifact at the given path."""
+        p = Path(path)
+        if p.is_dir():
+            cfg = p / "config.json"
+            if cfg.exists():
+                try:
+                    AutoConfig.from_pretrained(p, local_files_only=True) # definitive check: can Transformers parse it?
+                    return "hf_dir"
+                except Exception:
+                    # fallback schema sniff
+                    j = json.loads(cfg.read_text())
+                    if isinstance(j, dict) and ("model_type" in j or "architectures" in j):
+                        return "hf_dir"
+            return "unknown"
+        if p.is_file():
+            if p.suffix.lower() in {".pt", ".pth", ".pkl"}:
+                return "torch_state_dict"
+            if p.name == "pytorch_model.bin":
+                return "hf_single" # usually alongside a config.json → treat as HF single weights file
+            if p.suffix.lower() == ".safetensors":
+                return "hf_single" if (p.parent / "config.json").exists() else "unknown" # if a sibling config exists, it’s HF; otherwise just weights
+        return "unknown"
+
+    def _load_trained_target_model(self:Self) -> None:
+        """Get the trained target model."""
+        model_path = self.configs.target.target_path
+        if model_path is None:
+            raise ValueError("Trained model path not found in configs.")
+
+        kind = self._detect_artifact(model_path)
+        p = Path(model_path)
+        init_params = self.target_model_metadata.init_params
+        try:
+            if self.target_model_blueprint is None and (kind in {"hf_dir", "hf_single"}):
+                self.target_model = AutoModelForCausalLM.from_pretrained(str(p), torch_dtype="auto", local_files_only=True).eval()
+            if kind == "torch_state_dict":
+                with open(self.model_path, "rb") as f:
+                    self.target_model = self.target_model_blueprint(**init_params)
+                    self.target_model.load_state_dict(torch.load(f))
+                    logger.info(f"Loaded target model from {model_path}")
+>>>>>>> 728c5b9 (Clean snapshot (history rewritten to remove secrets))
         except FileNotFoundError as e:
             raise FileNotFoundError(f"Could not find the trained target model at {model_path}") from e
 
@@ -117,6 +197,12 @@ class MIAHandler:
         if not isinstance(criterion_config, LossConfig):
             raise ValueError("Criterion is not a valid schema.")
 
+<<<<<<< HEAD
+=======
+        if criterion_config.name == "":
+            self._criterion = None
+            return
+>>>>>>> 728c5b9 (Clean snapshot (history rewritten to remove secrets))
         # create dict of losses as {name (lower-case): Class}
         loss_classes = {
             cls.__name__.lower(): cls for cls in vars(nn.modules.loss).values()

@@ -4,7 +4,7 @@ from typing import Annotated, Any, Callable, Dict, List, Literal, Optional, Unio
 
 import numpy as np
 import optuna
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from torch.nn import Module
 
 ArrayOrScalar = Union[np.ndarray, np.integer, int, list]
@@ -86,16 +86,20 @@ class AuditConfig(BaseModel):
 class TargetConfig(BaseModel):
     """Configuration for the target model."""
 
-    module_path: Annotated[str, Field(pattern=r".*\.py$", description="Path to the target model module")]
-    model_class: str = Field(..., description="Class name of the model")
-    target_folder: str = Field(..., description="Directory where target model data is stored")
-    data_path: str = Field(..., description="Path to dataset file")
-    # TODO: Change data_path description to be more descriptive, i.e path to target (or private) dataset.
+    module_path: Annotated[Optional[str], Field(pattern=r".*\.py$", description="Path to the target model module")]
+    model_class: Optional[str] = Field(..., description="Class name of the model")
+    target_path: str = Field(..., description="Path to where target model is stored")
 
     # MINV-specific field - optional
     public_data_path: Optional[str] = Field(None, description="Path to the public dataset used for model inversion")
 
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields
+
+    @model_validator(mode="after")
+    def _both_or_neither(self) -> "TargetConfig":
+        if (self.module_path is None) ^ (self.model_class is None): # XOR between the two
+            raise ValueError("Provide both 'module_path' and 'model_class', or neither.")
+        return self
 
 class ShadowModelConfig(BaseModel):
     """Configuration for the Shadow models."""
@@ -167,7 +171,7 @@ class MIAMetaDataSchema(BaseModel):
     epochs: int = Field(ge=1, description="Number of training epochs")
     train_result: EvalOutput = Field(..., description="Final evaluation during training")
     test_result: EvalOutput = Field(..., description="Evaluation output for the test set")
-    dataset: str = Field(..., description="Dataset name")
+    dataset_path: str = Field(..., description="Dataset path")
 
     model_config = ConfigDict(from_attributes=True, extra="forbid")  # Prevent extra fields
 
@@ -237,3 +241,11 @@ class MIAResultSchema(BaseModel):
     fn: Union[ArrayOrScalar, None] = Field(None, description="FN values")
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # Prevent extra fields
+
+class MIAAttackCreationConfig(BaseModel):
+    """Schema for loss function parameters."""
+
+    attack_class: Any = Field(..., description="Class of the attack")
+    requires_shadow_models: bool = Field(default=True, description="Whether the attack requires shadow models")
+    requires_distillation_model: bool = Field(default=False, description="Whether the attack requires distillation models")
+    model_config = ConfigDict(extra="forbid")  # Prevent extra fields
