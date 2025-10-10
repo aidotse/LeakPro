@@ -1,0 +1,19 @@
+audit:  # Configurations for auditing
+  random_seed: 1236  # Integer specifying the random seed
+  attack_list:
+# CAMIA
+    - attack: camia
+
+  output_dir: "./leakpro_output"
+  attack_type: "mia" #mia, gia
+  data_modality: "text" #image, tabular
+
+target:
+  # Target model path
+  module_path: null
+  model_class: null
+  target_path: "./target"
+
+shadow_model:
+
+distillation_model:

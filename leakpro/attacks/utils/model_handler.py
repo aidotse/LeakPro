@@ -37,7 +37,7 @@ class ModelHandler():
         self.use_target_model_setup = caller_configs is None
 
         # get the bluepring for the model
-        if self.use_target_model_setup:
+        if self.use_target_model_setup and handler.target_model_blueprint is not None:
             self.model_class = handler.target_model_blueprint.__name__
             self.model_blueprint = handler.target_model_blueprint
         else:
