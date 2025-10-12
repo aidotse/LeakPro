@@ -2,6 +2,9 @@
 
 from typing import Literal
 
+import os
+import time
+
 import numpy as np
 from pydantic import BaseModel, Field, model_validator
 from scipy.stats import norm
@@ -267,18 +270,39 @@ class AttackLiRA(AbstractMIA):
         self.fixed_out_std = self.get_std(self.shadow_models_logits.flatten(), (~self.in_indices_masks).flatten(), False, "fixed")
 
         #  Decides which score calculation method should be used
-        if(self.vectorized):
-            score = lira_vectorized.lira_vectorized(self.shadow_models_logits,
-                                                    self.target_logits,
-                                                    self.in_indices_masks,
-                                                    self.var_calculation,
-                                                    self.online)
-        else:
-            score = lira_iterative.lira_iterative(self.shadow_models_logits,
-                                                    self.target_logits,
-                                                    self.in_indices_masks,
-                                                    self.var_calculation,
-                                                    self.online)
+        #if(self.vectorized):
+        os.makedirs("compare", exist_ok=True)
+        # -----------Mod-vector----------
+        start = time.perf_counter()
+        score_vectorized = lira_vectorized.lira_vectorized(self.shadow_models_logits,
+                                                self.target_logits,
+                                                self.in_indices_masks,
+                                                self.var_calculation,
+                                                self.online)
+        elapsed_vectorized = time.perf_counter() - start
+        np.save("compare/modular_vectorized_scores.npy", score_vectorized)
+
+        # -----------Mod-iterative----------
+        #else:
+        start = time.perf_counter()
+        score_iterative = lira_iterative.lira_iterative(self.shadow_models_logits,
+                                                self.target_logits,
+                                                self.in_indices_masks,
+                                                self.var_calculation,
+                                                self.online)
+        elapsed_iterative = time.perf_counter() - start
+        np.save("compare/modular_iterative_scores.npy", score_iterative)
+
+        # -----------iterative----------
+        start = time.perf_counter()
+        score = self.iterative_attack()
+        elapsed_attack = time.perf_counter() - start
+        np.save("compare/iterative_scores.npy", score)
+
+        with open("compare/time.txt", "w") as f:
+            f.write(f"modular_vectorized:{elapsed_vectorized:.4f}\n")
+            f.write(f"modular_iterative:{elapsed_iterative:.4f}\n")
+            f.write(f"iterative_attack:{elapsed_attack:.4f}\n")
 
         # Split the score array into two parts based on membership: in (training) and out (non-training)
         self.in_member_signals = score[self.in_members].reshape(-1,1)  # Scores for known training data members
