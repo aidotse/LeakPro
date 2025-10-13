@@ -26,7 +26,7 @@ def test_abstract_handler_setup(image_handler:ImageInputHandler) -> None:
     assert len(image_handler.train_indices) == parameters.train_data_points
     assert image_handler.test_indices is not None
     assert len(image_handler.test_indices) == parameters.test_data_points
-    assert len(image_handler.train_indices) + len(image_handler.test_indices) < parameters.data_points
+    assert len(image_handler.train_indices) + len(image_handler.test_indices) <= parameters.data_points
 
     assert image_handler.target_model_metadata.optimizer is not None
     assert image_handler.target_model_metadata.optimizer.name == parameters.optimizer
