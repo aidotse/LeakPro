@@ -225,9 +225,6 @@ class AttackLiRA(AbstractMIA):
         n_audit_samples = self.shadow_models_logits.shape[0]
         score = np.zeros(n_audit_samples)  # List to hold the computed probability scores for each sample
 
-        self.fixed_in_std = self.get_std(self.shadow_models_logits.flatten(), self.in_indices_masks.flatten(), True, "fixed")
-        self.fixed_out_std = self.get_std(self.shadow_models_logits.flatten(), (~self.in_indices_masks).flatten(), False, "fixed")
-
         #  Decides which score calculation method should be used
         if(self.vectorized):
             score = lira_vectorized.lira_vectorized(self.shadow_models_logits,
