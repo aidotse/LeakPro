@@ -167,6 +167,8 @@ class MIAResult:
         sorted_labels = self.true[sorted_indices]
         sorted_scores = self.signal_values[sorted_indices]
 
+        assert np.all(np.diff(sorted_scores) <= 0), "sorted_scores are not in descending order"
+
         # check that sorted_scores are descending
         assert np.all(np.diff(sorted_scores) <= 0), "sorted_scores are not in descending order"
 
@@ -179,8 +181,12 @@ class MIAResult:
 
         self.tp = tp_cumsum[first_indices]
         self.fp = fp_cumsum[first_indices]
+        self.thresholds = sorted_scores[first_indices]
+
         self.fn = np.sum(sorted_labels == 1) - self.tp
         self.tn = np.sum(sorted_labels == 0) - self.fp
+
+        assert np.all(self.tp + self.fp + self.tn + self.fn == len(self.true)), "Confusion counts do not sum to total samples"
 
         if len(self.tp) == 1:
             self.roc_mode = "none"

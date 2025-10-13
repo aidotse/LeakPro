@@ -67,7 +67,7 @@ class ShadowModelHandler(ModelHandler):
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    def _filter(self:Self, data_size:int, online:bool)->list[int]:
+    def _filter(self:Self, data_size:int)->list[int]:
         # Get the metadata for the shadow models
         entries = os.listdir(self.storage_path)
         pattern = re.compile(rf"^{self.metadata_storage_name}_\d+\.pkl$")
@@ -77,21 +77,49 @@ class ShadowModelHandler(ModelHandler):
         all_indices = [int(re.search(r"\d+", f).group()) for f in files]
 
         # Setup checks
-        # Get target model hash, this tells if the data has changed for the training
-        target_model_hash = self.target_model_hash
-        # create check list
-        filter_checks = [data_size, online, self.model_class, target_model_hash]
+        # TODO: we use the same shadow models for all targets!
+        filter_checks = [data_size, self.model_class]
 
         # Filter out indices to only keep the ones that passes the checks
         filtered_indices = []
         for i in all_indices:
             metadata = self._load_shadow_metadata(i)
             assert isinstance(metadata, ShadowModelTrainingSchema), "Shadow Model metadata is not of the correct type"
-            meta_check_values = [metadata.num_train, metadata.online, metadata.model_class, metadata.target_model_hash]
+            meta_check_values = [metadata.num_train, metadata.model_class]
             if all(a == b for a, b in zip(filter_checks, meta_check_values)):
                 filtered_indices.append(i)
 
         return all_indices, filtered_indices
+
+    def construct_balanced_assignments(self, m: int, n: int, seed: int = None) -> np.ndarray:
+        """Assigns each of m data points to exactly n/2 out of n datasets by partitioning.
+
+        Args:
+        ----
+            m (int): The number of data points.
+            n (int): The number of datasets (must be even).
+            seed (int, optional): Random seed for reproducibility. Defaults to None.
+
+        Returns:
+        -------
+            A (np.ndarray): binary matrix of shape (n, m) where A[i,j] = 1 if data point j is in dataset i.
+
+        """
+        assert n % 2 == 0, "n must be even"
+        if seed is not None:
+            np.random.seed(seed)
+
+        A = np.zeros((n, m), dtype=np.uint8)  # noqa: N806
+        all_indices = np.arange(m)
+
+        for i in range(0, n, 2):
+            permuted = np.random.permutation(all_indices)
+            half = m // 2
+            A[i, permuted[:half]] = 1       # First half to dataset i
+            A[i+1, permuted[half:]] = 1     # Second half to dataset i+1
+
+        return A
+
 
     def create_shadow_models(
         self:Self,
@@ -119,14 +147,15 @@ class ShadowModelHandler(ModelHandler):
 
         # Get the size of the dataset
         data_size = int(len(shadow_population)*training_fraction)
-        all_indices, filtered_indices = self._filter(data_size, online)
+        all_indices, filtered_indices = self._filter(data_size)
 
         # Create a list of indices to use for the new shadow models
         n_existing_models = len(filtered_indices)
 
         if n_existing_models >= num_models:
             logger.info("Number of existing models exceeds or equals the number of models to create")
-            return filtered_indices[:num_models]
+            # sort the filtered indices
+            return np.sort(filtered_indices)[:num_models]
 
         indices_to_use = []
         next_index = max(all_indices) + 1 if all_indices else 0
@@ -134,16 +163,20 @@ class ShadowModelHandler(ModelHandler):
             indices_to_use.append(next_index)
             next_index += 1
 
-        for i in indices_to_use:
+        A = self.construct_balanced_assignments(len(shadow_population), num_models)  # noqa: N806
+        assert np.all(np.sum(A,axis=0) == num_models//2)
+        assert np.all(np.sum(A,axis=1) == len(shadow_population)//2)
+        shadow_population = np.array(shadow_population)
+        for i, indx in enumerate(indices_to_use):
             # Get dataloader
-            data_indices = np.random.choice(shadow_population, data_size, replace=False)
+            data_indices = shadow_population[np.where(A[i,:] == 1)]
             data_loader = self.handler.get_dataloader(data_indices, params=None)
 
             # Get shadow model blueprint
             model, criterion, optimizer = self._get_model_criterion_optimizer()
 
             # Train shadow model
-            logger.info(f"Training shadow model {i} on {len(data_loader.dataset)} points")
+            logger.info(f"Training shadow model {indx} on {len(data_loader.dataset)} points")
             training_results = self.handler.train(data_loader, model, criterion, optimizer, self.epochs)
 
             # Read out results
@@ -156,16 +189,16 @@ class ShadowModelHandler(ModelHandler):
             test_loader = self.handler.get_dataloader(remaining_indices, params=dataset_params)
             test_result = self.handler.eval(test_loader, shadow_model, criterion)
 
-            logger.info(f"Training shadow model {i} complete")
+            logger.info(f"Training shadow model {indx} complete")
             shadow_model_state_dict = shadow_model.state_dict()
             cleaned_state_dict = {key.replace("_module.", "").replace("module.", ""): value
                     for key, value in shadow_model_state_dict.items()}
 
-            with open(f"{self.storage_path}/{self.model_storage_name}_{i}.pkl", "wb") as f:
+            with open(f"{self.storage_path}/{self.model_storage_name}_{indx}.pkl", "wb") as f:
                 save(cleaned_state_dict, f)
-                logger.info(f"Saved shadow model {i} to {self.storage_path}")
+                logger.info(f"Saved shadow model {indx} to {self.storage_path}")
 
-            logger.info(f"Storing metadata for shadow model {i}")
+            logger.info(f"Storing metadata for shadow model {indx}")
             meta_data = ShadowModelTrainingSchema(
                 init_params=self.init_params,
                 train_indices = data_indices,
@@ -180,11 +213,13 @@ class ShadowModelHandler(ModelHandler):
                 target_model_hash= self.target_model_hash
             )
 
-            logger.info(f"Metadata for shadow model {i}:\n{meta_data}")
-            with open(f"{self.storage_path}/{self.metadata_storage_name}_{i}.pkl", "wb") as f:
+            ShadowModelHandler().cache_logits(PytorchModel(shadow_model, criterion), name=f"sm_{indx}")
+
+            logger.info(f"Metadata for shadow model {indx}:\n{meta_data}")
+            with open(f"{self.storage_path}/{self.metadata_storage_name}_{indx}.pkl", "wb") as f:
                 pickle.dump(meta_data, f)
 
-            logger.info(f"Metadata for shadow model {i} stored in {self.storage_path}")
+            logger.info(f"Metadata for shadow model {indx} stored in {self.storage_path}")
         return filtered_indices + indices_to_use
 
     def _load_shadow_model(self:Self, index:int) -> Module:
@@ -247,6 +282,23 @@ class ShadowModelHandler(ModelHandler):
             logger.info(f"Loading metadata {i}")
             metadata.append(self._load_shadow_metadata(i))
         return metadata
+
+    def load_logits(self:Self, name:str=None, indx:int=None) -> np.ndarray:
+        """Load model logits."""
+
+        if name is None and indx is not None:
+            name = f"sm_{indx}"
+
+        # check if the name is already in the cache
+        cache_file = f"{self.attack_cache_folder_path}/{name}_logits.npy"
+        if not os.path.exists(cache_file):
+            logger.info(f"Logits not cached at {cache_file}, caching now")
+            self.cache_logits(self._load_shadow_model(indx), name=name)
+
+        # load the logits
+        logits = np.load(cache_file)
+        logger.info(f"Loaded logits from {cache_file}")
+        return logits
 
     def get_in_indices_mask(self:Self, shadow_model_indices:list[int], dataset_indices:np.ndarray) -> np.ndarray:
         """Get the mask indicating which indices in the dataset are present in the shadow model training set.
