@@ -8,15 +8,17 @@ from scipy.stats import norm
 from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
-from leakpro.attacks.utils.boosting import Memorization
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.reporting.mia_result import MIAResult
-from leakpro.signals.signal import ModelRescaledLogits
 from leakpro.utils.import_helper import Self
+<<<<<<< HEAD
 from leakpro.utils.logger import logger
 from leakpro.attacks.mia_attacks.lira_versions import lira_vectorized, lira_iterative
 
+=======
+from leakpro.attacks.mia_attacks.lira_versions import lira_vectorized, lira_iterative
+>>>>>>> 1f175c0cd4089a9f0ca705177a3f98417e6c62e5
 
 class AttackLiRA(AbstractMIA):
     """Implementation of the LiRA attack."""
@@ -27,14 +29,7 @@ class AttackLiRA(AbstractMIA):
         num_shadow_models: int = Field(default=1, ge=1, description="Number of shadow models")
         training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow models")  # noqa: E501
         online: bool = Field(default=False, description="Online vs offline attack")
-        eval_batch_size: int = Field(default=32, ge=1, description="Batch size for evaluation")
         var_calculation: Literal["carlini", "individual_carlini", "fixed"] = Field(default="carlini", description="Variance estimation method to use [carlini, individual_carlini, fixed]")  # noqa: E501
-        # memorization boosting
-        memorization: bool = Field(default=False, description="Activate memorization boosting")
-        use_privacy_score: bool = Field(default=False, description="Filter based on privacy score aswell as memorization score")
-        memorization_threshold: float = Field(default=0.8, ge=0.0, le=1.0, description="Set percentile for most vulnerable data points, use 0.0 for paper thresholds")  # noqa: E501
-        min_num_memorization_audit_points: int = Field(default=10, ge=1, description="Set minimum allowed audit points after memorization")  # noqa: E501
-        num_memorization_audit_points: int = Field(default=0, ge=0, description="Directly set number of most vulnerable audit data points (Overrides 'memorization_threshold')")  # noqa: E501
         vectorized: bool = Field(default=False, description="Compute shadow-model scores in a single vectorized pass (faster) instead of per-sample loop (safer).")
 
         @model_validator(mode="after")
@@ -75,12 +70,7 @@ class AttackLiRA(AbstractMIA):
         for key, value in self.configs.model_dump().items():
             setattr(self, key, value)
 
-        if self.online is False and self.population_size == self.audit_size:
-            raise ValueError("The audit dataset is the same size as the population dataset. \
-                    There is no data left for the shadow models.")
-
         self.shadow_models = []
-        self.signal = ModelRescaledLogits()
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
@@ -104,6 +94,35 @@ class AttackLiRA(AbstractMIA):
             "detailed": detailed_str,
         }
 
+    def rescale_logits(self:Self, logits: np.ndarray, true_label:np.ndarray) -> np.ndarray:
+        """Rescale the logits to a range of [0, 1].
+
+        Args:
+            logits (np.ndarray): The logits to be rescaled.
+            true_label (np.ndarray): The true labels for the logits.
+
+        Returns:
+            np.ndarray: The rescaled logits.
+
+        """
+        if logits.shape[1] == 1:
+            def sigmoid(z:np.ndarray) -> np.ndarray:
+                return 1/(1 + np.exp(-z))
+            positive_class_prob = sigmoid(logits).reshape(-1, 1)
+            predictions = np.concatenate([1 - positive_class_prob, positive_class_prob], axis=1)
+        else:
+            predictions = logits - np.max(logits, axis=1, keepdims=True)
+            predictions = np.exp(predictions)
+            predictions = predictions/np.sum(predictions,axis=1, keepdims=True)
+
+        count = predictions.shape[0]
+        y_true = predictions[np.arange(count), true_label]
+        predictions[np.arange(count), true_label] = 0
+
+        y_wrong = np.sum(predictions, axis=1)
+        output_signals = np.log(y_true+1e-45) - np.log(y_wrong+1e-45)
+        return output_signals  # noqa: RET504
+
     def prepare_attack(self:Self)->None:
         """Prepares data to obtain metric on the target model and dataset, using signals computed on the auxiliary model/dataset.
 
@@ -116,8 +135,8 @@ class AttackLiRA(AbstractMIA):
         #       from (Membership Inference Attacks From First Principles)
         self.fix_var_threshold = 32
 
-        self.attack_data_indices = self.sample_indices_from_population(include_train_indices = self.online,
-                                                                       include_test_indices = self.online)
+        self.attack_data_indices = self.sample_indices_from_population(include_train_indices = True,
+                                                                       include_test_indices = True)
 
         self.shadow_model_indices = ShadowModelHandler().create_shadow_models(num_models = self.num_shadow_models,
                                                                               shadow_population =  self.attack_data_indices,
@@ -126,18 +145,15 @@ class AttackLiRA(AbstractMIA):
 
         self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)
 
-        logger.info("Create masks for all IN and OUT samples")
-        self.in_indices_masks = ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"])
+        self.out_indices = ~ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"]).T
 
-        if self.online:
-            # Exclude all audit points that have either no IN or OUT samples
-            num_shadow_models_seen_points = np.sum(self.in_indices_masks, axis=1)
-            mask = (num_shadow_models_seen_points > 0) & (num_shadow_models_seen_points < self.num_shadow_models)
+        true_labels = self.handler.get_labels(self.audit_dataset["data"])
+        self.target_logits = ShadowModelHandler().load_logits(name="target")
+        self.shadow_models_logits = []
+        for indx in self.shadow_model_indices:
+            self.shadow_models_logits.append(ShadowModelHandler().load_logits(indx=indx))
 
-            # Filter the audit data
-            self.audit_data_indices = self.audit_dataset["data"][mask]
-            self.in_indices_masks = self.in_indices_masks[mask, :]
-
+<<<<<<< HEAD
             # Filter IN and OUT members
             self.in_members = np.arange(np.sum(mask[self.audit_dataset["in_members"]]))
             num_out_members = np.sum(mask[self.audit_dataset["out_members"]])
@@ -211,6 +227,10 @@ class AttackLiRA(AbstractMIA):
             self.target_logits = self.target_logits[memorization_mask]
 
         return np.array([None])
+=======
+        self.shadow_models_logits = np.array([self.rescale_logits(x, true_labels) for x in self.shadow_models_logits])
+        self.target_logits = self.rescale_logits(self.target_logits, true_labels)
+>>>>>>> 1f175c0cd4089a9f0ca705177a3f98417e6c62e5
 
     def run_attack(self:Self) -> MIAResult:
         """Runs the attack on the target model and dataset and assess privacy risks or data leakage.
@@ -225,11 +245,8 @@ class AttackLiRA(AbstractMIA):
         true labels, and signal values.
 
         """
-        n_audit_samples = self.shadow_models_logits.shape[0]
+        n_audit_samples = self.shadow_models_logits.shape[1]
         score = np.zeros(n_audit_samples)  # List to hold the computed probability scores for each sample
-
-        self.fixed_in_std = self.get_std(self.shadow_models_logits.flatten(), self.in_indices_masks.flatten(), True, "fixed")
-        self.fixed_out_std = self.get_std(self.shadow_models_logits.flatten(), (~self.in_indices_masks).flatten(), False, "fixed")
 
         #  Decides which score calculation method should be used
         if(self.vectorized):
@@ -246,8 +263,10 @@ class AttackLiRA(AbstractMIA):
                                                 self.online)
 
         # Split the score array into two parts based on membership: in (training) and out (non-training)
-        self.in_member_signals = score[self.in_members].reshape(-1,1)  # Scores for known training data members
-        self.out_member_signals = score[self.out_members].reshape(-1,1)  # Scores for non-training data members
+        in_members = self.audit_dataset["in_members"]
+        out_members = self.audit_dataset["out_members"]
+        self.in_member_signals = score[in_members].reshape(-1,1)  # Scores for known training data members
+        self.out_member_signals = score[out_members].reshape(-1,1)  # Scores for non-training data members
 
         # Prepare true labels array, marking 1 for training data and 0 for non-training data
         true_labels = np.concatenate(

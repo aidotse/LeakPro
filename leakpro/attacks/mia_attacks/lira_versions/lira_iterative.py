@@ -10,13 +10,27 @@ def lira_iterative(shadow_models_logits,
                       fix_var_threshold = 32
                       ) -> np.array:  
     """
-    Compute LiRA scores in an iterative manner.
+    Compute LiRA (Likelihood Ratio Attack) scores iteratively for each sample.
 
-    Expects:
-      - self.shadow_models_logits: numpy array shape (N, M) where N = audit samples, M = shadow models logits per sample
-      - self.in_indices_masks: boolean array shape (N, M), True for IN shadow models, False for OUT
-      - self.target_logits: numpy array shape (N,)
-      - self.online: bool (if False, pr_in is zero)
+    Parameters
+    ----------
+    shadow_models_logits : np.ndarray
+        Array of shape (N, M), logits from shadow models for each audit sample.
+    target_logits : np.ndarray
+        Array of shape (N,), logits from the target model.
+    in_indices_masks : np.ndarray
+        Boolean array of shape (N, M), True where the shadow model saw the sample (IN).
+    var_calculation : str
+        Variance calculation method: "fixed", "carlini", or "individual_carlini".
+    online : bool
+        Whether to include IN likelihoods when computing scores.
+    fix_var_threshold : int, optional
+        Minimum number of shadow models to compute local variance (default: 32).
+
+    Returns
+    -------
+    np.ndarray
+        Array of shape (N,) containing per-sample LiRA scores.
     """
 
     if shadow_models_logits.ndim != 2:

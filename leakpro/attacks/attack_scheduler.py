@@ -3,7 +3,6 @@
 from pathlib import Path
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
-from leakpro.reporting.mia_result import MIAResult
 from leakpro.utils.import_helper import Any, Dict, Self
 from leakpro.utils.logger import logger
 
@@ -105,6 +104,7 @@ class AttackScheduler:
             # If Optuna is used, the attack should not be loaded even if it already exists
             if run_with_optuna:
                 logger.info(f"Preparing attack: {attack_type}")
+                attack_obj.bayesian_optimization = True
                 attack_obj.prepare_attack()
                 logger.info(f"Running attack with Optuna: {attack_type}")
                 study = attack_obj.run_with_optuna()
@@ -112,20 +112,14 @@ class AttackScheduler:
                 attack_obj.reset_attack(best_config)
                 attack_obj._hash_attack() # update hash with new config
 
-            # Check if the attack has been run before and load the result if it has
-            self._read_attack_hashes()
-            if attack_obj.attack_id in self.attack_hashes:
-                data_path = f"{self.data_object_dir}/{attack_obj.attack_id}.json"
-                result = MIAResult.load(data_path)
-                logger.info(f"Loaded previous results for attack: {attack_type}")
-            else:
-                if not run_with_optuna:
-                    logger.info(f"Preparing attack: {attack_type}")
-                    attack_obj.prepare_attack()
-                logger.info(f"Running attack: {attack_type}")
-                result = attack_obj.run_attack()
-                logger.info(f"Saving results for attack: {attack_type} to {self.report_dir}")
-                result.save(attack_obj = attack_obj, output_dir = self.output_dir)
+            if not run_with_optuna:
+                logger.info(f"Preparing attack: {attack_type}")
+                attack_obj.bayesian_optimization = False
+                attack_obj.prepare_attack()
+            logger.info(f"Running attack: {attack_type}")
+            result = attack_obj.run_attack()
+            logger.info(f"Saving results for attack: {attack_type} to {self.report_dir}")
+            result.save(attack_obj = attack_obj, output_dir = self.output_dir)
             results.append({"attack_type": attack_type, "attack_object": attack_obj, "result_object": result})
 
         return results
