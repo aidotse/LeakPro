@@ -273,23 +273,42 @@ def test_multivariate_singling_out_queries_max_attempts(max_attempts: int) -> No
     assert len(queries) <= max_attempts
 
 def test_multivariate_singling_out_queries() -> None:
-    """Assert results of function multivariate_singling_out_queries with simple input."""
-    df = pd.DataFrame({"c0": ["a", "b"], "c1": [1.23, 9.87]})
-    n_queries = 2
-    queries = singl_ev.multivariate_singling_out_queries(df=df, n_queries=n_queries, n_cols=2, max_attempts=None)
+    """Assert results of function multivariate_singling_out_queries with simple input.
+
+    Test implicitly tests query_from_record function."""
+    #Auxiliary function used further in test
+    def aux_assert_col_query(*, col: str, rest_query: str) -> None:
+        if col=='c0': #Numerical non-categorical
+            assert rest_query[0:2] in ('<=', '>=')
+        elif col=='c4': #Nan values
+            assert rest_query == '.isna()' or rest_query[0:2] == '=='
+        else: #All the rest (categories or similar)
+            assert rest_query[0:2] == '=='
+    #Create input dataframe and run convert_df_numerical_columns_to_categories_with_threshold
+    n_queries = 5
+    n_cols = 4
+    threshold = 3
+    df = pd.DataFrame({
+        "c0": [1, 2, 3, 4, 5], #Numerical non-categorical
+        "c1": [1, 1, 2, 2, 3], #Numerical categorical
+        "c2": [1, 1, 1, 0, 0], #Numerical boolean
+        "c3": [True, False, True, False, True], #Boolean
+        "c4": ['a', None, 'b', None, None], #Nan values
+        "c5": ['a', 'b', 'c', 'd', 'e'], #String categorical
+    })
+    singl_ev.convert_df_numerical_columns_to_categories_with_threshold(df=df, threshold=threshold)
+    #Run multivariate_singling_out_queries and assert results
+    queries = singl_ev.multivariate_singling_out_queries(df=df, n_queries=n_queries, n_cols=n_cols, max_attempts=None)
     assert len(queries) == n_queries
-    possible_queries = [
-        "c0 == 'a' & c1 <= 1.23",
-        "c1 <= 1.23 & c0 == 'a'",
-        "c0 == 'a' & c1 >= 9.87",
-        "c1 >= 9.87 & c0 == 'a'",
-        "c0 == 'b' & c1 <= 1.23",
-        "c1 <= 1.23 & c0 == 'b'",
-        "c0 == 'b' & c1 >= 9.87",
-        "c1 >= 9.87 & c0 == 'b'"
-    ]
+    all_columns = set()
     for query in queries:
-        assert query in possible_queries
+        for col_query in query.split('&'):
+            col_query = col_query.strip()
+            col = col_query[0:2]
+            rest_query = col_query[2:]
+            aux_assert_col_query(col=col, rest_query=rest_query)
+            all_columns.add(col)
+    assert all_columns == set(df.columns)
 
 def test_main_singling_out_attack() -> None:
     """Assert function main_singling_out_attack raises no errors with adults simple input."""
@@ -305,6 +324,30 @@ def test_main_singling_out_attack() -> None:
         for query in queries.queries:
             assert len(query.split("&")) == n_cols
 
+@pytest.mark.parametrize(
+    ("threshold", "c1_is_cat", "c2_is_cat"),
+    [
+        (2, False, False),
+        (3, False, True),
+        (5, True, True),
+    ]
+)
+def test_convert_df_numerical_columns_to_categories_with_threshold(threshold: int, c1_is_cat: bool, c2_is_cat: bool) -> None:
+    """Assert results of function convert_df_numerical_columns_to_categories_with_threshold with simple input."""
+    def assert_dtype(*, dtype, c_is_cat: bool) -> None:
+        if c_is_cat:
+            assert dtype == 'category'
+            assert dtype.categories.dtype == 'int64'
+        else:
+            assert dtype == 'int64'
+
+    df = pd.DataFrame([[1,1],[2,1],[3,2],[4,2],[5,3]], columns=['c1', 'c2'])
+    for col in df.columns:
+        assert df[col].dtype == 'int64'
+    singl_ev.convert_df_numerical_columns_to_categories_with_threshold(df=df, threshold=threshold)
+    assert_dtype(dtype=df['c1'].dtype, c_is_cat=c1_is_cat)
+    assert_dtype(dtype=df['c2'].dtype, c_is_cat=c2_is_cat)
+
 @pytest.mark.parametrize("n_cols", [1, 3])
 def test_SinglingOutEvaluator(n_cols: int) -> None: # noqa: N802
     """Assert SinglingOutEvaluator results with adults simple input and varying n_cols."""
@@ -312,11 +355,12 @@ def test_SinglingOutEvaluator(n_cols: int) -> None: # noqa: N802
     syn = get_adult(return_ori=False, n_samples=10)
     #Instantiate SinglingOutEvaluator
     soe = singl_ev.SinglingOutEvaluator(ori=ori, syn=syn, n_cols=n_cols, n_attacks=5)
-    assert soe.ori.equals(ori)
-    assert soe.syn.equals(syn)
+    assert (soe.ori.values == ori.values).all()
+    assert (soe.syn.values == syn.values).all()
     assert soe.n_cols == n_cols
     assert soe.n_attacks == 5
     assert soe.confidence_level == 0.95
+    assert soe.categorical_threshold == 20
     assert soe.max_attempts == 10_000_000
     assert soe.main_queries is None
     assert soe.naive_queries is None
