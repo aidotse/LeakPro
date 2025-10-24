@@ -210,11 +210,7 @@ def validate_inputs(shadow_models_logits: np.ndarray, target_logits: np.ndarray,
 def fixed_std(shadow_models_logits, out_indices, online):
     """Compute per-sample IN and OUT standard deviations using fixed variance mode."""
     out_std = np.nanstd(np.where(out_indices, shadow_models_logits, np.nan))
-    in_std  = np.nanstd(np.where(~out_indices,  shadow_models_logits, np.nan))
-
-    if not online:
-        in_std = 0.0
-
+    in_std  = np.nanstd(np.where(~out_indices,  shadow_models_logits, np.nan)) if online else 0.0
     return np.array([in_std]), np.array([out_std])
 
 #-------------------------------
@@ -279,7 +275,7 @@ def lira_vectorized(shadow_models_logits: np.ndarray, target_logits: np.ndarray,
     if(var_calc == "fixed"):
         pass # Base case already handled
 
-    if(var_calc == "carlini"):
+    elif(var_calc == "carlini"):
         if(num_shadow_models >= fix_var_threshold*2):
             out_stds = np.nanstd(np.where(out_indices, shadow_models_logits, np.nan), axis=0)
             in_stds  = np.nanstd(np.where(~out_indices,  shadow_models_logits, np.nan), axis=0)
@@ -367,7 +363,7 @@ def lira_iterative(shadow_models_logits: np.ndarray, target_logits: np.ndarray,
 
         out_mean = np.mean(sm_logits[out_mask])
         out_std = get_std(sm_logits, out_mask, False, num_shadow_models,
-                                fixed_in_std, var_calculation, fixed_out_std, fix_var_threshold)
+                                var_calculation, fixed_in_std, fixed_out_std, fix_var_threshold)
 
         # Get the logit from the target model for the current sample
         target_logit = target_logits[i]
