@@ -15,6 +15,8 @@ class AdultDataset(Dataset):
     def __init__(self, x:tensor, y:tensor, dec_to_onehot:dict, one_hot_encoded:bool=True):
         self.x = x
         self.y = y
+        self.data = x  # align with LeakPro expectations
+        self.targets = y
 
         # create dictionary to map between indices in categorical representation and one-hot encoded representation
         # For example: cols 1,2 continuous and col 3 categorical with 3 categories will be mapped to {1:1,2:2,3:[3,4,5]}

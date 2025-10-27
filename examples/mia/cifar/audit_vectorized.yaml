@@ -1,0 +1,49 @@
+audit:
+  attack_list:
+  - attack: rmia
+    num_shadow_models: 2
+    online: false
+    training_data_fraction: 0.5
+    vec_batch_points: 1024
+    vec_use_all_z: false
+    vec_z_chunk: 2048
+    vectorized: true
+  - attack: base
+    num_shadow_models: 2
+    online: false
+    training_data_fraction: 0.5
+  - attack: rmia
+    augment_strength: easy
+    n_ops: 0
+    num_transforms: 0
+    vec_batch_points: 1024
+    vec_use_all_z: false
+    vec_z_chunk: 2048
+    vectorized: true
+  - attack: rmia
+    augment_strength: strong
+    n_ops: 1
+    num_transforms: 1
+    vec_batch_points: 1024
+    vec_use_all_z: false
+    vec_z_chunk: 2048
+    vectorized: true
+  - attack: rmia
+    augment_strength: strong
+    n_ops: 1
+    num_transforms: 8
+    vec_batch_points: 1024
+    vec_use_all_z: false
+    vec_z_chunk: 2048
+    vectorized: true
+  attack_type: mia
+  data_modality: image
+  output_dir: ./cifar10/leakpro_output
+  random_seed: 1236
+distillation_model: null
+shadow_model: null
+target:
+  data_path: ./data/cifar10.pkl
+  model_class: WideResNet
+  module_path: ./target_model_class.py
+  target_folder: ./target

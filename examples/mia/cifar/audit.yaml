@@ -12,17 +12,17 @@ audit:  # Configurations for auditing
       num_shadow_models: 2
       training_data_fraction: 0.5  
 # BASE but through RaMIA
-    - attack: ramia
+    - attack: rmia
       num_transforms: 0
       n_ops: 0
       augment_strength: "easy"
 # 1 transform
-    - attack: ramia
+    - attack: rmia
       num_transforms: 1
       n_ops: 1
       augment_strength: "strong"
 # 8 transform      
-    - attack: ramia
+    - attack: rmia
       num_transforms: 8
       n_ops: 1
       augment_strength: "strong"

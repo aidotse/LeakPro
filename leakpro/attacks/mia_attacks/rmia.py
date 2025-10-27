@@ -392,9 +392,13 @@ class AttackRMIA(AbstractMIA):
             shadow_probs_true = p_x_given_shadow_models.T            # (N, M)
             shadow_logits = _logit_from_prob(shadow_probs_true)
 
-            # Shadow in-mask: we currently have OUT mask (M, N).
-            # Convert to IN mask, transpose to (N, M).
-            shadow_inmask = (~self.out_indices).T                    # (N, M)
+            # Shadow in-mask: mark samples that each shadow model trained on.
+            # offline: we have out_indices -> derive IN mask
+            # online : no per-shadow in/out info -> treat *all* as OUT (i.e., IN mask all False)
+            if not self.online:
+                shadow_inmask = (~self.out_indices).T              # (N, M)
+            else:
+                shadow_inmask = np.zeros_like(p_x_given_shadow_models.T, dtype=bool)  # (N, M)
 
             # Optional: membership mask for ROC (not used by scorer)
             target_inmask = np.zeros_like(target_probs_true, dtype=bool)

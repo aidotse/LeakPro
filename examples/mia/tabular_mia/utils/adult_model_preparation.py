@@ -2,7 +2,9 @@ import pickle
 
 from torch import cuda, device, nn, no_grad, optim, save, sigmoid
 from tqdm import tqdm
-from leakpro.schemas import MIAMetaDataSchema, OptimizerConfig, LossConfig
+
+from leakpro.leakpro import LeakPro
+from leakpro.schemas import EvalOutput, TrainingOutput
 
 
 class AdultNet(nn.Module):
@@ -11,6 +13,9 @@ class AdultNet(nn.Module):
         self.init_params = {"input_size": input_size,
                             "hidden_size": hidden_size,
                             "num_classes": num_classes}
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.num_classes = num_classes
         self.fc1 = nn.Linear(input_size, hidden_size)
         self.relu = nn.ReLU()
         self.fc2 = nn.Linear(hidden_size, hidden_size)
@@ -83,37 +88,30 @@ def create_trained_model_and_metadata(model, train_loader, test_loader, epochs =
     with open("target/target_model.pkl", "wb") as f:
         save(model.state_dict(), f)
 
-    # Write init params
-    init_params = {}
-    for key, value in model.init_params.items():
-        init_params[key] = value
-    
-    optimizer_data = {
-        "name": optimizer.__class__.__name__.lower(),
-        "lr": optimizer.param_groups[0].get("lr", 0),
-        "weight_decay": optimizer.param_groups[0].get("weight_decay", 0),
-        "momentum": optimizer.param_groups[0].get("momentum", 0),
-        "dampening": optimizer.param_groups[0].get("dampening", 0),
-        "nesterov": optimizer.param_groups[0].get("nesterov", False)
-    }
-    
-    loss_data = {"name": criterion.__class__.__name__.lower()}
-    
-    meta_data = MIAMetaDataSchema(
-            train_indices=train_loader.dataset.indices,
-            test_indices=test_loader.dataset.indices,
-            num_train=len(train_loader.dataset.indices),
-            init_params=init_params,
-            optimizer=OptimizerConfig(**optimizer_data),
-            criterion=LossConfig(**loss_data),
-            batch_size=train_loader.batch_size,
-            epochs=epochs,
-            train_acc=train_acc,
-            test_acc=test_acc,
-            train_loss=train_loss,
-            test_loss=test_loss,
-            dataset="adult"
-        )
+    train_metrics = EvalOutput(
+        accuracy=float(train_accuracies[-1]),
+        loss=float(train_losses[-1]),
+        extra={"accuracy_history": train_accuracies, "loss_history": train_losses},
+    )
+    train_result = TrainingOutput(model=model, metrics=train_metrics)
+
+    test_metrics = EvalOutput(
+        accuracy=float(test_accuracies[-1]),
+        loss=float(test_losses[-1]),
+        extra={"accuracy_history": test_accuracies, "loss_history": test_losses},
+    )
+
+    meta_data = LeakPro.make_mia_metadata(
+        train_result=train_result,
+        optimizer=optimizer,
+        loss_fn=criterion,
+        dataloader=train_loader,
+        test_result=test_metrics,
+        epochs=epochs,
+        train_indices=list(train_loader.dataset.indices),
+        test_indices=list(test_loader.dataset.indices),
+        dataset_name="adult",
+    )
     
     with open("target/model_metadata.pkl", "wb") as f:
         pickle.dump(meta_data, f)
