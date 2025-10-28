@@ -168,13 +168,13 @@ class AttackLiRA(AbstractMIA):
 
         # Decides which score calculation method should be used
         if(self.vectorized):
-            score = lira_vectorized(self.shadow_models_logits, self.target_logits,
-                                    self.out_indices, self.var_calculation,
-                                    self.online, self.fix_var_threshold)
+            score = lira_vectorized(self.shadow_models_logits, ~self.out_indices,
+                                   self.target_logits, self.var_calculation,
+                                   self.online, self.fix_var_threshold)
         else:
-            score = lira_iterative(self.shadow_models_logits, self.target_logits,
-                                    self.out_indices, self.var_calculation,
-                                    self.online, self.fix_var_threshold)
+            score = lira_iterative(self.shadow_models_logits, ~self.out_indices,
+                                   self.target_logits, self.var_calculation,
+                                   self.online, self.fix_var_threshold)
 
         # Split the score array into two parts based on membership: in (training) and out (non-training)
         in_members = self.audit_dataset["in_members"]
@@ -210,15 +210,15 @@ def validate_inputs(shadow_models_logits: np.ndarray, target_logits: np.ndarray,
 def fixed_std(shadow_models_logits, out_indices, online):
     """Compute per-sample IN and OUT standard deviations using fixed variance mode."""
     out_std = np.nanstd(np.where(out_indices, shadow_models_logits, np.nan))
-    in_std  = np.nanstd(np.where(~out_indices,  shadow_models_logits, np.nan)) if online else 0.0
+    in_std  = np.nanstd(np.where(~out_indices,  shadow_models_logits, np.nan)) if online else np.nan
     return np.array([in_std]), np.array([out_std])
 
 #-------------------------------
 # Vectorized LiRA implementation
 #-------------------------------
 
-def lira_vectorized(shadow_models_logits: np.ndarray, target_logits: np.ndarray,
-                    out_indices: np.ndarray, var_calculation: str = "carlini",
+def lira_vectorized(shadow_models_logits: np.ndarray, shadow_inmask: np.ndarray, 
+                    target_logits: np.ndarray, var_calculation: str = "carlini",
                     online: bool = False, fix_var_threshold: int = 32) -> np.ndarray:
     """
     Compute LiRA membership inference scores in a fully vectorized manner.
@@ -232,11 +232,11 @@ def lira_vectorized(shadow_models_logits: np.ndarray, target_logits: np.ndarray,
     ----------
     shadow_models_logits : np.ndarray
         Array of shape (num_shadow_models, n_samples) containing logits from shadow models.
+    shadow_inmask: np.ndarray
+        Boolean array of shape (num_shadow_models, n_samples) indicating which shadow models
+        correspond to IN (training) samples.
     target_logits : np.ndarray
         Array of shape (n_samples,) containing logits from the target model.
-    out_indices : np.ndarray
-        Boolean array of shape (num_shadow_models, n_samples) indicating which shadow models
-        correspond to OUT (non-training) samples.
     var_calculation : str, default "carlini"
         Method to calculate variance. Options: 'fixed', 'carlini', 'individual_carlini'.
     online : bool, default False
@@ -249,6 +249,8 @@ def lira_vectorized(shadow_models_logits: np.ndarray, target_logits: np.ndarray,
     np.ndarray
         Array of shape (n_samples,) containing the LiRA scores for each audit sample.
     """
+
+    out_indices = ~shadow_inmask
 
     validate_inputs(shadow_models_logits, target_logits, out_indices)
 
@@ -314,8 +316,8 @@ def lira_vectorized(shadow_models_logits: np.ndarray, target_logits: np.ndarray,
 # Iterative LiRA implementation
 #-------------------------------
 
-def lira_iterative(shadow_models_logits: np.ndarray, target_logits: np.ndarray,
-                   out_indices: np.ndarray, var_calculation: str = "carlini",
+def lira_iterative(shadow_models_logits: np.ndarray, shadow_inmask: np.ndarray,
+                   target_logits: np.ndarray, var_calculation: str = "carlini",
                    online: bool = False, fix_var_threshold: int = 32) -> np.ndarray:
 
     """
@@ -329,11 +331,11 @@ def lira_iterative(shadow_models_logits: np.ndarray, target_logits: np.ndarray,
     ----------
     shadow_models_logits : np.ndarray
         Array of shape (num_shadow_models, n_samples) containing logits from shadow models.
+    shadow_inmask: np.ndarray
+        Boolean array of shape (num_shadow_models, n_samples) indicating which shadow models
+        correspond to IN (training) samples.
     target_logits : np.ndarray
         Array of shape (n_samples,) containing logits from the target model.
-    out_indices : np.ndarray
-        Boolean array of shape (num_shadow_models, n_samples) indicating which shadow models
-        correspond to OUT (non-training) samples.
     var_calculation : str, default "carlini"
         Method to calculate variance. Options: 'fixed', 'carlini', 'individual_carlini'.
     online : bool, default False
@@ -346,6 +348,8 @@ def lira_iterative(shadow_models_logits: np.ndarray, target_logits: np.ndarray,
     np.ndarray
         Array of shape (n_samples,) containing the LiRA scores for each audit sample.
     """
+
+    out_indices = ~shadow_inmask
 
     validate_inputs(shadow_models_logits, target_logits, out_indices)
 
