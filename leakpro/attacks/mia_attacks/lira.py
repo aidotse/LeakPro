@@ -163,16 +163,20 @@ class AttackLiRA(AbstractMIA):
         true labels, and signal values.
 
         """
-        n_audit_samples = self.shadow_models_logits.shape[1]
+        # Convert shape (M, N) -> (N, M) and out_mask to in_mask
+        shadow_models_logits = self.shadow_models_logits.T
+        in_indices = (~self.out_indices).T
+        
+        n_audit_samples = shadow_models_logits.shape[0]
         score = np.zeros(n_audit_samples)  # List to hold the computed probability scores for each sample
 
         # Decides which score calculation method should be used
         if(self.vectorized):
-            score = lira_vectorized(self.shadow_models_logits, ~self.out_indices,
+            score = lira_vectorized(shadow_models_logits, in_indices,
                                    self.target_logits, self.var_calculation,
                                    self.online, self.fix_var_threshold)
         else:
-            score = lira_iterative(self.shadow_models_logits, ~self.out_indices,
+            score = lira_iterative(shadow_models_logits, in_indices,
                                    self.target_logits, self.var_calculation,
                                    self.online, self.fix_var_threshold)
 
@@ -198,14 +202,14 @@ class AttackLiRA(AbstractMIA):
 
 def validate_inputs(shadow_models_logits: np.ndarray, target_logits: np.ndarray, out_indices: np.ndarray):
     if shadow_models_logits.ndim != 2:
-        raise ValueError("shadow_models_logits must be a 2D array (n_shadow_models, n_samples)")
+        raise ValueError("shadow_models_logits must be a 2D array (n_samples, n_shadow_models)")
     if out_indices.shape != shadow_models_logits.shape:
         raise ValueError("out_indices must have the same shape as shadow_models_logits")
     if target_logits.ndim != 1:
         raise ValueError("target_logits must be a 1D array")
-    if len(target_logits) != shadow_models_logits.shape[1]:
+    if len(target_logits) != shadow_models_logits.shape[0]:
         raise ValueError( f"target_logits length ({target_logits.shape[0]}) must match " 
-                         f"the number of audit samples ({shadow_models_logits.shape[1]})")
+                         f"the number of audit samples ({shadow_models_logits.shape[0]})")
 
 def fixed_std(shadow_models_logits, out_indices, online):
     """Compute per-sample IN and OUT standard deviations using fixed variance mode."""
@@ -225,18 +229,17 @@ def lira_vectorized(shadow_models_logits: np.ndarray, shadow_inmask: np.ndarray,
 
     This function evaluates the likelihood that each sample in the target dataset
     was part of the training set by comparing its logits with shadow model logits.
-    The computation is fully vectorized for efficiency, and supports different
-    variance calculation methods ('fixed', 'carlini', 'individual_carlini').
+    The computation is fully vectorized for efficiency.
 
     Parameters
     ----------
     shadow_models_logits : np.ndarray
-        Array of shape (num_shadow_models, n_samples) containing logits from shadow models.
+        Array of shape (N, M), N = n_samples, M = num_shadow_models, containing logits from shadow models.
     shadow_inmask: np.ndarray
-        Boolean array of shape (num_shadow_models, n_samples) indicating which shadow models
+        Boolean array of shape (N, M) indicating which shadow models
         correspond to IN (training) samples.
     target_logits : np.ndarray
-        Array of shape (n_samples,) containing logits from the target model.
+        Array of shape (N,) containing logits from the target model.
     var_calculation : str, default "carlini"
         Method to calculate variance. Options: 'fixed', 'carlini', 'individual_carlini'.
     online : bool, default False
@@ -250,18 +253,19 @@ def lira_vectorized(shadow_models_logits: np.ndarray, shadow_inmask: np.ndarray,
         Array of shape (n_samples,) containing the LiRA scores for each audit sample.
     """
 
+    # Due to original LiRA implementation in leakpro using out_indices
     out_indices = ~shadow_inmask
 
     validate_inputs(shadow_models_logits, target_logits, out_indices)
 
-    num_shadow_models, n_samples = shadow_models_logits.shape
+    n_samples, num_shadow_models = shadow_models_logits.shape
 
     # Computes the fixed in and out variances
     fixed_in_std, fixed_out_std = fixed_std(shadow_models_logits.flatten(), out_indices.flatten(), online)
 
     # Vectorized mean calculation
-    out_means = np.nanmean(np.where(out_indices, shadow_models_logits, np.nan), axis=0)
-    in_means = np.nanmean(np.where(~out_indices, shadow_models_logits, np.nan), axis=0)
+    out_means = np.nanmean(np.where(out_indices, shadow_models_logits, np.nan), axis=1)
+    in_means = np.nanmean(np.where(~out_indices, shadow_models_logits, np.nan), axis=1)
 
     # Replace NaNs in means with 0.0
     out_means = np.where(np.isnan(out_means), 0.0, out_means)
@@ -271,29 +275,29 @@ def lira_vectorized(shadow_models_logits: np.ndarray, shadow_inmask: np.ndarray,
     var_calc = var_calculation.lower()
 
     # Base std case (fixed)
-    out_stds = np.full(n_samples, fixed_out_std)
-    in_stds = np.full(n_samples, fixed_in_std)
+    out_stds = np.full(n_samples, fixed_out_std[0])
+    in_stds = np.full(n_samples, fixed_in_std[0])
 
     if(var_calc == "fixed"):
         pass # Base case already handled
 
     elif(var_calc == "carlini"):
         if(num_shadow_models >= fix_var_threshold*2):
-            out_stds = np.nanstd(np.where(out_indices, shadow_models_logits, np.nan), axis=0)
-            in_stds  = np.nanstd(np.where(~out_indices,  shadow_models_logits, np.nan), axis=0)
+            out_stds = np.nanstd(np.where(out_indices, shadow_models_logits, np.nan), axis=1)
+            in_stds  = np.nanstd(np.where(~out_indices,  shadow_models_logits, np.nan), axis=1)
 
     elif(var_calc == "individual_carlini"):
         # Count contributing shadow models per sample
-        in_counts  = np.sum(~out_indices, axis=0)
-        out_counts = np.sum(out_indices, axis=0)
+        in_counts  = np.sum(~out_indices, axis=1)
+        out_counts = np.sum(out_indices, axis=1)
 
         # Compute std only where enough shadow models exist, otherwise fallback to fixed
         in_mask  = in_counts  >= fix_var_threshold
         out_mask = out_counts >= fix_var_threshold
 
         # Use global fixed std as default, overwrite only where enough shadow models
-        in_stds[in_mask]  = np.nanstd(np.where(~out_indices[:, in_mask], shadow_models_logits[:, in_mask], np.nan), axis=0)
-        out_stds[out_mask] = np.nanstd(np.where(out_indices[:, out_mask], shadow_models_logits[:, out_mask], np.nan), axis=0)
+        in_stds[in_mask]  = np.nanstd(np.where(~out_indices[in_mask, :], shadow_models_logits[in_mask, :], np.nan), axis=1)
+        out_stds[out_mask] = np.nanstd(np.where(out_indices[out_mask, :], shadow_models_logits[out_mask, :], np.nan), axis=1)
 
     else:
         raise ValueError(f"Unknown var_calculation: {var_calculation!r}")
@@ -330,12 +334,12 @@ def lira_iterative(shadow_models_logits: np.ndarray, shadow_inmask: np.ndarray,
     Parameters
     ----------
     shadow_models_logits : np.ndarray
-        Array of shape (num_shadow_models, n_samples) containing logits from shadow models.
+        Array of shape (N, M), N = n_samples, M = num_shadow_models, containing logits from shadow models.
     shadow_inmask: np.ndarray
-        Boolean array of shape (num_shadow_models, n_samples) indicating which shadow models
+        Boolean array of shape (N, M) indicating which shadow models
         correspond to IN (training) samples.
     target_logits : np.ndarray
-        Array of shape (n_samples,) containing logits from the target model.
+        Array of shape (N,) containing logits from the target model.
     var_calculation : str, default "carlini"
         Method to calculate variance. Options: 'fixed', 'carlini', 'individual_carlini'.
     online : bool, default False
@@ -353,13 +357,14 @@ def lira_iterative(shadow_models_logits: np.ndarray, shadow_inmask: np.ndarray,
 
     validate_inputs(shadow_models_logits, target_logits, out_indices)
 
-    num_shadow_models, n_audit_samples = shadow_models_logits.shape
+    n_samples, num_shadow_models = shadow_models_logits.shape
     score = np.zeros(n_audit_samples)  # List to hold the computed probability scores for each sample
 
-    fixed_in_std, fixed_out_std = fixed_std(shadow_models_logits, out_indices, online)
+    # Computes the fixed in and out variances
+    fixed_in_std, fixed_out_std = fixed_std(shadow_models_logits.flatten(), out_indices.flatten(), online)
 
     # Iterate over and extract logits for IN and OUT shadow models for each audit sample
-    for i in tqdm(range(n_audit_samples), total=n_audit_samples, desc="Processing audit samples"):
+    for i in tqdm(range(n_samples), total=n_samples, desc="Processing audit samples"):
 
         # Calculate the mean for OUT shadow model logits
         out_mask = out_indices[:,i]
@@ -367,7 +372,7 @@ def lira_iterative(shadow_models_logits: np.ndarray, shadow_inmask: np.ndarray,
 
         out_mean = np.mean(sm_logits[out_mask])
         out_std = get_std(sm_logits, out_mask, False, num_shadow_models,
-                                var_calculation, fixed_in_std, fixed_out_std, fix_var_threshold)
+                          var_calculation, fixed_in_std, fixed_out_std, fix_var_threshold)
 
         # Get the logit from the target model for the current sample
         target_logit = target_logits[i]
@@ -375,7 +380,8 @@ def lira_iterative(shadow_models_logits: np.ndarray, shadow_inmask: np.ndarray,
         # Calculate the log probability density function value
         if online:
             in_mean = np.mean(sm_logits[~out_mask])
-            in_std = get_std(sm_logits, ~out_mask, True, num_shadow_models, var_calculation, fixed_in_std, fixed_out_std, fix_var_threshold)
+            in_std = get_std(sm_logits, ~out_mask, True, num_shadow_models,
+                             var_calculation, fixed_in_std, fixed_out_std, fix_var_threshold)
 
             pr_in = norm.logpdf(target_logit, in_mean, in_std + 1e-30)
             pr_out = norm.logpdf(target_logit, out_mean, out_std + 1e-30)
