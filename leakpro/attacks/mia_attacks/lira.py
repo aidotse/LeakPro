@@ -213,6 +213,11 @@ def validate_inputs(shadow_models_logits: np.ndarray, target_logits: np.ndarray,
 
 def fixed_std(shadow_models_logits, out_indices, online):
     """Compute per-sample IN and OUT standard deviations using fixed variance mode."""
+
+    assert np.sum(out_indices) > 30, "Too few OUT logits to compute fixed std"
+    if online:
+        assert np.sum(~out_indices) > 30, "Too few IN logits to compute fixed std"
+
     out_std = np.nanstd(np.where(out_indices, shadow_models_logits, np.nan))
     in_std  = np.nanstd(np.where(~out_indices,  shadow_models_logits, np.nan)) if online else np.nan
     return np.array([in_std]), np.array([out_std])
@@ -263,13 +268,10 @@ def lira_vectorized(shadow_models_logits: np.ndarray, shadow_inmask: np.ndarray,
     # Computes the fixed in and out variances
     fixed_in_std, fixed_out_std = fixed_std(shadow_models_logits.flatten(), out_indices.flatten(), online)
 
-    # Vectorized mean calculation
+    # Vectorized mean calculation, if a slice is empty it will produce an
+    # runtime warning, but the calculation will still produce the correct result
     out_means = np.nanmean(np.where(out_indices, shadow_models_logits, np.nan), axis=1)
     in_means = np.nanmean(np.where(~out_indices, shadow_models_logits, np.nan), axis=1)
-
-    # Replace NaNs in means with 0.0
-    out_means = np.where(np.isnan(out_means), 0.0, out_means)
-    in_means  = np.where(np.isnan(in_means),  0.0, in_means)
 
     # Cast to lowercase
     var_calc = var_calculation.lower()
