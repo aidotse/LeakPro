@@ -85,3 +85,9 @@ lint.ignore = [
   "D202", # No blank lines allowed after function docstring
   "F811" # redefinition of function
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"leakpro/attacks/mia_attacks/rmia.py" = [
+  "PLR0915",  # too many statements (the vectorized rmia function is long by design)
+  "T201",     # print in self-test (if you keep it)
+]
