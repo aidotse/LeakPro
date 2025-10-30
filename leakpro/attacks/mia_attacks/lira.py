@@ -197,26 +197,28 @@ class AttackLiRA(AbstractMIA):
                                     result_name="LiRA",
                                     metadata=self.configs.model_dump())
 
-def validate_inputs(shadow_models_logits: np.ndarray, target_logits: np.ndarray, out_indices: np.ndarray):
+def validate_inputs(shadow_models_logits: np.ndarray, target_logits: np.ndarray, shadow_inmask: np.ndarray):
+    if(np.all(shadow_inmask) or not np.any(shadow_inmask)):
+        raise ValueError("shadow_inmask cannot be purely True or False.")
+    if shadow_inmask.shape != shadow_models_logits.shape:
+        raise ValueError("shadow_inmask must have the same shape as shadow_models_logits")
     if shadow_models_logits.ndim != 2:
         raise ValueError("shadow_models_logits must be a 2D array (n_samples, n_shadow_models)")
-    if out_indices.shape != shadow_models_logits.shape:
-        raise ValueError("out_indices must have the same shape as shadow_models_logits")
     if target_logits.ndim != 1:
         raise ValueError("target_logits must be a 1D array")
     if len(target_logits) != shadow_models_logits.shape[0]:
         raise ValueError( f"target_logits length ({target_logits.shape[0]}) must match " 
                          f"the number of audit samples ({shadow_models_logits.shape[0]})")
 
-def fixed_std(shadow_models_logits, out_indices, online):
+def fixed_std(shadow_models_logits, shadow_inmask, online):
     """Compute per-sample IN and OUT standard deviations using fixed variance mode."""
 
-    assert np.sum(out_indices) > 30, "Too few OUT logits to compute fixed std"
+    assert np.sum(~shadow_inmask) > 30, "Too few OUT logits to compute fixed std"
     if online:
-        assert np.sum(~out_indices) > 30, "Too few IN logits to compute fixed std"
+        assert np.sum(shadow_inmask) > 30, "Too few IN logits to compute fixed std"
 
-    out_std = np.nanstd(np.where(out_indices, shadow_models_logits, np.nan))
-    in_std  = np.nanstd(np.where(~out_indices,  shadow_models_logits, np.nan)) if online else np.nan
+    out_std = np.nanstd(np.where(~shadow_inmask, shadow_models_logits, np.nan))
+    in_std  = np.nanstd(np.where(shadow_inmask,  shadow_models_logits, np.nan)) if online else np.nan
     return np.array([in_std]), np.array([out_std])
 
 #-------------------------------
@@ -254,21 +256,17 @@ def lira_vectorized(shadow_models_logits: np.ndarray, shadow_inmask: np.ndarray,
     np.ndarray
         Array of shape (n_samples,) containing the LiRA scores for each audit sample.
     """
-
-    # Due to original LiRA implementation in leakpro using out_indices
-    out_indices = ~shadow_inmask
-
-    validate_inputs(shadow_models_logits, target_logits, out_indices)
+    validate_inputs(shadow_models_logits, target_logits, shadow_inmask)
 
     n_samples, num_shadow_models = shadow_models_logits.shape
 
     # Computes the fixed in and out variances
-    fixed_in_std, fixed_out_std = fixed_std(shadow_models_logits.flatten(), out_indices.flatten(), online)
+    fixed_in_std, fixed_out_std = fixed_std(shadow_models_logits.flatten(), shadow_inmask.flatten(), online)
 
     # Vectorized mean calculation, if a slice is empty it will produce an
     # runtime warning, but the calculation will still produce the correct result
-    out_means = np.nanmean(np.where(out_indices, shadow_models_logits, np.nan), axis=1)
-    in_means = np.nanmean(np.where(~out_indices, shadow_models_logits, np.nan), axis=1)
+    out_means = np.nanmean(np.where(~shadow_inmask, shadow_models_logits, np.nan), axis=1)
+    in_means = np.nanmean(np.where(shadow_inmask, shadow_models_logits, np.nan), axis=1)
 
     # Cast to lowercase
     var_calc = var_calculation.lower()
@@ -282,21 +280,21 @@ def lira_vectorized(shadow_models_logits: np.ndarray, shadow_inmask: np.ndarray,
 
     elif(var_calc == "carlini"):
         if(num_shadow_models >= fix_var_threshold*2):
-            out_stds = np.nanstd(np.where(out_indices, shadow_models_logits, np.nan), axis=1)
-            in_stds  = np.nanstd(np.where(~out_indices,  shadow_models_logits, np.nan), axis=1)
+            out_stds = np.nanstd(np.where(~shadow_inmask, shadow_models_logits, np.nan), axis=1)
+            in_stds  = np.nanstd(np.where(shadow_inmask,  shadow_models_logits, np.nan), axis=1)
 
     elif(var_calc == "individual_carlini"):
         # Count contributing shadow models per sample
-        in_counts  = np.sum(~out_indices, axis=1)
-        out_counts = np.sum(out_indices, axis=1)
+        out_counts = np.sum(~shadow_inmask, axis=1)
+        in_counts  = np.sum(shadow_inmask, axis=1)
 
         # Compute std only where enough shadow models exist, otherwise fallback to fixed
         in_mask  = in_counts  >= fix_var_threshold
         out_mask = out_counts >= fix_var_threshold
 
         # Use global fixed std as default, overwrite only where enough shadow models
-        in_stds[in_mask]  = np.nanstd(np.where(~out_indices[in_mask, :], shadow_models_logits[in_mask, :], np.nan), axis=1)
-        out_stds[out_mask] = np.nanstd(np.where(out_indices[out_mask, :], shadow_models_logits[out_mask, :], np.nan), axis=1)
+        in_stds[in_mask]  = np.nanstd(np.where(shadow_inmask[in_mask, :], shadow_models_logits[in_mask, :], np.nan), axis=1)
+        out_stds[out_mask] = np.nanstd(np.where(~shadow_inmask[out_mask, :], shadow_models_logits[out_mask, :], np.nan), axis=1)
 
     else:
         raise ValueError(f"Unknown var_calculation: {var_calculation!r}")
@@ -354,10 +352,10 @@ def lira_iterative(shadow_models_logits: np.ndarray, shadow_inmask: np.ndarray,
 
     out_indices = ~shadow_inmask
 
-    validate_inputs(shadow_models_logits, target_logits, out_indices)
+    validate_inputs(shadow_models_logits, target_logits, shadow_inmask)
 
     n_samples, num_shadow_models = shadow_models_logits.shape
-    score = np.zeros(n_audit_samples)  # List to hold the computed probability scores for each sample
+    score = np.zeros(n_samples)  # List to hold the computed probability scores for each sample
 
     # Computes the fixed in and out variances
     fixed_in_std, fixed_out_std = fixed_std(shadow_models_logits.flatten(), out_indices.flatten(), online)
@@ -404,7 +402,8 @@ def get_std(logits: np.ndarray, mask: np.ndarray, is_in: bool,
 
     # Fixed/Global variance calculation.
     if var_calc == "fixed":
-        return fixed_std(logits, mask, is_in)
+        # We flip the mask as this specific function takes the shadow_inmask
+        return fixed_std(logits, ~mask, is_in)
 
     # Variance calculation as in the paper ( Membership Inference Attacks From First Principles )
     elif var_calc == "carlini":
