@@ -349,7 +349,6 @@ def lira_iterative(shadow_models_logits: np.ndarray, shadow_inmask: np.ndarray,
     np.ndarray
         Array of shape (n_samples,) containing the LiRA scores for each audit sample.
     """
-
     out_indices = ~shadow_inmask
 
     validate_inputs(shadow_models_logits, target_logits, shadow_inmask)
@@ -358,14 +357,14 @@ def lira_iterative(shadow_models_logits: np.ndarray, shadow_inmask: np.ndarray,
     score = np.zeros(n_samples)  # List to hold the computed probability scores for each sample
 
     # Computes the fixed in and out variances
-    fixed_in_std, fixed_out_std = fixed_std(shadow_models_logits.flatten(), out_indices.flatten(), online)
+    fixed_in_std, fixed_out_std = fixed_std(shadow_models_logits.flatten(), shadow_inmask.flatten(), online)
 
     # Iterate over and extract logits for IN and OUT shadow models for each audit sample
     for i in tqdm(range(n_samples), total=n_samples, desc="Processing audit samples"):
 
         # Calculate the mean for OUT shadow model logits
-        out_mask = out_indices[:,i]
-        sm_logits = shadow_models_logits[:,i]
+        out_mask = out_indices[i,:]
+        sm_logits = shadow_models_logits[i,:]
 
         out_mean = np.mean(sm_logits[out_mask])
         out_std = get_std(sm_logits, out_mask, False, num_shadow_models,
