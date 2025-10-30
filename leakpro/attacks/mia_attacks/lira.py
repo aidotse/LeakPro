@@ -210,6 +210,12 @@ def validate_inputs(shadow_models_logits: np.ndarray, target_logits: np.ndarray,
         raise ValueError( f"target_logits length ({target_logits.shape[0]}) must match " 
                          f"the number of audit samples ({shadow_models_logits.shape[0]})")
 
+    all_true_rows = np.all(shadow_inmask, axis=1)
+    all_false_rows = np.all(~shadow_inmask, axis=1)
+    if np.any(all_true_rows) or np.any(all_false_rows):
+        problem_indices = np.where(all_true_rows | all_false_rows)[0]
+        raise ValueError(f"Some samples have shadow_inmask all True or all False at indices {problem_indices.tolist()}")
+
 def fixed_std(shadow_models_logits, shadow_inmask, online):
     """Compute per-sample IN and OUT standard deviations using fixed variance mode."""
 
