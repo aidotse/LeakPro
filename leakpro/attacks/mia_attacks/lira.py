@@ -167,9 +167,6 @@ class AttackLiRA(AbstractMIA):
         shadow_models_logits = self.shadow_models_logits.T
         in_indices = (~self.out_indices).T
         
-        n_audit_samples = shadow_models_logits.shape[0]
-        score = np.zeros(n_audit_samples)  # List to hold the computed probability scores for each sample
-
         # Decides which score calculation method should be used
         if(self.vectorized):
             score = lira_vectorized(shadow_models_logits, in_indices,
@@ -187,7 +184,7 @@ class AttackLiRA(AbstractMIA):
         self.out_member_signals = score[out_members].reshape(-1,1)  # Scores for non-training data members
 
         # Prepare true labels array, marking 1 for training data and 0 for non-training data
-        true_labels = np.concatenate(
+        true_membership = np.concatenate(
             [np.ones(len(self.in_member_signals)), np.zeros(len(self.out_member_signals))]
         )
 
@@ -195,7 +192,7 @@ class AttackLiRA(AbstractMIA):
         signal_values = np.concatenate([self.in_member_signals, self.out_member_signals])
 
         # Return a result object containing predictions, true labels, and the signal values for further evaluation
-        return MIAResult.from_full_scores(true_membership=true_labels,
+        return MIAResult.from_full_scores(true_membership=true_membership,
                                     signal_values=signal_values,
                                     result_name="LiRA",
                                     metadata=self.configs.model_dump())
