@@ -218,7 +218,7 @@ class ShadowModelHandler(ModelHandler):
 
             if verbose is True: # prints a very large list of indices
                 logger.info(f"Metadata for shadow model {indx}:\n{meta_data}")
-            
+
             with open(f"{self.storage_path}/{self.metadata_storage_name}_{indx}.pkl", "wb") as f:
                 pickle.dump(meta_data, f)
 
