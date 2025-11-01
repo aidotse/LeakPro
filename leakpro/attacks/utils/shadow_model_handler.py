@@ -126,7 +126,8 @@ class ShadowModelHandler(ModelHandler):
         num_models:int,
         shadow_population: list,
         training_fraction:float=0.1,
-        online:bool=False
+        online:bool=False, 
+        verbose:bool=False
     ) -> list[int]:
         """Create and train shadow models based on the blueprint.
 
@@ -215,7 +216,9 @@ class ShadowModelHandler(ModelHandler):
 
             ShadowModelHandler().cache_logits(PytorchModel(shadow_model, criterion), name=f"sm_{indx}")
 
-            logger.info(f"Metadata for shadow model {indx}:\n{meta_data}")
+            if verbose is True: # prints a very large list of indices
+                logger.info(f"Metadata for shadow model {indx}:\n{meta_data}")
+            
             with open(f"{self.storage_path}/{self.metadata_storage_name}_{indx}.pkl", "wb") as f:
                 pickle.dump(meta_data, f)
 
