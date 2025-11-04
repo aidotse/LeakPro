@@ -85,8 +85,7 @@ class ModelHandler():
         self.target_model_hash = hash_model(self.handler.target_model)
 
         # Folder to store intermediate results
-        #self.attack_cache_folder_path = "leakpro_output/attack_cache"
-        self.attack_cache_folder_path = f"{storage_path}/attack_cache/{caller}"
+        self.attack_cache_folder_path = f"{storage_path}/attack_cache/{caller}" # prev hardcoded to "leakpro_output/attack_cache"
         os.makedirs(self.attack_cache_folder_path, exist_ok=True)
 
         criterion = self.handler.get_criterion()

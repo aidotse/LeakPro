@@ -126,8 +126,7 @@ class ShadowModelHandler(ModelHandler):
         num_models:int,
         shadow_population: list,
         training_fraction:float=0.1,
-        online:bool=False, 
-        verbose:bool=False
+        online:bool=False
     ) -> list[int]:
         """Create and train shadow models based on the blueprint.
 
@@ -164,9 +163,12 @@ class ShadowModelHandler(ModelHandler):
             indices_to_use.append(next_index)
             next_index += 1
 
+        # balanced assignment should be optional as it also places implicit requirements on attack
+        # specifically, the number of shadow models must be even and the train fraction must be 0.5
         A = self.construct_balanced_assignments(len(shadow_population), num_models)  # noqa: N806
         assert np.all(np.sum(A,axis=0) == num_models//2)
         assert np.all(np.sum(A,axis=1) == len(shadow_population)//2)
+        
         shadow_population = np.array(shadow_population)
         for i, indx in enumerate(indices_to_use):
             # Get dataloader
@@ -216,8 +218,7 @@ class ShadowModelHandler(ModelHandler):
 
             ShadowModelHandler().cache_logits(PytorchModel(shadow_model, criterion), name=f"sm_{indx}")
 
-            if verbose is True: # prints a very large list of indices
-                logger.info(f"Metadata for shadow model {indx}:\n{meta_data}")
+            logger.debug(f"Metadata for shadow model {indx}:\n{meta_data}") # large debug dump
 
             with open(f"{self.storage_path}/{self.metadata_storage_name}_{indx}.pkl", "wb") as f:
                 pickle.dump(meta_data, f)
