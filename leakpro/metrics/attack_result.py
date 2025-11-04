@@ -20,7 +20,9 @@ from torch import Tensor, clamp, stack
 from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision.utils import save_image
 
+from leakpro.attacks.utils.diff_mi.setup import DiffMiConfig
 from leakpro.fl_utils.save_text import save_text, validate_tokens
+from leakpro.schemas import MinvResultSchema
 from leakpro.utils.import_helper import Any, List, Self
 
 ########################################################################################################################
@@ -687,44 +689,93 @@ class MinvResult:
 
     def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003, ARG002
         raise RuntimeError(
-            "Use one of the constructors: \"from_metrics\""
+            'Use one of the constructors: "from_metrics"'
             ""
         )
 
+    def _init_obj(self: Self, result_name: str, result_id: str) -> None:
+        """Initialize the MinvResult object.
+
+        Args:
+        ----
+            result_name (str): Name of the result.
+            result_id (str): Unique identifier for the result.
+
+        Returns:
+        -------
+            None
+
+        """
+        self.name = result_name
+        self.id = result_id
+
     @classmethod
-    def from_metrics(cls, metric_dict:dict) -> Self:
+    def from_metrics(cls,
+                     result_name: str,
+                     result_id: str,
+                     config: DiffMiConfig,
+                     metrics: dict) -> Self:
         """Create MinvResult from evaluation metrics.
 
         Args:
         ----
-            metric_dict: Dictionary containing the evaluation metrics (dict).
+            result_name (str): Name of the result.
+            result_id (str): Unique identifier for the result.
+            config (DiffMiConfig): Configuration used for the attack.
+            metrics (dict): Dictionary containing the evaluation metrics.
 
         Returns:
         -------
             MinvResult: An instance of MinvResult with the evaluation metrics.
 
         """
-        if metadata is None:
-            metadata = {}
+
+        if metrics is None:
+            metrics = {}
         obj = object.__new__(cls)
-        obj.result = obj._make_result_object(metric_dict)
+        obj._init_obj(result_name, result_id)
+        obj.result = obj._make_result_object(config, metrics)
         return obj
 
-    def _make_result_object(self, metric_dict: dict) -> MinvResultSchema:
-        """Create result metric object for top1 accuracy, top5 accuracy, and KNN."""
+    def _make_result_object(self, config: DiffMiConfig, metrics: dict) -> MinvResultSchema:
+        """Create result metric object for top1 accuracy, top5 accuracy, and KNN.
+
+        Args:
+        ----
+            config (DiffMiConfig): Configuration used for the attack.
+            metrics (dict): Dictionary containing the evaluation metrics.
+
+        Returns:
+        -------
+            MinvResultSchema: An instance of MinvResultSchema containing the metrics.
+
+        """
+
         return MinvResultSchema(
-            accuracy=self.accuracy,
+            name=self.name,
+            id=self.id,
+            config=config.model_dump(),
+            metrics=metrics,
         )
 
-    def save(self:Self, attack_obj: Any, output_dir: str) -> None:
+    def _create_dir(self, path: str) -> None:
+        if not os.path.exists(path):
+            os.makedirs(path)
+
+    def save(self:Self, attack_obj: Any, output_dir: str) -> None: # noqa: ARG002
         """Save the MinVResult to disk.
+
         Args.
         ----
-            None.
-        Returns.
-        --------
-            None.            
+            attack_obj (Any): The attack object associated with this result.
+            output_dir (str): The directory to save the results to.
+
+        Returns
+        -------
+            None
+
         """
+
         save_path = f"{output_dir}/results/{self.id}"
         self._create_dir(save_path)
 
@@ -741,7 +792,7 @@ class MinvResult:
             raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
         # Save the results to a file in data objects using attack hash
-        with open(f"{data_obj_storage}{attack_obj.attack_id}.json", "w") as f:
+        with open(f"{data_obj_storage}{self.result.id}.json", "w") as f:
             json.dump(self.result.model_dump(), f, default=json_fallback)
 
         # Store results for user output

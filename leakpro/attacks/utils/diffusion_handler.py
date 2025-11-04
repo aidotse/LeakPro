@@ -80,7 +80,8 @@ class DiffMiHandler():
         if self.diffusion_path and self.diffusion_model_class and self.gaussian_diffusion_class:
             self.diffusion_model_blueprint = self._import_model_from_path(self.diffusion_path, self.diffusion_model_class)
             self.gaussian_diffusion_blueprint = self._import_model_from_path(self.diffusion_path, self.gaussian_diffusion_class)
-            logger.info(f"Imported Diffusion model blueprint and Gaussian diffusion from {self.diffusion_model_class} and {self.gaussian_diffusion_class} in {self.diffusion_path}")
+            logger.info(f"Imported Diffusion model {self.diffusion_model_class}")
+            logger.info(f"Imported Gaussian diffusion {self.gaussian_diffusion_class}")
 
             self.diffusion_model = self.diffusion_model_blueprint(**diffusion_model_params)
             self.diffusion = self.gaussian_diffusion_blueprint(**gaussian_diffusion_params)
