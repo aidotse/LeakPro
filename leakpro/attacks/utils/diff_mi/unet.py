@@ -1,28 +1,25 @@
-from abc import abstractmethod
-
-import pdb
 import math
+from abc import abstractmethod
 
 import numpy as np
 import torch as th
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 from .fp16_util import convert_module_to_f16, convert_module_to_f32
 from .nn import (
+    avg_pool_nd,
     checkpoint,
     conv_nd,
     linear,
-    avg_pool_nd,
-    zero_module,
     normalization,
     timestep_embedding,
+    zero_module,
 )
 
 
 class AttentionPool2d(nn.Module):
-    """
-    Adapted from CLIP: https://github.com/openai/CLIP/blob/main/clip/model.py
+    """Adapted from CLIP: https://github.com/openai/CLIP/blob/main/clip/model.py
     """
 
     def __init__(
@@ -53,20 +50,17 @@ class AttentionPool2d(nn.Module):
 
 
 class TimestepBlock(nn.Module):
-    """
-    Any module where forward() takes timestep embeddings as a second argument.
+    """Any module where forward() takes timestep embeddings as a second argument.
     """
 
     @abstractmethod
     def forward(self, x, emb):
-        """
-        Apply the module to `x` given `emb` timestep embeddings.
+        """Apply the module to `x` given `emb` timestep embeddings.
         """
 
 
 class TimestepEmbedSequential(nn.Sequential, TimestepBlock):
-    """
-    A sequential module that passes timestep embeddings to the children that
+    """A sequential module that passes timestep embeddings to the children that
     support it as an extra input.
     """
 
@@ -80,8 +74,7 @@ class TimestepEmbedSequential(nn.Sequential, TimestepBlock):
 
 
 class Upsample(nn.Module):
-    """
-    An upsampling layer with an optional convolution.
+    """An upsampling layer with an optional convolution.
 
     :param channels: channels in the inputs and outputs.
     :param use_conv: a bool determining if a convolution is applied.
@@ -112,8 +105,7 @@ class Upsample(nn.Module):
 
 
 class Downsample(nn.Module):
-    """
-    A downsampling layer with an optional convolution.
+    """A downsampling layer with an optional convolution.
 
     :param channels: channels in the inputs and outputs.
     :param use_conv: a bool determining if a convolution is applied.
@@ -142,8 +134,7 @@ class Downsample(nn.Module):
 
 
 class ResBlock(TimestepBlock):
-    """
-    A residual block that can optionally change the number of channels.
+    """A residual block that can optionally change the number of channels.
 
     :param channels: the number of input channels.
     :param emb_channels: the number of timestep embedding channels.
@@ -223,8 +214,7 @@ class ResBlock(TimestepBlock):
             self.skip_connection = conv_nd(dims, channels, self.out_channels, 1)
 
     def forward(self, x, emb):
-        """
-        Apply the block to a Tensor, conditioned on a timestep embedding.
+        """Apply the block to a Tensor, conditioned on a timestep embedding.
 
         :param x: an [N x C x ...] Tensor of features.
         :param emb: an [N x emb_channels] Tensor of timestep embeddings.
@@ -258,8 +248,7 @@ class ResBlock(TimestepBlock):
 
 
 class AttentionBlock(nn.Module):
-    """
-    An attention block that allows spatial positions to attend to each other.
+    """An attention block that allows spatial positions to attend to each other.
 
     Originally ported from here, but adapted to the N-d case.
     https://github.com/hojonathanho/diffusion/blob/1e0dceb3b3495bbe19116a5e1b3596cd0706c543/diffusion_tf/models/unet.py#L66.
@@ -307,8 +296,7 @@ class AttentionBlock(nn.Module):
 
 
 def count_flops_attn(model, _x, y):
-    """
-    A counter for the `thop` package to count the operations in an
+    """A counter for the `thop` package to count the operations in an
     attention operation.
     Meant to be used like:
         macs, params = thop.profile(
@@ -327,8 +315,7 @@ def count_flops_attn(model, _x, y):
 
 
 class QKVAttentionLegacy(nn.Module):
-    """
-    A module which performs QKV attention. Matches legacy QKVAttention + input/ouput heads shaping
+    """A module which performs QKV attention. Matches legacy QKVAttention + input/ouput heads shaping
     """
 
     def __init__(self, n_heads):
@@ -336,8 +323,7 @@ class QKVAttentionLegacy(nn.Module):
         self.n_heads = n_heads
 
     def forward(self, qkv):
-        """
-        Apply QKV attention.
+        """Apply QKV attention.
 
         :param qkv: an [N x (H * 3 * C) x T] tensor of Qs, Ks, and Vs.
         :return: an [N x (H * C) x T] tensor after attention.
@@ -360,8 +346,7 @@ class QKVAttentionLegacy(nn.Module):
 
 
 class QKVAttention(nn.Module):
-    """
-    A module which performs QKV attention and splits in a different order.
+    """A module which performs QKV attention and splits in a different order.
     """
 
     def __init__(self, n_heads):
@@ -369,8 +354,7 @@ class QKVAttention(nn.Module):
         self.n_heads = n_heads
 
     def forward(self, qkv):
-        """
-        Apply QKV attention.
+        """Apply QKV attention.
 
         :param qkv: an [N x (3 * H * C) x T] tensor of Qs, Ks, and Vs.
         :return: an [N x (H * C) x T] tensor after attention.
@@ -395,8 +379,7 @@ class QKVAttention(nn.Module):
 
 
 class UNetModel(nn.Module):
-    """
-    The full UNet model with attention and timestep embedding.
+    """The full UNet model with attention and timestep embedding.
 
     :param in_channels: channels in the input Tensor.
     :param model_channels: base channel count for the model.
@@ -619,24 +602,21 @@ class UNetModel(nn.Module):
         )
 
     def convert_to_fp16(self):
-        """
-        Convert the torso of the model to float16.
+        """Convert the torso of the model to float16.
         """
         self.input_blocks.apply(convert_module_to_f16)
         self.middle_block.apply(convert_module_to_f16)
         self.output_blocks.apply(convert_module_to_f16)
 
     def convert_to_fp32(self):
-        """
-        Convert the torso of the model to float32.
+        """Convert the torso of the model to float32.
         """
         self.input_blocks.apply(convert_module_to_f32)
         self.middle_block.apply(convert_module_to_f32)
         self.output_blocks.apply(convert_module_to_f32)
 
     def forward(self, x, timesteps, y=None):
-        """
-        Apply the model to an input batch.
+        """Apply the model to an input batch.
 
         :param x: an [N x C x ...] Tensor of inputs.
         :param timesteps: a 1-D batch of timesteps.
@@ -670,8 +650,7 @@ class UNetModel(nn.Module):
 
 
 class SuperResModel(UNetModel):
-    """
-    A UNetModel that performs super-resolution.
+    """A UNetModel that performs super-resolution.
 
     Expects an extra kwarg `low_res` to condition on a low-resolution image.
     """
@@ -687,8 +666,7 @@ class SuperResModel(UNetModel):
 
 
 class EncoderUNetModel(nn.Module):
-    """
-    The half UNet model with attention and timestep embedding.
+    """The half UNet model with attention and timestep embedding.
 
     For usage, see UNet.
     """
@@ -867,22 +845,19 @@ class EncoderUNetModel(nn.Module):
             raise NotImplementedError(f"Unexpected {pool} pooling")
 
     def convert_to_fp16(self):
-        """
-        Convert the torso of the model to float16.
+        """Convert the torso of the model to float16.
         """
         self.input_blocks.apply(convert_module_to_f16)
         self.middle_block.apply(convert_module_to_f16)
 
     def convert_to_fp32(self):
-        """
-        Convert the torso of the model to float32.
+        """Convert the torso of the model to float32.
         """
         self.input_blocks.apply(convert_module_to_f32)
         self.middle_block.apply(convert_module_to_f32)
 
     def forward(self, x, timesteps):
-        """
-        Apply the model to an input batch.
+        """Apply the model to an input batch.
 
         :param x: an [N x C x ...] Tensor of inputs.
         :param timesteps: a 1-D batch of timesteps.
@@ -901,6 +876,5 @@ class EncoderUNetModel(nn.Module):
             results.append(h.type(x.dtype).mean(dim=(2, 3)))
             h = th.cat(results, axis=-1)
             return self.out(h)
-        else:
-            h = h.type(x.dtype)
-            return self.out(h)
+        h = h.type(x.dtype)
+        return self.out(h)

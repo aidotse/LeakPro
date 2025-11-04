@@ -1,5 +1,4 @@
-"""
-Helpers for distributed training.
+"""Helpers for distributed training.
 """
 
 import io
@@ -7,9 +6,9 @@ import os
 import socket
 
 import blobfile as bf
-from mpi4py import MPI
 import torch as th
 import torch.distributed as dist
+from mpi4py import MPI
 
 # Change this to reflect your cluster layout.
 # The GPU for a given rank is (rank % GPUS_PER_NODE).
@@ -20,8 +19,7 @@ SETUP_RETRY_COUNT = 3
 
 
 def setup_dist():
-    """
-    Setup a distributed process group.
+    """Setup a distributed process group.
     """
     if dist.is_initialized():
         return
@@ -33,7 +31,7 @@ def setup_dist():
     if backend == "gloo":
         hostname = "localhost"
     else:
-        hostname = socket.gethostbyname(socket.getfqdn().split('.')[0])  # LDS-10.lan
+        hostname = socket.gethostbyname(socket.getfqdn().split(".")[0])  # LDS-10.lan
     os.environ["MASTER_ADDR"] = comm.bcast(hostname, root=0)
     os.environ["RANK"] = str(comm.rank)
     os.environ["WORLD_SIZE"] = str(comm.size)
@@ -44,8 +42,7 @@ def setup_dist():
 
 
 def dev():
-    """
-    Get the device to use for torch.distributed.
+    """Get the device to use for torch.distributed.
     """
     if th.cuda.is_available():
         return th.device(f"cuda:{MPI.COMM_WORLD.Get_rank() % GPUS_PER_NODE}")
@@ -54,8 +51,7 @@ def dev():
 
 
 def load_state_dict(path, **kwargs):
-    """
-    Load a PyTorch file without redundant fetches across MPI ranks.
+    """Load a PyTorch file without redundant fetches across MPI ranks.
     """
     chunk_size = 2 ** 30  # MPI has a relatively small size limit
     if MPI.COMM_WORLD.Get_rank() == 0:
@@ -77,8 +73,7 @@ def load_state_dict(path, **kwargs):
 
 
 def sync_params(params):
-    """
-    Synchronize a sequence of Tensors across ranks from rank 0.
+    """Synchronize a sequence of Tensors across ranks from rank 0.
     """
     for p in params:
         with th.no_grad():

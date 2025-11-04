@@ -6,23 +6,20 @@ import torch.distributed as dist
 
 
 def create_named_schedule_sampler(name, diffusion):
-    """
-    Create a ScheduleSampler from a library of pre-defined samplers.
+    """Create a ScheduleSampler from a library of pre-defined samplers.
 
     :param name: the name of the sampler.
     :param diffusion: the diffusion object to sample for.
     """
     if name == "uniform":
         return UniformSampler(diffusion)
-    elif name == "loss-second-moment":
+    if name == "loss-second-moment":
         return LossSecondMomentResampler(diffusion)
-    else:
-        raise NotImplementedError(f"unknown schedule sampler: {name}")
+    raise NotImplementedError(f"unknown schedule sampler: {name}")
 
 
 class ScheduleSampler(ABC):
-    """
-    A distribution over timesteps in the diffusion process, intended to reduce
+    """A distribution over timesteps in the diffusion process, intended to reduce
     variance of the objective.
 
     By default, samplers perform unbiased importance sampling, in which the
@@ -33,15 +30,13 @@ class ScheduleSampler(ABC):
 
     @abstractmethod
     def weights(self):
-        """
-        Get a numpy array of weights, one per diffusion step.
+        """Get a numpy array of weights, one per diffusion step.
 
         The weights needn't be normalized, but must be positive.
         """
 
     def sample(self, batch_size, device):
-        """
-        Importance-sample timesteps for a batch.
+        """Importance-sample timesteps for a batch.
 
         :param batch_size: the number of timesteps.
         :param device: the torch device to save to.
@@ -69,8 +64,7 @@ class UniformSampler(ScheduleSampler):
 
 class LossAwareSampler(ScheduleSampler):
     def update_with_local_losses(self, local_ts, local_losses):
-        """
-        Update the reweighting using losses from a model.
+        """Update the reweighting using losses from a model.
 
         Call this method from each rank with a batch of timesteps and the
         corresponding losses for each of those timesteps.
@@ -105,8 +99,7 @@ class LossAwareSampler(ScheduleSampler):
 
     @abstractmethod
     def update_with_all_losses(self, ts, losses):
-        """
-        Update the reweighting using losses from a model.
+        """Update the reweighting using losses from a model.
 
         Sub-classes should override this method to update the reweighting
         using losses from the model.

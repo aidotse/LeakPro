@@ -1,38 +1,26 @@
-from fileinput import filename
-import pdb
 import copy
 import functools
-import os
-import shutil
-import queue
 import io
-
-import numpy as np
-import math
-import kornia
-import matplotlib.pyplot as plt
-
-from PIL import Image
+import os
 
 import blobfile as bf
+import kornia
+import matplotlib.pyplot as plt
+import numpy as np
 import torch as th
 import torch.distributed as dist
-import torch.nn.functional as F
+from PIL import Image
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.optim import AdamW
-from torch.utils.data import TensorDataset, DataLoader
-
-
-from .losses import topk_loss, p_reg_loss
-
+from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
 from . import dist_util, logger
+from .dpm_solver_pytorch import DPM_Solver, NoiseScheduleVP, model_wrapper
 from .fp16_util import MixedPrecisionTrainer
+from .losses import p_reg_loss, topk_loss
 from .nn import update_ema
 from .resample import LossAwareSampler, UniformSampler
-
-from .dpm_solver_pytorch import NoiseScheduleVP, model_wrapper, DPM_Solver
 
 # For ImageNet experiments, this was a good default value.
 # We found that the lg_loss_scale quickly climbed to
@@ -51,6 +39,7 @@ class PreTrain:
         schedule_sampler=None,
     ):
         """Pre-train the diffusion model.
+
         Args:
             model: The diffusion model to be pre-trained.
             diffusion: The diffusion process.
@@ -58,8 +47,10 @@ class PreTrain:
             args: The training arguments.
             save_path: The path to save checkpoints.
             schedule_sampler: The schedule sampler for training.
+
         Returns:
             None
+
         """
         dist_util.setup_dist()
         self.model = model.to(dist_util.dev())
@@ -95,7 +86,7 @@ class PreTrain:
         self.step = 0
         self.resume_step = 0
         self.global_batch = self.batch_size * dist.get_world_size()
-        
+
 
         self.sync_cuda = False # th.cuda.is_available()
 
@@ -187,7 +178,7 @@ class PreTrain:
             )
             self.opt.load_state_dict(state_dict)
 
-    def run_loop(self):
+    def run(self):
         while (
             not self.lr_anneal_steps
             or self.step + self.resume_step < self.lr_anneal_steps
@@ -198,7 +189,7 @@ class PreTrain:
                 break
             batch, cond = next(self.data)
             if np.random.rand() < 0.1:
-                cond['y'] = th.ones_like(cond['y']) * (self.model.num_classes - 1)
+                cond["y"] = th.ones_like(cond["y"]) * (self.model.num_classes - 1)
             self.run_step(batch, cond)
             if self.step % self.log_interval == 0:
                 logger.dumpkvs()
@@ -313,8 +304,9 @@ class FineTune:
         schedule_sampler=None,
     ):
         """Fine-tune the diffusion model with classifier guidance.
+
         Args:
-        -----
+        ----
             self: Self
             args: The arguments for fine-tuning.
             target (Module): The target model to guide the diffusion model.
@@ -323,8 +315,10 @@ class FineTune:
             p_reg (Tensor): The regularization tensor.
             save_path: The path to save checkpoints.
             schedule_sampler: The schedule sampler for training.
+
         Returns:
             None
+
         """
 
         dist_util.setup_dist()
@@ -352,12 +346,12 @@ class FineTune:
 
         self.mp_trainer_cls = MixedPrecisionTrainer(
             model=self.model,
-            layers=[['label_emb.weight', 
-                     'middle_block.0.in_layers.2', 
-                     'middle_block.0.out_layers.3', 
-                     'middle_block.2.in_layers.2', 
-                     'middle_block.2.out_layers.3', 
-                     'middle_block.1.proj'], []],
+            layers=[["label_emb.weight",
+                     "middle_block.0.in_layers.2",
+                     "middle_block.0.out_layers.3",
+                     "middle_block.2.in_layers.2",
+                     "middle_block.2.out_layers.3",
+                     "middle_block.1.proj"], []],
             use_fp16=self.use_fp16,
             fp16_scale_growth=self.fp16_scale_growth,
         )
@@ -387,7 +381,7 @@ class FineTune:
         # Configuration for dpm_solver
         b0, bT, timesteps = 1e-4, 2e-2, 1000
         betas = th.tensor(np.linspace(b0, bT, timesteps), dtype=float)
-        self.noise_schedule = NoiseScheduleVP(schedule='discrete', betas=betas)
+        self.noise_schedule = NoiseScheduleVP(schedule="discrete", betas=betas)
 
         # Load for p_reg loss
         self.p_reg = p_reg
@@ -398,7 +392,7 @@ class FineTune:
             kornia.augmentation.RandomHorizontalFlip(),
             kornia.augmentation.RandomRotation(5),
         )
-        
+
     def _load_and_sync_parameters(self):
         if resume_checkpoint := find_resume_checkpoint() or self.resume_checkpoint:
             if dist.get_rank() == 0:
@@ -411,23 +405,23 @@ class FineTune:
                 )
         dist_util.sync_params(self.model.parameters())
 
-    def run_cls_only(self, guidance_scale=3.0, aug_times=2):
+    def run(self, guidance_scale=3.0, aug_times=2):
 
         acc, acc_mean, best_mean_acc, iter = [], 0.0, 0.0, 0
         labels = th.tensor(np.arange(0, 300)).to(dist_util.dev())
         label_dataset = TensorDataset(labels)
 
-        while (acc_mean < self.threshold): 
+        while (acc_mean < self.threshold):
 
             # ME
             loss_agg = 0.0
             loss1_agg = 0.0
             loss2_agg = 0.0
-    
+
             bar = tqdm(DataLoader(dataset=label_dataset, batch_size=self.batch_size, shuffle=True))
             for classes in bar:
                 bs = classes[0].shape[0]
-                bar.set_description(f'Epoch {iter}')
+                bar.set_description(f"Epoch {iter}")
                 self.mp_trainer_cls.zero_grad()
                 model_fn = model_wrapper(
                     self.model,
@@ -445,7 +439,7 @@ class FineTune:
                     steps=10,
                     order=2,
                     method="multistep",
-                    skip_type='time_uniform',
+                    skip_type="time_uniform",
                     return_pred_x0=True)
                 samples = th.cat(x0_pred_list)
 
@@ -465,8 +459,8 @@ class FineTune:
                 self.mp_trainer_cls.optimize(self.opt_cls)
 
                 acc.append(th.eq(th.topk(logits[-bs * aug_times:], k=1)[1], classes[0].repeat(aug_times).view(-1,1)).float().mean().item())
-                bar.set_postfix({'Loss1': loss1.item(), 'Loss2': loss2.item(), 'Loss': loss.item()})
-                
+                bar.set_postfix({"Loss1": loss1.item(), "Loss2": loss2.item(), "Loss": loss.item()})
+
                 loss_agg += loss.item()
                 loss1_agg += loss1.item()
                 loss2_agg += loss2.item()
@@ -485,7 +479,7 @@ class FineTune:
                 if iter >= self.epochs:
                     logger.log(f"Training completed with best mean acc: {self.best_mean_acc:.2%}")
                     break
-    
+
     def save(self):
         filename = f"{self.save_name}.pt"
         with bf.BlobFile(bf.join(self.save_path, filename), "wb") as f:
@@ -495,86 +489,21 @@ class FineTune:
 
 def generator_from_dataloader(dataloader: DataLoader):
     """Create a generator that yields batches from a DataLoader indefinitely.
+
     Args:
-    -----
+    ----
         dataloader (DataLoader): The DataLoader to yield batches from.
+
     Returns:
         generator: A generator that yields batches from the DataLoader.
+
     """
     while True:
         for batch in dataloader:
             yield batch
 
-# def top_n(
-#         model,
-#         num_classes,
-#         data_name,
-#         data_loader,
-#         top_n=30,
-#         save_path='data/reclassified_public_data'
-#     ):
-#     """
-#     Top-n selection strategy.
-#     :param args: top-n, save_path
-#     :param T: target model
-#     :param data_loader: dataloader of
-#     :return:
-#     """
-#     print("=> start inference ...")
-#     all_images_prob, all_images_path = [], []
-#     with th.no_grad():
-#         for (images, img_path) in tqdm(data_loader):
-#             bs = images.shape[0]
-#             images = images.cuda()
-#             logits = model(images)[-1]
-#             prob = F.softmax(logits, dim=1)  # (bs, 1000)
-#             all_images_prob.append(prob.detach().cpu())
-#             # all_images_path += img_path
-#             all_images_path.extend(img_path)
-#         all_images_prob = th.cat(all_images_prob)
-
-#     print("=> start reclassify ...")
-#     save_path = os.path.join(save_path, data_name, model.__class__.__name__ + "_top" + str(top_n))
-#     print(" top_n: ", top_n)
-#     print(" save_path: ", save_path)
-#     # top-n selection
-#     for class_idx in tqdm(range(num_classes)):
-#         bs = all_images_prob.shape[0]
-#         ccc = 0
-#         # maintain a priority queue
-#         q = queue.PriorityQueue()
-#         class_idx_prob = all_images_prob[:, class_idx]
-
-#         for j in range(bs):
-#             current_value = float(class_idx_prob[j])
-#             image_path = all_images_path[j]
-#             # Maintain a priority queue with confidence as the priority
-#             if q.qsize() < top_n:
-#                 q.put([current_value, image_path])
-#             else:
-#                 current_min = q.get()
-#                 if current_value < current_min[0]:
-#                     q.put(current_min)
-#                 else:
-#                     q.put([current_value, image_path])
-#         # reclassify and move the images
-#         for m in range(q.qsize()):
-#             q_value = q.get()
-#             q_prob = round(q_value[0], 4)
-#             q_image_path = q_value[1]
-
-#             ori_save_path = os.path.join(save_path, str(class_idx))
-#             if not os.path.exists(ori_save_path):
-#                 os.makedirs(ori_save_path)
-
-#             new_image_path = os.path.join(ori_save_path, str(ccc) + '_' + str(q_prob) + '.jpg')
-
-#             shutil.copy(q_image_path, new_image_path)
-#             ccc += 1
-
 def parse_resume_step_from_filename(filename):
-    """
-    Parse filenames of the form path/to/modelNNNNNN.pt, where NNNNNN is the
+    """Parse filenames of the form path/to/modelNNNNNN.pt, where NNNNNN is the
     checkpoint's number of steps.
     """
     split = filename.split("model")
@@ -629,11 +558,11 @@ def visualize(img, label):
         plt.subplot(N, N, i + 1)
         plt.imshow(arr[i])
         plt.title(label[i].item())
-        plt.axis('off')
+        plt.axis("off")
 
     # Save the Matplotlib figure to a BytesIO object
     img_bytes = io.BytesIO()
-    plt.savefig(img_bytes, format='png', bbox_inches='tight', pad_inches=0)
+    plt.savefig(img_bytes, format="png", bbox_inches="tight", pad_inches=0)
     plt.close()
 
     # Convert the BytesIO object to a PIL Image
@@ -641,15 +570,16 @@ def visualize(img, label):
 
     return img_pil
 
-def show_images_side_by_side(image1, image2, title1='Reconstructed Images (Diff-MI)', title2='Private Images (Ground-Truth)'):
-    """
-    Display two PIL images side by side in a Jupyter Notebook.
+def show_images_side_by_side(image1, image2, title1="Reconstructed Images (Diff-MI)", title2="Private Images (Ground-Truth)"):
+    """Display two PIL images side by side in a Jupyter Notebook.
 
-    Parameters:
+    Parameters
+    ----------
     - image1: PIL image object for the first image
     - image2: PIL image object for the second image
     - title1: Title for the first image (default is 'Image 1')
     - title2: Title for the second image (default is 'Image 2')
+
     """
     fig, axes = plt.subplots(1, 2, figsize=(10, 5))
 
@@ -660,6 +590,6 @@ def show_images_side_by_side(image1, image2, title1='Reconstructed Images (Diff-
     axes[1].set_title(title2)
 
     for ax in axes:
-        ax.axis('off')
+        ax.axis("off")
 
     plt.show()

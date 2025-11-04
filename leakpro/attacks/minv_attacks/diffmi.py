@@ -1,27 +1,33 @@
 """Implementation of the Diff-Mi attack."""
-from typing import Any, Dict, Optional
-
-import os
 import math
-import numpy as np
-import torch
+import os
+from typing import Any, Dict
+
 import kornia.augmentation as K
-from torch.nn import functional as F  # noqa: N812
+import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from leakpro.attacks.minv_attacks.abstract_minv import AbstractMINV
+from leakpro.attacks.utils.diff_mi.attack_utils import (
+    Iterative_Image_Reconstruction,
+    calc_acc,
+    calc_acc_std,
+    calc_knn,
+    get_PGD,
+    save_tensor_to_image,
+)
+from leakpro.attacks.utils.diff_mi.setup import DiffMiConfig, extract_features, get_p_reg, top_n_pseudo_label_dataset
 from leakpro.attacks.utils.diffusion_handler import DiffMiHandler
 from leakpro.input_handler.minv_handler import MINVHandler
-from leakpro.input_handler.modality_extensions.image_metrics import ImageMetrics
-# from leakpro.reporting.minva_result import MinvResult
-from leakpro.metrics.attack_result import MinvResult
+from leakpro.reporting.minva_result import MinvResult
+
+# from leakpro.metrics.attack_result import MinvResult
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
-
 from leakpro.utils.save_load import hash_config
-from leakpro.attacks.utils.diff_mi.setup import DiffMiConfig, get_p_reg, top_n_pseudo_label_dataset, extract_features
-from leakpro.attacks.utils.diff_mi.attack_utils import calc_knn, calc_acc, calc_acc_std, get_PGD, Iterative_Image_Reconstruction, save_tensor_to_image, calc_pytorch_fid
+
+# calc_pytorch_fid
 
 class AttackDiffMi(AbstractMINV):
     """Class that implements the DiffMi attack."""
@@ -46,7 +52,7 @@ class AttackDiffMi(AbstractMINV):
 
         # Get hashes of the configurations. Make sure to do this before setting up paths and other.
         self.hashes = self._hash_configs()
-        
+
         # Alter save_names to include hashes
         if self.config.hash_identifiable:
             logger.info(f"Using pretrain save_name: {self.hashes['pretrain']}")
@@ -73,8 +79,8 @@ class AttackDiffMi(AbstractMINV):
         hashes: Dict[str, Any] = {}
         configs = self.config.model_dump()
 
-        hashes['attackhash'] = hash_config(configs)
-        logger.info(f"Attack configuration hashed")
+        hashes["attackhash"] = hash_config(configs)
+        logger.info("Attack configuration hashed")
         for k in configs.keys():
             if isinstance(configs[k], dict):
                 if k in self._configs_:
@@ -82,18 +88,15 @@ class AttackDiffMi(AbstractMINV):
                     hashes[f"{k}"] = config_hash
                     logger.info(f"{k} configuration hashed")
         if self.config.hash_identifiable:
-            logger.info(f"Attack is hash identifiable.")
+            logger.info("Attack is hash identifiable.")
 
         return hashes
 
     def _validate_configs(self:Self, configs) -> None:
         """Validate the configuration parameters."""
         for config in self._configs_:
-            if config not in configs.keys():
+            if config not in configs.keys() or not isinstance(configs[config], dict):
                 configs[config] = {}
-            else:
-                if not isinstance(configs[config], dict):
-                    configs[config] = {}
         return configs
 
     def _setup_paths_(self:Self) -> None:
@@ -106,7 +109,7 @@ class AttackDiffMi(AbstractMINV):
                 os.makedirs(self.storage_path)
                 logger.info(f"Created storage path at {self.storage_path} for diffusion models")
         else:
-            self.storage_path = f"./leakpro_output/attack_objects/diffusion_models"
+            self.storage_path = "./leakpro_output/attack_objects/diffusion_models"
 
     def description(self:Self) -> dict:
         """Return the description of the attack."""
@@ -159,7 +162,7 @@ class AttackDiffMi(AbstractMINV):
         logger.info("Pseudo labeled dataset created.")
 
         pseudo_dataloader = DataLoader(pseudo_dataset, batch_size=self.config.pretrain.batch_size, shuffle=True)
-        logger.info(f"Pseudo labeled dataloader created.")
+        logger.info("Pseudo labeled dataloader created.")
 
         self.diff_handler.pseudo_dataloader = pseudo_dataloader
         logger.info("Pseudo labeled dataloader set in DiffMiHandler.")
@@ -195,7 +198,7 @@ class AttackDiffMi(AbstractMINV):
 
             img_translated = pgd_model(recon_imgs, target=classes, **self.config.diffmiattack.pgdconfig.__dict__)[-1].clamp(0,1)
             _, _, idx = calc_acc(self.evaluation_model, K.Resize((input_dim_x, input_dim_y))(img_translated), classes, with_success=True)
-    
+
             recon_list.append(img_translated)
             success_img_list.append(img_translated[idx])
             success_label_list.append(classes[idx])
@@ -207,24 +210,24 @@ class AttackDiffMi(AbstractMINV):
         logger.info(f"Final Top1: {acc1:.2%} ± {var1:.2%}, Top5: {acc5:.2%} ± {var5:.2%}")
 
         # Save Reconstructed Images
-        recon_paths = save_tensor_to_image(recon_list, labels, f'./{self.output_dir}/results/Diff-Mi/all_imgs')
-        success_img_paths = save_tensor_to_image(success_img_list, success_label_list, f'./{self.output_dir}/results/Diff-Mi/success_imgs')
-        print(f'Saved {self.config.diffmiattack.repeat_N}x{self.config.diffmiattack.label_num} generated images.')
+        recon_paths = save_tensor_to_image(recon_list, labels, f"./{self.output_dir}/results/Diff-Mi/all_imgs")
+        success_img_paths = save_tensor_to_image(success_img_list, success_label_list, f"./{self.output_dir}/results/Diff-Mi/success_imgs")
+        print(f"Saved {self.config.diffmiattack.repeat_N}x{self.config.diffmiattack.label_num} generated images.")
 
         if self.config.diffmiattack.cal_knn:
             knn, knn_arr = calc_knn(success_img_list, success_label_list,
                      private_feats=self.private_features,
                      private_idents=self.private_idents,
                      evaluation_model=self.evaluation_model, device=self.device)
-    
+
         # if self.config.diffmiattack.cal_fid:
         #     calc_pytorch_fid(recon_paths)
 
 
         return MinvResult.from_metrics(
             result_name="Diff-Mi Attack Result",
-            result_id=self.hashes['attackhash'][:8],
-            config=self.config.model_dump(),
+            result_id=self.hashes["attackhash"][:8],
+            config=self.config,
             metrics={
                 "top1_accuracy": acc1,
                 "top5_accuracy": acc5,

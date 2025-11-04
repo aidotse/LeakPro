@@ -1,28 +1,29 @@
 """Utility functions for the Diff-MI attack."""
 
-import os
-import torch
-import torch.nn.functional as F
-import kornia.augmentation as K
 import copy
 import math
-import numpy as np
-import torchvision
-
-
-from torch.utils.data import TensorDataset, DataLoader
-from leakpro.utils.logger import logger
-from .diffusion import GaussianDiffusion, InferenceModel
-from .losses import topk_loss, p_reg_loss
-
-import torchvision.transforms as augmentation
-from tqdm import tqdm
+import os
 import statistics
 
+import kornia.augmentation as K
+import numpy as np
+import torch
+import torch.nn.functional as F
+import torchvision
+import torchvision.transforms as augmentation
 from robustness import model_utils
+from torch.utils.data import TensorDataset
+from tqdm import tqdm
 
-def Iterative_Image_Reconstruction(args, diff_net, classifier, classes, p_reg, iter=None, batch_num=None, device='cuda'):
+from leakpro.utils.logger import logger
+
+from .diffusion import GaussianDiffusion, InferenceModel
+from .losses import p_reg_loss, topk_loss
+
+
+def Iterative_Image_Reconstruction(args, diff_net, classifier, classes, p_reg, iter=None, batch_num=None, device="cuda"):
     """Perform iterative image reconstruction using diffusion model and classifier guidance.
+
     Args:
     ----
         args: Argument parser containing hyperparameters.
@@ -33,12 +34,14 @@ def Iterative_Image_Reconstruction(args, diff_net, classifier, classes, p_reg, i
         iter: Current iteration number (for logging).
         batch_num: Total number of batches (for logging).
         device: Device to run the computations on.
+
     Returns:
-    --------
+    -------
         Reconstructed: Images.
+
     """
 
-    diffusion = GaussianDiffusion(T=1000, schedule='linear')
+    diffusion = GaussianDiffusion(T=1000, schedule="linear")
     model = InferenceModel(batch_size=classes.shape[0]).to(device=device)
     model.train()
 
@@ -56,7 +59,7 @@ def Iterative_Image_Reconstruction(args, diff_net, classifier, classes, p_reg, i
     )
     # print(f"--------------------- Epoch {iter}/{batch_num} ---------------------")
     bar = range(steps) #tqdm(range(steps))
-    for i, _ in enumerate(bar): 
+    for i, _ in enumerate(bar):
 
         # bar.set_description(f'Epoch {iter}/{batch_num}')
 
@@ -123,12 +126,15 @@ def Iterative_Image_Reconstruction(args, diff_net, classifier, classes, p_reg, i
 
 def get_PGD(model):
     """Set the model to use PGD adversarial training.
+
     Args:
     ----
         model: Pre-trained classifier model.
+
     Returns:
-    --------
+    -------
         PGD_model: Model set up for PGD adversarial training.
+
     """
     logger.info("Making PGD version of model for the Diff-MI attack.")
     class mean_and_std():
@@ -138,7 +144,7 @@ def get_PGD(model):
 
     # Create a copy of the model to avoid modifying the original
     model_copy = copy.deepcopy(model)
-    
+
     # Set to False to return only the output logits
     model_copy.return_feature = False
 
@@ -147,9 +153,9 @@ def get_PGD(model):
 
     return PGD_model
 
-def calc_acc(classifier, imgs, labels, bs=64, anno='', with_success=False, enable_print=True):
-    """
-    Calculate top-1 and top-5 accuracy of the classifier on the given images and labels.
+def calc_acc(classifier, imgs, labels, bs=64, anno="", with_success=False, enable_print=True):
+    """Calculate top-1 and top-5 accuracy of the classifier on the given images and labels.
+
     Args:
     ----
         classifier: Pre-trained classifier model.
@@ -159,11 +165,13 @@ def calc_acc(classifier, imgs, labels, bs=64, anno='', with_success=False, enabl
         anno: Annotation string for logging.
         with_success: Whether to return indices of successful predictions.
         enable_print: Whether to print the accuracy results.
+
     Returns:
-    --------
+    -------
         top1_count: Number of correct top-1 predictions.
         top5_count: Number of correct top-5 predictions.
         success_idx (optional): Indices of successful predictions if with_success is True.
+
     """
 
     output, img_dataset = [], TensorDataset(imgs)
@@ -173,17 +181,16 @@ def calc_acc(classifier, imgs, labels, bs=64, anno='', with_success=False, enabl
     top1_count = torch.eq(torch.topk(output, k=1)[1], labels.view(-1,1)).float()
     top5_count = torch.eq(torch.topk(output, k=5)[1], labels.view(-1,1)).float()
     if enable_print:
-        print(f'===> top1_acc: {top1_count.mean().item():.2%}, top5_acc: {5*top5_count.mean().item():.2%} {anno}')
+        print(f"===> top1_acc: {top1_count.mean().item():.2%}, top5_acc: {5*top5_count.mean().item():.2%} {anno}")
     if with_success:
         success_idx = torch.nonzero((output.max(1)[1] == labels).int()).squeeze(1)
         return top1_count.sum().item(), top5_count.sum().item(), success_idx
-    else:
-        return top1_count.sum().item(), top5_count.sum().item()
+    return top1_count.sum().item(), top5_count.sum().item()
 
 
 def calc_acc_std(imgs, labels, cls, label_num, dims=(64,64)):
-    """
-    Calculate top-1 and top-5 accuracy and their standard deviations over groups of images.
+    """Calculate top-1 and top-5 accuracy and their standard deviations over groups of images.
+
     Args:
     ----
         imgs: Input images (Tensor).
@@ -191,12 +198,14 @@ def calc_acc_std(imgs, labels, cls, label_num, dims=(64,64)):
         cls: Pre-trained classifier model.
         label_num: Number of labels per group.
         dims: Dimensions to resize images for the classifier.
+
     Returns:
-    --------
+    -------
         acc1: Mean top-1 accuracy.
         acc5: Mean top-5 accuracy.
         var1: Standard deviation of top-1 accuracy.
         var5: Standard deviation of top-5 accuracy.
+
     """
 
     top1_list, top5_list = [], []
@@ -205,7 +214,7 @@ def calc_acc_std(imgs, labels, cls, label_num, dims=(64,64)):
         imgs_ = imgs[i * label_num: (i+1) * label_num]
         labels_ = labels[i * label_num: (i+1) * label_num]
         assert torch.max(labels_) - torch.min(labels_) == label_num - 1
-        top1_count, top5_count = calc_acc(cls, augmentation.Resize((dims[0], dims[1]))(imgs_), 
+        top1_count, top5_count = calc_acc(cls, augmentation.Resize((dims[0], dims[1]))(imgs_),
                                           labels_, enable_print=False)
         top1_list.append(top1_count/label_num)
         top5_list.append(top5_count/label_num)
@@ -220,20 +229,22 @@ def calc_acc_std(imgs, labels, cls, label_num, dims=(64,64)):
         var5 = statistics.stdev(top5_list)
     except Exception:
         var1, var5 = 0.0, 0.0
-        
+
     return acc1, acc5, var1, var5
 
 def save_tensor_to_image(imgs, lables, save_path):
-    """
-    Save a batch of images as individual image files organized by labels.
+    """Save a batch of images as individual image files organized by labels.
+
     Args:
     ----
         imgs: Input images (Tensor).
         lables: Corresponding labels (Tensor).
         save_path: Directory to save the images.
+
     Returns:
-    --------
+    -------
         label_paths: List of paths to the saved image files.
+
     """
     label_paths = []
     fake_dataset = TensorDataset(imgs.cpu(), lables.cpu())
@@ -245,7 +256,7 @@ def save_tensor_to_image(imgs, lables, save_path):
     return label_paths
 
 # def calc_lpips(fake_images, fake_targets, anno='', device='cuda'):
-    
+
 #     import lpips
 #     loss_fn_alex = lpips.LPIPS(net='alex').to(device) # best forward scores
 #     loss_fn_vgg = lpips.LPIPS(net='vgg').to(device) # closer to "traditional" perceptual loss, when used for optimization
@@ -285,14 +296,14 @@ def save_tensor_to_image(imgs, lables, save_path):
 #     value_v = (value_v / bs).item()
 #     print(f"LPIPS : Alex {value_a:.4f} | VGG {value_v:.4f} {anno}")
 
-def calc_knn(fake_imgs, fake_targets, 
+def calc_knn(fake_imgs, fake_targets,
              private_feats,
              private_idents,
              evaluation_model,
              batch_size=64,
-             anno='', device='cuda', dims=(64,64)):
-    """
-    Calculate KNN distance between reconstructed images and target images in feature space.
+             anno="", device="cuda", dims=(64,64)):
+    """Calculate KNN distance between reconstructed images and target images in feature space.
+
     Args:
     ----
         fake_imgs: Reconstructed images (Tensor).
@@ -304,11 +315,13 @@ def calc_knn(fake_imgs, fake_targets,
         path: Path to the directory containing target image features.
         device: Device to run the computations on.
         dims: Dimensions to resize images for the feature extractor.
+
     Returns:
-    --------
+    -------
         knn: Average Minimum KNN distance value.
         knn_arr: Array of Minimum KNN distances for each reconstructed image.
-    """ 
+
+    """
 
     # get features of reconstructed images
     infered_feats = None
@@ -330,7 +343,7 @@ def calc_knn(fake_imgs, fake_targets,
 
     # calculate knn dist
     knn_arr = np.zeros((bs,))
-    for i in tqdm(range(bs), desc='Calculating KNN Dist'):
+    for i in tqdm(range(bs), desc="Calculating KNN Dist"):
         knn = 1e8
         idx = torch.nonzero(private_idents == idens[i]).squeeze(1)
         fake_feat = feats[i].repeat(idx.shape[0], 1)

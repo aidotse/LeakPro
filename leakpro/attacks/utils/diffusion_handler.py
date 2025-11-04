@@ -5,29 +5,31 @@ import torch
 from torch.nn import Module
 
 from leakpro.attacks.utils.diff_mi.resample import create_named_schedule_sampler
+from leakpro.attacks.utils.diff_mi.script_util import create_gaussian_diffusion, create_model, diffusion_defaults, model_defaults
 from leakpro.attacks.utils.diff_mi.setup import DiffMiConfig, args_to_dict
-from leakpro.attacks.utils.diff_mi.script_util import create_model, create_gaussian_diffusion, model_defaults, diffusion_defaults
-from leakpro.attacks.utils.diff_mi.train_util import PreTrain, FineTune
-
+from leakpro.attacks.utils.diff_mi.train_util import FineTune, PreTrain
 from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.input_handler.user_imports import get_class_from_module, import_module_from_file
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
+
 
 class DiffMiHandler():
     def __init__(self: Self,
                  handler: MINVHandler = None,
                  configs: DiffMiConfig = None
         ) -> None:
-
         """Initialize the DiffMiHandler class.
+
         Args:
         ----
             handler (MINVHandler): The MINVHandler object.
             configs (DiffMiConfig): The DiffMiConfig object.
+
         Returns:
         -------
             None
+
         """
         logger.info("Initializing DiffMiHandler...")
         self.handler = handler
@@ -35,17 +37,20 @@ class DiffMiHandler():
         self.configs = configs
         self._setup_diffusion_configs(self.configs)
 
-        logger.info(f"Initialized DiffMiHandler")
+        logger.info("Initialized DiffMiHandler")
 
     def _setup_diffusion_configs(self: Self, configs: DiffMiConfig) -> None:
         """Load diffusion-specific configurations (e.g., diffusion path, params).
+
         Args:
         ----
             self: Self
             configs: DiffMiConfig
+
         Returns:
         -------
             None
+
         """
         logger.info("Setting up diffusion configurations")
         self.diffusion_path = configs.diffusion.module_path
@@ -56,13 +61,16 @@ class DiffMiHandler():
 
     def _init_model(self: Self, _configs_: DiffMiConfig) -> None:
         """Initialize the diffusion model.
+
         Args:
         ----
             self: Self
             _configs_: DiffMiConfig
+
         Returns:
         -------
             None
+
         """
         logger.info("Initializing diffusion model")
 
@@ -87,11 +95,11 @@ class DiffMiHandler():
                 **gaussian_diffusion_params
             )
         else:
-            logger.warning(f"Diffusion path or class is not set or is invalid.")
+            logger.warning("Diffusion path or class is not set or is invalid.")
             logger.info(f"Diffusion path: {self.diffusion_path}")
             logger.info(f"Diffusion class: {self.diffusion_model_class}")
             logger.info(f"Gaussian diffusion class: {self.gaussian_diffusion_class}")
-            logger.warning(f"Using defaults from Diff-MI instead, UNet and SpacedDiffusion model.")
+            logger.warning("Using defaults from Diff-MI instead, UNet and SpacedDiffusion model.")
             self.diffusion_model = create_model(
                 **diffusion_model_params
             )
@@ -101,18 +109,21 @@ class DiffMiHandler():
 
     def get_finetuned(self) -> Module:
         """Return the fine-tuned diffusion model.
+
         Args:
         ----
             self: Self
+
         Returns:
         -------
             Module: The fine-tuned diffusion model.
+
         """
-        # Re-initialize model with fine-tuning configs  
+        # Re-initialize model with fine-tuning configs
         self._init_model(_configs_ = self.configs.finetune)
 
         fine_tune_path = f"{self.configs.save_path}/{self.configs.finetune.save_name}.pt"
-        print(fine_tune_path)
+
         if os.path.exists(fine_tune_path):
 
             logger.info(f"Loading fine-tuned diffusion model from {fine_tune_path}")
@@ -128,18 +139,21 @@ class DiffMiHandler():
 
     def get_pretrained(self) -> Module:
         """Return the pre-trained diffusion model.
+
         Args:
         ----
             self: Self
+
         Returns:
         -------
             Module: The pre-trained diffusion model.
+
         """
         # Init pretrain model
         self._init_model(_configs_ = self.configs.pretrain)
 
         pre_trained_path = f"{self.configs.save_path}/{self.configs.pretrain.save_name}.pt"
-        print(pre_trained_path)
+
         if os.path.exists(pre_trained_path):
             logger.info(f"Loading pre-trained diffusion model from {pre_trained_path}")
             self.diffusion_model.load_state_dict(torch.load(pre_trained_path))
@@ -160,17 +174,20 @@ class DiffMiHandler():
             args=self.configs.pretrain,
             save_path=self.configs.save_path,
             schedule_sampler=schedule_sampler,
-        ).run_loop()
+        ).run()
 
 
     def fine_tune(self) -> None:
         """Fine-tune the diffusion model.
+
         Args:
         ----
             self: Self
+
         Returns:
         -------
             None
+
         """
         logger.info("Fine-tuning diffusion model...")
         # Diffusion-specific fine-tuning logic would be implemented here.
@@ -183,7 +200,7 @@ class DiffMiHandler():
             p_reg=self.p_reg,
             save_path=self.configs.save_path,
             schedule_sampler=schedule_sampler,
-        ).run_cls_only()
+        ).run()
 
     def _import_model_from_path(self:Self, module_path:str, model_class:str)->None:
         """Import the model from the given path.
@@ -206,23 +223,28 @@ class DiffMiHandler():
                                 label: int = None,
                                 ) -> tuple:
         """Samples data from a given diffusion model.
+
         Args:
             batch_size (int): The number of samples to generate.
             label (int): The optional class label to generate samples for, otherwise random.
 
         Returns:
             tuple: A tuple containing the generated samples, the class labels.
+
         """
         pass
 
     def save_diffusion_model(self, diffusion_model: Module, path: str) -> None:
         """Save the diffusion model.
+
         Args:
         ----
             diffusion_model (Module): The diffusion model to save.
             path (str): The path to save the model.
+
         Returns:
         -------
             None
+
         """
         torch.save(diffusion_model.state_dict(), path)

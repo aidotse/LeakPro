@@ -48,7 +48,7 @@ audit:  # Configurations for auditing
       diffmiattack:
         label_num: 300
         repeat_N: 5
-        batch_size: 16
+        batch_size: 18
       diffusion:
         # module_path: "./utils/diffusion.py"
         # model_class: "UNet"

@@ -1,17 +1,15 @@
-"""
-Helpers for various likelihood-based losses. These are ported from the original
+"""Helpers for various likelihood-based losses. These are ported from the original
 Ho et al. diffusion models codebase:
 https://github.com/hojonathanho/diffusion/blob/1e0dceb3b3495bbe19116a5e1b3596cd0706c543/diffusion_tf/utils.py
 """
 
 import numpy as np
-
 import torch as th
 import torch.nn.functional as F
 
+
 def normal_kl(mean1, logvar1, mean2, logvar2):
-    """
-    Compute the KL divergence between two gaussians.
+    """Compute the KL divergence between two gaussians.
 
     Shapes are automatically broadcasted, so batches can be compared to
     scalars, among other use cases.
@@ -40,16 +38,14 @@ def normal_kl(mean1, logvar1, mean2, logvar2):
 
 
 def approx_standard_normal_cdf(x):
-    """
-    A fast approximation of the cumulative distribution function of the
+    """A fast approximation of the cumulative distribution function of the
     standard normal.
     """
     return 0.5 * (1.0 + th.tanh(np.sqrt(2.0 / np.pi) * (x + 0.044715 * th.pow(x, 3))))
 
 
 def discretized_gaussian_log_likelihood(x, *, means, log_scales):
-    """
-    Compute the log-likelihood of a Gaussian distribution discretizing to a
+    """Compute the log-likelihood of a Gaussian distribution discretizing to a
     given image.
 
     :param x: the target images. It is assumed that this was uint8 values,
@@ -78,14 +74,17 @@ def discretized_gaussian_log_likelihood(x, *, means, log_scales):
 
 def topk_loss(out, iden, k):
     """Compute the top-k loss.
+
     Args:
-    -----
+    ----
         out (Tensor): The output logits from the model.
         iden (Tensor): The ground truth class indices.
         k (int): The number of top incorrect classes to consider.
+
     Returns:
     -------
         Tensor: The computed top-k loss.
+
     """
     assert out.shape[0] == iden.shape[0]
     iden = iden.unsqueeze(1)
@@ -94,17 +93,20 @@ def topk_loss(out, iden, k):
     tmp_out = th.scatter(out, dim=1, index=iden, src=-th.ones_like(iden) * 1000.0)
     margin = th.topk(tmp_out, k=k)[0]
     return -1 * real.mean() + margin.mean()
-    
+
 def p_reg_loss(featureT, classes, p_reg):
     """Compute the p_reg loss.
+
     Args:
-    -----
+    ----
         featureT (Tensor): The feature tensor.
         classes (Tensor): The class indices.
         p_reg (Tensor): The regularization tensor.
+
     Returns:
     -------
         Tensor: The computed p_reg loss.
+
     """
     fea_reg = p_reg[classes]
     return F.mse_loss(featureT, fea_reg)

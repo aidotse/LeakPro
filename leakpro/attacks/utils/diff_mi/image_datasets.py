@@ -1,11 +1,10 @@
-import pdb
 import math
 import random
 
-from PIL import Image
 import blobfile as bf
-from mpi4py import MPI
 import numpy as np
+from mpi4py import MPI
+from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 
 
@@ -19,8 +18,7 @@ def load_data(
     random_flip=True,
     transform=None,
 ):
-    """
-    For a dataset, create a generator over (images, kwargs) pairs.
+    """For a dataset, create a generator over (images, kwargs) pairs.
 
     Each images is an NCHW float tensor, and the kwargs dict contains zero or
     more keys, each of which map to a batched Tensor of their own.
@@ -111,7 +109,7 @@ class ImageDataset(Dataset):
             arr = arr[:, ::-1]
 
         arr = arr.astype(np.float32) / 127.5 - 1
-        
+
         out_dict = {}
         if self.local_classes is not None:
             out_dict["y"] = np.array(self.local_classes[idx], dtype=np.int64)

@@ -1,16 +1,14 @@
-"""
-Logger copied from OpenAI baselines to avoid extra RL-based dependencies:
+"""Logger copied from OpenAI baselines to avoid extra RL-based dependencies:
 https://github.com/openai/baselines/blob/ea25b9e8b234e6ee1bca43083f8f3cf974143998/baselines/logger.py
 """
 
-import os
-import sys
-import shutil
-import os.path as osp
-import json
-import time
 import datetime
+import json
+import os
+import os.path as osp
+import sys
 import tempfile
+import time
 import warnings
 from collections import defaultdict
 from contextlib import contextmanager
@@ -59,9 +57,8 @@ class HumanOutputFormat(KVWriter, SeqWriter):
         if len(key2str) == 0:
             print("WARNING: tried to write empty key-value dict")
             return
-        else:
-            keywidth = max(map(len, key2str.keys()))
-            valwidth = max(map(len, key2str.values()))
+        keywidth = max(map(len, key2str.keys()))
+        valwidth = max(map(len, key2str.values()))
 
         # Write out the data
         dashes = "-" * (keywidth + valwidth + 7)
@@ -148,8 +145,7 @@ class CSVOutputFormat(KVWriter):
 
 
 class TensorBoardOutputFormat(KVWriter):
-    """
-    Dumps key/value pairs into TensorBoard's numeric format.
+    """Dumps key/value pairs into TensorBoard's numeric format.
     """
 
     def __init__(self, dir):
@@ -159,8 +155,8 @@ class TensorBoardOutputFormat(KVWriter):
         prefix = "events"
         path = osp.join(osp.abspath(dir), prefix)
         import tensorflow as tf
-        from tensorflow.python import pywrap_tensorflow
         from tensorflow.core.util import event_pb2
+        from tensorflow.python import pywrap_tensorflow
         from tensorflow.python.util import compat
 
         self.tf = tf
@@ -192,16 +188,15 @@ def make_output_format(format, ev_dir, log_suffix=""):
     os.makedirs(ev_dir, exist_ok=True)
     if format == "stdout":
         return HumanOutputFormat(sys.stdout)
-    elif format == "log":
+    if format == "log":
         return HumanOutputFormat(osp.join(ev_dir, "log%s.txt" % log_suffix))
-    elif format == "json":
+    if format == "json":
         return JSONOutputFormat(osp.join(ev_dir, "progress%s.json" % log_suffix))
-    elif format == "csv":
+    if format == "csv":
         return CSVOutputFormat(osp.join(ev_dir, "progress%s.csv" % log_suffix))
-    elif format == "tensorboard":
+    if format == "tensorboard":
         return TensorBoardOutputFormat(osp.join(ev_dir, "tb%s" % log_suffix))
-    else:
-        raise ValueError("Unknown format specified: %s" % (format,))
+    raise ValueError("Unknown format specified: %s" % (format,))
 
 
 # ================================================================
@@ -210,8 +205,7 @@ def make_output_format(format, ev_dir, log_suffix=""):
 
 
 def logkv(key, val):
-    """
-    Log a value of some diagnostic
+    """Log a value of some diagnostic
     Call this once for each diagnostic quantity, each iteration
     If called many times, last value will be used.
     """
@@ -219,23 +213,20 @@ def logkv(key, val):
 
 
 def logkv_mean(key, val):
-    """
-    The same as logkv(), but if called many times, values averaged.
+    """The same as logkv(), but if called many times, values averaged.
     """
     get_current().logkv_mean(key, val)
 
 
 def logkvs(d):
-    """
-    Log a dictionary of key-value pairs
+    """Log a dictionary of key-value pairs
     """
     for (k, v) in d.items():
         logkv(k, v)
 
 
 def dumpkvs():
-    """
-    Write all of the diagnostics from the current iteration
+    """Write all of the diagnostics from the current iteration
     """
     return get_current().dumpkvs()
 
@@ -245,8 +236,7 @@ def getkvs():
 
 
 def log(*args, level=INFO):
-    """
-    Write the sequence of args, with no separators, to the console and output files (if you've configured an output file).
+    """Write the sequence of args, with no separators, to the console and output files (if you've configured an output file).
     """
     get_current().log(*args, level=level)
 
@@ -268,8 +258,7 @@ def error(*args):
 
 
 def set_level(level):
-    """
-    Set logging threshold on current logger.
+    """Set logging threshold on current logger.
     """
     get_current().set_level(level)
 
@@ -279,8 +268,7 @@ def set_comm(comm):
 
 
 def get_dir():
-    """
-    Get directory that log files are being written to.
+    """Get directory that log files are being written to.
     will be None if there is no output directory (i.e., if you didn't call start)
     """
     return get_current().get_dir()
@@ -301,8 +289,7 @@ def profile_kv(scopename):
 
 
 def profile(n):
-    """
-    Usage:
+    """Usage:
     @profile("my_func")
     def my_func(): code
     """
@@ -410,8 +397,7 @@ def get_rank_without_mpi_import():
 
 
 def mpi_weighted_mean(comm, local_name2valcount):
-    """
-    Copied from: https://github.com/openai/baselines/blob/ea25b9e8b234e6ee1bca43083f8f3cf974143998/baselines/common/mpi_util.py#L110
+    """Copied from: https://github.com/openai/baselines/blob/ea25b9e8b234e6ee1bca43083f8f3cf974143998/baselines/common/mpi_util.py#L110
     Perform a weighted average over dicts that are each on a different node
     Input: local_name2valcount: dict mapping key -> (value, count)
     Returns: key -> mean
@@ -435,13 +421,11 @@ def mpi_weighted_mean(comm, local_name2valcount):
                     name2sum[name] += val * count
                     name2count[name] += count
         return {name: name2sum[name] / name2count[name] for name in name2sum}
-    else:
-        return {}
+    return {}
 
 
 def configure(dir=None, format_strs=None, comm=None, log_suffix=""):
-    """
-    If comm is provided, average all numerical stats across that comm
+    """If comm is provided, average all numerical stats across that comm
     """
     if dir is None:
         dir = os.getenv("OPENAI_LOGDIR")

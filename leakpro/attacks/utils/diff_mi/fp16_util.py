@@ -1,10 +1,9 @@
-"""
-Helpers to train with 16-bit precision.
+"""Helpers to train with 16-bit precision.
 """
 
 import numpy as np
 import torch as th
-import torch.nn as nn
+from torch import nn
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 
 from . import logger
@@ -13,8 +12,7 @@ INITIAL_LOG_LOSS_SCALE = 20.0
 
 
 def convert_module_to_f16(l):
-    """
-    Convert primitive modules to float16.
+    """Convert primitive modules to float16.
     """
     if isinstance(l, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
         l.weight.data = l.weight.data.half()
@@ -23,8 +21,7 @@ def convert_module_to_f16(l):
 
 
 def convert_module_to_f32(l):
-    """
-    Convert primitive modules to float32, undoing convert_module_to_f16().
+    """Convert primitive modules to float32, undoing convert_module_to_f16().
     """
     if isinstance(l, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
         l.weight.data = l.weight.data.float()
@@ -33,8 +30,7 @@ def convert_module_to_f32(l):
 
 
 def make_master_params(param_groups_and_shapes):
-    """
-    Copy model parameters into a (differently-shaped) list of full-precision
+    """Copy model parameters into a (differently-shaped) list of full-precision
     parameters.
     """
     master_params = []
@@ -50,8 +46,7 @@ def make_master_params(param_groups_and_shapes):
 
 
 def model_grads_to_master_grads(param_groups_and_shapes, master_params):
-    """
-    Copy the gradients from the model parameters into the master parameters
+    """Copy the gradients from the model parameters into the master parameters
     from make_master_params().
     """
     for master_param, (param_group, shape) in zip(
@@ -63,8 +58,7 @@ def model_grads_to_master_grads(param_groups_and_shapes, master_params):
 
 
 def master_params_to_model_params(param_groups_and_shapes, master_params):
-    """
-    Copy the master parameter data back into the model parameters.
+    """Copy the master parameter data back into the model parameters.
     """
     # Without copying to a list, if a generator is passed, this will
     # silently not copy any parameters.
@@ -145,8 +139,7 @@ def zero_grad(model_params):
 def param_grad_or_zeros(param):
     if param.grad is not None:
         return param.grad.data.detach()
-    else:
-        return th.zeros_like(param)
+    return th.zeros_like(param)
 
 
 class MixedPrecisionTrainer:
@@ -164,7 +157,7 @@ class MixedPrecisionTrainer:
         self.fp16_scale_growth = fp16_scale_growth
 
         self.model_params = list(self.model.parameters())
-        if layers is None: 
+        if layers is None:
             self.master_params = self.model_params
             logger.log("===> Start Fine-tuning on All Layers <===")
             params = None
@@ -199,8 +192,7 @@ class MixedPrecisionTrainer:
     def optimize(self, opt: th.optim.Optimizer):
         if self.use_fp16:
             return self._optimize_fp16(opt)
-        else:
-            return self._optimize_normal(opt)
+        return self._optimize_normal(opt)
 
     def _optimize_fp16(self, opt: th.optim.Optimizer):
         logger.logkv_mean("lg_loss_scale", self.lg_loss_scale)

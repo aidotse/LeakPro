@@ -1,9 +1,7 @@
-import argparse
-import inspect
 
 from . import gaussian_diffusion as gd
 from .respace import SpacedDiffusion, space_timesteps
-from .unet import SuperResModel, UNetModel, EncoderUNetModel
+from .unet import EncoderUNetModel, UNetModel
 
 NUM_CLASSES = 1000 + 1
 
@@ -47,8 +45,7 @@ NUM_CLASSES = 1000 + 1
 
 
 def model_and_diffusion_defaults():
-    """
-    Defaults for image training.
+    """Defaults for image training.
     """
     res = dict(
         image_size=64,
@@ -71,8 +68,7 @@ def model_and_diffusion_defaults():
     return res
 
 def model_defaults():
-    """
-    Defaults for image training.
+    """Defaults for image training.
     """
     model_default = dict(
         image_size=64,
@@ -94,8 +90,7 @@ def model_defaults():
     return model_default
 
 def diffusion_defaults():
-    """
-    Defaults for diffusion training.
+    """Defaults for diffusion training.
     """
     return dict(
         learn_sigma=False,

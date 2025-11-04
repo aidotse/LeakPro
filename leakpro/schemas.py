@@ -241,8 +241,8 @@ class MIAResultSchema(BaseModel):
 class MinvResultSchema(BaseModel):
     """Schema for the Minv attack results."""
 
-    result_name: str = Field(..., description="Name of the result")
-    result_id: str = Field(..., description="Unique identifier for the result")
+    name: str = Field(..., description="Name of the result")
+    id: str = Field(..., description="Unique identifier for the result")
     config: Dict[str, Any] = Field(..., description="Configuration of the attack")
     metrics: Dict[str, Any] = Field(..., description="Reconstruction metrics")
 

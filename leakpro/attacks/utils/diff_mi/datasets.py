@@ -1,16 +1,13 @@
-import os, sys, pdb
-import queue
-import shutil
+import os
+
 import torch
-import torch.nn.functional as F
-import torch.utils.data as data
-import torchvision.transforms as transforms
 from PIL import Image
-from tqdm import tqdm
-import random
+from torch.utils import data
+from torchvision import transforms
+
 
 class PublicFFHQ(torch.utils.data.Dataset):
-    def __init__(self, root='data/ffhq/thumbnails128x128', transform=None):
+    def __init__(self, root="data/ffhq/thumbnails128x128", transform=None):
         super(PublicFFHQ, self).__init__()
         self.root = root
         self.transform = transform
@@ -41,9 +38,9 @@ class PublicFFHQ(torch.utils.data.Dataset):
 
 
 class PublicCeleba(torch.utils.data.Dataset):
-    def __init__(self, 
-                 file_path='data/celeba/data_files/celeba_ganset.txt',
-                 img_root='data/celeba/img_align_celeba',
+    def __init__(self,
+                 file_path="data/celeba/data_files/celeba_ganset.txt",
+                 img_root="data/celeba/img_align_celeba",
                  mode_gan=True,
                  transform=None
         ):
@@ -54,7 +51,7 @@ class PublicCeleba(torch.utils.data.Dataset):
         self.images = []
         self.labels = []
         self.mode_gan = mode_gan
-        
+
         # _, _, image2id, id2image = get_identity_from_file(self.img_idx_path)
 
         f = open(self.file_path, "r")
@@ -64,7 +61,7 @@ class PublicCeleba(torch.utils.data.Dataset):
                 # img_name, iden = line.strip().split(' ')
                 # self.labels.append(int(iden))
             else:
-                img_name, iden = line.strip().split(' ')
+                img_name, iden = line.strip().split(" ")
                 self.labels.append(int(iden))
 
             img_path = os.path.join(self.img_root, img_name)
@@ -91,21 +88,20 @@ class PublicCeleba(torch.utils.data.Dataset):
             if self.transform != None:
                 img = self.transform(img)
             return img, img_path
-        else:
-            img_path = self.images[index]
-            label = self.labels[index]
-            img = Image.open(img_path)
-            if self.transform != None:
-                img = self.transform(img)
-            return img, label
+        img_path = self.images[index]
+        label = self.labels[index]
+        img = Image.open(img_path)
+        if self.transform != None:
+            img = self.transform(img)
+        return img, label
 
     def __len__(self):
         return len(self.images)
 
 
 class PublicFaceScrub(torch.utils.data.Dataset):
-    def __init__(self, file_path='data/data_files/facescrub_ganset.txt',
-                 img_root='data/facescrub', transform=None):
+    def __init__(self, file_path="data/data_files/facescrub_ganset.txt",
+                 img_root="data/facescrub", transform=None):
         super(PublicFaceScrub, self).__init__()
         self.file_path = file_path
         self.img_root = img_root
@@ -123,7 +119,7 @@ class PublicFaceScrub(torch.utils.data.Dataset):
                     img = Image.open(img_path)
                     if img.size != (64, 64):
                         img = img.resize((64, 64), Image.ANTIALIAS)
-                    img = img.convert('RGB')
+                    img = img.convert("RGB")
                     self.images.append((img, img_path))
             except:
                 continue
@@ -141,7 +137,7 @@ class PublicFaceScrub(torch.utils.data.Dataset):
 
 def _noise_adder(img):
     return torch.empty_like(img, dtype=torch.float32).uniform_(0.0, 1 / 256.0) + img
-    
+
 def pathdataset(
         data_name,
         mode_gan=True,
@@ -157,7 +153,7 @@ def pathdataset(
         pin_memory=False,
         ):
 
-    if data_name == 'celeba':
+    if data_name == "celeba":
         re_size = 64
         crop_size = 108
         offset_height = (218 - crop_size) // 2
@@ -177,7 +173,7 @@ def pathdataset(
                                 # classes=classes,
                                 mode_gan=mode_gan,
                                 transform=celeba_transform)
-    elif data_name == 'ffhq':
+    elif data_name == "ffhq":
         re_size = 64
         crop_size = 88
         offset_height = (128 - crop_size) // 2
@@ -193,7 +189,7 @@ def pathdataset(
         ])
         data_set = PublicFFHQ(root=img_path,
                               transform=ffhq_transform)
-    elif data_name == 'facescrub':
+    elif data_name == "facescrub":
         crop_size = 54
         offset_height = (64 - crop_size) // 2
         offset_width = (64 - crop_size) // 2
@@ -218,29 +214,28 @@ def pathdataset(
     # while True:
     #     yield from data_loader
 
-def get_identity_from_file(identity_annot_filename='data/celeba/identity_CelebA.txt'):
+def get_identity_from_file(identity_annot_filename="data/celeba/identity_CelebA.txt"):
+    """Reads the identity annotations from a file and returns the unique identities, images, and mappings.
     """
-    Reads the identity annotations from a file and returns the unique identities, images, and mappings.
-    """
-    with open(identity_annot_filename, 'r') as file:
+    with open(identity_annot_filename, "r") as file:
         lines = file.readlines()
         ids = set()
         images = []
         image2id = {}
         id2images = {}
-        excludes = '202599.jpg' #get_excludes()
+        excludes = "202599.jpg" #get_excludes()
 
         for line in lines:
             line = line.strip()
             if len(line) > 0:
-                tokens = line.split(' ')
+                tokens = line.split(" ")
                 image_name = tokens[0].strip()
-                if image_name not in excludes and image_name != '202599.jpg':
+                if image_name not in excludes and image_name != "202599.jpg":
                     id = tokens[1].strip()
                     ids.add(id)
                     images.append(image_name)
                     image2id[image_name] = int(id)
-                    if id in id2images.keys():
+                    if id in id2images:
                         id2images[id].append(image_name)
                     else:
                         id2images[id] = [image_name]
