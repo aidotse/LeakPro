@@ -237,3 +237,13 @@ class MIAResultSchema(BaseModel):
     fn: Union[ArrayOrScalar, None] = Field(None, description="FN values")
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # Prevent extra fields
+
+class MinvResultSchema(BaseModel):
+    """Schema for the Minv attack results."""
+
+    result_name: str = Field(..., description="Name of the result")
+    result_id: str = Field(..., description="Unique identifier for the result")
+    config: Dict[str, Any] = Field(..., description="Configuration of the attack")
+    metrics: Dict[str, Any] = Field(..., description="Reconstruction metrics")
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # Prevent extra fields

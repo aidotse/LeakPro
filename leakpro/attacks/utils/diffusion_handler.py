@@ -1,11 +1,11 @@
-"""Module for handling GANs."""
+"""Module for handling Diffusion models from Diff-MI."""
 import os
 
 import torch
 from torch.nn import Module
 
 from leakpro.attacks.utils.diff_mi.resample import create_named_schedule_sampler
-from leakpro.attacks.utils.diff_mi.setup import DiffMiConfig
+from leakpro.attacks.utils.diff_mi.setup import DiffMiConfig, args_to_dict
 from leakpro.attacks.utils.diff_mi.script_util import create_model, create_gaussian_diffusion, model_defaults, diffusion_defaults
 from leakpro.attacks.utils.diff_mi.train_util import PreTrain, FineTune
 
@@ -13,21 +13,22 @@ from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.input_handler.user_imports import get_class_from_module, import_module_from_file
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
-from operator import attrgetter
-
-
-def args_to_dict(args, keys):
-    return {k: getattr(args, k) for k in keys}
 
 class DiffMiHandler():
-    """Handler for training and managing diffusion models."""
-
     def __init__(self: Self,
                  handler: MINVHandler = None,
                  configs: DiffMiConfig = None
         ) -> None:
 
-        """Initialize the DiffMiHandler class."""
+        """Initialize the DiffMiHandler class.
+        Args:
+        ----
+            handler (MINVHandler): The MINVHandler object.
+            configs (DiffMiConfig): The DiffMiConfig object.
+        Returns:
+        -------
+            None
+        """
         logger.info("Initializing DiffMiHandler...")
         self.handler = handler
         self.trained_bool = False
@@ -37,7 +38,15 @@ class DiffMiHandler():
         logger.info(f"Initialized DiffMiHandler")
 
     def _setup_diffusion_configs(self: Self, configs: DiffMiConfig) -> None:
-        """Load diffusion-specific configurations (e.g., diffusion path, params)."""
+        """Load diffusion-specific configurations (e.g., diffusion path, params).
+        Args:
+        ----
+            self: Self
+            configs: DiffMiConfig
+        Returns:
+        -------
+            None
+        """
         logger.info("Setting up diffusion configurations")
         self.diffusion_path = configs.diffusion.module_path
         self.diffusion_model_class = configs.diffusion.model_class
@@ -46,7 +55,15 @@ class DiffMiHandler():
         logger.info(f"Diffusion path: {self.diffusion_path}, Diffusion class: {self.diffusion_model_class}")
 
     def _init_model(self: Self, _configs_: DiffMiConfig) -> None:
-        """Initialize the diffusion model."""
+        """Initialize the diffusion model.
+        Args:
+        ----
+            self: Self
+            _configs_: DiffMiConfig
+        Returns:
+        -------
+            None
+        """
         logger.info("Initializing diffusion model")
 
         diffusion_model_params = args_to_dict(_configs_, model_defaults().keys())
@@ -83,7 +100,14 @@ class DiffMiHandler():
             )
 
     def get_finetuned(self) -> Module:
-        """Return the fine-tuned diffusion model."""
+        """Return the fine-tuned diffusion model.
+        Args:
+        ----
+            self: Self
+        Returns:
+        -------
+            Module: The fine-tuned diffusion model.
+        """
         # Re-initialize model with fine-tuning configs  
         self._init_model(_configs_ = self.configs.finetune)
 
@@ -103,7 +127,14 @@ class DiffMiHandler():
 
 
     def get_pretrained(self) -> Module:
-        """Return the pre-trained diffusion model."""
+        """Return the pre-trained diffusion model.
+        Args:
+        ----
+            self: Self
+        Returns:
+        -------
+            Module: The pre-trained diffusion model.
+        """
         # Init pretrain model
         self._init_model(_configs_ = self.configs.pretrain)
 
@@ -133,7 +164,14 @@ class DiffMiHandler():
 
 
     def fine_tune(self) -> None:
-        """Fine-tune the diffusion model."""
+        """Fine-tune the diffusion model.
+        Args:
+        ----
+            self: Self
+        Returns:
+        -------
+            None
+        """
         logger.info("Fine-tuning diffusion model...")
         # Diffusion-specific fine-tuning logic would be implemented here.
         schedule_sampler = create_named_schedule_sampler(self.configs.finetune.schedule_sampler, self.diffusion)
@@ -178,5 +216,13 @@ class DiffMiHandler():
         pass
 
     def save_diffusion_model(self, diffusion_model: Module, path: str) -> None:
-        """Save the diffusion model."""
+        """Save the diffusion model.
+        Args:
+        ----
+            diffusion_model (Module): The diffusion model to save.
+            path (str): The path to save the model.
+        Returns:
+        -------
+            None
+        """
         torch.save(diffusion_model.state_dict(), path)

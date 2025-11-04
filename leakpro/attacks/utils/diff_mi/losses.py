@@ -7,7 +7,7 @@ https://github.com/hojonathanho/diffusion/blob/1e0dceb3b3495bbe19116a5e1b3596cd0
 import numpy as np
 
 import torch as th
-
+import torch.nn.functional as F
 
 def normal_kl(mean1, logvar1, mean2, logvar2):
     """
@@ -75,3 +75,36 @@ def discretized_gaussian_log_likelihood(x, *, means, log_scales):
     )
     assert log_probs.shape == x.shape
     return log_probs
+
+def topk_loss(out, iden, k):
+    """Compute the top-k loss.
+    Args:
+    -----
+        out (Tensor): The output logits from the model.
+        iden (Tensor): The ground truth class indices.
+        k (int): The number of top incorrect classes to consider.
+    Returns:
+    -------
+        Tensor: The computed top-k loss.
+    """
+    assert out.shape[0] == iden.shape[0]
+    iden = iden.unsqueeze(1)
+    real = out.gather(1, iden).squeeze(1)
+    if k == 0: return -1 * real.mean()
+    tmp_out = th.scatter(out, dim=1, index=iden, src=-th.ones_like(iden) * 1000.0)
+    margin = th.topk(tmp_out, k=k)[0]
+    return -1 * real.mean() + margin.mean()
+    
+def p_reg_loss(featureT, classes, p_reg):
+    """Compute the p_reg loss.
+    Args:
+    -----
+        featureT (Tensor): The feature tensor.
+        classes (Tensor): The class indices.
+        p_reg (Tensor): The regularization tensor.
+    Returns:
+    -------
+        Tensor: The computed p_reg loss.
+    """
+    fea_reg = p_reg[classes]
+    return F.mse_loss(featureT, fea_reg)

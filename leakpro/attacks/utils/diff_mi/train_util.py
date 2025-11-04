@@ -1,3 +1,4 @@
+from fileinput import filename
 import pdb
 import copy
 import functools
@@ -21,6 +22,8 @@ from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.optim import AdamW
 from torch.utils.data import TensorDataset, DataLoader
 
+
+from .losses import topk_loss, p_reg_loss
 
 from tqdm import tqdm
 
@@ -47,11 +50,17 @@ class PreTrain:
         save_path=None,
         schedule_sampler=None,
     ):
-        def generator_from_dataloader(dataloader: DataLoader):
-            while True:
-                for batch in dataloader:
-                    yield batch
-
+        """Pre-train the diffusion model.
+        Args:
+            model: The diffusion model to be pre-trained.
+            diffusion: The diffusion process.
+            data: The training data.
+            args: The training arguments.
+            save_path: The path to save checkpoints.
+            schedule_sampler: The schedule sampler for training.
+        Returns:
+            None
+        """
         dist_util.setup_dist()
         self.model = model.to(dist_util.dev())
         self.diffusion = diffusion
@@ -91,13 +100,11 @@ class PreTrain:
         self.sync_cuda = False # th.cuda.is_available()
 
         self._load_and_sync_parameters()
-        print("1")
         self.mp_trainer = MixedPrecisionTrainer(
             model=self.model,
             use_fp16=self.use_fp16,
             fp16_scale_growth=args.fp16_scale_growth,
         )
-        print("2")
 
         self.opt = AdamW(
             self.mp_trainer.master_params, lr=self.lr, weight_decay=self.weight_decay
@@ -301,16 +308,25 @@ class FineTune:
         target,
         model,
         diffusion,
-        # batch_size,
-        # learning_rate,
-        # resume_checkpoint,
         p_reg,
         save_path=None,
-        # use_fp16,
-        # fp16_scale_growth,
         schedule_sampler=None,
-        # weight_decay=0.0,
     ):
+        """Fine-tune the diffusion model with classifier guidance.
+        Args:
+        -----
+            self: Self
+            args: The arguments for fine-tuning.
+            target (Module): The target model to guide the diffusion model.
+            model (Module): The diffusion model to be fine-tuned.
+            diffusion: The diffusion process.
+            p_reg (Tensor): The regularization tensor.
+            save_path: The path to save checkpoints.
+            schedule_sampler: The schedule sampler for training.
+        Returns:
+            None
+        """
+
         dist_util.setup_dist()
         self.threshold = args.threshold
         self.epochs = args.epochs
@@ -401,7 +417,7 @@ class FineTune:
         labels = th.tensor(np.arange(0, 300)).to(dist_util.dev())
         label_dataset = TensorDataset(labels)
 
-        while (acc_mean < self.threshold): #and (iter < self.epochs):
+        while (acc_mean < self.threshold): 
 
             # ME
             loss_agg = 0.0
@@ -461,100 +477,100 @@ class FineTune:
                 acc_mean = np.mean(acc)
                 logger.log(f"The mean acc in iteration {iter} is {acc_mean:.2%}")
 
-                # TODO: save model to the same name instead of new name everytime.
-                if acc_mean > best_mean_acc:
-                    best_mean_acc = acc_mean
-                    state_dict = self.mp_trainer_cls.master_params_to_state_dict(self.mp_trainer_cls.model_params)
-                    filename = f"{self.resume_checkpoint.split('/')[-1].split('.pt')[0]}_{iter}_{acc_mean:.2%}.pt"
-                    with bf.BlobFile(bf.join(get_blob_logdir(), filename), "wb") as f:
-                        th.save(state_dict, f)
-                        logger.log(f"New best mean acc: {best_mean_acc:.2%}. Saving model to {f.name}")
-                acc, iter = [], (iter + 1)
+                if acc_mean > self.best_mean_acc:
+                    self.best_mean_acc = acc_mean
+                    self.state_dict = self.mp_trainer_cls.master_params_to_state_dict(self.mp_trainer_cls.model_params)
+                    self.save()
+                    acc, iter = [], (iter + 1)
                 if iter >= self.epochs:
-                    # save the final model
+                    logger.log(f"Training completed with best mean acc: {self.best_mean_acc:.2%}")
                     break
-        logger.log(f"Training completed with best mean acc: {best_mean_acc:.2%}")
-
-def topk_loss(out, iden, k):
-    assert out.shape[0] == iden.shape[0]
-    iden = iden.unsqueeze(1)
-    real = out.gather(1, iden).squeeze(1)
-    if k == 0: return -1 * real.mean()
-    tmp_out = th.scatter(out, dim=1, index=iden, src=-th.ones_like(iden) * 1000.0)
-    margin = th.topk(tmp_out, k=k)[0]
-    return -1 * real.mean() + margin.mean()
     
-def p_reg_loss(featureT, classes, p_reg):
-    # fea_reg = self.p_reg[classes]
-    fea_reg = p_reg[classes]
-    return F.mse_loss(featureT, fea_reg)
+    def save(self):
+        filename = f"{self.save_name}.pt"
+        with bf.BlobFile(bf.join(self.save_path, filename), "wb") as f:
+            th.save(self.state_dict, f)
+            logger.log(f"New best mean acc: {self.best_mean_acc:.2%}. Saving model to {f.name}")
 
-def top_n(
-        model,
-        num_classes,
-        data_name,
-        data_loader,
-        top_n=30,
-        save_path='data/reclassified_public_data'
-    ):
+
+def generator_from_dataloader(dataloader: DataLoader):
+    """Create a generator that yields batches from a DataLoader indefinitely.
+    Args:
+    -----
+        dataloader (DataLoader): The DataLoader to yield batches from.
+    Returns:
+        generator: A generator that yields batches from the DataLoader.
     """
-    Top-n selection strategy.
-    :param args: top-n, save_path
-    :param T: target model
-    :param data_loader: dataloader of
-    :return:
-    """
-    print("=> start inference ...")
-    all_images_prob, all_images_path = [], []
-    with th.no_grad():
-        for (images, img_path) in tqdm(data_loader):
-            bs = images.shape[0]
-            images = images.cuda()
-            logits = model(images)[-1]
-            prob = F.softmax(logits, dim=1)  # (bs, 1000)
-            all_images_prob.append(prob.detach().cpu())
-            # all_images_path += img_path
-            all_images_path.extend(img_path)
-        all_images_prob = th.cat(all_images_prob)
+    while True:
+        for batch in dataloader:
+            yield batch
 
-    print("=> start reclassify ...")
-    save_path = os.path.join(save_path, data_name, model.__class__.__name__ + "_top" + str(top_n))
-    print(" top_n: ", top_n)
-    print(" save_path: ", save_path)
-    # top-n selection
-    for class_idx in tqdm(range(num_classes)):
-        bs = all_images_prob.shape[0]
-        ccc = 0
-        # maintain a priority queue
-        q = queue.PriorityQueue()
-        class_idx_prob = all_images_prob[:, class_idx]
+# def top_n(
+#         model,
+#         num_classes,
+#         data_name,
+#         data_loader,
+#         top_n=30,
+#         save_path='data/reclassified_public_data'
+#     ):
+#     """
+#     Top-n selection strategy.
+#     :param args: top-n, save_path
+#     :param T: target model
+#     :param data_loader: dataloader of
+#     :return:
+#     """
+#     print("=> start inference ...")
+#     all_images_prob, all_images_path = [], []
+#     with th.no_grad():
+#         for (images, img_path) in tqdm(data_loader):
+#             bs = images.shape[0]
+#             images = images.cuda()
+#             logits = model(images)[-1]
+#             prob = F.softmax(logits, dim=1)  # (bs, 1000)
+#             all_images_prob.append(prob.detach().cpu())
+#             # all_images_path += img_path
+#             all_images_path.extend(img_path)
+#         all_images_prob = th.cat(all_images_prob)
 
-        for j in range(bs):
-            current_value = float(class_idx_prob[j])
-            image_path = all_images_path[j]
-            # Maintain a priority queue with confidence as the priority
-            if q.qsize() < top_n:
-                q.put([current_value, image_path])
-            else:
-                current_min = q.get()
-                if current_value < current_min[0]:
-                    q.put(current_min)
-                else:
-                    q.put([current_value, image_path])
-        # reclassify and move the images
-        for m in range(q.qsize()):
-            q_value = q.get()
-            q_prob = round(q_value[0], 4)
-            q_image_path = q_value[1]
+#     print("=> start reclassify ...")
+#     save_path = os.path.join(save_path, data_name, model.__class__.__name__ + "_top" + str(top_n))
+#     print(" top_n: ", top_n)
+#     print(" save_path: ", save_path)
+#     # top-n selection
+#     for class_idx in tqdm(range(num_classes)):
+#         bs = all_images_prob.shape[0]
+#         ccc = 0
+#         # maintain a priority queue
+#         q = queue.PriorityQueue()
+#         class_idx_prob = all_images_prob[:, class_idx]
 
-            ori_save_path = os.path.join(save_path, str(class_idx))
-            if not os.path.exists(ori_save_path):
-                os.makedirs(ori_save_path)
+#         for j in range(bs):
+#             current_value = float(class_idx_prob[j])
+#             image_path = all_images_path[j]
+#             # Maintain a priority queue with confidence as the priority
+#             if q.qsize() < top_n:
+#                 q.put([current_value, image_path])
+#             else:
+#                 current_min = q.get()
+#                 if current_value < current_min[0]:
+#                     q.put(current_min)
+#                 else:
+#                     q.put([current_value, image_path])
+#         # reclassify and move the images
+#         for m in range(q.qsize()):
+#             q_value = q.get()
+#             q_prob = round(q_value[0], 4)
+#             q_image_path = q_value[1]
 
-            new_image_path = os.path.join(ori_save_path, str(ccc) + '_' + str(q_prob) + '.jpg')
+#             ori_save_path = os.path.join(save_path, str(class_idx))
+#             if not os.path.exists(ori_save_path):
+#                 os.makedirs(ori_save_path)
 
-            shutil.copy(q_image_path, new_image_path)
-            ccc += 1
+#             new_image_path = os.path.join(ori_save_path, str(ccc) + '_' + str(q_prob) + '.jpg')
+
+#             shutil.copy(q_image_path, new_image_path)
+#             ccc += 1
 
 def parse_resume_step_from_filename(filename):
     """
