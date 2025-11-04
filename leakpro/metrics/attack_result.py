@@ -685,8 +685,68 @@ def img_save(path: str, recreated_data: Dataset, original_data: Dataset, data_st
 class MinvResult:
     """Contains results for a MI attack."""
 
-    pass
+    def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003, ARG002
+        raise RuntimeError(
+            "Use one of the constructors: \"from_metrics\""
+            ""
+        )
 
+    @classmethod
+    def from_metrics(cls, metric_dict:dict) -> Self:
+        """Create MinvResult from evaluation metrics.
+
+        Args:
+        ----
+            metric_dict: Dictionary containing the evaluation metrics (dict).
+
+        Returns:
+        -------
+            MinvResult: An instance of MinvResult with the evaluation metrics.
+
+        """
+        if metadata is None:
+            metadata = {}
+        obj = object.__new__(cls)
+        obj.result = obj._make_result_object(metric_dict)
+        return obj
+
+    def _make_result_object(self, metric_dict: dict) -> MinvResultSchema:
+        """Create result metric object for top1 accuracy, top5 accuracy, and KNN."""
+        return MinvResultSchema(
+            accuracy=self.accuracy,
+        )
+
+    def save(self:Self, attack_obj: Any, output_dir: str) -> None:
+        """Save the MinVResult to disk.
+        Args.
+        ----
+            None.
+        Returns.
+        --------
+            None.            
+        """
+        save_path = f"{output_dir}/results/{self.id}"
+        self._create_dir(save_path)
+
+        # Create directory for saving data objects
+        data_obj_storage = f"{output_dir}/data_objects/"
+        self._create_dir(data_obj_storage)
+
+        def json_fallback(obj: Any) -> Any:
+            """Fallback function for JSON serialization."""
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            if isinstance(obj, (np.integer, np.floating)):
+                return obj.item()
+            raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
+        # Save the results to a file in data objects using attack hash
+        with open(f"{data_obj_storage}{attack_obj.attack_id}.json", "w") as f:
+            json.dump(self.result.model_dump(), f, default=json_fallback)
+
+        # Store results for user output
+        with open(f"{save_path}/result.txt", "w") as f:
+            f.write(str(self.result.model_dump()))
 
 
 class TEMPLATEResult:
