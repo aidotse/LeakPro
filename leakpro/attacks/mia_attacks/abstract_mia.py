@@ -54,22 +54,20 @@ class AbstractMIA(AbstractAttack):
             raise TypeError(f"{self.__class__.__name__}.configs must be a subclass of Pydantic's BaseModel.")
 
         # These objects are shared and should be initialized only once
-        if not AbstractMIA._initialized:
-            AbstractMIA.population = handler.population
-            AbstractMIA.population_size = handler.population_size
-            AbstractMIA.target_model = PytorchModel(handler.target_model, handler.get_criterion())
+        AbstractMIA.population = handler.population
+        AbstractMIA.population_size = handler.population_size
+        AbstractMIA.target_model = PytorchModel(handler.target_model, handler.get_criterion())
 
-            AbstractMIA.audit_dataset = {
-                # Assuming train_indices and test_indices are arrays of indices, not the actual data
-                "data": np.concatenate((handler.train_indices, handler.test_indices)),
-                # in_members will be an array from 0 to the number of training indices - 1
-                "in_members": np.arange(len(handler.train_indices)),
-                # out_members will start after the last training index and go up to the number of test indices - 1
-                "out_members": np.arange(len(handler.train_indices),len(handler.train_indices)+len(handler.test_indices)),
-            }
-            AbstractMIA.handler = handler
-            self._validate_shared_quantities()
-            AbstractMIA._initialized = False
+        AbstractMIA.audit_dataset = {
+            # Assuming train_indices and test_indices are arrays of indices, not the actual data
+            "data": np.concatenate((handler.train_indices, handler.test_indices)),
+            # in_members will be an array from 0 to the number of training indices - 1
+            "in_members": np.arange(len(handler.train_indices)),
+            # out_members will start after the last training index and go up to the number of test indices - 1
+            "out_members": np.arange(len(handler.train_indices),len(handler.train_indices)+len(handler.test_indices)),
+        }
+        AbstractMIA.handler = handler
+        self._validate_shared_quantities()
 
         # These objects are instance specific
         self.signal_data = []
