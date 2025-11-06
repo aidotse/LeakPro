@@ -1,6 +1,4 @@
 """Implementation of the RMIA attack."""
-from typing import Optional, Tuple
-
 import numpy as np
 from pydantic import BaseModel, Field, model_validator
 
@@ -11,6 +9,7 @@ from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.reporting.mia_result import MIAResult
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
+
 
 class AttackRMIA(AbstractMIA):
     """Implementation of the RMIA attack."""
@@ -210,8 +209,6 @@ class AttackRMIA(AbstractMIA):
         # compute the ratio of p(x|theta) to p(x)
         ratio_x = p_x_given_theta / (p_x + self.epsilon)
 
-
-
         # for each x, compute the score
         score = np.zeros((1, n_audit_points))
         for i in range(n_audit_points):
@@ -258,3 +255,5 @@ class AttackRMIA(AbstractMIA):
 
         # new hyperparameters have been set, let's prepare the attack again
         self.prepare_attack()
+
+
