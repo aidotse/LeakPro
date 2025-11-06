@@ -150,8 +150,8 @@ class AttackLiRA(AbstractMIA):
         for indx in self.shadow_model_indices:
             shadow_models_logits.append(ShadowModelHandler().load_logits(indx=indx))
 
-        self.shadow_models_logits = np.array([self.rescale_logits(x, true_labels) for x in shadow_models_logits])
-        self.target_logits = self.rescale_logits(target_logits, true_labels)
+        self.shadow_rescaled_logits = np.array([self.rescale_logits(x, true_labels) for x in shadow_models_logits]).T
+        self.target_rescaled_logits = self.rescale_logits(target_logits, true_labels)
 
     def run_attack(self:Self) -> MIAResult:
         """Runs the attack on the target model and dataset and assess privacy risks or data leakage.
@@ -166,15 +166,13 @@ class AttackLiRA(AbstractMIA):
         true labels, and signal values.
 
         """
-        # Convert shape (M, N) -> (N, M) 
-        shadow_models_logits = self.shadow_models_logits.T
        
         # Decides which score calculation method should be used
         if(self.vectorized):
-            score = lira_vectorized(self.target_logits, shadow_models_logits, self.shadow_models_inmask,
+            score = lira_vectorized(self.target_rescaled_logits, self.shadow_rescaled_logits, self.shadow_models_inmask,
                                    self.var_calculation, self.online, self.fix_var_threshold)
         else:
-            score = lira_iterative(self.target_logits, shadow_models_logits, self.shadow_models_inmask,
+            score = lira_iterative(self.target_rescaled_logits, self.shadow_rescaled_logits, self.shadow_models_inmask,
                                    self.var_calculation, self.online, self.fix_var_threshold)
 
         # Split the score array into two parts based on membership: in (training) and out (non-training)

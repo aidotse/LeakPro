@@ -3,12 +3,20 @@ audit:  # Configurations for auditing
   attack_list:
 # LiRA with vectorized flag
     - attack: lira
-      online: True
+      online: true
       num_shadow_models: 20
       training_data_fraction: 0.5
       vectorized: True      
-
-  output_dir: "./robust/output"
+# RMIA with vectorized flag
+    - attack: rmia
+      online: true
+      num_shadow_models: 20
+      training_data_fraction: 0.5
+      vectorized: true
+      vec_batch_points: 1024
+      vec_use_all_z: false
+      vec_z_chunk: 2048
+  output_dir: "./B/output"
   attack_type: "mia" #mia, gia
   data_modality: "image" #image, tabular
 
@@ -16,7 +24,7 @@ target:
   # Target model path
   module_path: "./target_model_class.py"
   model_class: "WideResNet" #"WideResNet" #"ResNet18" 
-  target_folder: "./robust/target"
+  target_folder: "./B/target"
   # Data paths
   data_path: "./data/cifar10.pkl"
 

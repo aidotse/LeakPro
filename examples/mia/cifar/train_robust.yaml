@@ -1,9 +1,9 @@
 run: # Configurations for a specific run
   random_seed: 1236 # Integer number of specifying random seed
-  log_dir: ./robust/target # String for indicating where to save all the information, including models and computed signals. We can reuse the models saved in the same log_dir.
+  log_dir: ./B/target # String for indicating where to save all the information, including models and computed signals. We can reuse the models saved in the same log_dir.
 
 train:
-  epochs: 25
+  epochs: 12 #5
   batch_size: 256
   optimizer: SGD
   learning_rate: 0.1

@@ -1,4 +1,6 @@
 """Implementation of the RMIA attack."""
+from typing import Optional, Tuple
+
 import numpy as np
 from pydantic import BaseModel, Field, model_validator
 
@@ -10,6 +12,282 @@ from leakpro.reporting.mia_result import MIAResult
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
+##### some helper functions used in the vectorized code of rmia #####
+
+def _sigmoid(x: np.ndarray) -> np.ndarray:
+    """Compute a numerically stable sigmoid.
+
+    Parameters
+    ----------
+    x : np.ndarray
+        Input logits.
+
+    Returns
+    -------
+    np.ndarray
+        Sigmoid(x), computed stably in float64.
+
+    """
+    x = x.astype(np.float64, copy=False)
+    pos = x >= 0
+    neg = ~pos
+    z = np.zeros_like(x, dtype=np.float64)
+    z[pos] = np.exp(-x[pos])
+    z[neg] = np.exp(x[neg])
+    out = np.empty_like(x, dtype=np.float64)
+    out[pos] = 1.0 / (1.0 + z[pos])
+    out[neg] = z[neg] / (1.0 + z[neg])
+    return out
+
+
+def _estimate_prior_probs(
+    shadow_values: np.ndarray,
+    shadow_inmask: np.ndarray,
+    use_out_only: bool = True,
+    eps: float = 1e-12,
+    values_are_logits: bool = True,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Estimate the marginal p(x) from shadow models.
+
+    Parameters
+    ----------
+    shadow_values : np.ndarray
+        Array of shape (n, m) with one scalar per (sample, shadow-model).
+    shadow_inmask : np.ndarray
+        Boolean array of shape (n, m): True if that shadow trained on the sample.
+    use_out_only : bool, optional
+        If True, compute OUT-only mean; otherwise mean over all shadows.
+    eps : float, optional
+        Numerical clamp for stability.
+    values_are_logits : bool, optional
+        When True, interpret ``shadow_values`` as logits and apply a sigmoid.
+        When False, treat the inputs as probabilities in [0, 1].
+
+    Returns
+    -------
+    Tuple[np.ndarray, np.ndarray]
+        prior : (n,) estimated p(x)
+        counts : (n,) number of references used per sample
+
+    """
+    shadow_values = shadow_values.astype(np.float64, copy=False)
+    if values_are_logits:
+        probs = _sigmoid(shadow_values)
+    else:
+        probs = np.clip(shadow_values, eps, 1.0 - eps)
+    ref = np.where(shadow_inmask, np.nan, probs) if use_out_only else probs
+    with np.errstate(all="ignore"):
+        prior = np.nanmean(ref, axis=1)
+        counts = np.sum(~np.isnan(ref), axis=1).astype(np.int64)
+
+    # Fallback: if no OUT references, use all-model mean
+    need_fallback = counts == 0
+    if np.any(need_fallback):
+        with np.errstate(all="ignore"):
+            prior_all = np.nanmean(probs, axis=1)
+        prior[need_fallback] = prior_all[need_fallback]
+        counts[need_fallback] = np.sum(~np.isnan(probs[need_fallback]), axis=1)
+
+    prior = np.clip(prior, eps, 1.0 - eps)
+    return prior, counts
+
+
+def _true_class_probs_from_logits(
+    logits: np.ndarray,
+    true_labels: np.ndarray,
+    temperature: float = 1.0,
+    eps: float = 1e-12,
+) -> np.ndarray:
+    """Compute true-class probabilities from raw logits.
+
+    Supports arrays of shape (n, c) and (n, m, c); the last dimension
+    corresponds to classes and true_labels provides the index of the
+    correct class per sample.
+    """
+    logits = logits.astype(np.float64, copy=False) / float(temperature)
+    true_labels = np.asarray(true_labels, dtype=np.int64)
+
+    if logits.ndim == 2:
+        if logits.shape[0] != true_labels.shape[0]:
+            raise ValueError("true_labels must align with logits samples")
+        max_logits = np.max(logits, axis=1, keepdims=True)
+        shifted = logits - max_logits
+        exp_shifted = np.exp(shifted)
+        denom = np.sum(exp_shifted, axis=1)
+        numer = np.take_along_axis(exp_shifted, true_labels[:, None], axis=1).squeeze(axis=1)
+    elif logits.ndim == 3:
+        n, _, _ = logits.shape
+        if n != true_labels.shape[0]:
+            raise ValueError("true_labels must align with logits samples")
+        max_logits = np.max(logits, axis=2, keepdims=True)
+        shifted = logits - max_logits
+        exp_shifted = np.exp(shifted)
+        denom = np.sum(exp_shifted, axis=2)
+        gather_idx = true_labels[:, None, None]
+        numer = np.take_along_axis(exp_shifted, gather_idx, axis=2).squeeze(axis=2)
+    else:
+        raise ValueError("logits must be a 2D or 3D array")
+
+    probs = numer / np.clip(denom, eps, None)
+    return np.clip(probs, eps, 1.0 - eps)
+
+
+def vectorized_rmia_score(  # noqa: PLR0915
+    shadow_logits: np.ndarray,
+    shadow_inmask: np.ndarray,
+    target_logits: np.ndarray,
+    target_inmask: Optional[np.ndarray] = None,  # unused; kept for API parity
+    z_sample_size: int = 512,
+    gamma: float = 1.0,
+    rng: Optional[np.random.Generator | int] = None,
+    use_all_z: bool = False,
+    batch_points: int = 1024,
+    eps: float = 1e-12,
+    scale: float = 1.0,
+    z_chunk: int = 2048,
+    offline_a: Optional[float] = None,
+    true_labels: Optional[np.ndarray] = None,
+    temperature: float = 1.0,
+) -> np.ndarray:
+    """Compute RMIA scores in a vectorized manner.
+
+    Parameters
+    ----------
+    shadow_logits : np.ndarray
+        Either an (n, m) array of binary logits per (sample, shadow model) or
+        an (n, m, c) array of raw multi-class logits.
+    shadow_inmask : np.ndarray
+        (n, m) boolean IN-mask (True if that shadow trained on the sample).
+    target_logits : np.ndarray
+        Either an (n,) array of binary logits or an (n, c) array of raw logits.
+    target_inmask : Optional[np.ndarray], optional
+        Ignored; present for API compatibility.
+    z_sample_size : int, optional
+        Per-point Z-subsample size when use_all_z is False.
+    gamma : float, optional
+        Decision margin for the pairwise LR test.
+    rng : Optional[np.random.Generator | int], optional
+        RNG or seed for Z sampling.
+    use_all_z : bool, optional
+        If True, compare against all Z with streaming chunks.
+    batch_points : int, optional
+        Number of audit points processed per batch.
+    eps : float, optional
+        Numerical clamp.
+    scale : float, optional
+        Multiplicative prior scaling (unused if offline_a is provided).
+    z_chunk : int, optional
+        Chunk size for streaming Z when use_all_z is True.
+    offline_a : Optional[float], optional
+        If provided, apply 0.5*((1+a)*p_out + (1-a)) correction.
+    true_labels : Optional[np.ndarray], optional
+        True class indices for each sample. Required when logits include the
+        full class dimension.
+    temperature : float, optional
+        Temperature applied before computing softmax probabilities from logits.
+
+    Returns
+    -------
+    np.ndarray
+        (n,) RMIA scores in [0, 1].
+
+    """
+    del target_inmask  # silence ARG001 (unused)
+
+    shadow_shape = shadow_logits.shape
+    if shadow_logits.ndim == 3:
+        n, m, c = shadow_shape
+        assert shadow_inmask.shape == (n, m)
+        if target_logits.ndim != 2 or target_logits.shape != (n, c):
+            raise ValueError("target_logits must have shape (n, c) when shadow_logits is 3D")
+        if true_labels is None:
+            raise ValueError("true_labels must be provided when using raw logits")
+        labels = np.asarray(true_labels, dtype=np.int64)
+        p_theta = _true_class_probs_from_logits(target_logits, labels, temperature=temperature, eps=eps)
+        shadow_probs = _true_class_probs_from_logits(shadow_logits, labels, temperature=temperature, eps=eps)
+        prior, _ = _estimate_prior_probs(
+            shadow_probs,
+            shadow_inmask,
+            use_out_only=True,
+            eps=eps,
+            values_are_logits=False,
+        )
+    elif shadow_logits.ndim == 2:
+        n, m = shadow_shape
+        assert shadow_inmask.shape == (n, m)
+        if target_logits.ndim != 1 or target_logits.shape[0] != n:
+            raise ValueError("target_logits must have shape (n,) when shadow_logits is 2D")
+        p_theta = _sigmoid(target_logits.astype(np.float64))
+        p_theta = np.clip(p_theta, eps, 1.0 - eps)
+        prior, _ = _estimate_prior_probs(shadow_logits, shadow_inmask, use_out_only=True, eps=eps)
+    else:
+        raise ValueError("shadow_logits must be 2D or 3D")
+
+    # offline linear correction (paper): 0.5 * ((1+a)*p_out + (1-a))
+    if offline_a is not None:
+        a = float(offline_a)
+        prior = 0.5 * ((1.0 + a) * prior + (1.0 - a))
+    else:
+        prior = prior * float(scale)
+
+    prior = np.clip(prior, eps, 1.0 - eps)
+
+    # RNG
+    if isinstance(rng, (int, np.integer)) or rng is None:
+        rng = np.random.default_rng(rng)
+
+    # Z selection
+    if use_all_z:
+        pz_all = p_theta
+        prz_all = prior
+    else:
+        k = min(z_sample_size, max(1, n - 1))
+        z_samples = np.empty((n, k), dtype=np.int64)
+        for i in range(n):
+            pool = np.arange(n - 1, dtype=np.int64)
+            idxs = rng.choice(pool, size=k, replace=(k > (n - 1)))
+            idxs = np.where(idxs >= i, idxs + 1, idxs)
+            z_samples[i, :] = idxs
+
+    # Scores
+    scores = np.zeros(n, dtype=np.float64)
+    i0 = 0
+    while i0 < n:
+        i1 = min(n, i0 + batch_points)
+        p_x = p_theta[i0:i1][:, None]  # (b,1)
+        pr_x = prior[i0:i1][:, None]   # (b,1)
+
+        if use_all_z:
+            # Memory-safe: stream Z in chunks so we never materialize (b x n)
+            b = i1 - i0
+            votes = np.zeros(b, dtype=np.int64)
+            total = 0
+            s = 0
+            while s < n:
+                t = min(n, s + z_chunk)
+                rz = pz_all[s:t] / prz_all[s:t]          # (t-s,)
+                likelihood_ratio = (p_x / pr_x) / rz[None, :]  # (b, t-s)
+                # Exclude self-comparisons
+                for j in range(b):
+                    idx = i0 + j
+                    if s <= idx < t:
+                        likelihood_ratio[j, idx - s] = -np.inf
+                votes += np.count_nonzero(float(gamma) <= likelihood_ratio, axis=1)  # SIM300-friendly
+                total += (t - s)
+                s = t
+            denom = max(1, total - 1)  # minus self
+            scores[i0:i1] = votes / float(denom)
+        else:
+            idx = z_samples[i0:i1, :]     # (b,k)
+            p_z = p_theta[idx]            # (b,k)
+            pr_z = prior[idx]             # (b,k)
+            lrxz = (p_x / pr_x) / (p_z / pr_z)
+            votes = (lrxz >= float(gamma)).mean(axis=1)
+            scores[i0:i1] = votes
+
+        i0 = i1
+
+    return scores
 
 class AttackRMIA(AbstractMIA):
     """Implementation of the RMIA attack."""
@@ -43,6 +321,39 @@ class AttackRMIA(AbstractMIA):
                                  le=1.0,
                                  description="Parameter to estimate the marginal p(x)",
                                  json_schema_extra = {"optuna": {"type": "float", "low": 0.0, "high": 1.0,"enabled_if": lambda model: not model.online}})  # noqa: E501
+
+        # Vectorized-path options (minimal & safe defaults)
+        vectorized: bool = Field(
+            default=False,
+            description="Enable the vectorized RMIA fast-path (keeps classic path when False)."
+        )
+
+        vec_batch_points: int = Field(
+            default=1024,
+            ge=1,
+            description=(
+                "Number of audit points to process per inner batch in the vectorized path. "
+                "Lower this if you have limited memory; keep larger for speed."
+            ),
+        )
+
+        vec_use_all_z: bool = Field(
+            default=False,
+            description=(
+                "If True, each audit point is compared to the entire Z population (may be memory heavy). "
+                "When False, a per-point Z subsample is used (derived from z_data_sample_fraction)."
+            ),
+        )
+
+        vec_z_chunk: int = Field(
+            default=2048,
+            ge=1,
+            description=(
+                "Chunk size used to stream the Z set when vec_use_all_z=True. "
+                "Reduces peak memory by processing Z in slices of this size."
+            ),
+        )
+
 
         @model_validator(mode="after")
         def check_num_shadow_models_if_online(self) -> Self:
@@ -194,6 +505,60 @@ class AttackRMIA(AbstractMIA):
         # compute the ratio of p(x|theta) to p(x)
         ratio_x = p_x_given_theta / (p_x + self.epsilon)
 
+        # ===== Vectorized fast-path (audit-as-Z) =====
+        if self.configs.vectorized:
+            # Build inputs your helper expects.
+            target_raw_logits = self.logits_theta[np.arange(n_audit_points)]  # (N, C)
+            shadow_raw_logits = np.array(
+                [logits[np.arange(n_audit_points)] for logits in self.logits_shadow_models]
+            )  # (M, N, C)
+            shadow_raw_logits = np.transpose(shadow_raw_logits, (1, 0, 2))     # (N, M, C)
+
+            # Shadow in-mask: mark samples that each shadow model trained on.
+            # offline: we have out_indices -> derive IN mask
+            # online : no per-shadow in/out info -> treat *all* as OUT (i.e., IN mask all False)
+            # Shadow in-mask:
+            shadow_inmask = (~self.out_indices).T if not self.online else np.zeros_like(p_x_given_shadow_models.T, dtype=bool)
+
+            # Optional: membership mask for ROC (not used by scorer)
+            target_inmask = np.zeros(n_audit_points, dtype=bool)
+            if "in_members" in self.audit_dataset:
+                target_inmask[self.audit_dataset["in_members"]] = True
+
+            # Derive z_sample_size from existing fraction
+            n_targets = target_raw_logits.shape[0]
+            z_sample_size = max(1, min(n_targets - 1, int(self.z_data_sample_fraction * n_targets)))
+
+            # Call your vectorized scorer; stream when using all-Z to be memory-safe
+            scores = vectorized_rmia_score(
+                shadow_logits=shadow_raw_logits,
+                shadow_inmask=shadow_inmask,
+                target_logits=target_raw_logits,
+                target_inmask=target_inmask,
+                z_sample_size=z_sample_size,
+                gamma=float(self.gamma),
+                rng=None,
+                use_all_z=bool(self.vec_use_all_z),
+                batch_points=int(self.vec_batch_points),
+                eps=1e-12,
+                scale=1.0,
+                z_chunk=int(self.vec_z_chunk),
+                offline_a=float(self.offline_a) if not self.online else None,
+                true_labels=self.ground_truth_indices,
+                temperature=float(self.temperature),
+            )
+
+            # Convert scores to the same shape your classic code produces
+            score = scores.reshape(1, -1)
+
+            # Pick out in/out signals (same as classic path)
+            in_members = self.audit_dataset["in_members"]
+            out_members = self.audit_dataset["out_members"]
+            self.in_member_signals = score[0, in_members].reshape(-1, 1)
+            self.out_member_signals = score[0, out_members].reshape(-1, 1)
+            return
+        # ===== end vectorized =====
+
         # for each x, compute the score
         score = np.zeros((1, n_audit_points))
         for i in range(n_audit_points):
@@ -240,5 +605,67 @@ class AttackRMIA(AbstractMIA):
 
         # new hyperparameters have been set, let's prepare the attack again
         self.prepare_attack()
+### unit test
+if __name__ == "__main__":
+    print("[RMIA] self-test comparing classic (looped) vs vectorized paths")
 
+    rng = np.random.default_rng(42)
+    N, M = 80, 5
+    gamma = 2.0
+    offline_a = 0.33
 
+    # synthetic logits
+    target_logits = rng.normal(size=N)
+    shadow_logits = rng.normal(size=(N, M))
+    shadow_inmask = rng.random((N, M)) < 0.5
+
+    # ----- reference (non-vectorized) implementation -----
+    def _naive_scores(
+        target_logits: np.ndarray,
+        shadow_logits: np.ndarray,
+        inmask: np.ndarray,
+        gamma: float,
+        offline_a: float,
+    ) -> np.ndarray:
+        p_theta = _sigmoid(target_logits)
+        prior, _ = _estimate_prior_probs(shadow_logits, inmask, use_out_only=True)
+        prior = 0.5 * ((1 + offline_a) * prior + (1 - offline_a))
+        num_points = len(p_theta)
+        scores = np.zeros(num_points, dtype=np.float64)
+        for i in range(num_points):
+            rx = p_theta[i] / prior[i]
+            pool = np.delete(np.arange(num_points), i)
+            rz = p_theta[pool] / prior[pool]
+            votes = np.count_nonzero((rx / rz) >= gamma)
+            scores[i] = votes / float(len(pool))
+        return scores
+
+    ref_scores = _naive_scores(target_logits, shadow_logits, shadow_inmask,
+                               gamma=gamma, offline_a=offline_a)
+
+    # ----- vectorized version: use_all_z=True to match the above -----
+    vec_scores = vectorized_rmia_score(
+        shadow_logits=shadow_logits,
+        shadow_inmask=shadow_inmask,
+        target_logits=target_logits,
+        z_sample_size=max(1, int(0.2 * N)),
+        gamma=gamma,
+        rng=42,
+        use_all_z=True,          # full-Z to replicate reference
+        batch_points=16,
+        z_chunk=20,              # stress chunking
+        offline_a=offline_a,
+    )
+
+    # ----- compare -----
+    diff = np.abs(ref_scores - vec_scores)
+    print("First 10 ref vs vec scores:") # noqa: T201
+    for i in range(min(10, N)):
+        print(f"  i={i:02d}: ref={ref_scores[i]:.6f}, vec={vec_scores[i]:.6f}") # noqa: T201
+    print(f"Mean(abs diff) = {diff.mean():.3e},  Max(abs diff) = {diff.max():.3e}") # noqa: T201
+
+    # strict check
+    assert np.allclose(ref_scores, vec_scores, atol=1e-12), \
+        "Vectorized RMIA results differ from reference!"
+
+    print("[RMIA] Self-test passed ✔  vectorized == classic within tolerance") # noqa: T201
