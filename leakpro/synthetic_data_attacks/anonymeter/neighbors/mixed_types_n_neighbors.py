@@ -15,18 +15,21 @@ from leakpro.synthetic_data_attacks.anonymeter.preprocessing.transformations imp
 from leakpro.synthetic_data_attacks.anonymeter.preprocessing.type_detection import detect_consistent_col_types
 from leakpro.utils.logger import logger
 
+
 @jit(nopython=True, nogil=True)
-def fisher_yates(idx, start, end):
+def fisher_yates(idx: npt.NDArray[np.int64], start: int, end: int) -> None:
     """In-place Fisher–Yates shuffle of idx[start:end].
+
     Args.
     -----
         idx: npt.NDArray
         start: int
         end: int
-    
+
     Returns
     -------
         None.
+
     """
     for i in range(end - 1, start, -1):
         j = np.random.randint(start, i + 1)
@@ -35,22 +38,23 @@ def fisher_yates(idx, start, end):
         idx[j] = tmp
 
 @jit(nopython=True, nogil=True)
-def random_argsort_binary_numba(arr):
-    """
-    Numba-compatible binary version of for numeric 1-D arrays for sorting array indices.
+def random_argsort_binary_numba(arr: npt.NDArray) -> npt.NDArray[np.int64]:
+    """Numba-compatible binary version of for numeric 1-D arrays for sorting array indices.
+
     Returns array indices where equal values remain grouped but are
     shuffled within each group (random tie-breaking).
 
     Args.
     -----
         arr: npt.NDArray
-   
+
     Returns
     -------
         (sorted and shuffled indices): npt.NDArray[np.int64]
+
     """
     n = arr.shape[0]
-   
+
     # Count zeros
     cnt0 = 0
     for i in range(n):
@@ -99,11 +103,12 @@ def random_argsort_binary_numba(arr):
 
 
 @jit(nopython=True, nogil=True)
-def random_argsorted_general_numba(arr):
-    """
-    Numba-compatible general version for numeric 1-D arrays for sorting array indices.
+def random_argsorted_general_numba(arr: np.ndarray) -> npt.NDArray[np.int64]:
+    """Numba-compatible general version for numeric 1-D arrays for sorting array indices.
+
     Returns array indices where equal values remain grouped but are
     shuffled within each group (random tie-breaking).
+
     Args.
     -----
         arr: npt.NDArray
@@ -111,8 +116,9 @@ def random_argsorted_general_numba(arr):
     Returns
     -------
         (sorted and shuffled indices): npt.NDArray[np.int64]
+
     """
-    # argsort indices
+    # Sort indices
     idx = np.argsort(arr)
     n = arr.shape[0]
 
