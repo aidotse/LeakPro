@@ -49,7 +49,7 @@ from glob import glob
 import os
 import hashlib
 
-def load_results(glob_prompt = "robust/output/signals", verbose = False):
+def load_results(glob_prompt = "robust/output/signals", signal_name = "rescaled_logits.npy", verbose = False):
 
     if isinstance(glob_prompt, str):
         glob_prompts = [glob_prompt]
@@ -74,7 +74,7 @@ def load_results(glob_prompt = "robust/output/signals", verbose = False):
         audit_data_indices = np.load(dirpath+"/audit_data_indices.npy")
         #print("audit_data_indices",audit_data_indices.shape)
         audit_data_indices_list.append(audit_data_indices)
-        shadow_models_logits = np.load(dirpath+"/rescaled_logits.npy")
+        shadow_models_logits = np.load(dirpath+"/"+signal_name)
         #print("shadow_models_logits",shadow_models_logits.shape)
         shadow_models_logits_list.append(shadow_models_logits)
         in_indices_masks = np.load(dirpath+"/in_indices_masks.npy")

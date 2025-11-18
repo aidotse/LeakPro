@@ -200,3 +200,53 @@ class AttackBASE(AbstractMIA):
                                     signal_values=signal_values,
                                     result_name="BASE",
                                     metadata=self.configs.model_dump())
+
+#----------------------------------
+# Free-standing BASE implementation
+#----------------------------------
+
+def base_practical(log_conf_target: np.ndarray, log_conf_shadow: np.ndarray, shadow_inmasks: np.ndarray = None, 
+                     online: bool = True, offline_scale_factor: float = 0.33, verbose: bool = False) -> np.ndarray:
+    """
+    This function compute BASE membership inference scores proposed by 
+    Lassila, Marcus, Johan Östman, and Khac-Hoang Ngo. 
+    Practical Bayes-Optimal Membership Inference Attacks. 
+    arXiv preprint arXiv:2505.24089 (2025).
+
+    Parameters
+    ----------
+    log_conf_target : np.ndarray
+        Array of shape (N,), for N = n_samples, of ground truth label log confidence for the target model.
+    log_conf_shadow : np.ndarray
+        Array of shape (N, M), for M = num_shadow_models, containing GTL log conf for the shadow models.
+    shadow_inmask: np.ndarray, default None (for offline case)
+        Boolean array of shape (N, M) indicating which shadow models
+        correspond to IN (training) samples (for online).
+    online : bool, default False
+        Whether to compute online BASE scores or offline scores.
+    offline_scale_factor : float, default 0.33
+        The scale factor used for the offline BASE attack.
+
+    Returns
+    -------
+    np.ndarray
+        Array of shape (n_samples,) containing the BASE scores for each audit sample.
+    """
+
+    num_shadow_models = log_conf_shadow.shape[1]
+
+    if online is True:
+        threshold = logsumexp(log_conf_shadow, axis=1) - np.log(num_shadow_models)
+        if verbose: print("threshold",threshold.shape)
+        return log_conf_target.ravel() - threshold
+        
+    else:
+        # ensure that each point has been trained on by half of the shadow models # RB Why?
+        out_indices = ~shadow_inmasks
+        n_out_models = np.sum(out_indices, axis=1)
+        assert np.all(n_out_models == num_shadow_models//2), "Number of OUT models is wrong" 
+
+        out_logits = np.where(out_indices, log_conf_shadow, -np.inf)
+        threshold = logsumexp(out_logits, axis=1) - np.log(n_out_models)
+
+        return log_conf_target.ravel() - offline_scale_factor * threshold

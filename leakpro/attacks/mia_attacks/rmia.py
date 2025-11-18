@@ -332,31 +332,63 @@ def rmia_use_torch(ratio_x, ratio_z, gamma=1.0, batch_size=1000, use_gpu_if_avai
     score_tensor = torch.cat(score_list)  # shape: (n_x,)
     return score_tensor.cpu().numpy()
 
-def rmia_vectorised(target_gtlprobs, shadow_gtlprobs, shadow_inmasks=None, online=True, offline_a=0.33,
-                    x_indices=None, z_indices=None, gamma=1.0, epsilon=1e-12, batch_size=1000, use_gpu_if_available=True):
+#----------------------------------
+# Free-standing RMIA implementation
+#----------------------------------
+
+def rmia_vectorised(target_gtlprobs: np.ndarray, shadow_gtlprobs: np.ndarray, shadow_inmasks: np.ndarray = None, 
+                    online: bool = True, offline_a: float = 0.33, verbose: bool = False, 
+                    x_indices: list = None, z_indices: list = None, gamma: float = 1.0, 
+                    epsilon: float = 1e-12, batch_size: int = 1000, use_gpu_if_available: bool = True):
+
+    """
+    This function compute RMIA membership inference scores proposed by 
+    Zarifzadeh, Sajjad, Philippe Cheng-Jie Marc Liu, and Reza Shokri.
+    Low-Cost High-Power Membership Inference by Boosting Relativity. (2023).
+
+    Parameters
+    ----------
+    target_gtlprobs : np.ndarray
+        Array of shape (N,), for N = n_samples, of ground truth label confidence for the target model.
+    shadow_gtlprobs : np.ndarray
+        Array of shape (N, M), for M = num_shadow_models, containing GTL confidence for the shadow models.
+    shadow_inmask: np.ndarray, default None (for offline case)
+        Boolean array of shape (N, M) indicating which shadow models
+        correspond to IN (training) samples (for online).
+    online : bool, default False
+        Whether to compute online BASE scores or offline scores.
+    offline_a : float, default 0.33
+        Constant factor used for the offline RMIA attack.
+
+    Returns
+    -------
+    np.ndarray
+        Array of shape (n_samples,) containing the RMIA scores for each audit sample.
+    """
 
     device = torch.device('cuda' if use_gpu_if_available and torch.cuda.is_available() else 'cpu')
-    print("Available device:", device)
+    if verbose: print("Available device:", device)
 
     if len(target_gtlprobs.shape) == 1:
         target_gtlprobs = target_gtlprobs.reshape(-1, 1)
 
     n_population = target_gtlprobs.shape[0]
     n_shadow_models = shadow_gtlprobs.shape[1]
-    print("shadow_gtlprobs", shadow_gtlprobs.shape)
+    if verbose: print("shadow_gtlprobs", shadow_gtlprobs.shape)
     assert shadow_gtlprobs.shape[0] == n_population
 
     if shadow_inmasks is None:
         shadow_inmasks = np.zeros_like(shadow_gtlprobs, dtype=bool)
 
     assert shadow_inmasks.shape == shadow_gtlprobs.shape
-    print("shadow_inmasks", shadow_inmasks.shape)
+    if verbose: print("shadow_inmasks", shadow_inmasks.shape)
 
     ratio_x = rmia_prep_ratio(target_gtlprobs, shadow_gtlprobs, shadow_inmasks, x_indices, online, offline_a, epsilon)
     ratio_z = rmia_prep_ratio(target_gtlprobs, shadow_gtlprobs, shadow_inmasks, z_indices, online, offline_a, epsilon)
 
-    print("ratio_x", ratio_x.shape)
-    print("ratio_z", ratio_z.shape)
+    if verbose: 
+        print("ratio_x", ratio_x.shape)
+        print("ratio_z", ratio_z.shape)
 
     return rmia_use_torch(ratio_x, ratio_z, gamma, batch_size, use_gpu_if_available)
 
