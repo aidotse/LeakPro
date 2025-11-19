@@ -141,7 +141,7 @@ def nearest_neighbors(
         dist_ix = np.zeros((candidates.shape[0]), dtype=np.float64)
         for iy in range(candidates.shape[0]):
             dist_ix[iy] = gower_distance(r0=queries[ix], r1=candidates[iy], cat_cols_index=cat_cols_index)
-            close_match_idx = shuffled_argsorted(dist_ix)[:n_neighbors]
+        close_match_idx = shuffled_argsorted(dist_ix)[:n_neighbors]
         idx[ix] = close_match_idx
         dists[ix] = dist_ix[close_match_idx]
     return idx, dists
