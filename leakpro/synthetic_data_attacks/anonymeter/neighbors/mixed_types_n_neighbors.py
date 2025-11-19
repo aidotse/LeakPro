@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import numpy.typing as npt
+from numpy.random import shuffle
 import pandas as pd
 from joblib import Parallel, delayed
 from numba import jit
@@ -15,95 +16,8 @@ from leakpro.synthetic_data_attacks.anonymeter.preprocessing.transformations imp
 from leakpro.synthetic_data_attacks.anonymeter.preprocessing.type_detection import detect_consistent_col_types
 from leakpro.utils.logger import logger
 
-
 @jit(nopython=True, nogil=True)
-def fisher_yates(idx: npt.NDArray[np.int64], start: int, end: int) -> None:
-    """In-place Fisher–Yates shuffle of idx[start:end].
-
-    Args.
-    -----
-        idx: npt.NDArray
-        start: int
-        end: int
-
-    Returns
-    -------
-        None.
-
-    """
-    for i in range(end - 1, start, -1):
-        j = np.random.randint(start, i + 1)
-        tmp = idx[i]
-        idx[i] = idx[j]
-        idx[j] = tmp
-
-@jit(nopython=True, nogil=True)
-def random_argsort_binary_numba(arr: npt.NDArray) -> npt.NDArray[np.int64]:
-    """Numba-compatible binary version of for numeric 1-D arrays for sorting array indices.
-
-    Returns array indices where equal values remain grouped but are
-    shuffled within each group (random tie-breaking).
-
-    Args.
-    -----
-        arr: npt.NDArray
-
-    Returns
-    -------
-        (sorted and shuffled indices): npt.NDArray[np.int64]
-
-    """
-    n = arr.shape[0]
-
-    # Count zeros
-    cnt0 = 0
-    for i in range(n):
-        if arr[i] == 0:
-            cnt0 += 1
-    cnt1 = n - cnt0
-
-    # Allocate index arrays
-    zeros_idx = np.zeros(cnt0, dtype=np.int64)
-    ones_idx = np.zeros(cnt1, dtype=np.int64)
-
-    z = 0
-    o = 0
-    for i in range(n):
-        if arr[i] == 0:
-            zeros_idx[z] = i
-            z += 1
-        else:
-            ones_idx[o] = i
-            o += 1
-
-    # Shuffle each index array in-place (Fisher–Yates)
-    for i in range(cnt0 - 1, 0, -1):
-        j = np.random.randint(0, i + 1)
-        tmp = zeros_idx[i]
-        zeros_idx[i] = zeros_idx[j]
-        zeros_idx[j] = tmp
-
-    for i in range(cnt1 - 1, 0, -1):
-        j = np.random.randint(0, i + 1)
-        tmp = ones_idx[i]
-        ones_idx[i] = ones_idx[j]
-        ones_idx[j] = tmp
-
-    # Concatenate indices: zeros first, then ones
-    idx = np.zeros(n, dtype=np.int64)
-    k = 0
-    for i in range(cnt0):
-        idx[k] = zeros_idx[i]
-        k += 1
-    for i in range(cnt1):
-        idx[k] = ones_idx[i]
-        k += 1
-
-    return idx
-
-
-@jit(nopython=True, nogil=True)
-def random_argsorted_general_numba(arr: np.ndarray) -> npt.NDArray[np.int64]:
+def shuffled_argsorted(arr: np.ndarray) -> npt.NDArray[np.int64]:
     """Numba-compatible general version for numeric 1-D arrays for sorting array indices.
 
     Returns array indices where equal values remain grouped but are
@@ -129,7 +43,7 @@ def random_argsorted_general_numba(arr: np.ndarray) -> npt.NDArray[np.int64]:
         while end < n and arr[idx[end]] == arr[idx[start]]:
             end += 1
         if end - start > 1:
-            fisher_yates(idx, start, end)
+            shuffle(idx[start:end])
         start = end
 
     return idx
@@ -227,7 +141,7 @@ def nearest_neighbors(
         dist_ix = np.zeros((candidates.shape[0]), dtype=np.float64)
         for iy in range(candidates.shape[0]):
             dist_ix[iy] = gower_distance(r0=queries[ix], r1=candidates[iy], cat_cols_index=cat_cols_index)
-        close_match_idx = dist_ix.argsort()[:n_neighbors]
+            close_match_idx = shuffled_argsorted(dist_ix)[:n_neighbors]
         idx[ix] = close_match_idx
         dists[ix] = dist_ix[close_match_idx]
     return idx, dists
