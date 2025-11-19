@@ -7,14 +7,15 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import numpy.typing as npt
-from numpy.random import shuffle
 import pandas as pd
 from joblib import Parallel, delayed
 from numba import jit
+from numpy.random import shuffle
 
 from leakpro.synthetic_data_attacks.anonymeter.preprocessing.transformations import mixed_types_transform
 from leakpro.synthetic_data_attacks.anonymeter.preprocessing.type_detection import detect_consistent_col_types
 from leakpro.utils.logger import logger
+
 
 @jit(nopython=True, nogil=True)
 def shuffled_argsorted(arr: np.ndarray) -> npt.NDArray[np.int64]:
