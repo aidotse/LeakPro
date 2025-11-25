@@ -100,50 +100,30 @@ def test_mixed_type_n_neighbors_shape(n_neighbors: int, n_queries: int) -> None:
     assert isinstance(ids, np.ndarray)
     assert ids.shape == (n_queries, n_neighbors)
 
-
-def test_returns_valid_permutation():
-    """Check that the output contains all indices from 0 to n-1 exactly once."""
+def test_shuffled_argsorted_logic():
+    """
+    Tests that shuffled_argsorted returns valid indices that sort the array,
+    verifying against specific valid permutations for ties.
+    """
+    # Array with duplicates to allow for multiple valid index permutations
     arr = np.array([10, 5, 8, 5, 2])
+    
     result = shuffled_argsorted(arr)
     
-    # Result should have same shape
-    assert result.shape == arr.shape
-    # Result should contain all indices (0 to 4)
-    expected_indices = np.arange(len(arr))
-    # Sorting the result indices should yield 0, 1, 2, 3...
-    np.testing.assert_array_equal(np.sort(result), expected_indices)
-
-def test_is_actually_sorted():
-    """Check that the indices provided actually sort the original array values."""
-    # Array with duplicates and negative numbers
-    arr = np.array([3, 1, 2, 1, 3, -5, 0])
-    idx = shuffled_argsorted(arr)
-    
-    sorted_arr = arr[idx]
-    
-    # Check if sorted_arr is non-decreasing
-    # (Difference between adjacent elements must be >= 0)
+    # Check that the indices actually sort the array
+    sorted_arr = arr[result]
     assert np.all(np.diff(sorted_arr) >= 0), "The result indices did not sort the array correctly"
-
-def test_shuffling_behavior():
-    """
-    Check that identical values are not stable-sorted but randomized.
-    We run the sort multiple times on a large block of identical values.
-    If it were a stable sort, the indices would always be increasing.
-    """
-    # Create an array of all zeros (all identical)
-    n = 100
-    arr = np.zeros(n)
     
-    # Get the argsort
-    idx = shuffled_argsorted(arr)
+    valid_option_1 = np.array([4, 1, 3, 2, 0])
+    valid_option_2 = np.array([4, 3, 1, 2, 0])
     
-    # If it were a standard stable argsort, idx would be [0, 1, 2, ... 99]
-    # Since we shuffle, it is statistically impossible for it to be perfectly ordered
-    # for a large N.
-    is_perfectly_ordered = np.all(np.diff(idx) == 1)
+    match_1 = np.array_equal(result, valid_option_1)
+    match_2 = np.array_equal(result, valid_option_2)
     
-    assert not is_perfectly_ordered, "Indices for identical values were not shuffled (result looked stable)."
+    assert match_1 or match_2, (
+        f"Result {result} matches neither expected permutation "
+        f"({valid_option_1} or {valid_option_2})"
+    )
 
 def test_randomness_across_runs():
     """Ensure that running the function twice on the same data produces different index orders for ties."""
