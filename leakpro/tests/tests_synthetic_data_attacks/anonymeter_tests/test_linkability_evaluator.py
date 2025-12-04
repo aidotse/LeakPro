@@ -212,7 +212,6 @@ def test_linkability_naive_attack(n_neighbors: int, e_naive_rate: float) -> None
         n_jobs=1
     )
     results = evaluator.evaluate()
-    naive_rate = results.naive_rate
     assert isinstance(results, EvaluationResults)
     naive_rate = results.naive_rate
     assert naive_rate.ci[0] <= e_naive_rate
