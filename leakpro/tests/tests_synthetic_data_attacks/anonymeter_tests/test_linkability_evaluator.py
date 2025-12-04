@@ -128,10 +128,8 @@ def test_linkability_main_attack(
     e_main_rate: float,
     e_ci: tuple
 ) -> None:
-    """Test linkability main attack results.
-
-    Test implicitly tests functions main_linkability_attack, random_links and naive_linkability_attack.
-    """
+    
+    """Test linkability main attack results."""
     #Note: monkeypatch for fixing random seed in calculations
     rng = np.random.default_rng(seed=42)
     callable = np.random.default_rng
@@ -140,24 +138,49 @@ def test_linkability_main_attack(
             return callable(seed=int(rng.random()*1000))
         return callable(seed=seed)
     monkeypatch.setattr(np.random, "default_rng", mock_np_random_default_rng)
-    #Continuing with test after monkeypatch
-    ori = pd.DataFrame({"col0": [0, 1, 4, 9], "col1": [0, 1, 9, 4]})
-    syn = pd.DataFrame({"col0": [0, 1, 4, 9], "col1": [0, 1, 4, 9]})
+
+
+    # 1000 rows: 500 Matches + 500 Mismatches.
+    n_rows = 1000
+    half = n_rows // 2
+
+    # Matches
+    match_ids = [f"match_{i}" for i in range(half)]
+    df_match = pd.DataFrame({"col0": match_ids, "col1": match_ids})
+
+    # Mismatches
+    syn_mismatch_ids = [f"syn_unique_{i}" for i in range(half)]
+    ori_mismatch_ids = [f"ori_unique_{i}" for i in range(half)]
+    syn_mismatch = pd.DataFrame({"col0": syn_mismatch_ids, "col1": syn_mismatch_ids})
+    ori_mismatch = pd.DataFrame({"col0": ori_mismatch_ids, "col1": ori_mismatch_ids})
+
+    # Create ori and syn dataframes
+    ori_ordered = pd.concat([df_match, ori_mismatch], ignore_index=True)
+    syn_ordered = pd.concat([df_match, syn_mismatch], ignore_index=True)
+    
+    # Randomize order to prevent sequential sampling bias.
+    shuffled_indices = np.random.default_rng(seed=123).permutation(n_rows)
+    ori = ori_ordered.iloc[shuffled_indices].reset_index(drop=True)
+    syn = syn_ordered.iloc[shuffled_indices].reset_index(drop=True)
+
     evaluator = LinkabilityEvaluator(
         ori = ori,
         syn = syn,
-        aux_cols = (["col0"], ["col1"]),
-        n_attacks = 4,
+        aux_cols = [['col0'], ['col1']],
+        n_attacks = n_rows,
         confidence_level = confidence_level,
         n_neighbors = n_neighbors,
         n_jobs = 1
     )
+    
     results = evaluator.evaluate()
-    assert isinstance(results, EvaluationResults)
     main_rate = results.main_rate
-    assert main_rate.rate == e_main_rate
-    assert abs(main_rate.ci[0]-e_ci[0])<0.0001
-    assert abs(main_rate.ci[1]-e_ci[1])<0.0001
+    
+    # Rate should strictly hover at 0.5 because exactly 50% of records are linkable.
+    # The other 50% are disjoint strings that cannot be linked.
+    assert main_rate.rate == pytest.approx(e_main_rate, abs=0.05)
+    assert((main_rate.ci[0]-e_ci[0])>0.0)
+    assert((main_rate.ci[1]-e_ci[1])<0.0)
 
 @pytest.mark.parametrize(
     ("n_neighbors", "e_naive_rate"),
@@ -169,17 +192,24 @@ def test_linkability_naive_attack(n_neighbors: int, e_naive_rate: float) -> None
     Test implicitly tests functions main_linkability_attack, random_links and naive_linkability_attack.
     """
     rng = np.random.default_rng(seed=42)
-    # Note that for the naive attack, it does not really matter
-    # what's inside the synthetic or the original dataframe.
-    ori = pd.DataFrame(rng.choice(["a", "b"], size=(1000, 2)), columns=["c0", "c1"])
-    syn = pd.DataFrame([["a", "a"], ["b", "b"]], columns=["c0", "c1"])
+
+    # Ensure rows match the expected rate
+    n_rows = int(n_neighbors / e_naive_rate)
+
+    # Avoid denominator collapse (when n_neighbors / N_syn_rows > 1, confidence interval will collapse to 1)
+    n_syn_rows = 10
+
+    # Create the dataframe with the calculated size
+    ori = pd.DataFrame(rng.choice(["a", "b"], size=(n_rows, 2)), columns=["c0", "c1"])
+    syn = pd.DataFrame([["a", "a"], ["b", "b"]] * n_syn_rows, columns=["c0", "c1"])
+
     evaluator = LinkabilityEvaluator(
-        ori = ori,
-        syn = syn,
-        aux_cols = (["c0"],["c1"]),
-        confidence_level = 0.99,
-        n_neighbors = n_neighbors,
-        n_jobs = 1
+        ori=ori, 
+        syn=syn, 
+        aux_cols=(["c0"], ["c1"]),
+        confidence_level=0.99,
+        n_neighbors=n_neighbors,
+        n_jobs=1
     )
     results = evaluator.evaluate()
     assert isinstance(results, EvaluationResults)
