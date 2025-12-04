@@ -15,12 +15,14 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
-from . import dist_util, logger
+from . import dist_util#, logger
 from .dpm_solver_pytorch import DPM_Solver, NoiseScheduleVP, model_wrapper
 from .fp16_util import MixedPrecisionTrainer
 from .losses import p_reg_loss, topk_loss
 from .nn import update_ema
 from .resample import LossAwareSampler, UniformSampler
+
+from leakpro.utils.logger import logger
 
 # For ImageNet experiments, this was a good default value.
 # We found that the lg_loss_scale quickly climbed to
@@ -73,7 +75,8 @@ class PreTrain:
         self.save_path = "./" if save_path is None else save_path
         self.save_name = args.save_name if args.save_name else "pretrain"
 
-        logger.log(f"Saving checkpoints to {self.save_path}")
+        # logger.info(f"Saving checkpoints to {self.save_path}")
+        logger.info(f"Saving checkpoints to {self.save_path}")
 
         self.resume_checkpoint = args.resume_checkpoint
         self.use_fp16 = args.use_fp16
@@ -141,7 +144,7 @@ class PreTrain:
 
             self.resume_step = parse_resume_step_from_filename(resume_checkpoint)
             if dist.get_rank() == 0:
-                logger.log(f"loading model from checkpoint: {resume_checkpoint}...")
+                logger.info(f"loading model from checkpoint: {resume_checkpoint}...")
                 self.model.load_state_dict(
                     dist_util.load_state_dict(
                         resume_checkpoint, map_location=dist_util.dev()
@@ -157,7 +160,7 @@ class PreTrain:
         ema_checkpoint = find_ema_checkpoint(main_checkpoint, self.resume_step, rate)
         if ema_checkpoint:
             if dist.get_rank() == 0:
-                logger.log(f"loading EMA from checkpoint: {ema_checkpoint}...")
+                logger.info(f"loading EMA from checkpoint: {ema_checkpoint}...")
                 state_dict = dist_util.load_state_dict(
                     ema_checkpoint, map_location=dist_util.dev()
                 )
@@ -172,7 +175,7 @@ class PreTrain:
             bf.dirname(main_checkpoint), f"opt{self.resume_step:06}.pt"
         )
         if bf.exists(opt_checkpoint):
-            logger.log(f"loading optimizer state from checkpoint: {opt_checkpoint}")
+            logger.info(f"loading optimizer state from checkpoint: {opt_checkpoint}")
             state_dict = dist_util.load_state_dict(
                 opt_checkpoint, map_location=dist_util.dev()
             )
@@ -192,7 +195,8 @@ class PreTrain:
                 cond["y"] = th.ones_like(cond["y"]) * (self.model.num_classes - 1)
             self.run_step(batch, cond)
             if self.step % self.log_interval == 0:
-                logger.dumpkvs()
+                # logger.dumpkvs()
+                self._dump_loggs()
             if self.step % self.save_interval == 0:
                 self.save()
                 # Run for a finite amount of time in integration tests.
@@ -210,7 +214,7 @@ class PreTrain:
         if took_step:
             self._update_ema()
         self._anneal_lr()
-        self.log_step()
+        # self.log_step()
 
     def forward_backward(self, batch, cond):
         self.mp_trainer.zero_grad()
@@ -243,7 +247,7 @@ class PreTrain:
                 )
 
             loss = (losses["loss"] * weights).mean()
-            log_loss_dict(
+            self.loss_loggs = log_loss_dict(
                 self.diffusion, t, {k: v * weights for k, v in losses.items()}
             )
             self.mp_trainer.backward(loss)
@@ -260,15 +264,28 @@ class PreTrain:
         for param_group in self.opt.param_groups:
             param_group["lr"] = lr
 
-    def log_step(self):
-        logger.logkv("step", self.step + self.resume_step)
-        logger.logkv("samples", (self.step + self.resume_step + 1) * self.global_batch)
+    def _dump_loggs(self):
+        logger.info("***** Training statistics *****")
+        logger.info(f"Step: {self.step + self.resume_step}")
+        logger.info(f"Samples: {(self.step + self.resume_step + 1) * self.global_batch}")
+    
+        for key, value in self.loss_loggs.items():
+            logger.info(f"loss: {key}: {value}")
+
+        for key, value in self.mp_trainer.loggs.items():
+            logger.info(f"mp: {key}: {value}")
+
+    # def log_step(self):
+        # logger.infokv("step", self.step + self.resume_step)
+        # logger.infokv("samples", (self.step + self.resume_step + 1) * self.global_batch)
+        # self.loggs["step"] = self.step + self.resume_step
+        # self.loggs["samples"] = (self.step + self.resume_step + 1) * self.global_batch
 
     def save(self):
         def save_checkpoint(rate, params):
             state_dict = self.mp_trainer.master_params_to_state_dict(params)
             if dist.get_rank() == 0:
-                logger.log(f"saving model {rate}...")
+                logger.info(f"saving model {rate}...")
                 if not rate:
                     filename = f"{self.save_name}.pt"
                 else:
@@ -333,7 +350,7 @@ class FineTune:
         # self.save_path = get_blob_logdir() if save_path is None else save_path
         self.save_path = "./" if save_path is None else save_path
         print(self.save_path, get_blob_logdir())
-        logger.log(f"Saving checkpoints to {self.save_path}")
+        logger.info(f"Saving checkpoints to {self.save_path}")
 
         self.use_fp16 = args.use_fp16
         self.fp16_scale_growth = args.fp16_scale_growth
@@ -396,7 +413,7 @@ class FineTune:
     def _load_and_sync_parameters(self):
         if resume_checkpoint := find_resume_checkpoint() or self.resume_checkpoint:
             if dist.get_rank() == 0:
-                logger.log(f"loading model from checkpoint: {resume_checkpoint}...")
+                logger.info(f"loading model from checkpoint: {resume_checkpoint}...")
                 self.model.load_state_dict(
                     dist_util.load_state_dict(
                         resume_checkpoint, map_location=dist_util.dev()
@@ -464,12 +481,12 @@ class FineTune:
                 loss_agg += loss.item()
                 loss1_agg += loss1.item()
                 loss2_agg += loss2.item()
-            logger.log(f"Epoch {iter}: loss {loss_agg/len(bar):.4f}, loss1 {loss1_agg/len(bar):.4f}, loss2 {loss2_agg/len(bar):.4f}")
+            logger.info(f"Epoch {iter}: loss {loss_agg/len(bar):.4f}, loss1 {loss1_agg/len(bar):.4f}, loss2 {loss2_agg/len(bar):.4f}")
 
             # Save the fine-tuned model
             with th.no_grad():
                 acc_mean = np.mean(acc)
-                logger.log(f"The mean acc in iteration {iter} is {acc_mean:.2%}")
+                logger.info(f"The mean acc in iteration {iter} is {acc_mean:.2%}")
 
                 if acc_mean > self.best_mean_acc:
                     self.best_mean_acc = acc_mean
@@ -477,14 +494,14 @@ class FineTune:
                     self.save()
                     acc, iter = [], (iter + 1)
                 if iter >= self.epochs:
-                    logger.log(f"Training completed with best mean acc: {self.best_mean_acc:.2%}")
+                    logger.info(f"Training completed with best mean acc: {self.best_mean_acc:.2%}")
                     break
 
     def save(self):
         filename = f"{self.save_name}.pt"
         with bf.BlobFile(bf.join(self.save_path, filename), "wb") as f:
             th.save(self.state_dict, f)
-            logger.log(f"New best mean acc: {self.best_mean_acc:.2%}. Saving model to {f.name}")
+            logger.info(f"New best mean acc: {self.best_mean_acc:.2%}. Saving model to {f.name}")
 
 
 def generator_from_dataloader(dataloader: DataLoader):
@@ -539,12 +556,16 @@ def find_ema_checkpoint(main_checkpoint, step, rate):
 
 
 def log_loss_dict(diffusion, ts, losses):
+    loggs = {}
     for key, values in losses.items():
-        logger.logkv_mean(key, values.mean().item())
+        # logger.infokv_mean(key, values.mean().item())
+        loggs[key] = values.mean().item()
         # Log the quantiles (four quartiles, in particular).
         for sub_t, sub_loss in zip(ts.cpu().numpy(), values.detach().cpu().numpy()):
             quartile = int(4 * sub_t / diffusion.num_timesteps)
-            logger.logkv_mean(f"{key}_q{quartile}", sub_loss)
+            # logger.infokv_mean(f"{key}_q{quartile}", sub_loss)
+            loggs[f"{key}_q{quartile}"] = sub_loss
+    return loggs
 
 def visualize(img, label):
     sample = ((img + 1) * 127.5).clamp(0, 255).to(th.uint8)

@@ -28,6 +28,7 @@ from leakpro.utils.logger import logger
 from leakpro.utils.save_load import hash_config
 
 # calc_pytorch_fid
+import matplotlib.pyplot as plt
 
 class AttackDiffMi(AbstractMINV):
     """Class that implements the DiffMi attack."""
@@ -191,7 +192,7 @@ class AttackDiffMi(AbstractMINV):
 
         # TODO: Adjust input dimensions based on dataset and model input requirements
         input_dim_x, input_dim_y = 64, 64
-        for i, classes in tqdm(enumerate(label_dataset)):
+        for i, classes in tqdm(enumerate(label_dataset), total=len(label_dataset)):
             classes = classes.to(self.device)
             recon_imgs = Iterative_Image_Reconstruction(args=self.config.diffmiattack, diff_net=self.diffusion_model,  classifier=self.target_model, classes=classes,
                                                         p_reg=self.p_reg, iter=i, batch_num=batch_num, device=self.device).clamp(0,1).to(device=self.device)
@@ -223,6 +224,9 @@ class AttackDiffMi(AbstractMINV):
         # if self.config.diffmiattack.cal_fid:
         #     calc_pytorch_fid(recon_paths)
 
+        plt.hist(knn_arr)
+        plt.savefig("dummy_name.png")
+        plt.show()
 
         return MinvResult.from_metrics(
             result_name="Diff-Mi Attack Result",
