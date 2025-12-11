@@ -1,33 +1,30 @@
 import copy
 import functools
-import io
 import os
 
 import blobfile as bf
 import kornia
-import matplotlib.pyplot as plt
 import numpy as np
 import torch as th
 import torch.distributed as dist
-from PIL import Image
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.optim import AdamW
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
-from . import dist_util#, logger
+from leakpro.utils.logger import logger
+
+from . import dist_util  #, logger
 from .dpm_solver_pytorch import DPM_Solver, NoiseScheduleVP, model_wrapper
 from .fp16_util import MixedPrecisionTrainer
 from .losses import p_reg_loss, topk_loss
 from .nn import update_ema
 from .resample import LossAwareSampler, UniformSampler
 
-from leakpro.utils.logger import logger
-
 # For ImageNet experiments, this was a good default value.
 # We found that the lg_loss_scale quickly climbed to
 # 20-21 within the first ~1K steps of training.
-INITIAL_LOG_LOSS_SCALE = 20.0
+# INITIAL_LOG_LOSS_SCALE = 20.0
 
 
 class PreTrain:
@@ -75,7 +72,6 @@ class PreTrain:
         self.save_path = "./" if save_path is None else save_path
         self.save_name = args.save_name if args.save_name else "pretrain"
 
-        # logger.info(f"Saving checkpoints to {self.save_path}")
         logger.info(f"Saving checkpoints to {self.save_path}")
 
         self.resume_checkpoint = args.resume_checkpoint
@@ -136,11 +132,13 @@ class PreTrain:
             self.ddp_model = self.model
 
     def _load_and_sync_parameters(self):
+        """Load model parameters from checkpoint and sync across processes."""
+
         resume_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
 
         if resume_checkpoint:
 
-            print("RESUME CHECKPOINT: ", resume_checkpoint)
+            logger.info("RESUME CHECKPOINT: ", resume_checkpoint)
 
             self.resume_step = parse_resume_step_from_filename(resume_checkpoint)
             if dist.get_rank() == 0:
@@ -154,6 +152,8 @@ class PreTrain:
         dist_util.sync_params(self.model.parameters())
 
     def _load_ema_parameters(self, rate):
+        """Load EMA parameters from checkpoint."""
+
         ema_params = copy.deepcopy(self.mp_trainer.master_params)
 
         main_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
@@ -170,6 +170,8 @@ class PreTrain:
         return ema_params
 
     def _load_optimizer_state(self):
+        """Load optimizer state from checkpoint."""
+
         main_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
         opt_checkpoint = bf.join(
             bf.dirname(main_checkpoint), f"opt{self.resume_step:06}.pt"
@@ -182,6 +184,8 @@ class PreTrain:
             self.opt.load_state_dict(state_dict)
 
     def run(self):
+        """Run the pre-training loop."""
+
         while (
             not self.lr_anneal_steps
             or self.step + self.resume_step < self.lr_anneal_steps
@@ -195,7 +199,6 @@ class PreTrain:
                 cond["y"] = th.ones_like(cond["y"]) * (self.model.num_classes - 1)
             self.run_step(batch, cond)
             if self.step % self.log_interval == 0:
-                # logger.dumpkvs()
                 self._dump_loggs()
             if self.step % self.save_interval == 0:
                 self.save()
@@ -209,14 +212,17 @@ class PreTrain:
             self.save()
 
     def run_step(self, batch, cond):
+        """Run a single step of training."""
+
         self.forward_backward(batch, cond)
         took_step = self.mp_trainer.optimize(self.opt)
         if took_step:
             self._update_ema()
         self._anneal_lr()
-        # self.log_step()
 
     def forward_backward(self, batch, cond):
+        """Run the forward and backward passes."""
+
         self.mp_trainer.zero_grad()
         for i in range(0, batch.shape[0], self.microbatch):
             micro = batch[i : i + self.microbatch].to(dist_util.dev())
@@ -253,10 +259,14 @@ class PreTrain:
             self.mp_trainer.backward(loss)
 
     def _update_ema(self):
+        """Update the EMA parameters."""
+
         for rate, params in zip(self.ema_rate, self.ema_params):
             update_ema(params, self.mp_trainer.master_params, rate=rate)
 
     def _anneal_lr(self):
+        """Anneal the learning rate, if specified."""
+
         if not self.lr_anneal_steps:
             return
         frac_done = (self.step + self.resume_step) / self.lr_anneal_steps
@@ -265,24 +275,34 @@ class PreTrain:
             param_group["lr"] = lr
 
     def _dump_loggs(self):
+        """Dump training statistics to the logger."""
+
         logger.info("***** Training statistics *****")
         logger.info(f"Step: {self.step + self.resume_step}")
         logger.info(f"Samples: {(self.step + self.resume_step + 1) * self.global_batch}")
-    
+
         for key, value in self.loss_loggs.items():
             logger.info(f"loss: {key}: {value}")
 
         for key, value in self.mp_trainer.loggs.items():
             logger.info(f"mp: {key}: {value}")
 
-    # def log_step(self):
-        # logger.infokv("step", self.step + self.resume_step)
-        # logger.infokv("samples", (self.step + self.resume_step + 1) * self.global_batch)
-        # self.loggs["step"] = self.step + self.resume_step
-        # self.loggs["samples"] = (self.step + self.resume_step + 1) * self.global_batch
-
     def save(self):
+        """Save the model and optimizer state."""
+
         def save_checkpoint(rate, params):
+            """Save the model checkpoint.
+
+            Args:
+            ----
+                rate: The EMA rate.
+                params: The model parameters.
+
+            Returns:
+                None
+
+            """
+
             state_dict = self.mp_trainer.master_params_to_state_dict(params)
             if dist.get_rank() == 0:
                 logger.info(f"saving model {rate}...")
@@ -290,7 +310,6 @@ class PreTrain:
                     filename = f"{self.save_name}.pt"
                 else:
                     filename = f"ema_{rate}_{self.save_name}.pt"
-                print(self.save_path, filename)
                 with bf.BlobFile(bf.join(self.save_path, filename), "wb") as f:
                     th.save(state_dict, f)
 
@@ -308,10 +327,8 @@ class PreTrain:
         dist.barrier()
 
 class FineTune:
-
     def __init__(
         self,
-        # *,
         args,
         target,
         model,
@@ -347,9 +364,7 @@ class FineTune:
         self.batch_size = args.batch_size
         self.lr = args.lr
         self.resume_checkpoint = args.resume_checkpoint
-        # self.save_path = get_blob_logdir() if save_path is None else save_path
         self.save_path = "./" if save_path is None else save_path
-        print(self.save_path, get_blob_logdir())
         logger.info(f"Saving checkpoints to {self.save_path}")
 
         self.use_fp16 = args.use_fp16
@@ -400,7 +415,7 @@ class FineTune:
         betas = th.tensor(np.linspace(b0, bT, timesteps), dtype=float)
         self.noise_schedule = NoiseScheduleVP(schedule="discrete", betas=betas)
 
-        # Load for p_reg loss
+        # Set p_reg for p_reg_loss
         self.p_reg = p_reg
 
         self.aug = kornia.augmentation.container.ImageSequential(
@@ -411,6 +426,8 @@ class FineTune:
         )
 
     def _load_and_sync_parameters(self):
+        """Load model parameters from checkpoint and sync across processes."""
+
         if resume_checkpoint := find_resume_checkpoint() or self.resume_checkpoint:
             if dist.get_rank() == 0:
                 logger.info(f"loading model from checkpoint: {resume_checkpoint}...")
@@ -423,6 +440,18 @@ class FineTune:
         dist_util.sync_params(self.model.parameters())
 
     def run(self, guidance_scale=3.0, aug_times=2):
+        """Run the fine-tuning loop.
+
+        Args:
+        ----
+            guidance_scale (float): The guidance scale for classifier-free guidance.
+            aug_times (int): The number of augmentations per sample.
+
+        Returns:
+        -------
+            None
+
+        """
 
         acc, acc_mean, best_mean_acc, iter = [], 0.0, 0.0, 0
         labels = th.tensor(np.arange(0, 300)).to(dist_util.dev())
@@ -498,6 +527,8 @@ class FineTune:
                     break
 
     def save(self):
+        """Save the fine-tuned diffusion model."""
+
         filename = f"{self.save_name}.pt"
         with bf.BlobFile(bf.join(self.save_path, filename), "wb") as f:
             th.save(self.state_dict, f)
@@ -532,20 +563,15 @@ def parse_resume_step_from_filename(filename):
     except ValueError:
         return 0
 
-
-def get_blob_logdir():
-    # You can change this to be a separate path to save checkpoints to
-    # a blobstore or some external drive.
-    return logger.get_dir()
-
-
 def find_resume_checkpoint():
-    # On your infrastructure, you may want to override this to automatically
-    # discover the latest checkpoint on your blob storage, etc.
-    return None
+    """Find the latest checkpoint in the given directory."""
+    # Not implemented yet.
+    return
 
 
 def find_ema_checkpoint(main_checkpoint, step, rate):
+    """Find the EMA checkpoint corresponding to the main checkpoint, step, and rate."""
+
     if main_checkpoint is None:
         return None
     filename = f"ema_{rate}_{(step):06d}.pt"
@@ -556,6 +582,20 @@ def find_ema_checkpoint(main_checkpoint, step, rate):
 
 
 def log_loss_dict(diffusion, ts, losses):
+    """Log the loss dictionary.
+
+    Args:
+    ----
+        diffusion: The diffusion process.
+        ts: The time steps.
+        losses: The loss dictionary.
+
+    Returns:
+    -------
+        loggs: The logged loss dictionary.
+
+    """
+
     loggs = {}
     for key, values in losses.items():
         # logger.infokv_mean(key, values.mean().item())
@@ -567,50 +607,50 @@ def log_loss_dict(diffusion, ts, losses):
             loggs[f"{key}_q{quartile}"] = sub_loss
     return loggs
 
-def visualize(img, label):
-    sample = ((img + 1) * 127.5).clamp(0, 255).to(th.uint8)
-    arr = np.array([i.permute(1, 2, 0).cpu().numpy() for i in sample])
-    N = min(int(np.sqrt(len(arr))), 4)
+# def visualize(img, label):
+#     sample = ((img + 1) * 127.5).clamp(0, 255).to(th.uint8)
+#     arr = np.array([i.permute(1, 2, 0).cpu().numpy() for i in sample])
+#     N = min(int(np.sqrt(len(arr))), 4)
 
-    fig, axes = plt.subplots(N, N, figsize=(4, 4))
-    plt.subplots_adjust(wspace=0, hspace=0.5)
+#     fig, axes = plt.subplots(N, N, figsize=(4, 4))
+#     plt.subplots_adjust(wspace=0, hspace=0.5)
 
-    for i in range(N * N):
-        plt.subplot(N, N, i + 1)
-        plt.imshow(arr[i])
-        plt.title(label[i].item())
-        plt.axis("off")
+#     for i in range(N * N):
+#         plt.subplot(N, N, i + 1)
+#         plt.imshow(arr[i])
+#         plt.title(label[i].item())
+#         plt.axis("off")
 
-    # Save the Matplotlib figure to a BytesIO object
-    img_bytes = io.BytesIO()
-    plt.savefig(img_bytes, format="png", bbox_inches="tight", pad_inches=0)
-    plt.close()
+#     # Save the Matplotlib figure to a BytesIO object
+#     img_bytes = io.BytesIO()
+#     plt.savefig(img_bytes, format="png", bbox_inches="tight", pad_inches=0)
+#     plt.close()
 
-    # Convert the BytesIO object to a PIL Image
-    img_pil = Image.open(img_bytes)
+#     # Convert the BytesIO object to a PIL Image
+#     img_pil = Image.open(img_bytes)
 
-    return img_pil
+#     return img_pil
 
-def show_images_side_by_side(image1, image2, title1="Reconstructed Images (Diff-MI)", title2="Private Images (Ground-Truth)"):
-    """Display two PIL images side by side in a Jupyter Notebook.
+# def show_images_side_by_side(image1, image2, title1="Reconstructed Images (Diff-MI)", title2="Private Images (Ground-Truth)"):
+#     """Display two PIL images side by side in a Jupyter Notebook.
 
-    Parameters
-    ----------
-    - image1: PIL image object for the first image
-    - image2: PIL image object for the second image
-    - title1: Title for the first image (default is 'Image 1')
-    - title2: Title for the second image (default is 'Image 2')
+#     Parameters
+#     ----------
+#     - image1: PIL image object for the first image
+#     - image2: PIL image object for the second image
+#     - title1: Title for the first image (default is 'Image 1')
+#     - title2: Title for the second image (default is 'Image 2')
 
-    """
-    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+#     """
+#     fig, axes = plt.subplots(1, 2, figsize=(10, 5))
 
-    axes[0].imshow(image1)
-    axes[0].set_title(title1)
+#     axes[0].imshow(image1)
+#     axes[0].set_title(title1)
 
-    axes[1].imshow(image2)
-    axes[1].set_title(title2)
+#     axes[1].imshow(image2)
+#     axes[1].set_title(title2)
 
-    for ax in axes:
-        ax.axis("off")
+#     for ax in axes:
+#         ax.axis("off")
 
-    plt.show()
+#     plt.show()

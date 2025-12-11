@@ -3,32 +3,31 @@ import math
 import os
 from typing import Any, Dict
 
-import kornia.augmentation as K
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from leakpro.attacks.minv_attacks.abstract_minv import AbstractMINV
 from leakpro.attacks.utils.diff_mi.attack_utils import (
-    Iterative_Image_Reconstruction,
+    Iterative_Reconstruction,
     calc_acc,
     calc_acc_std,
     calc_knn,
+    calc_lpips,
+    calc_mse,
+    calc_pytorch_fid,
     get_PGD,
-    save_tensor_to_image,
+    save_tensor,
 )
 from leakpro.attacks.utils.diff_mi.setup import DiffMiConfig, extract_features, get_p_reg, top_n_pseudo_label_dataset
 from leakpro.attacks.utils.diffusion_handler import DiffMiHandler
 from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.reporting.minva_result import MinvResult
-
-# from leakpro.metrics.attack_result import MinvResult
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 from leakpro.utils.save_load import hash_config
 
-# calc_pytorch_fid
-import matplotlib.pyplot as plt
 
 class AttackDiffMi(AbstractMINV):
     """Class that implements the DiffMi attack."""
@@ -145,30 +144,30 @@ class AttackDiffMi(AbstractMINV):
         logger.info("Evaluation model set.")
 
         # Private DATASET
-        private_dataloader = self.handler.get_private_dataloader(batch_size=self.config.pretrain.batch_size)
+        self.private_dataloader = self.handler.get_private_dataloader(batch_size=self.config.pretrain.batch_size)
         logger.info("Loading private dataloader finished.")
 
-        self.private_features, self.private_idents = extract_features(self.target_model, private_dataloader, self.device, save_dir=self.config.save_path)
+        self.private_features, self.private_idents = extract_features(self.target_model, self.private_dataloader, self.device, save_dir=self.config.save_path)
         logger.info("Extracted private features from target model.")
 
         # PUBLIC DATASET
-        public_dataloader = self.handler.get_public_dataloader(batch_size=self.config.pretrain.batch_size)
+        self.public_dataloader = self.handler.get_public_dataloader(batch_size=self.config.pretrain.batch_size)
         logger.info("Loading public dataloader finished.")
 
         # PSEUDO LABELED DATASET
-        pseudo_dataset = top_n_pseudo_label_dataset(public_dataloader, self.target_model, self.device,
+        pseudo_dataset = top_n_pseudo_label_dataset(self.public_dataloader, self.target_model, self.device,
                                                     num_classes=self.handler.get_num_classes(),
                                                     top_n=self.config.preprocessing.top_n
                                                     )
         logger.info("Pseudo labeled dataset created.")
 
-        pseudo_dataloader = DataLoader(pseudo_dataset, batch_size=self.config.pretrain.batch_size, shuffle=True)
+        self.pseudo_dataloader = DataLoader(pseudo_dataset, batch_size=self.config.pretrain.batch_size, shuffle=True)
         logger.info("Pseudo labeled dataloader created.")
 
-        self.diff_handler.pseudo_dataloader = pseudo_dataloader
+        self.diff_handler.pseudo_dataloader = self.pseudo_dataloader
         logger.info("Pseudo labeled dataloader set in DiffMiHandler.")
 
-        self.p_reg = get_p_reg(public_dataloader, self.target_model, self.device, args=self.config)
+        self.p_reg = get_p_reg(self.public_dataloader, self.target_model, self.device, args=self.config)
         logger.info("Done computing p_reg.")
 
         if self.config.do_fine_tune:
@@ -184,49 +183,75 @@ class AttackDiffMi(AbstractMINV):
         logger.info("Running the Diff-Mi attack")
         pgd_model = get_PGD(self.target_model)
 
-        recon_list, success_img_list, success_label_list = [], [], []
+        recon_list, success_list, success_label_list = [], [], []
         labels = torch.cat([torch.randperm(self.config.diffmiattack.label_num) for _ in range(self.config.diffmiattack.repeat_N)]).to(self.device)
         label_dataset = DataLoader(labels, batch_size=self.config.diffmiattack.batch_size, shuffle=False)
         batch_num = math.ceil(len(labels) / self.config.diffmiattack.batch_size) - 1
 
-
-        # TODO: Adjust input dimensions based on dataset and model input requirements
-        input_dim_x, input_dim_y = 64, 64
+        logger.info("Running reconstruction... ")
         for i, classes in tqdm(enumerate(label_dataset), total=len(label_dataset)):
             classes = classes.to(self.device)
-            recon_imgs = Iterative_Image_Reconstruction(args=self.config.diffmiattack, diff_net=self.diffusion_model,  classifier=self.target_model, classes=classes,
+            recon = Iterative_Reconstruction(args=self.config.diffmiattack, diff_net=self.diffusion_model,  classifier=self.target_model, classes=classes,
                                                         p_reg=self.p_reg, iter=i, batch_num=batch_num, device=self.device).clamp(0,1).to(device=self.device)
 
-            img_translated = pgd_model(recon_imgs, target=classes, **self.config.diffmiattack.pgdconfig.__dict__)[-1].clamp(0,1)
-            _, _, idx = calc_acc(self.evaluation_model, K.Resize((input_dim_x, input_dim_y))(img_translated), classes, with_success=True)
+            translated = pgd_model(recon, target=classes, **self.config.diffmiattack.pgdconfig.__dict__)[-1].clamp(0,1)
+            _, _, idx = calc_acc(self.evaluation_model, translated, classes, with_success=True)
 
-            recon_list.append(img_translated)
-            success_img_list.append(img_translated[idx])
+            recon_list.append(translated)
+            success_list.append(translated[idx])
             success_label_list.append(classes[idx])
+
         recon_list = torch.cat(recon_list)
-        success_img_list = torch.cat(success_img_list)
+        success_list = torch.cat(success_list)
         success_label_list = torch.cat(success_label_list)
 
-        acc1, acc5, var1, var5 = calc_acc_std(recon_list, labels, self.evaluation_model, self.config.diffmiattack.label_num, dims=(input_dim_x, input_dim_y))
+        acc1, acc5, var1, var5 = calc_acc_std(recon_list, labels, self.evaluation_model, self.config.diffmiattack.label_num)
         logger.info(f"Final Top1: {acc1:.2%} ± {var1:.2%}, Top5: {acc5:.2%} ± {var5:.2%}")
 
         # Save Reconstructed Images
-        recon_paths = save_tensor_to_image(recon_list, labels, f"./{self.output_dir}/results/Diff-Mi/all_imgs")
-        success_img_paths = save_tensor_to_image(success_img_list, success_label_list, f"./{self.output_dir}/results/Diff-Mi/success_imgs")
-        print(f"Saved {self.config.diffmiattack.repeat_N}x{self.config.diffmiattack.label_num} generated images.")
+        logger.info(f"Saved {self.config.diffmiattack.repeat_N}x{self.config.diffmiattack.label_num} generated images.")
 
-        if self.config.diffmiattack.cal_knn:
-            knn, knn_arr = calc_knn(success_img_list, success_label_list,
+        recon_path = f"{self.output_dir}/results/Diff-Mi/all_recreated"
+        recon_paths = save_tensor(recon_list, labels, recon_path)
+        logger.info(f"All recreated images saved at: {recon_path}")
+
+        success_path = f"{self.output_dir}/results/Diff-Mi/success_recreated"
+        success_paths = save_tensor(success_list, success_label_list, success_path)
+        logger.info(f"Successful recreated images saved at: {success_path}")
+
+        # Calculate additional metrics
+        knn, knn_arr = np.nan, []
+        value_a, value_v = np.nan, np.nan
+        avg_mse, mse_per_label, mse_arr, mse_min_fake, mse_min_real = np.nan, [], [], [], []
+        fid_value = np.nan
+
+        if self.config.diffmiattack.calc_knn:
+            logger.info("Calculating KNN Distance...")
+            knn, knn_arr = calc_knn(success_list, success_label_list,
                      private_feats=self.private_features,
                      private_idents=self.private_idents,
                      evaluation_model=self.evaluation_model, device=self.device)
+            logger.info(f"KNN Dist computed on {success_list.shape[0]} attack samples: {knn:.2f}")
 
-        # if self.config.diffmiattack.cal_fid:
-        #     calc_pytorch_fid(recon_paths)
+        if self.config.diffmiattack.calc_lpips:
+            logger.info("Calculating LPIPS...")
+            value_a, value_v = calc_lpips(private_data=self.private_dataloader, fakes=success_list, fake_targets=success_label_list, anno="", device="cuda")
+            logger.info(f"LPIPS Alex: {value_a:.4f}, VGG: {value_v:.4f}")
 
-        plt.hist(knn_arr)
-        plt.savefig("dummy_name.png")
-        plt.show()
+        if self.config.diffmiattack.calc_mse:
+            logger.info("Calculating MSE...")
+            avg_mse, mse_per_label, mse_arr, mse_min_fake, mse_min_real = calc_mse(
+                private_data=self.private_dataloader,
+                fakes=success_list,
+                fake_labels=success_label_list,
+                device=self.device,
+            )
+            logger.info(f"Average MSE: {avg_mse:.4f}")
+
+        if self.config.diffmiattack.calc_fid:
+            logger.info("Calculating FID...")
+            fid_value = calc_pytorch_fid(recon_list, self.private_dataloader)
+            logger.info(f"FID score: {fid_value:.2f}")
 
         return MinvResult.from_metrics(
             result_name="Diff-Mi Attack Result",
@@ -237,15 +262,9 @@ class AttackDiffMi(AbstractMINV):
                 "top5_accuracy": acc5,
                 "knn": knn,
                 "knn_arr": knn_arr,
+                "lpips_alex": value_a,
+                "lpips_vgg": value_v,
+                "mse": avg_mse,
+                "fid": fid_value,
                 },
             )
-
-
-    def reconstruction(self:Self):
-        pass
-
-    # TODO:
-    @staticmethod
-    def get_attack() -> str:
-        """Return the name of the attack."""
-        return "Diff-Mi"

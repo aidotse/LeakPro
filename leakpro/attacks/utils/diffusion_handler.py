@@ -15,6 +15,8 @@ from leakpro.utils.logger import logger
 
 
 class DiffMiHandler():
+    """Handler for Diffusion models from Diff-MI."""
+
     def __init__(self: Self,
                  handler: MINVHandler = None,
                  configs: DiffMiConfig = None

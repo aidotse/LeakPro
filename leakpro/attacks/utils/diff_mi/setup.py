@@ -108,8 +108,11 @@ class AttackConfig(BaseModel):
     aug_times: int = Field(4, description="Number of augmentations per label.")
     k: int = Field(20, description="Top K for p_reg.")
     alpha: float = Field(1.0, description="Weight for p_reg loss.")
-    cal_fid: bool = Field(True, description="Whether to calculate FID.")
-    cal_knn: bool = Field(True, description="Whether to calculate KNN accuracy.")
+    calc_knn: bool = Field(True, description="Whether to calculate KNN accuracy.")
+    calc_lpips: bool = Field(True, description="Whether to calculate LPIPS.")
+    calc_mse: bool = Field(True, description="Whether to calculate MSE.")
+    calc_fid: bool = Field(True, description="Whether to calculate FID.")
+
 
 class DiffMiConfig(BaseModel):
     """Overall configuration for DiffMi attack."""

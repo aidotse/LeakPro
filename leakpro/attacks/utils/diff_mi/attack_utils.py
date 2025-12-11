@@ -6,13 +6,16 @@ import os
 import statistics
 
 import kornia.augmentation as K
+import lpips
 import numpy as np
 import torch
 import torch.nn.functional as F
 import torchvision
 import torchvision.transforms as augmentation
 from robustness import model_utils
+from scipy import linalg
 from torch.utils.data import TensorDataset
+from torchvision.models import inception_v3
 from tqdm import tqdm
 
 from leakpro.utils.logger import logger
@@ -21,7 +24,7 @@ from .diffusion import GaussianDiffusion, InferenceModel
 from .losses import p_reg_loss, topk_loss
 
 
-def Iterative_Image_Reconstruction(args, diff_net, classifier, classes, p_reg, iter=None, batch_num=None, device="cuda"):
+def Iterative_Reconstruction(args, diff_net, classifier, classes, p_reg, iter=None, batch_num=None, device="cuda"):
     """Perform iterative image reconstruction using diffusion model and classifier guidance.
 
     Args:
@@ -41,7 +44,7 @@ def Iterative_Image_Reconstruction(args, diff_net, classifier, classes, p_reg, i
 
     """
 
-    diffusion = GaussianDiffusion(T=1000, schedule="linear")
+    diffusion = GaussianDiffusion(T=classifier.num_classes, schedule="linear")
     model = InferenceModel(batch_size=classes.shape[0]).to(device=device)
     model.train()
 
@@ -57,11 +60,8 @@ def Iterative_Image_Reconstruction(args, diff_net, classifier, classes, p_reg, i
         K.ColorJitter(brightness=0.2, p=0.5),
         K.RandomGaussianBlur((7, 7), (3, 3), p=0.5),
     )
-    # print(f"--------------------- Epoch {iter}/{batch_num} ---------------------")
-    bar = range(steps) #tqdm(range(steps))
+    bar = range(steps)
     for i, _ in enumerate(bar):
-
-        # bar.set_description(f'Epoch {iter}/{batch_num}')
 
         # Select t
         t = ((steps-i)/1.5 + (steps-i)/3*math.cos(3/(10*math.pi)*i))/steps*800 + 200 # Linearly decreasing + cosine
@@ -94,7 +94,6 @@ def Iterative_Image_Reconstruction(args, diff_net, classifier, classes, p_reg, i
         attr_input_batch = []
         for _ in range(args.aug_times):
             attr_input = model.encode()
-            # attr_input = args.aug(attr_input).clamp(-1,1)
             attr_input = aug(attr_input).clamp(-1,1)
             attr_input_batch.append(attr_input)
 
@@ -153,15 +152,15 @@ def get_PGD(model):
 
     return PGD_model
 
-def calc_acc(classifier, imgs, labels, bs=64, anno="", with_success=False, enable_print=True):
-    """Calculate top-1 and top-5 accuracy of the classifier on the given images and labels.
+def calc_acc(classifier, data, labels, bs=64, anno="", with_success=False, enable_print=False):
+    """Calculate top-1 and top-5 accuracy of the classifier on the given data and labels.
 
     Args:
     ----
         classifier: Pre-trained classifier model.
-        imgs: Input images (Tensor).
+        data: Input data (Tensor).
         labels: True labels (Tensor).
-        bs: Batch size for processing images.
+        bs: Batch size for processing data.
         anno: Annotation string for logging.
         with_success: Whether to return indices of successful predictions.
         enable_print: Whether to print the accuracy results.
@@ -173,31 +172,33 @@ def calc_acc(classifier, imgs, labels, bs=64, anno="", with_success=False, enabl
         success_idx (optional): Indices of successful predictions if with_success is True.
 
     """
-
-    output, img_dataset = [], TensorDataset(imgs)
+    # Resize data if classifier has a resize method
+    if hasattr(classifier, "resize") and callable(getattr(classifier, "resize", None)):
+        data = classifier.resize(data)
+    output, img_dataset = [], TensorDataset(data)
     for x in torch.utils.data.DataLoader(img_dataset, batch_size=bs, shuffle=False):
         output.append(classifier(x[0])[-1])
     output = torch.cat(output)
     top1_count = torch.eq(torch.topk(output, k=1)[1], labels.view(-1,1)).float()
     top5_count = torch.eq(torch.topk(output, k=5)[1], labels.view(-1,1)).float()
     if enable_print:
-        print(f"===> top1_acc: {top1_count.mean().item():.2%}, top5_acc: {5*top5_count.mean().item():.2%} {anno}")
+        logger.info(f"Acculating accuracy: top1_acc - {top1_count.mean().item():.2%}, top5_acc: {5*top5_count.mean().item():.2%} {anno}")
     if with_success:
         success_idx = torch.nonzero((output.max(1)[1] == labels).int()).squeeze(1)
         return top1_count.sum().item(), top5_count.sum().item(), success_idx
     return top1_count.sum().item(), top5_count.sum().item()
 
 
-def calc_acc_std(imgs, labels, cls, label_num, dims=(64,64)):
-    """Calculate top-1 and top-5 accuracy and their standard deviations over groups of images.
+def calc_acc_std(data, labels, classifier, label_num):
+    """Calculate top-1 and top-5 accuracy and their standard deviations over groups of data.
 
     Args:
     ----
-        imgs: Input images (Tensor).
+        data: Input data (Tensor).
         labels: True labels (Tensor).
         cls: Pre-trained classifier model.
         label_num: Number of labels per group.
-        dims: Dimensions to resize images for the classifier.
+        dims: Dimensions to resize data for the classifier.
 
     Returns:
     -------
@@ -207,15 +208,17 @@ def calc_acc_std(imgs, labels, cls, label_num, dims=(64,64)):
         var5: Standard deviation of top-5 accuracy.
 
     """
+    # Resize data if classifier has a resize method
+    if hasattr(classifier, "resize") and callable(getattr(classifier, "resize", None)):
+        data = classifier.resize(data)
 
     top1_list, top5_list = [], []
-    assert imgs.shape[0] % label_num == 0
-    for i in range(int(imgs.shape[0]/label_num)):
-        imgs_ = imgs[i * label_num: (i+1) * label_num]
+    assert data.shape[0] % label_num == 0
+    for i in range(int(data.shape[0]/label_num)):
+        data_ = data[i * label_num: (i+1) * label_num]
         labels_ = labels[i * label_num: (i+1) * label_num]
         assert torch.max(labels_) - torch.min(labels_) == label_num - 1
-        top1_count, top5_count = calc_acc(cls, augmentation.Resize((dims[0], dims[1]))(imgs_),
-                                          labels_, enable_print=False)
+        top1_count, top5_count = calc_acc(classifier, data_, labels_, enable_print=False)
         top1_list.append(top1_count/label_num)
         top5_list.append(top5_count/label_num)
     try:
@@ -232,81 +235,107 @@ def calc_acc_std(imgs, labels, cls, label_num, dims=(64,64)):
 
     return acc1, acc5, var1, var5
 
-def save_tensor_to_image(imgs, lables, save_path):
-    """Save a batch of images as individual image files organized by labels.
+def save_tensor(data, labels, save_path, file_extension=".pt"):
+    """Save a batch of tensors as individual files organized by labels.
 
     Args:
     ----
-        imgs: Input images (Tensor).
-        lables: Corresponding labels (Tensor).
-        save_path: Directory to save the images.
+        data: Input data (Tensor).
+        labels: Corresponding labels (Tensor).
+        save_path: Directory to save the files.
+        file_extension: File extension for saved files (default: ".pt").
 
     Returns:
     -------
-        label_paths: List of paths to the saved image files.
+        label_paths: List of paths to the saved files.
 
     """
     label_paths = []
-    fake_dataset = TensorDataset(imgs.cpu(), lables.cpu())
-    for i, (x,y) in enumerate(torch.utils.data.DataLoader(fake_dataset, batch_size=1, shuffle=False)):
+    dataset = TensorDataset(data.cpu(), labels.cpu())
+    for i, (x, y) in enumerate(torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False)):
         label_path = os.path.join(save_path, str(y.item()))
-        if not os.path.exists(label_path): os.makedirs(label_path)
+        if not os.path.exists(label_path):
+            os.makedirs(label_path)
         label_paths.append(label_path)
-        torchvision.utils.save_image(x.detach()[0,:,:,:], os.path.join(label_path, f"{i}_attack.png"), padding=0)
+
+        # Save based on file extension
+        if file_extension in [".png", ".jpg", ".jpeg"]:
+            # Handle image data
+            torchvision.utils.save_image(x.detach()[0, :, :, :],
+                                        os.path.join(label_path, f"{i}_attack{file_extension}"),
+                                        padding=0)
+        else:
+            # Handle general tensor data
+            torch.save(x.detach()[0], os.path.join(label_path, f"{i}_attack{file_extension}"))
+
     return label_paths
 
-# def calc_lpips(fake_images, fake_targets, anno='', device='cuda'):
+def calc_lpips(private_data, fakes, fake_targets, anno="", device="cuda"):
+    """Calculate LPIPS distance between reconstructed data and target data.
 
-#     import lpips
-#     loss_fn_alex = lpips.LPIPS(net='alex').to(device) # best forward scores
-#     loss_fn_vgg = lpips.LPIPS(net='vgg').to(device) # closer to "traditional" perceptual loss, when used for optimization
+    Args:
+    ----
+        private_data: DataLoader containing private/real data.
+        fakes: Reconstructed data (Tensor).
+        fake_targets: Corresponding target labels (Tensor).
+        anno: Annotation string for logging.
+        device: Device to run the computations on.
 
-#     # get target images and labels
-#     inferred_image_path = PRIVATE_PATH
-#     list_of_idx = os.listdir(inferred_image_path)
-#     images_list, targets_list = [], []
-#     # load reconstructed images
-#     for idx in list_of_idx:
-#         for filename in os.listdir(os.path.join(inferred_image_path, idx)):
-#             image = Image.open(os.path.join(inferred_image_path, idx, filename))
-#             image = T.functional.to_tensor(image)
-#             images_list.append(image)
-#             targets_list.append(int(idx))
-#     real_images = torch.stack(images_list, dim=0).to(device)
-#     real_targets = torch.LongTensor(targets_list).to(device)
+    Returns:
+    -------
+        value_a: Average LPIPS distance using AlexNet.
+        value_v: Average LPIPS distance using VGG.
 
-#     # get fake images and labels
-#     fake_images = fake_images.to(device)
-#     fake_targets = fake_targets.to(device)
-#     bs = fake_targets.size(0)
-#     value_a, value_v = 0, 0
+    """
+    try:
+        loss_fn_alex = lpips.LPIPS(net="alex").to(device) # best forward scores
+        loss_fn_vgg = lpips.LPIPS(net="vgg").to(device) # closer to "traditional" perceptual loss, when used for optimization
 
-#     # calculate metric
-#     for i in range(bs):
-#         single_value_a, single_value_v = -1, -1
-#         idx = torch.nonzero(real_targets == fake_targets[i]).squeeze(1)
-#         for j in idx:
-#             temp_value_a = loss_fn_alex(fake_images[i].unsqueeze(0), real_images[j].unsqueeze(0))
-#             temp_value_v = loss_fn_vgg(fake_images[i].unsqueeze(0), real_images[j].unsqueeze(0))
-#             if temp_value_a > single_value_a: single_value_a = temp_value_a
-#             if temp_value_v > single_value_v: single_value_v = temp_value_v
-#         value_a += single_value_a
-#         value_v += single_value_v
-#     value_a = (value_a / bs).item()
-#     value_v = (value_v / bs).item()
-#     print(f"LPIPS : Alex {value_a:.4f} | VGG {value_v:.4f} {anno}")
+        # Load real data and labels from private_data dataloader
+        real_data, real_targets = None, None
+        for x in private_data:
+            real_data = x[0] if real_data is None else torch.cat([real_data, x[0]], dim=0)
+            real_targets = x[1] if real_targets is None else torch.cat([real_targets, x[1]], dim=0)
 
-def calc_knn(fake_imgs, fake_targets,
+        real_data = real_data.to(device)
+        real_targets = real_targets.to(device)
+
+        # Get fake data and labels
+        fakes = fakes.to(device)
+        fake_targets = fake_targets.to(device)
+        bs = fake_targets.size(0)
+        value_a, value_v = 0, 0
+
+        # Calculate metric
+        for i in range(bs):
+            single_value_a, single_value_v = -1, -1
+            idx = torch.nonzero(real_targets == fake_targets[i]).squeeze(1)
+            for j in idx:
+                temp_value_a = loss_fn_alex(fakes[i].unsqueeze(0), real_data[j].unsqueeze(0))
+                temp_value_v = loss_fn_vgg(fakes[i].unsqueeze(0), real_data[j].unsqueeze(0))
+                single_value_a = max(single_value_a, temp_value_a)
+                single_value_v = max(single_value_v, temp_value_v)
+            value_a += single_value_a
+            value_v += single_value_v
+        value_a = (value_a / bs).item()
+        value_v = (value_v / bs).item()
+
+        return value_a, value_v
+    except Exception as e:
+        logger.error(f"LPIPS calculation failed: {e}")
+        return -1.0, -1.0
+
+def calc_knn(fake_data, fake_targets,
              private_feats,
              private_idents,
              evaluation_model,
              batch_size=64,
              anno="", device="cuda", dims=(64,64)):
-    """Calculate KNN distance between reconstructed images and target images in feature space.
+    """Calculate KNN distance between reconstructed data and target data in feature space.
 
     Args:
     ----
-        fake_imgs: Reconstructed images (Tensor).
+        fake_data: Reconstructed data (Tensor).
         fake_targets: Corresponding target labels (Tensor).
         private_feats: Fetures from private dataset (np.ndarray).
         private_idents: Labels corresponding to the private features (np.ndarray).
@@ -314,7 +343,7 @@ def calc_knn(fake_imgs, fake_targets,
         anno: Annotation string for logging.
         path: Path to the directory containing target image features.
         device: Device to run the computations on.
-        dims: Dimensions to resize images for the feature extractor.
+        dims: Dimensions to resize data for the feature extractor.
 
     Returns:
     -------
@@ -323,17 +352,17 @@ def calc_knn(fake_imgs, fake_targets,
 
     """
 
-    # get features of reconstructed images
+    # get features of reconstructed data
     infered_feats = None
-    for i, images in enumerate(torch.utils.data.DataLoader(fake_imgs, batch_size=batch_size)):
-        images = augmentation.Resize(dims)(images).to(device)
-        feats = evaluation_model(images)[0]
+    for i, data in enumerate(torch.utils.data.DataLoader(fake_data, batch_size=batch_size)):
+        data = augmentation.Resize(dims)(data).to(device)
+        feats = evaluation_model(data)[0]
         if i == 0:
             infered_feats = feats.detach().cpu()
         else:
             infered_feats = torch.cat([infered_feats, feats.detach().cpu()], dim=0)
 
-    # get features of target images
+    # get features of target data
     idens = fake_targets.to(device).long()
     feats = infered_feats.to(device)
     private_feats = torch.from_numpy(private_feats).float().to(device)
@@ -354,128 +383,302 @@ def calc_knn(fake_imgs, fake_targets,
         knn_dist += knn_min
 
     knn = (knn_dist / bs).item()
-    print(f"KNN Dist computed on {fake_imgs.shape[0]} attack samples: {knn:.2f} {anno}")
 
     return knn, knn_arr
 
 
-# def calc_pytorch_fid(file_path, file_path2=PRIVATE_PATH, anno=""):
-#     file_path2 = PRIVATE_PATH+f"/{file_path.split('/')[-1]}"
-#     fid_value = calculate_fid_given_paths(paths=[file_path, file_path2], batch_size=1, device='cuda', dims=2048, num_workers=8,)
-#     print(f"[pytorch_fid] FID score computed on file {file_path.split('Inversion/')[-1]} is {fid_value:.2f} {anno}")
+def calc_mse(private_data, fakes, fake_labels, device="cuda", anno=""):
+    """Calculate mean squared error between real and fake data grouped by labels.
 
-# from pytorch_fid.inception import InceptionV3
-# def calculate_fid_given_paths(paths, batch_size, device, dims, num_workers=1):
-#     """Calculates the FID of two paths"""
-#     for p in paths:
-#         if not os.path.exists(p):
-#             raise RuntimeError('Invalid path: %s' % p)
+    Args:
+    ----
+        real: Real data (Tensor).
+        labels: True labels for real data (Tensor).
+        fakes: Reconstructed/fake data (Tensor).
+        fake_labels: Labels for fake data (Tensor).
+        anno: Annotation string for logging.
 
-#     block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[dims]
+    Returns:
+    -------
+        avg_mse: Average MSE across all label groups.
+        mse_per_label: Dictionary mapping each label to its MSE value.
 
-#     model = InceptionV3([block_idx]).to(device)
+    """
+    real, labels = None, None
+    for x in private_data:
+        real = x[0] if real is None else torch.cat([real, x[0]], dim=0)
+        labels = x[1] if labels is None else torch.cat([labels, x[1]], dim=0)
 
-#     m1, s1 = compute_statistics_of_path(paths[0], model, batch_size,
-#                                         dims, device, num_workers)
-#     m2, s2 = compute_statistics_of_path(paths[1], model, batch_size,
-#                                         dims, device, num_workers)
-#     fid_value = calculate_frechet_distance(m1, s1, m2, s2)
+    unique_labels = torch.unique(labels)
+    mse_values = []
+    mse_values_arr = []
+    mse_min_real = []
+    mse_min_fake = []
+    mse_per_label = {}
 
-#     return fid_value
+    for label in unique_labels:
+        # Get all real data with this label
+        real_idx = torch.nonzero(labels == label).squeeze(1)
+        real_data = real[real_idx]
 
-# def compute_statistics_of_path(path, model, batch_size, dims, device,
-#                                num_workers=1):
-#     if path.endswith('.npz'):
-#         with np.load(path) as f:
-#             m, s = f['mu'][:], f['sigma'][:]
-#     else:
-#         # path = pathlib.Path(path)
-#         subfolders = [pathlib.Path(f.path) for f in os.scandir(path) if f.is_dir()]
-#         files = sorted([file for ext in IMAGE_EXTENSIONS for p in subfolders
-#                        for file in p.glob('*.{}'.format(ext))])
-#         m, s = calculate_activation_statistics(files, model, batch_size,
-#                                                dims, device, num_workers)
-#     return m, s
+        # Get all fake data with this label
+        fake_idx = torch.nonzero(fake_labels == label).squeeze(1)
+        fake_data = fakes[fake_idx]
 
-# def calculate_activation_statistics(files, model, batch_size=50, dims=2048,
-#                                     device='cpu', num_workers=1):
-#     """Calculation of the statistics used by the FID.
-#     Params:
-#     -- files       : List of image files paths
-#     -- model       : Instance of inception model
-#     -- batch_size  : The images numpy array is split into batches with
-#                      batch size batch_size. A reasonable batch size
-#                      depends on the hardware.
-#     -- dims        : Dimensionality of features returned by Inception
-#     -- device      : Device to run calculations
-#     -- num_workers : Number of parallel dataloader workers
+        if len(real_data) == 0 or len(fake_data) == 0:
+            continue
 
-#     Returns:
-#     -- mu    : The mean over samples of the activations of the pool_3 layer of
-#                the inception model.
-#     -- sigma : The covariance matrix of the activations of the pool_3 layer of
-#                the inception model.
-#     """
-#     act = get_activations(files, model, batch_size, dims, device, num_workers)
-#     mu = np.mean(act, axis=0)
-#     sigma = np.cov(act, rowvar=False)
-#     return mu, sigma
+        # Calculate MSE
+        label_mse = []
+        for real_data_point in real_data:
+            min_label_mse = 0
+            for fake_data_point in fake_data:
+                mse = F.mse_loss(real_data_point.to(device=device), fake_data_point.to(device=device))
+                label_mse.append(mse.item())
 
-# from torch.nn.functional import adaptive_avg_pool2d
-# def get_activations(files, model, batch_size=50, dims=2048, device='cpu',
-#                     num_workers=1):
-#     """Calculates the activations of the pool_3 layer for all images.
+                # Use the minimum MSE fake image for this real image
+                if min_label_mse == 0 or mse.item() < min_label_mse:
+                    min_label_mse = mse.item()
+                    min_real_data_point = real_data_point
+                    min_fake_data_point = fake_data_point
+                min_label_mse = mse.item() if min_label_mse == 0 else min(min_label_mse, mse.item())
 
-#     Params:
-#     -- files       : List of image files paths
-#     -- model       : Instance of inception model
-#     -- batch_size  : Batch size of images for the model to process at once.
-#                      Make sure that the number of samples is a multiple of
-#                      the batch size, otherwise some samples are ignored. This
-#                      behavior is retained to match the original FID score
-#                      implementation.
-#     -- dims        : Dimensionality of features returned by Inception
-#     -- device      : Device to run calculations
-#     -- num_workers : Number of parallel dataloader workers
+            # Store all MSE values for this label
+            mse_values_arr.append(min_label_mse)
 
-#     Returns:
-#     -- A numpy array of dimension (num images, dims) that contains the
-#        activations of the given tensor when feeding inception with the
-#        query tensor.
-#     """
-#     model.eval()
+            # Store the real and fake data point with the lowest mse
+            mse_min_real.append(min_real_data_point)
+            mse_min_fake.append(min_fake_data_point)
 
-#     if batch_size > len(files):
-#         print(('Warning: batch size is bigger than the data size. '
-#                'Setting batch size to data size'))
-#         batch_size = len(files)
+        # Average MSE
+        avg_label_mse = statistics.mean(label_mse)
+        mse_per_label[label.item()] = avg_label_mse
+        mse_values.append(avg_label_mse)
 
-#     dataset = ImagePathDataset(files, transforms=TF.ToTensor())
-#     dataloader = torch.utils.data.DataLoader(dataset,
-#                                              batch_size=batch_size,
-#                                              shuffle=False,
-#                                              drop_last=False,
-#                                              num_workers=num_workers)
+    avg_mse = statistics.mean(mse_values) if mse_values else 0.0
 
-#     pred_arr = np.empty((len(files), dims))
+    return avg_mse, mse_per_label, mse_values_arr, mse_min_fake, mse_min_real
 
-#     start_idx = 0
+def calc_pytorch_fid(fake_data, private_data, batch_size=50, device="cuda", dims=2048, num_workers=1, anno=""):
+    """Calculate FID score between fake data tensors and private dataset.
+    
+    Args:
+    ----
+        fake_data: Reconstructed/fake data (Tensor).
+        private_data: DataLoader containing private/real data.
+        batch_size: Batch size for processing.
+        device: Device to run calculations.
+        dims: Dimensionality of Inception features.
+        num_workers: Number of parallel dataloader workers.
+        anno: Annotation string for logging.
+    
+    Returns:
+    -------
+        fid_value: Computed FID score.
+    
+    """
 
-#     for batch in tqdm(dataloader):
-#         batch = batch.to(device)
+    # Load InceptionV3 model
+    try:
+        model = inception_v3(pretrained=True, transform_input=False).to(device)
+        model.fc = torch.nn.Identity()  # Remove final classification layer
+        model.eval()
+    except Exception as e:
+        logger.error(f"Failed to load Inception model: {e}")
+        return -1.0
 
-#         with torch.no_grad():
-#             pred = model(batch)[0]
+    # Get activations for fake data
+    m1, s1 = compute_statistics_from_tensor(fake_data, model, batch_size, dims, device)
 
-#         # If model output is not scalar, apply global spatial average pooling.
-#         # This happens if you choose a dimensionality not equal 2048.
-#         if pred.size(2) != 1 or pred.size(3) != 1:
-#             pred = adaptive_avg_pool2d(pred, output_size=(1, 1))
+    # Get activations for private data
+    m2, s2 = compute_statistics_from_dataloader(private_data, model, batch_size, dims, device)
 
-#         pred = pred.squeeze(3).squeeze(2).cpu().numpy()
+    # Calculate FID
+    fid_value = calculate_frechet_distance(m1, s1, m2, s2).item()
 
-#         pred_arr[start_idx:start_idx + pred.shape[0]] = pred
+    return fid_value
 
-#         start_idx = start_idx + pred.shape[0]
 
-#     return pred_arr
+def compute_statistics_from_tensor(data, model, batch_size, dims, device):
+    """Compute mean and covariance of Inception features from tensor data.
+    
+    Args:
+    ----
+        data: Input data tensor.
+        model: Inception model.
+        batch_size: Batch size for processing.
+        dims: Dimensionality of features.
+        device: Device to run calculations.
+    
+    Returns:
+    -------
+        mu: Mean of activations.
+        sigma: Covariance of activations.
+    
+    """
+    act = get_activations_from_tensor(data, model, batch_size, dims, device)
+    mu = np.mean(act, axis=0)
+    sigma = np.cov(act, rowvar=False)
+    return mu, sigma
+
+
+def compute_statistics_from_dataloader(dataloader, model, batch_size, dims, device):
+    """Compute mean and covariance of Inception features from dataloader.
+    
+    Args:
+    ----
+        dataloader: DataLoader containing data.
+        model: Inception model.
+        batch_size: Batch size for processing.
+        dims: Dimensionality of features.
+        device: Device to run calculations.
+    
+    Returns:
+    -------
+        mu: Mean of activations.
+        sigma: Covariance of activations.
+    
+    """
+    act = get_activations_from_dataloader(dataloader, model, batch_size, dims, device)
+    mu = np.mean(act, axis=0)
+    sigma = np.cov(act, rowvar=False)
+    return mu, sigma
+
+
+def get_activations_from_tensor(data, model, batch_size, dims, device):
+    """Extract Inception activations from tensor data.
+    
+    Args:
+    ----
+        data: Input data tensor.
+        model: Inception model.
+        batch_size: Batch size for processing.
+        dims: Dimensionality of features.
+        device: Device to run calculations.
+    
+    Returns:
+    -------
+        pred_arr: Array of activations.
+    
+    """
+    model.eval()
+
+    dataset = TensorDataset(data)
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False, drop_last=False)
+
+    pred_arr = np.empty((len(data), dims))
+    start_idx = 0
+
+    for batch in tqdm(dataloader, desc="Computing activations (fake)"):
+        batch = batch[0].to(device)
+
+        # Resize to 299x299 for Inception
+        if batch.shape[2] != 299 or batch.shape[3] != 299:
+            batch = F.interpolate(batch, size=(299, 299), mode="bilinear", align_corners=False)
+
+        with torch.no_grad():
+            pred = model(batch)
+
+        # Apply global average pooling if needed
+        if len(pred.shape) > 2:
+            pred = F.adaptive_avg_pool2d(pred, output_size=(1, 1))
+            pred = pred.squeeze(3).squeeze(2)
+
+        pred = pred.cpu().numpy()
+        pred_arr[start_idx:start_idx + pred.shape[0]] = pred
+        start_idx = start_idx + pred.shape[0]
+
+    return pred_arr
+
+
+def get_activations_from_dataloader(dataloader, model, batch_size, dims, device):
+    """Extract Inception activations from dataloader.
+    
+    Args:
+    ----
+        dataloader: DataLoader containing data.
+        model: Inception model.
+        batch_size: Batch size for processing.
+        dims: Dimensionality of features.
+        device: Device to run calculations.
+    
+    Returns:
+    -------
+        pred_arr: Array of activations.
+    
+    """
+    model.eval()
+
+    # First pass to count samples
+    num_samples = sum(batch[0].shape[0] for batch in dataloader)
+
+    pred_arr = np.empty((num_samples, dims))
+    start_idx = 0
+
+    for batch in tqdm(dataloader, desc="Computing activations (private)"):
+        batch_data = batch[0].to(device)
+
+        # Resize to 299x299 for Inception
+        if batch_data.shape[2] != 299 or batch_data.shape[3] != 299:
+            batch_data = F.interpolate(batch_data, size=(299, 299), mode="bilinear", align_corners=False)
+
+        with torch.no_grad():
+            pred = model(batch_data)
+
+        # Apply global average pooling if needed
+        if len(pred.shape) > 2:
+            pred = F.adaptive_avg_pool2d(pred, output_size=(1, 1))
+            pred = pred.squeeze(3).squeeze(2)
+
+        pred = pred.cpu().numpy()
+        pred_arr[start_idx:start_idx + pred.shape[0]] = pred
+        start_idx = start_idx + pred.shape[0]
+
+    return pred_arr
+
+
+def calculate_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
+    """Calculate Frechet distance between two Gaussian distributions.
+    
+    Args:
+    ----
+        mu1: Mean of first distribution.
+        sigma1: Covariance of first distribution.
+        mu2: Mean of second distribution.
+        sigma2: Covariance of second distribution.
+        eps: Epsilon for numerical stability.
+    
+    Returns:
+    -------
+        fid: Frechet distance.
+    
+    """
+
+    mu1 = np.atleast_1d(mu1)
+    mu2 = np.atleast_1d(mu2)
+
+    sigma1 = np.atleast_2d(sigma1)
+    sigma2 = np.atleast_2d(sigma2)
+
+    assert mu1.shape == mu2.shape, "Training and test mean vectors have different lengths"
+    assert sigma1.shape == sigma2.shape, "Training and test covariances have different dimensions"
+
+    diff = mu1 - mu2
+
+    # Product might be almost singular
+    covmean, _ = linalg.sqrtm(sigma1.dot(sigma2), disp=False)
+    if not np.isfinite(covmean).all():
+        logger.warning(f"FID calculation produces singular product; adding {eps} to diagonal of cov estimates")
+        offset = np.eye(sigma1.shape[0]) * eps
+        covmean = linalg.sqrtm((sigma1 + offset).dot(sigma2 + offset))
+
+    # Numerical error might give slight imaginary component
+    if np.iscomplexobj(covmean):
+        if not np.allclose(np.diagonal(covmean).imag, 0, atol=1e-3):
+            m = np.max(np.abs(covmean.imag))
+            raise ValueError(f"Imaginary component {m}")
+        covmean = covmean.real
+
+    tr_covmean = np.trace(covmean)
+
+    return diff.dot(diff) + np.trace(sigma1) + np.trace(sigma2) - 2 * tr_covmean

@@ -1,4 +1,4 @@
-
+import kornia.augmentation as K
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -40,3 +40,6 @@ class VGG16(nn.Module):
         out = F.softmax(res, dim=1)
 
         return out
+
+    def resize(self, x):
+        return K.Resize((64, 64))(x)
