@@ -367,6 +367,9 @@ class FineTune:
         self.save_path = "./" if save_path is None else save_path
         logger.info(f"Saving checkpoints to {self.save_path}")
 
+        self.save_name = args.save_name if args.save_name else "pretrain"
+        logger.info(f"Saving name {self.save_name}")
+
         self.use_fp16 = args.use_fp16
         self.fp16_scale_growth = args.fp16_scale_growth
         self.schedule_sampler = schedule_sampler or UniformSampler(diffusion)
@@ -453,13 +456,14 @@ class FineTune:
 
         """
 
-        acc, acc_mean, best_mean_acc, iter = [], 0.0, 0.0, 0
+        acc, acc_mean, self.best_mean_acc, iter = [], 0.0, 0.0, 0
         labels = th.tensor(np.arange(0, 300)).to(dist_util.dev())
         label_dataset = TensorDataset(labels)
 
         while (acc_mean < self.threshold):
 
-            # ME
+            # Loss aggregation variables
+            _steps_ = 0
             loss_agg = 0.0
             loss1_agg = 0.0
             loss2_agg = 0.0
@@ -505,11 +509,13 @@ class FineTune:
                 self.mp_trainer_cls.optimize(self.opt_cls)
 
                 acc.append(th.eq(th.topk(logits[-bs * aug_times:], k=1)[1], classes[0].repeat(aug_times).view(-1,1)).float().mean().item())
-                bar.set_postfix({"Loss1": loss1.item(), "Loss2": loss2.item(), "Loss": loss.item()})
 
                 loss_agg += loss.item()
                 loss1_agg += loss1.item()
                 loss2_agg += loss2.item()
+
+                _steps_ += 1
+                bar.set_postfix({"Loss1": f"{loss1_agg/_steps_:.2f}", "Loss2": f"{loss2_agg/_steps_:.2f}", "Loss": f"{loss_agg/_steps_:.2f}"})
             logger.info(f"Epoch {iter}: loss {loss_agg/len(bar):.4f}, loss1 {loss1_agg/len(bar):.4f}, loss2 {loss2_agg/len(bar):.4f}")
 
             # Save the fine-tuned model

@@ -34,7 +34,7 @@ audit:  # Configurations for auditing
 
     - attack: diffmi
       hash_identifiable: True
-      do_fine_tune: False
+      do_fine_tune: True
       preprocessing:
           top_n: 30 # Integer number for indicating the top n pseudo labels per class
           top_k: 50 # Integer number for indicating the top k features for p_reg computation
@@ -45,10 +45,10 @@ audit:  # Configurations for auditing
         max_steps: 50000
       finetune:
         save_name: "model_finetune"
-        batch_size: 1
+        batch_size: 4
       diffmiattack:
-        label_num: 1
-        repeat_N: 10
+        label_num: 30
+        repeat_N: 30
         batch_size: 15
       diffusion:
         # module_path: "./utils/diffusion.py"

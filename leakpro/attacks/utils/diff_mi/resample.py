@@ -1,11 +1,14 @@
+"""Schedule samplers for diffusion training and inference."""
 from abc import ABC, abstractmethod
 
 import numpy as np
 import torch as th
 import torch.distributed as dist
 
+from leakpro.attacks.utils.diff_mi.respace import SpacedDiffusion
 
-def create_named_schedule_sampler(name, diffusion):
+
+def create_named_schedule_sampler(name: str, diffusion: SpacedDiffusion) -> ABC:
     """Create a ScheduleSampler from a library of pre-defined samplers.
 
     :param name: the name of the sampler.
@@ -19,8 +22,7 @@ def create_named_schedule_sampler(name, diffusion):
 
 
 class ScheduleSampler(ABC):
-    """A distribution over timesteps in the diffusion process, intended to reduce
-    variance of the objective.
+    """A distribution over timesteps in the diffusion process, intended to reduce variance of the objective.
 
     By default, samplers perform unbiased importance sampling, in which the
     objective's mean is unchanged.
@@ -29,13 +31,13 @@ class ScheduleSampler(ABC):
     """
 
     @abstractmethod
-    def weights(self):
+    def weights(self) -> np.ndarray:
         """Get a numpy array of weights, one per diffusion step.
 
         The weights needn't be normalized, but must be positive.
         """
 
-    def sample(self, batch_size, device):
+    def sample(self, batch_size: int, device: th.device) -> tuple[th.Tensor, th.Tensor]:
         """Importance-sample timesteps for a batch.
 
         :param batch_size: the number of timesteps.
@@ -54,16 +56,21 @@ class ScheduleSampler(ABC):
 
 
 class UniformSampler(ScheduleSampler):
-    def __init__(self, diffusion):
+    """A schedule sampler that samples uniformly."""
+
+    def __init__(self, diffusion: SpacedDiffusion) -> None:
         self.diffusion = diffusion
         self._weights = np.ones([diffusion.num_timesteps])
 
-    def weights(self):
+    def weights(self) -> np.ndarray:
+        """Get weights for uniform sampling."""
         return self._weights
 
 
 class LossAwareSampler(ScheduleSampler):
-    def update_with_local_losses(self, local_ts, local_losses):
+    """A schedule sampler that adapts to the model's loss on each timestep."""
+
+    def update_with_local_losses(self, local_ts: th.Tensor, local_losses: th.Tensor) -> None:
         """Update the reweighting using losses from a model.
 
         Call this method from each rank with a batch of timesteps and the
@@ -98,7 +105,7 @@ class LossAwareSampler(ScheduleSampler):
         self.update_with_all_losses(timesteps, losses)
 
     @abstractmethod
-    def update_with_all_losses(self, ts, losses):
+    def update_with_all_losses(self, ts: list[int], losses: list[float]) -> None:
         """Update the reweighting using losses from a model.
 
         Sub-classes should override this method to update the reweighting
@@ -115,7 +122,9 @@ class LossAwareSampler(ScheduleSampler):
 
 
 class LossSecondMomentResampler(LossAwareSampler):
-    def __init__(self, diffusion, history_per_term=10, uniform_prob=0.001):
+    """A schedule sampler that uses the second moment of the loss to reweight."""
+
+    def __init__(self, diffusion: SpacedDiffusion, history_per_term: int = 10, uniform_prob: float = 0.001) -> None:
         self.diffusion = diffusion
         self.history_per_term = history_per_term
         self.uniform_prob = uniform_prob
@@ -124,7 +133,8 @@ class LossSecondMomentResampler(LossAwareSampler):
         )
         self._loss_counts = np.zeros([diffusion.num_timesteps], dtype=np.int)
 
-    def weights(self):
+    def weights(self) -> np.ndarray:
+        """Get weights based on the second moment of the loss."""
         if not self._warmed_up():
             return np.ones([self.diffusion.num_timesteps], dtype=np.float64)
         weights = np.sqrt(np.mean(self._loss_history ** 2, axis=-1))
@@ -133,7 +143,9 @@ class LossSecondMomentResampler(LossAwareSampler):
         weights += self.uniform_prob / len(weights)
         return weights
 
-    def update_with_all_losses(self, ts, losses):
+    def update_with_all_losses(self, ts: list[int], losses: list[float]) -> None:
+        """Update the reweighting using losses from a model."""
+
         for t, loss in zip(ts, losses):
             if self._loss_counts[t] == self.history_per_term:
                 # Shift out the oldest loss term.
@@ -143,5 +155,6 @@ class LossSecondMomentResampler(LossAwareSampler):
                 self._loss_history[t, self._loss_counts[t]] = loss
                 self._loss_counts[t] += 1
 
-    def _warmed_up(self):
+    def _warmed_up(self) -> bool:
+        """Check if the resampler has enough loss history to start reweighting."""
         return (self._loss_counts == self.history_per_term).all()
