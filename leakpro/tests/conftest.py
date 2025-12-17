@@ -34,6 +34,7 @@ def image_handler(manage_storage_directory) -> ImageInputHandler:
 
     config = DotMap()
     config.target = setup_image_test()
+    config.target.dpsgd_path = f"{STORAGE_PATH}/dummy_dpsgd_model.pt"
     config.audit = get_audit_config()
     config.audit.data_modality = "image"
     #save config to file
@@ -54,6 +55,7 @@ def tabular_handler(manage_storage_directory) -> TabularInputHandler:
 
     config = DotMap()
     config.target = setup_tabular_test()
+    config.target.dpsgd_path = f"{STORAGE_PATH}/dummy_dpsgd_model.pt"
     config.audit = get_audit_config()
     config.audit.data_modality = "tabular"
     #save config to file
