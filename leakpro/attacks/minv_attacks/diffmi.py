@@ -170,6 +170,9 @@ class AttackDiffMi(AbstractMINV):
         self.p_reg = get_p_reg(self.public_dataloader, self.target_model, self.device, args=self.config)
         logger.info("Done computing p_reg.")
 
+        self.pgd_model = get_PGD(self.target_model)
+        logger.info("PGD model for reconstruction set.")
+
         if self.config.do_fine_tune:
             self.diff_handler.target_model = self.target_model
             self.diff_handler.p_reg = self.p_reg
@@ -178,32 +181,37 @@ class AttackDiffMi(AbstractMINV):
         else:
             self.diffusion_model = self.diff_handler.get_pretrained().to(device=self.device)
 
-    def run_attack(self:Self) -> MinvResult:
-        """Run the attack."""
-        logger.info("Running the Diff-Mi attack")
-        pgd_model = get_PGD(self.target_model)
+    def reconstruct(self, label_num, repeat_N) -> torch.Tensor:
 
         recon_list, success_list, success_label_list = [], [], []
-        labels = torch.cat([torch.randperm(self.config.diffmiattack.label_num) for _ in range(self.config.diffmiattack.repeat_N)]).to(self.device)
+        labels = torch.cat([torch.randperm(label_num) for _ in range(repeat_N)]).to(self.device)
         label_dataset = DataLoader(labels, batch_size=self.config.diffmiattack.batch_size, shuffle=False)
         batch_num = math.ceil(len(labels) / self.config.diffmiattack.batch_size) - 1
-
-        logger.info("Running reconstruction... ")
+    
         for i, classes in tqdm(enumerate(label_dataset), total=len(label_dataset)):
             classes = classes.to(self.device)
             recon = Iterative_Reconstruction(args=self.config.diffmiattack, diff_net=self.diffusion_model,  classifier=self.target_model, classes=classes,
                                                         p_reg=self.p_reg, iter=i, batch_num=batch_num, device=self.device).clamp(0,1).to(device=self.device)
 
-            translated = pgd_model(recon, target=classes, **self.config.diffmiattack.pgdconfig.__dict__)[-1].clamp(0,1)
+            translated = self.pgd_model(recon, target=classes, **self.config.diffmiattack.pgdconfig.__dict__)[-1].clamp(0,1)
             _, _, idx = calc_acc(self.evaluation_model, translated, classes, with_success=True)
 
             recon_list.append(translated)
             success_list.append(translated[idx])
             success_label_list.append(classes[idx])
 
-        recon_list = torch.cat(recon_list)
-        success_list = torch.cat(success_list)
-        success_label_list = torch.cat(success_label_list)
+        return torch.cat(recon_list), torch.cat(success_list), torch.cat(success_label_list), labels
+
+    def run_attack(self:Self) -> MinvResult:
+        """Run the attack."""
+        logger.info("Running the Diff-Mi attack")
+
+        recon_list, success_list, success_label_list, labels = self.reconstruct(
+                                                            label_num=self.config.diffmiattack.label_num,
+                                                            repeat_N=self.config.diffmiattack.repeat_N
+                                                            )
+
+        logger.info("Running reconstruction... ")
 
         acc1, acc5, var1, var5 = calc_acc_std(recon_list, labels, self.evaluation_model, self.config.diffmiattack.label_num)
         logger.info(f"Final Top1: {acc1:.2%} ± {var1:.2%}, Top5: {acc5:.2%} ± {var5:.2%}")
@@ -268,3 +276,63 @@ class AttackDiffMi(AbstractMINV):
                 "fid": fid_value,
                 },
             )
+
+    def get_attack_state(self: Self) -> Dict[str, Any]:
+        """Return the attack state with all initialized instance variables.
+
+        Returns:
+        -------
+            Dict[str, Any]: Dictionary containing all initialized attack state variables.
+        """
+        state = {
+            "config": self.config,
+            "hashes": self.hashes,
+            "output_dir": self.output_dir,
+            "storage_path": self.storage_path,
+            "device": self.device,
+            "diff_handler": self.diff_handler,
+        }
+        
+        # Add variables that may be set during prepare_attack()
+        if hasattr(self, "target_model"):
+            state["target_model"] = self.target_model
+        if hasattr(self, "evaluation_model"):
+            state["evaluation_model"] = self.evaluation_model
+        if hasattr(self, "diffusion_model"):
+            state["diffusion_model"] = self.diffusion_model
+        if hasattr(self, "private_dataloader"):
+            state["private_dataloader"] = self.private_dataloader
+        if hasattr(self, "public_dataloader"):
+            state["public_dataloader"] = self.public_dataloader
+        if hasattr(self, "pseudo_dataloader"):
+            state["pseudo_dataloader"] = self.pseudo_dataloader
+        if hasattr(self, "private_features"):
+            state["private_features"] = self.private_features
+        if hasattr(self, "private_idents"):
+            state["private_idents"] = self.private_idents
+        if hasattr(self, "p_reg"):
+            state["p_reg"] = self.p_reg
+        
+        # Add variables that may be set during run_attack()
+        if hasattr(self, "pgd_model"):
+            state["pgd_model"] = self.pgd_model
+            
+        return state
+
+    @classmethod
+    def get_generator(cls, handler: MINVHandler, configs: dict) -> "AttackDiffMi":
+        """Get the attack.
+
+        Args:
+        ----
+            handler (MINVHandler): The input handler object.
+            configs (dict): Configuration parameters for the attack.
+
+        Returns:
+        -------
+            AttackDiffMi: The Diff-Mi attack object.
+        """
+        assert isinstance(handler, MINVHandler), "Handler must be an instance of MINVHandler"
+        assert isinstance(configs, dict), "Configs must be a dictionary"
+
+        return AttackDiffMi(handler, configs)
