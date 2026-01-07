@@ -16,11 +16,12 @@ from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
 from leakpro.fl_utils.data_utils import GiaDataModalityExtension, GiaImageExtension
 from leakpro.fl_utils.gia_optimizers import MetaSGD
 from leakpro.fl_utils.gia_train import train
-from leakpro.fl_utils.model_utils import InferredBNFeatureHook
+from leakpro.fl_utils.model_utils import InferredBNFeatureHook, InferredIN2dFeatureHook, InferredLN2dFeatureHook, InferredLNFeatureHook
 from leakpro.fl_utils.similarity_measurements import cosine_similarity_weights, total_variation
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.utils.import_helper import Callable, Self
 from leakpro.utils.logger import logger
+from torchvision.models.convnext import LayerNorm2d
 
 
 @dataclass
@@ -47,14 +48,16 @@ class GIABaseConfig:
     bn_reg: float = 0.00016
     # if we compare difference only for top 10 layers with largest changes. Potentially good for larger models.
     top10norms: bool = False
+    # if we chose the latest image or the one which has the most similarity as the result
+    chose_best_ssim_as_final: bool = True
 
 
 class GIABase(AbstractGIA):
     """Gradient inversion attack by us."""
 
     def __init__(self: Self, model: Module, client_loader: DataLoader, data_mean: Tensor, data_std: Tensor,
-                 proxy_loader: DataLoader,train_fn: Optional[Callable] = None,
-                 configs: Optional[GIABaseConfig] = None, optuna_trial_data: list = None) -> None:
+                 proxy_loader: DataLoader, train_fn: Optional[Callable] = None,
+                 configs: Optional[GIABaseConfig] = None, optuna_trial_data: list = None, exp_name:str = "gradient_inversion") -> None:
         super().__init__()
         self.original_model = model
         self.model = deepcopy(self.original_model)
@@ -72,8 +75,8 @@ class GIABase(AbstractGIA):
         self.data_std = data_std
 
         # required for optuna to save the best hyperparameters
-        self.attack_folder_path = "leakpro_output/attacks/huang"
-        os.makedirs(self.attack_folder_path, exist_ok=True)
+        self.attack_cache_folder_path = f"leakpro_output/results/{exp_name}"
+        os.makedirs(self.attack_cache_folder_path, exist_ok=True)
 
         logger.info("Attack initialized.")
 
@@ -113,11 +116,44 @@ class GIABase(AbstractGIA):
             batch_mean = input[0].mean([0, 2, 3])
             batch_var = input[0].var([0, 2, 3], unbiased=False)
             proxy_statistics.append((batch_mean, batch_var))
+        
+        def ln_forward_hook(module, input, output):  # noqa: ARG001
+            x = input[0]
+            k = len(module.normalized_shape)
+            dims = tuple(range(x.ndim - k, x.ndim))
+            sample_mean = x.mean(dim=dims)
+            sample_var  = x.var(dim=dims, unbiased=False)
+            sample_mean = sample_mean.reshape(sample_mean.shape[0], -1).mean(dim=1)
+            sample_var  = sample_var.reshape(sample_var.shape[0], -1).mean(dim=1)
+            proxy_statistics.append((sample_mean.mean().detach(), sample_var.mean().detach()))
+        
+        def ln2d_forward_hook(module, input, output):  # noqa: ARG001
+            x = input[0]  # NCHW
+            # LN2d normalizes across channel dim (C) per (n,h,w)
+            m = x.mean(dim=1)
+            v = x.var(dim=1, unbiased=False)
+            proxy_statistics.append((m.mean().detach(), v.mean().detach()))
+        
+        def in2d_forward_hook(module, input, output):  # noqa: ARG001
+            x = input[0]  # NCHW
+            # InstanceNorm2d normalizes over (H, W) per (N, C)
+            m = x.mean(dim=(2, 3))                       # [N, C]
+            v = x.var(dim=(2, 3), unbiased=False)        # [N, C]
+            # Match your "scalar target" style:
+            # average over channels -> [N], then over batch -> scalar
+            proxy_statistics.append((m.mean(dim=1).mean().detach(), v.mean(dim=1).mean().detach()))
+
 
         hooks = []
         for module in self.model.modules():
             if isinstance(module, torch.nn.BatchNorm2d):
                 hooks.append(module.register_forward_hook(bn_forward_hook))
+            if isinstance(module, torch.nn.LayerNorm):
+                hooks.append(module.register_forward_hook(ln_forward_hook))
+            if isinstance(module, LayerNorm2d):
+                hooks.append(module.register_forward_hook(ln2d_forward_hook))
+            if isinstance(module, torch.nn.InstanceNorm2d): 
+                hooks.append(module.register_forward_hook(in2d_forward_hook)) 
 
         _ = self.train_fn(self.model, self.proxy_loader,
                                         self.configs.optimizer, self.configs.criterion, self.configs.epochs)
@@ -135,6 +171,25 @@ class GIABase(AbstractGIA):
                     module,
                     proxy_statistics[start_idx][0],
                     proxy_statistics[start_idx][1]))
+                start_idx += 1
+            elif isinstance(module, torch.nn.LayerNorm):
+                self.loss_r_feature_layers.append(InferredLNFeatureHook(
+                    module,
+                    proxy_statistics[start_idx][0],
+                    proxy_statistics[start_idx][1]))
+                start_idx += 1
+            elif isinstance(module, LayerNorm2d):
+                self.loss_r_feature_layers.append(InferredLN2dFeatureHook(
+                    module,
+                    proxy_statistics[start_idx][0],
+                    proxy_statistics[start_idx][1]))
+                start_idx += 1
+            elif isinstance(module, torch.nn.InstanceNorm2d):
+                self.loss_r_feature_layers.append(InferredIN2dFeatureHook(
+                    module,
+                    proxy_statistics[start_idx][0],
+                    proxy_statistics[start_idx][1],
+                ))
                 start_idx += 1
 
         # Stop updating running statistics
@@ -164,7 +219,7 @@ class GIABase(AbstractGIA):
         """
         return self.generic_attack_loop(self.configs, self.gradient_closure, self.configs.at_iterations, self.reconstruction,
                                         self.data_mean, self.data_std, self.configs.attack_lr, self.configs.median_pooling,
-                                        self.client_loader, self.reconstruction_loader)
+                                        self.client_loader, self.reconstruction_loader, self.configs.chose_best_ssim_as_final)
 
 
     def gradient_closure(self: Self, optimizer: torch.optim.Optimizer) -> Callable:
@@ -186,7 +241,6 @@ class GIABase(AbstractGIA):
             gradient = self.train_fn(self.model, self.reconstruction_loader, self.configs.optimizer,
                                      self.configs.criterion, self.configs.epochs)
             rec_loss = cosine_similarity_weights(gradient, self.client_gradient, self.configs.top10norms)
-
             loss_r_feature = sum([
                 mod.r_feature
                 for (idx, mod) in enumerate(self.loss_r_feature_layers)
@@ -204,17 +258,18 @@ class GIABase(AbstractGIA):
         pass
 
     def suggest_parameters(self: Self, trial: Trial) -> None:
-        """Suggest parameters to chose and range for optimization for the Huang attack."""
+        """Suggest parameters to chose and range for optimization for the norm estimate attack."""
         total_variation = trial.suggest_float("total_variation", 1e-8, 1e-1, log=True)
-        bn_reg = trial.suggest_float("bn_reg", 1e-4, 1e-1, log=True)
+        bn_reg = trial.suggest_categorical("bn_reg", [0.0, 1e-4, 1e-2])
         attack_lr = trial.suggest_float("attack_lr", 1e-4, 100.0, log=True)
         median_pooling = trial.suggest_int("median_pooling", 0, 1)
         top10norms = trial.suggest_int("top10norms", 0, 1)
-        self.configs.bn_reg = bn_reg
+        self.configs.bn_reg = 0.0
         self.configs.attack_lr = attack_lr
         self.configs.tv_reg = total_variation
-        self.configs.median_pooling = median_pooling
-        self.configs.top10norms = top10norms
+        self.configs.median_pooling = bool(0)
+        self.configs.top10norms = bool(0)
+
         if self.optuna_trial_data is not None:
             trial_data_idx = trial.suggest_categorical(
                 "trial_data",
@@ -222,12 +277,15 @@ class GIABase(AbstractGIA):
             )
             self.client_loader, self.proxy_loader = self.optuna_trial_data[trial_data_idx]
             logger.info(f"Next experiment on trial data idx: {trial_data_idx}")
-        logger.info(f"Chosen parameters:\
-                    total_variation: {total_variation} \
-                    bn_reg: {bn_reg} \
-                    attack_lr: {attack_lr} \
-                    median_pooling: {median_pooling} \
-                    top10norms: {top10norms}")
+
+        logger.info(
+            f"Chosen parameters: "
+            f"total_variation: {total_variation} "
+            f"bn_reg: {bn_reg} "
+            f"attack_lr: {attack_lr} "
+            f"median_pooling: {bool(median_pooling)} "
+            f"top10norms: {bool(top10norms)} "
+        )
 
     def reset_attack(self: Self, new_config:dict) -> None:  # noqa: ARG002
         """Reset attack to initial state."""
