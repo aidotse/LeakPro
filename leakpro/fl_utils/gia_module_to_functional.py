@@ -3,10 +3,10 @@ from collections import OrderedDict
 
 import torch
 from torch import cuda, device, nn
+from torch.func import functional_call
 
 from leakpro.utils.import_helper import Any, Dict, Self
 
-from torch.func import functional_call
 
 class MetaModule(nn.Module):
     """Run a network with a provided parameter dict (stateless).

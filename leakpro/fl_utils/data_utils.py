@@ -1,7 +1,7 @@
 """Util functions relating to data."""
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from typing import List, Optional, Tuple
+from typing import Any, List, Literal, Self
 
 import numpy as np
 import torch
@@ -9,12 +9,7 @@ from torch import Tensor, cat, mean, randn, std
 from torch.utils.data import DataLoader, Dataset
 
 from leakpro.utils.import_helper import Any, Self
-from copy import deepcopy
-from typing import Self, List, Any, Optional, Literal
 
-import torch
-from torch import Tensor
-from torch.utils.data import DataLoader
 
 class GiaDataModalityExtension(ABC):
     """Abstract class for data modality extensions for GIA."""
@@ -66,12 +61,13 @@ class GiaImageCloneNoiseExtension(GiaDataModalityExtension):
       "normal"  -> randn_like (mean 0, std 1)
       "uniform" -> uniform in [0, 1)
     """
+
     def __init__(
         self,
         pixel_noise_p: float = 0.0,
         random_mode: Literal["normal", "uniform"] = "normal",
         pixel_wise: bool = True,  # True: mask is (N,1,H,W); False: element-wise (N,C,H,W)
-    ):
+    ) -> None:
         super().__init__()
         if not (0.0 <= pixel_noise_p <= 1.0):
             raise ValueError("pixel_noise_p must be in [0, 1]")
@@ -95,7 +91,8 @@ class GiaImageCloneNoiseExtension(GiaDataModalityExtension):
             return torch.rand_like(x)
         raise ValueError(f"Unknown random_mode: {self.random_mode}")
 
-    def get_at_data(self: Self, client_loader: DataLoader):
+    def get_at_data(self: Self, client_loader: DataLoader) -> DataLoader:
+        """Generate recreation data based on adding noise to original loader."""
         original = torch.stack([img.clone() for img, _ in client_loader.dataset], dim=0)
         labels = self._clone_labels(client_loader)
 

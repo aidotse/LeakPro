@@ -11,17 +11,22 @@ from optuna.trial import Trial
 from torch import Tensor, device
 from torch.nn import CrossEntropyLoss, Module
 from torch.utils.data import DataLoader
+from torchvision.models.convnext import LayerNorm2d
 
 from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
 from leakpro.fl_utils.data_utils import GiaDataModalityExtension, GiaImageExtension
 from leakpro.fl_utils.gia_optimizers import MetaSGD
 from leakpro.fl_utils.gia_train import train
-from leakpro.fl_utils.model_utils import InferredBNFeatureHook, InferredIN2dFeatureHook, InferredLN2dFeatureHook, InferredLNFeatureHook
+from leakpro.fl_utils.model_utils import (
+    InferredBNFeatureHook,
+    InferredIN2dFeatureHook,
+    InferredLN2dFeatureHook,
+    InferredLNFeatureHook,
+)
 from leakpro.fl_utils.similarity_measurements import cosine_similarity_weights, total_variation
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.utils.import_helper import Callable, Self
 from leakpro.utils.logger import logger
-from torchvision.models.convnext import LayerNorm2d
 
 
 @dataclass
@@ -57,7 +62,8 @@ class GIABase(AbstractGIA):
 
     def __init__(self: Self, model: Module, client_loader: DataLoader, data_mean: Tensor, data_std: Tensor,
                  proxy_loader: DataLoader, train_fn: Optional[Callable] = None,
-                 configs: Optional[GIABaseConfig] = None, optuna_trial_data: list = None, exp_name:str = "gradient_inversion") -> None:
+                 configs: Optional[GIABaseConfig] = None, optuna_trial_data: list = None,
+                 exp_name:str = "gradient_inversion") -> None:
         super().__init__()
         self.original_model = model
         self.model = deepcopy(self.original_model)
@@ -93,7 +99,7 @@ class GIABase(AbstractGIA):
             "detailed": detailed_str,
         }
 
-    def prepare_attack(self:Self) -> None:  # noqa: C901
+    def prepare_attack(self:Self) -> None:  # noqa: C901, PLR0915, PLR0912
         """Prepare the attack.
 
         Args:
@@ -116,8 +122,8 @@ class GIABase(AbstractGIA):
             batch_mean = input[0].mean([0, 2, 3])
             batch_var = input[0].var([0, 2, 3], unbiased=False)
             proxy_statistics.append((batch_mean, batch_var))
-        
-        def ln_forward_hook(module, input, output):  # noqa: ARG001
+
+        def ln_forward_hook(module: Module, input: torch.tensor, output: torch.tensor) -> None:# noqa: ARG001
             x = input[0]
             k = len(module.normalized_shape)
             dims = tuple(range(x.ndim - k, x.ndim))
@@ -126,15 +132,15 @@ class GIABase(AbstractGIA):
             sample_mean = sample_mean.reshape(sample_mean.shape[0], -1).mean(dim=1)
             sample_var  = sample_var.reshape(sample_var.shape[0], -1).mean(dim=1)
             proxy_statistics.append((sample_mean.mean().detach(), sample_var.mean().detach()))
-        
-        def ln2d_forward_hook(module, input, output):  # noqa: ARG001
+
+        def ln2d_forward_hook(module: Module, input: torch.tensor, output: torch.tensor) -> None:  # noqa: ARG001
             x = input[0]  # NCHW
             # LN2d normalizes across channel dim (C) per (n,h,w)
             m = x.mean(dim=1)
             v = x.var(dim=1, unbiased=False)
             proxy_statistics.append((m.mean().detach(), v.mean().detach()))
-        
-        def in2d_forward_hook(module, input, output):  # noqa: ARG001
+
+        def in2d_forward_hook(module: Module, input: torch.tensor, output: torch.tensor) -> None:  # noqa: ARG001
             x = input[0]  # NCHW
             # InstanceNorm2d normalizes over (H, W) per (N, C)
             m = x.mean(dim=(2, 3))                       # [N, C]
@@ -152,8 +158,8 @@ class GIABase(AbstractGIA):
                 hooks.append(module.register_forward_hook(ln_forward_hook))
             if isinstance(module, LayerNorm2d):
                 hooks.append(module.register_forward_hook(ln2d_forward_hook))
-            if isinstance(module, torch.nn.InstanceNorm2d): 
-                hooks.append(module.register_forward_hook(in2d_forward_hook)) 
+            if isinstance(module, torch.nn.InstanceNorm2d):
+                hooks.append(module.register_forward_hook(in2d_forward_hook))
 
         _ = self.train_fn(self.model, self.proxy_loader,
                                         self.configs.optimizer, self.configs.criterion, self.configs.epochs)
