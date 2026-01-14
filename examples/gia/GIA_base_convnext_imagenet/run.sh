@@ -3,11 +3,11 @@ set -euo pipefail
 
 # Adjust these
 PYTHON="${PYTHON:-python3}"
-SCRIPT="${SCRIPT:-measuremodel.py}"   # <-- change to your filename
+SCRIPT="${SCRIPT:-measuremodel.py}"
 GPU="${GPU:-0}"
 
 # Experiment values to run in parallel
-EXPS=(0.1)
+EXPS=(0.9 0.95 1.0)
 
 # Optional knobs
 SEED=1234

@@ -260,10 +260,10 @@ class GIABase(AbstractGIA):
     def suggest_parameters(self: Self, trial: Trial) -> None:
         """Suggest parameters to chose and range for optimization for the norm estimate attack."""
         total_variation = trial.suggest_float("total_variation", 1e-8, 1e-1, log=True)
-        bn_reg = trial.suggest_categorical("bn_reg", [0.0, 1e-4, 1e-2])
+        # bn_reg = trial.suggest_categorical("bn_reg", [0.0, 1e-4, 1e-2])
         attack_lr = trial.suggest_float("attack_lr", 1e-4, 100.0, log=True)
-        median_pooling = trial.suggest_int("median_pooling", 0, 1)
-        top10norms = trial.suggest_int("top10norms", 0, 1)
+        # median_pooling = trial.suggest_int("median_pooling", 0, 1)
+        # top10norms = trial.suggest_int("top10norms", 0, 1)
         self.configs.bn_reg = 0.0
         self.configs.attack_lr = attack_lr
         self.configs.tv_reg = total_variation
@@ -281,10 +281,10 @@ class GIABase(AbstractGIA):
         logger.info(
             f"Chosen parameters: "
             f"total_variation: {total_variation} "
-            f"bn_reg: {bn_reg} "
+            # f"bn_reg: {bn_reg} "
             f"attack_lr: {attack_lr} "
-            f"median_pooling: {bool(median_pooling)} "
-            f"top10norms: {bool(top10norms)} "
+            # f"median_pooling: {bool(median_pooling)} "
+            # f"top10norms: {bool(top10norms)} "
         )
 
     def reset_attack(self: Self, new_config:dict) -> None:  # noqa: ARG002

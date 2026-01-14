@@ -449,11 +449,9 @@ def get_coco_detection_loader(num_images: int = 1, img_size=256, start_idx=0, ba
             filenames.append('COCO/images/train2017/' + filename)
 
     dataset = Dataset(filenames, img_size, params, aug)
-    subset_indices = sample(range(len(dataset)), min(len(dataset), 2500))
-    asd = Subset(dataset, subset_indices)
-    data_mean, data_std = get_meanstd(asd)
-    # data_mean = [0.49139968, 0.48215827, 0.44653124]
-    # data_std  = [0.24703233, 0.24348505, 0.26158768]
+    data_mean = torch.tensor([0.485, 0.456, 0.406])[:, None, None]
+    data_std  = torch.tensor([0.229, 0.224, 0.225])[:, None, None]
+
 
     dataset.debug = False
     total_examples = len(dataset)

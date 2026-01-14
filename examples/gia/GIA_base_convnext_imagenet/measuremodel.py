@@ -1,6 +1,9 @@
 """Inverting on a single image (ConvNeXt)."""
 import optuna
 from torchvision.models import convnext_tiny, convnext_base, swin_t, Swin_T_Weights, vit_b_16, swin_v2_t, maxvit_t
+from vit_b16_cifar import vit_b_16_cifar
+from swint_cifar import swin_t_cifar, swin_v2_t_cifar
+from maxvit_cifar import maxvit_t_cifar
 from model import convnext_tiny_cifar10
 from imagenet import get_imagenette_loader, get_cifar10_loader
 
@@ -82,12 +85,12 @@ if __name__ == "__main__":
     seed_everything(args.seed)
 
     # If needed for ViT-B, leave commented or gate behind a flag.
+    # import torch
     # if torch.cuda.is_available():
     #     torch.backends.cuda.enable_flash_sdp(False)
     #     torch.backends.cuda.enable_mem_efficient_sdp(False)
     #     torch.backends.cuda.enable_math_sdp(True)
-
-    model = convnext_tiny_cifar10(small_stem=True)
+    model = convnext_tiny_cifar10()
     model.eval()
 
     NUM_IMAGES = 1

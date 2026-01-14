@@ -409,7 +409,7 @@ def convnext_tiny_cifar10(
     block: Callable[..., nn.Module] = CNBlockPreLN,
     downsample_bn: bool = False,
     downsample_norm_input: bool = True,
-    small_stem: bool = False,
+    small_stem: bool = True,
 ) -> ConvNeXt:
     block_setting = [
         CNBlockConfig(96, 192, 3),
