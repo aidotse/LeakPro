@@ -6,6 +6,7 @@ import torch.nn.functional as f
 from torch.nn.modules.utils import _pair, _quadruple
 
 from leakpro.utils.import_helper import Self
+from torchvision.models.convnext import LayerNorm2d
 
 
 class BNFeatureHook:
@@ -36,6 +37,75 @@ class BNFeatureHook:
 
     def close(self: Self) -> None:
         """Remove the hook."""
+        self.hook.remove()
+
+class InferredIN2dFeatureHook:
+    """Regularize pre-InstanceNorm activations toward proxy mean/var over (H, W)."""
+
+    def __init__(self, module: torch.nn.InstanceNorm2d, target_mean: torch.Tensor, target_var: torch.Tensor) -> None:
+        self.hook = module.register_forward_hook(self.hook_fn)
+        self.target_mean = target_mean
+        self.target_var = target_var
+        self.r_feature = None
+
+    def hook_fn(self, _module: torch.nn.InstanceNorm2d, input: torch.Tensor, _: torch.Tensor) -> None:
+        x = input[0]  # NCHW
+        m = x.mean(dim=(2, 3))                       # [N, C]
+        v = x.var(dim=(2, 3), unbiased=False)        # [N, C]
+        m = m.mean(dim=1).mean()                     # scalar
+        v = v.mean(dim=1).mean()                     # scalar
+        self.mean = m
+        self.var = v
+        self.r_feature = torch.norm(self.target_var - v, 2) + torch.norm(self.target_mean - m, 2)
+
+    def close(self) -> None:
+        self.hook.remove()
+
+class InferredLN2dFeatureHook:
+    def __init__(self, module: LayerNorm2d, target_mean: torch.Tensor, target_var: torch.Tensor) -> None:
+        self.hook = module.register_forward_hook(self.hook_fn)
+        self.target_mean = target_mean
+        self.target_var = target_var
+        self.r_feature = None
+
+    def hook_fn(self, module: LayerNorm2d, input: torch.Tensor, _: torch.Tensor) -> None:
+        x = input[0]
+        m = x.mean(dim=1).mean()
+        v = x.var(dim=1, unbiased=False).mean()
+        self.mean, self.var = m, v
+        self.r_feature = torch.norm(self.target_var - v, 2) + torch.norm(self.target_mean - m, 2)
+
+    def close(self) -> None:
+        self.hook.remove()
+
+class InferredLNFeatureHook:
+    """Regularize pre-LN activations toward proxy mean/var over LN-normalized dims."""
+    def __init__(self, module: torch.nn.LayerNorm, target_mean: torch.Tensor, target_var: torch.Tensor) -> None:
+        self.hook = module.register_forward_hook(self.hook_fn)
+        self.module = module
+        self.target_mean = target_mean
+        self.target_var = target_var
+        self.r_feature = None
+
+    def hook_fn(self, module: torch.nn.LayerNorm, input: torch.Tensor, _: torch.Tensor) -> None:
+        x = input[0]
+        k = len(module.normalized_shape)
+        dims = tuple(range(x.ndim - k, x.ndim))
+
+        sample_mean = x.mean(dim=dims)
+        sample_var  = x.var(dim=dims, unbiased=False)
+
+        sample_mean = sample_mean.reshape(sample_mean.shape[0], -1).mean(dim=1)
+        sample_var  = sample_var.reshape(sample_var.shape[0], -1).mean(dim=1)
+
+        mean = sample_mean.mean()
+        var  = sample_var.mean()
+
+        self.mean = mean
+        self.var = var
+        self.r_feature = torch.norm(self.target_var - var, 2) + torch.norm(self.target_mean - mean, 2)
+
+    def close(self) -> None:
         self.hook.remove()
 
 class InferredBNFeatureHook:

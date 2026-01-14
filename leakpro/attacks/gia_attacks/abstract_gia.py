@@ -97,8 +97,8 @@ class AbstractGIA(AbstractAttack):
 
     def generic_attack_loop(self: Self, configs:dict, gradient_closure: Callable, at_iterations: int,
                             reconstruction: Tensor, data_mean: Tensor, data_std: Tensor, attack_lr: float,
-                            median_pooling: bool, client_loader: DataLoader, reconstruction_loader: DataLoader
-                            ) -> Generator[tuple[int, Tensor, GIAResults]]:
+                            median_pooling: bool, client_loader: DataLoader, reconstruction_loader: DataLoader, 
+                            chose_best_ssim_as_final: bool = True) -> Generator[tuple[int, Tensor, GIAResults]]:
         """Generic attack loop for GIA's."""
         optimizer = torch.optim.Adam([reconstruction], lr=attack_lr)
         # reduce LR every 1/3 of total iterations
@@ -133,17 +133,23 @@ class AbstractGIA(AbstractAttack):
                     if ssim > self.best_sim:
                         self.final_best = deepcopy(self.best_reconstruction)
                         self.best_sim = ssim
-                    logger.info(f"best ssim: {self.best_sim}")
-                    yield i, self.best_sim, None
+                    current_sim = self.best_sim if chose_best_ssim_as_final else ssim
+                    logger.info(f"curent ssim: {self.best_sim}")
+                    yield i, current_sim, None
         except Exception as e:
             logger.info(f"Attack stopped due to {e}. \
                         Saving results.")
-        ssim_score = dataloaders_ssim_ignite(client_loader, self.final_best)
-        psnr_score = dataloaders_psnr(client_loader, self.final_best)
-        gia_result = GIAResults(client_loader, self.final_best,
+        if chose_best_ssim_as_final:
+            result = self.final_best
+        else:
+            result = reconstruction_loader
+        ssim_score = dataloaders_ssim_ignite(client_loader, result)
+        psnr_score = dataloaders_psnr(client_loader, result)
+        logger.info(f"final sim: {ssim_score}")
+        gia_result = GIAResults(client_loader, result,
                           psnr_score=psnr_score, ssim_score=ssim_score,
                           data_mean=data_mean, data_std=data_std, config=configs)
-        yield i, self.best_sim, gia_result
+        yield i, ssim_score, gia_result
 
 
     def generic_attack_loop_text(self: Self, configs:dict, gradient_closure: Callable, at_iterations: int,

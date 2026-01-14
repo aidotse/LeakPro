@@ -536,7 +536,7 @@ class GIAResults:
             data_mean: float = None,
             data_std: float = None,
             config: dict = None,
-            images: bool = True
+            images: bool = True,
         ) -> None:
 
         self.original_data = original_data
@@ -592,7 +592,7 @@ class GIAResults:
         # prevent too long config name bad hack..
         config_name = config_name[:len(config_name)//2]
         self.id = f"{name}{config_name}"
-        path = f"{path}/gradient_inversion/{self.id}"
+        path = f"{path}/gradient_inversion/{name}"
 
         if self.images:
              # Check if path exists, otherwise create it.
