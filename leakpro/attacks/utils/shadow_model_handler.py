@@ -163,16 +163,50 @@ class ShadowModelHandler(ModelHandler):
             indices_to_use.append(next_index)
             next_index += 1
 
-        # balanced assignment should be optional as it also places implicit requirements on attack
-        # specifically, the number of shadow models must be even and the train fraction must be 0.5
-        A = self.construct_balanced_assignments(len(shadow_population), num_models)  # noqa: N806
-        assert np.all(np.sum(A,axis=0) == num_models//2)
-        assert np.all(np.sum(A,axis=1) == len(shadow_population)//2)
-        
+        # Get sampling strategy from audit config
+        sampling_strategy = "independent"  # default
+        if hasattr(self.handler.configs.audit, 'sampling_strategy') and self.handler.configs.audit.sampling_strategy is not None:
+            sampling_strategy = self.handler.configs.audit.sampling_strategy
+
+        # Validate sampling strategy
+        if sampling_strategy not in ["independent", "balanced"]:
+            raise ValueError(f"sampling_strategy must be 'independent' or 'balanced', got '{sampling_strategy}'")
+
+        logger.info(f"Using '{sampling_strategy}' sampling strategy for shadow models")
+
+        # Prepare population array and initialize buffer for balanced sampling
         shadow_population = np.array(shadow_population)
+        if sampling_strategy == "balanced":
+            current_population = np.array([], dtype=int)
+
         for i, indx in enumerate(indices_to_use):
+            # Sample data indices based on strategy
+            if sampling_strategy == "balanced":
+                # Structured shuffle-shift sampling: ensures balanced coverage
+                if data_size <= len(shadow_population)//2:
+                    # Standard mode: sample IN sets
+                    if len(current_population) < data_size:
+                        logger.info(f"Replenish buffer: {len(current_population)} < {data_size}")
+                        remaining_population = np.setdiff1d(shadow_population, current_population)
+                        np.random.shuffle(remaining_population)
+                        current_population = np.concatenate((current_population, remaining_population))
+                    data_indices = current_population[:data_size]
+                    current_population = current_population[data_size:]
+                else:
+                    # Complement mode: sample OUT sets (for training_fraction > 0.5)
+                    out_size = len(shadow_population) - data_size
+                    if len(current_population) < out_size:
+                        logger.info(f"Replenish buffer: {len(current_population)} < {out_size}")
+                        remaining_population = np.setdiff1d(shadow_population, current_population)
+                        np.random.shuffle(remaining_population)
+                        current_population = np.concatenate((current_population, remaining_population))
+                    data_indices = np.setdiff1d(shadow_population, current_population[:out_size])
+                    current_population = current_population[out_size:]
+            else:  # sampling_strategy == "independent"
+                # Independent random sampling: each model samples independently
+                data_indices = np.random.choice(shadow_population, data_size, replace=False)
+
             # Get dataloader
-            data_indices = shadow_population[np.where(A[i,:] == 1)]
             data_loader = self.handler.get_dataloader(data_indices, params=None)
 
             # Get shadow model blueprint

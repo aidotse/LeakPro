@@ -65,14 +65,35 @@ class ReconstructionConfig(BaseModel):
 class AuditConfig(BaseModel):
     """Configuration for the audit process."""
 
-    random_seed: int = Field(default=42, description="Random seed for reproducibility")
+    random_seed: Optional[int] = Field(
+        default=None,
+        description="Random seed for reproducibility (NOT IMPLEMENTED - must be None or omitted)"
+    )
     attack_type: Literal["mia", "gia", "minv", "synthetic"] = Field(..., description="Type of attack: must be one of ['mia', 'gia', 'minv', 'synthetic]")  # noqa: E501
     attack_list: List[Dict[str, Any]] = Field(..., min_length=1, description="Must have at least one attack")
     hyper_param_search: bool = Field(default=False, description="Whether to perform hyperparameter search")
     data_modality: Literal["image", "tabular", "text", "graph", "timeseries"] = Field(..., description="Type of data modality: must be one of ['image', 'tabular', 'text', 'graph', 'timeseries']")  # noqa: E501
     output_dir: str = Field(..., description="Output directory for audit results")
+    sampling_strategy: Optional[Literal["independent", "balanced"]] = Field(
+        default="independent",
+        description="Sampling strategy for shadow models: 'independent' (random) or 'balanced' (structured shuffle-shift)"
+    )
 
     reconstruction: Optional[ReconstructionConfig] = Field(None, description="Reconstruction attack configuration")
+
+    # Validate that random_seed is not set (not implemented)
+    @field_validator("random_seed", mode="before")
+    @classmethod
+    def validate_random_seed(cls, v: Optional[int]) -> Optional[int]:
+        """Validate that random_seed is not set since seeding is not implemented."""
+        if v is not None:
+            raise ValueError(
+                "random_seed is not implemented in LeakPro. "
+                "Setting a random seed will not control randomness and may create "
+                "a false sense of reproducibility. Please remove random_seed from "
+                "your configuration or set it to null/None."
+            )
+        return v
 
     # turn some of the fields to lowercase
     @field_validator("attack_type", "data_modality", "attack_list", mode="before")
