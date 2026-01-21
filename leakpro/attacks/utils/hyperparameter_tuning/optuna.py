@@ -46,7 +46,7 @@ def optuna_optimal_hyperparameters(attack_object: AbstractAttack, optuna_config:
                         raise optuna.TrialPruned()
                     # save results if not pruned
                 if result_object is not None:
-                    result_object.save(name="optuna"+"trial"+str(trial.number), path="./leakpro_output/results",
+                    result_object.save(name="optuna"+"trial"+str(trial.number), path=attack_object.attack_cache_folder_path,
                                     config=attack_object.get_configs())
                     return intermediary_results
         elif isinstance(result, MIAResult):
@@ -72,12 +72,15 @@ def optuna_optimal_hyperparameters(attack_object: AbstractAttack, optuna_config:
     # Display and save the results
     logger.info(f"Best hyperparameters: {study.best_params}")
     logger.info(f"Best optimized value: {study.best_value}")
+    logger.info(f"Best trial number: {study.best_trial.number}")
 
     f_results_file = attack_object.attack_cache_folder_path + "/optuna_results.txt"
     with open(f_results_file, "w") as f:
         f.write("Best hyperparameters:\n")
         for key, value in study.best_params.items():
             f.write(f"{key}: {value}\n")
+        f.write(f"Best trial: {study.best_trial.number}")
+        f.write(f"Best optimzied value: {study.best_value}")
 
     logger.info(f"Results saved to {f_results_file}")
 

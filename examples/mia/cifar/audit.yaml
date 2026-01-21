@@ -1,12 +1,14 @@
 audit:  # Configurations for auditing
   random_seed: 1236  # Integer specifying the random seed
   attack_list:
+# RMIA
     - attack: rmia
       online: False
       num_shadow_models: 2
-      gamma: 1
-    - attack: rmia
-      online: True
+      training_data_fraction: 0.5   
+# BASE
+    - attack: base
+      online: False
       num_shadow_models: 2
       gamma: 1
     - attack: population
@@ -22,14 +24,14 @@ audit:  # Configurations for auditing
       number_of_traj: 50
       mia_classifier_epochs: 1000
 
-  output_dir: "./leakpro_output"
+  output_dir: "./cifar10/leakpro_output"
   attack_type: "mia" #mia, gia
   data_modality: "image" #image, tabular
 
 target:
   # Target model path
   module_path: "./target_model_class.py"
-  model_class: "ResNet18" 
+  model_class: "WideResNet" #"WideResNet" #"ResNet18" 
   target_folder: "./target"
   # Data paths
   data_path: "./data/cifar10.pkl"
