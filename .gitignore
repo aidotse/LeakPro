@@ -177,3 +177,5 @@ leakpro_output
 nohup.out
 img_align_celeba
 optuna_results.txt
+echr*
+nohup*
