@@ -8,10 +8,9 @@ from leakpro.utils.seed import seed_everything
 from model import ResNet, PreActBlock
 
 if __name__ == "__main__":
+    seed_everything(1234)
     # This attack needs pre activation batch normalization to function properly
     model = ResNet(PreActBlock, [2, 2, 2, 2], num_classes=10)
-
-    seed_everything(1234)
     client_dataloader, data_mean, data_std = get_cifar10_loader(num_images=16, batch_size=16, num_workers=2)
     trial_data = []
     for i in range(0,16*5,16):

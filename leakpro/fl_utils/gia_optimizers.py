@@ -56,7 +56,7 @@ class MetaSGD(MetaOptimizer):
         # Compute gradients only for grad params
         grads = grad(
             loss, [param for _, param in grad_params],
-            retain_graph=True, create_graph=True, only_inputs=True
+            retain_graph=True, create_graph=True, only_inputs=True, allow_unused=True
         )
 
         grad_iter = iter(grads)
@@ -65,6 +65,8 @@ class MetaSGD(MetaOptimizer):
         for name, param in params.items():
             if param.requires_grad:
                 grad_value = next(grad_iter)
+                if grad_value is None:
+                    grad_value = 1
                 updated_params[name] = param - self.lr * grad_value
             else:
                 # Leave params that does not require grad as they are

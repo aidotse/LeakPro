@@ -22,6 +22,7 @@ dependencies = [
   "scikit-learn",
   "pydantic",
   "ts2vec",
+  "umap-learn"
 ]
 
 [project.optional-dependencies]
@@ -36,7 +37,7 @@ dev = [
   "pytest-mock",
   "coverage-badge",
   "ruff",
-  "torch",  # from mia & federated
+  "torch >= 2.6.0",  # from mia & federated
   "torchvision",  # from mia & federated
   "torchmetrics",  # from federated
   "numba",  # from synthetic
@@ -46,6 +47,7 @@ dev = [
   "optuna", # federated and mia
   "kornia", # from minv
   "albumentations", # federated example
+  "transformers", # federated example
 ]
 
 [tool.setuptools]
