@@ -22,6 +22,59 @@ from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 
+class LSTM(nn.Module):
+    """LSTM model."""
+
+    def __init__(self, input_size: int = 2, hidden_size: int = 4, num_layers: int = 1, num_classes: int = 2) -> None:
+        super().__init__()
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.lstm = nn.LSTM(input_size, hidden_size, num_layers)
+        self.label = nn.Linear(hidden_size, num_classes)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward call."""
+        h0 = Variable(torch.zeros(self.num_layers, x.size(1), self.hidden_size))
+        c0 = Variable(torch.zeros(self.num_layers, x.size(1), self.hidden_size))
+        h0, c0 = h0.to(device=self.device), c0.to(device=self.device)
+
+        out, (h1, c1) = self.lstm(x, (h0, c0))
+        return self.label(h1)
+
+
+class LSTMAttention(nn.Module):
+    """LSTM model with attention."""
+
+    def __init__(self, input_size: int = 2, hidden_size: int = 4, num_layers: int = 1, num_classes: int = 2) -> None:
+        super().__init__()
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.layer1 = nn.LSTM(input_size, hidden_size, num_layers)
+        self.layer3 = nn.Linear(hidden_size * 2, num_classes)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward call."""
+        h0 = Variable(torch.zeros(self.num_layers, x.size(1), self.hidden_size))
+        c0 = Variable(torch.zeros(self.num_layers, x.size(1), self.hidden_size))
+        h0, c0 = h0.to(device=self.device), c0.to(device=self.device)
+
+        out, (h1, c1) = self.layer1(x, (h0, c0))
+
+        atten_energies = torch.sum(h1 * out, dim=2)
+        scores = F.softmax(atten_energies, dim=0)
+        scores = scores.unsqueeze(2)
+
+        context_vector = torch.sum(scores * out, dim=0)
+        context_vector = context_vector.unsqueeze(0)
+
+        out = torch.cat((h1, context_vector), 2)
+        return self.layer3(out)
+
+
 class AttackSeqMIA(AbstractMIA):
     """Implementation of the sequential MIA attack."""
 
@@ -41,58 +94,12 @@ class AttackSeqMIA(AbstractMIA):
         attention_model: bool = Field(default=True, description="Whether to use an LSTM with or without attention")
         label_only: bool = Field(default=False, description="Whether to use only the labels for the attack")
         temperature: float = Field(default=2.0, ge=0.0, description="Temperature for the softmax")
-
-    # Attack model classes are taken directly from the GitHub of the original paper.
-    class LSTM(nn.Module):
-        """LSTM model."""
-
-        def __init__(self, input_size: int = 2, hidden_size: int = 4, num_layers: int = 1, num_classes: int = 2) -> None:
-            super().__init__()
-            self.input_size = input_size
-            self.hidden_size = hidden_size
-            self.num_layers = num_layers
-            self.lstm = nn.LSTM(input_size, hidden_size, num_layers)
-            self.label = nn.Linear(hidden_size, num_classes)
-
-        def forward(self, x: torch.Tensor) -> torch.Tensor:
-            """Forward call."""
-            h0 = Variable(torch.zeros(self.num_layers, x.size(1), self.hidden_size))
-            c0 = Variable(torch.zeros(self.num_layers, x.size(1), self.hidden_size))
-
-            out, (h1, c1) = self.lstm(x, (h0, c0))
-            return self.label(h1)
-
-    class LSTMAttention(nn.Module):
-        """LSTM model with attention."""
-
-        def __init__(self, input_size: int = 2, hidden_size: int = 4, num_layers: int = 1, num_classes: int = 2) -> None:
-            super().__init__()
-            self.input_size = input_size
-            self.hidden_size = hidden_size
-            self.num_layers = num_layers
-            self.layer1 = nn.LSTM(input_size, hidden_size, num_layers)
-            self.layer3 = nn.Linear(hidden_size * 2, num_classes)
-
-        def forward(self, x: torch.Tensor) -> torch.Tensor:
-            """Forward call."""
-            h0 = Variable(torch.zeros(self.num_layers, x.size(1), self.hidden_size))
-            c0 = Variable(torch.zeros(self.num_layers, x.size(1), self.hidden_size))
-            out, (h1, c1) = self.layer1(x, (h0, c0))
-
-            atten_energies = torch.sum(h1 * out, dim=2)
-            scores = F.softmax(atten_energies, dim=0)
-            scores = scores.unsqueeze(2)
-
-            context_vector = torch.sum(scores * out, dim=0)
-            context_vector = context_vector.unsqueeze(0)
-
-            out = torch.cat((h1, context_vector), 2)
-            return self.layer3(out)
+        input_size: int = Field(default=5, ge=1, description="Input size for the LSTM model")
 
     def __init__(self: Self,
                  handler: MIAHandler,
                  configs: dict
-                ) -> None:
+                 ) -> None:
         """Initialize the AttackSeqMIA class.
 
         Args:
@@ -106,7 +113,6 @@ class AttackSeqMIA(AbstractMIA):
 
         super().__init__(handler)
 
-        # Assign the configuration parameters to the object
         for key, value in self.configs.model_dump().items():
             setattr(self, key, value)
 
@@ -127,16 +133,17 @@ class AttackSeqMIA(AbstractMIA):
         self.mia_test_data_loader = None
         self.dim_in_mia = (self.number_of_traj + 1 )
         if self.attention_model:
-            self.mia_classifer = self.LSTMAttention(5)
+            self.mia_model = LSTMAttention(self.input_size)
         else:
-            self.mia_classifer = self.LSTM(5)
+            self.mia_model = LSTM(self.input_size)
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
-        title_str = "Membership Inference Attacks by Exploiting Loss Trajectory"
-        reference_str = "Yiyong Liu, Zhengyu Zhao, Michael Backes, Yang Zhang \
-            Membership Inference Attacks by Exploiting Loss Trajectory. (2022)."
-        summary_str = " "
+        title_str = "SeqMIA: Sequential-Metric Based Membership Inference Attack"
+        reference_str = "Hao Li, Zheng Li, Siyuan Wu, Chengrui Hu, \
+            Yutong Ye, Min Zhang, Dengguo Feng, and Yang Zhang \
+            SeqMIA: Sequential-Metric Based Membership Inference Attack. (2024)."
+        summary_str = ""
         detailed_str = ""
         return {
             "title_str": title_str,
@@ -159,54 +166,36 @@ class AttackSeqMIA(AbstractMIA):
         """
         logger.info("Preparing the data for seqMIA attack")
 
-        # Get all available indices for auxiliary dataset
         aux_data_index = self.sample_indices_from_population(include_train_indices = False, include_test_indices = False)
 
-        # create auxiliary dataset
         aux_data_size = len(aux_data_index)
         shadow_data_size = int(aux_data_size * self.shadow_data_fraction)
         shadow_data_indices = np.random.choice(aux_data_index, shadow_data_size, replace=False)
-        # Split the shadow data into two equal parts
         split_index = len(shadow_data_indices) // 2
         shadow_training_indices = shadow_data_indices[:split_index]
-        # Distillation on target and shadow model happen on the same dataset
         distill_data_indices = np.setdiff1d(aux_data_index, shadow_data_indices)
 
-        #--------------------------------------------------------
-        # Train and load shadow model
-        #--------------------------------------------------------
         logger.info(f"Training shadow models on {len(shadow_training_indices)} points")
         self.shadow_model_indices = ShadowModelHandler().create_shadow_models(self.num_shadow_models,
-                                                                         shadow_training_indices,
-                                                                         training_fraction = 0.99)
+                                                                              shadow_training_indices,
+                                                                              training_fraction = 0.99)
 
-        # load shadow models
         self.shadow_model, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)
 
-        #--------------------------------------------------------
-        # Knowledge distillation of target and shadow models
-        #--------------------------------------------------------
-        # Note: shadow and target models are PytorchModel objects, hence, we need to take model_obj
         DistillationModelHandler().add_student_teacher_pair("shadow_distillation", self.shadow_model[0].model_obj)
         DistillationModelHandler().add_student_teacher_pair("target_distillation", self.target_model.model_obj)
 
         logger.info(f"Training distillation of the shadow model on {len(distill_data_indices)} points")
-        # train the distillation model using the one and only trained shadow model
         self.distill_shadow_models = DistillationModelHandler().distill_model("shadow_distillation",
-                                                                              self.number_of_traj,
-                                                                              distill_data_indices,
-                                                                              self.label_only)
+                                                                                self.number_of_traj,
+                                                                                distill_data_indices,
+                                                                                self.label_only)
 
-        # train distillation model of the target model
         self.distill_target_models = DistillationModelHandler().distill_model("target_distillation",
-                                                                              self.number_of_traj,
-                                                                              distill_data_indices,
-                                                                              self.label_only)
+                                                                                self.number_of_traj,
+                                                                                distill_data_indices,
+                                                                                self.label_only)
 
-        #--------------------------------------------------------
-        # Prepare data to train and test the MIA classifier
-        #--------------------------------------------------------
-        # shadow data (train and test) is used as training data for MIA_classifier in the paper
         train_mask = np.isin(shadow_data_indices,shadow_training_indices)
         self.prepare_mia_data(shadow_data_indices,
                               train_mask,
@@ -214,7 +203,6 @@ class AttackSeqMIA(AbstractMIA):
                               teacher_model = self.shadow_model[0].model_obj,
                               train_mode = True)
 
-        # Data used in the target (train and test) is used as test data for MIA_classifier
         mia_test_data_indices = self.audit_dataset["data"]
         train_indices = mia_test_data_indices[self.audit_dataset["in_members"]]
         test_mask = np.isin(mia_test_data_indices, train_indices)
@@ -223,7 +211,6 @@ class AttackSeqMIA(AbstractMIA):
                               student_model = self.distill_target_models,
                               teacher_model = self.target_model.model_obj,
                               train_mode = False)
-
 
     def prepare_mia_data(self:Self,
                         data_indices: np.ndarray,
@@ -258,7 +245,6 @@ class AttackSeqMIA(AbstractMIA):
                                           student_model,
                                           teacher_model,
                                           dataset_name)
-        # Create the training dataset for the MIA classifier.
         data["member_status"] = membership_status_shadow_train
 
         os.makedirs(self.storage_dir, exist_ok=True)
@@ -282,27 +268,23 @@ class AttackSeqMIA(AbstractMIA):
         gpu_or_cpu = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         data_loader = self.handler.get_dataloader(data_indices, batch_size=self.train_mia_batch_size, shuffle = False)
 
-        model_trajectory = np.array([])
+        model_trajectory_list = []
 
-        for loader_idx, (data, target) in tqdm(enumerate(data_loader),
+        for _loader_idx, (data, target) in tqdm(enumerate(data_loader),
                                                total=len(data_loader),
                                                desc=f"Preparing MIA data {dataset_name}"):
             data = data.to(gpu_or_cpu)
             target = target.to(gpu_or_cpu)
 
-            #---------------------------------------------------------------------
-            # Calculate the losses for the distilled student models
-            #---------------------------------------------------------------------
             criterion = DistillationModelHandler().get_criterion()
-            trajectory_current = np.array([])
+            trajectory_steps = []
+
             for d in range(self.number_of_traj) :
                 distill_model[d].to(gpu_or_cpu)
                 distill_model[d].eval()
 
-                # infer from the shadow model
                 distill_model_soft_output = distill_model[d](data).squeeze()
 
-                # Calculate the loss
                 loss = []
                 for logit_target_i, target_i in zip(distill_model_soft_output, target):
                     p_target_i = torch.exp(logit_target_i - torch.max(logit_target_i))
@@ -321,17 +303,12 @@ class AttackSeqMIA(AbstractMIA):
                         ])
                     loss.append(loss_i)
                 loss = torch.stack(loss).detach().cpu().numpy()
-                if d == 0:
-                    trajectory_current = loss[:,np.newaxis,:]
-                else:
-                    trajectory_current = np.concatenate((trajectory_current, loss[:,np.newaxis,:]), 1)
+                trajectory_steps.append(loss[:, np.newaxis, :])
 
-            # Append output of teacher model at the end.
             teacher_model.to(gpu_or_cpu)
             teacher_model.eval()
             model_soft_output = teacher_model(data).squeeze()
 
-            # Calculate the loss
             loss = []
             for logit_target_i, target_i in zip(model_soft_output, target):
                 p_target_i = torch.exp(logit_target_i - torch.max(logit_target_i))
@@ -350,30 +327,35 @@ class AttackSeqMIA(AbstractMIA):
                     ])
                 loss.append(loss_i)
             loss = torch.stack(loss).detach().cpu().numpy()
-            trajectory_current = np.concatenate((trajectory_current, loss[:,np.newaxis,:]), 1)
 
-            if loader_idx == 0:
-                model_trajectory = trajectory_current
-            else:
-                model_trajectory = np.concatenate((model_trajectory, trajectory_current), axis=0)
+            trajectory_steps.append(loss[:, np.newaxis, :])
+            trajectory_current = np.concatenate(trajectory_steps, 1)
+            model_trajectory_list.append(trajectory_current)
+
+        if model_trajectory_list:
+            model_trajectory = np.concatenate(model_trajectory_list, axis=0)
+        else:
+            model_trajectory = np.array([])
 
         return {"model_trajectory": model_trajectory}
 
-    def mia_classifier(self:Self)-> nn.Module:
-        """Trains and returns the MIA (Membership Inference Attack) classifier.
+    # --- FIX: Renamed function to train_seqmia_classifier to avoid collision ---
+    def train_seqmia_classifier(self:Self)-> nn.Module:
+        """"Trains and returns the MIA (Membership Inference Attack) classifier.
 
         Returns
         -------
             attack_model (torch.nn.Module): The trained MIA classifier model.
 
         """
-        attack_model = self.mia_classifer
+        attack_model = self.mia_model
+        
         if not os.path.exists(f"{self.storage_dir}/seqmia_model.pkl"):
             gpu_or_cpu = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             attack_optimizer = torch.optim.SGD(attack_model.parameters(),
-                                            lr=self.mia_classifier_lr,
-                                            momentum=self.mia_classifier_momentum,
-                                            weight_decay=self.mia_classifier_weight_decay)
+                                               lr=self.mia_classifier_lr,
+                                               momentum=self.mia_classifier_momentum,
+                                               weight_decay=self.mia_classifier_weight_decay)
             attack_model = attack_model.to(gpu_or_cpu)
             loss_fn = nn.CrossEntropyLoss()
 
@@ -462,11 +444,12 @@ class AttackSeqMIA(AbstractMIA):
         attack_model.eval()
         test_loss = 0
         correct = 0
-        auc_ground_truth = None
-        auc_pred = None
+        
+        auc_ground_truth_list = []
+        auc_pred_list = []
 
         with torch.no_grad():
-            for batch_idx, (data, target) in tqdm(enumerate(self.mia_test_data_loader), total=len(self.mia_test_data_loader)):
+            for _batch_idx, (data, target) in tqdm(enumerate(self.mia_test_data_loader), total=len(self.mia_test_data_loader)):
                 data = data.to(gpu_or_cpu) # noqa: PLW2901
                 target = target.to(gpu_or_cpu) # noqa: PLW2901
                 target = target.long() # noqa: PLW2901
@@ -477,12 +460,16 @@ class AttackSeqMIA(AbstractMIA):
                 pred0, pred1 = pred.max(1, keepdim=True)
                 correct += pred1.eq(target).sum().item()
                 auc_pred_current = pred[:, -1]
-                if batch_idx == 0 :
-                    auc_ground_truth = target.cpu().numpy()
-                    auc_pred = auc_pred_current.cpu().detach().numpy()
-                else:
-                     auc_ground_truth = np.concatenate((auc_ground_truth, target.cpu().numpy()), axis=0)
-                     auc_pred = np.concatenate((auc_pred, auc_pred_current.cpu().detach().numpy()),axis=0)
+                
+                auc_ground_truth_list.append(target.cpu().numpy())
+                auc_pred_list.append(auc_pred_current.cpu().detach().numpy())
+
+        if auc_ground_truth_list:
+            auc_ground_truth = np.concatenate(auc_ground_truth_list, axis=0)
+            auc_pred = np.concatenate(auc_pred_list, axis=0)
+        else:
+            auc_ground_truth = np.array([])
+            auc_pred = np.array([])
 
         test_loss /= len(self.mia_test_data_loader.dataset)
 
@@ -496,8 +483,8 @@ class AttackSeqMIA(AbstractMIA):
             MIAResult: The result of the attack.
 
         """
-        self.mia_classifier()
-        true_labels, signals = self.mia_attack(self.mia_classifer)
+        self.train_seqmia_classifier()
+        true_labels, signals = self.mia_attack(self.mia_model)
 
         return MIAResult.from_full_scores(true_membership=true_labels,
                                           signal_values=signals,
