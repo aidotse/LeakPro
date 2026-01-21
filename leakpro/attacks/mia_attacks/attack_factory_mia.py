@@ -29,9 +29,9 @@ class AttackFactoryMIA:
         "lira": AttackLiRA,
         "HSJ" : AttackHopSkipJump,
         "yoqo": AttackYOQO,
-        "multi_signal_lira": AttackMSLiRA,
         "base": AttackBASE,
         "ramia": AttackRaMIA,
+        "multi_signal_lira": AttackMSLiRA,
     }
 
     # Shared variables for all attacks
