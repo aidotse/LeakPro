@@ -332,10 +332,7 @@ class AttackSeqMIA(AbstractMIA):
             trajectory_current = np.concatenate(trajectory_steps, 1)
             model_trajectory_list.append(trajectory_current)
 
-        if model_trajectory_list:
-            model_trajectory = np.concatenate(model_trajectory_list, axis=0)
-        else:
-            model_trajectory = np.array([])
+        model_trajectory = np.concatenate(model_trajectory_list, axis=0) if model_trajectory_list else np.array([])
 
         return {"model_trajectory": model_trajectory}
 
@@ -349,7 +346,7 @@ class AttackSeqMIA(AbstractMIA):
 
         """
         attack_model = self.mia_model
-        
+
         if not os.path.exists(f"{self.storage_dir}/seqmia_model.pkl"):
             gpu_or_cpu = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             attack_optimizer = torch.optim.SGD(attack_model.parameters(),
@@ -444,7 +441,7 @@ class AttackSeqMIA(AbstractMIA):
         attack_model.eval()
         test_loss = 0
         correct = 0
-        
+
         auc_ground_truth_list = []
         auc_pred_list = []
 
@@ -460,7 +457,7 @@ class AttackSeqMIA(AbstractMIA):
                 pred0, pred1 = pred.max(1, keepdim=True)
                 correct += pred1.eq(target).sum().item()
                 auc_pred_current = pred[:, -1]
-                
+
                 auc_ground_truth_list.append(target.cpu().numpy())
                 auc_pred_list.append(auc_pred_current.cpu().detach().numpy())
 
