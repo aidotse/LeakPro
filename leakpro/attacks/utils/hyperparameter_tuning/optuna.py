@@ -26,22 +26,27 @@ def optuna_optimal_hyperparameters(attack_object: AbstractAttack, optuna_config:
     """
     def objective(trial: optuna.trial.Trial) -> Tensor:
         # Suggest hyperparameters
+
         new_config = attack_object.suggest_parameters(trial)
+
         # Reset attack to apply new hyperparameters
         attack_object.reset_attack(new_config)
+
         seed_everything(optuna_config.seed)
+
         result = attack_object.run_attack()
+
         if isinstance(result, Generator):
             for step, intermediary_results, result_object in result:
                 # check every 3000 results
-                if step%3000==0:
+                if step%optuna_config.check_interval==0:
                     trial.report(intermediary_results, step)
 
                     if trial.should_prune():
                         raise optuna.TrialPruned()
                     # save results if not pruned
                 if result_object is not None:
-                    result_object.save(name="optuna"+"trial"+str(trial.number), path="./leakpro_output/results",
+                    result_object.save(name="optuna"+"trial"+str(trial.number), path=attack_object.attack_cache_folder_path,
                                     config=attack_object.get_configs())
                     return intermediary_results
         elif isinstance(result, MIAResult):
@@ -61,19 +66,21 @@ def optuna_optimal_hyperparameters(attack_object: AbstractAttack, optuna_config:
     # Define the pruner and study
     pruner = optuna_config.pruner
     study = optuna.create_study(direction=optuna_config.direction, pruner=pruner)
-
     # Run optimization
     study.optimize(objective, n_trials=optuna_config.n_trials)
 
     # Display and save the results
     logger.info(f"Best hyperparameters: {study.best_params}")
     logger.info(f"Best optimized value: {study.best_value}")
+    logger.info(f"Best trial number: {study.best_trial.number}")
 
     f_results_file = attack_object.attack_cache_folder_path + "/optuna_results.txt"
     with open(f_results_file, "w") as f:
         f.write("Best hyperparameters:\n")
         for key, value in study.best_params.items():
             f.write(f"{key}: {value}\n")
+        f.write(f"Best trial: {study.best_trial.number}")
+        f.write(f"Best optimzied value: {study.best_value}")
 
     logger.info(f"Results saved to {f_results_file}")
 

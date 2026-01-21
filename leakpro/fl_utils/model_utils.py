@@ -4,6 +4,7 @@
 import torch
 import torch.nn.functional as f
 from torch.nn.modules.utils import _pair, _quadruple
+from torchvision.models.convnext import LayerNorm2d
 
 from leakpro.utils.import_helper import Self
 
@@ -30,6 +31,117 @@ class BNFeatureHook:
 
         r_feature = torch.norm(module.running_var.data - var, 2) + torch.norm(
             module.running_mean.data - mean, 2)
+        self.mean = mean
+        self.var = var
+        self.r_feature = r_feature
+
+    def close(self: Self) -> None:
+        """Remove the hook."""
+        self.hook.remove()
+
+class InferredIN2dFeatureHook:
+    """Regularize pre-InstanceNorm activations toward proxy mean/var over (H, W)."""
+
+    def __init__(self, module: torch.nn.InstanceNorm2d, target_mean: torch.Tensor, target_var: torch.Tensor) -> None:
+        self.hook = module.register_forward_hook(self.hook_fn)
+        self.target_mean = target_mean
+        self.target_var = target_var
+        self.r_feature = None
+
+    def hook_fn(self, _module: torch.nn.InstanceNorm2d, input: torch.Tensor, _: torch.Tensor) -> None:
+        """Hook to compute regularization towadrds target."""
+        x = input[0]  # NCHW
+        m = x.mean(dim=(2, 3))                       # [N, C]
+        v = x.var(dim=(2, 3), unbiased=False)        # [N, C]
+        m = m.mean(dim=1).mean()                     # scalar
+        v = v.mean(dim=1).mean()                     # scalar
+        self.mean = m
+        self.var = v
+        self.r_feature = torch.norm(self.target_var - v, 2) + torch.norm(self.target_mean - m, 2)
+
+    def close(self) -> None:
+        """Remove the hook."""
+        self.hook.remove()
+
+class InferredLN2dFeatureHook:
+    """Regularize pre-LN activations toward proxy mean/var over LN-normalized dims."""
+
+    def __init__(self, module: LayerNorm2d, target_mean: torch.Tensor, target_var: torch.Tensor) -> None:
+        self.hook = module.register_forward_hook(self.hook_fn)
+        self.target_mean = target_mean
+        self.target_var = target_var
+        self.r_feature = None
+
+    def hook_fn(self, module: LayerNorm2d, input: torch.Tensor, _: torch.Tensor) -> None: # noqa: ARG002
+        """Hook to compute regularization towards target."""
+        x = input[0]
+        m = x.mean(dim=1).mean()
+        v = x.var(dim=1, unbiased=False).mean()
+        self.mean, self.var = m, v
+        self.r_feature = torch.norm(self.target_var - v, 2) + torch.norm(self.target_mean - m, 2)
+
+    def close(self) -> None:
+        """Remove the hook."""
+        self.hook.remove()
+
+class InferredLNFeatureHook:
+    """Regularize pre-LN activations toward proxy mean/var over LN-normalized dims."""
+
+    def __init__(self, module: torch.nn.LayerNorm, target_mean: torch.Tensor, target_var: torch.Tensor) -> None:
+        self.hook = module.register_forward_hook(self.hook_fn)
+        self.module = module
+        self.target_mean = target_mean
+        self.target_var = target_var
+        self.r_feature = None
+
+    def hook_fn(self, module: torch.nn.LayerNorm, input: torch.Tensor, _: torch.Tensor) -> None:
+        """Hook to compute regularization towards target."""
+        x = input[0]
+        k = len(module.normalized_shape)
+        dims = tuple(range(x.ndim - k, x.ndim))
+
+        sample_mean = x.mean(dim=dims)
+        sample_var  = x.var(dim=dims, unbiased=False)
+
+        sample_mean = sample_mean.reshape(sample_mean.shape[0], -1).mean(dim=1)
+        sample_var  = sample_var.reshape(sample_var.shape[0], -1).mean(dim=1)
+
+        mean = sample_mean.mean()
+        var  = sample_var.mean()
+
+        self.mean = mean
+        self.var = var
+        self.r_feature = torch.norm(self.target_var - var, 2) + torch.norm(self.target_mean - mean, 2)
+
+    def close(self) -> None:
+        """Remove the hook."""
+        self.hook.remove()
+
+class InferredBNFeatureHook:
+    """Implementation of the forward hook to track feature statistics and compute a loss on them.
+
+    Will compute mean and variance, and will use l2 as a loss.
+    """
+
+    def __init__(self: Self, module: torch.nn.modules.BatchNorm2d, target_batch_mean: torch.tensor, target_batch_var: torch.tensor
+                 ) -> None:
+        self.hook = module.register_forward_hook(self.hook_fn)
+        self.target_batch_mean = target_batch_mean
+        self.target_batch_var = target_batch_var
+
+    def hook_fn(self: Self, _module: torch.nn.modules.BatchNorm2d, input: torch.Tensor, _: torch.Tensor) -> None: # noqa: ARG002
+        """Hook to compute feature distribution regularization toward client statistics."""
+        nch = input[0].shape[1]
+        # Compute the mean of the feature maps across batch, height, and width dimensions
+        mean = input[0].mean([0, 2, 3])
+        # Compute the variance for each channel
+        var = (input[0].permute(1, 0, 2,
+                                3).contiguous().view([nch,
+                                                      -1]).var(1,
+                                                               unbiased=False))
+
+        r_feature = torch.norm(self.target_batch_var.data - var, 2) + torch.norm(
+            self.target_batch_mean.data - mean, 2)
         self.mean = mean
         self.var = var
         self.r_feature = r_feature

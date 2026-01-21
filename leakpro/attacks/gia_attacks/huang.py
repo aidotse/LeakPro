@@ -25,7 +25,7 @@ from leakpro.utils.logger import logger
 
 @dataclass
 class HuangConfig:
-    """Possible configs for the Inverting Gradients attack."""
+    """Possible configs for the Huang Gradients attack."""
 
     # total variation scale for smoothing the reconstructions after each iteration
     tv_reg: float = 0.052
@@ -73,10 +73,9 @@ class Huang(AbstractGIA):
         self.data_std = data_std
 
         # required for optuna to save the best hyperparameters
-        self.attack_folder_path = "leakpro_output/attacks/huang"
-        os.makedirs(self.attack_folder_path, exist_ok=True)
+        self.attack_cache_folder_path = "leakpro_output/attacks/huang"
+        os.makedirs(self.attack_cache_folder_path, exist_ok=True)
 
-        self.prepare_attack()
         logger.info("Evaluating with Huang. et al initialized.")
 
     def description(self:Self) -> dict:
@@ -195,11 +194,15 @@ class Huang(AbstractGIA):
         self.configs.median_pooling = median_pooling
         self.configs.top10norms = top10norms
         if self.optuna_trial_data is not None:
-            trial_data_idx = trial.suggest_int("trial_data", 0, len(self.optuna_trial_data) - 1)
+            trial_data_idx = trial.suggest_categorical(
+                "trial_data",
+                list(range(len(self.optuna_trial_data)))
+            )
             self.client_loader = self.optuna_trial_data[trial_data_idx]
             logger.info(f"Next experiment on trial data idx: {trial_data_idx}")
         logger.info(f"Chosen parameters:\
                     total_variation: {total_variation} \
+                    bn_reg: {bn_reg} \
                     attack_lr: {attack_lr} \
                     median_pooling: {median_pooling} \
                     top10norms: {top10norms}")
@@ -210,5 +213,6 @@ class Huang(AbstractGIA):
         self.best_reconstruction = None
         self.best_reconstruction_round = None
         self.model = deepcopy(self.original_model)
+        super().reset_attack()
         self.prepare_attack()
         logger.info("Huang attack reset to initial state.")

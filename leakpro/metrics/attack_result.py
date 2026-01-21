@@ -20,6 +20,7 @@ from torch import Tensor, clamp, stack
 from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision.utils import save_image
 
+from leakpro.fl_utils.save_text import save_text, validate_tokens
 from leakpro.utils.import_helper import Any, List, Self
 
 ########################################################################################################################
@@ -535,6 +536,7 @@ class GIAResults:
             data_mean: float = None,
             data_std: float = None,
             config: dict = None,
+            images: bool = True,
         ) -> None:
 
         self.original_data = original_data
@@ -544,6 +546,7 @@ class GIAResults:
         self.data_mean = data_mean
         self.data_std = data_std
         self.config = config
+        self.images = images
 
     @staticmethod
     def load(
@@ -589,39 +592,18 @@ class GIAResults:
         # prevent too long config name bad hack..
         config_name = config_name[:len(config_name)//2]
         self.id = f"{name}{config_name}"
-        path = f"{path}/gradient_inversion/{self.id}"
+        path = f"{path}/gradient_inversion/{name}"
 
-        # Check if path exists, otherwise create it.
-        if not os.path.exists(f"{path}"):
-            os.makedirs(f"{path}")
-
-        def extract_tensors_from_subset(dataset: Dataset) -> Tensor:
-            all_tensors = []
-            if isinstance(dataset, Subset):
-                for idx in dataset.indices:
-                    all_tensors.append(dataset.dataset[idx][0])
-
-            else:
-                for idx in range(len(dataset)):
-                    all_tensors.append(dataset[idx][0])
-            return stack(all_tensors)
-
-        recreated_data = extract_tensors_from_subset(self.recreated_data.dataset)
-        original_data = extract_tensors_from_subset(self.original_data.dataset)
-
-        output_denormalized = clamp(recreated_data * self.data_std + self.data_mean, 0, 1)
-        recreated = os.path.join(path, "recreated_image.png")
-        save_image(output_denormalized, recreated)
-
-        gt_denormalized = clamp(original_data * self.data_std + self.data_mean, 0, 1)
-        original = os.path.join(path, "original_image.png")
-        save_image(gt_denormalized, original)
+        if self.images:
+             # Check if path exists, otherwise create it.
+            img_save(path, self.recreated_data, self.original_data, self.data_std, self.data_mean)
+        else:
+            text_save(path, self.recreated_data, self.original_data)
+            validate_tokens(self.original_data, self.recreated_data, os.path.join(path,"recreated_tokens"))
 
         # Data to be saved
         data = {
             "resulttype": self.__class__.__name__,
-            "original": original,
-            "recreated": recreated,
             # Can not save config anymore since it contains objects. Need workaround.
             # "result_config": result_config,  # noqa: ERA001
             "id": self.id,
@@ -661,6 +643,44 @@ class GIAResults:
         for res, name in zip(results, unique_names):
             latex += _latex(save_name=name, original=res.original, recreated=res.recreated)
         return latex
+
+def text_save(path: str, recreated_data: Dataset, original_data: Dataset) -> None:
+    """Save text to path."""
+    if not os.path.exists(f"{path}"):
+        os.makedirs(f"{path}")
+    original = os.path.join(path, "original_text.txt")
+    save_text(original_data, original)
+    recreated = os.path.join(path, "recreated_text.txt")
+    save_text(recreated_data, recreated)
+
+
+def img_save(path: str, recreated_data: Dataset, original_data: Dataset, data_std: Tensor, data_mean: Tensor) -> None:
+    """Save images to path."""
+    # Check if path exists, otherwise create it.
+    if not os.path.exists(f"{path}"):
+        os.makedirs(f"{path}")
+
+    def extract_tensors_from_subset(dataset: Dataset) -> Tensor:
+        all_tensors = []
+        if isinstance(dataset, Subset):
+            for idx in dataset.indices:
+                all_tensors.append(dataset.dataset[idx][0])
+
+        else:
+            for idx in range(len(dataset)):
+                all_tensors.append(dataset[idx][0])
+        return stack(all_tensors)
+
+    recreated_data = extract_tensors_from_subset(recreated_data.dataset)
+    original_data = extract_tensors_from_subset(original_data.dataset)
+
+    output_denormalized = clamp(recreated_data * data_std + data_mean, 0, 1)
+    recreated = os.path.join(path, "recreated_image.png")
+    save_image(output_denormalized, recreated)
+
+    gt_denormalized = clamp(original_data * data_std + data_mean, 0, 1)
+    original = os.path.join(path, "original_image.png")
+    save_image(gt_denormalized, original)
 
 class MinvResult:
     """Contains results for a MI attack."""
@@ -816,5 +836,3 @@ def reduce_to_unique_labels(results: list) -> list:
             result.append(f"{name}")
 
     return result
-
-

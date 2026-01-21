@@ -246,7 +246,7 @@ class LinkabilityResults(BaseModel):
         save_name: str = "fig.png"
     ) -> None:
         """Plot method for LinkabilityResults."""
-        from leakpro.synthetic_data_attacks.plots import plot_linkability
+        from leakpro.synthetic_data_attacks.plots import plot_linkability  # noqa: PLC0415
         plot_linkability(
             link_res = LinkabilityResults(
                 res = self.res,

@@ -3,6 +3,7 @@ import os
 
 import torch
 from cifar100 import get_cifar100_loader
+from leakpro.run import run_gia_attack
 from leakpro.schemas import OptunaConfig
 from model import ResNet
 from pre_train import pre_train
@@ -43,6 +44,7 @@ if __name__ == "__main__":
     config.at_iterations = 12000
     attack_object = InvertingGradients(model, client_trainloader, data_mean, data_std, configs=config, optuna_trial_data=trial_data)
     optuna_config = OptunaConfig()
+    run_gia_attack(attack_object)
     optuna_config.n_trials = 100
-    attack_object.run_with_optuna()
+    attack_object.run_with_optuna(optuna_config)
     

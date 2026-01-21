@@ -1,12 +1,13 @@
 """Hyperparameter tuning with optuna on evaluating."""
 from coco import get_coco_detection_loader
+from leakpro.attacks.gia_attacks.gia_running import GIABaseRunning
 from leakpro.attacks.gia_attacks.invertinggradients import InvertingGradients, InvertingConfig
 from leakpro.fl_utils.data_utils import GiaImageYoloExtension
 from leakpro.fl_utils.gia_optimizers import MetaSGD
 from leakpro.fl_utils.gia_train import trainyolo
 from leakpro.schemas import OptunaConfig
 from leakpro.utils.seed import seed_everything
-from model import yolo_v8_n_basicblock, ComputeLoss
+from model import yolo_v8_n_basicblock, ComputeLoss, yolo_v8_n_preactblock, yolo_v8_n
 from torch import cuda, device
 
 if __name__ == "__main__":

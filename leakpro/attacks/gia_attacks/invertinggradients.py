@@ -65,13 +65,12 @@ class InvertingGradients(AbstractGIA):
         self.best_reconstruction = None
         self.best_reconstruction_round = None
         # required for optuna to save the best hyperparameters
-        self.attack_folder_path = "leakpro_output/attacks/inverting_grad"
-        os.makedirs(self.attack_folder_path, exist_ok=True)
+        self.attack_cache_folder_path = "leakpro_output/attacks/inverting_grad"
+        os.makedirs(self.attack_cache_folder_path, exist_ok=True)
         # optuna trial data
         self.optuna_trial_data = optuna_trial_data
 
         logger.info("Inverting gradient initialized.")
-        self.prepare_attack()
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
@@ -171,7 +170,10 @@ class InvertingGradients(AbstractGIA):
         self.configs.median_pooling = median_pooling
         self.configs.top10norms = top10norms
         if self.optuna_trial_data is not None:
-            trial_data_idx = trial.suggest_int("trial_data", 0, len(self.optuna_trial_data) - 1)
+            trial_data_idx = trial.suggest_categorical(
+                "trial_data",
+                list(range(len(self.optuna_trial_data)))
+            )
             self.client_loader = self.optuna_trial_data[trial_data_idx]
             logger.info(f"Next experiment on trial data idx: {trial_data_idx}")
         logger.info(f"Chosen parameters:\
@@ -186,5 +188,6 @@ class InvertingGradients(AbstractGIA):
         self.best_reconstruction = None
         self.best_reconstruction_round = None
         self.model = deepcopy(self.original_model)
+        super().reset_attack()
         self.prepare_attack()
         logger.info("Inverting attack reset to initial state.")
