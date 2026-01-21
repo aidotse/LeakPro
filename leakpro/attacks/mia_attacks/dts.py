@@ -1,7 +1,7 @@
 """Implementation of the Deep Time Series (DTS) attack.
 
 Unlike other time series attacks, DTS does not rely on signal extraction.
-Instead, it utilizes deep learing to automatically map raw time series to membership labels.
+Instead, it utilizes deep learning to automatically map raw time series to membership labels.
 This process involves constructing a Membership Inference Classification (MIC) dataset
 and training a binary time series classifier (MIC model) to infer membership.
 """
