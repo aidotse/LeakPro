@@ -52,6 +52,10 @@ def dataloader_to_config(dataloader: DataLoader) -> DataLoaderConfig:
 def get_model_init_params(model: Module) -> dict:
     """Extracts the parameters that were passed to the __init__ method from an object instance."""
 
+    # If model is a GradSampleModule (Opacus), unwrap it
+    if hasattr(model, "_module"):
+        model = model._module
+
     cls = model.__class__
     init_signature = inspect.signature(cls.__init__)  # Get constructor signature
     param_names = list(init_signature.parameters.keys())[1:]  # Skip 'self'
