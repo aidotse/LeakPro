@@ -31,13 +31,36 @@ audit:  # Configurations for auditing
         module_path: "./utils/discriminator.py"
         model_class: "SNResNetProjectionDiscriminator"
         checkpoint_path: #"dis.pth"
+
+    - attack: diffmi
+      hash_identifiable: True
+      do_fine_tune: True
+      preprocessing:
+          top_n: 30 # Integer number for indicating the top n pseudo labels per class
+          top_k: 50 # Integer number for indicating the top k features for p_reg computation
+      pretrain: 
+        save_name: "model_pretrain"
+        batch_size: 150  
+        microbatch: 12
+        max_steps: 50000
+      finetune:
+        save_name: "model_finetune"
+        batch_size: 4
+      diffmiattack:
+        label_num: 30
+        repeat_N: 30
+        batch_size: 15
+      diffusion:
+        # module_path: "./utils/diffusion.py"
+        # model_class: "UNet"
+
   reconstruction:
     batch_size: 32 # Integer number for indicating batch size for training the GAN
     num_class_samples: 1 # Number of samples to generate for each class
     num_audited_classes: 200 # Number of classes to audit
     eval_model:
-      module_path: "utils/resnet_model.py"
-      model_class: "ResNet152" # Class name of the model
+      module_path: models.py #"utils/resnet_model.py"
+      model_class: VGG16 #"ResNet152" # Class name of the model
       eval_folder: "./target/resnet152" # Path to the model checkpoint
     metrics:
       accuracy:
@@ -52,8 +75,8 @@ audit:  # Configurations for auditing
 
 target:
   # Target model path
-  module_path: "utils/resnet_model.py"
-  model_class: "ResNet152" 
+  module_path: models.py #"utils/resnet_model.py"
+  model_class: VGG16 #"ResNet152" 
   # Data paths
   target_folder: "./target/resnet152"
   data_path: "./data/celebA_private_data.pkl"
