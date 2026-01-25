@@ -129,8 +129,9 @@ class TestMIAResult:
         # Check that the subsection is correctly included
         assert "\\subsection{attack comparison}" in latex_content
 
-        # Check that the figure is correctly included
-        assert f"\\includegraphics[width=0.8\\textwidth]{{{self.temp_dir.name}/ROC.png}}" in latex_content
+        # Check that the figure is correctly included (path has underscores escaped for LaTeX)
+        expected_path = self.temp_dir.name.replace("_", "\\_")
+        assert f"\\includegraphics[width=0.8\\textwidth]{{{expected_path}/ROC.png}}" in latex_content
 
         # Check that the table header is correct
         assert "Attack name & attack config & TPR: 10.0\\%FPR & 1.0\\%FPR & 0.1\\%FPR & 0.0\\%FPR" in latex_content
