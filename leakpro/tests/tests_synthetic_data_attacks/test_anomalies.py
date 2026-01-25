@@ -12,7 +12,11 @@ df = pd.DataFrame(
 
 def test_encode_categorical_columns() -> None:
     """Assert results for encode_categorical_columns function with simple input."""
-    assert list(df.dtypes) == [np.dtype("int64"), np.dtype("bool"), np.dtype("O"), np.dtype("O")]
+    # Check that string columns are detected as string-like (object or StringDtype in newer pandas)
+    assert df.dtypes[0] == np.dtype("int64")
+    assert df.dtypes[1] == np.dtype("bool")
+    assert pd.api.types.is_string_dtype(df.dtypes[2])
+    assert pd.api.types.is_string_dtype(df.dtypes[3])
     df_encoded = anom.encode_categorical_columns(df=df)
     assert list(df_encoded.columns) == ["non_cat", "cat_bool", "cat_more_threshold", "cat_less_threshold_True"]
     assert df_encoded[["non_cat", "cat_bool"]].equals(df[["non_cat", "cat_bool"]])
