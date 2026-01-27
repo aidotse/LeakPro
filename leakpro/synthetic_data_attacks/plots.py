@@ -233,45 +233,63 @@ def plot_singling_out(*,
         save: bool = False,
         save_name: str = None
     ) -> None:
-    """Function to plot singling out given results.
-
+    """Function to plot singling out given results, and annotate the plot
+    with the total number of main attacks for each n_cols.
+    
     Note: function is not tested and is used in examples.
     """
-    #Set res, n_cols and set_n_cols
+    # Set res, n_cols and set_n_cols
     res = np.array(sin_out_res.res)
-    n_cols = res[:,-1].astype(int).tolist()
+    n_cols = res[:, -1].astype(int).tolist()
     set_n_cols = np.unique(n_cols)
-    # High res flag
+    
+    # High resolution flag
     if high_res_flag:
         plot_save_high_res()
+    
     # Set up the figure and get axes
     ax = get_figure_axes()
-    # Iterate through values and plot bar charts
+    
+    # Plot the bar charts for risk values (columns 5 to 7 assumed)
     iterate_values_plot_bar_charts(
-        ax = ax,
-        res = res,
-        set_values = set_n_cols,
-        values = n_cols,
-        max_value_flag = True
+        ax=ax,
+        res=res,
+        set_values=set_n_cols,
+        values=np.array(n_cols),
+        max_value_flag=True
     )
+    
+    # Annotate each n_cols with the total number of main attacks for that group.
+    # (Assuming column 0 holds the number of main attacks.)
+    for i, n in enumerate(set_n_cols):
+        # Extract rows corresponding to this n_cols value
+        subset = res[res[:, -1].astype(int) == n]
+        total_attacks = int(subset[:, 0].sum())
+        # Determine the x position of this group (i is the index from iterate_values_plot_bar_charts)
+        # and a y-position near the top of the axis
+        ax.text(i, ax.get_ylim()[1]*0.98, f"{total_attacks:,}", 
+                ha="center", va="top", fontsize=8, color="red")
+    
     # Adding labels and title
-    fig_title = f"Singling out risk total main attacks: {int(res[:,0].sum()):,}"
-    if res.shape[0]==1:
-        fig_title += f", n_cols={int(res[0,-1])}"
+    fig_title = f"Singling out risk total main attacks: {int(res[:, 0].sum()):,}"
+    if res.shape[0] == 1:
+        fig_title += f", n_cols={int(res[0, -1])}"
     set_labels_and_title(
-        ax = ax,
-        xlabel = "n_cols for predicates",
-        ylabel = "Risk",
-        title = fig_title
+        ax=ax,
+        xlabel="n_cols for predicates",
+        ylabel="Risk",
+        title=fig_title
     )
+    
     # Adding ticks
-    set_ticks(ax=ax, xlabels=set_n_cols)
+    set_ticks(ax=ax, xlabels=set_n_cols.tolist())
+    
     # Adding legend
     set_legend(ax=ax)
-    # Save and or show figure
+    
+    # Save and/or show figure
     if save:
         plt.savefig(fname=f"{save_name}.png", dpi=1000, bbox_inches="tight")
-    # Show plot
     if show:
         plt.show()
     else:
