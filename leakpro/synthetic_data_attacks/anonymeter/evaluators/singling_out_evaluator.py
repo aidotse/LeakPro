@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Optional, Set
 from itertools import combinations
 import random
 
-
 import numpy as np
 import pandas as pd
 from sklearn.tree import DecisionTreeRegressor
@@ -325,7 +324,7 @@ def query_from_record(
         if is_numeric_dtype(dtypes[col]):
             if use_medians:
                 if medians is None:
-                    operator = np.random.choice([">=", "<="])
+                    operator: str = np.random.choice([">=", "<="])
                 elif record[col] > medians[col]:
                     operator = ">="
                 else:
