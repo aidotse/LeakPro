@@ -12,6 +12,7 @@ from leakpro.attacks.mia_attacks.multi_signal_lira import AttackMSLiRA
 from leakpro.attacks.mia_attacks.qmia import AttackQMIA
 from leakpro.attacks.mia_attacks.ramia import AttackRaMIA
 from leakpro.attacks.mia_attacks.rmia import AttackRMIA
+from leakpro.attacks.mia_attacks.seq_mia import AttackSeqMIA
 from leakpro.attacks.mia_attacks.yoqo import AttackYOQO
 from leakpro.attacks.utils.distillation_model_handler import DistillationModelHandler
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
@@ -27,6 +28,7 @@ class AttackFactoryMIA:
         "rmia": AttackRMIA,
         "qmia": AttackQMIA,
         "loss_traj":AttackLossTrajectory,
+        "seqmia":AttackSeqMIA,
         "lira": AttackLiRA,
         "HSJ" : AttackHopSkipJump,
         "yoqo": AttackYOQO,
