@@ -3,9 +3,12 @@
 # See https://github.com/statice/anonymeter/blob/main/LICENSE.md for details.
 """Privacy evaluator that measures the singling out risk."""
 from typing import Any, Dict, List, Optional, Set
+from itertools import combinations
+import random
 
 import numpy as np
 import pandas as pd
+from sklearn.tree import DecisionTreeRegressor
 from pandas.api.types import is_bool_dtype, is_datetime64_any_dtype, is_numeric_dtype
 from pydantic import BaseModel, ConfigDict
 
@@ -94,9 +97,17 @@ def random_queries(*, df: pd.DataFrame, n_queries: int, n_cols: int) -> List[str
     return queries
 
 class UniqueSinglingOutQueries(BaseModel):
-    """Collection of unique queries that single out in a DataFrame."""
+    """
+    Collection of unique queries that single out records in a DataFrame.
 
-    model_config = ConfigDict(arbitrary_types_allowed = True)
+    Attributes:
+        df (pd.DataFrame): The DataFrame to evaluate queries against.
+        sorted_queries_set (Set[str]): A set of sorted query strings to ensure uniqueness.
+        queries (List[str]): List of unique queries.
+        idxs (List[int]): Indices of records singled out by the queries.
+        count (int): Total count of unique queries.
+    """
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     df: pd.DataFrame
     sorted_queries_set: Set[str] = set()
     queries: List[str] = []
@@ -146,6 +157,19 @@ class UniqueSinglingOutQueries(BaseModel):
                 self.queries.append(query)
                 self.idxs.append(idxs[0])
                 self.count += 1
+
+    def append_only(self, *, query: str) -> None:
+        """
+        Add a query to the collection if it is unique, without evaluating its result.
+
+        Parameters:
+            query (str): The query to add.
+        """
+        sorted_query = "".join(sorted(query))
+        if sorted_query not in self.sorted_queries_set:
+            self.sorted_queries_set.add(sorted_query)
+            self.queries.append(query)
+            self.count += 1
 
 def naive_singling_out_attack(*,
     ori: pd.DataFrame,
@@ -209,103 +233,297 @@ def univariate_singling_out_queries(*, df: pd.DataFrame, n_queries: int) -> List
             break
     return queries.queries
 
-def query_from_record(*,
+
+def precompute_column_stats(df: pd.DataFrame, columns: List[str]) -> tuple[dict[str, pd.Series], dict[str, pd.Series]]:
+    """
+    Precompute sorted non-null values and value counts for each column.
+    
+    Parameters:
+        df (pd.DataFrame): The dataframe to process.
+        columns (List[str]): List of column names.
+    
+    Returns:
+        Tuple containing:
+          - sorted_vals: A dictionary mapping each column to its sorted (non-null) values.
+          - value_counts: A dictionary mapping each column to its value counts.
+    """
+    sorted_vals = {}
+    value_counts = {}
+    for col in columns:
+        sorted_vals[col] = df[col].dropna().sort_values()
+        value_counts[col] = df[col].value_counts()
+    return sorted_vals, value_counts
+
+
+
+def query_from_record(
+    *,
+    df: pd.DataFrame,
     record: pd.Series,
     dtypes: pd.Series,
     columns: List[str],
-    medians: Optional[pd.Series]
+    medians: Optional[pd.Series] = None,
+    use_medians: bool = True,
+    precomputed_sorted: Optional[dict[str, pd.Series]] = None,
+    precomputed_counts: Optional[dict[str, pd.Series]] = None,
+    use_tree: bool = False,
+    tree_models: Optional[Dict[str, any]] = None  # Expecting tree models keyed by column name.
 ) -> str:
-    """Function that constructs and returns a query from the attributes in a record."""
-    #Placeholder query
-    query = []
-    #Iterate through columns
+    """
+    Construct a query from a record. For numeric attributes, if use_medians is True
+    a median-based operator (>= or <=) is used; otherwise, the function uses the
+    extreme values and uniqueness check. If use_tree is True, then for continuous columns,
+    the decision tree’s decision path is used to generate an interval predicate.
+    
+    Parameters:
+        df (pd.DataFrame): The dataframe.
+        record (pd.Series): The record for which to build a query.
+        dtypes (pd.Series): The data types for the dataframe columns.
+        columns (List[str]): The list of columns to consider.
+        medians (Optional[pd.Series]): Precomputed medians for numeric columns.
+        use_medians (bool): Whether to use the median-based approach.
+        precomputed_sorted (Optional[dict[str, pd.Series]]): Precomputed sorted values per column.
+        precomputed_counts (Optional[dict[str, pd.Series]]): Precomputed value counts per column.
+        use_tree (bool): If True, use the decision tree for continuous columns.
+        tree_models (Optional[Dict[str, any]]): Dictionary of pre-fitted decision trees keyed by column.
+    
+    Returns:
+        str: The constructed query string.
+    """
+    query_parts: List[str] = []
     for col in columns:
-        #NaN
+        # If using decision tree for continuous columns, and a tree exists for this column:
+        if use_tree and tree_models is not None and col in tree_models:
+            tree = tree_models[col]
+            # Use the tree's decision path for this record (for univariate case)
+            X = df[[col]]
+            # Get decision path for the record (using its index)
+            node_indicator = tree.decision_path(X.loc[[record.name]])
+            node_index = node_indicator.indices
+            lower_bound, upper_bound = -np.inf, np.inf
+            for node_id in node_index:
+                if tree.tree_.feature[node_id] != -2:  # not a leaf node
+                    threshold = tree.tree_.threshold[node_id]
+                    # For univariate tree, no need to check feature name.
+                    if record[col] <= threshold:
+                        upper_bound = min(upper_bound, threshold)
+                    else:
+                        lower_bound = max(lower_bound, threshold)
+            query_parts.append(f"{col} >= {lower_bound:.2f} & {col} < {upper_bound:.2f}")
+            continue
+
+        # Default processing:
         if pd.isna(record[col]):
-            item = ".isna()"
-        #Boolean
-        elif is_bool_dtype(dtypes[col]):
-            item = f"== {record[col]}"
-        #Numeric
-        elif is_numeric_dtype(dtypes[col]):
-            if medians is None:
-                operator = rng.choice([">=", "<="])
-            elif record[col] > medians[col]:
-                operator = ">="
+            query_parts.append(f"{col}.isna()")
+            continue
+
+        if is_bool_dtype(dtypes[col]):
+            query_parts.append(f"{col} == {record[col]}")
+            continue
+
+        if is_numeric_dtype(dtypes[col]):
+            if use_medians:
+                if medians is None:
+                    operator: str = np.random.choice([">=", "<="])
+                elif record[col] > medians[col]:
+                    operator = ">="
+                else:
+                    operator = "<="
+                query_parts.append(f"{col} {operator} {record[col]}")
             else:
-                operator = "<="
-            item = f"{operator} {record[col]}"
-        #Categorical
-        elif isinstance(dtypes[col], pd.CategoricalDtype) and is_numeric_dtype(dtypes[col].categories.dtype):
-            item = f"== {record[col]}"
-        elif isinstance(record[col], str):
-            item = f"== '{escape_quotes(input=record[col])}'"
+                values = (precomputed_sorted[col]
+                          if precomputed_sorted and col in precomputed_sorted
+                          else df[col].dropna().sort_values())
+                if len(values) > 0:
+                    if record[col] <= values.iloc[0]:
+                        query_parts.append(f"{col} <= {values.iloc[0]}")
+                    elif record[col] >= values.iloc[-1]:
+                        query_parts.append(f"{col} >= {values.iloc[-1]}")
+                    else:
+                        counts = (precomputed_counts[col]
+                                  if precomputed_counts and col in precomputed_counts
+                                  else df[col].value_counts())
+                        if counts.get(record[col], 0) == 1:
+                            query_parts.append(f"{col} == {record[col]}")
+            continue
+
+        # For categorical columns with numeric underlying categories:
+        if isinstance(dtypes[col], pd.CategoricalDtype) and is_numeric_dtype(dtypes[col].categories.dtype):
+            query_parts.append(f"{col} == {record[col]}")
         else:
-            item = f'== "{record[col]}"'
-        query.append(f"{col} {item}")
-    return " & ".join(query)
+            if not use_medians:
+                counts = (precomputed_counts[col]
+                          if precomputed_counts and col in precomputed_counts
+                          else df[col].value_counts())
+                if counts.get(record[col], 0) == 1:
+                    query_parts.append(f"{col} == '{record[col]}'")
+            else:
+                query_parts.append(f"{col} == '{record[col]}'")
+    return " & ".join(query_parts)
 
 def multivariate_singling_out_queries(
     df: pd.DataFrame,
     n_queries: int,
     n_cols: int,
-    max_attempts: Optional[int]
+    max_per_combo: int = 50,
+    max_attempts: Optional[int] = 20_000,
+    sample_size_per_combo: int = 10,
+    max_rounds_no_progress: int = 100,
+    use_medians: bool = True,
+    use_tree: bool = True,
+    tree_params={
+        'min_samples_leaf': 1,
+        'max_depth': None,           # let the tree grow
+        'random_state': 42
+    }
 ) -> List[str]:
-    """Function that generates singling out queries from a combination of attributes.
-
-    Parameters
-    ----------
-    df: pd.DataFrame
-        Input dataframe from which queries will be generated.
-    n_queries: int
-        Number of queries to generate.
-    n_cols: int
-        Number of columns that the attacker uses to create the
-        singling out queries.
-    max_attempts: int, optional.
-        Maximum number of attempts that the attacker can make to generate
-        the requested `n_queries` singling out queries. Parameter
-        caps the total number of query generation attempts.
-        If `max_attempts` is None, no limit will be imposed.
-
-    Returns
-    -------
-    List[str]
-        The singling out queries.
-
     """
-    #Set medians and n_attemps
-    medians = df.median(numeric_only=True)
-    n_attempts = 0
-    #Instantiate queries
-    queries = UniqueSinglingOutQueries(df=df)
-    #Construct queries
-    while queries.count < n_queries:
-        #Reached max attemps
-        if max_attempts is not None and n_attempts >= max_attempts:
-            print( # noqa: T201
-                f"Reached maximum number of attempts ({max_attempts}) when generating singling out queries. "
-                f"Returning {queries.count} instead of the requested {n_queries} queries. "
-                "To avoid this, increase max_attempts or set it to `None` to disable limit."
-            )
-            return queries.queries
-        #Choose record and columns
-        record = df.iloc[rng.integers(df.shape[0])]
-        columns = rng.choice(df.columns, size=n_cols, replace=False).tolist()
-        #Construct query
-        query = query_from_record(record=record, dtypes=df.dtypes, columns=columns, medians=medians)
-        #Check query and append
-        queries.check_and_append(query=query)
-        #Add to n_attempts
-        n_attempts += 1
-    return queries.queries
+    Generate diverse singling-out queries for a given dataframe.
+    
+    If use_tree is True, a decision tree is pre-fitted for each continuous column
+    (not for every combination) and passed into query_from_record.
+    
+    Parameters:
+        df (pd.DataFrame): The dataframe from which queries are generated.
+        n_queries (int): The total number of queries to generate.
+        n_cols (int): Number of columns to use in each query combination.
+        max_per_combo (int): Maximum queries per column combination.
+        max_attempts (Optional[int]): Maximum number of generation attempts.
+        sample_size_per_combo (int): Number of unique records to sample per combination.
+        max_rounds_no_progress (int): Rounds with no progress before stopping.
+        use_medians (bool): Whether to use the median-based approach.
+        use_tree (bool): If True, use decision tree based query generation for continuous columns.
+        tree_params (Optional[Dict[str, Any]]): Parameters for DecisionTreeRegressor.
+    
+    Returns:
+        List[str]: A list of generated queries.
+    """
+    medians: pd.Series = df.median(numeric_only=True)
+    all_combos: List[tuple] = list(combinations(df.columns, n_cols))
+    random.shuffle(all_combos)
+    
+    # Precompute expensive operations once for all columns.
+    precomputed_sorted, precomputed_counts = precompute_column_stats(df, list(df.columns))
+    
+    # Pre-fit decision tree models for continuous columns only.
+    tree_models: Dict[str, DecisionTreeRegressor] = {}
+    if use_tree:
+        if tree_params is None:
+            tree_params = {'min_samples_leaf': 1, 'random_state': 42}
+        for col in df.columns:
+            # Only consider continuous (non-boolean) columns
+            if is_numeric_dtype(df[col]) and (not is_bool_dtype(df[col])):
+                # Drop rows with NaN in this column
+                mask = ~df[col].isna()
+                if mask.sum() == 0:
+                    continue  # skip column if all values are NaN
+                X_nonan = df.loc[mask, [col]]
+                tree = DecisionTreeRegressor(**tree_params)
+                tree.fit(X_nonan, X_nonan[col])
+                tree_models[col] = tree
+
+    
+    combo_usage_count: dict = {combo: 0 for combo in all_combos}
+    queries: List[str] = []
+    used_record_indexes: set = set()
+    
+    attempts: int = 0
+    rounds_no_progress: int = 0
+    
+    while len(queries) < n_queries:
+        if max_attempts is not None and attempts >= max_attempts:
+            print(f"Reached maximum number of attempts ({max_attempts}). Returning {len(queries)} queries out of requested {n_queries}.")
+            break
+        
+        random.shuffle(all_combos)
+        queries_before_this_round: int = len(queries)
+        
+        for combo in all_combos:
+            if len(queries) >= n_queries:
+                break
+            if combo_usage_count[combo] >= max_per_combo:
+                continue
+            
+            groups: pd.Series = df.groupby(list(combo)).size()
+            unique_groups: pd.Series = groups[groups == 1]
+            if unique_groups.empty:
+                continue
+            
+            unique_indices: List[tuple] = list(unique_groups.index)
+            random.shuffle(unique_indices)
+            unique_indices = unique_indices[:sample_size_per_combo]
+            
+            for idx in unique_indices:
+                if len(queries) >= n_queries or (max_attempts is not None and attempts >= max_attempts):
+                    break
+                
+                mask: pd.Series = (df[list(combo)] == idx).all(axis=1)
+                record: pd.Series = df.loc[mask].iloc[0]
+                
+                query: str = query_from_record(
+                    df=df,
+                    columns=list(combo),
+                    dtypes=df.dtypes,
+                    record=record,
+                    medians=medians,
+                    use_medians=use_medians,
+                    precomputed_sorted=precomputed_sorted,
+                    precomputed_counts=precomputed_counts,
+                    use_tree=use_tree,
+                    tree_models=tree_models
+                )
+                
+                try:
+                    result: pd.DataFrame = df.query(query)
+                    if len(result) == 1:
+                        r_idx: int = result.index[0]
+                        if r_idx not in used_record_indexes:
+                            queries.append(query)
+                            used_record_indexes.add(r_idx)
+                            combo_usage_count[combo] += 1
+                except Exception:
+                    pass
+                
+                attempts += 1
+                if max_attempts is not None and attempts >= max_attempts:
+                    print(f"Reached maximum number of attempts ({max_attempts}). Returning {len(queries)} queries for n_cols={n_cols}.")
+                    break
+        
+        current_query_count: int = len(queries)
+        if current_query_count == queries_before_this_round:
+            rounds_no_progress += 1
+        else:
+            rounds_no_progress = 0
+        
+        if rounds_no_progress >= max_rounds_no_progress:
+            print("No progress for several rounds. Stopping to prevent infinite loop.")
+            break
+    
+    if len(queries) < n_queries:
+        print(
+            f"[multivariate_singling_out_queries] Generated only {len(queries)} "
+            f"queries out of requested {n_queries} for n_cols={n_cols}. "
+            "This can lead to an underestimate of the singling-out risk."
+        )
+    
+    return queries[:n_queries]
 
 def main_singling_out_attack(
     ori: pd.DataFrame,
     syn: pd.DataFrame,
     n_attacks: int,
     n_cols: int,
-    max_attempts: Optional[int]
+    max_per_combo: int = 5,
+    max_attempts: Optional[int] = 10_000,
+    sample_size_per_combo: int = 2,
+    max_rounds_no_progress: int = 10,
+    use_medians: bool = True,
+    use_tree: bool = True,
+    tree_params={
+        'min_samples_leaf': 1,
+        'max_depth': None,           # let the tree grow
+        'random_state': 42
+    }
 ) -> UniqueSinglingOutQueries:
     """Main singling-out attack function.
 
@@ -319,7 +537,13 @@ def main_singling_out_attack(
             df = syn,
             n_queries = n_attacks,
             n_cols = n_cols,
-            max_attempts = max_attempts
+            max_attempts = max_attempts,
+            max_per_combo = max_per_combo,
+            sample_size_per_combo = sample_size_per_combo,
+            max_rounds_no_progress = max_rounds_no_progress,
+            use_medians = use_medians,
+            use_tree=use_tree,
+            tree_params=tree_params
         )
     #Warning message
     if len(queries) < n_attacks:
@@ -370,6 +594,32 @@ class SinglingOutEvaluator(BaseModel):
         EvaluationResults object containing the success rates for the various attacks.
         Parameter will be set in evaluate method.
 
+    max_per_combo : int, default is 5
+        The maximum number of queries allowed per column combination. This parameter 
+        limits the number of successful queries generated for each specific grouping.
+    sample_size_per_combo : int, default is 2
+        The number of unique records (per column combination) that are sampled to generate 
+        candidate queries.
+    max_rounds_no_progress : int, default is 10
+        The number of consecutive rounds with no new queries found after which the algorithm 
+        will stop further attempts. This helps prevent infinite loops when the data does not 
+        yield additional singletons.
+    use_medians : bool, default is False
+        If True, for numeric attributes the query is constructed using a median-based condition 
+        (e.g. using ">=" or "<="). If False, the algorithm uses extreme value and uniqueness checks.
+    use_tree : bool, default is True
+        If True, a decision tree is used to construct adaptive interval predicates for continuous 
+        columns. In this approach, a decision tree is pre-fitted (one per continuous column) and 
+        its decision path is used to determine the lower and upper bounds that ideally isolate 
+        the record.
+    tree_params : Dict[str, Any], default is {'min_samples_leaf': 1, 'max_depth': None, 'random_state': 42}
+        A dictionary of hyperparameters to configure the decision tree used for continuous columns.
+        - `min_samples_leaf`: Minimum number of samples required in a leaf node. A value of 1 allows 
+          the tree to isolate single records.
+        - `max_depth`: Maximum depth of the tree. If set to None, the tree is allowed to grow until 
+          other stopping criteria are met.
+        - `random_state`: Seed for reproducibility.
+
     """
 
     model_config = ConfigDict(arbitrary_types_allowed = True)
@@ -379,6 +629,12 @@ class SinglingOutEvaluator(BaseModel):
     n_attacks: int = 2_000
     confidence_level: float = 0.95
     max_attempts: Optional[int] = 10_000_000
+    max_per_combo: int = 5
+    sample_size_per_combo: int = 2
+    max_rounds_no_progress: int = 10
+    use_medians: bool = False
+    use_tree: bool = True
+    tree_params: Dict[str, Any] = {'min_samples_leaf': 1, 'max_depth': None, 'random_state': 42}
     #Following parameters are set in evaluate method
     main_queries: Optional[UniqueSinglingOutQueries] = None
     naive_queries: Optional[UniqueSinglingOutQueries] = None
@@ -397,7 +653,13 @@ class SinglingOutEvaluator(BaseModel):
             syn = self.syn,
             n_attacks = self.n_attacks,
             n_cols = self.n_cols,
-            max_attempts = self.max_attempts
+            max_attempts = self.max_attempts,
+            max_per_combo = self.max_per_combo,
+            sample_size_per_combo = self.sample_size_per_combo,
+            max_rounds_no_progress = self.max_rounds_no_progress,
+            use_medians = self.use_medians,
+            use_tree=self.use_tree,
+            tree_params=self.tree_params
         )
         # Naive singling-out attack
         self.naive_queries = naive_singling_out_attack(
