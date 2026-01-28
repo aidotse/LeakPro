@@ -3,6 +3,8 @@
 # See https://github.com/statice/anonymeter/blob/main/LICENSE.md for details.
 """Privacy evaluator that measures the singling out risk."""
 from typing import Any, Dict, List, Optional, Set
+from itertools import combinations
+import random
 
 import numpy as np
 import pandas as pd
@@ -94,9 +96,17 @@ def random_queries(*, df: pd.DataFrame, n_queries: int, n_cols: int) -> List[str
     return queries
 
 class UniqueSinglingOutQueries(BaseModel):
-    """Collection of unique queries that single out in a DataFrame."""
+    """
+    Collection of unique queries that single out records in a DataFrame.
 
-    model_config = ConfigDict(arbitrary_types_allowed = True)
+    Attributes:
+        df (pd.DataFrame): The DataFrame to evaluate queries against.
+        sorted_queries_set (Set[str]): A set of sorted query strings to ensure uniqueness.
+        queries (List[str]): List of unique queries.
+        idxs (List[int]): Indices of records singled out by the queries.
+        count (int): Total count of unique queries.
+    """
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     df: pd.DataFrame
     sorted_queries_set: Set[str] = set()
     queries: List[str] = []
@@ -146,6 +156,19 @@ class UniqueSinglingOutQueries(BaseModel):
                 self.queries.append(query)
                 self.idxs.append(idxs[0])
                 self.count += 1
+
+    def append_only(self, *, query: str) -> None:
+        """
+        Add a query to the collection if it is unique, without evaluating its result.
+
+        Parameters:
+            query (str): The query to add.
+        """
+        sorted_query = "".join(sorted(query))
+        if sorted_query not in self.sorted_queries_set:
+            self.sorted_queries_set.add(sorted_query)
+            self.queries.append(query)
+            self.count += 1
 
 def naive_singling_out_attack(*,
     ori: pd.DataFrame,
@@ -209,103 +232,195 @@ def univariate_singling_out_queries(*, df: pd.DataFrame, n_queries: int) -> List
             break
     return queries.queries
 
-def query_from_record(*,
+
+def query_from_record(
+    *,
+    df: pd.DataFrame,
     record: pd.Series,
     dtypes: pd.Series,
     columns: List[str],
-    medians: Optional[pd.Series]
+    medians: Optional[pd.Series] = None,
+    use_medians: bool = True
 ) -> str:
-    """Function that constructs and returns a query from the attributes in a record."""
-    #Placeholder query
-    query = []
-    #Iterate through columns
+    """
+    Construct a query using either a median-based (multivariate) or univariate approach.
+
+    Parameters:
+        df (pd.DataFrame): The dataframe containing the dataset.
+        record (pd.Series): The specific record to generate a query for.
+        dtypes (pd.Series): Data types of the columns in the dataframe.
+        columns (List[str]): Columns to include in the query.
+        medians (Optional[pd.Series]): Precomputed medians for numeric columns, if applicable.
+        use_medians (bool): Flag to determine whether to use the median-based approach or not.
+
+    Returns:
+        str: The constructed query string.
+    """
+    query: List[str] = []
+
     for col in columns:
         #NaN
         if pd.isna(record[col]):
-            item = ".isna()"
-        #Boolean
-        elif is_bool_dtype(dtypes[col]):
-            item = f"== {record[col]}"
-        #Numeric
-        elif is_numeric_dtype(dtypes[col]):
-            if medians is None:
-                operator = rng.choice([">=", "<="])
-            elif record[col] > medians[col]:
-                operator = ">="
+            query.append(f"{col}.isna()")
+            continue
+
+        if is_bool_dtype(dtypes[col]):
+            query.append(f"{col} == {record[col]}")
+            continue
+
+        if is_numeric_dtype(dtypes[col]):
+            if use_medians:
+                if medians is None:
+                    operator: str = np.random.choice([">=", "<="])
+                elif record[col] > medians[col]:
+                    operator = ">="
+                else:
+                    operator = "<="
+                query.append(f"{col} {operator} {record[col]}")
             else:
-                operator = "<="
-            item = f"{operator} {record[col]}"
-        #Categorical
-        elif isinstance(dtypes[col], pd.CategoricalDtype) and is_numeric_dtype(dtypes[col].categories.dtype):
-            item = f"== {record[col]}"
-        elif isinstance(record[col], str):
-            item = f"== '{escape_quotes(input=record[col])}'"
+                values: pd.Series = df[col].dropna().sort_values()
+                if len(values) > 0:
+                    if record[col] <= values.iloc[0]:
+                        query.append(f"{col} <= {values.iloc[0]}")
+                    elif record[col] >= values.iloc[-1]:
+                        query.append(f"{col} >= {values.iloc[-1]}")
+                    else:
+                        value_counts: pd.Series = df[col].value_counts()
+                        if value_counts.get(record[col], 0) == 1:
+                            query.append(f"{col} == {record[col]}")
+            continue
+
+        if isinstance(dtypes[col], pd.CategoricalDtype) and is_numeric_dtype(dtypes[col].categories.dtype):
+            query.append(f"{col} == {record[col]}")
         else:
-            item = f'== "{record[col]}"'
-        query.append(f"{col} {item}")
+            if not use_medians:
+                value_counts: pd.Series = df[col].value_counts()
+                if value_counts.get(record[col], 0) == 1:
+                    query.append(query_equality_expression(col=col, val=record[col], dtype=dtypes[col]))
+            else:
+                query.append(query_equality_expression(col=col, val=record[col], dtype=dtypes[col]))
+
     return " & ".join(query)
 
 def multivariate_singling_out_queries(
     df: pd.DataFrame,
     n_queries: int,
     n_cols: int,
-    max_attempts: Optional[int]
+    max_per_combo: int = 5,
+    max_attempts: Optional[int] = 10_000,
+    sample_size_per_combo: int = 2,
+    max_rounds_no_progress: int = 10,
+    use_medians: bool = True
 ) -> List[str]:
-    """Function that generates singling out queries from a combination of attributes.
-
-    Parameters
-    ----------
-    df: pd.DataFrame
-        Input dataframe from which queries will be generated.
-    n_queries: int
-        Number of queries to generate.
-    n_cols: int
-        Number of columns that the attacker uses to create the
-        singling out queries.
-    max_attempts: int, optional.
-        Maximum number of attempts that the attacker can make to generate
-        the requested `n_queries` singling out queries. Parameter
-        caps the total number of query generation attempts.
-        If `max_attempts` is None, no limit will be imposed.
-
-    Returns
-    -------
-    List[str]
-        The singling out queries.
-
     """
-    #Set medians and n_attemps
-    medians = df.median(numeric_only=True)
-    n_attempts = 0
-    #Instantiate queries
-    queries = UniqueSinglingOutQueries(df=df)
-    #Construct queries
-    while queries.count < n_queries:
-        #Reached max attemps
-        if max_attempts is not None and n_attempts >= max_attempts:
-            print( # noqa: T201
-                f"Reached maximum number of attempts ({max_attempts}) when generating singling out queries. "
-                f"Returning {queries.count} instead of the requested {n_queries} queries. "
-                "To avoid this, increase max_attempts or set it to `None` to disable limit."
-            )
-            return queries.queries
-        #Choose record and columns
-        record = df.iloc[rng.integers(df.shape[0])]
-        columns = rng.choice(df.columns, size=n_cols, replace=False).tolist()
-        #Construct query
-        query = query_from_record(record=record, dtypes=df.dtypes, columns=columns, medians=medians)
-        #Check query and append
-        queries.check_and_append(query=query)
-        #Add to n_attempts
-        n_attempts += 1
-    return queries.queries
+    Generate diverse singling-out queries for a given dataframe.
+
+    Parameters:
+        df (pd.DataFrame): The dataframe containing the dataset to generate queries from.
+        n_queries (int): The total number of queries to generate.
+        n_cols (int): The number of columns to use in each query combination.
+        max_per_combo (int): Maximum allowed queries per column combination.
+        max_attempts (Optional[int]): Maximum number of attempts to generate queries before stopping.
+        sample_size_per_combo (int): Number of unique records to sample from each combination per iteration.
+        max_rounds_no_progress (int): Number of rounds with no progress before stopping.
+        use_medians (int): whether to use the medians in the query construction or not
+
+    Returns:
+        List[str]: A list of generated queries.
+    """
+
+    medians: pd.Series = df.median(numeric_only=True)
+    all_combos: List[tuple] = list(combinations(df.columns, n_cols))
+    random.shuffle(all_combos)
+
+    combo_usage_count: dict = {combo: 0 for combo in all_combos}
+    queries: List[str] = []
+    used_record_indexes: set = set()
+
+    attempts: int = 0
+    rounds_no_progress: int = 0
+
+    while len(queries) < n_queries:
+        if max_attempts is not None and attempts >= max_attempts:
+            print(f"Reached maximum number of attempts ({max_attempts}). Returning {len(queries)} queries out of requested {n_queries}.")
+            break
+
+        random.shuffle(all_combos)
+        queries_before_this_round: int = len(queries)
+
+        for combo in all_combos:
+            if len(queries) >= n_queries:
+                break
+
+            if combo_usage_count[combo] >= max_per_combo:
+                continue
+
+            groups: pd.Series = df.groupby(list(combo)).size()
+            unique_groups: pd.Series = groups[groups == 1]
+            if unique_groups.empty:
+                continue
+
+            unique_indices: List[tuple] = list(unique_groups.index)
+            random.shuffle(unique_indices)
+            unique_indices = unique_indices[:sample_size_per_combo]
+
+            for idx in unique_indices:
+                if len(queries) >= n_queries or (max_attempts is not None and attempts >= max_attempts):
+                    break
+
+                mask: pd.Series = (df[list(combo)] == idx).all(axis=1)
+                record: pd.Series = df.loc[mask].iloc[0]
+
+                query: str = query_from_record(
+                    df=df,
+                    columns=combo,
+                    dtypes=df.dtypes,
+                    record=record,
+                    medians=medians,
+                    use_medians=use_medians
+                )
+
+                try:
+                    result: pd.DataFrame = df.query(query)
+                    if len(result) == 1:
+                        r_idx: int = result.index[0]
+                        if r_idx not in used_record_indexes:
+                            queries.append(query)
+                            used_record_indexes.add(r_idx)
+                            combo_usage_count[combo] += 1
+                except Exception:
+                    pass
+
+                attempts += 1
+                if max_attempts is not None and attempts >= max_attempts:
+                    print(f"Reached maximum number of attempts ({max_attempts}). Returning {len(queries)} queries.")
+                    break
+
+        current_query_count: int = len(queries)
+        if current_query_count == queries_before_this_round:
+            rounds_no_progress += 1
+        else:
+            rounds_no_progress = 0
+
+        if rounds_no_progress >= max_rounds_no_progress:
+            print("No progress for several rounds. Stopping to prevent infinite loop.")
+            break
+
+    if len(queries) < n_queries:
+        print(f"Generated only {len(queries)} queries out of requested {n_queries}.")
+
+    return queries[:n_queries]
 
 def main_singling_out_attack(
     ori: pd.DataFrame,
     syn: pd.DataFrame,
     n_attacks: int,
     n_cols: int,
-    max_attempts: Optional[int]
+    max_per_combo: int = 5,
+    max_attempts: Optional[int] = 10_000,
+    sample_size_per_combo: int = 2,
+    max_rounds_no_progress: int = 10,
+    use_medians: bool = True
 ) -> UniqueSinglingOutQueries:
     """Main singling-out attack function.
 
@@ -319,7 +434,11 @@ def main_singling_out_attack(
             df = syn,
             n_queries = n_attacks,
             n_cols = n_cols,
-            max_attempts = max_attempts
+            max_attempts = max_attempts,
+            max_per_combo = max_per_combo,
+            sample_size_per_combo = sample_size_per_combo,
+            max_rounds_no_progress = max_rounds_no_progress,
+            use_medians = use_medians
         )
     #Warning message
     if len(queries) < n_attacks:
@@ -379,6 +498,10 @@ class SinglingOutEvaluator(BaseModel):
     n_attacks: int = 2_000
     confidence_level: float = 0.95
     max_attempts: Optional[int] = 10_000_000
+    max_per_combo: int = 5,
+    sample_size_per_combo: int = 2,
+    max_rounds_no_progress: int = 10,
+    use_medians: bool = True
     #Following parameters are set in evaluate method
     main_queries: Optional[UniqueSinglingOutQueries] = None
     naive_queries: Optional[UniqueSinglingOutQueries] = None
@@ -397,7 +520,11 @@ class SinglingOutEvaluator(BaseModel):
             syn = self.syn,
             n_attacks = self.n_attacks,
             n_cols = self.n_cols,
-            max_attempts = self.max_attempts
+            max_attempts = self.max_attempts,
+            max_per_combo = self.max_per_combo,
+            sample_size_per_combo = self.sample_size_per_combo,
+            max_rounds_no_progress = self.max_rounds_no_progress,
+            use_medians = self.use_medians
         )
         # Naive singling-out attack
         self.naive_queries = naive_singling_out_attack(
