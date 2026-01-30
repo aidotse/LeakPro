@@ -1,19 +1,16 @@
 """Implementation of the RMIA-Direct attack."""
-import os
-from typing import Literal
 
 import numpy as np
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 from scipy.stats import norm
 from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
-from leakpro.attacks.utils.utils import softmax_logits
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.reporting.mia_result import MIAResult
 from leakpro.signals.signal import get_signal_from_name
-from leakpro.utils.import_helper import Self, Tuple
+from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 
@@ -23,7 +20,6 @@ class AttackRMIADirect(AbstractMIA):
     class AttackConfig(BaseModel):
         """Configuration for the RMIA attack."""
 
-        
         signal_name: str = Field(default="ModelRescaledLogits", description="What signal to use.")
         num_shadow_models: int = Field(default=2,
                                        ge=2,
@@ -123,7 +119,7 @@ rati                   between a target point x and random population samples z.
         # load shadow models
         self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)
 
-    def run_attack(self:Self) -> MIAResult:
+    def run_attack(self:Self) -> MIAResult:  # noqa: PLR0915
         """Run the attack on the target model and dataset.
 
         Returns
@@ -148,12 +144,12 @@ rati                   between a target point x and random population samples z.
         # find out how many out-members survived the filtering
         num_out_members = np.sum(mask[self.audit_dataset["out_members"]])
         out_members = np.arange(len(in_members), len(in_members) + num_out_members)
-        
+
         assert len(audit_data_indices) == len(in_members) + len(out_members)
 
         if len(audit_data_indices) == 0:
             raise ValueError("No points in the audit dataset are used for the shadow models")
-        
+
         in_indices_mask = in_indices_mask[:,mask]
         n_audit_points = len(audit_data_indices)
 
@@ -163,7 +159,7 @@ rati                   between a target point x and random population samples z.
         # run audit points through target and shadow models to get logits
         x_logits_target_model = np.array(self.signal([self.target_model], self.handler, audit_data_indices)).squeeze()
         x_logits_shadow_models = np.array(self.signal(self.shadow_models, self.handler, audit_data_indices))
-        
+
         # Make a "random sample" to compute p(z) for points in attack dataset on the OUT shadow models for each audit point
         self.attack_data_index = self.sample_indices_from_population(include_aux_indices= not self.online,
                                                                      include_train_indices = self.online,
@@ -183,7 +179,9 @@ rati                   between a target point x and random population samples z.
         assert len(self.attack_data_index) == n_attack_points
 
         # Run sampled attack points through target and shadow models
-        attack_data_in_indices_mask = ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.attack_data_index).T
+        attack_data_in_indices_mask = ShadowModelHandler().get_in_indices_mask(
+            self.shadow_model_indices, self.attack_data_index
+        ).T
         z_logits_target_model = np.array(self.signal([self.target_model], self.handler, self.attack_data_index)).squeeze()
         z_logits_shadow_models = np.array(self.signal(self.shadow_models, self.handler, self.attack_data_index))
 
@@ -197,21 +195,25 @@ rati                   between a target point x and random population samples z.
             x_mask = x_mask[:, valid_z] # shape (num_shadow_models, num_valid_z)
             z_mask = z_mask[:, valid_z] # shape (num_shadow_models, num_valid_z)
 
-            
-            #logger.info(x_mask.shape, z_mask.shape)
-
             x_sm = x_logits_shadow_models[:, i:i+1].repeat(num_valid_z, axis=1) # shape (num_shadow_models, num_valid_z)
             x_tgt = x_logits_target_model[i:i+1].repeat(num_valid_z) # shape (num_valid_z,)
 
             z_sm = z_logits_shadow_models[:, valid_z] # shape (num_shadow_models, num_valid_z)
             z_tgt = z_logits_target_model[valid_z] # shape (num_valid_z,)
 
-            #print(x_sm.shape, x_tgt.shape, z_sm.shape, z_tgt.shape)
+            x_mean_in = np.mean(x_sm, where=x_mask, axis=0)
+            x_std_in = np.std(x_sm, where=x_mask, axis=0) + self.epsilon
+            x_mean_out = np.mean(x_sm, where=z_mask, axis=0)
+            x_std_out = np.std(x_sm, where=z_mask, axis=0) + self.epsilon
+            z_mean_in = np.mean(z_sm, where=x_mask, axis=0)
+            z_std_in = np.std(z_sm, where=x_mask, axis=0) + self.epsilon
+            z_mean_out = np.mean(z_sm, where=z_mask, axis=0)
+            z_std_out = np.std(z_sm, where=z_mask, axis=0) + self.epsilon
 
-            x_ratio_numer = norm.logpdf(x_tgt, np.mean(x_sm, where=x_mask, axis=0), np.std(x_sm, where=x_mask, axis=0) + self.epsilon)
-            x_ratio_denom = norm.logpdf(x_tgt, np.mean(x_sm, where=z_mask, axis=0), np.std(x_sm, where=z_mask, axis=0) + self.epsilon)
-            z_ratio_numer = norm.logpdf(z_tgt, np.mean(z_sm, where=x_mask, axis=0), np.std(z_sm, where=x_mask, axis=0) + self.epsilon)
-            z_ratio_denom = norm.logpdf(z_tgt, np.mean(z_sm, where=z_mask, axis=0), np.std(z_sm, where=z_mask, axis=0) + self.epsilon)
+            x_ratio_numer = norm.logpdf(x_tgt, x_mean_in, x_std_in)
+            x_ratio_denom = norm.logpdf(x_tgt, x_mean_out, x_std_out)
+            z_ratio_numer = norm.logpdf(z_tgt, z_mean_in, z_std_in)
+            z_ratio_denom = norm.logpdf(z_tgt, z_mean_out, z_std_out)
             log_pr = x_ratio_numer + z_ratio_numer - x_ratio_denom - z_ratio_denom
             log_pr = log_pr[~np.isnan(log_pr)]
             score[i] = np.mean(log_pr > self.gamma)
@@ -219,7 +221,7 @@ rati                   between a target point x and random population samples z.
         # pick out the in-members and out-members signals
         self.in_member_signals = score[in_members].reshape(-1,1)
         self.out_member_signals = score[out_members].reshape(-1,1)
-        
+
         # set true labels for being in the training dataset
         true_labels = np.concatenate(
             [

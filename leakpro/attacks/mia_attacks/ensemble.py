@@ -1,23 +1,22 @@
 """Implementation of the Ensemble Attack from "Improving Membership Inference Attacks against Classification Models"."""
 
-from typing import Literal
+
+from warnings import filterwarnings
 
 import numpy as np
-from pydantic import BaseModel, Field, model_validator
-from warnings import filterwarnings
-from tqdm import tqdm
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler
-from sklearn.svm import SVC
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, VotingClassifier
+from pydantic import BaseModel, Field
+from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
+from sklearn.exceptions import ConvergenceWarning
 from sklearn.linear_model import LogisticRegression
-from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import roc_auc_score
+from sklearn.model_selection import train_test_split
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import make_pipeline
-from sklearn.metrics import roc_auc_score
-from sklearn.exceptions import ConvergenceWarning
-
+from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
+from sklearn.svm import SVC
+from sklearn.tree import DecisionTreeClassifier
+from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
@@ -40,7 +39,7 @@ class AttackEnsemble(AbstractMIA):
         subset_size: int = Field(default=50, ge=1, description="Amount of datapoints within each data subset.")
         num_pairs: int = Field(default=20, ge=1, description="Number of pairs of subsets to create membership classifiers for.")
         num_runs: int = Field(default=5, ge=1, description="Number of runs for each subset pair.")
-        audit: bool = Field(default=False, description="Audit mode implies that membership classifiers are trained on target model membership labels, otherwise shadow model labels.")
+        audit: bool = Field(default=False, description="Audit mode: classifiers trained on target model labels.")  # noqa: E501
         training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow models")  # noqa: E501
 
     def __init__(self:Self,
@@ -92,7 +91,7 @@ class AttackEnsemble(AbstractMIA):
         Signals are computed on the auxiliary model(s) and dataset.
         """
 
-        filterwarnings(action='ignore', category=ConvergenceWarning)
+        filterwarnings(action="ignore", category=ConvergenceWarning)
         logger.info("Preparing shadow models for Ensemble attack")
         # Check number of shadow models that are available
 
@@ -115,12 +114,13 @@ class AttackEnsemble(AbstractMIA):
             # load shadow models
             self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)
 
-            self.in_indices_masks = ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"])
+            audit_data = self.audit_dataset["data"]
+            self.in_indices_masks = ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, audit_data)
             self.out_indices_masks = np.logical_not(self.in_indices_masks)
-            
 
 
-    def run_attack(self:Self) -> MIAResult:
+
+    def run_attack(self:Self) -> MIAResult:  # noqa: C901, PLR0912, PLR0915
         """Run the attack on the target model and dataset.
 
         Returns
@@ -132,7 +132,7 @@ class AttackEnsemble(AbstractMIA):
             logger.info("Running Ensemble shadow attack (audit mode)")
         else:
             logger.info("Running Ensemble shadow attack (attack mode)")
-            
+
 
         ensemble_models = []
         for instance in range(self.num_instances):
@@ -158,7 +158,7 @@ class AttackEnsemble(AbstractMIA):
             in_features = []
             out_features = []
             for signal, signal_name in zip(self.signals, self.signal_names):
-                ts2vec_params = ([self.attack_data_indices] if signal_name == 'TS2VecLoss' else [])
+                ts2vec_params = ([self.attack_data_indices] if signal_name == "TS2VecLoss" else [])
 
                 in_features.append(np.squeeze(signal([current_model],
                                                      self.handler,
@@ -183,11 +183,11 @@ class AttackEnsemble(AbstractMIA):
 
                 run_models = []
                 run_auc = []
-                for run_i in range(self.num_runs):
+                for _run_i in range(self.num_runs):
                     # Randomly split the pair 50-50 into train and test data for the membership classifier
                     features_train, features_test, label_train, label_test = train_test_split(
                             pair_features, pair_label, test_size=0.5)
-                    
+
                     # Try each combination of scaler and model, record auc score on test set
                     for scaler in [StandardScaler, MinMaxScaler, RobustScaler]:
                         models = [RandomForestClassifier(),
@@ -199,11 +199,11 @@ class AttackEnsemble(AbstractMIA):
                                   SVC(kernel="poly"),
                                   SVC(kernel="rbf"),
                                   SVC(kernel="sigmoid")]
-                        
+
                         for model in models:
                             pipe = make_pipeline(scaler(), model)
                             pipe = pipe.fit(features_train, label_train)
-                            
+
                             probs = pipe.predict(features_test)
 
                             run_models.append(pipe)
@@ -218,20 +218,20 @@ class AttackEnsemble(AbstractMIA):
                         best_model = run_models[i]
                 pair_models.append(best_model)
             ensemble_models.append(pair_models)
-        
+
         self.audit_data_indices = self.audit_dataset["data"]
         self.in_members = self.audit_dataset["in_members"]
         self.out_members = self.audit_dataset["out_members"]
 
         features = []
         for signal, signal_name in zip(self.signals, self.signal_names):
-            ts2vec_params = ([self.attack_data_indices] if signal_name == 'TS2VecLoss' else [])
+            ts2vec_params = ([self.attack_data_indices] if signal_name == "TS2VecLoss" else [])
             features.append(np.squeeze(signal([self.target_model],
                                               self.handler,
                                               self.audit_data_indices,
                                               *ts2vec_params)))
         features = np.swapaxes(np.array(features), 0, 1)
-        
+
         # Average membership score over all instances and models
         self.score = np.zeros(features.shape[0])
         for best_models in ensemble_models:
@@ -247,13 +247,15 @@ class AttackEnsemble(AbstractMIA):
 
         if self.individual_mia:
             samples_per_individual = self.handler.population.samples_per_individual
-            in_num_individuals = len(self.in_member_signals) // samples_per_individual 
+            in_num_individuals = len(self.in_member_signals) // samples_per_individual
             out_num_individuals = len(self.out_member_signals) // samples_per_individual
             num_individuals = in_num_individuals + out_num_individuals
-            logger.info(f"Running individual-level MI on {num_individuals} individuals with {samples_per_individual} samples per individual.")
+            logger.info(f"Running individual-level MI on {num_individuals} individuals.")
 
-            self.in_member_signals = self.in_member_signals.reshape((in_num_individuals, samples_per_individual)).mean(axis=1, keepdims=True)
-            self.out_member_signals = self.out_member_signals.reshape((out_num_individuals, samples_per_individual)).mean(axis=1, keepdims=True)
+            in_shape = (in_num_individuals, samples_per_individual)
+            out_shape = (out_num_individuals, samples_per_individual)
+            self.in_member_signals = self.in_member_signals.reshape(in_shape).mean(axis=1, keepdims=True)
+            self.out_member_signals = self.out_member_signals.reshape(out_shape).mean(axis=1, keepdims=True)
             self.audit_data_indices = np.arange(num_individuals)
 
         # Prepare true labels array, marking 1 for training data and 0 for non-training data
@@ -264,7 +266,7 @@ class AttackEnsemble(AbstractMIA):
         # Combine all signal values for further analysis
         signal_values = np.concatenate([self.in_member_signals, self.out_member_signals])
 
-    
+
         # Return a result object containing predictions, true labels, and the signal values for further evaluation
         return MIAResult.from_full_scores(true_membership=true_labels,
                                     signal_values=signal_values,
