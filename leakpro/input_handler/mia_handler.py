@@ -175,20 +175,10 @@ class MIAHandler:
         raise ValueError("Object is not indexable.")
 
     def get_dataset(self:Self, dataset_indices: np.ndarray, params:dict=None) -> np.ndarray:
-        """Get the dataset from the population.
+        """Get the dataset from the population."""
 
-        Args:
-        ----
-            dataset_indices: Indices to select from the population.
-            params: Optional parameters for the UserDataset. If None, uses
-                    population's return_params() to preserve dataset-specific
-                    settings (e.g., scaler, lookback for time series).
-
-        Returns:
-        -------
-            A UserDataset instance with the selected data.
-
-        """
+        if params is None:
+            params = {}
         if isinstance(dataset_indices, np.ndarray) is False:
             dataset_indices = np.array(dataset_indices, ndmin=1)
 
@@ -197,9 +187,7 @@ class MIAHandler:
         data = self.population.data[dataset_indices]
         targets = self.population.targets[dataset_indices]
 
-        # Use population's params if none provided (preserves dataset-specific settings)
-        if params is None:
-            params = self.population.return_params()
+        params = {} if params is None else params
         return self.UserDataset(data, targets, **params)
 
     def get_dataloader(self: Self,
@@ -315,12 +303,4 @@ class MIAHandler:
         if optimizer_cls is None:
             raise ValueError(f"Optimizer {self.name} not found in torch.optim")
 
-        # Get valid constructor argument names for given optimizer class
-        valid_args = set(inspect.signature(optimizer_cls.__init__).parameters)
-
-        # Filter params to only include valid ones
-        filtered_params = {
-            k: v for k, v in optimizer_config.params.items() if k in valid_args
-        }
-
-        return optimizer_cls(model.parameters(), **filtered_params)
+        return optimizer_cls(model.parameters(), **optimizer_config.params)
