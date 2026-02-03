@@ -238,6 +238,8 @@ def singling_out_risk_evaluation(
         print(f"\nRunning singling out risk evaluation for `{{dataset}}` with n_cols {suffix}") # noqa: T201
     if n_cols is not None:
         check_for_int_value(x=n_cols)
+        if n_cols == 2:
+            raise ValueError("Parameter `n_cols` must be different than 2.")
 
         #Run individual aux_singling_out_risk_evaluation
         res, res_cols, queries = aux_singling_out_risk_evaluation(
@@ -259,10 +261,13 @@ def singling_out_risk_evaluation(
         #Construct kwargs_list
         kwargs_list = []
         for i in range(len(ori.columns)):
+            n_cols_val = i + 1
+            if n_cols_val == 2:
+                continue  # Skip n_cols=2
             kwargs_t = {
                 "ori": ori,
                 "syn": syn,
-                "n_cols": i+1,
+                "n_cols": n_cols_val,
                 "verbose": verbose,
                 "max_per_combo": max_per_combo,
                 "sample_size_per_combo": sample_size_per_combo,
@@ -300,7 +305,7 @@ def singling_out_risk_evaluation(
             res = sin_out_res.model_dump(),
             path = path
         )
-    return sin_out_res, queries
+    return sin_out_res
 
 def load_singling_out_results(*, dataset: str, n_cols: Optional[int] = None, path: str = None) -> SinglingOutResults: # noqa: ANN101
     """Function to load and return singling-out results from given dataset."""

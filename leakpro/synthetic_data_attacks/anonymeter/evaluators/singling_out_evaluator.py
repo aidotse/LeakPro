@@ -20,7 +20,7 @@ rng = np.random.default_rng()
 
 def escape_quotes(*, input: str) -> str:
     """Function escapes quotes for given input string."""
-    return input.replace('"', '"').replace("'", "'")
+    return input.replace('"', '\\"').replace("'", "\\'")
 
 def safe_query_elements(*, query: str, df: pd.DataFrame) -> List[int]:
     """Return elements indexes in df satisfying a given query."""
@@ -331,7 +331,8 @@ def query_from_record(  # noqa: C901, PLR0912, PLR0915
                         upper_bound = min(upper_bound, threshold)
                     else:
                         lower_bound = max(lower_bound, threshold)
-            query_parts.append(f"{col} >= {lower_bound:.2f} & {col} < {upper_bound:.2f}")
+            query_parts.append(f"{col} >= {lower_bound:.2f}")
+            query_parts.append(f"{col} < {upper_bound:.2f}")
             continue
 
         # Default processing:
