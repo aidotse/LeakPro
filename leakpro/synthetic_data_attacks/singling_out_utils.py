@@ -66,7 +66,7 @@ class SinglingOutResults(BaseModel):
         )
 
     @staticmethod
-    def load(data: dict) -> None:
+    def load(data: dict) -> None: # noqa: ANN102
         """Load method for SinglingOutResults."""
         return SinglingOutResults(
             res = data["res"]["res"],
@@ -110,9 +110,9 @@ class SinglingOutResults(BaseModel):
             ) -> str:
             """Latex method for SinglingOutResults."""
             return f"""
-            \\subsection{{{" ".join(save_name.split("_"))}}}
-            \\begin{{figure}}[ht]
-            \\includegraphics[width=0.8\\textwidth]{{{save_name}}}
+            \\subsection{{{" ".join(save_name.split("_"))}}}"
+            \begin{{figure}}[ht]
+            \\includegraphics[width=0.8\textwidth]{{{save_name}}}
             \\caption{{Original}}
             \\end{{figure}}
             """
@@ -121,12 +121,12 @@ class SinglingOutResults(BaseModel):
             latex += _latex(save_name=res.prefix)
         return latex
 
-def check_for_int_value(*, x: int) -> None:
+def check_for_int_value(*, x: int) -> None: # noqa: ANN001, ANN101
     """Auxiliary function to check a given integer value."""
     assert isinstance(x, int)
     assert x>0
 
-def get_singling_out_suffix(*, n_cols: Optional[int]) -> str:
+def get_singling_out_suffix(*, n_cols: Optional[int]) -> str: # noqa: ANN101
     """Auxiliary function to get singling-out suffix."""
     suffix = "all"
     if n_cols is not None:
@@ -134,7 +134,7 @@ def get_singling_out_suffix(*, n_cols: Optional[int]) -> str:
         suffix = str(n_cols)
     return suffix
 
-def get_singling_out_prefix(*, n_cols: Optional[int]) -> str:
+def get_singling_out_prefix(*, n_cols: Optional[int]) -> str: # noqa: ANN101
     """Auxiliary function to get singling-out prefix used in json results filename."""
     return "singling_out_n_cols_" + get_singling_out_suffix(n_cols=n_cols)
 
@@ -144,10 +144,6 @@ def aux_singling_out_risk_evaluation(**kwargs: Any) -> Tuple[Optional[Union[int,
     verbose = kwargs.pop("verbose")
     #Get n_cols
     n_cols = kwargs["n_cols"]
-    # Note: With the improved algorithm (tree-based approach and better heuristics),
-    # n_cols==2 is now handled efficiently
-    # if n_cols == 2:
-    #     return None, None
     #Instantiate singling-out evaluator and evaluate
     evaluator = SinglingOutEvaluator(**kwargs)
     evaluator.evaluate()
@@ -165,7 +161,7 @@ def aux_apply_kwargs_to_fun(fun: Callable, kwargs: Dict) -> Any: # noqa: ANN401
     """Auxiliary function that executes passed fun with given kwargs."""
     return fun(**kwargs)
 
-def starmap_with_kwargs(pool: mp.Pool, fn: Callable, kwargs_list: List[Dict]) -> List:
+def starmap_with_kwargs(pool: mp.Pool, fn: Callable, kwargs_list: List[Dict]) -> List: # noqa: ANN401
     """Auxiliary wrapper function for mp.Pool.starmap function, that enables passing kwargs to it."""
     args_for_starmap = zip(repeat(fn), kwargs_list)
     return pool.starmap(aux_apply_kwargs_to_fun, args_for_starmap)
@@ -179,16 +175,12 @@ def singling_out_risk_evaluation(
     verbose: bool = False,
     save_results_json: bool = False,
     path: str = None,
-    max_per_combo= 5,
+    max_per_combo: int = 5,
     sample_size_per_combo: int = 2,
     max_rounds_no_progress: int = 10,
     use_medians: bool = True,
     use_tree: bool = True,
-    tree_params: Dict = {
-        'min_samples_leaf': 1,
-        'max_depth': None,           # let the tree grow
-        'random_state': 42
-    }, 
+    tree_params: Optional[Dict] = None,
     **kwargs: dict
 ) -> SinglingOutResults:
     """Perform an individual/full singling-out risk evaluation.
@@ -213,13 +205,20 @@ def singling_out_risk_evaluation(
         If True, saves results and combinations to json file.
     path: str, default is None
         Path where to save json results file.
+    max_per_combo : int, default is 5
+        The maximum number of queries allowed per column combination.
+    sample_size_per_combo : int, default is 2
+        The number of unique records to sample from each combination per iteration.
+    max_rounds_no_progress : int, default is 10
+        Number of rounds with no progress before stopping.
+    use_medians : bool, default is True
+        Whether to use the medians in the query construction or not.
+    use_tree : bool, default is True
+        Whether to use decision tree based query generation.
+    tree_params : Dict, optional
+        Parameters for the decision tree regressor.
     kwargs: dict
         Other keyword arguments for SinglingOutEvaluator.
-    max_per_combo (int): Maximum allowed queries per column combination.
-    max_attempts (Optional[int]): Maximum number of attempts to generate queries before stopping.
-    sample_size_per_combo (int): Number of unique records to sample from each combination per iteration.
-    max_rounds_no_progress (int): Number of rounds with no progress before stopping.
-    use_medians (int): whether to use the medians in the query construction or not
 
     Returns
     -------
@@ -227,15 +226,18 @@ def singling_out_risk_evaluation(
         SinglingOutResults with results.
 
     """
+    if tree_params is None:
+        tree_params = {
+            "min_samples_leaf": 1,
+            "max_depth": None,
+            "random_state": 42
+        }
+
     if verbose:
         suffix = get_singling_out_suffix(n_cols=n_cols)
-        print(f"\nRunning singling out risk evaluation for `{dataset}` with n_cols {suffix}") # noqa: T201
+        print(f"\nRunning singling out risk evaluation for `{{dataset}}` with n_cols {suffix}") # noqa: T201
     if n_cols is not None:
         check_for_int_value(x=n_cols)
-        # no need for this checking, since the modifications has better heurestics 
-
-        # if n_cols == 2:
-        #     raise ValueError("Parameter `n_cols` must be different than 2.")
 
         #Run individual aux_singling_out_risk_evaluation
         res, res_cols, queries = aux_singling_out_risk_evaluation(
@@ -243,6 +245,12 @@ def singling_out_risk_evaluation(
             syn = syn,
             n_cols = n_cols,
             verbose = verbose,
+            max_per_combo=max_per_combo,
+            sample_size_per_combo=sample_size_per_combo,
+            max_rounds_no_progress=max_rounds_no_progress,
+            use_medians=use_medians,
+            use_tree=use_tree,
+            tree_params=tree_params,
             **kwargs
         )
         #Repack res
@@ -294,7 +302,7 @@ def singling_out_risk_evaluation(
         )
     return sin_out_res, queries
 
-def load_singling_out_results(*, dataset: str, n_cols: Optional[int] = None, path: str = None) -> SinglingOutResults:
+def load_singling_out_results(*, dataset: str, n_cols: Optional[int] = None, path: str = None) -> SinglingOutResults: # noqa: ANN101
     """Function to load and return singling-out results from given dataset."""
     prefix = get_singling_out_prefix(n_cols=n_cols)
     return SinglingOutResults(**load_res_json_file(prefix=prefix, dataset=dataset, path=path))

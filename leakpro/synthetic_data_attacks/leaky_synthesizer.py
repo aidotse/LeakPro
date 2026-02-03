@@ -6,52 +6,52 @@ import pandas as pd
 
 
 class LeakySynthesizer:
-    """
-    A class to implement a leaky synthesizer for privacy analysis using pre-split datasets.
-    
+    """A class to implement a leaky synthesizer for privacy analysis using pre-split datasets.
+
     The LeakySynthesizer takes pre-split training and control datasets, treating the control
     set as the release set. It creates a leaky dataset by replacing a specified fraction
     of records in the release set with records from the training set.
-    
+
     When generating the leaky data, the leak fraction (fl) determines how many records
     from the release set are replaced with training records. When fl=0, the output
     remains identical to the release set (maximum privacy), when fl=1, all release
     records are replaced with training records (privacy violation).
-    
+
     Attributes
     ----------
     training_set : pd.DataFrame
         The pre-split training dataset
     release_set : pd.DataFrame
         The pre-split control dataset used as release set
-    
+
     Examples
     --------
     >>> synthesizer = LeakySynthesizer(training_data, control_data)
     >>> leaky_data = synthesizer.generate_leaky_data(leak_fraction=0.3, random_state=42)
+
     """
 
     def __init__(
-        self, 
-        training_set: pd.DataFrame, 
+        self,
+        training_set: pd.DataFrame,
         control_set: pd.DataFrame
     ) -> None:
-        """
-        Initialize the LeakySynthesizer with pre-split training and control datasets.
-        
+        """Initialize the LeakySynthesizer with pre-split training and control datasets.
+
         Parameters
         ----------
         training_set : pd.DataFrame
             The pre-split training dataset
         control_set : pd.DataFrame
             The pre-split control dataset to be used as release set
-        
+
         Raises
         ------
         ValueError
             If either dataset is empty or None
         ValueError
             If datasets have different columns
+
         """
         if training_set is None or training_set.empty:
             raise ValueError("training_set cannot be None or empty")
@@ -62,97 +62,97 @@ class LeakySynthesizer:
 
         self.training_set = training_set
         self.release_set = control_set.copy()
-    
+
     def generate_leaky_data(
-        self, 
-        leak_fraction: float, 
+        self,
+        leak_fraction: float,
         random_state: Optional[int] = None
     ) -> pd.DataFrame:
-        """
-        Generate leaky data by replacing release set records with training records.
-        
+        """Generate leaky data by replacing release set records with training records.
+
         This method modifies a copy of the release set by replacing a specified fraction
         of its records with randomly selected records from the training set. The number
         of records remains constant, only the content is modified based on the leak fraction.
-        
+
         Parameters
         ----------
         leak_fraction : float
             Proportion of records to replace with training data (0 to 1)
         random_state : int, optional
             Seed for random number generation
-        
+
         Returns
         -------
         pd.DataFrame
             A DataFrame containing the modified release set with leaked training records
-        
+
         Raises
         ------
         ValueError
             If leak_fraction is not between 0 and 1
+
         """
         if not 0 <= leak_fraction <= 1:
             raise ValueError("leak_fraction must be between 0 and 1")
-            
+
         rng = np.random.RandomState(random_state)
         leaky_data = self.release_set.copy()
-        
+
         if leak_fraction == 0:
             return leaky_data
-            
+
         num_records_to_replace = int(len(leaky_data) * leak_fraction)
-        
+
         indices_to_replace = rng.choice(
-            len(leaky_data), 
-            size=num_records_to_replace, 
+            len(leaky_data),
+            size=num_records_to_replace,
             replace=False
         )
-        
+
         replacement_records = self.training_set.sample(
             n=num_records_to_replace,
             random_state=rng,
             replace=True
         )
-        
+
         leaky_data.iloc[indices_to_replace] = replacement_records.values
-        
+
         return leaky_data
-    
+
     def get_sets(self) -> tuple[pd.DataFrame, pd.DataFrame]:
-        """
-        Retrieve the training and release (control) sets used by the synthesizer.
-        
+        """Retrieve the training and release (control) sets used by the synthesizer.
+
         This method provides access to the training set and control set (used as release set)
         for further analysis or validation of the synthetic data generation process.
-        
+
         Returns
         -------
         tuple[pd.DataFrame, pd.DataFrame]
             A tuple containing (training_set, release_set)
+
         """
         return self.training_set, self.release_set
 
     @property
     def training_size(self) -> int:
-        """
-        Get the number of records in the training set.
-        
+        """Get the number of records in the training set.
+
         Returns
         -------
         int
             The number of records in the training set
+
         """
         return len(self.training_set)
 
     @property
     def release_size(self) -> int:
-        """
-        Get the number of records in the release (control) set.
-        
+        """Get the number of records in the release (control) set.
+
         Returns
         -------
         int
             The number of records in the release set
+
         """
         return len(self.release_set)
