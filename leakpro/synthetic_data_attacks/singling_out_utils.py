@@ -181,8 +181,9 @@ def singling_out_risk_evaluation(
     use_medians: bool = True,
     use_tree: bool = True,
     tree_params: Optional[Dict] = None,
+    ret_queries: bool = False,
     **kwargs: dict
-) -> SinglingOutResults:
+) -> Union[SinglingOutResults, Tuple[SinglingOutResults, List]]:  # noqa: ANN401
     """Perform an individual/full singling-out risk evaluation.
 
     Individual evaluation is for given n_cols to be used as len of predicates.
@@ -217,13 +218,17 @@ def singling_out_risk_evaluation(
         Whether to use decision tree based query generation.
     tree_params : Dict, optional
         Parameters for the decision tree regressor.
+    ret_queries : bool, default is False
+        If True, returns both results and queries as a tuple (SinglingOutResults, queries).
+        If False, returns only SinglingOutResults.
     kwargs: dict
         Other keyword arguments for SinglingOutEvaluator.
 
     Returns
     -------
-    SinglingOutResults
-        SinglingOutResults with results.
+    SinglingOutResults or Tuple[SinglingOutResults, List]
+        If ret_queries is False: returns SinglingOutResults with results.
+        If ret_queries is True: returns tuple of (SinglingOutResults, queries).
 
     """
     if tree_params is None:
@@ -238,8 +243,6 @@ def singling_out_risk_evaluation(
         print(f"\nRunning singling out risk evaluation for `{{dataset}}` with n_cols {suffix}") # noqa: T201
     if n_cols is not None:
         check_for_int_value(x=n_cols)
-        if n_cols == 2:
-            raise ValueError("Parameter `n_cols` must be different than 2.")
 
         #Run individual aux_singling_out_risk_evaluation
         res, res_cols, queries = aux_singling_out_risk_evaluation(
@@ -305,6 +308,8 @@ def singling_out_risk_evaluation(
             res = sin_out_res.model_dump(),
             path = path
         )
+    if ret_queries:
+        return sin_out_res, queries
     return sin_out_res
 
 def load_singling_out_results(*, dataset: str, n_cols: Optional[int] = None, path: str = None) -> SinglingOutResults: # noqa: ANN101
