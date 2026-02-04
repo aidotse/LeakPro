@@ -57,7 +57,6 @@ class AbstractMIA(AbstractAttack):
         AbstractMIA.population = handler.population
         AbstractMIA.population_size = handler.population_size
         AbstractMIA.target_model = PytorchModel(handler.target_model, handler.get_criterion())
-
         AbstractMIA.audit_dataset = {
             # Assuming train_indices and test_indices are arrays of indices, not the actual data
             "data": np.concatenate((handler.train_indices, handler.test_indices)),
