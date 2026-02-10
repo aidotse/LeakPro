@@ -292,7 +292,8 @@ class ComposableOptimizer(OptimizationStrategy):
         """
         for component in self.loss_components:
             if isinstance(component, BNStatisticsRegularization):
-                logger.info(f"  Setting up {component.name} with strategy: {component.strategy.name}")
+                strategy_name = component.strategy.get_metadata().name
+                logger.info(f"  Setting up {component.name} with strategy: {strategy_name}")
                 component.setup(
                     model=model,
                     reconstruction=reconstruction,
