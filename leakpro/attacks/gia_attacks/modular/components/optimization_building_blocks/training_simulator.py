@@ -34,17 +34,21 @@ class TrainingSimulator(Component):
         input_data: torch.Tensor,
         labels: torch.Tensor,
         loss_fn: nn.Module,
-    ) -> Dict[str, torch.Tensor]:
+    ) -> Dict[str, torch.Tensor] | Dict[str, list[torch.Tensor]]:
         """Compute gradients or updates from the model.
 
         Args:
             model: Target model
-            input_data: Reconstructed input data
-            labels: Labels used for the loss
+            input_data: Reconstructed input data. Shape can be:
+                - [B, C, H, W] for single-seed optimization
+                - [B, G, C, H, W] for multi-seed optimization (G seeds per image)
+            labels: Labels used for the loss (shape [B] or [B, num_classes])
             loss_fn: Loss function to use
 
         Returns:
-            Dictionary mapping parameter names to gradient/update tensors
+            Dictionary mapping parameter names to gradient/update tensors.
+            For multi-seed input, returns dict with 'seeds' key containing
+            list of G gradient dicts (one per seed).
 
         """
         pass
@@ -76,14 +80,53 @@ class DirectGradientComputation(TrainingSimulator):
         input_data: torch.Tensor,
         labels: torch.Tensor,
         loss_fn: nn.Module,
-    ) -> Dict[str, torch.Tensor]:
+    ) -> Dict[str, torch.Tensor] | Dict[str, list[torch.Tensor]]:
         """Compute gradients from single forward/backward pass.
 
         Args:
             model: Target model
-            input_data: Reconstructed input data
-            labels: Labels used for the loss
+            input_data: Reconstructed input data. Shape can be:
+                - [B, C, H, W] for single-seed optimization
+                - [B, G, C, H, W] for multi-seed optimization
+            labels: Labels used for the loss (shape [B] or [B, num_classes])
             loss_fn: Loss function to use
+
+        Returns:
+            Dictionary mapping parameter names to gradient tensors.
+            For multi-seed, returns dict with 'seeds' key containing list of dicts.
+
+        """
+        # Check if multi-seed input
+        if input_data.ndim == 5:
+            # Multi-seed: [B, G, C, H, W]
+            batch_size, num_seeds = input_data.shape[:2]
+
+            # Process each seed separately
+            seed_gradients = []
+            for g in range(num_seeds):
+                seed_data = input_data[:, g, ...]  # [B, C, H, W]
+                seed_grads = self._compute_single_seed(model, seed_data, labels, loss_fn)
+                seed_gradients.append(seed_grads)
+
+            return {"seeds": seed_gradients, "num_seeds": num_seeds}
+
+        # Single seed: [B, C, H, W]
+        return self._compute_single_seed(model, input_data, labels, loss_fn)
+
+    def _compute_single_seed(
+        self,
+        model: nn.Module,
+        input_data: torch.Tensor,
+        labels: torch.Tensor,
+        loss_fn: nn.Module,
+    ) -> Dict[str, torch.Tensor]:
+        """Compute gradients for a single seed.
+
+        Args:
+            model: Target model
+            input_data: Shape [B, C, H, W]
+            labels: Labels (shape [B] or [B, num_classes])
+            loss_fn: Loss function
 
         Returns:
             Dictionary mapping parameter names to gradient tensors
@@ -166,18 +209,57 @@ class MultiEpochTrainingSimulation(TrainingSimulator):
         input_data: torch.Tensor,
         labels: torch.Tensor,
         loss_fn: nn.Module,
-    ) -> Dict[str, torch.Tensor]:
+    ) -> Dict[str, torch.Tensor] | Dict[str, list[torch.Tensor]]:
         """Simulate training and compute parameter updates.
 
         Args:
             model: Target model
-            input_data: Reconstructed input data
-            labels: Labels used for the loss
+            input_data: Reconstructed input data. Shape can be:
+                - [B, C, H, W] for single-seed optimization
+                - [B, G, C, H, W] for multi-seed optimization
+            labels: Labels used for the loss (shape [B] or [B, num_classes])
             loss_fn: Loss function to use
 
         Returns:
             Dictionary mapping parameter names to update tensors (Δθ)
-            or gradient tensors (∂L/∂θ) depending on compute_mode
+            or gradient tensors (∂L/∂θ) depending on compute_mode.
+            For multi-seed, returns dict with 'seeds' key containing list of dicts.
+
+        """
+        # Check if multi-seed input
+        if input_data.ndim == 5:
+            # Multi-seed: [B, G, C, H, W]
+            batch_size, num_seeds = input_data.shape[:2]
+
+            # Process each seed separately
+            seed_results = []
+            for g in range(num_seeds):
+                seed_data = input_data[:, g, ...]  # [B, C, H, W]
+                seed_result = self._simulate_single_seed(model, seed_data, labels, loss_fn)
+                seed_results.append(seed_result)
+
+            return {"seeds": seed_results, "num_seeds": num_seeds}
+
+        # Single seed: [B, C, H, W]
+        return self._simulate_single_seed(model, input_data, labels, loss_fn)
+
+    def _simulate_single_seed(
+        self,
+        model: nn.Module,
+        input_data: torch.Tensor,
+        labels: torch.Tensor,
+        loss_fn: nn.Module,
+    ) -> Dict[str, torch.Tensor]:
+        """Simulate training for a single seed.
+
+        Args:
+            model: Target model
+            input_data: Shape [B, C, H, W]
+            labels: Labels (shape [B] or [B, num_classes])
+            loss_fn: Loss function
+
+        Returns:
+            Dictionary mapping parameter names to update/gradient tensors
 
         """
         if self.model_mode == "eval":

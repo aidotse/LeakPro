@@ -146,16 +146,61 @@ class InitializationStrategy(Component):
         shape: tuple[int, ...],
         device: torch.device,
         dtype: torch.dtype = torch.float32,
+        num_seeds: int = 1,
     ) -> InitializationResult:
         """Initialize reconstruction.
 
         Args:
-            shape: Shape of reconstruction tensor
+            shape: Shape of reconstruction tensor (e.g., [B, C, H, W])
             device: Device to create tensor on
             dtype: Data type for tensor
+            num_seeds: Number of seeds per image for multi-seed optimization
 
         Returns:
-            InitializationResult with initial reconstruction
+            InitializationResult with initial reconstruction.
+            Shape will be [B, G, C, H, W] if num_seeds > 1, else [B, C, H, W]
+
+        """
+        pass
+
+
+# =============================================================================
+# Seed Aggregation Components
+# =============================================================================
+
+
+class SeedAggregationStrategy(Component):
+    """Base class for seed aggregation strategies.
+
+    Seed aggregation handles multiple random seeds per image in multi-seed
+    optimization scenarios (e.g., See Through Gradients attack).
+
+    When reconstruction has shape [B, G, C, H, W] where:
+    - B = batch size (number of images)
+    - G = number of seeds per image
+    - C, H, W = image dimensions
+
+    This component computes consensus across seeds, used both:
+    1. During optimization for group consistency regularization
+    2. After optimization for final aggregation
+
+    Reference:
+        Yin et al., "See through Gradients: Image Batch Recovery via
+        GradInversion", CVPR 2021
+    """
+
+    @abstractmethod
+    def compute_consensus(self, reconstruction: torch.Tensor) -> torch.Tensor:
+        """Compute consensus across seeds.
+
+        Used both during optimization (for group consistency loss) and
+        after optimization (for final aggregation).
+
+        Args:
+            reconstruction: Tensor of shape [B, G, C, H, W]
+
+        Returns:
+            Consensus tensor of shape [B, C, H, W]
 
         """
         pass
@@ -229,6 +274,8 @@ __all__ = [
     # Initialization
     "InitializationResult",
     "InitializationStrategy",
+    # Seed Aggregation
+    "SeedAggregationStrategy",
     # Optimization
     "OptimizationState",
     "OptimizationStrategy",

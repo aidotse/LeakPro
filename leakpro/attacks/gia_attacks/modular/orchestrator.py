@@ -42,6 +42,7 @@ class ModularGIAOrchestrator:
         initialization: InitializationStrategy,
         optimization: OptimizationStrategy,
         label_inference: LabelInferenceStrategy | None = None,
+        num_seeds_per_image: int = 1,
     ) -> None:
         """Initialize orchestrator.
 
@@ -50,12 +51,14 @@ class ModularGIAOrchestrator:
             initialization: Initialization strategy
             optimization: Optimization strategy
             label_inference: Optional label inference strategy
+            num_seeds_per_image: Number of seeds per image for multi-seed optimization
 
         """
         self.threat_model = threat_model
         self.initialization = initialization
         self.optimization = optimization
         self.label_inference = label_inference
+        self.num_seeds_per_image = num_seeds_per_image
 
         # Validate components against threat model
         logger.info(f"Initializing ModularGIAOrchestrator with threat model: {threat_model.name}")
@@ -149,6 +152,7 @@ class ModularGIAOrchestrator:
         init_result = self.initialization.initialize(
             shape=input_shape,
             device=device,
+            num_seeds=self.num_seeds_per_image,
         )
         reconstruction = init_result.reconstruction
         logger.info(f"✓ Initialized reconstruction: shape={reconstruction.shape}")

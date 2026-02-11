@@ -27,6 +27,7 @@ Attacks:
 """
 
 from dataclasses import dataclass
+from typing import Tuple
 
 from torch import nn
 
@@ -54,8 +55,16 @@ from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks
 from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.loss_components import (
     BNStatisticsRegularization,
     GradientMatchingLoss,
+    GroupConsistencyRegularization,
+    L2Regularization,
     LabelEntropyRegularization,
     TVRegularization,
+)
+from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.seed_aggregation import (
+    MeanSeedAggregation,
+    NoSeedAggregation,
+    RegisteredSeedAggregation,
+    SeedAggregationStrategy,
 )
 from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.step_strategies import (
     StandardStepStrategy,
@@ -64,6 +73,7 @@ from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks
     MultiEpochTrainingSimulation,
 )
 from leakpro.attacks.gia_attacks.modular.core.threat_model import (
+    ThreatModel,
     model_a_eavesdropper,
     model_b_informed,
     model_c_parameter_aware,
@@ -88,10 +98,16 @@ class AttackConfig:
     # Loss components
     gradient_loss_type: str = "cosine"  # "l2", "cosine", "fisher"
     tv_weight: float = 0.0  # Total variation regularization weight
+    l2_weight: float = 0.0  # L2 regularization weight
     bn_weight: float = 0.0  # Batch normalization statistics weight
     bn_strategy: str = "running"  # "running", "inferred", "proxy"
     bn_momentum: float = 0.1  # Only for inferred strategy
     label_entropy_weight: float = 0.0  # Entropy regularization for joint label optimization
+    group_weight: float = 0.0  # Group consistency regularization weight (multi-seed)
+
+    # Multi-seed optimization (See Through Gradients)
+    num_seeds_per_image: int = 1  # Number of random seeds per image (G in paper)
+    seed_aggregation_method: str = "none"  # "none", "mean", "registered"
 
     # Optimizer settings
     learning_rate: float = 0.1
@@ -104,6 +120,7 @@ class AttackConfig:
 
     # Step strategy
     use_gradient_sign: bool = False  # Use sign of gradients in updates
+    gradient_noise_std: float = 0.0  # Std dev of Gaussian noise added to gradients
 
     # Training simulation
     training_simulator_epochs: int = 1
@@ -116,9 +133,8 @@ class AttackConfig:
     # Loss function
     loss_fn: nn.Module | None = None  # Custom loss function (default: CrossEntropyLoss)
 
-    def build(self, training_simulator: MultiEpochTrainingSimulation = None) -> ModularGIAOrchestrator:
-        """Build the attack orchestrator from this configuration."""
-        # Build threat model using literature taxonomy
+    def _build_threat_model(self) -> ThreatModel:
+        """Build threat model from configuration."""
         threat_model_factories = {
             "model_a": model_a_eavesdropper,
             "model_b": model_b_informed,
@@ -133,9 +149,10 @@ class AttackConfig:
                 f"Available: {list(threat_model_factories.keys())}"
             )
 
-        threat_model = threat_model_factories[self.threat_model_type]()
+        return threat_model_factories[self.threat_model_type]()
 
-        # Build label inference and strategy
+    def _build_label_components(self) -> Tuple:
+        """Build label inference and strategy components."""
         label_factories = {
             "oracle": (OracleLabels, FixedLabels),
             "idlg": (IDLGLabelInference, FixedLabels),
@@ -143,9 +160,64 @@ class AttackConfig:
         }
 
         label_inference_cls, label_strategy_cls = label_factories[self.labels]
+        return label_inference_cls(), label_strategy_cls()
 
-        label_inference = label_inference_cls()
-        label_strategy = label_strategy_cls()
+    def _build_bn_loss_component(self) -> BNStatisticsRegularization:
+        """Build batch normalization statistics loss component."""
+        if self.bn_strategy == "running":
+            bn_strategy_obj = RunningBNStatisticsStrategy()
+        elif self.bn_strategy == "inferred":
+            bn_strategy_obj = InferredBNStatisticsStrategy(momentum=self.bn_momentum)
+        elif self.bn_strategy == "proxy":
+            bn_strategy_obj = ProxyBNStatisticsStrategy()
+        else:
+            raise ValueError(f"Unknown bn_strategy: {self.bn_strategy}")
+
+        return BNStatisticsRegularization(strategy=bn_strategy_obj, weight=self.bn_weight)
+
+    def _build_loss_components(self, training_simulator: MultiEpochTrainingSimulation) -> list:
+        """Build loss components from configuration."""
+        loss_components = [
+            GradientMatchingLoss(
+                loss_type=self.gradient_loss_type,
+                weight=1.0,
+                training_simulator=training_simulator,
+            )
+        ]
+
+        if self.tv_weight > 0:
+            loss_components.append(TVRegularization(weight=self.tv_weight))
+
+        if self.l2_weight > 0:
+            loss_components.append(L2Regularization(weight=self.l2_weight))
+
+        if self.bn_weight > 0:
+            loss_components.append(self._build_bn_loss_component())
+
+        if self.label_entropy_weight > 0 and self.labels == "joint":
+            loss_components.append(
+                LabelEntropyRegularization(weight=self.label_entropy_weight)
+            )
+
+        return loss_components
+
+    def _build_seed_aggregation(self) -> SeedAggregationStrategy:
+        """Build seed aggregation strategy from configuration."""
+        if self.seed_aggregation_method == "mean":
+            return MeanSeedAggregation()
+        if self.seed_aggregation_method == "registered":
+            return RegisteredSeedAggregation()
+        if self.seed_aggregation_method == "none":
+            return NoSeedAggregation()
+        raise ValueError(f"Unknown seed_aggregation_method: {self.seed_aggregation_method}")
+
+    def build(self, training_simulator: MultiEpochTrainingSimulation = None) -> ModularGIAOrchestrator:
+        """Build the attack orchestrator from this configuration."""
+        # Build threat model
+        threat_model = self._build_threat_model()
+
+        # Build label inference and strategy
+        label_inference, label_strategy = self._build_label_components()
 
         # Build initialization
         initialization = RandomNoiseInitialization(mean=0.0, std=1.0)
@@ -158,42 +230,29 @@ class AttackConfig:
                 model_mode=self.training_simulator_model_mode,
             )
 
-        # Build loss components (pass training_simulator explicitly to those that need it)
-        loss_components = [
-            GradientMatchingLoss(
-                loss_type=self.gradient_loss_type,
-                weight=1.0,
-                training_simulator=training_simulator,
-            )
-        ]
+        # Build loss components
+        loss_components = self._build_loss_components(training_simulator)
 
-        if self.tv_weight > 0:
-            loss_components.append(TVRegularization(weight=self.tv_weight))
+        # Build seed aggregation strategy
+        seed_aggregation = self._build_seed_aggregation()
 
-        if self.bn_weight > 0:
-            if self.bn_strategy == "running":
-                bn_strategy_obj = RunningBNStatisticsStrategy()
-            elif self.bn_strategy == "inferred":
-                bn_strategy_obj = InferredBNStatisticsStrategy(momentum=self.bn_momentum)
-            elif self.bn_strategy == "proxy":
-                bn_strategy_obj = ProxyBNStatisticsStrategy()
-            else:
-                raise ValueError(f"Unknown bn_strategy: {self.bn_strategy}")
-
+        # Add group consistency if multi-seed and weight > 0
+        if self.group_weight > 0 and self.num_seeds_per_image > 1:
             loss_components.append(
-                BNStatisticsRegularization(strategy=bn_strategy_obj, weight=self.bn_weight)
-            )
-
-        if self.label_entropy_weight > 0 and self.labels == "joint":
-            loss_components.append(
-                LabelEntropyRegularization(weight=self.label_entropy_weight)
+                GroupConsistencyRegularization(
+                    seed_aggregation=seed_aggregation,
+                    weight=self.group_weight
+                )
             )
 
         # Build constraint
         constraint = ClipConstraint() if self.use_clip_constraint else None
 
         # Build step strategy
-        step_strategy = StandardStepStrategy(use_gradient_sign=self.use_gradient_sign) if self.use_gradient_sign else None
+        step_strategy = StandardStepStrategy(
+            use_gradient_sign=self.use_gradient_sign,
+            gradient_noise_std=self.gradient_noise_std
+        ) if self.use_gradient_sign or self.gradient_noise_std > 0 else None
 
         # Build optimizer
         optimization = ComposableOptimizer(
@@ -210,6 +269,7 @@ class AttackConfig:
             log_interval=self.log_interval,
             training_simulator=training_simulator,
             loss_fn=self.loss_fn,
+            seed_aggregation=seed_aggregation if self.num_seeds_per_image > 1 else None,
         )
 
         return ModularGIAOrchestrator(
@@ -217,6 +277,7 @@ class AttackConfig:
             label_inference=label_inference,
             initialization=initialization,
             optimization=optimization,
+            num_seeds_per_image=self.num_seeds_per_image,
         )
 
 
@@ -517,6 +578,110 @@ def gia_estimate_attack() -> AttackConfig:
     )
 
 
+def see_through_gradients_attack() -> AttackConfig:
+    """See Through Gradients attack with multi-seed optimization and BN matching.
+
+    This attack (Yin et al., CVPR 2021) is designed for batch gradient inversion
+    and introduces two key innovations:
+
+    1. **Multi-seed optimization**: Each image in the batch is reconstructed using
+       G parallel random initializations (seeds) that are jointly optimized. This
+       helps overcome local minima and spatial ambiguity caused by CNN translational
+       invariance.
+
+    2. **Group consistency regularization**: Seeds for the same image are regularized
+       to stay near their group consensus (mean), preventing excessive divergence
+       while allowing exploration of the optimization landscape.
+
+    After optimization, the G seeds per image are aggregated (averaged) to produce
+    the final reconstruction.
+
+    Threat Model: Model E (Statistical-Informed Eavesdropper)
+    - Has access to: Gradients + BN running statistics + auxiliary knowledge
+
+    Components:
+    - iDLG label inference (batch-aware analytical inference)
+    - Multi-seed random noise initialization (G=4 seeds per image)
+    - Adam optimizer with cosine LR schedule
+    - Gradient noise injection (Gaussian noise added to gradients during optimization)
+    - Loss components:
+      * Gradient matching (L2 distance, weight=1.0)
+      * BN statistics matching (weight=0.01)
+      * TV regularization (weight=1e-4)
+      * L2 regularization (weight=1e-6)
+      * Group consistency (weight=0.001)
+    - Mean seed aggregation (pixel-wise averaging across seeds)
+
+    Default Settings:
+        - num_seeds_per_image: 4 (G in paper)
+        - seed_aggregation_method: "mean"
+        - group_weight: 0.001 (α_group in paper)
+        - learning_rate: 0.1
+        - max_iterations: 8000
+        - optimizer_type: "adam"
+        - scheduler_type: "cosine"
+        - gradient_loss_type: "l2"
+        - gradient_noise_std: 0.01
+        - tv_weight: 1e-4
+        - l2_weight: 1e-6
+        - bn_weight: 0.01
+        - bn_strategy: "running"
+        - labels: "oracle"
+
+    Memory Note:
+        Multi-seed optimization requires G× memory (e.g., 4 seeds → 4× memory).
+        For a batch of B=8 images with G=4 seeds, you're optimizing 32 images
+        simultaneously. Consider reducing batch size if memory is limited.
+
+    Usage:
+        # Basic usage
+        config = see_through_gradients_attack()
+        attack = config.build()
+
+        # Adjust for memory constraints
+        config = see_through_gradients_attack()
+        config.num_seeds_per_image = 2  # Reduce to 2 seeds
+        config.max_iterations = 4000  # Fewer iterations
+        attack = config.build()
+
+        # Disable multi-seed (fallback to single-seed)
+        config = see_through_gradients_attack()
+        config.num_seeds_per_image = 1
+        config.group_weight = 0.0
+        config.seed_aggregation_method = "none"
+        attack = config.build()
+
+    Reference:
+        Yin, H., Molchanov, P., Alvarez, J. M., Li, Z., Mallya, A., Hoiem, D.,
+        ... & Kautz, J. (2021). See through Gradients: Image Batch Recovery via
+        GradInversion. In CVPR 2021.
+
+        Equation 11: Group consistency regularization
+        L_group = α_group * Σ_g ||x̂_g - E(x̂_group)||²
+
+    """
+    return AttackConfig(
+        threat_model_type="model_e",  # Has BN statistics + full capabilities
+        labels="oracle",
+        gradient_loss_type="l2",
+        tv_weight=1e-4,
+        l2_weight=1e-6,
+        bn_weight=1e-2,
+        bn_strategy="running",
+        group_weight=1e-2,
+        num_seeds_per_image=4,
+        seed_aggregation_method="mean",
+        learning_rate=0.1,
+        max_iterations=8000,
+        optimizer_type="adam",
+        scheduler_type="cosine",
+        gradient_noise_std=0.2,  # Add noise to gradients during optimization
+        use_clip_constraint=True,
+        training_simulator_epochs=1,
+        training_simulator_model_mode="train",
+    )
+
+
 __all__ = [
     "AttackConfig",
     "dlg_attack",
@@ -525,4 +690,5 @@ __all__ = [
     "huang_attack",
     "gia_running_attack",
     "gia_estimate_attack",
+    "see_through_gradients_attack",
 ]

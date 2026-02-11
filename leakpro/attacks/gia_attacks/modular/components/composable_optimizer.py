@@ -42,6 +42,7 @@ from leakpro.attacks.gia_attacks.modular.core.component_base import (
     LabelInferenceResult,
     OptimizationState,
     OptimizationStrategy,
+    SeedAggregationStrategy,
 )
 from leakpro.fl_utils.fl_client_simulator import ClientObservations
 
@@ -96,6 +97,7 @@ class ComposableOptimizer(OptimizationStrategy):
         log_interval: int = None,
         training_simulator: TrainingSimulator | None = None,
         loss_fn: nn.Module | None = None,
+        seed_aggregation: SeedAggregationStrategy | None = None,
     ) -> None:
         self.loss_components = loss_components
         self.constraint = constraint or NoConstraint()
@@ -110,6 +112,7 @@ class ComposableOptimizer(OptimizationStrategy):
         self.patience = patience
         self.log_interval = log_interval
         self._training_simulator = training_simulator
+        self.seed_aggregation = seed_aggregation
 
         super().__init__()
 
@@ -245,9 +248,16 @@ class ComposableOptimizer(OptimizationStrategy):
 
         # Return final best reconstruction
         if state.best_reconstruction is not None:
+            final_reconstruction = state.best_reconstruction
+
+            # Apply seed aggregation if multi-seed and aggregation strategy provided
+            if self.seed_aggregation is not None and final_reconstruction.ndim == 5:
+                logger.info(f"  Applying seed aggregation: {self.seed_aggregation.get_metadata().name}")
+                final_reconstruction = self.seed_aggregation.compute_consensus(final_reconstruction)
+
             final_labels = state.best_labels if state.best_labels is not None else labels
             return OptimizationState(
-                reconstruction=state.best_reconstruction,
+                reconstruction=final_reconstruction,
                 labels=final_labels,
                 loss=state.best_loss,
                 iteration=state.iteration,
@@ -259,11 +269,18 @@ class ComposableOptimizer(OptimizationStrategy):
             )
 
         # Fallback to current state
+        final_reconstruction = state.reconstruction.detach()
+
+        # Apply seed aggregation if multi-seed and aggregation strategy provided
+        if self.seed_aggregation is not None and final_reconstruction.ndim == 5:
+            logger.info(f"  Applying seed aggregation: {self.seed_aggregation.get_metadata().name}")
+            final_reconstruction = self.seed_aggregation.compute_consensus(final_reconstruction)
+
         current_labels = self.label_strategy.get_labels_for_forward(
             state.optimizable_params, state.labels
         )
         return OptimizationState(
-            reconstruction=state.reconstruction.detach(),
+            reconstruction=final_reconstruction,
             labels=current_labels if isinstance(current_labels, torch.Tensor) else labels,
             loss=total_loss_value,
             iteration=state.iteration,

@@ -16,7 +16,11 @@ from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks
     DirectGradientComputation,
     TrainingSimulator,
 )
-from leakpro.attacks.gia_attacks.modular.core.component_base import Component, ComponentMetadata
+from leakpro.attacks.gia_attacks.modular.core.component_base import (
+    Component,
+    ComponentMetadata,
+    SeedAggregationStrategy,
+)
 from leakpro.fl_utils.fl_client_simulator import ClientObservations
 
 
@@ -126,7 +130,7 @@ class GradientMatchingLoss(LossComponent):
         """Compute gradient matching loss.
 
         Args:
-            reconstruction: Current reconstruction
+            reconstruction: Current reconstruction (can be [B, C, H, W] or [B, G, C, H, W])
             model: Target model
             labels: Labels for reconstruction
             target_gradients: True gradients/updates to match
@@ -144,8 +148,47 @@ class GradientMatchingLoss(LossComponent):
             labels=labels,
             loss_fn=loss_fn,
         )
-        reconstructed_values = list(reconstructed_values_dict.values())
 
+        # Check if multi-seed results
+        if "seeds" in reconstructed_values_dict:
+            # Multi-seed: compute loss for each seed and average
+            seed_gradients = reconstructed_values_dict["seeds"]
+            num_seeds = reconstructed_values_dict["num_seeds"]
+
+            total_loss = 0.0
+            for seed_grads in seed_gradients:
+                reconstructed_values = list(seed_grads.values())
+                seed_loss = self._compute_matching_loss(
+                    reconstructed_values, target_gradients
+                )
+                total_loss += seed_loss
+
+            # Average across seeds
+            total_loss = total_loss / num_seeds
+        else:
+            # Single seed: compute loss directly
+            reconstructed_values = list(reconstructed_values_dict.values())
+            total_loss = self._compute_matching_loss(
+                reconstructed_values, target_gradients
+            )
+
+        return total_loss * self.weight
+
+    def _compute_matching_loss(
+        self,
+        reconstructed_values: List[torch.Tensor],
+        target_gradients: List[torch.Tensor],
+    ) -> torch.Tensor:
+        """Compute matching loss between reconstructed and target gradients.
+
+        Args:
+            reconstructed_values: List of reconstructed gradient tensors
+            target_gradients: List of target gradient tensors
+
+        Returns:
+            Matching loss (scalar)
+
+        """
         # Match values using specified distance metric
         if self.loss_type == "l2":
             total_loss = sum(
@@ -167,7 +210,8 @@ class GradientMatchingLoss(LossComponent):
                 total_loss +=  (fisher_weight * (g_rec - g_target).pow(2)).sum()
         else:
             raise ValueError(f"Unknown loss_type: {self.loss_type}")
-        return total_loss * self.weight
+
+        return total_loss
 
 
 class TVRegularization(LossComponent):
@@ -204,9 +248,72 @@ class TVRegularization(LossComponent):
 
         """
         _ = (model, labels, target_gradients, loss_fn)  # Unused parameters
+
+        # Handle multi-seed reconstruction [B, G, C, H, W]
+        if reconstruction.ndim == 5:
+            # Apply TV to each seed independently and average
+            batch_size, num_seeds = reconstruction.shape[:2]
+            total_tv = 0.0
+            for g in range(num_seeds):
+                seed_rec = reconstruction[:, g, ...]  # [B, C, H, W]
+                dx = torch.abs(seed_rec[:, :, :, :-1] - seed_rec[:, :, :, 1:])
+                dy = torch.abs(seed_rec[:, :, :-1, :] - seed_rec[:, :, 1:, :])
+                total_tv += dx.mean() + dy.mean()
+            return self.weight * total_tv / num_seeds
+
+        # Standard 4D case [B, C, H, W]
         dx = torch.abs(reconstruction[:, :, :, :-1] - reconstruction[:, :, :, 1:])
         dy = torch.abs(reconstruction[:, :, :-1, :] - reconstruction[:, :, 1:, :])
         return self.weight * dx.mean() + self.weight * dy.mean()
+
+
+class L2Regularization(LossComponent):
+    """L2 regularization on reconstruction pixel values.
+
+    Penalizes large pixel values by adding L2 norm to the loss:
+        L_l2 = weight * ||reconstruction||²
+
+    This encourages smaller, more constrained reconstructions and can
+    help prevent extreme pixel values.
+
+    Reference:
+        Yin et al., "See through Gradients", CVPR 2021
+    """
+
+    def __init__(self, weight: float = 1e-4) -> None:
+        """Initialize L2 regularization."""
+        super().__init__(weight)
+
+    @property
+    def name(self) -> str:
+        """Name of this loss component."""
+        return "L2Regularization"
+
+    def compute(
+        self,
+        reconstruction: torch.Tensor,
+        model: nn.Module,
+        labels: torch.Tensor,
+        target_gradients: List[torch.Tensor],
+        loss_fn: nn.Module,
+    ) -> torch.Tensor:
+        """Compute L2 regularization loss.
+
+        Args:
+            reconstruction: Current reconstruction (can be [B, C, H, W] or [B, G, C, H, W])
+            model: Not used
+            labels: Not used
+            target_gradients: Not used
+            loss_fn: Not used
+
+        Returns:
+            L2 regularization loss
+
+        """
+        _ = (model, labels, target_gradients, loss_fn)  # Unused parameters
+
+        # Compute squared L2 norm
+        return self.weight * reconstruction.pow(2).mean()
 
 
 class LabelEntropyRegularization(LossComponent):
@@ -396,10 +503,115 @@ class BNStatisticsRegularization(LossComponent):
         return metadata.required_capabilities
 
 
+class GroupConsistencyRegularization(LossComponent):
+    """Group consistency regularization for multi-seed optimization.
+
+    Encourages multiple seeds for the same image to converge towards a
+    consensus, preventing excessive divergence while allowing exploration.
+
+    For reconstruction with shape [B, G, C, H, W]:
+    - Computes consensus image for each of B images across its G seeds
+    - Penalizes each seed for deviating from the consensus
+
+    Loss formula (from See Through Gradients paper):
+        L_group = (1/G) * Σ_g ||x̂_g - E(x̂_group)||²
+
+    Where E(x̂_group) is the consensus (typically mean) across seeds.
+
+    Reference:
+        Yin et al., "See through Gradients: Image Batch Recovery via
+        GradInversion", CVPR 2021, Equation 11
+    """
+
+    def __init__(
+        self,
+        seed_aggregation: SeedAggregationStrategy,
+        weight: float = 0.01,
+    ) -> None:
+        """Initialize group consistency regularization.
+
+        Args:
+            seed_aggregation: Strategy for computing consensus across seeds
+            weight: Regularization weight (α_group in paper)
+
+        """
+        super().__init__(weight)
+        self.seed_aggregation = seed_aggregation
+
+    @property
+    def name(self) -> str:
+        """Name of this loss component."""
+        return "GroupConsistencyRegularization"
+
+    def compute(
+        self,
+        reconstruction: torch.Tensor,
+        model: nn.Module,
+        labels: torch.Tensor,
+        target_gradients: List[torch.Tensor],
+        loss_fn: nn.Module,
+    ) -> torch.Tensor:
+        """Compute group consistency regularization loss.
+
+        Args:
+            reconstruction: Current reconstruction, shape [B, G, C, H, W]
+            model: Not used
+            labels: Not used
+            target_gradients: Not used
+            loss_fn: Not used
+
+        Returns:
+            Group consistency loss (scalar)
+
+        """
+        _ = (model, labels, target_gradients, loss_fn)  # Unused parameters
+
+        # Check if multi-seed reconstruction
+        if reconstruction.ndim != 5:
+            # No seed dimension, return zero loss
+            return torch.tensor(0.0, device=reconstruction.device)
+
+        batch_size, num_seeds = reconstruction.shape[:2]
+
+        if num_seeds == 1:
+            # Single seed, no consistency needed
+            return torch.tensor(0.0, device=reconstruction.device)
+
+        # Compute consensus for each image across its seeds
+        # consensus shape: [B, C, H, W]
+        consensus = self.seed_aggregation.compute_consensus(reconstruction)
+
+        # Compute deviation of each seed from its group consensus
+        total_loss = torch.tensor(0.0, device=reconstruction.device)
+
+        for g in range(num_seeds):
+            seed_reconstruction = reconstruction[:, g, ...]  # [B, C, H, W]
+            deviation = (seed_reconstruction - consensus).pow(2).mean()
+            total_loss += deviation
+
+        # Average across seeds
+        total_loss = total_loss / num_seeds
+
+        return self.weight * total_loss
+
+    @classmethod
+    def get_metadata(cls) -> ComponentMetadata:
+        """Return metadata for group consistency regularization."""
+        return ComponentMetadata(
+            name="GroupConsistencyRegularization",
+            display_name="Group Consistency Regularization",
+            description="Regularizes multiple seeds to stay near consensus",
+            required_capabilities={},
+            paper_reference="Yin et al., See Through Gradients, CVPR 2021",
+        )
+
+
 __all__ = [
     "LossComponent",
     "GradientMatchingLoss",
     "TVRegularization",
+    "L2Regularization",
     "LabelEntropyRegularization",
     "BNStatisticsRegularization",
+    "GroupConsistencyRegularization",
 ]
