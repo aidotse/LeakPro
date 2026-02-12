@@ -1,15 +1,12 @@
-"""Measure CIFAR10 on one of the cifar models."""
+"""Inverting on a single image (ConvNeXt)."""
+import optuna
 from torchvision.models import convnext_tiny, convnext_base, swin_t, Swin_T_Weights, vit_b_16, swin_v2_t, maxvit_t
-from vit_b16_cifar import vit_b_16_cifar
-from swint_cifar import swin_t_cifar, swin_v2_t_cifar
-from maxvit_cifar import maxvit_t_cifar
-from model import convnext_tiny_cifar10
-from examples.gia.GIA_base_convnext_imagenet.data import get_cifar10_loader
+from _data import get_imagenette_loader, get_cifar10_loader
 
-from leakpro.attacks.gia_attacks.gia_estimate import GIABase, GIABaseConfig
-from leakpro.fl_utils.data_utils import GiaImageCloneNoiseExtension
+from leakpro.attacks.gia_attacks.gia_estimate import GIABase
 from leakpro.schemas import OptunaConfig
 from leakpro.utils.seed import seed_everything
+
 
 def build_trial_data(
     *,
@@ -42,7 +39,7 @@ def build_trial_data(
     for c in range(num_client_loaders):
         base = start_idx + c * step
 
-        client_loader, data_mean, data_std = get_cifar10_loader(
+        client_loader, data_mean, data_std = get_imagenette_loader(
             start_idx=base,
             num_images=num_images,
             batch_size=batch_size,
@@ -54,7 +51,7 @@ def build_trial_data(
 
         for p in range(proxies_per_client):
             proxy_start = base + (p + 1) * num_images
-            proxy, _, _ = get_cifar10_loader(
+            proxy, _, _ = get_imagenette_loader(
                 start_idx=proxy_start,
                 num_images=num_images,
                 batch_size=batch_size,
@@ -67,30 +64,23 @@ def build_trial_data(
 
     return trial_data, client_dataloader, proxy_loader, data_mean, data_std
 
-import argparse
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--exp", type=float, required=True, help="pixel_noise_p value, e.g. 0.7")
-    parser.add_argument("--seed", type=int, default=1234)
-    parser.add_argument("--start-idx", type=int, default=19)
-    parser.add_argument("--n-trials", type=int, default=10)
-    parser.add_argument("--at-iterations", type=int, default=10000)
-    parser.add_argument("--num-workers", type=int, default=2)
-    args = parser.parse_args()
+    seed_everything(1234)
+    # if torch.cuda.is_available(): # needed for vit-b
+    #     torch.backends.cuda.enable_flash_sdp(False)
+    #     torch.backends.cuda.enable_mem_efficient_sdp(False)
+    #     torch.backends.cuda.enable_math_sdp(True)
 
-    exp = float(args.exp)
-
-    seed_everything(args.seed)
-    model = convnext_tiny_cifar10()
+    model = maxvit_t(weights=None, num_classes=1000)
     model.eval()
 
     NUM_IMAGES = 1
     BATCH_SIZE = 1
-    NUM_CLIENT_LOADERS = 1
+    NUM_CLIENT_LOADERS = 15
     PROXIES_PER_CLIENT = 1
-    NUM_WORKERS = args.num_workers
-    START_IDX = args.start_idx
+    NUM_WORKERS = 2
+    START_IDX = 0
 
     trial_data, client_dataloader, proxy_loader, data_mean, data_std = build_trial_data(
         num_client_loaders=NUM_CLIENT_LOADERS,
@@ -101,12 +91,6 @@ if __name__ == "__main__":
         start_idx=START_IDX,
     )
 
-    config = GIABaseConfig(
-        data_extension=GiaImageCloneNoiseExtension(pixel_noise_p=exp),
-        chose_best_ssim_as_final=False,
-        at_iterations=args.at_iterations,
-    )
-
     attack_object = GIABase(
         model,
         client_dataloader,
@@ -114,9 +98,7 @@ if __name__ == "__main__":
         data_std,
         proxy_loader=proxy_loader,
         optuna_trial_data=trial_data,
-        configs=config,
-        exp_name=f"exp_{exp}",
     )
 
-    optuna_config = OptunaConfig(n_trials=args.n_trials)
+    optuna_config = OptunaConfig(n_trials=100, pruner=optuna.pruners.NopPruner())
     attack_object.run_with_optuna(optuna_config)

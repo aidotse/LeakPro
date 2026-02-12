@@ -1,8 +1,11 @@
 """Module with functions for preparing the dataset for training the target models."""
 import torchvision
+from leakpro.fl_utils.data_utils import get_meanstd
 from torch import Tensor, as_tensor, randperm
 from torch.utils.data import DataLoader, Subset
 from torchvision import transforms
+
+
 
 _IMAGENET_MEAN = (0.485, 0.456, 0.406)
 _IMAGENET_STD = (0.229, 0.224, 0.225)
@@ -57,15 +60,6 @@ def get_imagenette_loader(
     data_std = as_tensor(_IMAGENET_STD)[:, None, None]
 
     return loader, data_mean, data_std
-
-"""Module with functions for preparing the dataset for training the target models."""
-import torchvision
-from torch import Tensor, as_tensor, randperm
-from torch.utils.data import DataLoader, Subset
-from torchvision import transforms
-
-from leakpro.fl_utils.data_utils import get_meanstd
-
 
 def get_cifar10_loader(start_idx = None, num_images:int =1, batch_size:int = 1, num_workers:int = 2 ) -> tuple[DataLoader, Tensor, Tensor]:
     """Get the full dataset for CIFAR10."""
