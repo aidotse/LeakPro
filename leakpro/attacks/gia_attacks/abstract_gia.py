@@ -139,10 +139,7 @@ class AbstractGIA(AbstractAttack):
         except Exception as e:
             logger.info(f"Attack stopped due to {e}. \
                         Saving results.")
-        if chose_best_ssim_as_final:
-            result = self.final_best
-        else:
-            result = reconstruction_loader
+        result = self.final_best if chose_best_ssim_as_final else reconstruction_loader
         ssim_score = dataloaders_ssim_ignite(client_loader, result)
         psnr_score = dataloaders_psnr(client_loader, result)
         logger.info(f"final sim: {ssim_score}")

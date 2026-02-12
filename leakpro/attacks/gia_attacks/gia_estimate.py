@@ -11,12 +11,18 @@ from optuna.trial import Trial
 from torch import Tensor, device
 from torch.nn import CrossEntropyLoss, Module
 from torch.utils.data import DataLoader
+from torchvision.models.convnext import LayerNorm2d
 
 from leakpro.attacks.gia_attacks.abstract_gia import AbstractGIA
 from leakpro.fl_utils.data_utils import GiaDataModalityExtension, GiaImageExtension
 from leakpro.fl_utils.gia_optimizers import MetaSGD
 from leakpro.fl_utils.gia_train import train
-from leakpro.fl_utils.model_utils import InferredBNFeatureHook, InferredIN2dFeatureHook, InferredLN2dFeatureHook, InferredLNFeatureHook
+from leakpro.fl_utils.model_utils import (
+    InferredBNFeatureHook,
+    InferredIN2dFeatureHook,
+    InferredLN2dFeatureHook,
+    InferredLNFeatureHook,
+)
 from leakpro.fl_utils.similarity_measurements import cosine_similarity_weights, total_variation
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.utils.import_helper import Callable, Self
@@ -57,7 +63,8 @@ class GIABase(AbstractGIA):
 
     def __init__(self: Self, model: Module, client_loader: DataLoader, data_mean: Tensor, data_std: Tensor,
                  proxy_loader: DataLoader, train_fn: Optional[Callable] = None,
-                 configs: Optional[GIABaseConfig] = None, optuna_trial_data: list = None, exp_name:str = "gradient_inversion") -> None:
+                 configs: Optional[GIABaseConfig] = None, optuna_trial_data: list = None,
+                 exp_name:str = "gradient_inversion") -> None:
         super().__init__()
         self.original_model = model
         self.model = deepcopy(self.original_model)
@@ -93,7 +100,7 @@ class GIABase(AbstractGIA):
             "detailed": detailed_str,
         }
 
-    def prepare_attack(self:Self) -> None:  # noqa: C901
+    def prepare_attack(self:Self) -> None:  # noqa: C901, PLR0915, PLR0912
         """Prepare the attack.
 
         Args:
@@ -144,6 +151,33 @@ class GIABase(AbstractGIA):
             proxy_statistics.append((m.mean(dim=1).mean().detach(), v.mean(dim=1).mean().detach()))
 
 
+        def ln_forward_hook(module: Module, input: torch.tensor, output: torch.tensor) -> None:# noqa: ARG001
+            x = input[0]
+            k = len(module.normalized_shape)
+            dims = tuple(range(x.ndim - k, x.ndim))
+            sample_mean = x.mean(dim=dims)
+            sample_var  = x.var(dim=dims, unbiased=False)
+            sample_mean = sample_mean.reshape(sample_mean.shape[0], -1).mean(dim=1)
+            sample_var  = sample_var.reshape(sample_var.shape[0], -1).mean(dim=1)
+            proxy_statistics.append((sample_mean.mean().detach(), sample_var.mean().detach()))
+
+        def ln2d_forward_hook(module: Module, input: torch.tensor, output: torch.tensor) -> None:  # noqa: ARG001
+            x = input[0]  # NCHW
+            # LN2d normalizes across channel dim (C) per (n,h,w)
+            m = x.mean(dim=1)
+            v = x.var(dim=1, unbiased=False)
+            proxy_statistics.append((m.mean().detach(), v.mean().detach()))
+
+        def in2d_forward_hook(module: Module, input: torch.tensor, output: torch.tensor) -> None:  # noqa: ARG001
+            x = input[0]  # NCHW
+            # InstanceNorm2d normalizes over (H, W) per (N, C)
+            m = x.mean(dim=(2, 3))                       # [N, C]
+            v = x.var(dim=(2, 3), unbiased=False)        # [N, C]
+            # Match your "scalar target" style:
+            # average over channels -> [N], then over batch -> scalar
+            proxy_statistics.append((m.mean(dim=1).mean().detach(), v.mean(dim=1).mean().detach()))
+
+
         hooks = []
         for module in self.model.modules():
             if isinstance(module, torch.nn.BatchNorm2d):
@@ -152,8 +186,8 @@ class GIABase(AbstractGIA):
                 hooks.append(module.register_forward_hook(ln_forward_hook))
             if isinstance(module, LayerNorm2d):
                 hooks.append(module.register_forward_hook(ln2d_forward_hook))
-            if isinstance(module, torch.nn.InstanceNorm2d): 
-                hooks.append(module.register_forward_hook(in2d_forward_hook)) 
+            if isinstance(module, torch.nn.InstanceNorm2d):
+                hooks.append(module.register_forward_hook(in2d_forward_hook))
 
         _ = self.train_fn(self.model, self.proxy_loader,
                                         self.configs.optimizer, self.configs.criterion, self.configs.epochs)
@@ -260,15 +294,12 @@ class GIABase(AbstractGIA):
     def suggest_parameters(self: Self, trial: Trial) -> None:
         """Suggest parameters to chose and range for optimization for the norm estimate attack."""
         total_variation = trial.suggest_float("total_variation", 1e-8, 1e-1, log=True)
-        # bn_reg = trial.suggest_categorical("bn_reg", [0.0, 1e-4, 1e-2])
+        bn_reg = trial.suggest_categorical("bn_reg", [0.0, 1e-4, 1e-2])
         attack_lr = trial.suggest_float("attack_lr", 1e-4, 100.0, log=True)
-        # median_pooling = trial.suggest_int("median_pooling", 0, 1)
-        # top10norms = trial.suggest_int("top10norms", 0, 1)
-        self.configs.bn_reg = 0.0
+        median_pooling = trial.suggest_int("median_pooling", 0, 1)
+        top10norms = trial.suggest_int("top10norms", 0, 1)
         self.configs.attack_lr = attack_lr
         self.configs.tv_reg = total_variation
-        self.configs.median_pooling = bool(0)
-        self.configs.top10norms = bool(0)
 
         if self.optuna_trial_data is not None:
             trial_data_idx = trial.suggest_categorical(
@@ -281,10 +312,10 @@ class GIABase(AbstractGIA):
         logger.info(
             f"Chosen parameters: "
             f"total_variation: {total_variation} "
-            # f"bn_reg: {bn_reg} "
+            f"bn_reg: {bn_reg} "
             f"attack_lr: {attack_lr} "
-            # f"median_pooling: {bool(median_pooling)} "
-            # f"top10norms: {bool(top10norms)} "
+            f"median_pooling: {bool(median_pooling)} "
+            f"top10norms: {bool(top10norms)} "
         )
 
     def reset_attack(self: Self, new_config:dict) -> None:  # noqa: ARG002

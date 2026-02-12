@@ -1,7 +1,7 @@
 """Util functions relating to data."""
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from typing import List, Optional, Tuple
+from typing import Any, List, Literal, Self
 
 import numpy as np
 import torch
@@ -71,7 +71,7 @@ class GiaImageCloneNoiseExtension(GiaDataModalityExtension):
         pixel_noise_p: float = 0.0,
         random_mode: Literal["normal", "uniform"] = "normal",
         pixel_wise: bool = True,  # True: mask is (N,1,H,W); False: element-wise (N,C,H,W)
-    ):
+    ) -> None:
         super().__init__()
         if not (0.0 <= pixel_noise_p <= 1.0):
             raise ValueError("pixel_noise_p must be in [0, 1]")
@@ -95,7 +95,8 @@ class GiaImageCloneNoiseExtension(GiaDataModalityExtension):
             return torch.rand_like(x)
         raise ValueError(f"Unknown random_mode: {self.random_mode}")
 
-    def get_at_data(self: Self, client_loader: DataLoader):
+    def get_at_data(self: Self, client_loader: DataLoader) -> DataLoader:
+        """Generate recreation data based on adding noise to original loader."""
         original = torch.stack([img.clone() for img, _ in client_loader.dataset], dim=0)
         labels = self._clone_labels(client_loader)
 
