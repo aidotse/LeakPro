@@ -19,7 +19,7 @@ audit:  # Configurations for auditing
     - attack: loss_traj
     - attack: qmia
     - attack: HSJ
-    # - attack: yoqo
+    - attack: yoqo
     - attack: seqmia
       number_of_traj: 50
       mia_classifier_epochs: 1000
