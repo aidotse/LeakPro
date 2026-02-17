@@ -40,7 +40,7 @@ class LSTM(nn.Module):
         c0 = Variable(torch.zeros(self.num_layers, x.size(1), self.hidden_size))
         h0, c0 = h0.to(device=self.device), c0.to(device=self.device)
 
-        out, (h1, c1) = self.lstm(x, (h0, c0))
+        out, (h1, _) = self.lstm(x, (h0, c0))
         return self.label(h1)
 
 
@@ -62,7 +62,7 @@ class LSTMAttention(nn.Module):
         c0 = Variable(torch.zeros(self.num_layers, x.size(1), self.hidden_size))
         h0, c0 = h0.to(device=self.device), c0.to(device=self.device)
 
-        out, (h1, c1) = self.layer1(x, (h0, c0))
+        out, (h1, _) = self.layer1(x, (h0, c0))
 
         atten_energies = torch.sum(h1 * out, dim=2)
         scores = F.softmax(atten_energies, dim=0)
@@ -105,7 +105,7 @@ class AttackSeqMIA(AbstractMIA):
         Args:
         ----
             handler (MIAHandler): The input handler object.
-            configs (dict): A dictionary containing the attack loss_traj configurations.
+            configs (dict): A dictionary containing the attack seqMIA configurations.
 
         """
         logger.info("Configuring SeqMIA attack")
@@ -124,7 +124,7 @@ class AttackSeqMIA(AbstractMIA):
         self.shadow_data_fraction = 1 - self.distillation_data_fraction
 
         output_dir = self.handler.configs.audit.output_dir
-        self.storage_dir = f"{output_dir}/attack_objects/loss_traj"
+        self.storage_dir = f"{output_dir}/attack_objects/seqMIA"
 
         # set up mia classifier
         self.read_from_file = False
@@ -241,7 +241,7 @@ class AttackSeqMIA(AbstractMIA):
             with open(f"{self.storage_dir}/{dataset_name}", "rb") as file:
                 data = pickle.load(file)  # noqa: S301
         else:
-            data = self._prepare_mia_data(data_indices,
+            data = self.prepare_mia_data(data_indices,
                                           student_model,
                                           teacher_model,
                                           dataset_name)
@@ -258,19 +258,79 @@ class AttackSeqMIA(AbstractMIA):
         else:
             self.mia_test_data_loader = DataLoader(mia_dataset, batch_size=self.train_mia_batch_size, shuffle=True)
 
-    def _prepare_mia_data(self:Self,
+    def prepare_mia_data(self:Self,
                         data_indices: np.ndarray,
                         distill_model: nn.Module,
                         teacher_model: nn.Module,
                         dataset_name: str,
                         ) -> dict:
+        """Prepare the data for MIA attack.
+
+        Args:
+        ----
+            data_indices (np.ndarray): Indices of the data.
+            distill_model (nn.Module): Distillation model.
+            teacher_model (nn.Module): Teacher model.
+            dataset_name (str): Dataset name for storage.
+
+        Returns:
+        -------
+            dict: Dictionary containing the model trajectory.
+
+        """
+
         logger.info(f"Preparing MIA {dataset_name}: {len(data_indices)} points")
         gpu_or_cpu = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         data_loader = self.handler.get_dataloader(data_indices, batch_size=self.train_mia_batch_size, shuffle = False)
 
         model_trajectory_list = []
 
-        for _loader_idx, (data, target) in tqdm(enumerate(data_loader),
+        def loss_stack(output: torch.Tensor, target: torch.Tensor, criterion: torch.nn.Module) -> np.ndarray:
+            """Stacking the loss and other metrics for the seqMIA attack.
+
+            output (torch.Tensor): Model output
+            target (torch.Tensor): Ground truth labels
+            criterion (torch.nn.Module): Loss function
+            """
+            probs = torch.softmax(output, dim=1)
+
+            eps = 1e-10
+            probs_clamped = torch.clamp(probs, min=eps)
+            one_minus_p_clamped = torch.clamp(1 - probs, min=eps)
+
+            entropy = -torch.sum(probs * torch.log(probs_clamped), dim=1)
+
+            batch_indices = torch.arange(len(target), device=output.device)
+            p_target = probs[batch_indices, target]
+
+            term_1 = -(1 - p_target) * torch.log(probs_clamped[batch_indices, target])
+
+            total_sum_p_log_1_minus_p = torch.sum(probs * torch.log(one_minus_p_clamped), dim=1)
+            target_term_p_log_1_minus_p = p_target * torch.log(one_minus_p_clamped[batch_indices, target])
+
+            sum_except = total_sum_p_log_1_minus_p - target_term_p_log_1_minus_p
+
+            mentropy = term_1 - sum_except
+
+            raw_losses = torch.stack([
+                criterion(logit_i, target_i) for logit_i, target_i in zip(output, target)
+            ])
+
+            max_p = torch.max(probs, dim=1).values
+            std_p = torch.std(probs, dim=1)
+
+            final_stack = torch.stack([
+                raw_losses,
+                max_p,
+                std_p,
+                entropy,
+                mentropy
+            ], dim=1)
+
+            return final_stack.detach().cpu().numpy()
+
+
+        for _, (data, target) in tqdm(enumerate(data_loader),
                                                total=len(data_loader),
                                                desc=f"Preparing MIA data {dataset_name}"):
             data = data.to(gpu_or_cpu)
@@ -285,48 +345,14 @@ class AttackSeqMIA(AbstractMIA):
 
                 distill_model_soft_output = distill_model[d](data).squeeze()
 
-                loss = []
-                for logit_target_i, target_i in zip(distill_model_soft_output, target):
-                    p_target_i = torch.exp(logit_target_i - torch.max(logit_target_i))
-                    p_target_i = p_target_i / torch.sum(p_target_i)
-                    entropy = -torch.sum(p_target_i * torch.log(torch.clamp(p_target_i, min=1e-10)))
-                    p_except_target = torch.cat((p_target_i[:target_i],p_target_i[(target_i+1):]))
-                    mentropy = \
-                        -(1 - p_target_i[target_i]) * torch.log(torch.clamp(p_target_i[target_i],min=1e-10)) - \
-                        torch.sum(p_except_target * torch.log(torch.clamp((1 - p_except_target),min=1e-10)))
-                    loss_i = torch.stack([
-                        criterion(logit_target_i, target_i),
-                        torch.max(p_target_i),
-                        torch.std(p_target_i),
-                        entropy,
-                        mentropy
-                        ])
-                    loss.append(loss_i)
-                loss = torch.stack(loss).detach().cpu().numpy()
+                loss = loss_stack(distill_model_soft_output, target, criterion)
                 trajectory_steps.append(loss[:, np.newaxis, :])
 
             teacher_model.to(gpu_or_cpu)
             teacher_model.eval()
             model_soft_output = teacher_model(data).squeeze()
 
-            loss = []
-            for logit_target_i, target_i in zip(model_soft_output, target):
-                p_target_i = torch.exp(logit_target_i - torch.max(logit_target_i))
-                p_target_i = p_target_i / torch.sum(p_target_i)
-                entropy = -torch.sum(p_target_i * torch.log(torch.clamp(p_target_i, min=1e-10)))
-                p_except_target = torch.cat((p_target_i[:target_i],p_target_i[(target_i+1):]))
-                mentropy = \
-                    -(1 - p_target_i[target_i]) * torch.log(torch.clamp(p_target_i[target_i],min=1e-10)) - \
-                    torch.sum(p_except_target * torch.log(torch.clamp((1 - p_except_target),min=1e-10)))
-                loss_i = torch.stack([
-                    criterion(logit_target_i, target_i),
-                    torch.max(p_target_i),
-                    torch.std(p_target_i),
-                    entropy,
-                    mentropy
-                    ])
-                loss.append(loss_i)
-            loss = torch.stack(loss).detach().cpu().numpy()
+            loss = loss_stack(model_soft_output, target, criterion)
 
             trajectory_steps.append(loss[:, np.newaxis, :])
             trajectory_current = np.concatenate(trajectory_steps, 1)
@@ -346,27 +372,35 @@ class AttackSeqMIA(AbstractMIA):
 
         """
         attack_model = self.mia_model
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        attack_model = attack_model.to(device)
 
-        if not os.path.exists(f"{self.storage_dir}/seqmia_model.pkl"):
-            gpu_or_cpu = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            attack_optimizer = torch.optim.SGD(attack_model.parameters(),
-                                               lr=self.mia_classifier_lr,
-                                               momentum=self.mia_classifier_momentum,
-                                               weight_decay=self.mia_classifier_weight_decay)
-            attack_model = attack_model.to(gpu_or_cpu)
+        if not os.path.exists(f"{self.storage_dir}/seqmia_model.pt"):
+            attack_optimizer = torch.optim.SGD(
+                attack_model.parameters(),
+                lr=self.mia_classifier_lr,
+                momentum=self.mia_classifier_momentum,
+                weight_decay=self.mia_classifier_weight_decay,
+            )
             loss_fn = nn.CrossEntropyLoss()
 
             train_loss, train_prec1 = self._train_mia_classifier(attack_model, attack_optimizer, loss_fn)
             train_info = [train_loss, train_prec1]
 
-            torch.save(attack_model.state_dict(), self.storage_dir + "/seqmia_model.pkl")
+            torch.save(attack_model.state_dict(), f"{self.storage_dir}/seqmia_model.pt")
 
             with open(f"{self.storage_dir}/mia_model_losses.pkl", "wb") as file:
                 pickle.dump(train_info, file)
         else:
-            with open(f"{self.storage_dir}/seqmia_model.pkl", "rb") as model:
-                attack_model.load_state_dict(torch.load(model))
-            logger.info("Loading SeqMIA classifier")
+            attack_model.load_state_dict(
+                torch.load(
+                    f"{self.storage_dir}/seqmia_model.pt",
+                    map_location=device,
+                    weights_only=True,
+                )
+            )
+            logger.info("Loaded SeqMIA classifier")
+
 
         return attack_model
 
@@ -392,14 +426,16 @@ class AttackSeqMIA(AbstractMIA):
         train_prec_list = []
 
         model.train()
-        train_loss = 0
-        num_correct = 0
+
         mia_train_loader = self.mia_train_data_loader
         gpu_or_cpu = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         for _ in  tqdm(range(self.mia_classifier_epochs), total=self.mia_classifier_epochs):
-            for _batch_idx, (data, label) in enumerate(mia_train_loader):
-                data = data.to(gpu_or_cpu) # noqa: PLW2901
-                label = label.to(gpu_or_cpu).long() # noqa: PLW2901
+            train_loss = 0.0
+            num_correct = 0
+
+            for _, (data, label) in enumerate(mia_train_loader):
+                data = data.to(gpu_or_cpu)
+                label = label.to(gpu_or_cpu).long()
 
                 pred = model(torch.permute(data,(1,0,2)))
                 pred = torch.squeeze(pred)
@@ -416,7 +452,7 @@ class AttackSeqMIA(AbstractMIA):
             train_loss /= len(mia_train_loader.dataset)
             accuracy =  num_correct / len(mia_train_loader.dataset)
 
-            train_loss_list.append(loss)
+            train_loss_list.append(train_loss)
             train_prec_list.append(accuracy)
 
         return train_loss_list, train_prec_list
@@ -436,30 +472,29 @@ class AttackSeqMIA(AbstractMIA):
 
         """
         logger.info("Running the MIA attack")
-        gpu_or_cpu = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        attack_model.to(gpu_or_cpu)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        attack_model = attack_model.to(device)
         attack_model.eval()
-        test_loss = 0
+
         correct = 0
 
         auc_ground_truth_list = []
         auc_pred_list = []
 
         with torch.no_grad():
-            for _batch_idx, (data, target) in tqdm(enumerate(self.mia_test_data_loader), total=len(self.mia_test_data_loader)):
-                data = data.to(gpu_or_cpu) # noqa: PLW2901
-                target = target.to(gpu_or_cpu) # noqa: PLW2901
-                target = target.long() # noqa: PLW2901
+            for _, (data, target) in tqdm(enumerate(self.mia_test_data_loader), total=len(self.mia_test_data_loader)):
+                data = data.to(device, non_blocking=True)
+                target = target.to(device, non_blocking=True).long()
+
                 pred = attack_model(torch.permute(data,(1,0,2)))
                 pred = torch.squeeze(pred)
 
-                test_loss += F.cross_entropy(pred, target).item()
-                pred0, pred1 = pred.max(1, keepdim=True)
+                _, pred1 = pred.max(1, keepdim=True)
                 correct += pred1.eq(target).sum().item()
-                auc_pred_current = pred[:, -1]
 
-                auc_ground_truth_list.append(target.cpu().numpy())
-                auc_pred_list.append(auc_pred_current.cpu().detach().numpy())
+                auc_pred_current = pred[:, -1]
+                auc_ground_truth_list.append(target.detach().cpu().numpy())
+                auc_pred_list.append(auc_pred_current.detach().cpu().numpy())
 
         if auc_ground_truth_list:
             auc_ground_truth = np.concatenate(auc_ground_truth_list, axis=0)
@@ -467,8 +502,6 @@ class AttackSeqMIA(AbstractMIA):
         else:
             auc_ground_truth = np.array([])
             auc_pred = np.array([])
-
-        test_loss /= len(self.mia_test_data_loader.dataset)
 
         return auc_ground_truth, auc_pred
 
