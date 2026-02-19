@@ -282,7 +282,7 @@ class GengLabelInference(LabelInferenceStrategy):
             display_name="Geng Zero-Shot Label Inference",
             description="Analytical label inference for FedSGD using network statistics",
             required_capabilities={"has_gradients": True},
-            paper_reference="Geng et al., Towards Zero-shot Model Inversion, ICCV 2021",
+            paper_reference="Geng et al., Towards General Deep Leakage in Federated Learning",
         )
 
     def infer_labels(
