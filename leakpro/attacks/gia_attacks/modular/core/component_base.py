@@ -169,24 +169,28 @@ class InitializationStrategy(Component):
 # =============================================================================
 
 
-class SeedAggregationStrategy(Component):
-    """Base class for seed aggregation strategies.
+class AggregationStrategy(Component):
+    """Base class for aggregation strategies.
 
-    Seed aggregation handles multiple random seeds per image in multi-seed
-    optimization scenarios (e.g., See Through Gradients attack).
+    Aggregation strategies handle combining multiple reconstruction candidates
+    into a consensus reconstruction. This includes:
+    - Seed aggregation: Combining multiple random initializations per image
+    - Epoch aggregation: Matching and averaging across training epochs (FedAvg)
 
-    When reconstruction has shape [B, G, C, H, W] where:
-    - B = batch size (number of images)
+    When reconstruction has shape [E, N, G, C, H, W] where:
+    - E = number of epochs (1 for single-epoch attacks)
+    - N = num_images (number of images being reconstructed)
     - G = number of seeds per image
     - C, H, W = image dimensions
 
-    This component computes consensus across seeds, used both:
+    This component computes consensus, used both:
     1. During optimization for group consistency regularization
     2. After optimization for final aggregation
 
-    Reference:
-        Yin et al., "See through Gradients: Image Batch Recovery via
-        GradInversion", CVPR 2021
+    References:
+        - Yin et al., "See through Gradients", CVPR 2021 (seed aggregation)
+        - Dimitrov et al., "Data Leakage in Federated Averaging", 2022 (epoch matching)
+
     """
 
     @abstractmethod
@@ -275,7 +279,7 @@ __all__ = [
     "InitializationResult",
     "InitializationStrategy",
     # Seed Aggregation
-    "SeedAggregationStrategy",
+    "AggregationStrategy",
     # Optimization
     "OptimizationState",
     "OptimizationStrategy",

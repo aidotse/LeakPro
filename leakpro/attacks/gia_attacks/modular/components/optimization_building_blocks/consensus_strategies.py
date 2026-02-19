@@ -39,8 +39,7 @@ from leakpro.fl_utils.matching_utils import compute_cost_matrix, hungarian_match
 class NoSeedAggregation(AggregationStrategy):
     """No seed aggregation - assumes single seed per image (G=1).
 
-    This is the default strategy for backward compatibility with attacks
-    that don't use multi-seed optimization.
+    This is the default strategy for attacks that don't use multi-seed optimization.
     """
 
     @classmethod
@@ -174,15 +173,12 @@ class EpochMatchingConsensus(AggregationStrategy):
     def __init__(
         self,
         epochs: int = 3,
-        batch_size: int = 1,
         metric: str = "l2",
     ) -> None:
         """Initialize epoch matching consensus.
 
         Args:
             epochs: Number of local epochs (E)
-            batch_size: (Deprecated/Unused) Total images being reconstructed (N).
-                Kept for backward compatibility but not used for validation.
             metric: Similarity metric for matching
                 - "l2": L2 distance
                 - "mse": Mean squared error
@@ -190,7 +186,6 @@ class EpochMatchingConsensus(AggregationStrategy):
 
         """
         self.epochs = epochs
-        self.batch_size = batch_size  # Unused, kept for backward compatibility
         self.metric = metric
 
         if metric not in ["l2", "mse", "psnr"]:

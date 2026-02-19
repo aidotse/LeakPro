@@ -37,12 +37,12 @@ from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks
     TrainingSimulator,
 )
 from leakpro.attacks.gia_attacks.modular.core.component_base import (
+    AggregationStrategy,
     Component,
     ComponentMetadata,
     LabelInferenceResult,
     OptimizationState,
     OptimizationStrategy,
-    SeedAggregationStrategy,
 )
 from leakpro.fl_utils.fl_client_simulator import ClientObservations
 
@@ -97,7 +97,8 @@ class ComposableOptimizer(OptimizationStrategy):
         log_interval: int = None,
         training_simulator: TrainingSimulator | None = None,
         loss_fn: nn.Module | None = None,
-        seed_aggregation: SeedAggregationStrategy | None = None,
+        seed_aggregation: AggregationStrategy | None = None,
+        epoch_aggregation: AggregationStrategy | None = None,
     ) -> None:
         self.loss_components = loss_components
         self.constraint = constraint or NoConstraint()
@@ -113,7 +114,7 @@ class ComposableOptimizer(OptimizationStrategy):
         self.log_interval = log_interval
         self._training_simulator = training_simulator
         self.seed_aggregation = seed_aggregation
-
+        self.epoch_aggregation = epoch_aggregation
         super().__init__()
 
     @property
@@ -249,42 +250,40 @@ class ComposableOptimizer(OptimizationStrategy):
         # Return final best reconstruction
         if state.best_reconstruction is not None:
             final_reconstruction = state.best_reconstruction
-
-            # Apply seed aggregation if multi-seed and aggregation strategy provided
-            if self.seed_aggregation is not None and final_reconstruction.ndim == 5:
-                logger.info(f"  Applying seed aggregation: {self.seed_aggregation.get_metadata().name}")
-                final_reconstruction = self.seed_aggregation.compute_consensus(final_reconstruction)
-
             final_labels = state.best_labels if state.best_labels is not None else labels
-            return OptimizationState(
-                reconstruction=final_reconstruction,
-                labels=final_labels,
-                loss=state.best_loss,
-                iteration=state.iteration,
-                converged=(state.aux_data.get("stagnant_iterations", 0) < self.patience),
-                metrics={
-                    "gradient_loss": state.aux_data.get("best_gradient_loss", 0.0),
-                    "regularization_loss": state.aux_data.get("best_regularization_loss", 0.0),
-                },
+            final_loss = state.best_loss
+        else:
+            final_reconstruction = state.reconstruction.detach()
+            final_labels = self.label_strategy.get_labels_for_forward(
+                state.optimizable_params, state.labels
             )
+            final_loss = total_loss_value
 
-        # Fallback to current state
-        final_reconstruction = state.reconstruction.detach()
 
-        # Apply seed aggregation if multi-seed and aggregation strategy provided
-        if self.seed_aggregation is not None and final_reconstruction.ndim == 5:
+        # Apply seed aggregation
+        if self.seed_aggregation is not None:
             logger.info(f"  Applying seed aggregation: {self.seed_aggregation.get_metadata().name}")
             final_reconstruction = self.seed_aggregation.compute_consensus(final_reconstruction)
 
-        current_labels = self.label_strategy.get_labels_for_forward(
-            state.optimizable_params, state.labels
-        )
+        # Apply epoch aggregation: [E, N, 1, C, H, W] → [1, N, 1, C, H, W]
+        if self.epoch_aggregation is not None:
+            logger.info(f"  Applying epoch aggregation: {self.epoch_aggregation.get_metadata().name}")
+            final_reconstruction = self.epoch_aggregation.compute_consensus(final_reconstruction)
+
+        # Squeeze epoch and seed dimensions
+        final_reconstruction = final_reconstruction.squeeze(0).squeeze(1)
+
+
         return OptimizationState(
             reconstruction=final_reconstruction,
-            labels=current_labels if isinstance(current_labels, torch.Tensor) else labels,
-            loss=total_loss_value,
+            labels=final_labels,
+            loss=final_loss,
             iteration=state.iteration,
-            converged=False,
+            converged=(state.aux_data.get("stagnant_iterations", 0) < self.patience),
+            metrics={
+                "best_loss": state.best_loss,
+                **state.aux_data.get("best_losses", {}),
+            },
         )
 
     def _setup_bn_components(
