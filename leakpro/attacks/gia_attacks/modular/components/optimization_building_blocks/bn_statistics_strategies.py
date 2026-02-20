@@ -51,6 +51,17 @@ class BNStatisticsStrategy(Component):
         """Initialize common state for all strategies."""
         self.feature_hooks: List = []
 
+    def _initialize_setup(self) -> None:
+        """Common initialization for all setup methods."""
+        self.cleanup()
+        self.feature_hooks = []
+
+    def _freeze_bn_momentum(self, model: nn.Module) -> None:
+        """Freeze BatchNorm momentum to prevent running stats updates."""
+        for module in model.modules():
+            if isinstance(module, nn.BatchNorm2d):
+                module.momentum = 0
+
     @abstractmethod
     def setup(
         self,
@@ -158,8 +169,7 @@ class RunningBNStatisticsStrategy(BNStatisticsStrategy):
 
         """
         _ = (reconstruction, training_simulator, proxy_dataloader)  # Unused args
-        self.cleanup()  # Remove any existing hooks
-        self.feature_hooks = []
+        self._initialize_setup()
 
         # Check if client provided post-training BN statistics
         post_train_running_stats = None
@@ -191,9 +201,7 @@ class RunningBNStatisticsStrategy(BNStatisticsStrategy):
                 self.feature_hooks.append(BNFeatureHook(module))
 
         # Freeze BN running statistics by setting momentum=0
-        for module in model.modules():
-            if isinstance(module, nn.BatchNorm2d):
-                module.momentum = 0
+        self._freeze_bn_momentum(model)
 
 
 class InferredBNStatisticsStrategy(BNStatisticsStrategy):
@@ -256,8 +264,7 @@ class InferredBNStatisticsStrategy(BNStatisticsStrategy):
 
         """
         _ = training_simulator, proxy_dataloader  # Unused args
-        self.cleanup()
-        self.feature_hooks = []
+        self._initialize_setup()
 
         # Extract BN statistics from client observations
         pre_train_running_stats = None
@@ -321,9 +328,7 @@ class InferredBNStatisticsStrategy(BNStatisticsStrategy):
                     client_statistics[start_idx][1]))
                 start_idx += 1
 
-        for module in model.modules():
-            if isinstance(module, nn.BatchNorm2d):
-                module.momentum = 0
+        self._freeze_bn_momentum(model)
 
 
 class ProxyBNStatisticsStrategy(BNStatisticsStrategy):
@@ -502,8 +507,7 @@ class ProxyBNStatisticsStrategy(BNStatisticsStrategy):
 
         """
         _ = (reconstruction, client_observations, training_simulator)  # Unused args
-        self.cleanup()
-        self.feature_hooks = []
+        self._initialize_setup()
 
         # Check if proxy data is provided
         if proxy_dataloader is None:
@@ -521,9 +525,8 @@ class ProxyBNStatisticsStrategy(BNStatisticsStrategy):
         # Register feature hooks on the target model
         self._register_feature_hooks(model, proxy_statistics)
 
-        for module in model.modules():
-            if isinstance(module, nn.BatchNorm2d):
-                module.momentum = 0
+        # Freeze BN running statistics by setting momentum=0
+        self._freeze_bn_momentum(model)
 
 
 __all__ = [
