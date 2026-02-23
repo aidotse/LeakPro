@@ -195,7 +195,7 @@ class AttackOSLO(AbstractMIA):
 
         predictions = []
 
-        in_members = self.audit_dataset["data"][self.audit_dataset["in_members"]]
+        in_members = set(self.audit_dataset["data"][self.audit_dataset["in_members"]].tolist())
         true_labels = np.array([i in in_members for i in self.audit_data_indices])
 
         device_name = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -205,9 +205,11 @@ class AttackOSLO(AbstractMIA):
         for model in self.source_models:
             model.model_obj.eval()
             model.model_obj.to(device_name)
+            model.model_obj.requires_grad_(False)
         for model in self.validation_models:
             model.model_obj.eval()
             model.model_obj.to(device_name)
+            model.model_obj.requires_grad_(False)
 
         for _, (data, labels) in tqdm(enumerate(data_loader),
                                       total = len(data_loader),
