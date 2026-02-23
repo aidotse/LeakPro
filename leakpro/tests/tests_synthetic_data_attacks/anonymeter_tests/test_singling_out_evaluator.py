@@ -276,7 +276,7 @@ def test_multivariate_singling_out_queries() -> None:
     """Assert results of function multivariate_singling_out_queries with simple input."""
     df = pd.DataFrame({"c0": ["a", "b"], "c1": [1.23, 9.87]})
     n_queries = 2
-    queries = singl_ev.multivariate_singling_out_queries(df=df, n_queries=n_queries, n_cols=2, max_attempts=None)
+    queries = singl_ev.multivariate_singling_out_queries(df=df, n_queries=n_queries, n_cols=2, max_attempts=None, use_tree=False)
     assert len(queries) == n_queries
     possible_queries = [
         "c0 == 'a' & c1 <= 1.23",
@@ -299,7 +299,8 @@ def test_main_singling_out_attack() -> None:
     n_attacks = 10
     n_cols = 3
     #Get queries
-    queries = singl_ev.main_singling_out_attack(ori=ori, syn=syn, n_attacks=n_attacks, n_cols=n_cols, max_attempts=None)
+    queries = singl_ev.main_singling_out_attack(ori=ori, syn=syn, n_attacks=n_attacks, n_cols=n_cols, max_attempts=None,
+        use_tree=False)
     assert isinstance(queries, singl_ev.UniqueSinglingOutQueries)
     if queries.count>0:
         for query in queries.queries:

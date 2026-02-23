@@ -128,7 +128,6 @@ def test_linkability_main_attack(
     e_main_rate: float,
     e_ci: tuple
 ) -> None:
-    
     """Test linkability main attack results."""
     #Note: monkeypatch for fixing random seed in calculations
     rng = np.random.default_rng(seed=42)
@@ -157,7 +156,7 @@ def test_linkability_main_attack(
     # Create ori and syn dataframes
     ori_ordered = pd.concat([df_match, ori_mismatch], ignore_index=True)
     syn_ordered = pd.concat([df_match, syn_mismatch], ignore_index=True)
-    
+
     # Randomize order to prevent sequential sampling bias.
     shuffled_indices = np.random.default_rng(seed=123).permutation(n_rows)
     ori = ori_ordered.iloc[shuffled_indices].reset_index(drop=True)
@@ -166,16 +165,16 @@ def test_linkability_main_attack(
     evaluator = LinkabilityEvaluator(
         ori = ori,
         syn = syn,
-        aux_cols = [['col0'], ['col1']],
+        aux_cols = [["col0"], ["col1"]],
         n_attacks = n_rows,
         confidence_level = confidence_level,
         n_neighbors = n_neighbors,
         n_jobs = 1
     )
-    
+
     results = evaluator.evaluate()
     main_rate = results.main_rate
-    
+
     # Rate should strictly hover at 0.5 because exactly 50% of records are linkable.
     # The other 50% are disjoint strings that cannot be linked.
     assert main_rate.rate == pytest.approx(e_main_rate, abs=0.05)
@@ -204,8 +203,8 @@ def test_linkability_naive_attack(n_neighbors: int, e_naive_rate: float) -> None
     syn = pd.DataFrame([["a", "a"], ["b", "b"]] * n_syn_rows, columns=["c0", "c1"])
 
     evaluator = LinkabilityEvaluator(
-        ori=ori, 
-        syn=syn, 
+        ori=ori,
+        syn=syn,
         aux_cols=(["c0"], ["c1"]),
         confidence_level=0.99,
         n_neighbors=n_neighbors,
