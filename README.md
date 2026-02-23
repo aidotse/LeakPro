@@ -118,6 +118,34 @@ Our [example portfolio](https://github.com/aidotse/LeakPro/tree/readme/examples)
 2. **Install with pip**
 `pip install -e .[dev]`
 
+## How to run
+
+LeakPro runs privacy attacks against a **target model** that you have already trained. You provide the model, your dataset, and a small handler class — LeakPro takes care of the rest, including training shadow models, executing attacks, and producing a PDF report.
+
+A good starting point is the [CIFAR-10 example](https://github.com/aidotse/LeakPro/tree/main/examples/mia/cifar), which includes a ready-to-run notebook, a handler, and an [`audit.yaml`](https://github.com/aidotse/LeakPro/blob/main/examples/mia/cifar/audit.yaml). To run a different attack or tune parameters, edit the `attack_list` in `audit.yaml`:
+
+```yaml
+audit:
+  random_seed: 1234
+  attack_type: "mia"
+  data_modality: "image"
+  output_dir: "./leakpro_output"
+  attack_list:
+    - attack: lira
+      num_shadow_models: 4
+
+target:
+  module_path: "./target_model_class.py"
+  model_class: "MyModel"
+  target_folder: "./target"
+  data_path: "./data/dataset.pkl"
+```
+
+For full documentation see the **[LeakPro Wiki](https://github.com/aidotse/LeakPro/wiki)**:
+- [Attack Modules overview](https://github.com/aidotse/LeakPro/wiki/Attack-Modules)
+- [Membership Inference Attacks — implemented attacks & papers](https://github.com/aidotse/LeakPro/wiki/Membership-Inference-Attacks)
+- [Running MIA Attacks — audit.yaml config reference for all MIA attacks](https://github.com/aidotse/LeakPro/wiki/Running-MIA-Attacks)
+
 ## To Contribute
 0. **Ensure local repo is up-to-date:**
 `git fetch origin`
