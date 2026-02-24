@@ -291,6 +291,3 @@ class GRUD(nn.Module):
     def initHidden(self, batch_size):
         Hidden_State = Variable(zeros(batch_size, self.hidden_size)).to(self.device)
         return Hidden_State
-def to_numpy(tensor):
-    return tensor.detach().cpu().numpy() if tensor.is_cuda else tensor.detach().numpy()
-
