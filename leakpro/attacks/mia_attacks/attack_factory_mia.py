@@ -4,9 +4,11 @@
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.mia_attacks.attack_p import AttackP
 from leakpro.attacks.mia_attacks.base import AttackBASE
+from leakpro.attacks.mia_attacks.dts import AttackDTS
 from leakpro.attacks.mia_attacks.HSJ import AttackHopSkipJump
 from leakpro.attacks.mia_attacks.lira import AttackLiRA
 from leakpro.attacks.mia_attacks.loss_trajectory import AttackLossTrajectory
+from leakpro.attacks.mia_attacks.multi_signal_lira import AttackMSLiRA
 from leakpro.attacks.mia_attacks.qmia import AttackQMIA
 from leakpro.attacks.mia_attacks.ramia import AttackRaMIA
 from leakpro.attacks.mia_attacks.rmia import AttackRMIA
@@ -30,6 +32,8 @@ class AttackFactoryMIA:
         "yoqo": AttackYOQO,
         "base": AttackBASE,
         "ramia": AttackRaMIA,
+        "multi_signal_lira": AttackMSLiRA,
+        "dts": AttackDTS,
     }
 
     # Shared variables for all attacks

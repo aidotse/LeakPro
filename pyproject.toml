@@ -48,6 +48,7 @@ dev = [
   "kornia", # from minv
   "albumentations", # federated example
   "transformers", # federated example
+  "requests", 
 ]
 
 [tool.setuptools]

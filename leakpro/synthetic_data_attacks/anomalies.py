@@ -11,7 +11,7 @@ def encode_categorical_columns(*, df: pd.DataFrame, threshold_one_hot_encoding: 
     df_encoded = df.copy()
     # Iterate through each column in the DataFrame
     for column in df_encoded.columns:
-        if df_encoded[column].dtype == "object":
+        if pd.api.types.is_string_dtype(df_encoded[column]):
             unique_values = df_encoded[column].nunique()
             if unique_values <= threshold_one_hot_encoding:
                 # Perform one-hot encoding

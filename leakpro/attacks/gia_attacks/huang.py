@@ -73,8 +73,8 @@ class Huang(AbstractGIA):
         self.data_std = data_std
 
         # required for optuna to save the best hyperparameters
-        self.attack_folder_path = "leakpro_output/attacks/huang"
-        os.makedirs(self.attack_folder_path, exist_ok=True)
+        self.attack_cache_folder_path = "leakpro_output/attacks/huang"
+        os.makedirs(self.attack_cache_folder_path, exist_ok=True)
 
         logger.info("Evaluating with Huang. et al initialized.")
 

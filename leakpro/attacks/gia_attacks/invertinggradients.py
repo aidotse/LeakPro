@@ -65,8 +65,8 @@ class InvertingGradients(AbstractGIA):
         self.best_reconstruction = None
         self.best_reconstruction_round = None
         # required for optuna to save the best hyperparameters
-        self.attack_folder_path = "leakpro_output/attacks/inverting_grad"
-        os.makedirs(self.attack_folder_path, exist_ok=True)
+        self.attack_cache_folder_path = "leakpro_output/attacks/inverting_grad"
+        os.makedirs(self.attack_cache_folder_path, exist_ok=True)
         # optuna trial data
         self.optuna_trial_data = optuna_trial_data
 

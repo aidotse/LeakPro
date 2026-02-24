@@ -54,7 +54,7 @@ class GIABaseRunning(AbstractGIA):
 
     def __init__(self: Self, model: Module, client_loader: DataLoader, data_mean: Tensor, data_std: Tensor,
                 train_fn: Optional[Callable] = None, configs: Optional[GIABaseRunningConfig] = None,
-                optuna_trial_data: list = None) -> None:
+                optuna_trial_data: list = None, exp_name: str = "gradient_inversion") -> None:
         super().__init__()
         self.original_model = model
         self.model = deepcopy(self.original_model)
@@ -71,8 +71,8 @@ class GIABaseRunning(AbstractGIA):
         self.data_std = data_std
 
         # required for optuna to save the best hyperparameters
-        self.attack_folder_path = "leakpro_output/attacks/huang"
-        os.makedirs(self.attack_folder_path, exist_ok=True)
+        self.attack_cache_folder_path = f"leakpro_output/results/{exp_name}"
+        os.makedirs(self.attack_cache_folder_path, exist_ok=True)
 
         logger.info("Attack initialized.")
 
