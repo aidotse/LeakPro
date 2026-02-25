@@ -1,13 +1,16 @@
+"""Training utilities for Diff-MI diffusion models."""
+
 import copy
 import functools
 import os
+from typing import Iterator, Optional
 
 import blobfile as bf
 import kornia
 import numpy as np
 import torch as th
 import torch.distributed as dist
-from torch.nn.parallel.distributed import DistributedDataParallel as DDP
+from torch.nn.parallel.distributed import DistributedDataParallel
 from torch.optim import AdamW
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
@@ -21,22 +24,19 @@ from .losses import p_reg_loss, topk_loss
 from .nn import update_ema
 from .resample import LossAwareSampler, UniformSampler
 
-# For ImageNet experiments, this was a good default value.
-# We found that the lg_loss_scale quickly climbed to
-# 20-21 within the first ~1K steps of training.
-# INITIAL_LOG_LOSS_SCALE = 20.0
-
 
 class PreTrain:
+    """Pre-train a diffusion model."""
+
     def __init__(
         self,
-        model,
-        diffusion,
-        data,
-        args,
-        save_path=None,
-        schedule_sampler=None,
-    ):
+        model: th.nn.Module,
+        diffusion: object,
+        data: DataLoader,
+        args: object,
+        save_path: Optional[str] = None,
+        schedule_sampler: Optional[LossAwareSampler] = None,
+    ) -> None:
         """Pre-train the diffusion model.
 
         Args:
@@ -84,7 +84,7 @@ class PreTrain:
         self.max_steps = args.max_steps if args.max_steps else None
         self.step = 0
         self.resume_step = 0
-        self.global_batch = self.batch_size * dist.get_world_size()
+        self.global_batch = self.batch_size * dist_util.get_world_size()
 
 
         self.sync_cuda = False # th.cuda.is_available()
@@ -112,9 +112,10 @@ class PreTrain:
                 for _ in range(len(self.ema_rate))
             ]
 
-        if th.cuda.is_available():
+        use_dist = dist.is_initialized() and dist_util.get_world_size() > 1
+        if th.cuda.is_available() and use_dist:
             self.use_ddp = True
-            self.ddp_model = DDP(
+            self.ddp_model = DistributedDataParallel(
                 self.model,
                 device_ids=[dist_util.dev()],
                 output_device=dist_util.dev(),
@@ -123,7 +124,7 @@ class PreTrain:
                 find_unused_parameters=False,
             )
         else:
-            if dist.get_world_size() > 1:
+            if use_dist and not th.cuda.is_available():
                 logger.warn(
                     "Distributed training requires CUDA. "
                     "Gradients will not be synchronized properly!"
@@ -131,7 +132,7 @@ class PreTrain:
             self.use_ddp = False
             self.ddp_model = self.model
 
-    def _load_and_sync_parameters(self):
+    def _load_and_sync_parameters(self) -> None:
         """Load model parameters from checkpoint and sync across processes."""
 
         resume_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
@@ -141,7 +142,7 @@ class PreTrain:
             logger.info("RESUME CHECKPOINT: ", resume_checkpoint)
 
             self.resume_step = parse_resume_step_from_filename(resume_checkpoint)
-            if dist.get_rank() == 0:
+            if dist_util.get_rank() == 0:
                 logger.info(f"loading model from checkpoint: {resume_checkpoint}...")
                 self.model.load_state_dict(
                     dist_util.load_state_dict(
@@ -151,25 +152,24 @@ class PreTrain:
 
         dist_util.sync_params(self.model.parameters())
 
-    def _load_ema_parameters(self, rate):
+    def _load_ema_parameters(self, rate: float) -> list[th.Tensor]:
         """Load EMA parameters from checkpoint."""
 
         ema_params = copy.deepcopy(self.mp_trainer.master_params)
 
         main_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
         ema_checkpoint = find_ema_checkpoint(main_checkpoint, self.resume_step, rate)
-        if ema_checkpoint:
-            if dist.get_rank() == 0:
-                logger.info(f"loading EMA from checkpoint: {ema_checkpoint}...")
-                state_dict = dist_util.load_state_dict(
-                    ema_checkpoint, map_location=dist_util.dev()
-                )
-                ema_params = self.mp_trainer.state_dict_to_master_params(state_dict)
+        if ema_checkpoint and dist_util.get_rank() == 0:
+            logger.info(f"loading EMA from checkpoint: {ema_checkpoint}...")
+            state_dict = dist_util.load_state_dict(
+                ema_checkpoint, map_location=dist_util.dev()
+            )
+            ema_params = self.mp_trainer.state_dict_to_master_params(state_dict)
 
         dist_util.sync_params(ema_params)
         return ema_params
 
-    def _load_optimizer_state(self):
+    def _load_optimizer_state(self) -> None:
         """Load optimizer state from checkpoint."""
 
         main_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
@@ -183,7 +183,7 @@ class PreTrain:
             )
             self.opt.load_state_dict(state_dict)
 
-    def run(self):
+    def run(self) -> None:
         """Run the pre-training loop."""
 
         while (
@@ -211,7 +211,7 @@ class PreTrain:
         if (self.step - 1) % self.save_interval != 0:
             self.save()
 
-    def run_step(self, batch, cond):
+    def run_step(self, batch: th.Tensor, cond: dict[str, th.Tensor]) -> None:
         """Run a single step of training."""
 
         self.forward_backward(batch, cond)
@@ -220,7 +220,7 @@ class PreTrain:
             self._update_ema()
         self._anneal_lr()
 
-    def forward_backward(self, batch, cond):
+    def forward_backward(self, batch: th.Tensor, cond: dict[str, th.Tensor]) -> None:
         """Run the forward and backward passes."""
 
         self.mp_trainer.zero_grad()
@@ -258,13 +258,13 @@ class PreTrain:
             )
             self.mp_trainer.backward(loss)
 
-    def _update_ema(self):
+    def _update_ema(self) -> None:
         """Update the EMA parameters."""
 
         for rate, params in zip(self.ema_rate, self.ema_params):
             update_ema(params, self.mp_trainer.master_params, rate=rate)
 
-    def _anneal_lr(self):
+    def _anneal_lr(self) -> None:
         """Anneal the learning rate, if specified."""
 
         if not self.lr_anneal_steps:
@@ -274,7 +274,7 @@ class PreTrain:
         for param_group in self.opt.param_groups:
             param_group["lr"] = lr
 
-    def _dump_loggs(self):
+    def _dump_loggs(self) -> None:
         """Dump training statistics to the logger."""
 
         logger.info("***** Training statistics *****")
@@ -287,10 +287,10 @@ class PreTrain:
         for key, value in self.mp_trainer.loggs.items():
             logger.info(f"mp: {key}: {value}")
 
-    def save(self):
+    def save(self) -> None:
         """Save the model and optimizer state."""
 
-        def save_checkpoint(rate, params):
+        def save_checkpoint(rate: float, params: list[th.Tensor]) -> None:
             """Save the model checkpoint.
 
             Args:
@@ -304,12 +304,9 @@ class PreTrain:
             """
 
             state_dict = self.mp_trainer.master_params_to_state_dict(params)
-            if dist.get_rank() == 0:
+            if dist_util.get_rank() == 0:
                 logger.info(f"saving model {rate}...")
-                if not rate:
-                    filename = f"{self.save_name}.pt"
-                else:
-                    filename = f"ema_{rate}_{self.save_name}.pt"
+                filename = f"{self.save_name}.pt" if not rate else f"ema_{rate}_{self.save_name}.pt"
                 with bf.BlobFile(bf.join(self.save_path, filename), "wb") as f:
                     th.save(state_dict, f)
 
@@ -317,26 +314,28 @@ class PreTrain:
         for rate, params in zip(self.ema_rate, self.ema_params):
             save_checkpoint(rate, params)
 
-        if dist.get_rank() == 0:
+        if dist_util.get_rank() == 0:
             with bf.BlobFile(
                 bf.join(self.save_path, f"opt_{self.save_name}.pt"),
                 "wb",
             ) as f:
                 th.save(self.opt.state_dict(), f)
 
-        dist.barrier()
+        dist_util.barrier()
 
 class FineTune:
+    """Fine-tune a diffusion model with classifier guidance."""
+
     def __init__(
         self,
-        args,
-        target,
-        model,
-        diffusion,
-        p_reg,
-        save_path=None,
-        schedule_sampler=None,
-    ):
+        args: object,
+        target: th.nn.Module,
+        model: th.nn.Module,
+        diffusion: object,
+        p_reg: th.Tensor,
+        save_path: Optional[str] = None,
+        schedule_sampler: Optional[LossAwareSampler] = None,
+    ) -> None:
         """Fine-tune the diffusion model with classifier guidance.
 
         Args:
@@ -362,6 +361,7 @@ class FineTune:
         self.model = model.to(dist_util.dev())
         self.diffusion = diffusion
         self.batch_size = args.batch_size
+        self.num_classes = args.num_classes
         self.lr = args.lr
         self.resume_checkpoint = args.resume_checkpoint
         self.save_path = "./" if save_path is None else save_path
@@ -375,7 +375,7 @@ class FineTune:
         self.schedule_sampler = schedule_sampler or UniformSampler(diffusion)
         self.weight_decay = args.weight_decay
 
-        self.global_batch = self.batch_size * dist.get_world_size()
+        self.global_batch = self.batch_size * dist_util.get_world_size()
         self.sync_cuda = th.cuda.is_available()
         self._load_and_sync_parameters()
 
@@ -394,9 +394,10 @@ class FineTune:
             self.mp_trainer_cls.master_params, lr=self.lr, weight_decay=self.weight_decay
         )
 
-        if th.cuda.is_available():
+        use_dist = dist.is_initialized() and dist_util.get_world_size() > 1
+        if th.cuda.is_available() and use_dist:
             self.use_ddp = True
-            self.ddp_model = DDP(
+            self.ddp_model = DistributedDataParallel(
                 self.model,
                 device_ids=[dist_util.dev()],
                 output_device=dist_util.dev(),
@@ -405,7 +406,7 @@ class FineTune:
                 find_unused_parameters=False,
             )
         else:
-            if dist.get_world_size() > 1:
+            if use_dist and not th.cuda.is_available():
                 logger.warn(
                     "Distributed training requires CUDA. "
                     "Gradients will not be synchronized properly!"
@@ -414,8 +415,9 @@ class FineTune:
             self.ddp_model = self.model
 
         # Configuration for dpm_solver
-        b0, bT, timesteps = 1e-4, 2e-2, 1000
-        betas = th.tensor(np.linspace(b0, bT, timesteps), dtype=float)
+        b0, b_t = 1e-4, 2e-2
+        timesteps = getattr(args, "diffusion_steps", 1000)
+        betas = th.tensor(np.linspace(b0, b_t, timesteps), dtype=float)
         self.noise_schedule = NoiseScheduleVP(schedule="discrete", betas=betas)
 
         # Set p_reg for p_reg_loss
@@ -428,21 +430,18 @@ class FineTune:
             kornia.augmentation.RandomRotation(5),
         )
 
-    def _load_and_sync_parameters(self):
+    def _load_and_sync_parameters(self) -> None:
         """Load model parameters from checkpoint and sync across processes."""
 
-        if resume_checkpoint := find_resume_checkpoint() or self.resume_checkpoint:
-            if dist.get_rank() == 0:
-                logger.info(f"loading model from checkpoint: {resume_checkpoint}...")
-                self.model.load_state_dict(
-                    dist_util.load_state_dict(
-                        resume_checkpoint, map_location=dist_util.dev()
-                    )
-                    # , strict=False
-                )
+        resume_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
+        if resume_checkpoint and dist_util.get_rank() == 0:
+            logger.info(f"loading model from checkpoint: {resume_checkpoint}...")
+            self.model.load_state_dict(
+                dist_util.load_state_dict(resume_checkpoint, map_location=dist_util.dev())
+            )
         dist_util.sync_params(self.model.parameters())
 
-    def run(self, guidance_scale=3.0, aug_times=2):
+    def run(self, guidance_scale: float = 3.0, aug_times: int = 2) -> None:
         """Run the fine-tuning loop.
 
         Args:
@@ -456,22 +455,26 @@ class FineTune:
 
         """
 
-        acc, acc_mean, self.best_mean_acc, iter = [], 0.0, 0.0, 0
-        labels = th.tensor(np.arange(0, 300)).to(dist_util.dev())
+        self.best_mean_acc = 0.0
+        acc_mean = 0.0
+        epoch_idx = 0
+        if self.num_classes < 2:
+            raise ValueError("FineTune requires at least one class plus one unconditional label.")
+        labels = th.arange(0, self.num_classes - 1, device=dist_util.dev())
         label_dataset = TensorDataset(labels)
 
-        while (acc_mean < self.threshold):
+        while epoch_idx < self.epochs and acc_mean < self.threshold:
+            acc = []
 
             # Loss aggregation variables
-            _steps_ = 0
             loss_agg = 0.0
             loss1_agg = 0.0
             loss2_agg = 0.0
 
             bar = tqdm(DataLoader(dataset=label_dataset, batch_size=self.batch_size, shuffle=True))
-            for classes in bar:
+            for step_idx, classes in enumerate(bar, start=1):
                 bs = classes[0].shape[0]
-                bar.set_description(f"Epoch {iter}")
+                bar.set_description(f"Epoch {epoch_idx}")
                 self.mp_trainer_cls.zero_grad()
                 model_fn = model_wrapper(
                     self.model,
@@ -479,13 +482,13 @@ class FineTune:
                     model_type="noise",
                     guidance_type="classifier-free",
                     condition=classes[0],
-                    unconditional_condition=th.ones_like(classes[0])*1000,
+                    unconditional_condition=th.full_like(classes[0], fill_value=self.num_classes - 1),
                     guidance_scale=guidance_scale)
                 dpm_solver = DPM_Solver(model_fn, self.noise_schedule, algorithm_type="dpmsolver++")
 
-                x_T = th.randn((bs, 3, 64, 64)).to(dist_util.dev())
+                x_t = th.randn((bs, 3, 64, 64)).to(dist_util.dev())
                 x0_pred_list = dpm_solver.sample(
-                    x_T,
+                    x_t,
                     steps=10,
                     order=2,
                     method="multistep",
@@ -508,40 +511,57 @@ class FineTune:
                 self.mp_trainer_cls.backward(loss)
                 self.mp_trainer_cls.optimize(self.opt_cls)
 
-                acc.append(th.eq(th.topk(logits[-bs * aug_times:], k=1)[1], classes[0].repeat(aug_times).view(-1,1)).float().mean().item())
+                acc.append(
+                    th.eq(
+                        th.topk(logits[-bs * aug_times:], k=1)[1],
+                        classes[0].repeat(aug_times).view(-1, 1),
+                    )
+                    .float()
+                    .mean()
+                    .item()
+                )
 
                 loss_agg += loss.item()
                 loss1_agg += loss1.item()
                 loss2_agg += loss2.item()
 
-                _steps_ += 1
-                bar.set_postfix({"Loss1": f"{loss1_agg/_steps_:.2f}", "Loss2": f"{loss2_agg/_steps_:.2f}", "Loss": f"{loss_agg/_steps_:.2f}"})
-            logger.info(f"Epoch {iter}: loss {loss_agg/len(bar):.4f}, loss1 {loss1_agg/len(bar):.4f}, loss2 {loss2_agg/len(bar):.4f}")
+                bar.set_postfix(
+                    {
+                        "Loss1": f"{loss1_agg/step_idx:.2f}",
+                        "Loss2": f"{loss2_agg/step_idx:.2f}",
+                        "Loss": f"{loss_agg/step_idx:.2f}",
+                    }
+                )
+            logger.info(
+                f"Epoch {epoch_idx}: loss {loss_agg/len(bar):.4f}, "
+                f"loss1 {loss1_agg/len(bar):.4f}, loss2 {loss2_agg/len(bar):.4f}"
+            )
 
             # Save the fine-tuned model
             with th.no_grad():
                 acc_mean = np.mean(acc)
-                logger.info(f"The mean acc in iteration {iter} is {acc_mean:.2%}")
+                logger.info(f"The mean acc in iteration {epoch_idx} is {acc_mean:.2%}")
 
                 if acc_mean > self.best_mean_acc:
                     self.best_mean_acc = acc_mean
                     self.state_dict = self.mp_trainer_cls.master_params_to_state_dict(self.mp_trainer_cls.model_params)
                     self.save()
-                    acc, iter = [], (iter + 1)
-                if iter >= self.epochs:
-                    logger.info(f"Training completed with best mean acc: {self.best_mean_acc:.2%}")
-                    break
+            epoch_idx += 1
 
-    def save(self):
+        logger.info(f"Training completed with best mean acc: {self.best_mean_acc:.2%}")
+
+    def save(self) -> None:
         """Save the fine-tuned diffusion model."""
-
+        if dist_util.get_rank() != 0:
+            return
         filename = f"{self.save_name}.pt"
+        os.makedirs(self.save_path, exist_ok=True)
         with bf.BlobFile(bf.join(self.save_path, filename), "wb") as f:
             th.save(self.state_dict, f)
             logger.info(f"New best mean acc: {self.best_mean_acc:.2%}. Saving model to {f.name}")
 
 
-def generator_from_dataloader(dataloader: DataLoader):
+def generator_from_dataloader(dataloader: DataLoader) -> Iterator:
     """Create a generator that yields batches from a DataLoader indefinitely.
 
     Args:
@@ -556,9 +576,10 @@ def generator_from_dataloader(dataloader: DataLoader):
         for batch in dataloader:
             yield batch
 
-def parse_resume_step_from_filename(filename):
-    """Parse filenames of the form path/to/modelNNNNNN.pt, where NNNNNN is the
-    checkpoint's number of steps.
+def parse_resume_step_from_filename(filename: str) -> int:
+    """Parse filenames of the form path/to/modelNNNNNN.pt.
+
+    NNNNNN is the checkpoint's number of steps.
     """
     split = filename.split("model")
     if len(split) < 2:
@@ -569,13 +590,13 @@ def parse_resume_step_from_filename(filename):
     except ValueError:
         return 0
 
-def find_resume_checkpoint():
+def find_resume_checkpoint() -> Optional[str]:
     """Find the latest checkpoint in the given directory."""
     # Not implemented yet.
     return
 
 
-def find_ema_checkpoint(main_checkpoint, step, rate):
+def find_ema_checkpoint(main_checkpoint: Optional[str], step: int, rate: float) -> Optional[str]:
     """Find the EMA checkpoint corresponding to the main checkpoint, step, and rate."""
 
     if main_checkpoint is None:
@@ -587,7 +608,7 @@ def find_ema_checkpoint(main_checkpoint, step, rate):
     return None
 
 
-def log_loss_dict(diffusion, ts, losses):
+def log_loss_dict(diffusion: object, ts: th.Tensor, losses: dict[str, th.Tensor]) -> dict[str, float]:
     """Log the loss dictionary.
 
     Args:
@@ -604,59 +625,9 @@ def log_loss_dict(diffusion, ts, losses):
 
     loggs = {}
     for key, values in losses.items():
-        # logger.infokv_mean(key, values.mean().item())
         loggs[key] = values.mean().item()
         # Log the quantiles (four quartiles, in particular).
         for sub_t, sub_loss in zip(ts.cpu().numpy(), values.detach().cpu().numpy()):
             quartile = int(4 * sub_t / diffusion.num_timesteps)
-            # logger.infokv_mean(f"{key}_q{quartile}", sub_loss)
             loggs[f"{key}_q{quartile}"] = sub_loss
     return loggs
-
-# def visualize(img, label):
-#     sample = ((img + 1) * 127.5).clamp(0, 255).to(th.uint8)
-#     arr = np.array([i.permute(1, 2, 0).cpu().numpy() for i in sample])
-#     N = min(int(np.sqrt(len(arr))), 4)
-
-#     fig, axes = plt.subplots(N, N, figsize=(4, 4))
-#     plt.subplots_adjust(wspace=0, hspace=0.5)
-
-#     for i in range(N * N):
-#         plt.subplot(N, N, i + 1)
-#         plt.imshow(arr[i])
-#         plt.title(label[i].item())
-#         plt.axis("off")
-
-#     # Save the Matplotlib figure to a BytesIO object
-#     img_bytes = io.BytesIO()
-#     plt.savefig(img_bytes, format="png", bbox_inches="tight", pad_inches=0)
-#     plt.close()
-
-#     # Convert the BytesIO object to a PIL Image
-#     img_pil = Image.open(img_bytes)
-
-#     return img_pil
-
-# def show_images_side_by_side(image1, image2, title1="Reconstructed Images (Diff-MI)", title2="Private Images (Ground-Truth)"):
-#     """Display two PIL images side by side in a Jupyter Notebook.
-
-#     Parameters
-#     ----------
-#     - image1: PIL image object for the first image
-#     - image2: PIL image object for the second image
-#     - title1: Title for the first image (default is 'Image 1')
-#     - title2: Title for the second image (default is 'Image 2')
-
-#     """
-#     fig, axes = plt.subplots(1, 2, figsize=(10, 5))
-
-#     axes[0].imshow(image1)
-#     axes[0].set_title(title1)
-
-#     axes[1].imshow(image2)
-#     axes[1].set_title(title2)
-
-#     for ax in axes:
-#         ax.axis("off")
-
-#     plt.show()

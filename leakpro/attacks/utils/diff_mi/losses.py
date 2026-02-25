@@ -1,14 +1,20 @@
-"""Helpers for various likelihood-based losses. These are ported from the original
-Ho et al. diffusion models codebase:
+"""Helpers for various likelihood-based losses.
+
+Ported from the original Ho et al. diffusion models codebase:
 https://github.com/hojonathanho/diffusion/blob/1e0dceb3b3495bbe19116a5e1b3596cd0706c543/diffusion_tf/utils.py
 """
 
 import numpy as np
 import torch as th
-import torch.nn.functional as F
+from torch.nn import functional
 
 
-def normal_kl(mean1, logvar1, mean2, logvar2):
+def normal_kl(
+    mean1: th.Tensor | float,
+    logvar1: th.Tensor | float,
+    mean2: th.Tensor | float,
+    logvar2: th.Tensor | float,
+) -> th.Tensor:
     """Compute the KL divergence between two gaussians.
 
     Shapes are automatically broadcasted, so batches can be compared to
@@ -37,16 +43,18 @@ def normal_kl(mean1, logvar1, mean2, logvar2):
     )
 
 
-def approx_standard_normal_cdf(x):
-    """A fast approximation of the cumulative distribution function of the
-    standard normal.
-    """
+def approx_standard_normal_cdf(x: th.Tensor) -> th.Tensor:
+    """Approximate the cumulative distribution function of the standard normal."""
     return 0.5 * (1.0 + th.tanh(np.sqrt(2.0 / np.pi) * (x + 0.044715 * th.pow(x, 3))))
 
 
-def discretized_gaussian_log_likelihood(x, *, means, log_scales):
-    """Compute the log-likelihood of a Gaussian distribution discretizing to a
-    given image.
+def discretized_gaussian_log_likelihood(
+    x: th.Tensor,
+    *,
+    means: th.Tensor,
+    log_scales: th.Tensor,
+) -> th.Tensor:
+    """Compute the log-likelihood of a Gaussian distribution discretizing to an image.
 
     :param x: the target images. It is assumed that this was uint8 values,
               rescaled to the range [-1, 1].
@@ -72,7 +80,7 @@ def discretized_gaussian_log_likelihood(x, *, means, log_scales):
     assert log_probs.shape == x.shape
     return log_probs
 
-def topk_loss(out, iden, k):
+def topk_loss(out: th.Tensor, iden: th.Tensor, k: int) -> th.Tensor:
     """Compute the top-k loss.
 
     Args:
@@ -89,17 +97,18 @@ def topk_loss(out, iden, k):
     assert out.shape[0] == iden.shape[0]
     iden = iden.unsqueeze(1)
     real = out.gather(1, iden).squeeze(1)
-    if k == 0: return -1 * real.mean()
+    if k == 0:
+        return -1 * real.mean()
     tmp_out = th.scatter(out, dim=1, index=iden, src=-th.ones_like(iden) * 1000.0)
     margin = th.topk(tmp_out, k=k)[0]
     return -1 * real.mean() + margin.mean()
 
-def p_reg_loss(featureT, classes, p_reg):
+def p_reg_loss(feature_t: th.Tensor, classes: th.Tensor, p_reg: th.Tensor) -> th.Tensor:
     """Compute the p_reg loss.
 
     Args:
     ----
-        featureT (Tensor): The feature tensor.
+        feature_t (Tensor): The feature tensor.
         classes (Tensor): The class indices.
         p_reg (Tensor): The regularization tensor.
 
@@ -109,4 +118,4 @@ def p_reg_loss(featureT, classes, p_reg):
 
     """
     fea_reg = p_reg[classes]
-    return F.mse_loss(featureT, fea_reg)
+    return functional.mse_loss(feature_t, fea_reg)

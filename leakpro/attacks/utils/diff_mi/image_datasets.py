@@ -3,9 +3,15 @@ import random
 
 import blobfile as bf
 import numpy as np
-from mpi4py import MPI
+
+try:
+    from mpi4py import MPI
+except Exception:  # pragma: no cover - optional dependency
+    MPI = None
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
+
+from . import dist_util
 
 
 def load_data(
@@ -45,8 +51,8 @@ def load_data(
         image_size,
         all_files,
         classes=classes,
-        shard=MPI.COMM_WORLD.Get_rank(),
-        num_shards=MPI.COMM_WORLD.Get_size(),
+        shard=dist_util.get_rank(),
+        num_shards=dist_util.get_world_size(),
         random_flip=random_flip,
         transform=transform,
     )

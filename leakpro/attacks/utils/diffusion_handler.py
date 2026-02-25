@@ -130,13 +130,13 @@ class DiffMiHandler():
         if os.path.exists(fine_tune_path):
 
             logger.info(f"Loading fine-tuned diffusion model from {fine_tune_path}")
-            self.diffusion_model.load_state_dict(torch.load(fine_tune_path))
+            self.diffusion_model.load_state_dict(self._safe_torch_load(fine_tune_path))
         else:
             logger.warning("Fine-tuned path not found or doesn't exist")
             logger.info("Loading Pre-trained model to fine-tune...")
             self.get_pretrained()
             self.fine_tune()
-            self.diffusion_model.load_state_dict(torch.load(fine_tune_path))
+            self.diffusion_model.load_state_dict(self._safe_torch_load(fine_tune_path))
         return self.diffusion_model
 
 
@@ -159,11 +159,11 @@ class DiffMiHandler():
 
         if os.path.exists(pre_trained_path):
             logger.info(f"Loading pre-trained diffusion model from {pre_trained_path}")
-            self.diffusion_model.load_state_dict(torch.load(pre_trained_path))
+            self.diffusion_model.load_state_dict(self._safe_torch_load(pre_trained_path))
         else:
             logger.warning("Pre-trained path not found or doesn't exist")
             self.pre_train()
-            self.diffusion_model.load_state_dict(torch.load(pre_trained_path))
+            self.diffusion_model.load_state_dict(self._safe_torch_load(pre_trained_path))
         return self.diffusion_model
 
     def pre_train(self) -> None:
@@ -251,3 +251,11 @@ class DiffMiHandler():
 
         """
         torch.save(diffusion_model.state_dict(), path)
+
+    @staticmethod
+    def _safe_torch_load(path: str) -> dict:
+        """Load state dicts in a version-compatible way with safe defaults."""
+        try:
+            return torch.load(path, map_location="cpu", weights_only=True)
+        except TypeError:
+            return torch.load(path, map_location="cpu")

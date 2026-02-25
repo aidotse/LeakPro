@@ -48,7 +48,7 @@ audit:  # Configurations for auditing
         batch_size: 4
       diffmiattack:
         label_num: 30
-        repeat_N: 30
+        repeat_n: 30
         batch_size: 15
       diffusion:
         # module_path: "./utils/diffusion.py"
@@ -59,7 +59,7 @@ audit:  # Configurations for auditing
     num_class_samples: 1 # Number of samples to generate for each class
     num_audited_classes: 200 # Number of classes to audit
     eval_model:
-      module_path: models.py #"utils/resnet_model.py"
+      module_path: ./models.py #"utils/resnet_model.py"
       model_class: VGG16 #"ResNet152" # Class name of the model
       eval_folder: "./target/resnet152" # Path to the model checkpoint
     metrics:
@@ -75,11 +75,9 @@ audit:  # Configurations for auditing
 
 target:
   # Target model path
-  module_path: models.py #"utils/resnet_model.py"
+  module_path: ./models.py #"utils/resnet_model.py"
   model_class: VGG16 #"ResNet152" 
   # Data paths
   target_folder: "./target/resnet152"
   data_path: "./data/celebA_private_data.pkl"
   public_data_path: "./data/celebA_public_data.pkl"
-
-

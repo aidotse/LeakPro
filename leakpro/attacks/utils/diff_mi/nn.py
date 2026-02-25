@@ -1,26 +1,33 @@
-"""Various utilities for neural networks.
-"""
+"""Various utilities for neural networks."""
 
 import math
+from collections.abc import Callable, Iterable, Sequence
+from typing import Union
 
 import torch as th
 from torch import nn
+from torch.autograd.function import FunctionCtx
 
 
 # PyTorch 1.7 has SiLU, but we support PyTorch 1.5.
 class SiLU(nn.Module):
-    def forward(self, x):
+    """SiLU activation for older PyTorch versions."""
+
+    def forward(self, x: th.Tensor) -> th.Tensor:
+        """Apply the SiLU activation."""
         return x * th.sigmoid(x)
 
 
 class GroupNorm32(nn.GroupNorm):
-    def forward(self, x):
+    """Group normalization that preserves input dtype."""
+
+    def forward(self, x: th.Tensor) -> th.Tensor:
+        """Normalize with float32 and cast back to input dtype."""
         return super().forward(x.float()).type(x.dtype)
 
 
-def conv_nd(dims, *args, **kwargs):
-    """Create a 1D, 2D, or 3D convolution module.
-    """
+def conv_nd(dims: int, *args: object, **kwargs: object) -> nn.Module:
+    """Create a 1D, 2D, or 3D convolution module."""
     if dims == 1:
         return nn.Conv1d(*args, **kwargs)
     if dims == 2:
@@ -30,15 +37,13 @@ def conv_nd(dims, *args, **kwargs):
     raise ValueError(f"unsupported dimensions: {dims}")
 
 
-def linear(*args, **kwargs):
-    """Create a linear module.
-    """
+def linear(*args: object, **kwargs: object) -> nn.Module:
+    """Create a linear module."""
     return nn.Linear(*args, **kwargs)
 
 
-def avg_pool_nd(dims, *args, **kwargs):
-    """Create a 1D, 2D, or 3D average pooling module.
-    """
+def avg_pool_nd(dims: int, *args: object, **kwargs: object) -> nn.Module:
+    """Create a 1D, 2D, or 3D average pooling module."""
     if dims == 1:
         return nn.AvgPool1d(*args, **kwargs)
     if dims == 2:
@@ -48,41 +53,44 @@ def avg_pool_nd(dims, *args, **kwargs):
     raise ValueError(f"unsupported dimensions: {dims}")
 
 
-def update_ema(target_params, source_params, rate=0.99):
-    """Update target parameters to be closer to those of source parameters using
-    an exponential moving average.
+def update_ema(
+    target_params: Iterable[th.Tensor],
+    source_params: Iterable[th.Tensor],
+    rate: float = 0.99,
+) -> None:
+    """Update target parameters using an exponential moving average.
 
-    :param target_params: the target parameter sequence.
-    :param source_params: the source parameter sequence.
-    :param rate: the EMA rate (closer to 1 means slower).
+    Args:
+    ----
+        target_params: Target parameter sequence.
+        source_params: Source parameter sequence.
+        rate: EMA rate (closer to 1 means slower).
+
     """
     for targ, src in zip(target_params, source_params):
         targ.detach().mul_(rate).add_(src, alpha=1 - rate)
 
 
-def zero_module(module):
-    """Zero out the parameters of a module and return it.
-    """
+def zero_module(module: nn.Module) -> nn.Module:
+    """Zero out the parameters of a module and return it."""
     for p in module.parameters():
         p.detach().zero_()
     return module
 
 
-def scale_module(module, scale):
-    """Scale the parameters of a module and return it.
-    """
+def scale_module(module: nn.Module, scale: float) -> nn.Module:
+    """Scale the parameters of a module and return it."""
     for p in module.parameters():
         p.detach().mul_(scale)
     return module
 
 
-def mean_flat(tensor):
-    """Take the mean over all non-batch dimensions.
-    """
+def mean_flat(tensor: th.Tensor) -> th.Tensor:
+    """Take the mean over all non-batch dimensions."""
     return tensor.mean(dim=list(range(1, len(tensor.shape))))
 
 
-def normalization(channels):
+def normalization(channels: int) -> nn.Module:
     """Make a standard normalization layer.
 
     :param channels: number of input channels.
@@ -91,7 +99,7 @@ def normalization(channels):
     return GroupNorm32(32, channels)
 
 
-def timestep_embedding(timesteps, dim, max_period=10000):
+def timestep_embedding(timesteps: th.Tensor, dim: int, max_period: int = 10000) -> th.Tensor:
     """Create sinusoidal timestep embeddings.
 
     :param timesteps: a 1-D Tensor of N indices, one per batch element.
@@ -111,15 +119,21 @@ def timestep_embedding(timesteps, dim, max_period=10000):
     return embedding
 
 
-def checkpoint(func, inputs, params, flag):
-    """Evaluate a function without caching intermediate activations, allowing for
-    reduced memory at the expense of extra compute in the backward pass.
+def checkpoint(
+    func: Callable[..., Union[th.Tensor, tuple[th.Tensor, ...]]],
+    inputs: Sequence[th.Tensor],
+    params: Sequence[th.Tensor],
+    flag: bool,
+) -> Union[th.Tensor, tuple[th.Tensor, ...]]:
+    """Evaluate a function without caching intermediate activations.
 
-    :param func: the function to evaluate.
-    :param inputs: the argument sequence to pass to `func`.
-    :param params: a sequence of parameters `func` depends on but does not
-                   explicitly take as arguments.
-    :param flag: if False, disable gradient checkpointing.
+    Args:
+    ----
+        func: Function to evaluate.
+        inputs: Argument sequence to pass to `func`.
+        params: Parameters `func` depends on but does not take as arguments.
+        flag: If False, disable gradient checkpointing.
+
     """
     if flag:
         args = tuple(inputs) + tuple(params)
@@ -128,17 +142,28 @@ def checkpoint(func, inputs, params, flag):
 
 
 class CheckpointFunction(th.autograd.Function):
+    """Custom autograd function for gradient checkpointing."""
+
     @staticmethod
-    def forward(ctx, run_function, length, *args):
+    def forward(
+        ctx: FunctionCtx,
+        run_function: Callable[..., Union[th.Tensor, tuple[th.Tensor, ...]]],
+        length: int,
+        *args: th.Tensor,
+    ) -> Union[th.Tensor, tuple[th.Tensor, ...]]:
+        """Run the function with inputs, storing context for backward."""
         ctx.run_function = run_function
         ctx.input_tensors = list(args[:length])
         ctx.input_params = list(args[length:])
         with th.no_grad():
-            output_tensors = ctx.run_function(*ctx.input_tensors)
-        return output_tensors
+            return ctx.run_function(*ctx.input_tensors)
 
     @staticmethod
-    def backward(ctx, *output_grads):
+    def backward(
+        ctx: FunctionCtx,
+        *output_grads: th.Tensor,
+    ) -> tuple[th.Tensor | None, ...]:
+        """Recompute forward pass and return gradients."""
         ctx.input_tensors = [x.detach().requires_grad_(True) for x in ctx.input_tensors]
         with th.enable_grad():
             # Fixes a bug where the first op in run_function modifies the

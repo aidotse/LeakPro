@@ -720,7 +720,6 @@ class GaussianDiffusion:
                         )
                         yield out
                         img = out["sample"]
-                visualize(img, iter)
 
     def _vb_terms_bpd(
         self, model, x_start, x_t, t, clip_denoised=True, model_kwargs=None

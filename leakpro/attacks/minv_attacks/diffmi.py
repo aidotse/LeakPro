@@ -1,7 +1,7 @@
 """Implementation of the Diff-Mi attack."""
 import math
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import numpy as np
 import torch
@@ -10,14 +10,14 @@ from tqdm import tqdm
 
 from leakpro.attacks.minv_attacks.abstract_minv import AbstractMINV
 from leakpro.attacks.utils.diff_mi.attack_utils import (
-    Iterative_Reconstruction,
     calc_acc,
     calc_acc_std,
     calc_knn,
     calc_lpips,
     calc_mse,
     calc_pytorch_fid,
-    get_PGD,
+    get_pgd,
+    iterative_reconstruction,
     save_tensor,
 )
 from leakpro.attacks.utils.diff_mi.setup import DiffMiConfig, extract_features, get_p_reg, top_n_pseudo_label_dataset
@@ -32,7 +32,7 @@ from leakpro.utils.save_load import hash_config
 class AttackDiffMi(AbstractMINV):
     """Class that implements the DiffMi attack."""
 
-    def __init__(self: Self, handler: MINVHandler = None, configs: dict = {}) -> None:
+    def __init__(self: Self, handler: MINVHandler, configs: Optional[Dict[str, Any]] = None) -> None:
         """Initialize the Diff-Mi attack.
 
         Args:
@@ -43,6 +43,8 @@ class AttackDiffMi(AbstractMINV):
         """
         logger.info("Configuring Diff-Mi attack")
 
+        if handler is None:
+            raise ValueError("handler must be provided")
         self.output_dir = handler.configs.audit.output_dir if handler.configs.audit.output_dir else "./leakpro_output/"
         self._configs_ = ["preprocessing", "pretrain", "finetune", "diffusion"]
         self._setup_paths_()
@@ -50,18 +52,27 @@ class AttackDiffMi(AbstractMINV):
         configs = self._validate_configs(configs)
         self.config = DiffMiConfig(**configs)
 
+        if self.config.pretrain.save_name is None:
+            self.config.pretrain.save_name = "pretrain"
+        if self.config.finetune.save_name is None:
+            self.config.finetune.save_name = "finetune"
+
         # Get hashes of the configurations. Make sure to do this before setting up paths and other.
         self.hashes = self._hash_configs()
 
         # Alter save_names to include hashes
         if self.config.hash_identifiable:
+            if self.config.pretrain.save_name is None or self.config.finetune.save_name is None:
+                raise ValueError("save_name must be set when hash_identifiable is True")
             logger.info(f"Using pretrain save_name: {self.hashes['pretrain']}")
             self.config.pretrain.save_name += f"_{self.hashes['pretrain']}"
             logger.info(f"Using finetune save_name: {self.hashes['finetune']}")
             self.config.finetune.save_name += f"_{self.hashes['finetune']}"
 
         # Set save path for diffusion models
-        self.config.save_path = self.storage_path
+        if not self.config.save_path:
+            self.config.save_path = self.storage_path
+        os.makedirs(self.config.save_path, exist_ok=True)
 
         # Call the parent class constructor
         super().__init__(handler)
@@ -74,29 +85,32 @@ class AttackDiffMi(AbstractMINV):
         """Setup the attack."""
         logger.info("Setting up AttackDiffMi")
 
-    def _hash_configs(self:Self) -> None:
+    def _hash_configs(self:Self) -> Dict[str, Any]:
         """Hash the configuration parameters."""
         hashes: Dict[str, Any] = {}
         configs = self.config.model_dump()
 
         hashes["attackhash"] = hash_config(configs)
         logger.info("Attack configuration hashed")
-        for k in configs.keys():
-            if isinstance(configs[k], dict):
-                if k in self._configs_:
-                    config_hash = hash_config(configs[k])[:8]
-                    hashes[f"{k}"] = config_hash
-                    logger.info(f"{k} configuration hashed")
+        for k, cfg in configs.items():
+            if isinstance(cfg, dict) and k in self._configs_:
+                config_hash = hash_config(cfg)[:8]
+                hashes[k] = config_hash
+                logger.info(f"{k} configuration hashed")
         if self.config.hash_identifiable:
             logger.info("Attack is hash identifiable.")
 
         return hashes
 
-    def _validate_configs(self:Self, configs) -> None:
+
+    def _validate_configs(self:Self, configs: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """Validate the configuration parameters."""
+        configs = {} if configs is None else configs
         for config in self._configs_:
-            if config not in configs.keys() or not isinstance(configs[config], dict):
+            if config not in configs or not isinstance(configs[config], dict):
                 configs[config] = {}
+        if "diffmiattack" not in configs or not isinstance(configs["diffmiattack"], dict):
+            configs["diffmiattack"] = {}
         return configs
 
     def _setup_paths_(self:Self) -> None:
@@ -147,16 +161,35 @@ class AttackDiffMi(AbstractMINV):
         self.private_dataloader = self.handler.get_private_dataloader(batch_size=self.config.pretrain.batch_size)
         logger.info("Loading private dataloader finished.")
 
-        self.private_features, self.private_idents = extract_features(self.target_model, self.private_dataloader, self.device, save_dir=self.config.save_path)
+        self.private_features, self.private_idents = extract_features(
+            self.target_model,
+            self.private_dataloader,
+            self.device,
+            save_dir=self.config.save_path or self.storage_path,
+        )
         logger.info("Extracted private features from target model.")
 
         # PUBLIC DATASET
         self.public_dataloader = self.handler.get_public_dataloader(batch_size=self.config.pretrain.batch_size)
         logger.info("Loading public dataloader finished.")
 
+        self.num_classes = self.handler.get_num_classes()
+        if self.num_classes < 1:
+            raise ValueError("Target model must expose at least one class for Diff-MI.")
+        model_num_classes = self.num_classes + 1
+        self.config.pretrain.num_classes = model_num_classes
+        self.config.finetune.num_classes = model_num_classes
+        try:
+            sample_batch = next(iter(self.private_dataloader))[0]
+            self.data_channels = int(sample_batch.shape[1])
+            self.data_height = int(sample_batch.shape[2])
+            self.data_width = int(sample_batch.shape[3])
+        except StopIteration as exc:
+            raise ValueError("Private dataloader is empty; cannot run Diff-MI attack.") from exc
+
         # PSEUDO LABELED DATASET
         pseudo_dataset = top_n_pseudo_label_dataset(self.public_dataloader, self.target_model, self.device,
-                                                    num_classes=self.handler.get_num_classes(),
+                                                    num_classes=self.num_classes,
                                                     top_n=self.config.preprocessing.top_n
                                                     )
         logger.info("Pseudo labeled dataset created.")
@@ -170,7 +203,7 @@ class AttackDiffMi(AbstractMINV):
         self.p_reg = get_p_reg(self.public_dataloader, self.target_model, self.device, args=self.config)
         logger.info("Done computing p_reg.")
 
-        self.pgd_model = get_PGD(self.target_model)
+        self.pgd_model = get_pgd(self.target_model)
         logger.info("PGD model for reconstruction set.")
 
         if self.config.do_fine_tune:
@@ -181,17 +214,38 @@ class AttackDiffMi(AbstractMINV):
         else:
             self.diffusion_model = self.diff_handler.get_pretrained().to(device=self.device)
 
-    def reconstruct(self, label_num, repeat_N) -> torch.Tensor:
-
+    def reconstruct(self, label_num: int, repeat_n: int) -> torch.Tensor:
+        """Reconstruct samples for randomly sampled labels."""
         recon_list, success_list, success_label_list = [], [], []
-        labels = torch.cat([torch.randperm(label_num) for _ in range(repeat_N)]).to(self.device)
+        if label_num <= 0:
+            raise ValueError("label_num must be a positive integer.")
+        if repeat_n <= 0:
+            raise ValueError("repeat_n must be a positive integer.")
+        effective_label_num = min(label_num, self.num_classes)
+        if effective_label_num != label_num:
+            logger.warning(
+                f"label_num={label_num} exceeds available classes ({self.num_classes}); "
+                f"using {effective_label_num}."
+            )
+        labels = torch.cat([torch.randperm(effective_label_num) for _ in range(repeat_n)]).to(self.device)
         label_dataset = DataLoader(labels, batch_size=self.config.diffmiattack.batch_size, shuffle=False)
-        batch_num = math.ceil(len(labels) / self.config.diffmiattack.batch_size) - 1
-    
-        for i, classes in tqdm(enumerate(label_dataset), total=len(label_dataset)):
+        _ = math.ceil(len(labels) / self.config.diffmiattack.batch_size) - 1
+
+        for _, classes in tqdm(enumerate(label_dataset), total=len(label_dataset)):
             classes = classes.to(self.device)
-            recon = Iterative_Reconstruction(args=self.config.diffmiattack, diff_net=self.diffusion_model,  classifier=self.target_model, classes=classes,
-                                                        p_reg=self.p_reg, iter=i, batch_num=batch_num, device=self.device).clamp(0,1).to(device=self.device)
+
+            recon = iterative_reconstruction(
+                args=self.config.diffmiattack,
+                diff_net=self.diffusion_model,
+                classifier=self.target_model,
+                classes=classes,
+                p_reg=self.p_reg,
+                device=self.device,
+                diffusion_steps=self.config.pretrain.diffusion_steps,
+                data_channels=self.data_channels,
+                data_height=self.data_height,
+                data_width=self.data_width,
+            ).clamp(0, 1).to(device=self.device)
 
             translated = self.pgd_model(recon, target=classes, **self.config.diffmiattack.pgdconfig.__dict__)[-1].clamp(0,1)
             _, _, idx = calc_acc(self.evaluation_model, translated, classes, with_success=True)
@@ -200,31 +254,46 @@ class AttackDiffMi(AbstractMINV):
             success_list.append(translated[idx])
             success_label_list.append(classes[idx])
 
-        return torch.cat(recon_list), torch.cat(success_list), torch.cat(success_label_list), labels
+        recon = (
+            torch.cat(recon_list)
+            if recon_list
+            else torch.empty(0, self.data_channels, self.data_height, self.data_width, device=self.device)
+        )
+        success = (
+            torch.cat(success_list)
+            if success_list
+            else torch.empty(0, self.data_channels, self.data_height, self.data_width, device=self.device)
+        )
+        success_labels = (
+            torch.cat(success_label_list)
+            if success_label_list
+            else torch.empty(0, dtype=labels.dtype, device=self.device)
+        )
+        return recon, success, success_labels, labels, effective_label_num
 
     def run_attack(self:Self) -> MinvResult:
         """Run the attack."""
         logger.info("Running the Diff-Mi attack")
 
-        recon_list, success_list, success_label_list, labels = self.reconstruct(
+        recon_list, success_list, success_label_list, labels, effective_label_num = self.reconstruct(
                                                             label_num=self.config.diffmiattack.label_num,
-                                                            repeat_N=self.config.diffmiattack.repeat_N
+                                                            repeat_n=self.config.diffmiattack.repeat_n
                                                             )
 
         logger.info("Running reconstruction... ")
 
-        acc1, acc5, var1, var5 = calc_acc_std(recon_list, labels, self.evaluation_model, self.config.diffmiattack.label_num)
+        acc1, acc5, var1, var5 = calc_acc_std(recon_list, labels, self.evaluation_model, effective_label_num)
         logger.info(f"Final Top1: {acc1:.2%} ± {var1:.2%}, Top5: {acc5:.2%} ± {var5:.2%}")
 
         # Save Reconstructed Images
-        logger.info(f"Saved {self.config.diffmiattack.repeat_N}x{self.config.diffmiattack.label_num} generated images.")
+        logger.info(f"Saved {self.config.diffmiattack.repeat_n}x{effective_label_num} generated images.")
 
         recon_path = f"{self.output_dir}/results/Diff-Mi/all_recreated"
-        recon_paths = save_tensor(recon_list, labels, recon_path)
+        save_tensor(recon_list, labels, recon_path)
         logger.info(f"All recreated images saved at: {recon_path}")
 
         success_path = f"{self.output_dir}/results/Diff-Mi/success_recreated"
-        success_paths = save_tensor(success_list, success_label_list, success_path)
+        save_tensor(success_list, success_label_list, success_path)
         logger.info(f"Successful recreated images saved at: {success_path}")
 
         # Calculate additional metrics
@@ -233,20 +302,33 @@ class AttackDiffMi(AbstractMINV):
         avg_mse, mse_per_label, mse_arr, mse_min_fake, mse_min_real = np.nan, [], [], [], []
         fid_value = np.nan
 
-        if self.config.diffmiattack.calc_knn:
+        if self.config.diffmiattack.calc_knn and success_list.shape[0] > 0:
             logger.info("Calculating KNN Distance...")
             knn, knn_arr = calc_knn(success_list, success_label_list,
                      private_feats=self.private_features,
                      private_idents=self.private_idents,
-                     evaluation_model=self.evaluation_model, device=self.device)
+                     evaluation_model=self.evaluation_model,
+                     device=self.device,
+                     dims=(self.data_height, self.data_width)
+                     )
             logger.info(f"KNN Dist computed on {success_list.shape[0]} attack samples: {knn:.2f}")
+        elif self.config.diffmiattack.calc_knn:
+            logger.warning("Skipping KNN calculation because no successful reconstructions were produced.")
 
-        if self.config.diffmiattack.calc_lpips:
+        if self.config.diffmiattack.calc_lpips and success_list.shape[0] > 0:
             logger.info("Calculating LPIPS...")
-            value_a, value_v = calc_lpips(private_data=self.private_dataloader, fakes=success_list, fake_targets=success_label_list, anno="", device="cuda")
+            value_a, value_v = calc_lpips(
+                private_data=self.private_dataloader,
+                fakes=success_list,
+                fake_targets=success_label_list,
+                anno="",
+                device=self.device,
+            )
             logger.info(f"LPIPS Alex: {value_a:.4f}, VGG: {value_v:.4f}")
+        elif self.config.diffmiattack.calc_lpips:
+            logger.warning("Skipping LPIPS calculation because no successful reconstructions were produced.")
 
-        if self.config.diffmiattack.calc_mse:
+        if self.config.diffmiattack.calc_mse and success_list.shape[0] > 0:
             logger.info("Calculating MSE...")
             avg_mse, mse_per_label, mse_arr, mse_min_fake, mse_min_real = calc_mse(
                 private_data=self.private_dataloader,
@@ -255,10 +337,12 @@ class AttackDiffMi(AbstractMINV):
                 device=self.device,
             )
             logger.info(f"Average MSE: {avg_mse:.4f}")
+        elif self.config.diffmiattack.calc_mse:
+            logger.warning("Skipping MSE calculation because no successful reconstructions were produced.")
 
         if self.config.diffmiattack.calc_fid:
             logger.info("Calculating FID...")
-            fid_value = calc_pytorch_fid(recon_list, self.private_dataloader)
+            fid_value = calc_pytorch_fid(recon_list, self.private_dataloader, device=self.device)
             logger.info(f"FID score: {fid_value:.2f}")
 
         return MinvResult.from_metrics(
@@ -280,9 +364,10 @@ class AttackDiffMi(AbstractMINV):
     def get_attack_state(self: Self) -> Dict[str, Any]:
         """Return the attack state with all initialized instance variables.
 
-        Returns:
+        Returns
         -------
             Dict[str, Any]: Dictionary containing all initialized attack state variables.
+
         """
         state = {
             "config": self.config,
@@ -292,31 +377,22 @@ class AttackDiffMi(AbstractMINV):
             "device": self.device,
             "diff_handler": self.diff_handler,
         }
-        
-        # Add variables that may be set during prepare_attack()
-        if hasattr(self, "target_model"):
-            state["target_model"] = self.target_model
-        if hasattr(self, "evaluation_model"):
-            state["evaluation_model"] = self.evaluation_model
-        if hasattr(self, "diffusion_model"):
-            state["diffusion_model"] = self.diffusion_model
-        if hasattr(self, "private_dataloader"):
-            state["private_dataloader"] = self.private_dataloader
-        if hasattr(self, "public_dataloader"):
-            state["public_dataloader"] = self.public_dataloader
-        if hasattr(self, "pseudo_dataloader"):
-            state["pseudo_dataloader"] = self.pseudo_dataloader
-        if hasattr(self, "private_features"):
-            state["private_features"] = self.private_features
-        if hasattr(self, "private_idents"):
-            state["private_idents"] = self.private_idents
-        if hasattr(self, "p_reg"):
-            state["p_reg"] = self.p_reg
-        
-        # Add variables that may be set during run_attack()
-        if hasattr(self, "pgd_model"):
-            state["pgd_model"] = self.pgd_model
-            
+        optional_attrs = (
+            "target_model",
+            "evaluation_model",
+            "diffusion_model",
+            "private_dataloader",
+            "public_dataloader",
+            "pseudo_dataloader",
+            "private_features",
+            "private_idents",
+            "p_reg",
+            "pgd_model",
+        )
+        for attr_name in optional_attrs:
+            if hasattr(self, attr_name):
+                state[attr_name] = getattr(self, attr_name)
+
         return state
 
     @classmethod
@@ -331,6 +407,7 @@ class AttackDiffMi(AbstractMINV):
         Returns:
         -------
             AttackDiffMi: The Diff-Mi attack object.
+
         """
         assert isinstance(handler, MINVHandler), "Handler must be an instance of MINVHandler"
         assert isinstance(configs, dict), "Configs must be a dictionary"

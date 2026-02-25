@@ -1,9 +1,9 @@
 """Utilities for creating diffusion processes that skip steps."""
 
+from typing import Union
+
 import numpy as np
 import torch as th
-
-from leakpro.utils.typing import Union
 
 from .gaussian_diffusion import GaussianDiffusion
 
@@ -111,7 +111,7 @@ class SpacedDiffusion(GaussianDiffusion):
 
         return super().condition_score(self._wrap_model(cond_fn), *args, **kwargs)
 
-    def _wrap_model(self, model: th.nn.Module) -> _WrappedModel: # noqa: F821
+    def _wrap_model(self, model: th.nn.Module):
         """Wrap the model to remap the timesteps according to the new diffusion process."""
 
         if isinstance(model, _WrappedModel):

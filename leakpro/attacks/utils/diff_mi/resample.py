@@ -7,6 +7,8 @@ import torch.distributed as dist
 
 from leakpro.attacks.utils.diff_mi.respace import SpacedDiffusion
 
+from . import dist_util
+
 
 def create_named_schedule_sampler(name: str, diffusion: SpacedDiffusion) -> ABC:
     """Create a ScheduleSampler from a library of pre-defined samplers.
@@ -81,9 +83,14 @@ class LossAwareSampler(ScheduleSampler):
         :param local_ts: an integer Tensor of timesteps.
         :param local_losses: a 1D Tensor of losses.
         """
+
+        if not dist.is_initialized():
+            self.update_with_all_losses(local_ts.tolist(), local_losses.tolist())
+            return
+
         batch_sizes = [
             th.tensor([0], dtype=th.int32, device=local_ts.device)
-            for _ in range(dist.get_world_size())
+            for _ in range(dist_util.get_world_size())
         ]
         dist.all_gather(
             batch_sizes,
@@ -131,7 +138,7 @@ class LossSecondMomentResampler(LossAwareSampler):
         self._loss_history = np.zeros(
             [diffusion.num_timesteps, history_per_term], dtype=np.float64
         )
-        self._loss_counts = np.zeros([diffusion.num_timesteps], dtype=np.int)
+        self._loss_counts = np.zeros([diffusion.num_timesteps], dtype=np.int64)
 
     def weights(self) -> np.ndarray:
         """Get weights based on the second moment of the loss."""
