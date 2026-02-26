@@ -7,10 +7,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.metrics import auc
 
-from leakpro.reporting.report_utils import get_config_name, reduce_to_unique_labels
+from leakpro.reporting.report_utils import reduce_to_unique_labels
 from leakpro.schemas import MIAResultSchema
 from leakpro.utils.import_helper import Any, Self, Union
 from leakpro.utils.logger import logger
+from leakpro.utils.save_load import hash_config
 
 
 class MIAResult:
@@ -136,17 +137,18 @@ class MIAResult:
         self.true = np.ravel(true_membership)
         self.result_name = result_name
         self.metadata = metadata
-        result_config = self._safe_model_dump(self.metadata)
-        readable_name = get_config_name(result_config) # concatenate config params to name
-        self.id = f"{self.result_name}{readable_name}".replace("/", "__")
+        self.result_config = self._safe_model_dump(self.metadata)
+
+        # Generate a unique hash for the result based on its configuration.
+        hased_config = hash_config(self.result_config)[:16]
+        logger.info(f"Generated hash for {self.result_name} MIAResult config: {hased_config} with config: {self.result_config}")
+        self.id = f"{self.result_name}-{hased_config}"
 
     def _make_result_object(self) -> MIAResultSchema:
         return MIAResultSchema(
             result_name = self.result_name,
             result_type = self.__class__.__name__,
             id = self.id,
-            tpr = self.tpr,
-            fpr = self.fpr,
             roc_auc = self.roc_auc,
             accuracy = self.accuracy,
             config = self.metadata,
@@ -157,6 +159,8 @@ class MIAResult:
             fp = self.fp,
             tn = self.tn,
             fn = self.fn,
+            tpr = self.tpr,
+            fpr = self.fpr,
         )
 
     def _compute_confusion_arrays(self) -> None:
@@ -308,6 +312,10 @@ class MIAResult:
         # Store results for user output
         with open(f"{save_path}/result.txt", "w") as f:
             f.write(str(self.result.model_dump()))
+
+        # Store config as JSON
+        with open(f"{save_path}/config.json", "w") as f:
+            json.dump(self.result.model_dump()['config'], f, default=json_fallback)
 
         # Create ROC plot
         if self._has_roc():

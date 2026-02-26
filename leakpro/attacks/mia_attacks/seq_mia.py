@@ -241,7 +241,7 @@ class AttackSeqMIA(AbstractMIA):
             with open(f"{self.storage_dir}/{dataset_name}", "rb") as file:
                 data = pickle.load(file)  # noqa: S301
         else:
-            data = self.prepare_mia_data(data_indices,
+            data = self._prepare_mia_data(data_indices,
                                           student_model,
                                           teacher_model,
                                           dataset_name)
@@ -258,7 +258,7 @@ class AttackSeqMIA(AbstractMIA):
         else:
             self.mia_test_data_loader = DataLoader(mia_dataset, batch_size=self.train_mia_batch_size, shuffle=True)
 
-    def prepare_mia_data(self:Self,
+    def _prepare_mia_data(self:Self,
                         data_indices: np.ndarray,
                         distill_model: nn.Module,
                         teacher_model: nn.Module,
@@ -362,7 +362,6 @@ class AttackSeqMIA(AbstractMIA):
 
         return {"model_trajectory": model_trajectory}
 
-    # --- FIX: Renamed function to train_seqmia_classifier to avoid collision ---
     def train_seqmia_classifier(self:Self)-> nn.Module:
         """"Trains and returns the MIA (Membership Inference Attack) classifier.
 
