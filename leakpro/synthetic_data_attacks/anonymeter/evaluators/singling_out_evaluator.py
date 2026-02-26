@@ -332,8 +332,9 @@ def main_singling_out_attack(
 
 def convert_df_numerical_columns_to_categories_with_threshold(*, df: pd.DataFrame, threshold: int) -> pd.DataFrame:
     """Convert numerical columns in `df` to categorical dtype when the number of unique non-null values is <= threshold.
-    
-    Returns a (shallow) copy of `df` with the converted columns."""
+
+    Returns a (shallow) copy of `df` with the converted columns.
+    """
     df = df.copy()
     for col in df.columns:
         if pd.api.types.is_numeric_dtype(df[col]) and (df[col].nunique(dropna=True) <= threshold):
