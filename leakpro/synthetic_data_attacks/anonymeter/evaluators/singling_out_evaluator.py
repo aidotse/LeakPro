@@ -330,11 +330,15 @@ def main_singling_out_attack(
         )
     return UniqueSinglingOutQueries(df=ori).evaluate_queries(queries=queries)
 
-def convert_df_numerical_columns_to_categories_with_threshold(*, df: pd.DataFrame, threshold: int) -> None:
-    """Auxiliary function that converts numerical columns in a DataFrame to categories, if number of unique values are lower than threshold.""" # noqa: E501
+def convert_df_numerical_columns_to_categories_with_threshold(*, df: pd.DataFrame, threshold: int) -> pd.DataFrame:
+    """Convert numerical columns in `df` to categorical dtype when the number of unique non-null values is <= threshold.
+    
+    Returns a (shallow) copy of `df` with the converted columns."""
+    df = df.copy()
     for col in df.columns:
-        if pd.api.types.is_numeric_dtype(df[col]) and (df[col].nunique() <= threshold):
-            df[col] = df[col].astype("category")
+        if pd.api.types.is_numeric_dtype(df[col]) and (df[col].nunique(dropna=True) <= threshold):
+            df.loc[:, col] = df[col].astype("category")
+    return df
 
 class SinglingOutEvaluator(BaseModel):
     """Measure the singling-out risk created by a synthetic dataset.
@@ -399,8 +403,8 @@ class SinglingOutEvaluator(BaseModel):
         self.ori = self.ori.drop_duplicates()
         self.syn = self.syn.drop_duplicates()
         # Convert numeric columns with low unique counts (<= categorical_threshold) to categorical
-        for df in [self.ori, self.syn]:
-            convert_df_numerical_columns_to_categories_with_threshold(df=df, threshold=self.categorical_threshold)
+        self.ori = convert_df_numerical_columns_to_categories_with_threshold(df=self.ori, threshold=self.categorical_threshold)
+        self.syn = convert_df_numerical_columns_to_categories_with_threshold(df=self.syn, threshold=self.categorical_threshold)
 
     def evaluate(self: Self) -> EvaluationResults:
         """Run the singling-out attacks (main and naive) and set and return results."""
