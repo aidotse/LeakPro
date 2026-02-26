@@ -315,7 +315,7 @@ class MIAResult:
 
         # Store config as JSON
         with open(f"{save_path}/config.json", "w") as f:
-            json.dump(self.result.model_dump()['config'], f, default=json_fallback)
+            json.dump(self.result.model_dump()["config"], f, default=json_fallback)
 
         # Create ROC plot
         if self._has_roc():
