@@ -126,17 +126,18 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
         in_member_indices = self.audit_dataset["in_members"]
         out_member_indices = self.audit_dataset["out_members"]
 
-        audit_in_member_indicies = np.random.choice(in_member_indices,
+        self.audit_in_member_indicies = np.random.choice(in_member_indices,
                                               int(len(in_member_indices) * self.attack_data_fraction),
                                                 replace=False)
 
-        audit_out_member_indicies = np.random.choice(out_member_indices,
+        self.audit_out_member_indicies = np.random.choice(out_member_indices,
                                                 int(len(out_member_indices) * self.attack_data_fraction),
                                                 replace=False)
-        audit_indices = np.concatenate((audit_in_member_indicies, audit_out_member_indicies))
+        audit_indices = np.concatenate((self.audit_in_member_indicies, self.audit_out_member_indicies))
+
         assert len(audit_indices) >= self.batch_size , "The batch size must be greater than the number of audit indices"
 
-        self.attack_dataloader = self.handler.get_dataloader(audit_indices, batch_size=self.batch_size)
+        self.attack_dataloader = self.handler.get_dataloader(audit_indices, batch_size=self.batch_size, shuffle=False)
 
 
 
@@ -173,7 +174,7 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
 
         # set true labels for being in the training dataset
         true_labels = np.concatenate(
-            [np.ones(len(self.audit_dataset["in_members"])), np.zeros(len(self.audit_dataset["out_members"]))]
+            [np.ones(len(self.audit_in_member_indicies)), np.zeros(len(self.audit_out_member_indicies))]
         )
 
         print(true_labels.shape, perturbation_distances.shape)
