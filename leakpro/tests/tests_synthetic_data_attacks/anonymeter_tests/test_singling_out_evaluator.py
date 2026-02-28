@@ -360,7 +360,7 @@ def test_SinglingOutEvaluator(n_cols: int) -> None: # noqa: N802
     assert soe.n_cols == n_cols
     assert soe.n_attacks == 5
     assert soe.confidence_level == 0.95
-    assert soe.categorical_threshold == 20
+    assert soe.categorical_threshold == 2
     assert soe.max_attempts == 10_000_000
     assert soe.main_queries is None
     assert soe.naive_queries is None
@@ -373,3 +373,24 @@ def test_SinglingOutEvaluator(n_cols: int) -> None: # noqa: N802
     for q in soe.main_queries.queries:
         assert len(singl_ev.safe_query_elements(query=q, df=ori)) == 1
         assert len(singl_ev.safe_query_elements(query=q, df=syn)) == 1
+
+def test_num_2_col() -> None:
+    """Assert numerical columns with <=2 unique values are converted to categorical in SinglingOutEvaluator."""
+    df = pd.DataFrame(
+        {
+            "num2": [1, 1, 2, 2],
+            "num3": [1, 2, 3, 4],
+        }
+    )
+    soe = singl_ev.SinglingOutEvaluator(
+        ori=df,
+        syn=df,
+        n_cols=1,
+        n_attacks=1,
+        categorical_threshold=2,
+        numerical_to_categorical=True,
+    )
+    for dataset in (soe.ori, soe.syn):
+        assert dataset["num2"].dtype.name == "category"
+        assert dataset["num2"].dtype.categories.dtype == "int64"
+        assert pd.api.types.is_integer_dtype(dataset["num3"].dtype)
