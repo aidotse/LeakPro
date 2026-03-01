@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import sys
 import traceback
+import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Union
 
@@ -122,6 +124,9 @@ class TerminalApp:
             ),
         )
         self.flow = cifar_mia_flow()
+        self.session_dir = Path.home() / ".leakpro_sessions"
+        self.session_dir.mkdir(parents=True, exist_ok=True)
+        self.session_id: str | None = None
 
     def enable_auto_mode(self) -> None:
         """Enable non-interactive auto mode with default answers."""
@@ -209,6 +214,10 @@ class TerminalApp:
     def run(self) -> None:
         self.print_banner()
         completed: set[int] = set()
+        state = self._load_or_create_session()
+        if state:
+            completed = set(state.get("completed", []))
+            self._apply_state(state)
         tasks: dict[int, list[Step]] = {
             1: [ConfigurePathsStep()],
             2: [PreparePopulationStep()],
@@ -235,6 +244,10 @@ class TerminalApp:
                     self.io.warning("Complete tasks 1-3 before running the audit.")
                     continue
                 if self._run_box_steps([audit_step]):
+                    completed.add(5)
+                    self._save_state(completed)
+                    self.io.print()
+                    self._render_menu_boxes(completed)
                     break
                 continue
 
@@ -242,6 +255,7 @@ class TerminalApp:
                 task_id = int(choice)
                 if self._run_box_steps(tasks[task_id]):
                     completed.add(task_id)
+                    self._save_state(completed)
                 continue
 
             self.io.warning("Invalid selection.")
@@ -257,6 +271,61 @@ class TerminalApp:
                 self.io.print(f"  - {result}")
 
         self.io.print("\nThank you for using LeakPro!")
+
+    def _session_summary(self, state: dict) -> str:
+        base_dir = state.get("base_dir", "")
+        completed = state.get("completed", [])
+        return f"{state.get('session_id', '')} | {base_dir} | completed: {completed}"
+
+    def _load_or_create_session(self) -> dict | None:
+        sessions = sorted(self.session_dir.glob("session_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if sessions:
+            self.io.print("\nAvailable sessions (most recent first):")
+            for idx, path in enumerate(sessions, 1):
+                try:
+                    data = json.loads(path.read_text())
+                    self.io.print(f"  {idx}. {self._session_summary(data)}")
+                except Exception:
+                    self.io.print(f"  {idx}. {path.name} (corrupt)")
+            choice = self.io.ask("Select a session number or 'new'", default="new").strip().lower()
+            if choice != "new" and choice.isdigit():
+                index = int(choice) - 1
+                if 0 <= index < len(sessions):
+                    try:
+                        data = json.loads(sessions[index].read_text())
+                        self.session_id = data.get("session_id")
+                        return data
+                    except Exception:
+                        self.io.warning("Failed to load session; starting new.")
+        self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self._save_state(set())
+        return None
+
+    def _save_state(self, completed: set[int]) -> None:
+        state = {
+            "session_id": self.session_id,
+            "base_dir": str(self.context.base_dir),
+            "paths": {
+                "train_config": str(self.context.paths.train_config),
+                "audit_config": str(self.context.paths.audit_config),
+            },
+            "train_config_snapshot": self.context.train_config,
+            "audit_config_snapshot": self.context.audit_config,
+            "dataset_path": str(self.context.dataset_path) if self.context.dataset_path else None,
+            "completed": sorted(list(completed)),
+        }
+        path = self.session_dir / f"session_{self.session_id}.json"
+        path.write_text(json.dumps(state, indent=2))
+
+    def _apply_state(self, state: dict) -> None:
+        self.context.base_dir = Path(state.get("base_dir", self.context.base_dir))
+        paths = state.get("paths", {})
+        self.context.paths.train_config = Path(paths.get("train_config", self.context.paths.train_config))
+        self.context.paths.audit_config = Path(paths.get("audit_config", self.context.paths.audit_config))
+        self.context.train_config = state.get("train_config_snapshot")
+        self.context.audit_config = state.get("audit_config_snapshot")
+        dataset_path = state.get("dataset_path")
+        self.context.dataset_path = Path(dataset_path) if dataset_path else None
 
     def run_auto(self) -> bool:
         """Run the entire workflow non-interactively."""

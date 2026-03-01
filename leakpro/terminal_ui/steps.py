@@ -225,9 +225,6 @@ class ConfigurePathsStep(Step):
         from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
 
         available = AttackFactoryMIA.attack_classes
-        attack_list = audit_config.get("audit", {}).get("attack_list", [])
-        configured = {a.get("attack"): a for a in attack_list if isinstance(a, dict)}
-        attack_list = []
 
         io.print("\nAvailable attacks:")
         attack_names = sorted(available.keys())
@@ -258,7 +255,7 @@ class ConfigurePathsStep(Step):
         for idx in selected_indices:
             name = attack_names[idx - 1]
             default_dict = self._get_attack_default_dict(available[name])
-            attack = configured.get(name) or {"attack": name, **default_dict}
+            attack = {"attack": name, **default_dict}
             self._print_attack_summary(io, attack, idx)
             if io.ask_yes_no("Edit this attack's configuration?", default=False):
                 attack = self._edit_attack_config(io, dict(attack))
@@ -490,7 +487,19 @@ class RunAuditStep(Step):
                 yaml.dump(context.audit_config, f)
 
         create_pdf = io.ask_yes_no("Create PDF report?", default=True)
-        context.audit_results = api.run_audit(context.paths.audit_config, create_pdf=create_pdf)
+        results, report_dir = api.run_audit(context.paths.audit_config, create_pdf=create_pdf)
+        context.audit_results = results
+        io.print(f"Results saved to: {report_dir}")
+        for res in results:
+            roc_path = report_dir / "results" / res.id / "ROC.png"
+            if roc_path.exists():
+                io.print(f"ROC curve: {roc_path}")
+                try:
+                    from PIL import Image
+
+                    Image.open(roc_path).show()
+                except Exception:
+                    io.warning("Could not display ROC image; open the file manually.")
         return StepResult("done", "Audit completed")
 
 

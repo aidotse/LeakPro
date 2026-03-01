@@ -281,7 +281,7 @@ class CifarMIAApi:
 
         return {"metadata": meta_data, "metadata_path": metadata_path}
 
-    def run_audit(self, audit_config_path: Path, create_pdf: bool = True) -> list[Any]:
+    def run_audit(self, audit_config_path: Path, create_pdf: bool = True) -> tuple[list[Any], Path]:
         import yaml
 
         from leakpro import LeakPro
@@ -307,7 +307,8 @@ class CifarMIAApi:
 
         try:
             leakpro = LeakPro(CifarInputHandler, str(resolved_audit_path))
-            return leakpro.run_audit(create_pdf=create_pdf)
+            results = leakpro.run_audit(create_pdf=create_pdf)
+            return results, Path(leakpro.report_dir)
         finally:
             with resolved_audit_path.open("w") as f:
                 yaml.dump(audit_config, f)
