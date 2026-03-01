@@ -38,9 +38,9 @@ class AbstractMIA(AbstractAttack):
     AttackConfig: type[BaseModel]  # Subclasses must define an attack config
 
     def __init__(
-        self:Self,
+        self: Self,
         handler: AbstractInputHandler,
-    )->None:
+    ) -> None:
         """Initialize the AttackAbstract class.
 
         Args:
@@ -63,7 +63,7 @@ class AbstractMIA(AbstractAttack):
             # in_members will be an array from 0 to the number of training indices - 1
             "in_members": np.arange(len(handler.train_indices)),
             # out_members will start after the last training index and go up to the number of test indices - 1
-            "out_members": np.arange(len(handler.train_indices),len(handler.train_indices)+len(handler.test_indices)),
+            "out_members": np.arange(len(handler.train_indices), len(handler.train_indices) + len(handler.test_indices)),
         }
         AbstractMIA.handler = handler
         self._validate_shared_quantities()
@@ -74,7 +74,7 @@ class AbstractMIA(AbstractAttack):
         # Create an ID for the attack based on config + target model
         self._hash_attack()
 
-    def _hash_attack(self:Self)->None:
+    def _hash_attack(self: Self) -> None:
         """Hash the attack based on the config and target model."""
         self.attack_id = hash_attack(self.configs.model_dump(), AbstractMIA.handler.target_model)
 
@@ -91,9 +91,13 @@ class AbstractMIA(AbstractAttack):
             ValueError: If the attack type is unknown.
 
         """
-        return cls.Config()
+        if hasattr(cls, "AttackConfig"):
+            return cls.AttackConfig()
+        if hasattr(cls, "Config"):
+            return cls.Config()
+        raise ValueError(f"{cls.__name__} does not define an attack config class")
 
-    def _validate_shared_quantities(self:Self)->None:
+    def _validate_shared_quantities(self: Self) -> None:
         """Validate the shared quantities used by the attack."""
         if AbstractMIA.population is None:
             raise ValueError("Population dataset not found.")
@@ -113,10 +117,7 @@ class AbstractMIA(AbstractAttack):
             raise ValueError("Audit dataset is larger than the entire population dataset.")
 
     def sample_indices_from_population(
-        self:Self,
-        *,
-        include_train_indices: bool = False,
-        include_test_indices: bool = False
+        self: Self, *, include_train_indices: bool = False, include_test_indices: bool = False
     ) -> np.ndarray:
         """Function to get attack data indices from the population.
 
@@ -143,8 +144,7 @@ class AbstractMIA(AbstractAttack):
         data_size = len(available_index)
         return np.random.choice(available_index, data_size, replace=False)
 
-
-    def get_dataloader(self:Self, data:np.ndarray, batch_size:int=None)->DataLoader:
+    def get_dataloader(self: Self, data: np.ndarray, batch_size: int = None) -> DataLoader:
         """Function to get a dataloader from the dataset.
 
         Args:
@@ -158,10 +158,10 @@ class AbstractMIA(AbstractAttack):
 
         """
         if batch_size is None:
-            return self.handler.get_dataloader(dataset_indices = data)
-        return self.handler.get_dataloader(dataset_indices = data, batch_size = batch_size)
+            return self.handler.get_dataloader(dataset_indices=data)
+        return self.handler.get_dataloader(dataset_indices=data, batch_size=batch_size)
 
-    def sample_data_from_dataset(self:Self, data:np.ndarray, size:int)->DataLoader:
+    def sample_data_from_dataset(self: Self, data: np.ndarray, size: int) -> DataLoader:
         """Function to sample from the dataset.
 
         Args:
@@ -178,8 +178,7 @@ class AbstractMIA(AbstractAttack):
             raise ValueError("Size of the sample is greater than the size of the data.")
         return self.get_dataloader(np.random.choice(data, size, replace=False))
 
-
-    def run_with_optuna(self:Self, optuna_config: Optional[OptunaConfig] = None) -> optuna.study.Study:
+    def run_with_optuna(self: Self, optuna_config: Optional[OptunaConfig] = None) -> optuna.study.Study:
         """Finds optimal hyperparameters using optuna."""
         if optuna_config is None:
             # Use default valiues for config
@@ -191,7 +190,7 @@ class AbstractMIA(AbstractAttack):
         optuna_config.objective = objective
         return optuna_optimal_hyperparameters(self, optuna_config)
 
-    def suggest_parameters(self:Self, trial: Trial) -> BaseModel:
+    def suggest_parameters(self: Self, trial: Trial) -> BaseModel:
         """Update the given config with suggested parameters from the trial."""
         suggestions = {}
         for field_name, field in self.configs.model_fields.items():
@@ -209,48 +208,38 @@ class AbstractMIA(AbstractAttack):
             param_type = opt_variable.get("type")
             if param_type == "float":
                 suggestions[field_name] = trial.suggest_float(
-                    field_name,
-                    opt_variable["low"],
-                    opt_variable["high"],
-                    log=opt_variable.get("log", False)
+                    field_name, opt_variable["low"], opt_variable["high"], log=opt_variable.get("log", False)
                 )
             elif param_type == "int":
-                suggestions[field_name] = trial.suggest_int(
-                    field_name,
-                    opt_variable["low"],
-                    opt_variable["high"]
-                )
+                suggestions[field_name] = trial.suggest_int(field_name, opt_variable["low"], opt_variable["high"])
             elif param_type == "categorical":
-                suggestions[field_name] = trial.suggest_categorical(
-                    field_name,
-                    opt_variable["choices"]
-                )
+                suggestions[field_name] = trial.suggest_categorical(field_name, opt_variable["choices"])
             else:
                 raise ValueError(f"Unsupported parameter type: {param_type}")
 
         return self.configs.model_copy(update=suggestions)
 
-    def set_effective_optuna_metadata(self:Self, user_attack_config: dict) -> int:
+    def set_effective_optuna_metadata(self: Self, user_attack_config: dict) -> int:
         """Set the parameters to be optimized by optuna."""
 
         # Create default config
         self.optuna_params = 0
-        attack_config = self.configs.model_fields.items() # Read out default configs for attack as a dict
+        attack_config = self.configs.model_fields.items()  # Read out default configs for attack as a dict
         for field_name, field in attack_config:
             extra = field.json_schema_extra
             if extra is None or "optuna" not in extra:
                 continue
 
-            self.optuna_params += 1 # one more parameter to be optimized
+            self.optuna_params += 1  # one more parameter to be optimized
 
             user_provided_value = user_attack_config.get(field_name)
             # remove the optuna dict to prevent the parameter to get optimized if the user has provided a value
             if user_provided_value is not None:
                 self.configs.model_fields[field_name].json_schema_extra = None
-                self.optuna_params -= 1 # remove one parameter going into optuna
+                self.optuna_params -= 1  # remove one parameter going into optuna
                 logger.info(f"User provided value for {field_name}, it won't be optimized by optuna.")
 
-    def _filter_audit_data_for_online_attack(self:Self, shadow_model_indices:list[int])->None:
+    def _filter_audit_data_for_online_attack(self: Self, shadow_model_indices: list[int]) -> None:
         """Filter the audit data for online attacks."""
 
         if not self.online:
@@ -283,7 +272,7 @@ class AbstractMIA(AbstractAttack):
         return audit_data_indices, in_members, out_members
 
     @property
-    def population(self:Self)-> List:
+    def population(self: Self) -> List:
         """Get the population used for the attack.
 
         Returns
@@ -294,7 +283,7 @@ class AbstractMIA(AbstractAttack):
         return AbstractMIA.population
 
     @property
-    def population_size(self:Self)-> int:
+    def population_size(self: Self) -> int:
         """Get the size of the population used for the attack.
 
         Returns
@@ -305,7 +294,7 @@ class AbstractMIA(AbstractAttack):
         return AbstractMIA.population_size
 
     @property
-    def target_model(self:Self)-> Union[Self, List[Self] ]:
+    def target_model(self: Self) -> Union[Self, List[Self]]:
         """Get the target model used for the attack.
 
         Returns
@@ -316,7 +305,7 @@ class AbstractMIA(AbstractAttack):
         return AbstractMIA.target_model
 
     @property
-    def audit_dataset(self:Self)-> Self:
+    def audit_dataset(self: Self) -> Self:
         """Get the audit dataset used for the attack.
 
         Returns
@@ -327,7 +316,7 @@ class AbstractMIA(AbstractAttack):
         return AbstractMIA.audit_dataset
 
     @property
-    def train_indices(self:Self)-> np.ndarray:
+    def train_indices(self: Self) -> np.ndarray:
         """Get the training indices of the audit dataset.
 
         Returns
@@ -337,9 +326,8 @@ class AbstractMIA(AbstractAttack):
         """
         return AbstractMIA.audit_dataset["in_members"]
 
-
     @property
-    def test_indices(self:Self)-> np.ndarray:
+    def test_indices(self: Self) -> np.ndarray:
         """Get the test indices of the audit dataset.
 
         Returns
@@ -350,7 +338,7 @@ class AbstractMIA(AbstractAttack):
         return AbstractMIA.audit_dataset["out_members"]
 
     @property
-    def audit_size(self:Self)-> int:
+    def audit_size(self: Self) -> int:
         """Get the size of the audit dataset.
 
         Returns
@@ -361,7 +349,7 @@ class AbstractMIA(AbstractAttack):
         return len(AbstractMIA.audit_dataset["data"])
 
     @abstractmethod
-    def description(self:Self) -> dict:
+    def description(self: Self) -> dict:
         """Return a description of the attack.
 
         Returns
@@ -372,12 +360,12 @@ class AbstractMIA(AbstractAttack):
         pass
 
     @abstractmethod
-    def prepare_attack(self:Self) -> None:
+    def prepare_attack(self: Self) -> None:
         """Method that handles all computation related to the attack dataset."""
         pass
 
     @abstractmethod
-    def run_attack(self:Self) -> Union[MIAResult, List[MIAResult]]:
+    def run_attack(self: Self) -> Union[MIAResult, List[MIAResult]]:
         """Run the metric on the target model and dataset. This method handles all the computations related to the audit dataset.
 
         Args:

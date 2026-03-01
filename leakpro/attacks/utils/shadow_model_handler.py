@@ -46,11 +46,12 @@ def singleton(cls):  # noqa: ANN001, ANN201
 
     return get_instance
 
+
 @singleton
 class ShadowModelHandler(ModelHandler):
     """A class handling the creation, training, and loading of shadow models."""
 
-    def __init__(self:Self, handler: MIAHandler) -> None:  # noqa: PLR0912
+    def __init__(self: Self, handler: MIAHandler) -> None:  # noqa: PLR0912
         """Initialize the ShadowModelHandler.
 
         Args:
@@ -67,7 +68,7 @@ class ShadowModelHandler(ModelHandler):
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    def _filter(self:Self, data_size:int)->list[int]:
+    def _filter(self: Self, data_size: int) -> list[int]:
         # Get the metadata for the shadow models
         entries = os.listdir(self.storage_path)
         pattern = re.compile(rf"^{self.metadata_storage_name}_\d+\.pkl$")
@@ -115,18 +116,13 @@ class ShadowModelHandler(ModelHandler):
         for i in range(0, n, 2):
             permuted = np.random.permutation(all_indices)
             half = m // 2
-            A[i, permuted[:half]] = 1       # First half to dataset i
-            A[i+1, permuted[half:]] = 1     # Second half to dataset i+1
+            A[i, permuted[:half]] = 1  # First half to dataset i
+            A[i + 1, permuted[half:]] = 1  # Second half to dataset i+1
 
         return A
 
-
     def create_shadow_models(
-        self:Self,
-        num_models:int,
-        shadow_population: list,
-        training_fraction:float=0.1,
-        online:bool=False
+        self: Self, num_models: int, shadow_population: list, training_fraction: float = 0.1, online: bool = False
     ) -> list[int]:
         """Create and train shadow models based on the blueprint.
 
@@ -146,7 +142,7 @@ class ShadowModelHandler(ModelHandler):
             raise ValueError("Number of models cannot be negative")
 
         # Get the size of the dataset
-        data_size = int(len(shadow_population)*training_fraction)
+        data_size = int(len(shadow_population) * training_fraction)
         all_indices, filtered_indices = self._filter(data_size)
 
         # Create a list of indices to use for the new shadow models
@@ -159,17 +155,17 @@ class ShadowModelHandler(ModelHandler):
 
         indices_to_use = []
         next_index = max(all_indices) + 1 if all_indices else 0
-        while len(indices_to_use) < (num_models-n_existing_models):
+        while len(indices_to_use) < (num_models - n_existing_models):
             indices_to_use.append(next_index)
             next_index += 1
 
         A = self.construct_balanced_assignments(len(shadow_population), num_models)  # noqa: N806
-        assert np.all(np.sum(A,axis=0) == num_models//2)
-        assert np.all(np.sum(A,axis=1) == len(shadow_population)//2)
+        assert np.all(np.sum(A, axis=0) == num_models // 2)
+        assert np.all(np.sum(A, axis=1) == len(shadow_population) // 2)
         shadow_population = np.array(shadow_population)
         for i, indx in enumerate(indices_to_use):
             # Get dataloader
-            data_indices = shadow_population[np.where(A[i,:] == 1)]
+            data_indices = shadow_population[np.where(A[i, :] == 1)]
             data_loader = self.handler.get_dataloader(data_indices, params=None)
 
             # Get shadow model blueprint
@@ -191,8 +187,9 @@ class ShadowModelHandler(ModelHandler):
 
             logger.info(f"Training shadow model {indx} complete")
             shadow_model_state_dict = shadow_model.state_dict()
-            cleaned_state_dict = {key.replace("_module.", "").replace("module.", ""): value
-                    for key, value in shadow_model_state_dict.items()}
+            cleaned_state_dict = {
+                key.replace("_module.", "").replace("module.", ""): value for key, value in shadow_model_state_dict.items()
+            }
 
             with open(f"{self.storage_path}/{self.model_storage_name}_{indx}.pkl", "wb") as f:
                 save(cleaned_state_dict, f)
@@ -201,28 +198,30 @@ class ShadowModelHandler(ModelHandler):
             logger.info(f"Storing metadata for shadow model {indx}")
             meta_data = ShadowModelTrainingSchema(
                 init_params=self.init_params,
-                train_indices = data_indices,
-                num_train = len(data_indices),
-                optimizer = optimizer.__class__.__name__,
-                criterion = criterion.__class__.__name__,
-                epochs = self.epochs,
-                train_result = training_results.metrics,
-                test_result = test_result,
-                online = online,
-                model_class = self.model_class,
-                target_model_hash= self.target_model_hash
+                train_indices=data_indices,
+                num_train=len(data_indices),
+                optimizer=optimizer.__class__.__name__,
+                criterion=criterion.__class__.__name__,
+                epochs=self.epochs,
+                train_result=training_results.metrics,
+                test_result=test_result,
+                online=online,
+                model_class=self.model_class,
+                target_model_hash=self.target_model_hash,
             )
 
             ShadowModelHandler().cache_logits(PytorchModel(shadow_model, criterion), name=f"sm_{indx}")
 
-            logger.info(f"Metadata for shadow model {indx}:\n{meta_data}")
+            meta_log = meta_data.model_dump()
+            meta_log["train_indices"] = f"<len={len(data_indices)}>"
+            logger.info(f"Metadata for shadow model {indx}:\n{meta_log}")
             with open(f"{self.storage_path}/{self.metadata_storage_name}_{indx}.pkl", "wb") as f:
                 pickle.dump(meta_data, f)
 
             logger.info(f"Metadata for shadow model {indx} stored in {self.storage_path}")
         return filtered_indices + indices_to_use
 
-    def _load_shadow_model(self:Self, index:int) -> Module:
+    def _load_shadow_model(self: Self, index: int) -> Module:
         """Load a shadow model from a saved state.
 
         Args:
@@ -243,7 +242,7 @@ class ShadowModelHandler(ModelHandler):
         shadow_model, criterion = self._load_model(model_path)
         return PytorchModel(shadow_model, criterion)
 
-    def get_shadow_models(self:Self, num_models:list[int]) -> Tuple[list, list]:
+    def get_shadow_models(self: Self, num_models: list[int]) -> Tuple[list, list]:
         """Load the the shadow models."""
         shadow_models = []
         shadow_model_indices = []
@@ -254,7 +253,7 @@ class ShadowModelHandler(ModelHandler):
             shadow_model_indices.append(i)
         return shadow_models, shadow_model_indices
 
-    def _load_shadow_metadata(self:Self, index:int) -> dict:
+    def _load_shadow_metadata(self: Self, index: int) -> dict:
         """Load a shadow model from a saved state.
 
         Args:
@@ -273,7 +272,7 @@ class ShadowModelHandler(ModelHandler):
         metadata_path = f"{self.storage_path}/{self.metadata_storage_name}_{index}.pkl"
         return self._load_metadata(metadata_path)
 
-    def get_shadow_model_metadata(self:Self, model_indices:list[int]) -> list:
+    def get_shadow_model_metadata(self: Self, model_indices: list[int]) -> list:
         """Load the the shadow model metadata."""
         metadata = []
         if model_indices is int:
@@ -283,7 +282,7 @@ class ShadowModelHandler(ModelHandler):
             metadata.append(self._load_shadow_metadata(i))
         return metadata
 
-    def load_logits(self:Self, name:str=None, indx:int=None) -> np.ndarray:
+    def load_logits(self: Self, name: str = None, indx: int = None) -> np.ndarray:
         """Load model logits."""
 
         if name is None and indx is not None:
@@ -300,7 +299,7 @@ class ShadowModelHandler(ModelHandler):
         logger.info(f"Loaded logits from {cache_file}")
         return logits
 
-    def get_in_indices_mask(self:Self, shadow_model_indices:list[int], dataset_indices:np.ndarray) -> np.ndarray:
+    def get_in_indices_mask(self: Self, shadow_model_indices: list[int], dataset_indices: np.ndarray) -> np.ndarray:
         """Get the mask indicating which indices in the dataset are present in the shadow model training set.
 
         Args:
@@ -327,11 +326,11 @@ class ShadowModelHandler(ModelHandler):
         dataset_tensor = torch.from_numpy(dataset_indices).to(device=device)
         indice_masks_tensor = torch.zeros((len(dataset_indices), len(models_in_indices)), dtype=torch.bool, device=device)
 
-        return _torch_indice_in_shadowmodel_training_set(indice_masks_tensor,\
-                                                        dataset_tensor, model_indices_tensor).cpu().numpy()
+        return _torch_indice_in_shadowmodel_training_set(indice_masks_tensor, dataset_tensor, model_indices_tensor).cpu().numpy()
+
 
 @jit.script
-def _torch_indice_in_shadowmodel_training_set(in_tensor:Tensor, dataset:Tensor, model_indices:Tensor) -> Tensor:
+def _torch_indice_in_shadowmodel_training_set(in_tensor: Tensor, dataset: Tensor, model_indices: Tensor) -> Tensor:
     """Check if an audit indice is present in the shadow model training set.
 
     Args:

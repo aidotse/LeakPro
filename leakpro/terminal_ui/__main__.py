@@ -1,0 +1,365 @@
+"""Main entry point for the LeakPro terminal UI."""
+
+from __future__ import annotations
+
+import argparse
+import sys
+import traceback
+from pathlib import Path
+from typing import Any, Union
+
+from leakpro.terminal_ui.api import CifarMIAApi, ConfigPaths
+from leakpro.terminal_ui.io import TerminalIO
+from leakpro.terminal_ui.steps import (
+    AppContext,
+    ConfigurePathsStep,
+    CreateMetadataStep,
+    Flow,
+    PreparePopulationStep,
+    RunAuditStep,
+    SplitTrainTestStep,
+    Step,
+    TrainTargetModelStep,
+    cifar_mia_flow,
+)
+
+
+def get_project_root() -> Path:
+    return Path(__file__).parent.parent.parent.resolve()
+
+
+def load_ascii_art() -> str:
+    ascii_path = get_project_root() / "leakpro_ascii.txt"
+    if ascii_path.exists():
+        return ascii_path.read_text(encoding="utf-8")
+    return r"""
+
+
+   _          __          __        _           _ 
+  | |        /\ \        / /       | |         | |
+  | |       /  \ \      / /        | |         | |
+  | |      / /\ \ \    / /         | |         | |
+  | |     / /  \ \ \  / /          | |         | |
+  | |____/ /____\ \_\/_/           | |____     |_|
+  |______/______\___/              |______|   (_)
+                                              
+  LeakPro - Privacy Auditing Framework
+"""
+
+
+class AutoIO:
+    """Non-interactive IO for automated runs."""
+
+    def __init__(self, real_io: TerminalIO) -> None:
+        self.real_io = real_io
+        self.use_color = False
+
+    def print(self, text: str = "") -> None:
+        self.real_io.print(text)
+
+    def heading(self, text: str) -> None:
+        self.real_io.print(text)
+
+    def subtle(self, text: str) -> None:
+        self.real_io.print(text)
+
+    def success(self, text: str) -> None:
+        self.real_io.success(text)
+
+    def warning(self, text: str) -> None:
+        self.real_io.warning(text)
+
+    def error(self, text: str) -> None:
+        self.real_io.error(text)
+
+    def banner(self, art: str) -> None:
+        self.real_io.banner(art)
+
+    def set_overlay_art(self, art: str) -> None:
+        self.real_io.set_overlay_art(art)
+
+    def enable_overlay(self) -> None:
+        self.real_io.enable_overlay()
+
+    def ask(self, prompt: str, default: str | None = None, required: bool = False) -> str:
+        if default is not None:
+            self.real_io.print(f"{prompt} [{default}]: {default}")
+            return default
+        if required:
+            raise RuntimeError(f"Required input {prompt} not provided in auto mode")
+        return ""
+
+    def ask_yes_no(self, prompt: str, default: bool | None = None) -> bool:
+        if default is not None:
+            self.real_io.print(f"{prompt} {'[Y/n]' if default else '[y/N]'}: {'y' if default else 'n'}")
+            return default
+        return True
+
+    def ask_choice(self, prompt: str, choices: Any) -> str:
+        choices_list = list(choices)
+        self.real_io.print(f"{prompt}: {choices_list[0].key}")
+        return choices_list[0].key
+
+
+class TerminalApp:
+    def __init__(self, base_dir: Path | None = None, auto_mode: bool = False) -> None:
+        self.real_io = TerminalIO()
+        self.auto_mode = auto_mode
+        self.io: Union[TerminalIO, AutoIO] = self.real_io
+        self.project_root = get_project_root()
+
+        if base_dir is None:
+            base_dir = self.project_root / "examples" / "mia" / "cifar"
+
+        base_dir = base_dir.resolve()
+
+        self.api = CifarMIAApi(base_dir)
+        self.context = AppContext(
+            base_dir=base_dir,
+            paths=ConfigPaths(
+                train_config=base_dir / "train_config.yaml",
+                audit_config=base_dir / "audit.yaml",
+            ),
+        )
+        self.flow = cifar_mia_flow()
+
+    def enable_auto_mode(self) -> None:
+        """Enable non-interactive auto mode with default answers."""
+        self.auto_mode = True
+        self.io = AutoIO(self.real_io)
+
+    def print_banner(self) -> None:
+        art = load_ascii_art()
+        self.io.set_overlay_art(art)
+        self.io.enable_overlay()
+        self.io.print()
+        self.io.success("Welcome to LeakPro Terminal UI")
+        self.io.print()
+
+    def print_step_header(self, step: Step, step_num: int, total: int) -> None:
+        self.io.print()
+        self.io.print("=" * 60)
+        self.io.heading(f"Step {step_num}/{total}: {step.title}")
+        self.io.subtle(step.description)
+        self.io.print("=" * 60)
+
+    def run_step(self, step: Step, step_num: int, total: int) -> bool:
+        self.print_step_header(step, step_num, total)
+
+        try:
+            result = step.run(self.context, self.api, self.io)
+            self.io.success(f"✓ {result.message}")
+            return True
+        except Exception as e:
+            self.io.error(f"✗ Error: {e}")
+            self.io.warning(f"Step failed.")
+            self.io.print()
+            traceback.print_exc()
+            if self.auto_mode:
+                return False
+            return self.io.ask_yes_no("Retry this step?", default=True)
+
+    def _render_menu_boxes(self, completed: set[int]) -> None:
+        labels = {
+            1: "Configure Paths & Audit",
+            2: "Prepare Dataset",
+            3: "Train Target + Metadata",
+            5: "Run Audit",
+        }
+        active_ids = [1, 2, 3, 5]
+        locked = {
+            3: not completed.issuperset({1, 2}),
+            5: not completed.issuperset({1, 2, 3}),
+        }
+
+        use_color = isinstance(self.io, TerminalIO)
+
+        def build_box(index: int, label: str, done: bool, is_locked: bool) -> list[str]:
+            text = f"{index}. {label}"
+            width = max(len(text) + 2, 26)
+            top = "+" + "-" * (width - 2) + "+"
+            mid = "|" + text.ljust(width - 2) + "|"
+            bot = "+" + "-" * (width - 2) + "+"
+            if use_color:
+                if done:
+                    top = self.real_io._style(top, "32")
+                    mid = self.real_io._style(mid, "32")
+                    bot = self.real_io._style(bot, "32")
+                elif is_locked:
+                    top = self.real_io._style(top, "31")
+                    mid = self.real_io._style(mid, "31")
+                    bot = self.real_io._style(bot, "31")
+            return [top, mid, bot]
+
+        boxes = [build_box(idx, labels[idx], idx in completed, locked.get(idx, False)) for idx in active_ids]
+        for row in range(3):
+            line = "  ".join(box[row] for box in boxes)
+            self.io.print(line)
+
+    def _run_box_steps(self, steps: list[Step]) -> bool:
+        total = len(steps)
+        for i, step in enumerate(steps, 1):
+            while True:
+                ok = self.run_step(step, i, total)
+                if ok:
+                    break
+                return False
+        return True
+
+    def run(self) -> None:
+        self.print_banner()
+        completed: set[int] = set()
+        tasks: dict[int, list[Step]] = {
+            1: [ConfigurePathsStep()],
+            2: [PreparePopulationStep()],
+            3: [TrainTargetModelStep(), CreateMetadataStep()],
+        }
+        audit_step = RunAuditStep()
+
+        while True:
+            self.io.print()
+            self._render_menu_boxes(completed)
+            self.io.print()
+            if completed.issuperset({1, 2, 3}):
+                prompt = "Select 1, 2, 3, or 5 (audit), or q to quit"
+            else:
+                prompt = "Select 1, 2, 3 to complete tasks, or q to quit"
+            choice = self.io.ask(prompt, default="1").strip().lower()
+
+            if choice in {"q", "quit", "exit"}:
+                self.io.print("Aborted. Goodbye!")
+                return
+
+            if choice == "5":
+                if not completed.issuperset({1, 2, 3}):
+                    self.io.warning("Complete tasks 1-3 before running the audit.")
+                    continue
+                if self._run_box_steps([audit_step]):
+                    break
+                continue
+
+            if choice.isdigit() and int(choice) in tasks:
+                task_id = int(choice)
+                if self._run_box_steps(tasks[task_id]):
+                    completed.add(task_id)
+                continue
+
+            self.io.warning("Invalid selection.")
+
+        self.io.print()
+        self.io.success("=" * 60)
+        self.io.heading("Audit Complete!")
+        self.io.success("=" * 60)
+
+        if self.context.audit_results:
+            self.io.print("\nAttack Results Summary:")
+            for result in self.context.audit_results:
+                self.io.print(f"  - {result}")
+
+        self.io.print("\nThank you for using LeakPro!")
+
+    def run_auto(self) -> bool:
+        """Run the entire workflow non-interactively."""
+        self.enable_auto_mode()
+        self.io.set_overlay_art(load_ascii_art())
+        self.io.enable_overlay()
+        self.io.print("[AUTO MODE] Running leakpro workflow non-interactively")
+        self.io.print()
+
+        total = len(self.flow.steps)
+        for i, step in enumerate(self.flow.steps, 1):
+            self.io.print(f"[AUTO MODE] Running step {i}/{total}: {step.title}")
+            while True:
+                if self.run_step(step, i, total):
+                    break
+
+        self.io.print()
+        self.io.success("=" * 60)
+        self.io.heading("Audit Complete!")
+        self.io.success("=" * 60)
+
+        if self.context.audit_results:
+            self.io.print("\nAttack Results Summary:")
+            for result in self.context.audit_results:
+                self.io.print(f"  - {result}")
+
+        self.io.print("\nThank you for using LeakPro!")
+        return True
+
+
+def create_parser() -> argparse.ArgumentParser:
+    project_root = get_project_root()
+    default_cifar = project_root / "examples" / "mia" / "cifar"
+
+    parser = argparse.ArgumentParser(
+        prog="leakpro.terminal_ui",
+        description="LeakPro Terminal UI - Interactive privacy auditing workflow",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python -m leakpro.terminal_ui
+  python -m leakpro.terminal_ui --base-dir ./examples/mia/cifar
+  python -m leakpro.terminal_ui -b /path/to/configs --no-color
+  python -m leakpro.terminal_ui --auto --base-dir ./examples/mia/cifar
+        """,
+    )
+    parser.add_argument(
+        "-b",
+        "--base-dir",
+        type=Path,
+        default=default_cifar,
+        help=f"Base directory containing train_config.yaml and audit.yaml (default: %(default)s)",
+    )
+    parser.add_argument("--no-color", action="store_true", help="Disable colored output")
+    parser.add_argument("-q", "--quiet", action="store_true", help="Skip welcome message")
+    parser.add_argument(
+        "-a",
+        "--auto",
+        action="store_true",
+        help="Run in non-interactive mode with default answers (useful for testing/automation)",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = create_parser()
+    args = parser.parse_args(argv)
+
+    base_dir: Path = args.base_dir
+    if not base_dir.is_dir():
+        print(f"Error: Base directory does not exist: {base_dir}", file=sys.stderr)
+        return 1
+
+    if not (base_dir / "train_config.yaml").exists():
+        print(f"Error: train_config.yaml not found in {base_dir}", file=sys.stderr)
+        return 1
+
+    if not (base_dir / "audit.yaml").exists():
+        print(f"Error: audit.yaml not found in {base_dir}", file=sys.stderr)
+        return 1
+
+    use_color = not args.no_color
+    app = TerminalApp(base_dir=base_dir, auto_mode=args.auto)
+    app.io.use_color = use_color and sys.stdout.isatty()
+
+    if args.auto:
+        try:
+            app.run_auto()
+        except Exception as e:
+            print(f"Error during auto run: {e}", file=sys.stderr)
+            traceback.print_exc()
+            return 1
+    elif not args.quiet:
+        app.run()
+    else:
+        total = len(app.flow.steps)
+        for i, step in enumerate(app.flow.steps, 1):
+            while True:
+                if app.run_step(step, i, total):
+                    break
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
