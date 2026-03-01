@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict
 
 from leakpro.synthetic_data_attacks.anonymeter.stats.confidence import EvaluationResults
 from leakpro.utils.import_helper import Self
+from leakpro.utils.logger import logger
 
 # Set rng
 rng = np.random.default_rng()
@@ -327,6 +328,10 @@ def convert_df_numerical_columns_to_categories_with_threshold(*, df: pd.DataFram
     df = df.copy()
     for col in df.columns:
         if pd.api.types.is_numeric_dtype(df[col]) and not is_bool_dtype(df[col]) and (df[col].nunique(dropna=True) <= threshold):
+            logger.warning(f"Column '{col}' has {df[col].nunique(dropna=True)} unique non-null values")
+            logger.warning(f"which is less than or equal to the threshold of {threshold}. Converting to categorical dtype.")
+            logger.info("To turn off this behavior, set SinglingOutEvaluator(numerical_to_categorical=False)")
+            logger.info("Or use the kwarg numerical_to_categorical = False")
             df.loc[:, col] = df[col].astype("category")
     return df
 
@@ -383,7 +388,8 @@ class SinglingOutEvaluator(BaseModel):
     n_attacks: int = 2_000
     confidence_level: float = 0.95
     max_attempts: Optional[int] = 10_000_000
-    categorical_threshold: int = 20
+    categorical_threshold: int = 2
+    numerical_to_categorical: bool = True
     # Following parameters are set in evaluate method
     main_queries: Optional[UniqueSinglingOutQueries] = None
     naive_queries: Optional[UniqueSinglingOutQueries] = None
@@ -394,8 +400,15 @@ class SinglingOutEvaluator(BaseModel):
         self.ori = self.ori.drop_duplicates()
         self.syn = self.syn.drop_duplicates()
         # Convert numeric columns with low unique counts (<= categorical_threshold) to categorical
-        self.ori = convert_df_numerical_columns_to_categories_with_threshold(df=self.ori, threshold=self.categorical_threshold)
-        self.syn = convert_df_numerical_columns_to_categories_with_threshold(df=self.syn, threshold=self.categorical_threshold)
+        if self.numerical_to_categorical:
+            self.ori = convert_df_numerical_columns_to_categories_with_threshold(
+                df=self.ori,
+                threshold=self.categorical_threshold
+                )
+            self.syn = convert_df_numerical_columns_to_categories_with_threshold(
+                df=self.syn,
+                threshold=self.categorical_threshold
+                )
 
     def evaluate(self: Self) -> EvaluationResults:
         """Run the singling-out attacks (main and naive) and set and return results."""
