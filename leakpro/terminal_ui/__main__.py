@@ -31,7 +31,7 @@ def get_project_root() -> Path:
 
 
 def load_ascii_art() -> str:
-    ascii_path = get_project_root() / "leakpro_ascii.txt"
+    ascii_path = get_project_root() / "resources" / "leakpro_ascii.txt"
     if ascii_path.exists():
         return ascii_path.read_text(encoding="utf-8")
     return r"""
@@ -169,12 +169,12 @@ class TerminalApp:
             1: "Configure Paths & Audit",
             2: "Prepare Dataset",
             3: "Train Target + Metadata",
-            5: "Run Audit",
+            4: "Run Audit",
         }
-        active_ids = [1, 2, 3, 5]
+        active_ids = [1, 2, 3, 4]
         locked = {
             3: not completed.issuperset({1, 2}),
-            5: not completed.issuperset({1, 2, 3}),
+            4: not completed.issuperset({1, 2, 3}),
         }
 
         use_color = isinstance(self.io, TerminalIO)
@@ -230,7 +230,7 @@ class TerminalApp:
             self._render_menu_boxes(completed)
             self.io.print()
             if completed.issuperset({1, 2, 3}):
-                prompt = "Select 1, 2, 3, or 5 (audit), or q to quit"
+                prompt = "Select 1, 2, 3, or 4 (audit), or q to quit"
             else:
                 prompt = "Select 1, 2, 3 to complete tasks, or q to quit"
             choice = self.io.ask(prompt, default="1").strip().lower()
@@ -239,12 +239,12 @@ class TerminalApp:
                 self.io.print("Aborted. Goodbye!")
                 return
 
-            if choice == "5":
+            if choice == "4":
                 if not completed.issuperset({1, 2, 3}):
                     self.io.warning("Complete tasks 1-3 before running the audit.")
                     continue
                 if self._run_box_steps([audit_step]):
-                    completed.add(5)
+                    completed.add(4)
                     self._save_state(completed)
                     self.io.print()
                     self._render_menu_boxes(completed)
@@ -264,11 +264,6 @@ class TerminalApp:
         self.io.success("=" * 60)
         self.io.heading("Audit Complete!")
         self.io.success("=" * 60)
-
-        if self.context.audit_results:
-            self.io.print("\nAttack Results Summary:")
-            for result in self.context.audit_results:
-                self.io.print(f"  - {result}")
 
         self.io.print("\nThank you for using LeakPro!")
 

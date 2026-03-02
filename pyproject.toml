@@ -19,6 +19,7 @@ dependencies = [
   "tqdm",
   "joblib",
   "pyyaml",
+  "pillow",
   "prompt-toolkit",
   "scikit-learn",
   "pydantic",

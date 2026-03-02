@@ -184,6 +184,28 @@ class ConfigurePathsStep(Step):
         except Exception:
             return {}
 
+    def _parse_attack_selection(self, selection: str, attack_names: list[str]) -> list[str]:
+        selection = selection.strip().lower()
+        if selection in {"all", "*"}:
+            return list(attack_names)
+
+        tokens = [token.strip() for token in selection.split(",") if token.strip()]
+        if not tokens:
+            raise ValueError("No selections")
+
+        resolved: list[str] = []
+        for token in tokens:
+            if token.isdigit():
+                index = int(token)
+                if index < 1 or index > len(attack_names):
+                    raise ValueError("Selection out of range")
+                resolved.append(attack_names[index - 1])
+                continue
+            if token not in attack_names:
+                raise ValueError("Unknown attack")
+            resolved.append(token)
+        return resolved
+
     def _edit_attack_config(self, io: Any, attack: dict) -> dict:
         keys = [(k, k) for k in attack.keys() if k != "attack"]
         if not keys:
@@ -225,6 +247,14 @@ class ConfigurePathsStep(Step):
         from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
 
         available = AttackFactoryMIA.attack_classes
+        configured_by_name: dict[str, list[dict]] = {}
+        for entry in audit_config.get("audit", {}).get("attack_list", []):
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get("attack")
+            if not name:
+                continue
+            configured_by_name.setdefault(name, []).append(entry)
 
         io.print("\nAvailable attacks:")
         attack_names = sorted(available.keys())
@@ -237,26 +267,33 @@ class ConfigurePathsStep(Step):
         io.heading("ATTACK SELECTION")
         io.print("=" * 60)
         while True:
-            selection = io.ask("Select attacks by number (comma-separated) or 'all'", default="all").strip().lower()
-            if selection in {"all", "*"}:
-                selected_indices = list(range(1, len(attack_names) + 1))
-                break
+            selection = io.ask(
+                "Select attacks by number or name (comma-separated, repeats allowed) or 'all'",
+                default="all",
+            )
             try:
-                selected_indices = [int(s) for s in selection.split(",") if s.strip()]
-                if not selected_indices:
-                    raise ValueError("No selections")
-                if any(idx < 1 or idx > len(attack_names) for idx in selected_indices):
-                    raise ValueError("Selection out of range")
+                selected_names = self._parse_attack_selection(selection, attack_names)
                 break
             except ValueError:
-                io.warning("Invalid selection. Use numbers like 1,3,5 or 'all'.")
+                io.warning("Invalid selection. Use numbers like 1,3,5 or names like lira,qmia.")
 
         updated_attacks = []
-        for idx in selected_indices:
-            name = attack_names[idx - 1]
+        for name in selected_names:
             default_dict = self._get_attack_default_dict(available[name])
             attack = {"attack": name, **default_dict}
-            self._print_attack_summary(io, attack, idx)
+            if configured_by_name.get(name):
+                prior = configured_by_name[name].pop(0)
+                attack.update({k: v for k, v in prior.items() if k != "attack"})
+            self._print_attack_summary(io, attack, attack_names.index(name) + 1)
+            if name == "lira":
+                num_shadows = attack.get("num_shadow_models", 1)
+                if isinstance(num_shadows, int) and num_shadows < 2:
+                    io.warning("LiRA with <2 shadow models can produce NaN scores.")
+                    if io.ask_yes_no("Edit LiRA configuration now?", default=True):
+                        attack = self._edit_attack_config(io, dict(attack))
+                        num_shadows = attack.get("num_shadow_models", num_shadows)
+                        if isinstance(num_shadows, int) and num_shadows < 2:
+                            io.warning("LiRA may still fail; consider num_shadow_models >= 2.")
             if io.ask_yes_no("Edit this attack's configuration?", default=False):
                 attack = self._edit_attack_config(io, dict(attack))
             updated_attacks.append(attack)
@@ -271,6 +308,7 @@ class ConfigurePathsStep(Step):
     def run(self, context: AppContext, api: CifarMIAApi, io: Any) -> StepResult:
         io.print(f"Current training config: {context.paths.train_config}")
         io.print(f"Current audit config:    {context.paths.audit_config}")
+        paths_changed = False
 
         if io.ask_yes_no("Edit config paths?", default=False):
             io.print("\n--- Configure Training Config ---")
@@ -282,6 +320,7 @@ class ConfigurePathsStep(Step):
             io.print("\n--- Configure Audit Config ---")
             audit_path_str = io.ask_path("Select audit.yaml location:", default=str(context.paths.audit_config), must_exist=True)
             context.paths.audit_config = Path(audit_path_str)
+            paths_changed = True
 
         context.paths = ConfigPaths(
             self._resolve_config_path(io, context.paths.train_config, "train_config.yaml"),
@@ -290,9 +329,15 @@ class ConfigurePathsStep(Step):
         context.base_dir = context.paths.train_config.parent.resolve()
         io.print(f"\nWorking directory set to: {context.base_dir}")
 
+        if paths_changed:
+            context.train_config = None
+            context.audit_config = None
+
         while True:
-            context.train_config = api.load_yaml(context.paths.train_config)
-            context.audit_config = api.load_yaml(context.paths.audit_config)
+            if context.train_config is None:
+                context.train_config = api.load_yaml(context.paths.train_config)
+            if context.audit_config is None:
+                context.audit_config = api.load_yaml(context.paths.audit_config)
 
             io.print("\n" + "=" * 60)
             io.heading("CONFIGURATION REVIEW")
@@ -489,17 +534,33 @@ class RunAuditStep(Step):
         create_pdf = io.ask_yes_no("Create PDF report?", default=True)
         results, report_dir = api.run_audit(context.paths.audit_config, create_pdf=create_pdf)
         context.audit_results = results
-        io.print(f"Results saved to: {report_dir}")
+        summary_lines = [f"Results saved to: {report_dir}"]
         for res in results:
+            summary_lines.append("")
+            summary_lines.append(f"Attack: {res.result_name}")
+            if res.fixed_fpr_table:
+                summary_lines.append("  TPR at fixed FPR:")
+                for key in ("TPR@1%FPR", "TPR@0.1%FPR", "TPR@0.01%FPR"):
+                    summary_lines.append(f"    {key}: {res.fixed_fpr_table.get(key, 0.0)}")
+            else:
+                summary_lines.append("  TPR at fixed FPR: unavailable")
             roc_path = report_dir / "results" / res.id / "ROC.png"
             if roc_path.exists():
-                io.print(f"ROC curve: {roc_path}")
+                summary_lines.append(f"ROC curve: {roc_path}")
                 try:
                     from PIL import Image
 
-                    Image.open(roc_path).show()
+                    img = Image.open(roc_path)
+                    img.show()
+                    io.ask("Close the ROC window and press Enter to continue", default="")
                 except Exception:
                     io.warning("Could not display ROC image; open the file manually.")
+
+        summary_path = report_dir / "audit_summary.txt"
+        summary_path.write_text("\n".join(summary_lines))
+        for line in summary_lines:
+            io.print(line)
+        io.print(f"\nSummary saved to: {summary_path}")
         return StepResult("done", "Audit completed")
 
 
