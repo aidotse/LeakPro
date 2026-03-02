@@ -3,23 +3,21 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import traceback
-import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Union
+from typing import Union
 
 from leakpro.terminal_ui.api import CifarMIAApi, ConfigPaths
-from leakpro.terminal_ui.io import TerminalIO
+from leakpro.terminal_ui.io import Choice, TerminalIO
 from leakpro.terminal_ui.steps import (
     AppContext,
     ConfigurePathsStep,
     CreateMetadataStep,
-    Flow,
     PreparePopulationStep,
     RunAuditStep,
-    SplitTrainTestStep,
     Step,
     TrainTargetModelStep,
     cifar_mia_flow,
@@ -27,24 +25,26 @@ from leakpro.terminal_ui.steps import (
 
 
 def get_project_root() -> Path:
+    """Return the repository root directory."""
     return Path(__file__).parent.parent.parent.resolve()
 
 
 def load_ascii_art() -> str:
+    """Load the terminal banner ASCII art."""
     ascii_path = get_project_root() / "resources" / "leakpro_ascii.txt"
     if ascii_path.exists():
         return ascii_path.read_text(encoding="utf-8")
     return r"""
 
 
-   _          __          __        _           _ 
+   _          __          __        _           _
   | |        /\ \        / /       | |         | |
   | |       /  \ \      / /        | |         | |
   | |      / /\ \ \    / /         | |         | |
   | |     / /  \ \ \  / /          | |         | |
   | |____/ /____\ \_\/_/           | |____     |_|
   |______/______\___/              |______|   (_)
-                                              
+
   LeakPro - Privacy Auditing Framework
 """
 
@@ -53,37 +53,48 @@ class AutoIO:
     """Non-interactive IO for automated runs."""
 
     def __init__(self, real_io: TerminalIO) -> None:
+        """Initialize with a real IO backend."""
         self.real_io = real_io
         self.use_color = False
 
     def print(self, text: str = "") -> None:
+        """Print a line of text."""
         self.real_io.print(text)
 
     def heading(self, text: str) -> None:
+        """Print a heading line."""
         self.real_io.print(text)
 
     def subtle(self, text: str) -> None:
+        """Print subtle text."""
         self.real_io.print(text)
 
     def success(self, text: str) -> None:
+        """Print a success line."""
         self.real_io.success(text)
 
     def warning(self, text: str) -> None:
+        """Print a warning line."""
         self.real_io.warning(text)
 
     def error(self, text: str) -> None:
+        """Print an error line."""
         self.real_io.error(text)
 
     def banner(self, art: str) -> None:
+        """Print a banner block."""
         self.real_io.banner(art)
 
     def set_overlay_art(self, art: str) -> None:
+        """Set overlay ASCII art."""
         self.real_io.set_overlay_art(art)
 
     def enable_overlay(self) -> None:
+        """Enable overlay rendering."""
         self.real_io.enable_overlay()
 
     def ask(self, prompt: str, default: str | None = None, required: bool = False) -> str:
+        """Return an auto-resolved string input."""
         if default is not None:
             self.real_io.print(f"{prompt} [{default}]: {default}")
             return default
@@ -92,19 +103,24 @@ class AutoIO:
         return ""
 
     def ask_yes_no(self, prompt: str, default: bool | None = None) -> bool:
+        """Return an auto-resolved yes/no response."""
         if default is not None:
             self.real_io.print(f"{prompt} {'[Y/n]' if default else '[y/N]'}: {'y' if default else 'n'}")
             return default
         return True
 
-    def ask_choice(self, prompt: str, choices: Any) -> str:
+    def ask_choice(self, prompt: str, choices: list[Choice]) -> str:  # noqa: ANN401
+        """Return the first choice key for auto mode."""
         choices_list = list(choices)
         self.real_io.print(f"{prompt}: {choices_list[0].key}")
         return choices_list[0].key
 
 
 class TerminalApp:
+    """Interactive terminal application for LeakPro."""
+
     def __init__(self, base_dir: Path | None = None, auto_mode: bool = False) -> None:
+        """Initialize the terminal application state."""
         self.real_io = TerminalIO()
         self.auto_mode = auto_mode
         self.io: Union[TerminalIO, AutoIO] = self.real_io
@@ -134,6 +150,7 @@ class TerminalApp:
         self.io = AutoIO(self.real_io)
 
     def print_banner(self) -> None:
+        """Render the banner and welcome message."""
         art = load_ascii_art()
         self.io.set_overlay_art(art)
         self.io.enable_overlay()
@@ -142,6 +159,7 @@ class TerminalApp:
         self.io.print()
 
     def print_step_header(self, step: Step, step_num: int, total: int) -> None:
+        """Print the header for a step execution."""
         self.io.print()
         self.io.print("=" * 60)
         self.io.heading(f"Step {step_num}/{total}: {step.title}")
@@ -149,6 +167,7 @@ class TerminalApp:
         self.io.print("=" * 60)
 
     def run_step(self, step: Step, step_num: int, total: int) -> bool:
+        """Run a single step and return success."""
         self.print_step_header(step, step_num, total)
 
         try:
@@ -157,7 +176,7 @@ class TerminalApp:
             return True
         except Exception as e:
             self.io.error(f"✗ Error: {e}")
-            self.io.warning(f"Step failed.")
+            self.io.warning("Step failed.")
             self.io.print()
             traceback.print_exc()
             if self.auto_mode:
@@ -165,6 +184,7 @@ class TerminalApp:
             return self.io.ask_yes_no("Retry this step?", default=True)
 
     def _render_menu_boxes(self, completed: set[int]) -> None:
+        """Render the task selection boxes."""
         labels = {
             1: "Configure Paths & Audit",
             2: "Prepare Dataset",
@@ -202,6 +222,7 @@ class TerminalApp:
             self.io.print(line)
 
     def _run_box_steps(self, steps: list[Step]) -> bool:
+        """Run a list of steps and return success."""
         total = len(steps)
         for i, step in enumerate(steps, 1):
             while True:
@@ -212,6 +233,7 @@ class TerminalApp:
         return True
 
     def run(self) -> None:
+        """Run the interactive terminal application."""
         self.print_banner()
         completed: set[int] = set()
         state = self._load_or_create_session()
@@ -268,11 +290,13 @@ class TerminalApp:
         self.io.print("\nThank you for using LeakPro!")
 
     def _session_summary(self, state: dict) -> str:
+        """Format a one-line summary for a saved session."""
         base_dir = state.get("base_dir", "")
         completed = state.get("completed", [])
         return f"{state.get('session_id', '')} | {base_dir} | completed: {completed}"
 
     def _load_or_create_session(self) -> dict | None:
+        """Load a previous session or create a new one."""
         sessions = sorted(self.session_dir.glob("session_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
         if sessions:
             self.io.print("\nAvailable sessions (most recent first):")
@@ -292,11 +316,12 @@ class TerminalApp:
                         return data
                     except Exception:
                         self.io.warning("Failed to load session; starting new.")
-        self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.session_id = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
         self._save_state(set())
         return None
 
     def _save_state(self, completed: set[int]) -> None:
+        """Persist the current session state to disk."""
         state = {
             "session_id": self.session_id,
             "base_dir": str(self.context.base_dir),
@@ -307,12 +332,13 @@ class TerminalApp:
             "train_config_snapshot": self.context.train_config,
             "audit_config_snapshot": self.context.audit_config,
             "dataset_path": str(self.context.dataset_path) if self.context.dataset_path else None,
-            "completed": sorted(list(completed)),
+            "completed": sorted(completed),
         }
         path = self.session_dir / f"session_{self.session_id}.json"
         path.write_text(json.dumps(state, indent=2))
 
     def _apply_state(self, state: dict) -> None:
+        """Apply a saved session state to the context."""
         self.context.base_dir = Path(state.get("base_dir", self.context.base_dir))
         paths = state.get("paths", {})
         self.context.paths.train_config = Path(paths.get("train_config", self.context.paths.train_config))
@@ -352,6 +378,7 @@ class TerminalApp:
 
 
 def create_parser() -> argparse.ArgumentParser:
+    """Create the CLI argument parser."""
     project_root = get_project_root()
     default_cifar = project_root / "examples" / "mia" / "cifar"
 
@@ -372,7 +399,7 @@ Examples:
         "--base-dir",
         type=Path,
         default=default_cifar,
-        help=f"Base directory containing train_config.yaml and audit.yaml (default: %(default)s)",
+        help="Base directory containing train_config.yaml and audit.yaml (default: %(default)s)",
     )
     parser.add_argument("--no-color", action="store_true", help="Disable colored output")
     parser.add_argument("-q", "--quiet", action="store_true", help="Skip welcome message")
@@ -386,20 +413,21 @@ Examples:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """CLI entry point for the terminal UI."""
     parser = create_parser()
     args = parser.parse_args(argv)
 
     base_dir: Path = args.base_dir
     if not base_dir.is_dir():
-        print(f"Error: Base directory does not exist: {base_dir}", file=sys.stderr)
+        sys.stderr.write(f"Error: Base directory does not exist: {base_dir}\n")
         return 1
 
     if not (base_dir / "train_config.yaml").exists():
-        print(f"Error: train_config.yaml not found in {base_dir}", file=sys.stderr)
+        sys.stderr.write(f"Error: train_config.yaml not found in {base_dir}\n")
         return 1
 
     if not (base_dir / "audit.yaml").exists():
-        print(f"Error: audit.yaml not found in {base_dir}", file=sys.stderr)
+        sys.stderr.write(f"Error: audit.yaml not found in {base_dir}\n")
         return 1
 
     use_color = not args.no_color
@@ -410,7 +438,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             app.run_auto()
         except Exception as e:
-            print(f"Error during auto run: {e}", file=sys.stderr)
+            sys.stderr.write(f"Error during auto run: {e}\n")
             traceback.print_exc()
             return 1
     elif not args.quiet:

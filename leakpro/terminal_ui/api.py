@@ -5,9 +5,10 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import yaml
+
+from leakpro.utils.import_helper import Any, Self
 
 
 def _ensure_examples_in_path() -> None:
@@ -29,6 +30,8 @@ def _ensure_examples_in_path() -> None:
 
 @dataclass
 class ConfigPaths:
+    """Container for config file paths."""
+
     train_config: Path
     audit_config: Path
 
@@ -37,21 +40,26 @@ class CifarMIAApi:
     """Programmatic API for the CIFAR MIA guided flow."""
 
     def __init__(self, base_dir: Path) -> None:
+        """Initialize the API with a base directory."""
         self.base_dir = base_dir
 
     def resolve_path(self, path: str | Path) -> Path:
+        """Resolve a path relative to the base directory."""
         path = Path(path)
         if path.is_absolute():
             return path
         return (self.base_dir / path).resolve()
 
     def load_yaml(self, path: str | Path) -> dict:
+        """Load a YAML file into a dictionary."""
         resolved = self.resolve_path(path)
         with resolved.open("r", encoding="utf-8") as handle:
             return yaml.safe_load(handle)
 
-    def set_random_seed(self, seed: int) -> None:
+    def set_random_seed(self: Self, seed: int) -> None:
+        """Set random seeds for reproducibility."""
         import random
+
         import numpy as np
 
         random.seed(seed)
@@ -66,7 +74,9 @@ class CifarMIAApi:
             return
 
     def prepare_population_dataset(self, train_config: dict, save_if_missing: bool = True) -> dict:
+        """Prepare a CIFAR population dataset and optionally persist it."""
         import pickle
+
         import torch
         from torchvision.datasets import CIFAR10, CIFAR100
 
@@ -109,7 +119,8 @@ class CifarMIAApi:
             "dataset_path": dataset_path,
         }
 
-    def load_population_dataset(self, dataset_path: Path):
+    def load_population_dataset(self, dataset_path: Path) -> Any:
+        """Load a cached population dataset from disk."""
         import joblib
 
         _ensure_examples_in_path()
@@ -117,6 +128,7 @@ class CifarMIAApi:
             return joblib.load(handle)
 
     def split_train_test(self, train_config: dict, data: Any, targets: Any) -> dict:
+        """Split data into train/test loaders and indices."""
         import numpy as np
         from sklearn.model_selection import train_test_split
         from torch.utils.data import DataLoader
@@ -150,7 +162,8 @@ class CifarMIAApi:
             "test_subset": test_subset,
         }
 
-    def _load_target_model_class(self, module_path: Path, class_name: str):
+    def _load_target_model_class(self, module_path: Path, class_name: str) -> Any:
+        """Load a model class from a Python module path."""
         import importlib.util
         import sys
 
@@ -169,11 +182,11 @@ class CifarMIAApi:
         self,
         train_config: dict,
         audit_config: dict,
-        train_loader,
-        test_loader,
+        train_loader: Any,
+        test_loader: Any,
         dataset_name: str,
     ) -> dict:
-        import pickle
+        """Train the target model and return training artifacts."""
 
         import torch
         from torch import nn, optim
@@ -246,17 +259,18 @@ class CifarMIAApi:
 
     def create_metadata(
         self,
-        train_result,
-        optimizer,
-        criterion,
-        train_loader,
-        test_result,
+        train_result: Any,
+        optimizer: Any,
+        criterion: Any,
+        train_loader: Any,
+        test_result: Any,
         epochs: int,
-        train_indices,
-        test_indices,
+        train_indices: Any,
+        test_indices: Any,
         dataset_name: str,
         output_dir: Path,
     ) -> dict:
+        """Create and persist MIA metadata."""
         import pickle
 
         from leakpro import LeakPro
@@ -282,6 +296,7 @@ class CifarMIAApi:
         return {"metadata": meta_data, "metadata_path": metadata_path}
 
     def run_audit(self, audit_config_path: Path, create_pdf: bool = True) -> tuple[list[Any], Path]:
+        """Run the audit and return results and report directory."""
         import yaml
 
         from leakpro import LeakPro

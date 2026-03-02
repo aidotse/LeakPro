@@ -1,5 +1,6 @@
-"""LeakPro Terminal UI - An interactive terminal interface for privacy audits."""
+"""LeakPro Terminal UI package exports."""
 
+from leakpro.terminal_ui.__main__ import TerminalApp
 from leakpro.terminal_ui.api import CifarMIAApi, ConfigPaths
 from leakpro.terminal_ui.io import Choice, TerminalIO
 from leakpro.terminal_ui.steps import (
@@ -15,7 +16,6 @@ from leakpro.terminal_ui.steps import (
     TrainTargetModelStep,
     cifar_mia_flow,
 )
-from leakpro.terminal_ui.__main__ import TerminalApp
 
 __all__ = [
     "CifarMIAApi",

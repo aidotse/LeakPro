@@ -4,14 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 from leakpro.terminal_ui.api import CifarMIAApi, ConfigPaths
-from leakpro.terminal_ui.io import Choice, TerminalIO
+from leakpro.utils.import_helper import Any, Self
 
 
 @dataclass
 class AppContext:
+    """Shared state across terminal UI steps."""
+
     base_dir: Path
     paths: ConfigPaths
     train_config: dict | None = None
@@ -38,32 +39,41 @@ class AppContext:
 
 @dataclass
 class StepResult:
+    """Outcome of a single step execution."""
+
     status: str
     message: str
 
 
 class Step:
+    """Abstract step interface."""
+
     id: str = ""
     title: str = ""
     description: str = ""
 
-    def run(self, context: AppContext, api: CifarMIAApi, io: Any) -> StepResult:  # pragma: no cover - interface only
+    def run(self: Self, context: AppContext, api: CifarMIAApi, io: Any) -> StepResult:  # pragma: no cover - interface only
+        """Execute the step."""
         raise NotImplementedError
 
 
 class ConfigurePathsStep(Step):
+    """Configure paths, configs, and attack selections."""
+
     id = "configure_paths"
     title = "Configure Paths & Audit"
     description = "Select configs, review/edit values, and choose audit attacks."
 
-    def _get_nested_value(self, config: dict, key: str) -> Any:
+    def _get_nested_value(self: Self, config: dict, key: str) -> Any:
+        """Return a nested config value using dot notation."""
         parts = key.split(".")
         val = config
         for p in parts:
             val = val.get(p, {})
         return val if val != config else config.get(key)
 
-    def _set_nested_value(self, config: dict, key: str, value: Any) -> None:
+    def _set_nested_value(self: Self, config: dict, key: str, value: Any) -> None:
+        """Set a nested config value using dot notation."""
         parts = key.split(".")
         d = config
         for p in parts[:-1]:
@@ -81,14 +91,16 @@ class ConfigurePathsStep(Step):
             pass
         d[parts[-1]] = value
 
-    def _print_config_section(self, io: Any, title: str, config: dict, keys: list[tuple[str, str]]) -> None:
+    def _print_config_section(self: Self, io: Any, title: str, config: dict, keys: list[tuple[str, str]]) -> None:
+        """Print a section of configuration values."""
         io.print(f"\n{title}:")
         io.print("-" * 40)
         for key, label in keys:
             val = self._get_nested_value(config, key)
             io.print(f"  {label}: {val}")
 
-    def _resolve_config_path(self, io: Any, current: Path, filename: str) -> Path:
+    def _resolve_config_path(self: Self, io: Any, current: Path, filename: str) -> Path:
+        """Resolve a config path, prompting when missing."""
         while True:
             if current.exists() and current.is_file():
                 return current
@@ -102,7 +114,8 @@ class ConfigurePathsStep(Step):
             selected = io.ask_path(f"Find {filename}:", default=str(current.parent), must_exist=True)
             current = Path(selected)
 
-    def _is_path_key(self, key: str) -> bool:
+    def _is_path_key(self: Self, key: str) -> bool:
+        """Return True for path-like config keys."""
         return (
             key.endswith("_path")
             or key.endswith("_dir")
@@ -118,12 +131,12 @@ class ConfigurePathsStep(Step):
             }
         )
 
-    def _path_must_exist(self, key: str) -> bool:
-        if key in {"audit.output_dir", "run.log_dir", "data.data_dir", "target.data_path", "target.target_folder"}:
-            return False
-        return True
+    def _path_must_exist(self: Self, key: str) -> bool:
+        """Return True when a path must exist."""
+        return key not in {"audit.output_dir", "run.log_dir", "data.data_dir", "target.data_path", "target.target_folder"}
 
-    def _edit_config_loop(self, io: Any, config: dict, keys: list[tuple[str, str]], config_name: str) -> dict:
+    def _edit_config_loop(self: Self, io: Any, config: dict, keys: list[tuple[str, str]], config_name: str) -> dict:
+        """Edit config values interactively."""
         while True:
             io.print(f"\n{'=' * 60}")
             io.heading(f"EDIT {config_name} CONFIG")
@@ -161,7 +174,8 @@ class ConfigurePathsStep(Step):
 
         return config
 
-    def _print_attack_summary(self, io: Any, attack: dict, index: int) -> None:
+    def _print_attack_summary(self: Self, io: Any, attack: dict, index: int) -> None:
+        """Print a summary of an attack configuration."""
         name = attack.get("attack", "unknown")
         io.heading(f"Attack {index}: {name}")
         has_fields = False
@@ -173,7 +187,8 @@ class ConfigurePathsStep(Step):
         if not has_fields:
             io.print("  <no default config>")
 
-    def _get_attack_default_dict(self, attack_cls: type) -> dict:
+    def _get_attack_default_dict(self: Self, attack_cls: type) -> dict:
+        """Return the default config for an attack class."""
         try:
             if hasattr(attack_cls, "AttackConfig"):
                 return attack_cls.AttackConfig().model_dump()
@@ -184,7 +199,8 @@ class ConfigurePathsStep(Step):
         except Exception:
             return {}
 
-    def _parse_attack_selection(self, selection: str, attack_names: list[str]) -> list[str]:
+    def _parse_attack_selection(self: Self, selection: str, attack_names: list[str]) -> list[str]:
+        """Parse attack selection input into attack names."""
         selection = selection.strip().lower()
         if selection in {"all", "*"}:
             return list(attack_names)
@@ -206,8 +222,8 @@ class ConfigurePathsStep(Step):
             resolved.append(token)
         return resolved
 
-    def _edit_attack_config(self, io: Any, attack: dict) -> dict:
-        keys = [(k, k) for k in attack.keys() if k != "attack"]
+    def _edit_attack_config(self: Self, io: Any, attack: dict) -> dict:  # noqa: C901
+        keys = [(k, k) for k in attack if k != "attack"]
         if not keys:
             io.print("No editable fields for this attack.")
             return attack
@@ -243,7 +259,8 @@ class ConfigurePathsStep(Step):
                 io.warning("Please enter a valid number")
         return attack
 
-    def _configure_attacks(self, io: Any, audit_config: dict) -> dict:
+    def _configure_attacks(self: Self, io: Any, audit_config: dict) -> dict:  # noqa: C901, PLR0912
+        """Select and edit attacks for the audit config."""
         from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
 
         available = AttackFactoryMIA.attack_classes
@@ -305,7 +322,8 @@ class ConfigurePathsStep(Step):
         audit_config["audit"]["attack_list"] = updated_attacks
         return audit_config
 
-    def run(self, context: AppContext, api: CifarMIAApi, io: Any) -> StepResult:
+    def run(self: Self, context: AppContext, api: CifarMIAApi, io: Any) -> StepResult:  # noqa: C901
+        """Run the configuration step."""
         io.print(f"Current training config: {context.paths.train_config}")
         io.print(f"Current audit config:    {context.paths.audit_config}")
         paths_changed = False
@@ -398,11 +416,14 @@ class ConfigurePathsStep(Step):
 
 
 class PreparePopulationStep(Step):
+    """Prepare dataset and train/test loaders."""
+
     id = "prepare_population"
     title = "Prepare Dataset"
     description = "Select a dataset or provide a dataset file to use for the audit."
 
-    def run(self, context: AppContext, api: CifarMIAApi, io: Any) -> StepResult:
+    def run(self: Self, context: AppContext, api: CifarMIAApi, io: Any) -> StepResult:  # noqa: ARG002
+        """Prepare dataset based on config or user-provided file."""
         if context.train_config is None:
             raise RuntimeError("Train config not loaded")
         io.print("\nDataset options:")
@@ -445,22 +466,28 @@ class PreparePopulationStep(Step):
 
 
 class SplitTrainTestStep(Step):
+    """Validate pre-created train/test loaders."""
+
     id = "split_train_test"
     title = "Split Train/Test"
     description = "Create train/test loaders for the target model."
 
-    def run(self, context: AppContext, api: CifarMIAApi, io: Any) -> StepResult:
+    def run(self: Self, context: AppContext, api: CifarMIAApi, io: Any) -> StepResult:  # noqa: ARG002
+        """Confirm train/test loaders are ready."""
         if context.train_loader is None or context.test_loader is None:
             raise RuntimeError("Train/test loaders not prepared")
         return StepResult("done", "Train/test loaders already prepared")
 
 
 class TrainTargetModelStep(Step):
+    """Train the target model."""
+
     id = "train_target"
     title = "Train Target Model"
     description = "Train the target model and store weights to disk."
 
-    def run(self, context: AppContext, api: CifarMIAApi, io: Any) -> StepResult:
+    def run(self, context: AppContext, api: CifarMIAApi, io: Any) -> StepResult:  # noqa: ARG002
+        """Train the target model and record artifacts."""
         if context.train_config is None or context.audit_config is None:
             raise RuntimeError("Configs not loaded")
         if context.train_loader is None or context.test_loader is None:
@@ -484,11 +511,14 @@ class TrainTargetModelStep(Step):
 
 
 class CreateMetadataStep(Step):
+    """Create MIA metadata."""
+
     id = "create_metadata"
     title = "Create Metadata"
     description = "Generate MIA metadata for LeakPro."
 
-    def run(self, context: AppContext, api: CifarMIAApi, io: Any) -> StepResult:
+    def run(self: Self, context: AppContext, api: CifarMIAApi, io: Any) -> StepResult:  # noqa: ARG002
+        """Generate and persist metadata for auditing."""
         if context.train_result is None or context.test_result is None:
             raise RuntimeError("Train/test results not available")
         if context.optimizer is None or context.criterion is None:
@@ -516,11 +546,14 @@ class CreateMetadataStep(Step):
 
 
 class RunAuditStep(Step):
+    """Run the LeakPro audit and report results."""
+
     id = "run_audit"
     title = "Run LeakPro Audit"
     description = "Execute the audit and generate the report."
 
-    def run(self, context: AppContext, api: CifarMIAApi, io: Any) -> StepResult:
+    def run(self: Self, context: AppContext, api: CifarMIAApi, io: Any) -> StepResult:
+        """Execute the audit and display result summary."""
         if context.dataset_path is not None:
             if context.audit_config is None:
                 raise RuntimeError("Audit config not loaded")
@@ -566,11 +599,14 @@ class RunAuditStep(Step):
 
 @dataclass
 class Flow:
+    """Container for a named step flow."""
+
     name: str
     steps: list[Step] = field(default_factory=list)
 
 
 def cifar_mia_flow() -> Flow:
+    """Return the default CIFAR MIA flow."""
     return Flow(
         name="CIFAR MIA Guided Audit",
         steps=[

@@ -6,15 +6,18 @@ import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.shortcuts import clear
 
+from leakpro.utils.import_helper import Iterable, Self
+
 
 @dataclass
 class Choice:
+    """Selection option for interactive prompts."""
+
     key: str
     label: str
     description: str | None = None
@@ -23,7 +26,8 @@ class Choice:
 class TerminalIO:
     """Minimal terminal IO wrapper with light styling and validation."""
 
-    def __init__(self, use_color: bool = True) -> None:
+    def __init__(self: Self, use_color: bool = True) -> None:
+        """Initialize terminal IO with optional color output."""
         self.use_color = use_color and sys.stdout.isatty()
         self.session = PromptSession()
         self.overlay_art: list[str] = []
@@ -31,27 +35,34 @@ class TerminalIO:
         self._buffer: list[str] = []
         self._overlay_width = 0
 
-    def _style(self, text: str, code: str) -> str:
+    def _style(self: Self, text: str, code: str) -> str:
+        """Apply ANSI color styling if enabled."""
         if not self.use_color:
             return text
         return f"\033[{code}m{text}\033[0m"
 
-    def heading(self, text: str) -> None:
+    def heading(self: Self, text: str) -> None:
+        """Print a bold heading."""
         self.print(self._style(text, "1"))
 
-    def subtle(self, text: str) -> None:
+    def subtle(self: Self, text: str) -> None:
+        """Print subtle, dimmed text."""
         self.print(self._style(text, "2"))
 
-    def success(self, text: str) -> None:
+    def success(self: Self, text: str) -> None:
+        """Print a success message."""
         self.print(self._style(text, "32"))
 
-    def warning(self, text: str) -> None:
+    def warning(self: Self, text: str) -> None:
+        """Print a warning message."""
         self.print(self._style(text, "33"))
 
-    def error(self, text: str) -> None:
+    def error(self: Self, text: str) -> None:
+        """Print an error message."""
         self.print(self._style(text, "31"))
 
-    def print(self, text: str = "") -> None:
+    def print(self: Self, text: str = "") -> None:
+        """Print text, respecting overlay mode."""
         if self.overlay_active:
             self._buffer.append(text)
             self._render()
@@ -59,24 +70,26 @@ class TerminalIO:
             sys.stdout.write(text + "\n")
             sys.stdout.flush()
 
-    def banner(self, art: str) -> None:
+    def banner(self: Self, art: str) -> None:
+        """Print or render a banner block."""
         if self.overlay_active:
             self._buffer.append(art.rstrip("\n"))
             self._render()
         else:
             self.print(art.rstrip("\n"))
 
-    def ask(self, prompt: str, default: str | None = None, required: bool = False) -> str:
+    def ask(self: Self, prompt: str, default: str | None = None, required: bool = False) -> str:
+        """Prompt for a string value."""
         if default is not None:
             prompt = f"{prompt} [{default}]"
         prompt = f"{prompt}: "
         while True:
             try:
                 response = self._prompt(prompt).strip()
-            except EOFError:
-                raise RuntimeError("Input stream closed. Cannot continue.")
-            except KeyboardInterrupt:
-                raise KeyboardInterrupt("Operation cancelled by user.")
+            except EOFError as err:
+                raise RuntimeError("Input stream closed. Cannot continue.") from err
+            except KeyboardInterrupt as err:
+                raise KeyboardInterrupt("Operation cancelled by user.") from err
 
             if response:
                 return response
@@ -87,7 +100,8 @@ class TerminalIO:
             else:
                 return ""
 
-    def ask_yes_no(self, prompt: str, default: bool | None = None) -> bool:
+    def ask_yes_no(self: Self, prompt: str, default: bool | None = None) -> bool:
+        """Prompt for a yes/no confirmation."""
         suffix = ""
         if default is True:
             suffix = " [Y/n]"
@@ -98,10 +112,10 @@ class TerminalIO:
         while True:
             try:
                 response = self._prompt(f"{prompt}{suffix}: ").strip().lower()
-            except EOFError:
-                raise RuntimeError("Input stream closed. Cannot continue.")
-            except KeyboardInterrupt:
-                raise KeyboardInterrupt("Operation cancelled by user.")
+            except EOFError as err:
+                raise RuntimeError("Input stream closed. Cannot continue.") from err
+            except KeyboardInterrupt as err:
+                raise KeyboardInterrupt("Operation cancelled by user.") from err
 
             if not response and default is not None:
                 return default
@@ -111,7 +125,8 @@ class TerminalIO:
                 return False
             self.warning("Please enter y or n.")
 
-    def ask_choice(self, prompt: str, choices: Iterable[Choice]) -> str:
+    def ask_choice(self: Self, prompt: str, choices: Iterable[Choice]) -> str:
+        """Prompt for a choice by index or key."""
         self.print(prompt)
         choices_list = list(choices)
         for idx, choice in enumerate(choices_list, start=1):
@@ -123,10 +138,10 @@ class TerminalIO:
         while True:
             try:
                 response = self._prompt("Select option: ").strip()
-            except EOFError:
-                raise RuntimeError("Input stream closed. Cannot continue.")
-            except KeyboardInterrupt:
-                raise KeyboardInterrupt("Operation cancelled by user.")
+            except EOFError as err:
+                raise RuntimeError("Input stream closed. Cannot continue.") from err
+            except KeyboardInterrupt as err:
+                raise KeyboardInterrupt("Operation cancelled by user.") from err
 
             if response.isdigit():
                 index = int(response) - 1
@@ -136,7 +151,8 @@ class TerminalIO:
                 return response
             self.warning("Invalid selection.")
 
-    def ask_path(self, prompt: str, default: str | None = None, must_exist: bool = True) -> str:
+    def ask_path(self: Self, prompt: str, default: str | None = None, must_exist: bool = True) -> str:  # noqa: C901, PLR0912, PLR0915
+        """Prompt for a path using a shell-like navigator."""
         current_path = Path(default) if default else Path.cwd()
 
         self.print(f"{prompt}")
@@ -146,10 +162,10 @@ class TerminalIO:
         while True:
             try:
                 response = self._prompt(f"{current_path}> ").strip()
-            except EOFError:
-                raise RuntimeError("Input stream closed. Cannot continue.")
-            except KeyboardInterrupt:
-                raise KeyboardInterrupt("Operation cancelled by user.")
+            except EOFError as err:
+                raise RuntimeError("Input stream closed. Cannot continue.") from err
+            except KeyboardInterrupt as err:
+                raise KeyboardInterrupt("Operation cancelled by user.") from err
 
             if not response:
                 continue
@@ -163,7 +179,7 @@ class TerminalIO:
                     return default
                 return str(current_path)
 
-            elif cmd in ("p", "pwd"):
+            if cmd in ("p", "pwd"):
                 self.print(str(current_path))
 
             elif cmd in ("ls", "dir"):
@@ -214,7 +230,8 @@ class TerminalIO:
             else:
                 self.warning(f"Unknown command: {cmd}. Type 'h' for help.")
 
-    def set_overlay_art(self, art: str) -> None:
+    def set_overlay_art(self: Self, art: str) -> None:
+        """Set the overlay ASCII art content."""
         raw_lines = [line.rstrip("\n") for line in art.splitlines()]
         if not raw_lines:
             self.overlay_art = []
@@ -225,22 +242,26 @@ class TerminalIO:
         self.overlay_art = normalized
         self._overlay_width = max((len(line) for line in normalized), default=0)
 
-    def enable_overlay(self) -> None:
+    def enable_overlay(self: Self) -> None:
+        """Enable overlay rendering."""
         self.overlay_active = True
         self._render()
 
-    def disable_overlay(self) -> None:
+    def disable_overlay(self: Self) -> None:
+        """Disable overlay rendering and clear buffer."""
         self.overlay_active = False
         self._buffer.clear()
         clear()
 
-    def _prompt(self, text: str) -> str:
+    def _prompt(self: Self, text: str) -> str:
+        """Internal prompt wrapper that supports overlay mode."""
         if not self.overlay_active:
             return self.session.prompt(text)
         with patch_stdout():
             return self.session.prompt(text)
 
-    def _render(self) -> None:
+    def _render(self: Self) -> None:
+        """Render the overlay and buffered output to the terminal."""
         clear()
         rows, cols = self._get_terminal_size()
         overlay_lines = self.overlay_art
@@ -257,16 +278,18 @@ class TerminalIO:
             sys.stdout.write(line + "\n")
         sys.stdout.flush()
 
-    def _get_terminal_size(self) -> tuple[int, int]:
+    def _get_terminal_size(self: Self) -> tuple[int, int]:
+        """Return terminal (rows, cols) with a fallback default."""
         try:
             size = os.get_terminal_size()
             return size.lines, size.columns
         except Exception:
             return 24, 80
 
-    def _render_overlay(self, cols: int) -> dict[int, str]:
-        overlay_lines = {}
-        return overlay_lines
+    def _render_overlay(self: Self, _cols: int) -> dict[int, str]:
+        """Return a rendered overlay mapping (unused placeholder)."""
+        return {}
 
-    def _merge_lines(self, base: str, overlay: str, cols: int) -> str:
+    def _merge_lines(self: Self, base: str, _overlay: str, cols: int) -> str:
+        """Merge overlay and base lines (unused placeholder)."""
         return base[:cols]
