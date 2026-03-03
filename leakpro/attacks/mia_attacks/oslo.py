@@ -29,7 +29,7 @@ class AttackOSLO(AbstractMIA):
         num_iterations: int = Field(default=5, ge=1, description='Number of iterations in each "subprocedure"')
         step_size: float = Field(default=1e-2, ge=0.0, description="Step size for optimization of xprime")
         max_perturbation_size: float = Field(default=80/255, ge=0.0, description="Maximum distance between x and xprime")
-        min_threshold: float = Field(default=1e-4, ge=0.0, description="Minimum threshold for the early stopping criterion")
+        min_threshold: float = Field(default=1e-4, gt=0.0, description="Minimum threshold for the early stopping criterion")
         max_threshold: float = Field(default=1, ge=0.0, description="Maximum threshold for the early stopping criterion")
         n_thresholds: int = Field(default=5, ge=1, description="Number of thresholds to use for the early stopping criterion")
         n_audits: int = Field(default=500, ge=1, description="Number of data points to audit")
@@ -105,6 +105,9 @@ class AttackOSLO(AbstractMIA):
         self.attack_data_indices = self.sample_indices_from_population(include_train_indices = True,
                                                                        include_test_indices = True)
 
+        if self.n_audits > len(self.attack_data_indices):
+            raise ValueError(f"n_audits ({self.n_audits}) exceeds available attack data ({len(self.attack_data_indices)})")
+
         self.audit_data_indices = np.random.choice(self.attack_data_indices, self.n_audits, replace=False)
         self.attack_data_indices = np.setdiff1d(self.attack_data_indices, self.audit_data_indices)
 
@@ -119,17 +122,26 @@ class AttackOSLO(AbstractMIA):
         self.source_models, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices[:self.num_source_models])
         self.validation_models, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices[self.num_source_models:])
 
+    def _compute_loss(
+        self: Self,
+        x0: Tensor,
+        dx: Tensor,
+        y: Tensor,
+        models: list
+    ) -> float:
+        if self.binary_output:
+            loss = -torch.cat([self.loss(m.model_obj(x0 + dx)[0], y) for m in models], dim=0)
+        else:
+            loss = -torch.cat([self.loss(m.model_obj(x0 + dx), y) for m in models], dim=0)
+        return loss.sum()
+
     def _optimization_objective(
         self: Self,
         x0: Tensor,
         dx: Tensor,
         y: Tensor
     ) -> float:
-        if self.binary_output:
-            loss = -torch.cat([self.loss(shadow_model.model_obj(x0 + dx)[0],y) for shadow_model in self.source_models], dim = 0)
-        else:
-            loss = -torch.cat([self.loss(shadow_model.model_obj(x0 + dx),y) for shadow_model in self.source_models], dim = 0)
-        return loss.sum()
+        return self._compute_loss(x0, dx, y, self.source_models)
 
     def _stop_criterion(
         self: Self,
@@ -137,13 +149,7 @@ class AttackOSLO(AbstractMIA):
         dx: Tensor,
         y: Tensor
     ) -> float:
-        if self.binary_output:
-            loss = -torch.cat(
-                [self.loss(shadow_model.model_obj(x0 + dx)[0],y) for shadow_model in self.validation_models], dim = 0
-            )
-        else:
-            loss = -torch.cat([self.loss(shadow_model.model_obj(x0 + dx),y) for shadow_model in self.validation_models], dim = 0)
-        return loss.sum()
+        return self._compute_loss(x0, dx, y, self.validation_models)
 
     def _generate_adversarial_example(
         self: Self,
@@ -191,7 +197,7 @@ class AttackOSLO(AbstractMIA):
 
         """
 
-        data_loader = self.handler.get_dataloader(self.audit_data_indices, batch_size=1)
+        data_loader = self.handler.get_dataloader(self.audit_data_indices, batch_size=1, shuffle=False)
 
         predictions = []
 
@@ -202,11 +208,7 @@ class AttackOSLO(AbstractMIA):
 
         self.target_model.model_obj.to(device_name)
         self.target_model.model_obj.eval()
-        for model in self.source_models:
-            model.model_obj.eval()
-            model.model_obj.to(device_name)
-            model.model_obj.requires_grad_(False)
-        for model in self.validation_models:
+        for model in self.source_models + self.validation_models:
             model.model_obj.eval()
             model.model_obj.to(device_name)
             model.model_obj.requires_grad_(False)
@@ -224,7 +226,7 @@ class AttackOSLO(AbstractMIA):
             predictions.append(batch_predictions)
 
         predictions = np.array(predictions).reshape(-1, self.n_thresholds)
-        signal_values = predictions[:, -1].copy().reshape(-1, 1)
+        signal_values = predictions[:, -1].astype(float).reshape(-1, 1)
 
         logger.info(f"Accuracy: {np.sum(predictions == true_labels[:,np.newaxis], axis=0)/predictions.shape[0]}")
         logger.info(f"TPR: {np.sum(predictions * true_labels[:,np.newaxis], axis=0)/np.sum(true_labels)}")
