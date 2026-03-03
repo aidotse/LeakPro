@@ -249,6 +249,3 @@ class GRUHandler(BaseMIMICHandler):
         acc = float(acc) / total_samples
         return EvalOutput(accuracy=acc, loss=loss)
 
-
-def to_numpy(tensor):
-    return tensor.detach().cpu().numpy() if tensor.is_cuda else tensor.detach().numpy()
