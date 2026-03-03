@@ -25,25 +25,25 @@ audit:  # Configurations for auditing
 #   dpsgd_path: "./target_LR/dpsgd_dic.pkl"
 
 
-## GRUD model configurations
-target:
-  # Target model path
-  module_path: "./target_models.py" 
-  model_class: "GRUD"
-  target_folder: "./target_GRUD"
-  # Data paths
-  data_path: "./data/GRUD_data/dataset.pkl" #unflattened dataset for GRUD in GRUD_data direcotry and flattened dataset for LR in LR_data directory
-  dpsgd_path: "./target_GRUD/dpsgd_dic.pkl"
-
-# ### GRUD model configurations with DP-SGD
+# ## GRUD model configurations
 # target:
 #   # Target model path
 #   module_path: "./target_models.py" 
 #   model_class: "GRUD"
-#   target_folder: "./target_GRUD_dpsgd"
+#   target_folder: "./target_GRUD"
 #   # Data paths
 #   data_path: "./data/GRUD_data/dataset.pkl" #unflattened dataset for GRUD in GRUD_data direcotry and flattened dataset for LR in LR_data directory
-#   dpsgd_path: "./target_GRUD_dpsgd/dpsgd_dic.pkl"
+#   dpsgd_path: "./target_GRUD/dpsgd_dic.pkl"
+
+### GRUD model configurations with DP-SGD
+target:
+  # Target model path
+  module_path: "./target_models.py" 
+  model_class: "GRUD"
+  target_folder: "./target_GRUD_dpsgd"
+  # Data paths
+  data_path: "./data/GRUD_data/dataset.pkl" #unflattened dataset for GRUD in GRUD_data direcotry and flattened dataset for LR in LR_data directory
+  dpsgd_path: "./target_GRUD_dpsgd/dpsgd_dic.pkl"
 
 shadow_model:
 
