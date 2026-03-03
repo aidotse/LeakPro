@@ -91,13 +91,18 @@ class FilterLinear(nn.Module):
 
 class GRUD(nn.Module):
     def __init__(self, input_size, hidden_size, X_mean, batch_size,
-             dpsgd_path: Optional[str] = None, **kwargs):
+             dpsgd_path: Optional[str] = None,
+             bn_flag: bool = False,
+             output_last: bool = False,
+             batch_first: bool = True,
+             loss_reduction: str = "mean",
+             force_functorch: bool = False):
         """With minor modifications from https://github.com/zhiyongc/GRU-D/
 
         Recurrent Neural Networks for Multivariate Times Series with Missing Values
         GRU-D: GRU exploit two representations of informative missingness patterns, i.e., masking and time interval.
-        
-        Implemented based on the paper: 
+
+        Implemented based on the paper:
         @article{che2018recurrent,
           title={Recurrent neural networks for multivariate time series with missing values},
           author={Che, Zhengping and Purushotham, Sanjay and Cho, Kyunghyun and Sontag, David and Liu, Yan},
@@ -108,26 +113,21 @@ class GRUD(nn.Module):
           year={2018},
           publisher={Nature Publishing Group}
         }
-        
-        GRU-D:
+
+        Args:
             input_size: variable dimension of each time
             hidden_size: dimension of hidden_state
-            mask_size: dimension of masking vector
             X_mean: the mean of the historical input data
             batch_size: batch size for training
-            dpsgd_path: path to the DP-SGD model, if using DP-SGD mode
-        Keyword Args:
+            dpsgd_path: path to the DP-SGD config pickle, if using DP-SGD mode
             bn_flag: whether to use batch normalization (default: False)
             output_last: whether to output the last hidden state (default: False)
-            batch_first: whether the input tensor is in (batch, time, features) format (default: True)
+            batch_first: whether the input is in (batch, time, features) format (default: True)
             loss_reduction: reduction method for loss calculation (default: "mean")
             force_functorch: whether to force the use of functorch for autograd (default: False)
         """
 
         super(GRUD, self).__init__()
-        
-        if dpsgd_path is not None and kwargs:
-            raise ValueError(f"[DP-SGD mode] These kwargs will be ignored: {kwargs}")
 
         if dpsgd_path is not None:
             bn_flag = False
@@ -135,13 +135,6 @@ class GRUD(nn.Module):
             batch_first = True
             loss_reduction = "mean"
             force_functorch = False
-        else:
-            # Use from kwargs or defaults
-            bn_flag = kwargs.get("bn_flag", False)
-            output_last = kwargs.get("output_last", False)
-            batch_first = kwargs.get("batch_first", True)
-            loss_reduction = kwargs.get("loss_reduction", "mean")
-            force_functorch = kwargs.get("force_functorch", False)
 
 
         # Save init params to a dictionary
