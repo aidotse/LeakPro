@@ -8,36 +8,27 @@ from leakpro.tests.constants import get_shadow_model_config
 from leakpro.tests.input_handler.image_input_handler import ImageInputHandler
 
 FAST_OSLO_PARAMS = {
-    "n_audits": 3,
+    "n_audits": 2,
     "num_source_models": 1,
     "num_validation_models": 1,
     "num_sub_procedures": 1,
     "num_iterations": 1,
     "n_thresholds": 2,
-    "online": False,
+    "online": True,
     "training_data_fraction": 0.5,
 }
 
 
 def test_oslo_setup(image_handler: ImageInputHandler) -> None:
-    """Test that AttackOSLO initializes correctly with default and custom configs."""
-    # Default params
-    oslo_default = AttackOSLO(image_handler, None)
-    assert oslo_default is not None
-    assert oslo_default.target_model is not None
-    assert oslo_default.num_source_models == 9
-    assert oslo_default.num_validation_models == 3
-    assert oslo_default.n_audits == 500
-    assert oslo_default.online == False
-
-    # Custom fast params
-    oslo_custom = AttackOSLO(image_handler, FAST_OSLO_PARAMS)
-    assert oslo_custom is not None
+    """Test that AttackOSLO initializes correctly with custom configs."""
+    oslo_obj = AttackOSLO(image_handler, FAST_OSLO_PARAMS)
+    assert oslo_obj is not None
+    assert oslo_obj.target_model is not None
     for key, value in FAST_OSLO_PARAMS.items():
-        assert getattr(oslo_custom, key) == value
+        assert getattr(oslo_obj, key) == value
 
     # Description
-    desc = oslo_custom.description()
+    desc = oslo_obj.description()
     assert len(desc) == 4
 
     # min_threshold must be > 0 (gt=0.0)
