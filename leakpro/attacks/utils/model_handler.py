@@ -35,40 +35,45 @@ class ModelHandler():
 
         caller_configs = getattr(handler.configs, caller) if caller is not None else None
         self.use_target_model_setup = caller_configs is None
+        target_setup = handler.target_model_metadata
 
         # get the bluepring for the model
         if self.use_target_model_setup:
             self.model_class = handler.target_model_blueprint.__name__
             self.model_blueprint = handler.target_model_blueprint
         else:
-            try:
-                self.model_path = caller_configs.module_path
-                self.model_class = caller_configs.model_class
-            except AttributeError as e:
-                raise ValueError("Model path or class not provided in shadow model config") from e
+            # Allow partial shadow model config by inheriting from the target setup.
+            self.model_path = caller_configs.module_path or handler.configs.target.module_path
+            self.model_class = caller_configs.model_class or handler.configs.target.model_class
             try:
                 self.model_blueprint = self._import_model_from_path(self.model_path, self.model_class)
             except Exception as e:
                 raise ValueError(f"Failed to create model blueprint from {self.model_class} in {self.model_path}") from e
 
-        # Pick either target config or caller config
-        setup_config = handler.target_model_metadata if self.use_target_model_setup else caller_configs
-        # extract the init params
-        self.init_params = setup_config.init_params
+        if self.use_target_model_setup:
+            self.init_params = target_setup.init_params
+            optimizer_name = target_setup.optimizer.name
+            self.optimizer_config = target_setup.optimizer.params
+            criterion_name = target_setup.criterion.name
+            self.loss_config = target_setup.criterion.params
+            self.epochs = target_setup.epochs
+        else:
+            # Inherit defaults from target and apply caller overrides when present.
+            self.init_params = target_setup.init_params.copy()
+            self.init_params.update(caller_configs.init_params or {})
+            optimizer_cfg = caller_configs.optimizer or target_setup.optimizer
+            criterion_cfg = caller_configs.criterion or target_setup.criterion
+            optimizer_name = optimizer_cfg.name
+            self.optimizer_config = optimizer_cfg.params
+            criterion_name = criterion_cfg.name
+            self.loss_config = criterion_cfg.params
+            self.epochs = caller_configs.epochs if caller_configs.epochs is not None else target_setup.epochs
 
         # Get optimizer class
-        optimizer_name = setup_config.optimizer.name
         self.optimizer_class = self._get_optimizer_class(optimizer_name)
-        # copy to only have parameters left
-        self.optimizer_config = setup_config.optimizer.params
 
         # Get criterion class
-        criterion_class = setup_config.criterion.name
-        self.criterion_class = self._get_criterion_class(criterion_class)
-        # copy to only have parameters left
-        self.loss_config = setup_config.criterion.params
-
-        self.epochs = setup_config.epochs
+        self.criterion_class = self._get_criterion_class(criterion_name)
 
         # Set the storage paths for objects created by the handler
         storage_path = handler.configs.audit.output_dir
@@ -214,4 +219,3 @@ class ModelHandler():
                 return joblib.load(f)
         except FileNotFoundError as e:
             raise FileNotFoundError(f"Metadata at {metadata_path} not found") from e
-

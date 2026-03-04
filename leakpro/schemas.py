@@ -101,13 +101,13 @@ class TargetConfig(BaseModel):
 class ShadowModelConfig(BaseModel):
     """Configuration for the Shadow models."""
 
-    model_class: Optional[str] = None
-    module_path: Optional[str] = None
+    model_class: Optional[str] = Field(default=None, description="Class name of the shadow model")
+    module_path: Optional[str] = Field(default=None, description="Path to the shadow model module")
     init_params: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Model initialization parameters")
-    optimizer: Optional[OptimizerConfig] = Field(..., description="Optimizer configuration")
-    criterion: Optional[LossConfig] = Field(..., description="Loss function configuration")
-    batch_size: Optional[int] = Field(..., ge=1, description="Batch size used during training")
-    epochs: Optional[int] = Field(..., ge=1, description="Number of training epochs")
+    optimizer: Optional[OptimizerConfig] = Field(default=None, description="Optimizer configuration")
+    criterion: Optional[LossConfig] = Field(default=None, description="Loss function configuration")
+    batch_size: Optional[int] = Field(default=None, ge=1, description="Batch size used during training")
+    epochs: Optional[int] = Field(default=None, ge=1, description="Number of training epochs")
 
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields
 
