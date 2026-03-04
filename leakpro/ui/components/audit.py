@@ -66,7 +66,8 @@ def render_audit() -> None:
             st.session_state.stage = 2
             st.rerun()
     with col_fwd:
-        if st.session_state.get("audit_results"):
-            if st.button("Explore Results →", type="primary", use_container_width=True):
-                st.session_state.stage = 4
-                st.rerun()
+        if st.session_state.get("audit_results") and st.button(
+            "Explore Results →", type="primary", use_container_width=True
+        ):
+            st.session_state.stage = 4
+            st.rerun()

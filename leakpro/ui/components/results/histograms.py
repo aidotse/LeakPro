@@ -52,9 +52,9 @@ def render_histograms(results: list) -> None:
         barmode="overlay",
         xaxis_title="Attack signal score",
         yaxis_title="Count",
-        legend=dict(orientation="h", yanchor="bottom", y=-0.3, xanchor="center", x=0.5),
+        legend={"orientation": "h", "yanchor": "bottom", "y": -0.3, "xanchor": "center", "x": 0.5},
         height=400,
-        margin=dict(t=20),
+        margin={"t": 20},
     )
     st.plotly_chart(fig, use_container_width=True)
 

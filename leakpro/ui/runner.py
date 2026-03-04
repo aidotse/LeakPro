@@ -11,6 +11,7 @@ import logging
 import os
 import pickle
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
@@ -35,8 +36,8 @@ if str(_CIFAR_DIR) not in sys.path:
     sys.path.insert(0, str(_CIFAR_DIR))
 
 # Lazy imports from leakpro (available once project root is on path)
-from leakpro import LeakPro  # noqa: E402
-from leakpro.utils.logger import logger as leakpro_logger  # noqa: E402
+from leakpro import LeakPro  # noqa: E402, I001
+from leakpro.utils.logger import logger as leakpro_logger  # noqa: E402, I001
 
 
 # ---------------------------------------------------------------------------
@@ -49,13 +50,14 @@ class StreamlitLogHandler(logging.Handler):
     Attach before a long-running call; detach afterwards.
     """
 
-    def __init__(self, container) -> None:
+    def __init__(self, container: object) -> None:
         super().__init__()
         self.container = container
         self._lines: list[str] = []
         self.setFormatter(logging.Formatter("%(asctime)s %(levelname)-8s %(message)s"))
 
     def emit(self, record: logging.LogRecord) -> None:
+        """Format and emit a log record to the Streamlit container."""
         msg = self.format(record)
         self._lines.append(msg)
         # Keep only the most recent 30 lines to avoid giant text areas
@@ -63,7 +65,7 @@ class StreamlitLogHandler(logging.Handler):
 
 
 @contextlib.contextmanager
-def _stream_logs(container):
+def _stream_logs(container: object) -> Iterator[StreamlitLogHandler]:
     """Context manager that attaches/detaches a StreamlitLogHandler."""
     handler = StreamlitLogHandler(container)
     leakpro_logger.addHandler(handler)
@@ -74,7 +76,7 @@ def _stream_logs(container):
 
 
 @contextlib.contextmanager
-def _in_cifar_dir():
+def _in_cifar_dir() -> Iterator[None]:
     """Temporarily change the working directory to the CIFAR example folder.
 
     This is required because audit.yaml uses relative paths (./target, ./data/…).
@@ -98,7 +100,7 @@ class LeakProRunner:
     # Stage 2a – prepare dataset
     # ------------------------------------------------------------------
 
-    def prepare_data(self, train_config: dict, log_container=None) -> dict:
+    def prepare_data(self, train_config: dict, log_container: object | None = None) -> dict:
         """Download CIFAR data, build population dataset, create train/test splits.
 
         Returns a dict with keys:
@@ -178,7 +180,9 @@ class LeakProRunner:
     # Stage 2b – standard training
     # ------------------------------------------------------------------
 
-    def train_standard(self, train_config: dict, data_result: dict, log_container=None) -> dict:
+    def train_standard(
+        self, train_config: dict, data_result: dict, log_container: object | None = None
+    ) -> dict:
         """Train target model without differential privacy.
 
         Returns a dict with keys:
@@ -261,7 +265,7 @@ class LeakProRunner:
         train_config: dict,
         dpsgd_params: dict,
         data_result: dict,
-        log_container=None,
+        log_container: object | None = None,
     ) -> dict:
         """Train target model with differential privacy (DP-SGD via Opacus).
 
@@ -363,7 +367,7 @@ class LeakProRunner:
     # Stage 3 – run audit
     # ------------------------------------------------------------------
 
-    def run_audit(self, dpsgd: bool = False, log_container=None) -> list:
+    def run_audit(self, dpsgd: bool = False, log_container: object | None = None) -> list:
         """Run LeakPro MIA attacks and return a list of MIAResult objects."""
         with _in_cifar_dir():
             if dpsgd:
@@ -402,20 +406,20 @@ class LeakProRunner:
         if not data_objects_dir.exists():
             return results
         for json_file in sorted(data_objects_dir.glob("*.json")):
-            try:
+            with contextlib.suppress(Exception):
                 results.append(MIAResult.load(str(json_file)))
-            except Exception:  # noqa: BLE001
-                pass
         return results
 
     @staticmethod
     def default_train_config() -> dict:
+        """Return the default training configuration loaded from CIFAR train_config.yaml."""
         config_path = _CIFAR_DIR / "train_config.yaml"
         with open(config_path) as f:
             return yaml.safe_load(f)
 
     @staticmethod
     def default_audit_config() -> dict:
+        """Return the default audit configuration loaded from CIFAR audit.yaml."""
         config_path = _CIFAR_DIR / "audit.yaml"
         with open(config_path) as f:
             return yaml.safe_load(f)

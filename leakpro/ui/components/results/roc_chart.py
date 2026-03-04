@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-
 
 _PALETTE = [
     "#4C9BE8", "#E84C4C", "#27AE60", "#F5A623",
@@ -51,7 +51,7 @@ def render_roc(results: list) -> None:
             x=fpr, y=tpr,
             fill="tozeroy",
             fillcolor=f"rgba{tuple(int(colour.lstrip('#')[j:j+2], 16) for j in (0, 2, 4)) + (0.08,)}",
-            line=dict(width=0),
+            line={"width": 0},
             showlegend=False,
             hoverinfo="skip",
             visible=visible or "legendonly",
@@ -61,7 +61,7 @@ def render_roc(results: list) -> None:
             x=fpr, y=tpr,
             mode="lines",
             name=label,
-            line=dict(color=colour, width=2),
+            line={"color": colour, "width": 2},
             hovertemplate=(
                 f"<b>{r.result_name}</b><br>"
                 "FPR: %{x:.5f}<br>TPR: %{y:.5f}<extra></extra>"
@@ -75,16 +75,16 @@ def render_roc(results: list) -> None:
         x=baseline, y=baseline,
         mode="lines",
         name="Random guess (AUC=0.5)",
-        line=dict(dash="dash", color="#888888", width=1),
+        line={"dash": "dash", "color": "#888888", "width": 1},
         hoverinfo="skip",
     ))
 
     fig.update_layout(
-        xaxis=dict(type="log", title="False Positive Rate (FPR)", range=[-5, 0]),
-        yaxis=dict(type="log", title="True Positive Rate (TPR)", range=[-5, 0]),
-        legend=dict(orientation="h", yanchor="bottom", y=-0.35, xanchor="center", x=0.5),
+        xaxis={"type": "log", "title": "False Positive Rate (FPR)", "range": [-5, 0]},
+        yaxis={"type": "log", "title": "True Positive Rate (TPR)", "range": [-5, 0]},
+        legend={"orientation": "h", "yanchor": "bottom", "y": -0.35, "xanchor": "center", "x": 0.5},
         height=520,
-        margin=dict(t=20, b=120),
+        margin={"t": 20, "b": 120},
         hovermode="x unified",
     )
 
@@ -103,5 +103,4 @@ def render_roc(results: list) -> None:
             "TPR@0.1%FPR": f"{fpr_table.get('TPR@0.1%FPR', 0):.4f}",
             "TPR@0%FPR":  f"{fpr_table.get('TPR@0%FPR', 0):.4f}",
         })
-    import pandas as pd  # noqa: PLC0415
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)

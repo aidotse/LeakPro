@@ -69,7 +69,8 @@ def render_overview() -> None:
     with col_resume:
         st.markdown("### Resume previous run")
         if has_results:
-            st.caption(f"Previous results found in `{resume_dir.relative_to(Path.cwd()) if resume_dir.is_relative_to(Path.cwd()) else resume_dir}`.")
+            disp_path = resume_dir.relative_to(Path.cwd()) if resume_dir.is_relative_to(Path.cwd()) else resume_dir
+            st.caption(f"Previous results found in `{disp_path}`.")
             if st.button("Load Existing Results", use_container_width=True):
                 from leakpro.ui.runner import LeakProRunner  # noqa: PLC0415
                 results = LeakProRunner.load_audit_results_from_disk(str(resume_dir))
