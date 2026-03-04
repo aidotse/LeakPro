@@ -28,6 +28,12 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 _CIFAR_DIR = _PROJECT_ROOT / "examples" / "mia" / "cifar"
 
+# Also put the CIFAR dir on sys.path so that LeakPro's internal re-imports
+# of the handler (e.g. during shadow model training) can find 'cifar_handler'
+# by its simple module name — matching how the notebooks import it.
+if str(_CIFAR_DIR) not in sys.path:
+    sys.path.insert(0, str(_CIFAR_DIR))
+
 # Lazy imports from leakpro (available once project root is on path)
 from leakpro import LeakPro  # noqa: E402
 from leakpro.utils.logger import logger as leakpro_logger  # noqa: E402
@@ -124,7 +130,7 @@ class LeakProRunner:
             targets = cat([tensor(trainset.targets), tensor(testset.targets)], dim=0)
 
             # ---- import UserDataset (defined inside the handler) ---------
-            from examples.mia.cifar.cifar_handler import CifarInputHandler  # noqa: PLC0415
+            from cifar_handler import CifarInputHandler  # noqa: PLC0415
 
             population_dataset = CifarInputHandler.UserDataset(data, targets)
 
@@ -179,8 +185,8 @@ class LeakProRunner:
             model, train_result, test_result, epochs, target_folder
         """
         with _in_cifar_dir():
-            from examples.mia.cifar.cifar_handler import CifarInputHandler  # noqa: PLC0415
-            from examples.mia.cifar.target_model_class import WideResNet  # noqa: PLC0415
+            from cifar_handler import CifarInputHandler  # noqa: PLC0415
+            from target_model_class import WideResNet  # noqa: PLC0415
 
             dataset_name: str = data_result["dataset_name"]
             num_classes = 10 if dataset_name == "cifar10" else 100
@@ -265,8 +271,8 @@ class LeakProRunner:
         Returns same dict shape as train_standard, plus 'achieved_epsilon'.
         """
         with _in_cifar_dir():
-            from examples.mia.cifar.cifar_handler_dpsgd import CifarInputHandlerDPsgd  # noqa: PLC0415
-            from examples.mia.cifar.target_model_class import ResNet18_DPsgd  # noqa: PLC0415
+            from cifar_handler_dpsgd import CifarInputHandlerDPsgd  # noqa: PLC0415
+            from target_model_class import ResNet18_DPsgd  # noqa: PLC0415
 
             dataset_name: str = data_result["dataset_name"]
             num_classes = 10 if dataset_name == "cifar10" else 100
@@ -361,11 +367,11 @@ class LeakProRunner:
         """Run LeakPro MIA attacks and return a list of MIAResult objects."""
         with _in_cifar_dir():
             if dpsgd:
-                from examples.mia.cifar.cifar_handler_dpsgd import CifarInputHandlerDPsgd  # noqa: PLC0415
+                from cifar_handler_dpsgd import CifarInputHandlerDPsgd  # noqa: PLC0415
                 handler_cls = CifarInputHandlerDPsgd
                 config_path = "audit_dpsgd.yaml"
             else:
-                from examples.mia.cifar.cifar_handler import CifarInputHandler  # noqa: PLC0415
+                from cifar_handler import CifarInputHandler  # noqa: PLC0415
                 handler_cls = CifarInputHandler
                 config_path = "audit.yaml"
 

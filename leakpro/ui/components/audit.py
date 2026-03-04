@@ -23,7 +23,7 @@ def render_audit() -> None:
 
     runner = LeakProRunner()
 
-    if "audit_results" not in st.session_state:
+    if not st.session_state.get("audit_results"):
         st.markdown(
             """
             Click **Run Attacks** to execute the selected membership inference attacks
@@ -66,7 +66,7 @@ def render_audit() -> None:
             st.session_state.stage = 2
             st.rerun()
     with col_fwd:
-        if "audit_results" in st.session_state:
+        if st.session_state.get("audit_results"):
             if st.button("Explore Results →", type="primary", use_container_width=True):
                 st.session_state.stage = 4
                 st.rerun()

@@ -122,7 +122,8 @@ with st.sidebar:
 def _render_attack_details(results: list) -> None:
     """Render per-attack expandable detail sections."""
     for r in results:
-        with st.expander(f"{r.result_name}  (AUC = {r.roc_auc:.4f if r.roc_auc else 'N/A'})"):
+        auc_str = f"{r.roc_auc:.4f}" if r.roc_auc is not None else "N/A"
+        with st.expander(f"{r.result_name}  (AUC = {auc_str})"):
             col1, col2 = st.columns(2)
             with col1:
                 st.markdown("**Configuration**")
@@ -142,7 +143,7 @@ def _render_attack_details(results: list) -> None:
             with col2:
                 st.markdown("**Metrics**")
                 rows = [
-                    {"Metric": "AUC", "Value": f"{r.roc_auc:.5f}" if r.roc_auc else "N/A"},
+                    {"Metric": "AUC", "Value": f"{r.roc_auc:.5f}" if r.roc_auc is not None else "N/A"},
                 ]
                 if r.fixed_fpr_table:
                     for k, v in r.fixed_fpr_table.items():

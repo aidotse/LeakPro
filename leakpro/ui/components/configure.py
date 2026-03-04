@@ -26,10 +26,10 @@ def render_configure() -> None:
 
     runner = LeakProRunner()
 
-    # Load defaults if not yet in session state
-    if "train_config" not in st.session_state:
+    # Load defaults if not yet in session state (or reset to None by dashboard)
+    if not st.session_state.get("train_config"):
         st.session_state.train_config = runner.default_train_config()
-    if "audit_config" not in st.session_state:
+    if not st.session_state.get("audit_config"):
         st.session_state.audit_config = runner.default_audit_config()
     if "dpsgd_enabled" not in st.session_state:
         st.session_state.dpsgd_enabled = False

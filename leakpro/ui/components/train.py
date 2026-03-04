@@ -23,7 +23,7 @@ def render_train() -> None:
     # ------------------------------------------------------------------ #
     st.subheader("Step 1 — Prepare Dataset")
 
-    if "data_result" not in st.session_state:
+    if not st.session_state.get("data_result"):
         if st.button("Download & Prepare Data", type="primary"):
             log_container = st.empty()
             status_msg = st.empty()
@@ -44,11 +44,11 @@ def render_train() -> None:
     # ------------------------------------------------------------------ #
     # Step 2b — Train model
     # ------------------------------------------------------------------ #
-    if "data_result" in st.session_state:
+    if st.session_state.get("data_result"):
         st.markdown("---")
         st.subheader("Step 2 — Train Model")
 
-        if "train_result_dict" not in st.session_state:
+        if not st.session_state.get("train_result_dict"):
             if st.button("Train Model", type="primary"):
                 log_placeholder = st.empty()
                 with st.spinner("Training… this may take several minutes."):
@@ -76,12 +76,11 @@ def render_train() -> None:
     # ------------------------------------------------------------------ #
     # Navigation
     # ------------------------------------------------------------------ #
-    if "train_result_dict" in st.session_state:
+    if st.session_state.get("train_result_dict"):
         st.markdown("---")
         col_back, _, col_fwd = st.columns([1, 3, 1])
         with col_back:
             if st.button("← Reconfigure", use_container_width=True):
-                # Clear training results when going back
                 st.session_state.pop("train_result_dict", None)
                 st.session_state.pop("data_result", None)
                 st.session_state.stage = 1
@@ -90,7 +89,7 @@ def render_train() -> None:
             if st.button("Run Attacks →", type="primary", use_container_width=True):
                 st.session_state.stage = 3
                 st.rerun()
-    elif "data_result" not in st.session_state:
+    elif not st.session_state.get("data_result"):
         st.markdown("---")
         col_back, _ = st.columns([1, 4])
         with col_back:
