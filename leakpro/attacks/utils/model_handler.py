@@ -3,6 +3,7 @@
 import os
 
 import joblib
+import numpy as np
 from torch import load
 from torch.nn import Module
 
@@ -13,7 +14,9 @@ from leakpro.input_handler.user_imports import (
     get_optimizer_mapping,
     import_module_from_file,
 )
-from leakpro.utils.import_helper import Self, Tuple
+from leakpro.signals.signal import ModelLogits
+from leakpro.signals.signal_extractor import PytorchModel
+from leakpro.utils.import_helper import Self, Tuple, Union
 from leakpro.utils.logger import logger
 from leakpro.utils.save_load import hash_model
 
@@ -80,6 +83,31 @@ class ModelHandler():
 
         # Create the hash for the target model
         self.target_model_hash = hash_model(self.handler.target_model)
+
+        # Folder to store intermediate results
+        self.attack_cache_folder_path = "leakpro_output/attack_cache"
+        os.makedirs(self.attack_cache_folder_path, exist_ok=True)
+
+        criterion = self.handler.get_criterion()
+        self.cache_logits(PytorchModel(self.handler.target_model, criterion), name="target")
+
+
+    def cache_logits(self:Self, model:Union[Module, list[Module]], name:str) -> None:
+        """Cache the target model logits."""
+
+        # check if the name is already in the cache
+        cache_file = f"{self.attack_cache_folder_path}/{name}_logits.npy"
+        if os.path.exists(cache_file):
+            logger.info(f"Logits already cached at {cache_file}")
+            return
+
+        # run data through the model, collect the logits, and store them
+        if not isinstance(model, list):
+            model = [model]
+        data_indices = np.concatenate((self.handler.train_indices, self.handler.test_indices))
+        logits = np.array(ModelLogits()(model, self.handler, data_indices)).squeeze()
+        np.save(cache_file, logits)
+        logger.info(f"Saved logits to {cache_file}")
 
     def _import_model_from_path(self:Self, module_path:str, model_class:str)->None:
         """Import the model from the given path.
