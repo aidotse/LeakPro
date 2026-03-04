@@ -1,17 +1,15 @@
-"""Module containing the class to handle the user input for the CIFAR10/100 dataset."""
+"""Input handler for CelebA-HQ experiments with optional DP-SGD training."""
 
 import os
 import pickle
 
 from opacus import PrivacyEngine
 from opacus.accountants.utils import get_noise_multiplier
-from opacus.optimizers.optimizer import DPOptimizer
 from opacus.utils.batch_memory_manager import BatchMemoryManager
 from opacus.validators import ModuleValidator
 
 import torch
 from torch import cuda, device, optim, cat
-from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader, ConcatDataset
 from torchvision import datasets, transforms
 from tqdm import tqdm
@@ -22,7 +20,7 @@ from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 class CelebAInputHandlerDPsgd(AbstractInputHandler):
-    """Class to handle the user input for the CIFAR100 dataset."""
+    """Input handler for CelebA-HQ image classification experiments."""
 
     def train(
         self: Self,
@@ -49,45 +47,37 @@ class CelebAInputHandlerDPsgd(AbstractInputHandler):
         Returns:
             TrainingOutput: Contains the trained model and training metrics, including accuracy and loss history.
         """
-
-        # Get targeted batch_size from the dataloader
-        batch_size = dataloader.batch_size
         
-        # Get dpsgd flag from the model
-        RUN_DPSGD = model.dpsgd
+        if optimizer is None:
+            raise ValueError("Optimizer must be provided for training")
+        if criterion is None:
+            raise ValueError("Criterion must be provided for training")
+        if not hasattr(model, "dpsgd"):
+            raise ValueError("Model is missing required 'dpsgd' attribute")
 
-        if RUN_DPSGD:
+        run_dpsgd = bool(model.dpsgd)
+
+        if run_dpsgd:
             # Check if the model is compatible with DP-SGD
             errors = ModuleValidator.validate(model, strict=False)
             if len(errors) > 0:
                 logger.info("Model has privacy violations. Fixing...")
+
                 # Use ModuleValidator.fix to fix the models privacy violations
                 model = ModuleValidator.fix(model)
-                
-                # Re-instantiate the optimizer with the fixed model parameters
-                if optimizer is None:
-                    raise ValueError("Optimizer must be provided for DP-SGD training")
-                    
-                # Get optimizer class and constructor parameters
-                optimizer_class = optimizer.__class__
-                # Extract all important parameters from the optimizer
-                optimizer_config = {}
-                for group in optimizer.param_groups:
-                    for key, value in group.items():
-                        if key != 'params':  # Skip the parameters
-                            optimizer_config[key] = value
-                
-                # Create new optimizer with the same configuration but updated model parameters
-                optimizer = optimizer_class(model.parameters(), **optimizer_config)
-                logger.info(f"Model fixed and {optimizer_class.__name__} re-instantiated.")
 
-            # Send the model, optimizer, and dataloader to be DP-sgd-compliant 
-            model, optimizer, dataloader, privacyengine = dpsgd(
-                                                        model,
-                                                        optimizer,
-                                                        dataloader,
-                                                        dpsgd_path = dpsgd_metadata_path
-                                                        )
+                # Re-instantiate optimizer with equivalent settings for the fixed model.
+                optimizer = _rebuild_optimizer(optimizer, model)
+                logger.info(f"Model fixed and {optimizer.__class__.__name__} re-instantiated.")
+
+        # Convert model/optimizer/dataloader to DP-compatible variants when enabled.
+        _disable_inplace_activations(model)
+        model, optimizer, dataloader, _ = dpsgd(
+            model,
+            optimizer,
+            dataloader,
+            dpsgd_path=dpsgd_metadata_path,
+        )
 
         # read hyperparams for training (the parameters for the dataloader are defined in get_dataloader):
         if epochs is None:
@@ -96,11 +86,12 @@ class CelebAInputHandlerDPsgd(AbstractInputHandler):
         # prepare training
         device = torch.device("cuda" if cuda.is_available() else "cpu")
         model.to(device)
+        model.train()
 
         accuracy_history = []
         loss_history = []
 
-        if RUN_DPSGD:
+        if run_dpsgd:
             logger.info("Training with DP-SGD")
 
             # Use BatchMemoryManager to handle large batch sizes by splitting them into smaller sub-batches
@@ -149,13 +140,15 @@ class CelebAInputHandlerDPsgd(AbstractInputHandler):
         model.to("cpu")
         
         # Remove the GradSampleModule wrapper.
-        if hasattr(model, '_module'):
+        if hasattr(model, "_module"):
             model = model._module
 
-        results = EvalOutput(accuracy = train_accuracy,
-                             loss = avg_train_loss,
-                             extra = {"accuracy_history": accuracy_history, "loss_history": loss_history})
-        return TrainingOutput(model = model, metrics=results)
+        results = EvalOutput(
+            accuracy=train_accuracy,
+            loss=avg_train_loss,
+            extra={"accuracy_history": accuracy_history, "loss_history": loss_history},
+        )
+        return TrainingOutput(model=model, metrics=results)
 
     def eval(self, loader, model, criterion):
         gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
@@ -245,14 +238,32 @@ class CelebAInputHandlerDPsgd(AbstractInputHandler):
 
             return cls(data, targets)
 
+def _rebuild_optimizer(optimizer: optim.Optimizer, model: torch.nn.Module) -> optim.Optimizer:
+    """Recreate optimizer with the same hyperparameters for a new model parameter set."""
+    optimizer_class = optimizer.__class__
+    optimizer_config = {}
+    for group in optimizer.param_groups:
+        for key, value in group.items():
+            if key != "params":
+                optimizer_config[key] = value
+    return optimizer_class(model.parameters(), **optimizer_config)
+
+
+def _disable_inplace_activations(model: torch.nn.Module) -> None:
+    """Disable in-place activations that can break Opacus backward hooks."""
+    for module in model.modules():
+        if hasattr(module, "inplace") and isinstance(module.inplace, bool):
+            module.inplace = False
+
+
 def train_loop(dataloader, model, criterion, optimizer, device, epoch, epochs):
 
-    train_loss, train_acc = 0, 0
+    model.train()
+    train_loss, train_acc = 0.0, 0.0
     for inputs, labels in tqdm(dataloader, desc=f"Epoch {epoch}/{epochs}"):
-        labels = labels.long()
+        labels = labels.long().view(-1)
         inputs, labels = inputs.to(device, non_blocking=True), labels.to(device, non_blocking=True)
 
-        model.zero_grad()
         optimizer.zero_grad()
 
         outputs = model(inputs)
@@ -263,9 +274,9 @@ def train_loop(dataloader, model, criterion, optimizer, device, epoch, epochs):
 
         # Accumulate performance of shadow model
         train_acc += pred.eq(labels.view_as(pred)).sum().item()
-        train_loss += loss.item()
-    
-    return train_acc, train_loss
+        train_loss += loss.item() * labels.size(0)
+
+    return train_loss, train_acc
 
 def dpsgd(
         model: torch.nn.Module = None,
@@ -275,6 +286,9 @@ def dpsgd(
     ) -> None:
     """Set the model, optimizer and dataset using DPsgd."""
 
+    if not bool(getattr(model, "dpsgd", False)):
+        return model, optimizer, dataloader, None
+
     logger.info("Training with DP-SGD")
 
     sample_rate = 1/len(dataloader)
@@ -283,7 +297,7 @@ def dpsgd(
         # Open and read the pickle file
         with open(dpsgd_path, "rb") as file:
             privacy_engine_dict = pickle.load(file)
-        logger.info("Pickle file loaded successfully, using DPsgd config:", privacy_engine_dict)
+        logger.info(f"DP-SGD config loaded from {dpsgd_path}: {privacy_engine_dict}")
     else:
         raise Exception(f"File not found at: {dpsgd_path}")
 
@@ -313,7 +327,7 @@ def dpsgd(
         optimizer=optimizer,
         data_loader=dataloader,
         noise_multiplier=noise_multiplier,
-        max_grad_norm= privacy_engine_dict["max_grad_norm"]
+        max_grad_norm=privacy_engine_dict["max_grad_norm"],
     )
 
     return priv_model, priv_optimizer, priv_dataloader, privacy_engine
