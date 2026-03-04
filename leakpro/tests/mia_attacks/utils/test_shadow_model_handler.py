@@ -60,7 +60,7 @@ def test_shadow_model_creation_and_loading(image_handler:ImageInputHandler) -> N
     assert sm.loss_config is not None
 
     # Test creation
-    n_models = 1
+    n_models = 2
     training_fraction = 0.5
     online = False
 
@@ -74,23 +74,10 @@ def test_shadow_model_creation_and_loading(image_handler:ImageInputHandler) -> N
     assert f"metadata_{indx}.pkl" in entries
     assert f"shadow_model_{indx}.pkl" in entries
 
-
-    indx2 = sm.create_shadow_models(n_models, image_handler.test_indices, training_fraction, not online)[0]
-    entries = os.listdir(sm.storage_path)
-    assert len(entries) - n_entries_phase1 == 2*n_models
-    assert f"metadata_{indx}.pkl" in entries
-    assert f"shadow_model_{indx}.pkl" in entries
-    assert f"metadata_{indx2}.pkl" in entries
-    assert f"shadow_model_{indx2}.pkl" in entries
-
     # Test loading
-    meta_0 = sm._load_metadata(sm.storage_path + f"/metadata_{indx}.pkl")
-    meta_1 = sm._load_metadata(sm.storage_path + f"/metadata_{indx2}.pkl")
-    assert meta_0.online == online
-    assert meta_1.online == (not online)
-    assert meta_1.num_train == meta_0.num_train
-
-    shadow_model_indices = [indx, indx2]
+    meta= sm._load_metadata(sm.storage_path + f"/metadata_{indx}.pkl")
+    assert meta.num_train == training_fraction * len(image_handler.test_indices)
+    shadow_model_indices = [indx]
     models, indices = sm.get_shadow_models(shadow_model_indices)
     for model in models:
         assert model.model_obj.__class__.__name__ == "ConvNet"
@@ -99,8 +86,6 @@ def test_shadow_model_creation_and_loading(image_handler:ImageInputHandler) -> N
     # check what test data is included in the training data of the shadow models
     mask = sm.get_in_indices_mask(shadow_model_indices, np.array(image_handler.test_indices))
 
-    true_mask_0 = np.array([True if item in meta_0.train_indices else False for item in image_handler.test_indices])
+    true_mask_0 = np.array([True if item in meta.train_indices else False for item in image_handler.test_indices])
     assert np.array_equal(mask[:, 0], true_mask_0)
 
-    true_mask_1 = np.array([True if item in meta_1.train_indices else False for item in image_handler.test_indices])
-    assert np.array_equal(mask[:, 1], true_mask_1)

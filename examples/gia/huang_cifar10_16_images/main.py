@@ -1,27 +1,27 @@
 """Inverting on a single image."""
 
 from cifar import get_cifar10_loader
-import torchvision
-import torch
-import numpy as np
-import random
 
-from leakpro.attacks.gia_attacks.huang import HuangConfig
-from leakpro.fl_utils.gia_train import train
-from leakpro.run import run_huang
+from leakpro.attacks.gia_attacks.huang import Huang
+from leakpro.schemas import OptunaConfig
 from leakpro.utils.seed import seed_everything
 from model import ResNet, PreActBlock
 
 if __name__ == "__main__":
+    seed_everything(1234)
     # This attack needs pre activation batch normalization to function properly
     model = ResNet(PreActBlock, [2, 2, 2, 2], num_classes=10)
-
-    seed_everything(1234)
     client_dataloader, data_mean, data_std = get_cifar10_loader(num_images=16, batch_size=16, num_workers=2)
-    print(len(client_dataloader))
+    trial_data = []
+    for i in range(0,16*5,16):
+        loader, _, _ = get_cifar10_loader(start_idx=i,
+                                                num_images=16,
+                                                batch_size=16,
+                                                num_workers=2)
+        trial_data.append(loader)
 
     # meta train function designed to work with GIA
-    train_fn = train
     # baseline config
-    configs = HuangConfig()
-    result = run_huang(model, client_dataloader, train_fn, data_mean, data_std, configs)
+    attack_object = Huang(model, client_dataloader, data_mean, data_std,optuna_trial_data=trial_data)
+    optuna_config = OptunaConfig(n_trials=100)
+    attack_object.run_with_optuna(optuna_config)

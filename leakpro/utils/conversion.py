@@ -15,7 +15,7 @@ def _filter_metadata_to_use_init_params(cls_name:Union[Optimizer, Module], metad
     valid_params = inspect.signature(cls_name.__init__).parameters
     return {k: v for k, v in metadata_params.items() if k in valid_params}
 
-def _loss_to_config(loss_fn: Module) -> LossConfig:
+def loss_to_config(loss_fn: Module) -> LossConfig:
     """Convert a PyTorch loss function to a LossConfig instance."""
 
     loss_name = loss_fn.__class__.__name__.lower()  # Convert class name to lowercase
@@ -25,7 +25,7 @@ def _loss_to_config(loss_fn: Module) -> LossConfig:
 
     return LossConfig(name=loss_name, params=params)
 
-def _optimizer_to_config(optimizer: Optimizer) -> OptimizerConfig:
+def optimizer_to_config(optimizer: Optimizer) -> OptimizerConfig:
     """Convert a PyTorch optimizer to an OptimizerConfig instance."""
 
     optimizer_name = optimizer.__class__.__name__.lower()
@@ -35,7 +35,7 @@ def _optimizer_to_config(optimizer: Optimizer) -> OptimizerConfig:
 
     return OptimizerConfig(name=optimizer_name, params=params)
 
-def _dataloader_to_config(dataloader: DataLoader) -> DataLoaderConfig:
+def dataloader_to_config(dataloader: DataLoader) -> DataLoaderConfig:
     """Convert a PyTorch DataLoader to a DataLoaderConfig instance, excluding dataset and batch_sampler."""
 
     # Exclude 'dataset' and 'batch_sampler' from stored parameters
@@ -49,7 +49,7 @@ def _dataloader_to_config(dataloader: DataLoader) -> DataLoaderConfig:
 
 
 
-def _get_model_init_params(model: Module) -> dict:
+def get_model_init_params(model: Module) -> dict:
     """Extracts the parameters that were passed to the __init__ method from an object instance."""
 
     cls = model.__class__

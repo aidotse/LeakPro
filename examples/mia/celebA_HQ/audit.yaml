@@ -2,24 +2,18 @@
 audit:  # Configurations for auditing
   random_seed: 1234  # Integer specifying the random seed
   attack_list:
-    # - rmia:
-    #   online: False
-    #   num_shadow_models: 2
-    #   gamma: 1
-    - attack: lira
-      online: True
-      num_shadow_models: 2
-      training_data_fraction: 0.6
+    - attack: base
+      online: False
+      num_shadow_models: 8
+      training_data_fraction: 0.5  
 
-  output_dir: "./leakpro_output"
+  output_dir: "./celeba/leakpro_output"
   attack_type: "mia" #mia, gia
   data_modality: "image" #image, tabular
 
 target:
-  # Target model path
   module_path: "./utils/celeb_hq_model.py"
   model_class: "ResNet18" 
-  # Data paths
   target_folder: "./target"
   data_path: "./data/celeba_hq_data.pkl"
 
