@@ -101,7 +101,7 @@ with st.sidebar:
                         background:rgba(39,174,96,0.1); font-size:13px;">
                 🛡️ <strong>DP-SGD ON</strong><br/>
                 ε = {dp.get('target_epsilon', '?')}<br/>
-                δ = {dp.get('target_delta', '?'):.2e if isinstance(dp.get('target_delta'), float) else '?'}
+                δ = {f"{dp['target_delta']:.2e}" if isinstance(dp.get('target_delta'), float) else '?'}
             </div>
             """,
             unsafe_allow_html=True,
