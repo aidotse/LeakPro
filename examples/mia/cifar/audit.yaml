@@ -1,28 +1,40 @@
 audit:  # Configurations for auditing
   random_seed: 1236  # Integer specifying the random seed
   attack_list:
-# RMIA
-    - attack: rmia
-      online: False
-      num_shadow_models: 2
-      training_data_fraction: 0.5   
-# BASE
-    - attack: base
-      online: False
-      num_shadow_models: 2
-      gamma: 1
-    - attack: population
-    - attack: lira
+# # RMIA
+#     - attack: rmia
+#       online: False
+#       num_shadow_models: 2
+#       training_data_fraction: 0.5
+# # BASE
+#     - attack: base
+#       online: False
+#       num_shadow_models: 2
+#       training_data_fraction: 0.5
+# # BASE but through RaMIA
+#     - attack: ramia
+#       num_transforms: 0
+#       n_ops: 0
+#       augment_strength: "easy"
+# # 1 transform
+#     - attack: ramia
+#       num_transforms: 1
+#       n_ops: 1
+#       augment_strength: "strong"
+# # 8 transform
+#     - attack: ramia
+#       num_transforms: 8
+#       n_ops: 1
+#       augment_strength: "strong"
+# OSLO
+    - attack: oslo
+      n_audits: 500
+      training_data_fraction: 0.5
+      num_source_models: 6
+      num_validation_models: 2
       online: True
-      num_shadow_models: 3
-      training_data_fraction: 0.6
-    - attack: loss_traj
-    - attack: qmia
-    - attack: HSJ
-    - attack: yoqo
-    - attack: seqmia
-      number_of_traj: 50
-      mia_classifier_epochs: 1000
+      step_size: 0.01
+      max_perturbation_size: 0.314
 
   output_dir: "./cifar10/leakpro_output"
   attack_type: "mia" #mia, gia
