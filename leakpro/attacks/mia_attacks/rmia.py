@@ -1,5 +1,6 @@
 """Implementation of the RMIA attack."""
 import numpy as np
+import torch
 from pydantic import BaseModel, Field, model_validator
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
@@ -43,6 +44,21 @@ class AttackRMIA(AbstractMIA):
                                  le=1.0,
                                  description="Parameter to estimate the marginal p(x)",
                                  json_schema_extra = {"optuna": {"type": "float", "low": 0.0, "high": 1.0,"enabled_if": lambda model: not model.online}})  # noqa: E501
+
+        # Vectorized-path options (minimal & safe defaults)
+        vectorized: bool = Field(
+            default=False,
+            description="Enable the vectorized RMIA fast-path (keeps classic path when False)."
+        )
+
+        vec_batch: int = Field(
+            default=1024,
+            ge=1,
+            description=(
+                "Number of audit points to process per inner batch in the vectorized path. "
+                "Lower this if you have limited memory; keep larger for speed."
+            ),
+        )
 
         @model_validator(mode="after")
         def check_num_shadow_models_if_online(self) -> Self:
@@ -124,11 +140,14 @@ class AttackRMIA(AbstractMIA):
             shadow_population = self.attack_data_indices,
             training_fraction = self.training_data_fraction,
             online = True)
+        
         # load shadow models
         self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)
-
+        
         if self.online is False:
             self.out_indices = ~ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"]).T
+
+        
 
     def prepare_attack(self:Self) -> None:
         """Prepare Data needed for running the attack on the target model and dataset.
@@ -146,6 +165,13 @@ class AttackRMIA(AbstractMIA):
             self.logits_shadow_models = []
             for indx in self.shadow_model_indices:
                 self.logits_shadow_models.append(ShadowModelHandler().load_logits(indx=indx))
+
+            # suggest calculating here for use when calculating p_z_given_* and p_x_given_* later 
+            self.shadow_models_inmask = ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"])
+            self.target_gtlabel_probs = rmia_get_gtlprobs(self.logits_theta, self.ground_truth_indices, self.temperature) # check dims 
+            self.shadow_gtl_probs = np.vstack([
+                rmia_get_gtlprobs(logits, self.ground_truth_indices, self.temperature) for logits in self.logits_shadow_models
+            ]) 
 
         # collect the softmax output of the correct class
         n_attack_points = self.z_data_sample_fraction * len(self.handler.population) # points to compute p(z)
@@ -194,11 +220,19 @@ class AttackRMIA(AbstractMIA):
         # compute the ratio of p(x|theta) to p(x)
         ratio_x = p_x_given_theta / (p_x + self.epsilon)
 
-        # for each x, compute the score
-        score = np.zeros((1, n_audit_points))
-        for i in range(n_audit_points):
-            likelihoods = ratio_x[0,i] / self.ratio_z
-            score[0, i] = np.mean(likelihoods > self.gamma)
+        if self.configs.vectorized:
+            #ratio_x = rmia_prep_ratio(target_gtlprobs, shadow_gtlprobs, shadow_inmasks, x_indices, online, offline_a, epsilon)
+            #ratio_z = rmia_prep_ratio(target_gtlprobs, shadow_gtlprobs, shadow_inmasks, z_indices, online, offline_a, epsilon)
+            logger.info(f"Vectorized RMIA takes in ratio_x with shape {ratio_x.shape}")
+            logger.info(f"Vectorized RMIA takes in ratio_z with shape {self.ratio_z.shape}")
+            score = rmia_use_torch(ratio_x, self.ratio_z, self.gamma, self.configs.vec_batch).reshape(1,-1)
+            logger.info(f"Vectorized RMIA produces score with shape {score.shape}")
+        else:
+            # for each x, compute the score
+            score = np.zeros((1, n_audit_points))
+            for i in range(n_audit_points):
+                likelihoods = ratio_x[0,i] / self.ratio_z
+                score[0, i] = np.mean(likelihoods > self.gamma)
 
         # pick out the in-members and out-members signals
         in_members = self.audit_dataset["in_members"]
@@ -240,5 +274,122 @@ class AttackRMIA(AbstractMIA):
 
         # new hyperparameters have been set, let's prepare the attack again
         self.prepare_attack()
+
+
+
+##### some helper functions used in the vectorized code of rmia #####
+
+def rmia_get_gtlprobs(logits, labels, temperature=1.0, select = None):
+    select = np.arange(len(labels)) if select is None else select
+    assert len(select) == len(labels)
+    assert logits.shape[0] > max(select)
+    assert logits.shape[1] > max(labels)
+    return softmax_logits(logits, temperature)[select,labels]
+
+def rmia_prep_ratio(target_gtlprobs, shadow_gtlprobs, shadow_inmasks, indices=None, online=True, offline_a=0.33, epsilon=1e-12):
+    if indices is None:
+        prob_target = target_gtlprobs
+        prob_shadow = shadow_gtlprobs
+        mask_shadow = shadow_inmasks
+    else:
+        prob_target = target_gtlprobs[indices, :]
+        prob_shadow = shadow_gtlprobs[indices, :]
+        mask_shadow = shadow_inmasks[indices, :]
+
+    if online:
+        prob_prior = np.mean(prob_shadow, axis=1, keepdims=True)
+    else:
+        prob_in_masked = np.where(mask_shadow, np.nan, prob_shadow)
+        prob_prior_out = np.nanmean(prob_in_masked, axis=1, keepdims=True)
+        prob_prior = 0.5 * ((offline_a + 1) * prob_prior_out + (1 - offline_a))
+
+    ratio = prob_target / (prob_prior + epsilon)
+    return ratio
+
+def rmia_use_torch(ratio_x, ratio_z, gamma=1.0, batch_size=1000, use_gpu_if_available=True):
+
+    # Check that inputs are not matrices or higher-dimensional
+    if np.prod(ratio_x.shape) != len(np.ravel(ratio_x)):
+        raise ValueError("ratio_x must be a 1D array or a row/column vector.")
+    if np.prod(ratio_z.shape) != len(np.ravel(ratio_z)):
+        raise ValueError("ratio_z must be a 1D array or a row/column vector.")
+
+    device = torch.device('cuda' if use_gpu_if_available and torch.cuda.is_available() else 'cpu')
+    ratio_x_t = torch.from_numpy(np.ravel(ratio_x)).to(torch.float32).to(device).unsqueeze(1)  # shape: (n_x, 1)
+    ratio_z_t = torch.from_numpy(np.ravel(ratio_z)).to(torch.float32).to(device).unsqueeze(1)  # shape: (n_z, 1)
+    gamma_t = torch.tensor(gamma, dtype=torch.float32, device=device)
+
+    n_audit_points = ratio_x_t.shape[0]
+    score_list = []
+
+    for start_idx in range(0, n_audit_points, batch_size):
+        end_idx = min(start_idx + batch_size, n_audit_points)
+        batch_x_t = ratio_x_t[start_idx:end_idx]  # shape: (batch_size, 1)
+        likelihoods = batch_x_t / ratio_z_t.T     # shape: (batch_size, n_z)
+        score_batch = torch.mean((likelihoods > gamma_t).float(), dim=1)
+        score_list.append(score_batch)
+
+    score_tensor = torch.cat(score_list)  # shape: (n_x,)
+    return score_tensor.cpu().numpy()
+
+#----------------------------------
+# Free-standing RMIA implementation
+#----------------------------------
+
+def rmia_vectorised(target_gtlprobs: np.ndarray, shadow_gtlprobs: np.ndarray, shadow_inmasks: np.ndarray = None, 
+                    online: bool = True, offline_a: float = 0.33, verbose: bool = False, 
+                    x_indices: list = None, z_indices: list = None, gamma: float = 1.0, 
+                    epsilon: float = 1e-12, batch_size: int = 1000, use_gpu_if_available: bool = True):
+
+    """
+    This function compute RMIA membership inference scores proposed by 
+    Zarifzadeh, Sajjad, Philippe Cheng-Jie Marc Liu, and Reza Shokri.
+    Low-Cost High-Power Membership Inference by Boosting Relativity. (2023).
+
+    Parameters
+    ----------
+    target_gtlprobs : np.ndarray
+        Array of shape (N,), for N = n_samples, of ground truth label confidence for the target model.
+    shadow_gtlprobs : np.ndarray
+        Array of shape (N, M), for M = num_shadow_models, containing GTL confidence for the shadow models.
+    shadow_inmask: np.ndarray, default None (for offline case)
+        Boolean array of shape (N, M) indicating which shadow models
+        correspond to IN (training) samples (for online).
+    online : bool, default False
+        Whether to compute online BASE scores or offline scores.
+    offline_a : float, default 0.33
+        Constant factor used for the offline RMIA attack.
+
+    Returns
+    -------
+    np.ndarray
+        Array of shape (n_samples,) containing the RMIA scores for each audit sample.
+    """
+
+    device = torch.device('cuda' if use_gpu_if_available and torch.cuda.is_available() else 'cpu')
+    if verbose: print("Available device:", device)
+
+    if len(target_gtlprobs.shape) == 1:
+        target_gtlprobs = target_gtlprobs.reshape(-1, 1)
+
+    n_population = target_gtlprobs.shape[0]
+    n_shadow_models = shadow_gtlprobs.shape[1]
+    if verbose: print("shadow_gtlprobs", shadow_gtlprobs.shape)
+    assert shadow_gtlprobs.shape[0] == n_population
+
+    if shadow_inmasks is None:
+        shadow_inmasks = np.zeros_like(shadow_gtlprobs, dtype=bool)
+
+    assert shadow_inmasks.shape == shadow_gtlprobs.shape
+    if verbose: print("shadow_inmasks", shadow_inmasks.shape)
+
+    ratio_x = rmia_prep_ratio(target_gtlprobs, shadow_gtlprobs, shadow_inmasks, x_indices, online, offline_a, epsilon)
+    ratio_z = rmia_prep_ratio(target_gtlprobs, shadow_gtlprobs, shadow_inmasks, z_indices, online, offline_a, epsilon)
+
+    if verbose: 
+        print("ratio_x", ratio_x.shape)
+        print("ratio_z", ratio_z.shape)
+
+    return rmia_use_torch(ratio_x, ratio_z, gamma, batch_size, use_gpu_if_available)
 
 
