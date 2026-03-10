@@ -40,10 +40,14 @@ def render_configure() -> None:
 
     tc = st.session_state.train_config
     ac = st.session_state.audit_config
+    reaudit = st.session_state.get("reaudit_mode", False)
 
-    st.subheader("Training parameters")
-    _render_training_params(tc)
-    st.markdown("---")
+    if reaudit:
+        st.info("Re-audit mode — the trained model will be reused. Only attack selection and parameters can be changed.")
+    else:
+        st.subheader("Training parameters")
+        _render_training_params(tc)
+        st.markdown("---")
 
     st.subheader("Attacks to run")
     st.caption("Select which membership inference attacks to include in the audit.")
@@ -53,23 +57,27 @@ def render_configure() -> None:
     ac.setdefault("audit", {})["attack_list"] = selected_attacks
     st.markdown("---")
 
-    st.subheader("Differential Privacy (DP-SGD)")
-    _render_dpsgd_section()
-    st.markdown("---")
+    if not reaudit:
+        st.subheader("Differential Privacy (DP-SGD)")
+        _render_dpsgd_section()
+        st.markdown("---")
 
     col_back, _, col_fwd = st.columns([1, 3, 1])
     with col_back:
         if st.button("← Back", use_container_width=True):
+            st.session_state.pop("reaudit_mode", None)
             st.session_state.stage = 0
             st.rerun()
     with col_fwd:
+        next_stage = 3 if reaudit else 2
+        label = "Run Attacks →" if reaudit else "Start Audit →"
         if st.button(
-            "Start Audit →", type="primary",
+            label, type="primary",
             use_container_width=True, disabled=(len(selected_attacks) == 0),
         ):
             st.session_state.train_config = tc
             st.session_state.audit_config = ac
-            st.session_state.stage = 2
+            st.session_state.stage = next_stage
             st.rerun()
 
 
@@ -106,14 +114,94 @@ def _render_training_params(tc: dict) -> None:
 
 
 def _render_attack_selection(ac: dict) -> list[dict]:
-    """Render the attack checkboxes and return the list of selected attack dicts."""
-    current = {e["attack"] for e in ac.get("audit", {}).get("attack_list", [])}
+    """Render attack checkboxes + per-attack parameter expanders."""
+    current_list = ac.get("audit", {}).get("attack_list", [])
+    # Build a lookup of existing params keyed by attack id (last entry wins for duplicates)
+    current_params: dict[str, dict] = {}
+    for entry in current_list:
+        current_params[entry["attack"]] = entry
+
     selected: list[dict] = []
+
+    # ── checkboxes ──────────────────────────────────────────────────────────
     cols = st.columns(len(_AVAILABLE_ATTACKS))
+    enabled: dict[str, bool] = {}
     for col, (attack_id, label) in zip(cols, _AVAILABLE_ATTACKS):
         with col:
-            if st.checkbox(label.split(" — ")[0], value=(attack_id in current)):
-                selected.append({"attack": attack_id})
+            enabled[attack_id] = st.checkbox(
+                label.split(" — ")[0],
+                value=(attack_id in current_params),
+            )
+
+    # ── per-attack parameter expanders ──────────────────────────────────────
+    for attack_id, label in _AVAILABLE_ATTACKS:
+        if not enabled[attack_id]:
+            continue
+        prev = current_params.get(attack_id, {})
+        entry: dict = {"attack": attack_id}
+
+        with st.expander(f"⚙ {label.split(' — ')[0]} parameters", expanded=False):
+            if attack_id in ("rmia", "base"):
+                c1, c2, c3 = st.columns(3)
+                entry["num_shadow_models"] = c1.number_input(
+                    "Shadow models", min_value=1, max_value=32,
+                    value=int(prev.get("num_shadow_models", 2)),
+                    key=f"{attack_id}_nshadow",
+                )
+                entry["training_data_fraction"] = c2.slider(
+                    "Train data fraction", 0.1, 1.0,
+                    float(prev.get("training_data_fraction", 0.5)), 0.05,
+                    key=f"{attack_id}_frac",
+                )
+                entry["online"] = c3.checkbox(
+                    "Online mode",
+                    value=bool(prev.get("online", False)),
+                    key=f"{attack_id}_online",
+                    help="Online RMIA/BASE trains one shadow model per audit point — much slower but more accurate.",
+                )
+
+            elif attack_id == "lira":
+                c1, c2 = st.columns(2)
+                entry["num_shadow_models"] = c1.number_input(
+                    "Shadow models", min_value=1, max_value=64,
+                    value=int(prev.get("num_shadow_models", 4)),
+                    key="lira_nshadow",
+                )
+                entry["online"] = c2.checkbox(
+                    "Online mode", value=bool(prev.get("online", False)),
+                    key="lira_online",
+                )
+
+            elif attack_id == "ramia":
+                c1, c2, c3 = st.columns(3)
+                entry["num_transforms"] = c1.number_input(
+                    "Num transforms", min_value=0, max_value=32,
+                    value=int(prev.get("num_transforms", 1)),
+                    key="ramia_ntrans",
+                )
+                entry["n_ops"] = c2.number_input(
+                    "Ops per transform", min_value=0, max_value=8,
+                    value=int(prev.get("n_ops", 1)),
+                    key="ramia_nops",
+                )
+                entry["augment_strength"] = c3.selectbox(
+                    "Augment strength",
+                    ["easy", "medium", "strong"],
+                    index=["easy", "medium", "strong"].index(
+                        prev.get("augment_strength", "strong")
+                    ),
+                    key="ramia_strength",
+                )
+
+            elif attack_id == "qmia":
+                entry["num_shadow_models"] = st.number_input(
+                    "Shadow models", min_value=1, max_value=32,
+                    value=int(prev.get("num_shadow_models", 4)),
+                    key="qmia_nshadow",
+                )
+
+        selected.append(entry)
+
     return selected
 
 
