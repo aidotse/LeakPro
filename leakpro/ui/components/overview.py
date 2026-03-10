@@ -47,8 +47,17 @@ def render_overview() -> None:
 
     st.markdown("---")
 
-    # Check for existing results to offer resume
-    resume_dir = _CIFAR_OUTPUT_DIR / "leakpro_output"
+    # Check for existing results to offer resume.
+    # Derive output_dir from session audit config or the default audit.yaml.
+    audit_cfg = st.session_state.get("audit_config")
+    if audit_cfg is None:
+        try:
+            from leakpro.ui.runner import LeakProRunner  # noqa: PLC0415
+            audit_cfg = LeakProRunner.default_audit_config()
+        except Exception:
+            audit_cfg = {}
+    _output_dir_rel = audit_cfg.get("audit", {}).get("output_dir", "./leakpro_output")
+    resume_dir = (_CIFAR_OUTPUT_DIR / _output_dir_rel).resolve()
     has_results = (resume_dir / "data_objects").exists() and any(
         (resume_dir / "data_objects").glob("*.json")
     )

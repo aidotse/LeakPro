@@ -88,5 +88,9 @@ def render_histograms(results: list) -> None:
     c1.metric("TPR", f"{tpr:.4f}", help="True positive rate at this threshold.")
     c2.metric("FPR", f"{fpr:.4f}", help="False positive rate at this threshold.")
     c3.metric("Accuracy", f"{acc:.4f}")
-    c4.metric("TP / FN", f"{tp} / {fn}")
-    c5.metric("FP / TN", f"{fp} / {tn}")
+    with c4:
+        st.markdown("**TP / FN**")
+        st.markdown(f"{tp} / {fn}")
+    with c5:
+        st.markdown("**FP / TN**")
+        st.markdown(f"{fp} / {tn}")

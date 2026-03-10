@@ -31,22 +31,28 @@ def render_train() -> None:
 
 def _render_data_prep(runner: object, train_config: dict) -> None:
     """Render dataset download / status section."""
-    if not st.session_state.get("data_result"):
-        if st.button("Download & Prepare Data", type="primary"):
-            status_msg = st.empty()
-            with st.spinner("Preparing dataset…"):
-                try:
-                    data_result = runner.prepare_data(train_config, log_container=status_msg)  # type: ignore[attr-defined]
-                    st.session_state.data_result = data_result
-                    st.rerun()
-                except Exception as e:  # noqa: BLE001
-                    st.error(f"Data preparation failed: {e}")
-    else:
+    # Always allow re-preparing data so stale session indices don't carry over.
+    if st.session_state.get("data_result"):
         dr = st.session_state.data_result
         st.success(
             f"Dataset ready — {len(dr['train_indices'])} train / "
             f"{len(dr['test_indices'])} test samples ({dr['dataset_name']})."
         )
+        if st.button("Re-prepare Data"):
+            st.session_state.pop("data_result", None)
+            st.session_state.pop("train_result_dict", None)
+            st.rerun()
+        return
+
+    if st.button("Download & Prepare Data", type="primary"):
+        status_msg = st.empty()
+        with st.spinner("Preparing dataset…"):
+            try:
+                data_result = runner.prepare_data(train_config, log_container=status_msg)  # type: ignore[attr-defined]
+                st.session_state.data_result = data_result
+                st.rerun()
+            except Exception as e:  # noqa: BLE001
+                st.error(f"Data preparation failed: {e}")
 
 
 def _render_model_training(runner: object, train_config: dict, dpsgd: bool) -> None:

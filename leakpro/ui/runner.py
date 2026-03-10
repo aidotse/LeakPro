@@ -134,23 +134,29 @@ class LeakProRunner:
             # ---- import UserDataset (defined inside the handler) ---------
             from cifar_handler import CifarInputHandler  # noqa: PLC0415
 
-            population_dataset = CifarInputHandler.UserDataset(data, targets)
-
-            # ---- save population pickle if missing -----------------------
-            pkl_path = Path(f"data/{dataset_name}.pkl")
-            pkl_path.parent.mkdir(exist_ok=True)
-            if not pkl_path.exists():
-                with open(pkl_path, "wb") as f:
-                    pickle.dump(population_dataset, f)
-                if log_container:
-                    log_container.success(f"Population dataset saved to {pkl_path}")
-
-            # ---- train / test split --------------------------------------
-            dataset_size = len(population_dataset)
+            # ---- train / test split with sequential indices --------------
+            # Shuffle the full dataset so the split is random, but assign
+            # sequential (0-based) indices so that position == population-index.
+            # This is required by the MIA attack logit-cache which assumes
+            # logits[i] corresponds to population point i.
+            dataset_size = len(data)
             train_size = int(f_train * dataset_size)
             test_size = int(f_test * dataset_size)
-            selected = np.random.choice(np.arange(dataset_size), train_size + test_size, replace=False)
-            train_indices, test_indices = train_test_split(selected, test_size=test_size)
+            perm = np.random.permutation(dataset_size)
+            data = data[perm]
+            targets = targets[perm]
+            train_indices = np.arange(train_size)                        # [0 … train_size-1]
+            test_indices = np.arange(train_size, train_size + test_size) # [train_size … train_size+test_size-1]
+
+            population_dataset = CifarInputHandler.UserDataset(data, targets)
+
+            # ---- always overwrite the population pickle so it matches ----
+            pkl_path = Path(f"data/{dataset_name}.pkl")
+            pkl_path.parent.mkdir(exist_ok=True)
+            with open(pkl_path, "wb") as f:
+                pickle.dump(population_dataset, f)
+            if log_container:
+                log_container.success(f"Population dataset saved to {pkl_path}")
 
             train_subset = CifarInputHandler.UserDataset(data[train_indices], targets[train_indices])
             test_subset = CifarInputHandler.UserDataset(
