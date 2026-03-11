@@ -7,6 +7,7 @@ from torch.nn.modules.utils import _pair, _quadruple
 from torchvision.models.convnext import LayerNorm2d
 
 from leakpro.utils.import_helper import Self
+from torchvision.models.convnext import LayerNorm2d
 
 
 class BNFeatureHook:

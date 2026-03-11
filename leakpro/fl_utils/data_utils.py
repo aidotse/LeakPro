@@ -9,7 +9,12 @@ from torch import Tensor, cat, mean, randn, std
 from torch.utils.data import DataLoader, Dataset
 
 from leakpro.utils.import_helper import Any, Self
+from copy import deepcopy
+from typing import Self, List, Any, Optional, Literal
 
+import torch
+from torch import Tensor
+from torch.utils.data import DataLoader
 
 class GiaDataModalityExtension(ABC):
     """Abstract class for data modality extensions for GIA."""
@@ -61,7 +66,6 @@ class GiaImageCloneNoiseExtension(GiaDataModalityExtension):
       "normal"  -> randn_like (mean 0, std 1)
       "uniform" -> uniform in [0, 1)
     """
-
     def __init__(
         self,
         pixel_noise_p: float = 0.0,

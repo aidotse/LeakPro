@@ -7,7 +7,6 @@ from torch.func import functional_call
 
 from leakpro.utils.import_helper import Any, Dict, Self
 
-
 class MetaModule(nn.Module):
     """Run a network with a provided parameter dict (stateless).
 
