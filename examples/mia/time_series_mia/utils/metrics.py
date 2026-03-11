@@ -5,14 +5,8 @@ def nd(target, pred): # Normalized deviation
     denominator = np.sum(np.abs(target))
     return numerator / denominator if denominator != 0 else np.nan
 
-def mse(target, pred):
-    return np.mean(np.square(target - pred))
-
-def rmse(target, pred):
-    return np.sqrt(mse(target, pred))
-
 def nrmse(target, pred, variant = "mean_abs"):
-    numerator = rmse(target, pred)
+    numerator = np.sqrt(np.mean(np.square(target - pred)))
     denominator = {
         "min_max": np.max(target) - np.min(target),
         "mean_abs": np.mean(np.abs(target)),
@@ -21,9 +15,6 @@ def nrmse(target, pred, variant = "mean_abs"):
 
 def rmsle(target, pred):
     return np.sqrt(np.mean(np.square(np.log1p(target) - np.log1p(pred))))
-
-def mae(target, pred):
-    return np.mean(np.abs(target - pred))
 
 def mape(target, pred):
     mask = target != 0

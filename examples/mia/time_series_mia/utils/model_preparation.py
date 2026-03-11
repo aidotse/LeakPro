@@ -1,3 +1,4 @@
+import copy
 import os
 import torch
 import pickle
@@ -73,7 +74,7 @@ def create_trained_model_and_metadata(model, train_loader, test_loader, epochs, 
     
 
     best_val_loss = (-1, np.inf)  # (epoch, validation loss)
-    best_state_dict = model.state_dict()
+    best_state_dict = copy.deepcopy(model.state_dict())
 
     train_losses, test_losses = [], []
     for i in tqdm(range(epochs), desc="Training Progress"):
@@ -104,7 +105,7 @@ def create_trained_model_and_metadata(model, train_loader, test_loader, epochs, 
         val_loss = evaluate(model, val_loader, criterion, device)
         if val_loss < best_val_loss[1]:
             best_val_loss = (i, val_loss)
-            best_state_dict = model.state_dict()
+            best_state_dict = copy.deepcopy(model.state_dict())
         elif i - best_val_loss[0] > patience:
             print(f"Training stopped early at epoch {i+1}.")
             break

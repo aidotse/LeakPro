@@ -1,5 +1,6 @@
 """Module containing the class to handle the user input for the Georgia 12-Lead ECG or TUH-EEG dataset."""
 
+import copy
 import yaml
 import torch
 import random
@@ -55,7 +56,7 @@ class IndividualizedInputHandler(AbstractInputHandler):
             val_set = base_dataset.val_set
             val_loader = DataLoader(val_set, batch_size)
             best_val_loss = (-1, np.inf)  # (epoch, validation loss)
-            best_state_dict = model.state_dict()
+            best_state_dict = copy.deepcopy(model.state_dict())
 
         # prepare training
         device = torch.device("cuda" if cuda.is_available() else "cpu")
@@ -83,7 +84,7 @@ class IndividualizedInputHandler(AbstractInputHandler):
             val_loss = evaluate(model, val_loader, criterion, device)
             if val_loss < best_val_loss[1]:
                 best_val_loss = (epoch, val_loss)
-                best_state_dict = model.state_dict()
+                best_state_dict = copy.deepcopy(model.state_dict())
             elif epoch - best_val_loss[0] > patience:
                 print(f"Training stopped early at epoch {epoch+1}.")
                 break

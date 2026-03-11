@@ -4,9 +4,9 @@ project_root = os.path.abspath(os.path.join(os.getcwd(), "../../.."))
 sys.path.append(project_root)
 
 from examples.mia.time_series_mia.utils.data_preparation import preprocess_dataset, get_dataloaders
-from examples.mia.time_series_mia.utils.metrics import mse, smape, mae, nd
+from examples.mia.time_series_mia.utils.metrics import smape, nd
 from examples.mia.time_series_mia.utils.model_preparation import create_trained_model_and_metadata, predict
-from examples.mia.time_series_mia.utils.set_seed import set_seed
+from leakpro.utils.seed import seed_everything
 from examples.mia.time_series_mia.utils.models.LSTM import LSTM
 from examples.mia.time_series_mia.utils.models.TCN import TCN
 from examples.mia.time_series_mia.utils.models.DLinear import DLinear
@@ -67,10 +67,10 @@ if __name__ == "__main__":
     if target_data_file != dataset_name:
         raise Exception(f"Received unknown dataset or mismatching target file: dataset={dataset_name}, target={target_data_path}.")
 
-    set_seed(random_seed) # Set seed before and after, to ensure same randomness if you process or dont process dataset (dataset already processed)
+    seed_everything(random_seed) # Set seed before and after, to ensure same randomness if you process or dont process dataset (dataset already processed)
     dataset = preprocess_dataset(dataset_name, path, lookback, horizon, num_individuals, stride, scaling, val_fraction, k_lead=k_lead, num_time_steps=num_time_steps)
 
-    set_seed(random_seed)
+    seed_everything(random_seed)
     train_loader, val_loader, test_loader = get_dataloaders(dataset, train_fraction, test_fraction, batch_size=batch_size)
 
     # Print dataset split info
@@ -114,7 +114,8 @@ if __name__ == "__main__":
     unscaled_train = predict(model, train_loader, device, scaler, original_scale=True)
     unscaled_test  = predict(model, test_loader, device, scaler, original_scale=True)
 
-    metrics, names = [mse, mae, smape, nd], ["MSE", "MAE", "SMAPE", "ND"]
+    metrics = [lambda t, p: np.mean(np.square(t - p)), lambda t, p: np.mean(np.abs(t - p)), smape, nd]
+    names = ["MSE", "MAE", "SMAPE", "ND"]
 
     if val_loader:
         val  = predict(model, val_loader, device, scaler, original_scale=False)
