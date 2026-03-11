@@ -17,7 +17,6 @@ from pathlib import Path
 import numpy as np
 import torch
 import yaml
-from sklearn.model_selection import train_test_split
 from torch import cat, nn, optim, tensor
 from torch.utils.data import DataLoader
 from torchvision.datasets import CIFAR10, CIFAR100

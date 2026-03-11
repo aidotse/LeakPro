@@ -9,7 +9,6 @@ _CIFAR_OUTPUT_DIR = Path(__file__).parent.parent.parent.parent / "examples" / "m
 
 def render_overview() -> None:
     """Render the landing page with intro text, pipeline diagram, and entry buttons."""
-
     st.title("LeakPro — Privacy Auditor")
     st.markdown(
         """
@@ -22,9 +21,25 @@ def render_overview() -> None:
         This tool guides you through the full privacy audit journey:
         """
     )
+    _render_pipeline_diagram()
+    st.markdown("---")
+    resume_dir, has_results = _detect_existing_results()
+    _render_action_buttons(resume_dir, has_results)
+    st.markdown("---")
+    st.markdown(
+        """
+        <small style="color:#888">
+        LeakPro is a privacy auditing framework by <a href="https://github.com/aidotse/LeakPro" target="_blank">AI Sweden</a>.
+        MVP targets CIFAR-10/100 with Membership Inference Attacks.
+        </small>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    # Pipeline diagram using columns
-    col1, col2, col3, col4, col5 = st.columns(5)
+
+def _render_pipeline_diagram() -> None:
+    """Render the 4-step pipeline overview cards."""
+    _, col2, col3, col4, col5 = st.columns(5)
     steps = [
         ("⚙️", "Configure", "Set training parameters and select attacks"),
         ("🏋️", "Train", "Train target model (standard or DP-SGD)"),
@@ -45,25 +60,27 @@ def render_overview() -> None:
                 unsafe_allow_html=True,
             )
 
-    st.markdown("---")
 
-    # Check for existing results to offer resume.
-    # Derive output_dir from session audit config or the default audit.yaml.
+def _detect_existing_results() -> tuple:
+    """Return (resume_dir, has_results) based on session audit config."""
     audit_cfg = st.session_state.get("audit_config")
     if audit_cfg is None:
         try:
             from leakpro.ui.runner import LeakProRunner  # noqa: PLC0415
             audit_cfg = LeakProRunner.default_audit_config()
-        except Exception:
+        except Exception:  # noqa: BLE001
             audit_cfg = {}
-    _output_dir_rel = audit_cfg.get("audit", {}).get("output_dir", "./leakpro_output")
-    resume_dir = (_CIFAR_OUTPUT_DIR / _output_dir_rel).resolve()
+    output_dir_rel = audit_cfg.get("audit", {}).get("output_dir", "./leakpro_output")
+    resume_dir = (_CIFAR_OUTPUT_DIR / output_dir_rel).resolve()
     has_results = (resume_dir / "data_objects").exists() and any(
         (resume_dir / "data_objects").glob("*.json")
     )
+    return resume_dir, has_results
 
+
+def _render_action_buttons(resume_dir: Path, has_results: bool) -> None:
+    """Render Start / Re-audit / Resume buttons."""
     has_trained_model = bool(st.session_state.get("train_result_dict"))
-
     col_start, col_reaudit, col_resume = st.columns([1, 1, 1])
 
     with col_start:
@@ -106,14 +123,3 @@ def render_overview() -> None:
         else:
             st.caption("No previous results detected.")
             st.button("Load Existing Results", disabled=True, use_container_width=True)
-
-    st.markdown("---")
-    st.markdown(
-        """
-        <small style="color:#888">
-        LeakPro is a privacy auditing framework by <a href="https://github.com/aidotse/LeakPro" target="_blank">AI Sweden</a>.
-        MVP targets CIFAR-10/100 with Membership Inference Attacks.
-        </small>
-        """,
-        unsafe_allow_html=True,
-    )
