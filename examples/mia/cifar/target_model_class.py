@@ -1,16 +1,42 @@
-import torchvision.models as models
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import add
 
 from opacus.validators import ModuleValidator
+from torchvision.models.resnet import BasicBlock, ResNet
+
+
+class BasicBlockNoInplaceAdd(BasicBlock):
+    """Torchvision BasicBlock variant without in-place residual addition."""
+
+    def forward(self, x):
+        identity = x
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+
+        if self.downsample is not None:
+            identity = self.downsample(x)
+
+        out = out + identity
+        out = self.relu(out)
+        return out
+
+
+def _build_resnet18(num_classes: int) -> ResNet:
+    model = ResNet(block=BasicBlockNoInplaceAdd, layers=[2, 2, 2, 2])
+    model.fc = nn.Linear(model.fc.in_features, num_classes)
+    return model
 
 class ResNet18(nn.Module):
     def __init__(self, num_classes=10):
         super(ResNet18, self).__init__()
         self.num_classes = num_classes
-        self.model = models.resnet18(pretrained=False)
-        self.model.fc = nn.Linear(self.model.fc.in_features, self.num_classes)
+        self.model = _build_resnet18(self.num_classes)
 
     def forward(self, x):
         return self.model(x)
@@ -23,7 +49,6 @@ class ResNet18_DPsgd(nn.Module):
         self.num_classes = num_classes
 
         self.init_model()
-        
         if self.dpsgd:
             self.validate()
 
@@ -31,8 +56,7 @@ class ResNet18_DPsgd(nn.Module):
         return self.model(x)
 
     def init_model(self,):
-        self.model = models.resnet18(pretrained=False)
-        self.model.fc = nn.Linear(self.model.fc.in_features, self.num_classes)
+        self.model = _build_resnet18(self.num_classes)
 
     def validate(self,):
         self.model = ModuleValidator.fix(self.model)

@@ -3,6 +3,7 @@
 import importlib.util
 import inspect
 import os
+import sys
 
 from torch import nn, optim
 
@@ -14,8 +15,14 @@ def import_module_from_file(filepath:str) -> ModuleType:
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"File {filepath} not found")
     module_name = filepath.split("/")[-1].split(".")[0]
+    # Reuse existing module if it matches the same file path.
+    existing = sys.modules.get(module_name)
+    if existing is not None and getattr(existing, "__file__", None) == filepath:
+        return existing
     spec = importlib.util.spec_from_file_location(module_name, filepath)
     module = importlib.util.module_from_spec(spec)
+    # Register before exec so pickling sees a consistent module identity.
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 
