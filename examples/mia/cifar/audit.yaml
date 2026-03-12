@@ -27,14 +27,17 @@ audit:  # Configurations for auditing
 #       n_ops: 1
 #       augment_strength: "strong"
 # OSLO
-    - attack: oslo
-      n_audits: 500
-      training_data_fraction: 0.5
-      num_source_models: 6
-      num_validation_models: 2
-      online: True
-      step_size: 0.01
-      max_perturbation_size: 0.314
+    # - attack: oslo
+    #   n_audits: 500
+    #   training_data_fraction: 0.5
+    #   num_source_models: 6
+    #   num_validation_models: 2
+    #   online: True
+    #   step_size: 0.01
+      # max_perturbation_size: 0.314
+    - attack: seqmia
+      number_of_traj: 50
+      mia_classifier_epochs: 1000
 
   output_dir: "./cifar10/leakpro_output"
   attack_type: "mia" #mia, gia
@@ -43,7 +46,7 @@ audit:  # Configurations for auditing
 target:
   # Target model path
   module_path: "./target_model_class.py"
-  model_class: "WideResNet" #"WideResNet" #"ResNet18" 
+  model_class: "ResNet18" #"WideResNet" #"ResNet18" 
   target_folder: "./target"
   # Data paths
   data_path: "./data/cifar10.pkl"
