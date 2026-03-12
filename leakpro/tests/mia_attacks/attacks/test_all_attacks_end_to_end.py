@@ -361,6 +361,20 @@ def _build_attack_config(attack_name: str) -> dict:
         candidate["train_mia_batch_size"] = max(candidate.get("train_mia_batch_size", 2), 2)
         candidate["mia_classifier_epochs"] = max(candidate.get("mia_classifier_epochs", 1), 1)
 
+    if attack_name == "seqmia":
+        # SeqMIA builds 5 metrics per trajectory step; keep feature width aligned with model input.
+        candidate["input_size"] = max(candidate.get("input_size", 5), 5)
+        candidate["train_mia_batch_size"] = max(candidate.get("train_mia_batch_size", 2), 2)
+
+    if attack_name == "oslo":
+        # Keep a valid positive threshold range and an even post-audit pool size
+        # to satisfy current balanced shadow assignment assumptions.
+        candidate["min_threshold"] = max(candidate.get("min_threshold", 1e-4), 1e-4)
+        candidate["max_threshold"] = max(candidate.get("max_threshold", 1.0), 1.0)
+        candidate["n_audits"] = max(candidate.get("n_audits", 2), 2)
+        if candidate["n_audits"] % 2 != 0:
+            candidate["n_audits"] += 1
+
     validated_config = config_cls(**candidate)
     return validated_config.model_dump()
 
