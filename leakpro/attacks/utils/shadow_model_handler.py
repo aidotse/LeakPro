@@ -125,12 +125,13 @@ class ShadowModelHandler(ModelHandler):
         return A
 
 
-    def create_shadow_models(
+    def create_shadow_models(  # noqa: PLR0915
         self:Self,
         num_models:int,
         shadow_population: list,
         training_fraction:float=0.1,
-        online:bool=False
+        online:bool=False,
+        sampling_method:str=None
     ) -> list[int]:
         """Create and train shadow models based on the blueprint.
 
@@ -140,14 +141,29 @@ class ShadowModelHandler(ModelHandler):
             shadow_population (list): The indices in population eligible for training the shadow models.
             training_fraction (float): The fraction of the shadow population to use for training of a shadow model.
             online (bool): Whether the shadow models are created using an online or offline dataset.
+            sampling_method (str): Method for sampling training data. Options:
+                - "balanced": Each data point appears in exactly half the shadow models.
+                - "random": Random sampling, can be overridden by handler for custom behavior.
+                If None, reads from config (shadow_model.sampling_method), defaulting to "balanced".
 
         Returns:
         -------
-            None
+            list[int]: Indices of the shadow models (existing + newly created).
 
         """
         if num_models < 0:
             raise ValueError("Number of models cannot be negative")
+
+        # Get sampling_method from config if not explicitly provided
+        if sampling_method is None:
+            shadow_config = getattr(self.handler.configs, "shadow_model", None)
+            method = getattr(shadow_config, "sampling_method", None) if shadow_config is not None else None
+            sampling_method = method if isinstance(method, str) else "balanced"
+
+        if sampling_method not in ("balanced", "random"):
+            raise ValueError(f"Invalid sampling_method: {sampling_method}. Must be 'balanced' or 'random'.")
+
+        logger.info(f"Using '{sampling_method}' sampling method for shadow model training data")
 
         # Get the size of the dataset
         data_size = int(len(shadow_population)*training_fraction)
@@ -170,9 +186,17 @@ class ShadowModelHandler(ModelHandler):
         A = self.construct_balanced_assignments(len(shadow_population), num_models)  # noqa: N806
         assert np.all(np.sum(A,axis=1) == len(shadow_population)//2)
         shadow_population = np.array(shadow_population)
+        if sampling_method == "balanced":
+            A = self.construct_balanced_assignments(len(shadow_population), num_models)  # noqa: N806
+            assert np.all(np.sum(A,axis=0) == num_models//2)
+            assert np.all(np.sum(A,axis=1) == len(shadow_population)//2)
+
         for i, indx in enumerate(indices_to_use):
-            # Get dataloader
-            data_indices = shadow_population[np.where(A[i,:] == 1)]
+            # Get dataloader based on sampling method
+            if sampling_method == "balanced":
+                data_indices = shadow_population[np.where(A[i,:] == 1)]
+            else:  # random sampling (can be overridden by handler)
+                data_indices = self.handler.sample_shadow_indices(shadow_population.tolist(), training_fraction)
             data_loader = self.handler.get_dataloader(data_indices, params=None)
 
             # Get shadow model blueprint
