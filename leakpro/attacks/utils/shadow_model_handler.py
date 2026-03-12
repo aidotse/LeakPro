@@ -153,10 +153,8 @@ class ShadowModelHandler(ModelHandler):
         # Get sampling_method from config if not explicitly provided
         if sampling_method is None:
             shadow_config = getattr(self.handler.configs, "shadow_model", None)
-            if shadow_config is not None and hasattr(shadow_config, "sampling_method"):
-                sampling_method = shadow_config.sampling_method
-            else:
-                sampling_method = "balanced"
+            method = getattr(shadow_config, "sampling_method", None) if shadow_config is not None else None
+            sampling_method = method if isinstance(method, str) else "balanced"
 
         if sampling_method not in ("balanced", "random"):
             raise ValueError(f"Invalid sampling_method: {sampling_method}. Must be 'balanced' or 'random'.")
