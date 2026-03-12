@@ -5,6 +5,7 @@ from __future__ import annotations
 import pickle
 import shutil
 import tempfile
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,7 @@ UNUSED_INDICES = list(range(N_TRAIN + N_TEST, N_SAMPLES))
 RMIA_N_TRAIN = N_SAMPLES // 2
 RMIA_TRAIN_INDICES = list(range(0, RMIA_N_TRAIN))
 RMIA_TEST_INDICES = list(range(RMIA_N_TRAIN, N_SAMPLES))
+REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
 class TinyImageTargetModel(nn.Module):
@@ -221,9 +223,36 @@ def _set_seed(seed: int = 1234) -> None:
 
 
 def _clear_global_attack_cache() -> None:
-    cache_dir = Path("leakpro_output") / "attack_cache"
-    if cache_dir.exists():
-        shutil.rmtree(cache_dir)
+    cache_dirs = [
+        Path("leakpro_output") / "attack_cache",
+        REPO_ROOT / "leakpro_output" / "attack_cache",
+    ]
+    for cache_dir in cache_dirs:
+        if cache_dir.exists():
+            shutil.rmtree(cache_dir)
+
+
+def _snapshot_optuna_metadata() -> dict[str, dict[str, Any]]:
+    """Capture AttackConfig field optuna metadata for all MIA attacks.
+
+    Some attack setup paths mutate pydantic field metadata (json_schema_extra)
+    at class scope. Snapshot/restore keeps tests order-independent.
+    """
+    snapshot: dict[str, dict[str, Any]] = {}
+    for attack_name, attack_cls in AttackFactoryMIA.attack_classes.items():
+        snapshot[attack_name] = {
+            field_name: deepcopy(field.json_schema_extra)
+            for field_name, field in attack_cls.AttackConfig.model_fields.items()
+        }
+    return snapshot
+
+
+def _restore_optuna_metadata(snapshot: dict[str, dict[str, Any]]) -> None:
+    """Restore AttackConfig field optuna metadata for all MIA attacks."""
+    for attack_name, field_map in snapshot.items():
+        attack_cls = AttackFactoryMIA.attack_classes[attack_name]
+        for field_name, extra in field_map.items():
+            attack_cls.AttackConfig.model_fields[field_name].json_schema_extra = deepcopy(extra)
 
 
 def _build_tiny_image_population() -> TinyImageInputHandler.UserDataset:
@@ -541,43 +570,47 @@ def test_all_attacks_end_to_end(attack_name: str, monkeypatch: pytest.MonkeyPatc
     """Run a minimal real E2E flow for each MIA attack in AttackFactoryMIA."""
     _set_seed()
     run_mode = E2E_MODE_BY_ATTACK[attack_name]
+    optuna_metadata_snapshot = _snapshot_optuna_metadata()
     temp_root = None
-    with tempfile.TemporaryDirectory(prefix=f"mia_e2e_{attack_name}_") as temp_dir:
-        temp_root = Path(temp_dir)
-        monkeypatch.chdir(temp_root)
-        _clear_global_attack_cache()
+    try:
+        with tempfile.TemporaryDirectory(prefix=f"mia_e2e_{attack_name}_") as temp_dir:
+            temp_root = Path(temp_dir)
+            monkeypatch.chdir(temp_root)
+            _clear_global_attack_cache()
 
-        run_dir = temp_root / attack_name
-        run_dir.mkdir(parents=True, exist_ok=True)
+            run_dir = temp_root / attack_name
+            run_dir.mkdir(parents=True, exist_ok=True)
 
-        if attack_name == "dts":
-            config_path = _create_timeseries_e2e_config(run_dir, attack_name)
-            user_handler = TinyTimeSeriesInputHandler
-        else:
-            config_path = _create_image_e2e_config(run_dir, attack_name)
-            user_handler = TinyImageInputHandler
+            if attack_name == "dts":
+                config_path = _create_timeseries_e2e_config(run_dir, attack_name)
+                user_handler = TinyTimeSeriesInputHandler
+            else:
+                config_path = _create_image_e2e_config(run_dir, attack_name)
+                user_handler = TinyImageInputHandler
 
-        leakpro = LeakPro(user_handler, str(config_path))
-        results = leakpro.run_audit(create_pdf=False, use_optuna=False)
+            leakpro = LeakPro(user_handler, str(config_path))
+            results = leakpro.run_audit(create_pdf=False, use_optuna=False)
 
-        assert len(results) == 1
-        result = results[0]
-        assert result is not None
+            assert len(results) == 1
+            result = results[0]
+            assert result is not None
 
-        output_dir = Path(leakpro.handler.configs.audit.output_dir)
-        result_file = output_dir / "results" / result.id / "result.txt"
-        mode_file = output_dir / "results" / result.id / "e2e_mode.txt"
-        blocker_file = output_dir / "results" / result.id / "e2e_blocker.txt"
-        with open(mode_file, "w") as file:
-            file.write(run_mode)
-        if run_mode == "patched":
-            with open(blocker_file, "w") as file:
-                file.write(PATCHED_ATTACK_BLOCKERS[attack_name])
-        assert result_file.exists()
-        assert mode_file.exists()
-        if run_mode == "patched":
-            assert blocker_file.exists()
-        assert (output_dir / "data_objects").exists()
+            output_dir = Path(leakpro.handler.configs.audit.output_dir)
+            result_file = output_dir / "results" / result.id / "result.txt"
+            mode_file = output_dir / "results" / result.id / "e2e_mode.txt"
+            blocker_file = output_dir / "results" / result.id / "e2e_blocker.txt"
+            with open(mode_file, "w") as file:
+                file.write(run_mode)
+            if run_mode == "patched":
+                with open(blocker_file, "w") as file:
+                    file.write(PATCHED_ATTACK_BLOCKERS[attack_name])
+            assert result_file.exists()
+            assert mode_file.exists()
+            if run_mode == "patched":
+                assert blocker_file.exists()
+            assert (output_dir / "data_objects").exists()
 
-    assert temp_root is not None
-    assert not temp_root.exists()
+        assert temp_root is not None
+        assert not temp_root.exists()
+    finally:
+        _restore_optuna_metadata(optuna_metadata_snapshot)
