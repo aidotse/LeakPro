@@ -177,7 +177,6 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
             [np.ones(len(self.audit_in_member_indicies)), np.zeros(len(self.audit_out_member_indicies))]
         )
 
-        print(true_labels.shape, perturbation_distances.shape)
         return MIAResult.from_full_scores(true_membership=true_labels,
                                           signal_values=perturbation_distances,
                                           result_name="HopSkipJump",
