@@ -51,6 +51,17 @@ class BNStatisticsStrategy(Component):
         """Initialize common state for all strategies."""
         self.feature_hooks: List = []
 
+    def _initialize_setup(self) -> None:
+        """Common initialization for all setup methods."""
+        self.cleanup()
+        self.feature_hooks = []
+
+    def _freeze_bn_momentum(self, model: nn.Module) -> None:
+        """Freeze BatchNorm momentum to prevent running stats updates."""
+        for module in model.modules():
+            if isinstance(module, nn.BatchNorm2d):
+                module.momentum = 0
+
     @abstractmethod
     def setup(
         self,
@@ -123,6 +134,11 @@ class RunningBNStatisticsStrategy(BNStatisticsStrategy):
         in Federated Learning." NeurIPS 2021.
     """
 
+    def __init__(self) -> None:
+        """Initialize running BN statistics strategy."""
+        super().__init__()
+        self.name = self.__class__.get_metadata().name
+
     @classmethod
     def get_metadata(cls) -> ComponentMetadata:
         """Return metadata describing this strategy's requirements."""
@@ -153,8 +169,7 @@ class RunningBNStatisticsStrategy(BNStatisticsStrategy):
 
         """
         _ = (reconstruction, training_simulator, proxy_dataloader)  # Unused args
-        self.cleanup()  # Remove any existing hooks
-        self.feature_hooks = []
+        self._initialize_setup()
 
         # Check if client provided post-training BN statistics
         post_train_running_stats = None
@@ -185,6 +200,9 @@ class RunningBNStatisticsStrategy(BNStatisticsStrategy):
             if isinstance(module, nn.BatchNorm2d):
                 self.feature_hooks.append(BNFeatureHook(module))
 
+        # Freeze BN running statistics by setting momentum=0
+        self._freeze_bn_momentum(model)
+
 
 class InferredBNStatisticsStrategy(BNStatisticsStrategy):
     """Infer BN statistics from running statistics momentum (GIA Running approach).
@@ -210,6 +228,7 @@ class InferredBNStatisticsStrategy(BNStatisticsStrategy):
 
         """
         super().__init__()
+        self.name = self.__class__.get_metadata().name
         self.momentum = momentum
 
     @classmethod
@@ -238,25 +257,24 @@ class InferredBNStatisticsStrategy(BNStatisticsStrategy):
 
         Args:
             model: The target model
-            reconstruction: Current reconstruction (used to infer batch_size if client didn't provide it)
-            client_observations: ClientObservations from FL client (contains pre/post_bn_stats, batch_size)
+            reconstruction: Current reconstruction (used to infer num_images if client didn't provide it)
+            client_observations: ClientObservations from FL client (contains pre/post_bn_stats, num_images)
             training_simulator: Optional training simulator (not used in this strategy)
             proxy_dataloader: Optional proxy dataloader (not used in this strategy)
 
         """
         _ = training_simulator, proxy_dataloader  # Unused args
-        self.cleanup()
-        self.feature_hooks = []
+        self._initialize_setup()
 
         # Extract BN statistics from client observations
         pre_train_running_stats = None
         post_train_running_stats = None
-        batch_size = None
+        num_images = None
 
         if client_observations is not None:
             pre_train_running_stats = client_observations.pre_bn_stats
             post_train_running_stats = client_observations.post_bn_stats
-            batch_size = client_observations.batch_size
+            num_images = client_observations.num_images
 
         # Check if client provided necessary statistics
         if pre_train_running_stats is None or post_train_running_stats is None:
@@ -270,13 +288,13 @@ class InferredBNStatisticsStrategy(BNStatisticsStrategy):
             )
             return
 
-        # Get batch size - fallback to reconstruction shape if not provided by client
-        if batch_size is None and reconstruction is not None:
-            batch_size = reconstruction.shape[0]
-        elif batch_size is None:
-            # Cannot proceed without batch size
+        # Get num_images - fallback to reconstruction shape if not provided by client
+        if num_images is None and reconstruction is not None:
+            num_images = reconstruction.shape[0]
+        elif num_images is None:
+            # Cannot proceed without num_images
             logger.warning(
-                f"{self.name}: Cannot infer batch size (no client batch_size and no reconstruction). "
+                f"{self.name}: Cannot infer num_images (no client num_images and no reconstruction). "
                 "BN regularization will be disabled (loss = 0)."
             )
             return
@@ -297,7 +315,7 @@ class InferredBNStatisticsStrategy(BNStatisticsStrategy):
         client_statistics = []
         for i in range(len(used_statistics)):
             used_mean, used_var = used_statistics[i]
-            correction_factor = (batch_size - 1) / batch_size
+            correction_factor = (num_images - 1) / num_images
             client_statistics.append((used_mean, used_var * correction_factor))
 
         # Register InferredBNFeatureHook on all BatchNorm2d layers (same as gia_running.py)
@@ -309,6 +327,8 @@ class InferredBNStatisticsStrategy(BNStatisticsStrategy):
                     client_statistics[start_idx][0],
                     client_statistics[start_idx][1]))
                 start_idx += 1
+
+        self._freeze_bn_momentum(model)
 
 
 class ProxyBNStatisticsStrategy(BNStatisticsStrategy):
@@ -329,6 +349,11 @@ class ProxyBNStatisticsStrategy(BNStatisticsStrategy):
     Reference:
         GIA Estimate implementation (gia_estimate.py).
     """
+
+    def __init__(self) -> None:
+        """Initialize proxy BN statistics strategy."""
+        super().__init__()
+        self.name = self.__class__.get_metadata().name
 
     @classmethod
     def get_metadata(cls) -> ComponentMetadata:
@@ -482,8 +507,7 @@ class ProxyBNStatisticsStrategy(BNStatisticsStrategy):
 
         """
         _ = (reconstruction, client_observations, training_simulator)  # Unused args
-        self.cleanup()
-        self.feature_hooks = []
+        self._initialize_setup()
 
         # Check if proxy data is provided
         if proxy_dataloader is None:
@@ -500,6 +524,9 @@ class ProxyBNStatisticsStrategy(BNStatisticsStrategy):
 
         # Register feature hooks on the target model
         self._register_feature_hooks(model, proxy_statistics)
+
+        # Freeze BN running statistics by setting momentum=0
+        self._freeze_bn_momentum(model)
 
 
 __all__ = [

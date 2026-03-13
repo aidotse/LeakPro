@@ -53,13 +53,31 @@ class RandomNoiseInitialization(InitializationStrategy):
         device: torch.device,
         dtype: torch.dtype = torch.float32,
     ) -> InitializationResult:
-        """Initialize with random Gaussian noise."""
+        """Initialize with random Gaussian noise.
+
+        Args:
+            shape: Shape of reconstruction
+            device: Device to create tensor on
+            dtype: Data type for tensor
+
+        Returns:
+            InitializationResult with reconstruction tensor in [E, N, G, C, H, W] format.
+
+        """
+
+        # Generate different random noise for each epoch and seed
         reconstruction = torch.randn(shape, device=device, dtype=dtype) * self.std + self.mean
+
+        metadata = {
+            "mean": self.mean,
+            "std": self.std,
+            "method": "random_noise",
+        }
 
         return InitializationResult(
             reconstruction=reconstruction,
             labels=None,
-            metadata={"mean": self.mean, "std": self.std, "method": "random_noise"},
+            metadata=metadata,
         )
 
 

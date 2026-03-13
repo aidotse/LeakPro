@@ -15,16 +15,23 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
 from torchmetrics.image import PeakSignalNoiseRatio, StructuralSimilarityIndexMeasure
 
-from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.training_simulator import TrainingSimulator
+from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.training_simulator import (
+    MultiEpochTrainingSimulation,
+)
+from leakpro.fl_utils.matching_utils import match_images
 from leakpro.metrics.attack_result import GIAResults
 
+if TYPE_CHECKING:
+    from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.training_simulator import (
+        TrainingSettings,
+    )
 
 @dataclass
 class ClientObservations:
@@ -33,7 +40,7 @@ class ClientObservations:
     Different threat models expose different information:
     - Standard FL: Only gradients
     - Huang (Model B): Gradients + post-training BN statistics
-    - GIA Running (Model B+): Gradients + pre/post BN statistics + batch size
+    - GIA Running (Model B+): Gradients + pre/post BN statistics + num_images
     - GIA Estimate (Model C): Gradients only (attacker uses proxy data)
     """
 
@@ -43,8 +50,15 @@ class ClientObservations:
     # Optionally sent depending on protocol/threat model
     post_bn_stats: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None
     pre_bn_stats: Optional[List[Tuple[torch.Tensor, torch.Tensor]]] = None
-    batch_size: Optional[int] = None
-    spatial_sizes: Optional[List[int]] = None  # For accurate variance correction
+
+    # Number of images the client trained on (needed for BN correction and reconstruction)
+    num_images: Optional[int] = None
+
+    # Shape of input data [N, C, H, W] - needed for initialization
+    input_shape: Optional[tuple[int, ...]] = None
+
+    # Training configuration - allows attacker to match client's training setup
+    training_settings: Optional["TrainingSettings"] = None
 
     # Optional: labels for oracle mode (unrealistic but useful for testing)
     labels: Optional[torch.Tensor] = None
@@ -104,7 +118,7 @@ class FLClientSimulator:
     def train_and_observe(
         self,
         server_model: nn.Module,
-        training_simulator: TrainingSimulator,
+        training_settings: "TrainingSettings",
         loss_fn: nn.Module,
         threat_model: str = "gradients_only",
         send_labels_to_server: bool = False,
@@ -116,12 +130,12 @@ class FLClientSimulator:
 
         Args:
             server_model: Model received from server
-            training_simulator: Training simulator to use
+            training_settings: Training configuration (epochs, optimizer, etc.)
             loss_fn: Loss function to use for training
             threat_model: What information the protocol/threat model exposes:
                 - "gradients_only": Standard FL (most realistic)
                 - "huang": Model B - gradients + post-training BN stats
-                - "gia_running": Model B+ - gradients + pre/post BN stats + batch size
+                - "gia_running": Model B+ - gradients + pre/post BN stats + num_images
             send_labels_to_server: If True, include labels (for oracle mode testing)
 
         Returns:
@@ -132,17 +146,30 @@ class FLClientSimulator:
         client_model = deepcopy(server_model)
         client_model.to(self.device)
 
-        observations = ClientObservations(gradients=[],
-                                          data_mean=self.data_mean,
-                                          data_std=self.data_std,
-                                          num_classes=self.num_classes
-                                          )
+        observations = ClientObservations(
+            gradients=[],
+            data_mean=self.data_mean,
+            data_std=self.data_std,
+            num_classes=self.num_classes,
+            training_settings=training_settings,
+            input_shape=self.original_inputs.shape,
+        )
 
         # Capture pre-training BN statistics if needed
         if threat_model == "gia_running":
             observations.pre_bn_stats = self._capture_bn_stats(client_model)
-            observations.batch_size = self.client_data.batch_size
-            observations.spatial_sizes = self._capture_spatial_sizes(client_model)
+            observations.num_images = self.client_data.batch_size
+
+        # Create training simulator for client-side training
+        # Client always uses "client" mode (realistic with shuffling)
+        training_simulator = MultiEpochTrainingSimulation(
+            epochs=training_settings.epochs,
+            optimizer_type=training_settings.optimizer_type,
+            batch_size=training_settings.training_batch_size,
+            compute_mode=training_settings.compute_mode,
+            model_mode=training_settings.model_mode,
+            shuffle_mode="client",  # Client uses realistic shuffling
+        )
 
         # CLIENT TRAINS LOCALLY (server cannot observe this process)
         gradients = training_simulator.simulate_training(
@@ -176,34 +203,6 @@ class FLClientSimulator:
                 ))
         return stats
 
-    def _capture_spatial_sizes(self, model: nn.Module) -> List[int]:
-        """Capture spatial sizes (b*h*w) at each BN layer for variance correction."""
-        spatial_sizes = []
-        hooks = []
-
-        def capture_hook(module: nn.Module, input: tuple, output: tuple) -> None:  # noqa: ARG001
-            x = input[0]
-            b, c, h, w = x.shape
-            spatial_sizes.append(b * h * w)
-
-        for module in model.modules():
-            if isinstance(module, nn.BatchNorm2d):
-                hooks.append(module.register_forward_hook(capture_hook))
-
-        # Run forward pass
-        model.eval()
-        with torch.no_grad():
-            for inputs, _ in self.client_data:
-                inputs = inputs.to(self.device)
-                _ = model(inputs)
-                break
-
-        # Remove hooks
-        for h in hooks:
-            h.remove()
-
-        return spatial_sizes
-
     def compute_metrics(
         self,
         reconstruction: torch.Tensor,
@@ -222,7 +221,7 @@ class FLClientSimulator:
             GIAResults with metrics computed against private data
 
         """
-        batch_size = reconstruction.shape[0]
+        num_images = reconstruction.shape[0]
 
         # Denormalize for metric computation
         denorm_reconstruction = reconstruction * self.data_std.to(self.device) + self.data_mean.to(self.device)
@@ -232,27 +231,12 @@ class FLClientSimulator:
 
         # Match reconstructions to ground truth (handles permutation invariance)
         matched_indices = None
-        if batch_size > 1:
-            matched_indices = []
-            used_gt_indices = set()
-
-            for org_idx in range(batch_size):
-                org_image = denorm_original[org_idx:org_idx+1]
-                best_mse = float("inf")
-                best_rec_idx = 0
-
-                for rec_idx in range(batch_size):
-                    if rec_idx in used_gt_indices:
-                        continue
-                    rec_image = denorm_reconstruction[rec_idx:rec_idx+1]
-                    current_mse = (rec_image - org_image).pow(2).mean().item()
-                    if current_mse < best_mse:
-                        best_mse = current_mse
-                        best_rec_idx = rec_idx
-
-                matched_indices.append(best_rec_idx)
-                used_gt_indices.add(best_rec_idx)
-
+        if num_images > 1:
+            matched_indices, _ = match_images(
+                denorm_reconstruction,
+                denorm_original,
+                metric="mse"
+            )
             denorm_reconstruction = denorm_reconstruction[matched_indices]
         else:
             matched_indices = [0]
