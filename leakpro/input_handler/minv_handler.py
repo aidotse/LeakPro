@@ -97,7 +97,7 @@ class MINVHandler:
         try:
             with open(self.model_path, "rb") as f:
                 self.target_model = self.target_model_blueprint(**init_params)
-                self.target_model.load_state_dict(torch.load(f))
+                self.target_model.load_state_dict(self._safe_torch_load(f))
             logger.info(f"Loaded target model from {model_path}")
         except FileNotFoundError as e:
             raise FileNotFoundError(f"Could not find the trained target model at {model_path}") from e
@@ -112,8 +112,18 @@ class MINVHandler:
 
     def get_num_classes(self:Self) -> int:
         """Return the number of classes in the target model."""
-        # TODO: Implement this to work with different types of datasets (where the label is not always called y)
-        return self.private_dataset.y.unique().shape[0]
+        if hasattr(self.private_dataset, "y"):
+            return int(torch.unique(self.private_dataset.y).shape[0])
+        if hasattr(self.private_dataset, "targets"):
+            return int(torch.unique(torch.as_tensor(self.private_dataset.targets)).shape[0])
+        if hasattr(self.target_model, "num_classes"):
+            return int(self.target_model.num_classes)
+        init_num_classes = self.target_model_metadata.init_params.get("num_classes")
+        if init_num_classes is not None:
+            return int(init_num_classes)
+        raise ValueError(
+            "Could not infer number of classes from private dataset or target model metadata."
+        )
 
     def _load_criterion(self:Self) -> None:
         """Get the criterion for the target model."""
@@ -141,3 +151,11 @@ class MINVHandler:
     def get_criterion(self:Self) -> nn.modules.loss._Loss:
         """Get the criterion for the target model."""
         return self._criterion
+
+    @staticmethod
+    def _safe_torch_load(path_or_buffer: object) -> dict:
+        """Load torch state dicts across torch versions with safe defaults."""
+        try:
+            return torch.load(path_or_buffer, map_location="cpu", weights_only=True)
+        except TypeError:
+            return torch.load(path_or_buffer, map_location="cpu")
