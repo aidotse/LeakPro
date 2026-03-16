@@ -1,4 +1,5 @@
 """Run optuna to find best hyperparameters."""
+import os
 from abc import ABC, abstractmethod
 
 from leakpro.utils.import_helper import Self
@@ -6,6 +7,10 @@ from leakpro.utils.import_helper import Self
 
 class AbstractAttack(ABC):
     """Abstract attack template for attack objects."""
+
+    def __init__(self) -> None:
+        self.attack_cache_folder_path = "attack_cache_folder"
+        os.makedirs(self.attack_cache_folder_path,exist_ok=True)
 
     def get_configs(self: Self) -> dict:
         """Return configs used for attack."""

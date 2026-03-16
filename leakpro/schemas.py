@@ -90,6 +90,7 @@ class TargetConfig(BaseModel):
     model_class: str = Field(..., description="Class name of the model")
     target_folder: str = Field(..., description="Directory where target model data is stored")
     data_path: str = Field(..., description="Path to dataset file")
+    dpsgd_path: Optional[str] = Field(default=None, description="Path to the DP-SGD dictionary file (optional)")
     # TODO: Change data_path description to be more descriptive, i.e path to target (or private) dataset.
 
     # MINV-specific field - optional
@@ -205,8 +206,10 @@ class OptunaConfig(BaseModel):
 
     seed: int = Field(default=1234,
                       description="Random seed for reproducibility")
-    n_trials: int = Field(default=50,
+    n_trials: int = Field(default=100,
                           description="Number of trials to find the optimal hyperparameters")
+    check_interval: int = Field(default=3000,
+                          description="Interval of steps between checks")
     direction: Literal["maximize", "minimize"] = Field("maximize",
                                                        description="Direction of the optimization, minimize or maximize")
     pruner: optuna.pruners.BasePruner = Field(default=optuna.pruners.MedianPruner(n_warmup_steps=5),

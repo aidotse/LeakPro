@@ -31,7 +31,7 @@ class SinglingOutResults(BaseModel):
 
     def save(self:Self, path:str = "../leakpro_output/results/", name: str = "singling_out", config:dict = None) -> None: # noqa: ARG002
         """Save method for SinglingOutResults."""
-        from leakpro.synthetic_data_attacks.plots import plot_singling_out
+        from leakpro.synthetic_data_attacks.plots import plot_singling_out  # noqa: PLC0415
         id = f"{self.prefix}"+f"_{self.dataset}"
         # Data to be saved
         data = {
@@ -83,7 +83,7 @@ class SinglingOutResults(BaseModel):
             save_name:str = "fig.png",
         ) -> None:
         """Plot method for SinglingOutResults."""
-        from leakpro.synthetic_data_attacks.plots import plot_singling_out
+        from leakpro.synthetic_data_attacks.plots import plot_singling_out  # noqa: PLC0415
         plot_singling_out(
             sin_out_res=SinglingOutResults(
                 res=self.res,

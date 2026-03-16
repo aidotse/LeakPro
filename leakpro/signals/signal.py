@@ -51,8 +51,10 @@ class Signal(ABC):
         model: Model,
         handler: AbstractInputHandler,
         indices: np.ndarray,
+        data_loader: Optional[DataLoader] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
-        data_loader = handler.get_dataloader(indices, shuffle=False)    # NOTE: Shuffle must be false to maintain indices order
+        if data_loader is None:
+            data_loader = handler.get_dataloader(indices, shuffle=False) # NOTE: Shuffle must be false to maintain indices order
         assert self._is_shuffling(data_loader) is False, "DataLoader must not shuffle data to maintain order of indices"
         model_logits = []
         for data, _ in data_loader:
@@ -60,7 +62,7 @@ class Signal(ABC):
             logits = model.get_logits(data)
             model_logits.extend(logits)
         model_logits = np.array(model_logits)
-        return model_logits, np.array(handler.population.targets)[indices]
+        return model_logits, data_loader.dataset.targets
 
 class ModelLogits(Signal):
     """Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a Dataset.
@@ -73,6 +75,7 @@ class ModelLogits(Signal):
         models: List[Model],
         handler: AbstractInputHandler,
         indices: np.ndarray,
+        data_loader: Optional[list] = None,
     ) -> List[np.ndarray]:
         """Built-in call method.
 
@@ -81,6 +84,7 @@ class ModelLogits(Signal):
             models: List of models that can be queried.
             handler: The input handler object.
             indices: List of indices in population dataset that can be queried from handler.
+            data_loader: Optional DataLoader to use instead of creating a new one from the handler.
 
         Returns:
         -------
@@ -88,9 +92,15 @@ class ModelLogits(Signal):
 
         """        # Compute the signal for each model
 
+        # Iterate over the DataLoader (ensures we use transforms etc)
+        # NOTE: Shuffle must be false to maintain indices order
+        if data_loader is None:
+            data_loader = handler.get_dataloader(indices, shuffle=False)
+        assert self._is_shuffling(data_loader) is False, "DataLoader must not shuffle data to maintain order of indices"
+
         results = []
         for model in tqdm(models, desc="Getting Model Logits"):
-            model_logits, _ = self._get_model_output(model, handler, indices)
+            model_logits, _ = self._get_model_output(model, None, None, data_loader)
             results.append(model_logits)
         return np.array(results)
 

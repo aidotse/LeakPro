@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from leakpro.synthetic_data_attacks.anonymeter.neighbors.mixed_types_n_neighbors import gower_distance, mixed_type_n_neighbors
+from leakpro.synthetic_data_attacks.anonymeter.neighbors.mixed_types_n_neighbors import gower_distance, mixed_type_n_neighbors, shuffled_argsorted
 from leakpro.tests.tests_synthetic_data_attacks.anonymeter_tests.fixtures import get_adult
 
 rng = np.random.default_rng()
@@ -99,3 +99,55 @@ def test_mixed_type_n_neighbors_shape(n_neighbors: int, n_queries: int) -> None:
     )
     assert isinstance(ids, np.ndarray)
     assert ids.shape == (n_queries, n_neighbors)
+
+def test_shuffled_argsorted_logic():
+    """
+    Tests that shuffled_argsorted returns valid indices that sort the array,
+    verifying against specific valid permutations for ties.
+    """
+    # Array with duplicates to allow for multiple valid index permutations
+    arr = np.array([10, 5, 8, 5, 2])
+    
+    result = shuffled_argsorted(arr)
+    
+    # Check that the indices actually sort the array
+    sorted_arr = arr[result]
+    assert np.all(np.diff(sorted_arr) >= 0), "The result indices did not sort the array correctly"
+    
+    valid_option_1 = np.array([4, 1, 3, 2, 0])
+    valid_option_2 = np.array([4, 3, 1, 2, 0])
+    
+    match_1 = np.array_equal(result, valid_option_1)
+    match_2 = np.array_equal(result, valid_option_2)
+    
+    assert match_1 or match_2, (
+        f"Result {result} matches neither expected permutation "
+        f"({valid_option_1} or {valid_option_2})"
+    )
+
+def test_randomness_across_runs():
+    """Ensure that running the function twice on the same data produces different index orders for ties."""
+    arr = np.array([1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3])
+    
+    run1 = shuffled_argsorted(arr)
+    run2 = shuffled_argsorted(arr)
+    
+    # The values sorted by these indices must be the same (correct sorting)
+    np.testing.assert_array_equal(arr[run1], arr[run2])
+    
+    # But the indices themselves should differ because of the shuffle
+    # (Note: There is a tiny chance they shuffle to the same order, but with 17 items (17!) 
+    # the chance is 1/355687428096000. We assume they won't match for this test).
+    assert not np.array_equal(run1, run2), "Two runs produced identical permutations for tied values."
+
+def test_edge_cases():
+    """Test empty arrays and single-element arrays."""
+    # Empty
+    arr_empty = np.array([])
+    assert len(shuffled_argsorted(arr_empty)) == 0
+    
+    # Single element
+    arr_single = np.array([42])
+    res_single = shuffled_argsorted(arr_single)
+    assert len(res_single) == 1
+    assert res_single[0] == 0

@@ -10,11 +10,44 @@ import numpy.typing as npt
 import pandas as pd
 from joblib import Parallel, delayed
 from numba import jit
+from numpy.random import shuffle
 
 from leakpro.synthetic_data_attacks.anonymeter.preprocessing.transformations import mixed_types_transform
 from leakpro.synthetic_data_attacks.anonymeter.preprocessing.type_detection import detect_consistent_col_types
 from leakpro.utils.logger import logger
 
+
+@jit(nopython=True, nogil=True)
+def shuffled_argsorted(arr: np.ndarray) -> npt.NDArray[np.int64]:
+    """Numba-compatible general version for numeric 1-D arrays for sorting array indices.
+
+    Returns array indices where equal values remain grouped but are
+    shuffled within each group (random tie-breaking).
+
+    Args.
+    -----
+        arr: npt.NDArray
+
+    Returns
+    -------
+        (sorted and shuffled indices): npt.NDArray[np.int64]
+
+    """
+    # Sort indices
+    idx = np.argsort(arr)
+    n = arr.shape[0]
+
+    # Shuffle equal-value blocks in-place
+    start = 0
+    while start < n:
+        end = start + 1
+        while end < n and arr[idx[end]] == arr[idx[start]]:
+            end += 1
+        if end - start > 1:
+            shuffle(idx[start:end])
+        start = end
+
+    return idx
 
 @jit(nopython=True, nogil=True)
 def gower_distance(
@@ -109,7 +142,7 @@ def nearest_neighbors(
         dist_ix = np.zeros((candidates.shape[0]), dtype=np.float64)
         for iy in range(candidates.shape[0]):
             dist_ix[iy] = gower_distance(r0=queries[ix], r1=candidates[iy], cat_cols_index=cat_cols_index)
-        close_match_idx = dist_ix.argsort()[:n_neighbors]
+        close_match_idx = shuffled_argsorted(dist_ix)[:n_neighbors]
         idx[ix] = close_match_idx
         dists[ix] = dist_ix[close_match_idx]
     return idx, dists
