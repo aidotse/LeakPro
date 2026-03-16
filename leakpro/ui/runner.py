@@ -11,12 +11,14 @@ import logging
 import os
 import pickle
 import sys
+import uuid
 from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
 import torch
 import yaml
+from sklearn.model_selection import train_test_split
 from torch import cat, nn, optim, tensor
 from torch.utils.data import DataLoader
 from torchvision.datasets import CIFAR10, CIFAR100
@@ -120,7 +122,6 @@ class LeakProRunner:
             if log_container:
                 log_container.info(f"Downloading / loading {dataset_name}…")
 
-            # ---- load torchvision dataset --------------------------------
             cls = CIFAR10 if dataset_name == "cifar10" else CIFAR100
             trainset = cls(root=root, train=True, download=True)
             testset = cls(root=root, train=False, download=True)
@@ -130,32 +131,23 @@ class LeakProRunner:
             data = cat([train_data, test_data], dim=0)
             targets = cat([tensor(trainset.targets), tensor(testset.targets)], dim=0)
 
-            # ---- import UserDataset (defined inside the handler) ---------
             from cifar_handler import CifarInputHandler  # noqa: PLC0415
-
-            # ---- train / test split with sequential indices --------------
-            # Shuffle the full dataset so the split is random, but assign
-            # sequential (0-based) indices so that position == population-index.
-            # This is required by the MIA attack logit-cache which assumes
-            # logits[i] corresponds to population point i.
-            dataset_size = len(data)
-            train_size = int(f_train * dataset_size)
-            test_size = int(f_test * dataset_size)
-            perm = np.random.permutation(dataset_size)
-            data = data[perm]
-            targets = targets[perm]
-            train_indices = np.arange(train_size)                        # [0 … train_size-1]
-            test_indices = np.arange(train_size, train_size + test_size) # [train_size … train_size+test_size-1]
 
             population_dataset = CifarInputHandler.UserDataset(data, targets)
 
-            # ---- always overwrite the population pickle so it matches ----
             pkl_path = Path(f"data/{dataset_name}.pkl")
             pkl_path.parent.mkdir(exist_ok=True)
-            with open(pkl_path, "wb") as f:
-                pickle.dump(population_dataset, f)
-            if log_container:
-                log_container.success(f"Population dataset saved to {pkl_path}")
+            if not pkl_path.exists():
+                with open(pkl_path, "wb") as f:
+                    pickle.dump(population_dataset, f)
+                if log_container:
+                    log_container.success(f"Population dataset saved to {pkl_path}")
+
+            dataset_size = len(population_dataset)
+            train_size = int(f_train * dataset_size)
+            test_size = int(f_test * dataset_size)
+            selected = np.random.choice(np.arange(dataset_size), train_size + test_size, replace=False)
+            train_indices, test_indices = train_test_split(selected, test_size=test_size)
 
             train_subset = CifarInputHandler.UserDataset(data[train_indices], targets[train_indices])
             test_subset = CifarInputHandler.UserDataset(
@@ -186,7 +178,11 @@ class LeakProRunner:
     # ------------------------------------------------------------------
 
     def train_standard(
-        self, train_config: dict, data_result: dict, log_container: object | None = None
+        self,
+        train_config: dict,
+        data_result: dict,
+        target_folder: str,
+        log_container: object | None = None,
     ) -> dict:
         """Train target model without differential privacy.
 
@@ -202,8 +198,8 @@ class LeakProRunner:
             epochs: int = train_config["train"]["epochs"]
             lr: float = train_config["train"]["learning_rate"]
             weight_decay: float = train_config["train"]["weight_decay"]
-            target_folder = Path(train_config["run"]["log_dir"])
-            target_folder.mkdir(parents=True, exist_ok=True)
+            folder = Path(target_folder)
+            folder.mkdir(parents=True, exist_ok=True)
 
             model = WideResNet(depth=28, num_classes=num_classes, widen_factor=2)
             criterion = nn.CrossEntropyLoss()
@@ -226,11 +222,8 @@ class LeakProRunner:
                 data_result["test_loader"], train_result.model, criterion
             )
 
-            # Save model
-            model_path = target_folder / "target_model.pkl"
-            torch.save(train_result.model.state_dict(), model_path)
+            torch.save(train_result.model.state_dict(), folder / "target_model.pkl")
 
-            # Save metadata
             meta = LeakPro.make_mia_metadata(
                 train_result=train_result,
                 optimizer=optimizer,
@@ -242,7 +235,7 @@ class LeakProRunner:
                 test_indices=data_result["test_indices"],
                 dataset_name=data_result["dataset_name"],
             )
-            with open(target_folder / "model_metadata.pkl", "wb") as f:
+            with open(folder / "model_metadata.pkl", "wb") as f:
                 pickle.dump(meta, f)
 
             if log_container:
@@ -256,7 +249,7 @@ class LeakProRunner:
                 "train_result": train_result,
                 "test_result": test_result,
                 "epochs": epochs,
-                "target_folder": str(target_folder),
+                "target_folder": str(folder),
                 "optimizer": optimizer,
                 "criterion": criterion,
             }
@@ -270,6 +263,7 @@ class LeakProRunner:
         train_config: dict,
         dpsgd_params: dict,
         data_result: dict,
+        target_folder: str,
         log_container: object | None = None,
     ) -> dict:
         """Train target model with differential privacy (DP-SGD via Opacus).
@@ -277,7 +271,7 @@ class LeakProRunner:
         dpsgd_params keys: target_epsilon, target_delta, max_grad_norm,
                            virtual_batch_size (optional, default 16)
 
-        Returns same dict shape as train_standard, plus 'achieved_epsilon'.
+        Returns same dict shape as train_standard, plus 'dpsgd_params'.
         """
         with _in_cifar_dir():
             from cifar_handler_dpsgd import CifarInputHandlerDPsgd  # noqa: PLC0415
@@ -288,12 +282,11 @@ class LeakProRunner:
             epochs: int = train_config["train"]["epochs"]
             lr: float = train_config["train"]["learning_rate"]
             momentum: float = train_config["train"].get("momentum", 0.9)
-            target_folder = Path("target_dpsgd")
-            target_folder.mkdir(parents=True, exist_ok=True)
+            folder = Path(target_folder)
+            folder.mkdir(parents=True, exist_ok=True)
 
             virtual_batch_size: int = dpsgd_params.get("virtual_batch_size", 16)
 
-            # Build and save dpsgd_dic.pkl that the handler reads
             sample_rate = 1.0 / len(data_result["train_loader"])
             privacy_dict = {
                 "target_epsilon": dpsgd_params["target_epsilon"],
@@ -305,7 +298,7 @@ class LeakProRunner:
                 "eps_error": 0.01,
                 "max_grad_norm": dpsgd_params["max_grad_norm"],
             }
-            privacy_pkl_path = str(target_folder / "dpsgd_dic.pkl")
+            privacy_pkl_path = str(folder / "dpsgd_dic.pkl")
             with open(privacy_pkl_path, "wb") as f:
                 pickle.dump(privacy_dict, f)
 
@@ -335,7 +328,7 @@ class LeakProRunner:
                 data_result["test_loader"], train_result.model, criterion
             )
 
-            torch.save(train_result.model.state_dict(), target_folder / "target_model.pkl")
+            torch.save(train_result.model.state_dict(), folder / "target_model.pkl")
 
             meta = LeakPro.make_mia_metadata(
                 train_result=train_result,
@@ -348,7 +341,7 @@ class LeakProRunner:
                 test_indices=data_result["test_indices"],
                 dataset_name=data_result["dataset_name"],
             )
-            with open(target_folder / "model_metadata.pkl", "wb") as f:
+            with open(folder / "model_metadata.pkl", "wb") as f:
                 pickle.dump(meta, f)
 
             if log_container:
@@ -362,7 +355,7 @@ class LeakProRunner:
                 "train_result": train_result,
                 "test_result": test_result,
                 "epochs": epochs,
-                "target_folder": str(target_folder),
+                "target_folder": str(folder),
                 "optimizer": optimizer,
                 "criterion": criterion,
                 "dpsgd_params": privacy_dict,
@@ -372,25 +365,44 @@ class LeakProRunner:
     # Stage 3 – run audit
     # ------------------------------------------------------------------
 
-    def run_audit(self, dpsgd: bool = False, log_container: object | None = None) -> list:
-        """Run LeakPro MIA attacks and return a list of MIAResult objects."""
+    def run_audit(
+        self, target_folder: str, dpsgd: bool = False, log_container: object | None = None
+    ) -> list:
+        """Run LeakPro MIA attacks against the model in target_folder.
+
+        Writes a temporary audit config overriding target.target_folder,
+        runs the audit, then deletes the temp file.
+        """
         with _in_cifar_dir():
             if dpsgd:
                 from cifar_handler_dpsgd import CifarInputHandlerDPsgd  # noqa: PLC0415
                 handler_cls = CifarInputHandlerDPsgd
-                config_path = "audit_dpsgd.yaml"
+                base_config = "audit_dpsgd.yaml"
             else:
                 from cifar_handler import CifarInputHandler  # noqa: PLC0415
                 handler_cls = CifarInputHandler
-                config_path = "audit.yaml"
+                base_config = "audit.yaml"
 
-            if log_container:
-                log_container.info(f"Initialising audit with config: {config_path}")
+            with open(base_config) as f:
+                config = yaml.safe_load(f)
+            config["target"]["target_folder"] = target_folder
 
-            maybe_stream = _stream_logs(log_container) if log_container else contextlib.nullcontext()
-            with maybe_stream:
-                leakpro = LeakPro(handler_cls, config_path)
-                results = leakpro.run_audit(create_pdf=False)
+            temp_path = f"_audit_temp_{uuid.uuid4().hex}.yaml"
+            try:
+                with open(temp_path, "w") as f:
+                    yaml.dump(config, f)
+
+                if log_container:
+                    log_container.info(
+                        f"Auditing model at '{target_folder}' with config: {base_config}"
+                    )
+
+                maybe_stream = _stream_logs(log_container) if log_container else contextlib.nullcontext()
+                with maybe_stream:
+                    leakpro = LeakPro(handler_cls, temp_path)
+                    results = leakpro.run_audit(create_pdf=False)
+            finally:
+                Path(temp_path).unlink(missing_ok=True)
 
             if log_container:
                 log_container.success(f"Audit complete — {len(results)} attack(s) finished.")

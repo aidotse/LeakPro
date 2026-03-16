@@ -7,14 +7,31 @@ import pandas as pd
 import streamlit as st
 
 
-def render_sensitive_records(results: list) -> None:
-    """Render the sensitive records explorer."""
+def render_sensitive_records(models: list) -> None:
+    """Render the sensitive records explorer with a model selector."""
+    audited = [m for m in models if m.get("audit_results")]
+    if not audited:
+        st.info("No signal-value data available for sensitive records analysis.")
+        return
+
+    # Model selector (skip if only one model)
+    if len(audited) > 1:
+        model_name = st.selectbox(
+            "Select model", [m["name"] for m in audited], key="rec_model_select"
+        )
+        model = next(m for m in audited if m["name"] == model_name)
+    else:
+        model = audited[0]
+
+    results = model.get("audit_results") or []
     valid = [r for r in results if r.signal_values is not None and r.roc_auc is not None]
     if not valid:
         valid = [r for r in results if r.signal_values is not None]
     if not valid:
-        st.info("No signal-value data available for sensitive records analysis.")
+        st.info(f"No signal-value data available for **{model['name']}**.")
         return
+
+    st.caption(f"Model: **{model['name']}**")
 
     attack_names = [r.result_name for r in valid]
     selected_name = st.selectbox("Select attack", attack_names, key="rec_attack_select")

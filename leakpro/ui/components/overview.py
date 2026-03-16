@@ -80,31 +80,33 @@ def _detect_existing_results() -> tuple:
 
 def _render_action_buttons(resume_dir: Path, has_results: bool) -> None:
     """Render Start / Re-audit / Resume buttons."""
-    has_trained_model = bool(st.session_state.get("train_result_dict"))
+    has_trained_models = any(
+        m.get("train_result_dict") for m in st.session_state.get("models", [])
+    )
     col_start, col_reaudit, col_resume = st.columns([1, 1, 1])
 
     with col_start:
         st.markdown("### Start a new audit")
-        st.caption("Configure, train a model from scratch, and run attacks.")
+        st.caption("Configure, train models from scratch, and run attacks.")
         if st.button("Start New Audit", type="primary", use_container_width=True):
-            for key in ["data_result", "train_result_dict", "audit_results",
-                        "dpsgd_enabled", "dpsgd_params", "train_config", "audit_config"]:
+            for key in ["data_result", "train_config", "audit_config", "models"]:
                 st.session_state.pop(key, None)
             st.session_state.stage = 1
             st.rerun()
 
     with col_reaudit:
-        st.markdown("### Re-audit same model")
-        st.caption("Keep the trained model, change attacks or parameters.")
-        if has_trained_model:
-            if st.button("Re-audit (keep model)", use_container_width=True):
-                st.session_state.pop("audit_results", None)
+        st.markdown("### Re-audit same models")
+        st.caption("Keep trained models, change attacks or parameters.")
+        if has_trained_models:
+            if st.button("Re-audit (keep models)", use_container_width=True):
+                for m in st.session_state.get("models", []):
+                    m["audit_results"] = None
                 st.session_state["reaudit_mode"] = True
                 st.session_state.stage = 1
                 st.rerun()
         else:
-            st.caption("No trained model in session.")
-            st.button("Re-audit (keep model)", disabled=True, use_container_width=True)
+            st.caption("No trained models in session.")
+            st.button("Re-audit (keep models)", disabled=True, use_container_width=True)
 
     with col_resume:
         st.markdown("### Resume previous run")
@@ -115,7 +117,14 @@ def _render_action_buttons(resume_dir: Path, has_results: bool) -> None:
                 from leakpro.ui.runner import LeakProRunner  # noqa: PLC0415
                 results = LeakProRunner.load_audit_results_from_disk(str(resume_dir))
                 if results:
-                    st.session_state.audit_results = results
+                    st.session_state.models = [{
+                        "name": "Loaded",
+                        "dpsgd_enabled": False,
+                        "dpsgd_params": None,
+                        "target_folder": "",
+                        "train_result_dict": None,
+                        "audit_results": results,
+                    }]
                     st.session_state.stage = 4
                     st.rerun()
                 else:

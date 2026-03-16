@@ -1,7 +1,8 @@
-"""Stage 4 — Summary tab: risk cards, traffic-light indicator, and plain-English verdict."""
+"""Stage 4 — Summary tab: multi-model comparison table and risk verdict."""
 
 from __future__ import annotations
 
+import pandas as pd
 import streamlit as st
 
 
@@ -16,105 +17,130 @@ def _risk_level(auc: float | None) -> tuple[str, str, str]:
     return "LOW", "🟢", "#27AE60"
 
 
-def render_summary(results: list) -> None:
-    """Render the summary risk dashboard."""
-    if not results:
+def render_summary(models: list) -> None:
+    """Render the multi-model summary comparison dashboard."""
+    if not models:
         st.warning("No results to display.")
         return
 
-    valid = [r for r in results if r.roc_auc is not None]
-    best_auc = max((r.roc_auc for r in valid), default=None)
-    worst_tpr = max(
-        (r.fixed_fpr_table.get("TPR@0.1%FPR", 0) for r in valid if r.fixed_fpr_table),
-        default=None,
-    )
-
-    _render_risk_cards(best_auc, worst_tpr, len(results))
+    st.subheader("Model Comparison")
+    _render_comparison_table(models)
     st.markdown("---")
     st.subheader("Verdict")
-    _render_verdict(best_auc)
-    _render_dpsgd_panel(best_auc)
+    _render_verdict(models)
 
 
-def _render_risk_cards(best_auc: float | None, worst_tpr: float | None, num_attacks: int) -> None:
-    """Render the four top-level metric cards."""
-    risk_label, risk_icon, risk_colour = _risk_level(best_auc)
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Attacks run", num_attacks)
-    with col2:
-        st.metric(
-            "Best attack AUC",
-            f"{best_auc:.4f}" if best_auc is not None else "N/A",
-            help="Area under the ROC curve — 0.5 = random, 1.0 = perfect attack.",
+def _model_best_auc(model: dict) -> float | None:
+    """Return the best (highest) AUC across all attacks for a model."""
+    results = model.get("audit_results") or []
+    valid = [r.roc_auc for r in results if r.roc_auc is not None]
+    return max(valid) if valid else None
+
+
+def _render_comparison_table(models: list) -> None:
+    """Render one row per model with key metrics."""
+    rows = []
+    for m in models:
+        results = m.get("audit_results") or []
+        valid = [r for r in results if r.roc_auc is not None]
+        best_auc = max((r.roc_auc for r in valid), default=None)
+        worst_tpr = max(
+            (r.fixed_fpr_table.get("TPR@0.1%FPR", 0) for r in valid if r.fixed_fpr_table),
+            default=None,
         )
-    with col3:
-        st.metric(
-            "Worst TPR @ 0.1% FPR",
-            f"{worst_tpr:.4f}" if worst_tpr is not None else "N/A",
-            help="True positive rate when accepting only 0.1% false positives.",
+        tr = m.get("train_result_dict") or {}
+        test_acc = tr.get("test_result")
+        risk_label, risk_icon, _ = _risk_level(best_auc)
+        dp_str = (
+            f"ε={m['dpsgd_params']['target_epsilon']}"
+            if m.get("dpsgd_enabled") and m.get("dpsgd_params")
+            else "No"
         )
-    with col4:
-        st.markdown(
-            f"""
-            <div style="text-align:center; padding:16px; border:2px solid {risk_colour};
-                        border-radius:10px; background:rgba(0,0,0,0.05);">
-                <div style="font-size:32px">{risk_icon}</div>
-                <div style="font-size:20px; font-weight:bold; color:{risk_colour}">
-                    {risk_label} RISK
+        rows.append({
+            "Model": m["name"],
+            "Best AUC": f"{best_auc:.4f}" if best_auc is not None else "N/A",
+            "TPR@0.1%FPR": f"{worst_tpr:.4f}" if worst_tpr is not None else "N/A",
+            "Test Accuracy": f"{test_acc.accuracy:.3f}" if test_acc else "N/A",
+            "DP-SGD": dp_str,
+            "Risk": f"{risk_icon} {risk_label}",
+        })
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    # Traffic-light cards for each model
+    if len(models) > 1:
+        cols = st.columns(len(models))
+        for col, m in zip(cols, models):
+            best_auc = _model_best_auc(m)
+            _, risk_icon, risk_colour = _risk_level(best_auc)
+            auc_str = f"{best_auc:.3f}" if best_auc is not None else "N/A"
+            col.markdown(
+                f"""
+                <div style="text-align:center; padding:12px; border:2px solid {risk_colour};
+                            border-radius:8px; background:rgba(0,0,0,0.04);">
+                    <div style="font-size:24px">{risk_icon}</div>
+                    <strong>{m['name']}</strong><br/>
+                    <small>AUC = {auc_str}</small>
                 </div>
-            </div>
-            """,
+                """,
+                unsafe_allow_html=True,
+            )
+
+
+def _render_verdict(models: list) -> None:
+    """Render plain-English risk verdict for each model."""
+    for m in models:
+        best_auc = _model_best_auc(m)
+        _, _, colour = _risk_level(best_auc)
+        dp_note = ""
+        if m.get("dpsgd_enabled") and m.get("dpsgd_params"):
+            eps = m["dpsgd_params"].get("target_epsilon", "?")
+            dp_note = f" (DP-SGD ε={eps})"
+
+        if best_auc is None:
+            msg = f"**{m['name']}{dp_note}**: No AUC data available."
+        elif best_auc >= 0.75:
+            msg = (
+                f"**{m['name']}{dp_note}**: HIGH risk — AUC = {best_auc:.3f}. "
+                "An attacker can reliably identify training members."
+            )
+        elif best_auc >= 0.60:
+            msg = (
+                f"**{m['name']}{dp_note}**: MEDIUM risk — AUC = {best_auc:.3f}. "
+                "Attacks are partially effective."
+            )
+        else:
+            msg = (
+                f"**{m['name']}{dp_note}**: LOW risk — AUC = {best_auc:.3f}. "
+                "Attacks perform close to random guessing."
+            )
+        st.markdown(
+            f'<div style="padding:8px; border-left:4px solid {colour}; margin-bottom:8px;">'
+            f"{msg}</div>",
             unsafe_allow_html=True,
         )
 
-
-def _render_verdict(best_auc: float | None) -> None:
-    """Render the plain-English risk verdict."""
-    if best_auc is None:
-        st.info("No AUC-capable results available for verdict.")
-        return
-    if best_auc >= 0.75:
-        verdict = (
-            f"Your model is at **HIGH risk** of membership inference (best AUC = {best_auc:.3f}). "
-            "An attacker can reliably distinguish training samples from non-members. "
-            "Consider retraining with differential privacy (DP-SGD)."
-        )
-    elif best_auc >= 0.60:
-        verdict = (
-            f"Your model shows **moderate leakage** (best AUC = {best_auc:.3f}). "
-            "Attacks are partially effective. DP-SGD training may reduce this risk."
-        )
-    else:
-        verdict = (
-            f"Your model appears **well-protected** (best AUC = {best_auc:.3f}). "
-            "Membership inference attacks perform close to random guessing."
-        )
-    st.info(verdict)
-
-
-def _render_dpsgd_panel(best_auc: float | None) -> None:
-    """Render the DP-SGD impact panel when DP-SGD was used."""
-    dpsgd_enabled = st.session_state.get("dpsgd_enabled", False)
-    dpsgd_params = st.session_state.get("dpsgd_params", {})
-    if not (dpsgd_enabled and dpsgd_params):
-        return
-
-    st.markdown("---")
-    st.subheader("Differential Privacy Impact")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Target ε", dpsgd_params.get("target_epsilon", "—"))
-    c2.metric("Target δ", f"{dpsgd_params.get('target_delta', 0):.2e}")
-    c3.metric("Max grad norm", dpsgd_params.get("max_grad_norm", "—"))
-    train_result_dict = st.session_state.get("train_result_dict", {})
-    if train_result_dict:
-        test_acc = train_result_dict.get("test_result")
-        if test_acc:
-            c4.metric("Model test accuracy", f"{test_acc.accuracy:.3f}")
-
-    if best_auc is not None:
-        suffix = "(significantly reduced — DP is working!)" if best_auc < 0.60 else "(DP may need stronger ε)"
-        st.markdown(
-            f"> DP-SGD (ε={dpsgd_params.get('target_epsilon')}) "
-            f"→ Best attack AUC = **{best_auc:.3f}** {suffix}"
-        )
+    # DP comparison narrative when multiple models present
+    dp_models = [m for m in models if m.get("dpsgd_enabled")]
+    std_models = [m for m in models if not m.get("dpsgd_enabled")]
+    if dp_models and std_models:
+        st.markdown("---")
+        st.subheader("Privacy-Accuracy Trade-off")
+        for std in std_models:
+            std_auc = _model_best_auc(std)
+            std_tr = (std.get("train_result_dict") or {}).get("test_result")
+            for dp in dp_models:
+                dp_auc = _model_best_auc(dp)
+                dp_tr = (dp.get("train_result_dict") or {}).get("test_result")
+                eps = (dp.get("dpsgd_params") or {}).get("target_epsilon", "?")
+                auc_delta = (
+                    f"AUC {std_auc:.3f} → {dp_auc:.3f}" if std_auc and dp_auc else "AUC N/A"
+                )
+                acc_delta = ""
+                if std_tr and dp_tr:
+                    diff = dp_tr.accuracy - std_tr.accuracy
+                    sign = "+" if diff >= 0 else ""
+                    acc_delta = f", accuracy {sign}{diff:.3f}"
+                st.info(
+                    f"**{std['name']}** vs **{dp['name']}** (ε={eps}): "
+                    f"{auc_delta}{acc_delta}"
+                )

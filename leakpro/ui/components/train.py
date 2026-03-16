@@ -1,4 +1,4 @@
-"""Stage 2 — Train the target model and display training metrics."""
+"""Stage 2 — Train all target models and display per-model metrics."""
 
 from __future__ import annotations
 
@@ -10,10 +10,9 @@ def render_train() -> None:
     """Render the training stage."""
     from leakpro.ui.runner import LeakProRunner  # noqa: PLC0415
 
-    st.title("🏋️  Stage 2 — Train Target Model")
-    dpsgd = st.session_state.get("dpsgd_enabled", False)
-    mode_label = "DP-SGD (differential privacy)" if dpsgd else "standard (no privacy)"
-    st.caption(f"Training mode: **{mode_label}**")
+    st.title("🏋️  Stage 2 — Train Models")
+    models: list[dict] = st.session_state.get("models", [])
+    st.caption(f"{len(models)} model(s) defined — each will be trained to its own folder.")
 
     train_config = st.session_state.train_config
     runner = LeakProRunner()
@@ -23,15 +22,14 @@ def render_train() -> None:
 
     if st.session_state.get("data_result"):
         st.markdown("---")
-        st.subheader("Step 2 — Train Model")
-        _render_model_training(runner, train_config, dpsgd)
+        st.subheader("Step 2 — Train Models")
+        _render_all_model_training(runner, train_config, models)
 
-    _render_navigation()
+    _render_navigation(models)
 
 
 def _render_data_prep(runner: object, train_config: dict) -> None:
     """Render dataset download / status section."""
-    # Always allow re-preparing data so stale session indices don't carry over.
     if st.session_state.get("data_result"):
         dr = st.session_state.data_result
         st.success(
@@ -40,7 +38,8 @@ def _render_data_prep(runner: object, train_config: dict) -> None:
         )
         if st.button("Re-prepare Data"):
             st.session_state.pop("data_result", None)
-            st.session_state.pop("train_result_dict", None)
+            for m in st.session_state.get("models", []):
+                m["train_result_dict"] = None
             st.rerun()
         return
 
@@ -55,42 +54,84 @@ def _render_data_prep(runner: object, train_config: dict) -> None:
                 st.error(f"Data preparation failed: {e}")
 
 
-def _render_model_training(runner: object, train_config: dict, dpsgd: bool) -> None:
-    """Render model training button and metrics."""
-    if not st.session_state.get("train_result_dict"):
-        if st.button("Train Model", type="primary"):
-            log_placeholder = st.empty()
-            with st.spinner("Training… this may take several minutes."):
-                try:
-                    if dpsgd:
-                        result = runner.train_dpsgd(  # type: ignore[attr-defined]
-                            train_config,
-                            st.session_state.dpsgd_params,
-                            st.session_state.data_result,
-                            log_container=log_placeholder,
-                        )
-                    else:
-                        result = runner.train_standard(  # type: ignore[attr-defined]
-                            train_config,
-                            st.session_state.data_result,
-                            log_container=log_placeholder,
-                        )
-                    st.session_state.train_result_dict = result
-                    st.rerun()
-                except Exception as e:  # noqa: BLE001
-                    st.error(f"Training failed: {e}")
-    else:
-        _show_training_metrics(st.session_state.train_result_dict, dpsgd)
+def _render_all_model_training(runner: object, train_config: dict, models: list[dict]) -> None:
+    """Render the Train All Models button and per-model result cards."""
+    all_trained = all(m.get("train_result_dict") for m in models)
+
+    if not all_trained:
+        pending = [m for m in models if not m.get("train_result_dict")]
+        st.caption(f"{len(pending)} model(s) still need training.")
+        if st.button("Train All Models", type="primary"):
+            for model in models:
+                if model.get("train_result_dict"):
+                    continue
+                with st.spinner(f"Training **{model['name']}**…"):
+                    log_ph = st.empty()
+                    try:
+                        if model["dpsgd_enabled"]:
+                            result = runner.train_dpsgd(  # type: ignore[attr-defined]
+                                train_config,
+                                model["dpsgd_params"],
+                                st.session_state.data_result,
+                                target_folder=model["target_folder"],
+                                log_container=log_ph,
+                            )
+                        else:
+                            result = runner.train_standard(  # type: ignore[attr-defined]
+                                train_config,
+                                st.session_state.data_result,
+                                target_folder=model["target_folder"],
+                                log_container=log_ph,
+                            )
+                        model["train_result_dict"] = result
+                        st.success(f"✅ {model['name']} trained.")
+                    except Exception as e:  # noqa: BLE001
+                        st.error(f"Training failed for **{model['name']}**: {e}")
+            st.session_state.models = models
+            st.rerun()
+
+    # Show results for already-trained models
+    trained = [m for m in models if m.get("train_result_dict")]
+    if trained:
+        st.markdown("##### Trained Models")
+        _render_training_summary_table(trained)
+        for model in trained:
+            with st.expander(f"📈 {model['name']} — training curves", expanded=False):
+                _show_training_metrics(model["train_result_dict"], model["dpsgd_enabled"])
 
 
-def _render_navigation() -> None:
+def _render_training_summary_table(models: list[dict]) -> None:
+    """Render a summary table of all trained models."""
+    import pandas as pd  # noqa: PLC0415
+
+    rows = []
+    for m in models:
+        tr = m["train_result_dict"]
+        train_acc = tr["train_result"].metrics.accuracy
+        test_acc = tr["test_result"].accuracy
+        dp_str = (
+            f"ε={m['dpsgd_params']['target_epsilon']}" if m["dpsgd_enabled"] else "No"
+        )
+        rows.append({
+            "Model": m["name"],
+            "Train Acc": f"{train_acc:.3f}",
+            "Test Acc": f"{test_acc:.3f}",
+            "DP-SGD": dp_str,
+            "Folder": tr["target_folder"],
+        })
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+
+def _render_navigation(models: list[dict]) -> None:
     """Render back / forward navigation buttons."""
-    if st.session_state.get("train_result_dict"):
+    all_trained = bool(models) and all(m.get("train_result_dict") for m in models)
+    if all_trained:
         st.markdown("---")
         col_back, _, col_fwd = st.columns([1, 3, 1])
         with col_back:
             if st.button("← Reconfigure", use_container_width=True):
-                st.session_state.pop("train_result_dict", None)
+                for m in models:
+                    m["train_result_dict"] = None
                 st.session_state.pop("data_result", None)
                 st.session_state.stage = 1
                 st.rerun()

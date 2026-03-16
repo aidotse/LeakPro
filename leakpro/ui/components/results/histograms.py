@@ -7,22 +7,34 @@ import plotly.graph_objects as go
 import streamlit as st
 
 
-def render_histograms(results: list) -> None:
-    """Render signal histogram plots for each attack result."""
-    hist_results = [r for r in results if r.signal_values is not None]
-
-    if not hist_results:
+def render_histograms(models: list) -> None:
+    """Render signal histogram plots with a model and attack selector."""
+    audited = [m for m in models if m.get("audit_results")]
+    if not audited:
         st.info("No signal-value data available for histogram visualisation.")
         return
 
+    if len(audited) > 1:
+        model_name = st.selectbox(
+            "Select model", [m["name"] for m in audited], key="hist_model_select"
+        )
+        model = next(m for m in audited if m["name"] == model_name)
+    else:
+        model = audited[0]
+
+    hist_results = [r for r in (model.get("audit_results") or []) if r.signal_values is not None]
+    if not hist_results:
+        st.info(f"No signal-value data available for **{model['name']}**.")
+        return
+
     st.caption(
-        "A larger separation between the **member** (blue) and **non-member** (red) "
+        f"Model: **{model['name']}** — "
+        "a larger separation between the **member** (blue) and **non-member** (red) "
         "distributions indicates stronger privacy leakage."
     )
 
-    # Attack picker
     attack_names = [r.result_name for r in hist_results]
-    selected_name = st.selectbox("Select attack", attack_names)
+    selected_name = st.selectbox("Select attack", attack_names, key="hist_attack_select")
     result = next(r for r in hist_results if r.result_name == selected_name)
 
     signal = np.asarray(result.signal_values).ravel()
@@ -30,7 +42,6 @@ def render_histograms(results: list) -> None:
     members = signal[labels == 1]
     non_members = signal[labels == 0]
 
-    # ---- Histogram ------------------------------------------------------
     fig = go.Figure()
     fig.add_trace(go.Histogram(
         x=members,
@@ -58,7 +69,6 @@ def render_histograms(results: list) -> None:
     )
     st.plotly_chart(fig, use_container_width=True)
 
-    # ---- Interactive threshold slider -----------------------------------
     st.markdown("##### Decision threshold explorer")
     st.caption("Move the threshold to see how TP/FP/TN/FN change.")
 
@@ -69,6 +79,7 @@ def render_histograms(results: list) -> None:
     threshold = st.slider(
         "Decision threshold", min_value=score_min, max_value=score_max,
         value=default_threshold, step=(score_max - score_min) / 200,
+        key="hist_threshold_slider",
     )
 
     preds = (signal >= threshold).astype(int)
@@ -88,9 +99,5 @@ def render_histograms(results: list) -> None:
     c1.metric("TPR", f"{tpr:.4f}", help="True positive rate at this threshold.")
     c2.metric("FPR", f"{fpr:.4f}", help="False positive rate at this threshold.")
     c3.metric("Accuracy", f"{acc:.4f}")
-    with c4:
-        st.markdown("**TP / FN**")
-        st.markdown(f"{tp} / {fn}")
-    with c5:
-        st.markdown("**FP / TN**")
-        st.markdown(f"{fp} / {tn}")
+    c4.metric("TP / FN", f"{tp} / {fn}")
+    c5.metric("FP / TN", f"{fp} / {tn}")
