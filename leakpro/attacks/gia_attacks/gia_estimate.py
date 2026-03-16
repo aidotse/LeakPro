@@ -27,7 +27,6 @@ from leakpro.fl_utils.similarity_measurements import cosine_similarity_weights, 
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.utils.import_helper import Callable, Self
 from leakpro.utils.logger import logger
-from torchvision.models.convnext import LayerNorm2d
 
 
 @dataclass
@@ -41,11 +40,11 @@ class GIABaseConfig:
     # iterations for the attack steps
     at_iterations: int = 10000
     # MetaOptimizer, see MetaSGD for implementation
-    optimizer: object = field(default_factory=lambda: MetaSGD())
+    optimizer: object = field(default_factory=MetaSGD)
     # Client loss function
     criterion: object = field(default_factory=lambda: CrossEntropyLoss(reduction="mean"))
     # Data modality extension
-    data_extension: GiaDataModalityExtension = field(default_factory=lambda: GiaImageExtension())
+    data_extension: GiaDataModalityExtension = field(default_factory=GiaImageExtension)
     # Number of epochs for the client attack
     epochs: int = 1
     # if to use median pool 2d on images, can improve attack on high higher resolution (100+)
@@ -123,8 +122,8 @@ class GIABase(AbstractGIA):
             batch_mean = input[0].mean([0, 2, 3])
             batch_var = input[0].var([0, 2, 3], unbiased=False)
             proxy_statistics.append((batch_mean, batch_var))
-        
-        def ln_forward_hook(module, input, output):  # noqa: ARG001
+
+        def ln_forward_hook(module: Module, input: torch.tensor, output: torch.tensor) -> None:  # noqa: ARG001
             x = input[0]
             k = len(module.normalized_shape)
             dims = tuple(range(x.ndim - k, x.ndim))
@@ -133,15 +132,15 @@ class GIABase(AbstractGIA):
             sample_mean = sample_mean.reshape(sample_mean.shape[0], -1).mean(dim=1)
             sample_var  = sample_var.reshape(sample_var.shape[0], -1).mean(dim=1)
             proxy_statistics.append((sample_mean.mean().detach(), sample_var.mean().detach()))
-        
-        def ln2d_forward_hook(module, input, output):  # noqa: ARG001
+
+        def ln2d_forward_hook(module: Module, input: torch.tensor, output: torch.tensor) -> None:  # noqa: ARG001
             x = input[0]  # NCHW
             # LN2d normalizes across channel dim (C) per (n,h,w)
             m = x.mean(dim=1)
             v = x.var(dim=1, unbiased=False)
             proxy_statistics.append((m.mean().detach(), v.mean().detach()))
-        
-        def in2d_forward_hook(module, input, output):  # noqa: ARG001
+
+        def in2d_forward_hook(module: Module, input: torch.tensor, output: torch.tensor) -> None:  # noqa: ARG001
             x = input[0]  # NCHW
             # InstanceNorm2d normalizes over (H, W) per (N, C)
             m = x.mean(dim=(2, 3))                       # [N, C]
