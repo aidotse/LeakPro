@@ -17,6 +17,7 @@ target:
   target_folder: "./target_dpsgd"
   # Data paths
   data_path: "./data/cifar10.pkl"
+  dpsgd_path: "./target_dpsgd/dpsgd_dic.pkl"
 
 shadow_model:
   # module_path: "./target_model_class.py"

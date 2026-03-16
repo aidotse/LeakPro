@@ -1,5 +1,6 @@
 import os
 import pickle
+from pathlib import Path
 
 from opacus import PrivacyEngine
 from opacus.accountants.utils import get_noise_multiplier
@@ -27,6 +28,26 @@ class MimicInputHandlerGRUdpsgd(AbstractInputHandler):
         learning_rate = 0.01
         return optim.Adam(model.parameters(), lr=learning_rate)
 
+    def _resolve_dpsgd_metadata_path(self, explicit_path: str | None = None) -> str:
+        """Resolve the DP-SGD metadata path from input or target config."""
+        if explicit_path:
+            return explicit_path
+
+        target_cfg = getattr(self.configs, "target", None)
+        if target_cfg is not None:
+            target_path = getattr(target_cfg, "dpsgd_path", None)
+            if target_path:
+                return target_path
+
+            target_folder = getattr(target_cfg, "target_folder", None)
+            if target_folder:
+                return str(Path(target_folder) / "dpsgd_dic.pkl")
+
+        raise FileNotFoundError(
+            "DP-SGD is enabled, but no DP-SGD metadata path could be resolved. "
+            "Set `target.dpsgd_path`, or place `dpsgd_dic.pkl` inside `target.target_folder`."
+        )
+
     def train(
         self,
         dataloader: DataLoader,
@@ -34,11 +55,12 @@ class MimicInputHandlerGRUdpsgd(AbstractInputHandler):
         criterion: nn.Module = None,
         optimizer: optim.Optimizer = None,
         epochs: int = None,
-        dpsgd_path = "./target_GRUD_dpsgd/dpsgd_dic.pkl"
+        dpsgd_path: str | None = None
     ) -> TrainingOutput:
         print("Training shadow models with DP-SGD")
 
         sample_rate = 1/len(dataloader)
+        dpsgd_path = self._resolve_dpsgd_metadata_path(dpsgd_path)
         # Check if the file exists
         if os.path.exists(dpsgd_path):
             # Open and read the pickle file

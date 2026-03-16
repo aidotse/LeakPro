@@ -2,6 +2,7 @@
 
 import os
 import pickle
+from pathlib import Path
 
 from opacus import PrivacyEngine
 from opacus.accountants.utils import get_noise_multiplier
@@ -21,6 +22,32 @@ from leakpro.utils.logger import logger
 class CifarInputHandlerDPsgd(AbstractInputHandler):
     """Class to handle the user input for the CIFAR10 and CIFAR100 dataset."""
 
+    def _resolve_dpsgd_metadata_path(self: Self, explicit_path: str | None = None) -> str:
+        """Resolve the DP-SGD metadata path from arg or target config.
+
+        Resolution order:
+        1. Explicit function argument.
+        2. `target.dpsgd_path` from config.
+        3. `target.target_folder/dpsgd_dic.pkl` fallback.
+        """
+        if explicit_path:
+            return explicit_path
+
+        target_cfg = getattr(getattr(self, "configs", None), "target", None)
+        if target_cfg is not None:
+            target_path = getattr(target_cfg, "dpsgd_path", None)
+            if target_path:
+                return target_path
+
+            target_folder = getattr(target_cfg, "target_folder", None)
+            if target_folder:
+                return str(Path(target_folder) / "dpsgd_dic.pkl")
+
+        raise FileNotFoundError(
+            "DP-SGD is enabled, but no DP-SGD metadata path could be resolved. "
+            "Set `target.dpsgd_path`, or place `dpsgd_dic.pkl` inside `target.target_folder`."
+        )
+
     def train(
         self: Self,
         dataloader: DataLoader,
@@ -28,7 +55,7 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
         criterion: torch.nn.Module,
         optimizer: optim.Optimizer,
         epochs: int,
-        dpsgd_metadata_path: str = "./target_dpsgd/dpsgd_dic.pkl",
+        dpsgd_metadata_path: str | None = None,
         virtual_batch_size: int = 16,
     ) -> TrainingOutput:
         """
@@ -57,6 +84,7 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
         run_dpsgd = bool(model.dpsgd)
 
         if run_dpsgd:
+            dpsgd_metadata_path = self._resolve_dpsgd_metadata_path(dpsgd_metadata_path)
             # Check if the model is compatible with DP-SGD
             errors = ModuleValidator.validate(model, strict=False)
             if len(errors) > 0:
