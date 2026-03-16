@@ -54,14 +54,37 @@ class StepStrategy(Component):
 class StandardStepStrategy(StepStrategy):
     """Standard step execution with closure."""
 
-    def __init__(self, use_gradient_sign: bool = False) -> None:
+    def __init__(self, use_gradient_sign: bool = False, gradient_noise_std: float = 0.0) -> None:
         """Initialize step strategy.
 
         Args:
             use_gradient_sign: If True, use sign(grad) instead of grad for updates
+            gradient_noise_std: Standard deviation of Gaussian noise to add to gradients (0.0 = no noise)
 
         """
         self.use_gradient_sign = use_gradient_sign
+        self.gradient_noise_std = gradient_noise_std
+
+    def _add_gradient_noise(self, state: "InternalOptimizerState") -> None:
+        """Add Gaussian noise to gradients."""
+        if self.gradient_noise_std <= 0:
+            return
+
+        for param_group in state.optimizer.param_groups:
+            for param in param_group["params"]:
+                if param.grad is not None:
+                    noise = torch.randn_like(param.grad) * self.gradient_noise_std
+                    param.grad.data.add_(noise)
+
+    def _apply_gradient_sign(self, state: "InternalOptimizerState") -> None:
+        """Apply sign operation to gradients."""
+        if not self.use_gradient_sign:
+            return
+
+        for param_group in state.optimizer.param_groups:
+            for param in param_group["params"]:
+                if param.grad is not None:
+                    param.grad.data = torch.sign(param.grad.data)
 
     def execute_step(
         self,
@@ -78,23 +101,15 @@ class StandardStepStrategy(StepStrategy):
             total_loss, losses = compute_loss_fn()
             total_loss.backward()
 
-            # Apply sign to gradients if requested
-            if self.use_gradient_sign:
-                for param in state.optimizer.param_groups[0]["params"]:
-                    if param.grad is not None:
-                        param.grad.data = torch.sign(param.grad.data)
-                # Also apply to label parameters if they exist
-                if len(state.optimizer.param_groups) > 1:
-                    for param in state.optimizer.param_groups[1]["params"]:
-                        if param.grad is not None:
-                            param.grad.data = torch.sign(param.grad.data)
+            # Add noise and apply sign to gradients if requested
+            self._add_gradient_noise(state)
+            self._apply_gradient_sign(state)
 
             captured_losses["total_loss"] = total_loss
             captured_losses["losses"] = losses
             return total_loss
 
         state.optimizer.step(closure)
-
         apply_constraints_fn(state)
 
         if state.scheduler is not None:
