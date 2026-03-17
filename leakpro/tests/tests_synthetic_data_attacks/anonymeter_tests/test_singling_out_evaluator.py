@@ -2,6 +2,7 @@
 # This file is part of Anonymeter and is released under BSD 3-Clause Clear License.
 # Copyright (c) 2022 Anonos IP LLC.
 # See https://github.com/statice/anonymeter/blob/main/LICENSE.md for details.
+import random
 import re
 from typing import List
 
@@ -298,15 +299,29 @@ def test_multivariate_singling_out_queries() -> None:
         "c5": ['a', 'b', 'c', 'd', 'e'], #String categorical
     })
     singl_ev.convert_df_numerical_columns_to_categories_with_threshold(df=df, threshold=threshold)
+
+    # Make this test deterministic; otherwise some random runs do not cover all columns.
+    old_random_state = random.getstate()
+    old_rng = singl_ev.rng
+    random.seed(0)
+    singl_ev.rng = np.random.default_rng(0)
+
     #Run multivariate_singling_out_queries and assert results
-    queries = singl_ev.multivariate_singling_out_queries(df=df, n_queries=n_queries, n_cols=n_cols, max_attempts=None, use_tree=False)
+    try:
+        queries = singl_ev.multivariate_singling_out_queries(
+            df=df, n_queries=n_queries, n_cols=n_cols, max_attempts=None, use_tree=False
+        )
+    finally:
+        random.setstate(old_random_state)
+        singl_ev.rng = old_rng
+
     assert len(queries) == n_queries
     all_columns = set()
     for query in queries:
         for col_query in query.split('&'):
             col_query = col_query.strip()
             col = col_query[0:2]
-            rest_query = col_query[2:]
+            rest_query = col_query[2:].lstrip()
             aux_assert_col_query(col=col, rest_query=rest_query)
             all_columns.add(col)
     assert all_columns == set(df.columns)
