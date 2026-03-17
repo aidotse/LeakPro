@@ -26,6 +26,22 @@ class BaseMIMICHandler(AbstractInputHandler):
     def __init__(self) -> None:
         super().__init__()
 
+    def _resolve_dpsgd_metadata_path(self, explicit_path: Optional[str] = None) -> str:
+        """Resolve the DP-SGD metadata path from arg or target config."""
+        if explicit_path:
+            return explicit_path
+
+        target_cfg = getattr(getattr(self, "configs", None), "target", None)
+        if target_cfg is not None:
+            target_path = getattr(target_cfg, "dpsgd_path", None)
+            if target_path:
+                return target_path
+
+        raise FileNotFoundError(
+            "DP-SGD is enabled, but no DP-SGD metadata path could be resolved. "
+            "Set `target.dpsgd_path` in the config, or pass `dpsgd_metadata_path` explicitly."
+        )
+
     def get_criterion(self) -> nn.Module:
         return BCEWithLogitsLoss()
 
@@ -115,14 +131,22 @@ class GRUHandler(BaseMIMICHandler):
               patience_early_stopping: int = 5,
               patience_lr: float = 2,
               min_delta: float = 0.00001,
+              dpsgd_metadata_path: Optional[str] = None,
               ) -> TrainingOutput:
 
         device_name = device("cuda" if cuda.is_available() else "cpu")
 
-        if model.dpsgd_path is not None:
+        resolved_dpsgd_path = None
+        if dpsgd_metadata_path is not None:
+            resolved_dpsgd_path = self._resolve_dpsgd_metadata_path(dpsgd_metadata_path)
+        else:
+            target_cfg = getattr(getattr(self, "configs", None), "target", None)
+            if target_cfg is not None and getattr(target_cfg, "dpsgd_path", None):
+                resolved_dpsgd_path = self._resolve_dpsgd_metadata_path()
 
+        if resolved_dpsgd_path is not None:
             print("Training with DP-SGD...")
-            with open( model.dpsgd_path, "rb") as f:
+            with open(resolved_dpsgd_path, "rb") as f:
                 config = pickle.load(f)
 
             sample_rate = 1 / len(dataloader)
@@ -248,4 +272,3 @@ class GRUHandler(BaseMIMICHandler):
         loss /= len(loader)
         acc = float(acc) / total_samples
         return EvalOutput(accuracy=acc, loss=loss)
-
