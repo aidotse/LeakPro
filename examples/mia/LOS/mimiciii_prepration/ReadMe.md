@@ -14,11 +14,10 @@ Ensure that your system has the following tools available in the PATH:
 
  #### Create Conda envrioment
  Navigate to ```MIMIC_Extract``` and create a Conda environment:
-```
-conda env create -f mimic_extract_env_py36.yml
+``` 
+conda env create --force -f mimic_extract_env_py36.yml
 conda activate mimic_data_extraction
  ```
-> Note: If the environment already exists, remove it first with `conda env remove -n mimic_data_extraction`
 
 #### Compiling the data
 To create the `data` folder, run the following command from the `mimiciii_prepration` directory (where this `ReadMe.md` file is located):  

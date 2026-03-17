@@ -92,12 +92,12 @@ class ShadowModelHandler(ModelHandler):
         return all_indices, filtered_indices
 
     def construct_balanced_assignments(self, m: int, n: int, seed: int = None) -> np.ndarray:
-        """Assigns each of m data points to approximately n/2 out of n datasets by partitioning.
+        """Assigns each of m data points to exactly n/2 out of n datasets by partitioning.
 
         Args:
         ----
             m (int): The number of data points.
-            n (int): The number of datasets.
+            n (int): The number of datasets (must be even).
             seed (int, optional): Random seed for reproducibility. Defaults to None.
 
         Returns:
@@ -105,22 +105,18 @@ class ShadowModelHandler(ModelHandler):
             A (np.ndarray): binary matrix of shape (n, m) where A[i,j] = 1 if data point j is in dataset i.
 
         """
+        assert n % 2 == 0, "n must be even"
         if seed is not None:
             np.random.seed(seed)
 
         A = np.zeros((n, m), dtype=np.uint8)  # noqa: N806
         all_indices = np.arange(m)
 
-        for i in range(0, n - 1, 2):
+        for i in range(0, n, 2):
             permuted = np.random.permutation(all_indices)
             half = m // 2
             A[i, permuted[:half]] = 1       # First half to dataset i
             A[i+1, permuted[half:]] = 1     # Second half to dataset i+1
-
-        if n % 2 == 1:
-            permuted = np.random.permutation(all_indices)
-            half = m // 2
-            A[n - 1, permuted[:half]] = 1   # Last dataset gets half for odd n
 
         return A
 
@@ -168,6 +164,7 @@ class ShadowModelHandler(ModelHandler):
             next_index += 1
 
         A = self.construct_balanced_assignments(len(shadow_population), num_models)  # noqa: N806
+        assert np.all(np.sum(A,axis=0) == num_models//2)
         assert np.all(np.sum(A,axis=1) == len(shadow_population)//2)
         shadow_population = np.array(shadow_population)
         for i, indx in enumerate(indices_to_use):
