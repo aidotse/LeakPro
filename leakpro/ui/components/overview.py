@@ -62,14 +62,12 @@ def _render_pipeline_diagram() -> None:
 
 
 def _detect_existing_results() -> tuple:
-    """Return (resume_dir, has_results) based on session audit config."""
-    audit_cfg = st.session_state.get("audit_config")
-    if audit_cfg is None:
-        try:
-            from leakpro.ui.runner import LeakProRunner  # noqa: PLC0415
-            audit_cfg = LeakProRunner.default_audit_config()
-        except Exception:  # noqa: BLE001
-            audit_cfg = {}
+    """Return (resume_dir, has_results) based on default audit config."""
+    try:
+        from leakpro.ui.runner import LeakProRunner  # noqa: PLC0415
+        audit_cfg = LeakProRunner.default_audit_config()
+    except Exception:  # noqa: BLE001
+        audit_cfg = {}
     output_dir_rel = audit_cfg.get("audit", {}).get("output_dir", "./leakpro_output")
     resume_dir = (_CIFAR_OUTPUT_DIR / output_dir_rel).resolve()
     has_results = (resume_dir / "data_objects").exists() and any(
@@ -89,7 +87,7 @@ def _render_action_buttons(resume_dir: Path, has_results: bool) -> None:
         st.markdown("### Start a new audit")
         st.caption("Configure, train models from scratch, and run attacks.")
         if st.button("Start New Audit", type="primary", use_container_width=True):
-            for key in ["data_result", "train_config", "audit_config", "models"]:
+            for key in ["data_result", "models", "config_phase"]:
                 st.session_state.pop(key, None)
             st.session_state.stage = 1
             st.rerun()

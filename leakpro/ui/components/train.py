@@ -14,16 +14,20 @@ def render_train() -> None:
     models: list[dict] = st.session_state.get("models", [])
     st.caption(f"{len(models)} model(s) defined — each will be trained to its own folder.")
 
-    train_config = st.session_state.train_config
     runner = LeakProRunner()
 
+    # Use first model's train_config for data prep (dataset choice); falls back to default
+    first_tc = models[0].get("train_config") if models else {}
+    if not first_tc:
+        first_tc = runner.default_train_config()
+
     st.subheader("Step 1 — Prepare Dataset")
-    _render_data_prep(runner, train_config)
+    _render_data_prep(runner, first_tc)
 
     if st.session_state.get("data_result"):
         st.markdown("---")
         st.subheader("Step 2 — Train Models")
-        _render_all_model_training(runner, train_config, models)
+        _render_all_model_training(runner, models)
 
     _render_navigation(models)
 
@@ -54,7 +58,7 @@ def _render_data_prep(runner: object, train_config: dict) -> None:
                 st.error(f"Data preparation failed: {e}")
 
 
-def _render_all_model_training(runner: object, train_config: dict, models: list[dict]) -> None:
+def _render_all_model_training(runner: object, models: list[dict]) -> None:
     """Render the Train All Models button and per-model result cards."""
     all_trained = all(m.get("train_result_dict") for m in models)
 
@@ -67,10 +71,11 @@ def _render_all_model_training(runner: object, train_config: dict, models: list[
                     continue
                 with st.spinner(f"Training **{model['name']}**…"):
                     log_ph = st.empty()
+                    model_tc = model.get("train_config") or {}
                     try:
                         if model["dpsgd_enabled"]:
                             result = runner.train_dpsgd(  # type: ignore[attr-defined]
-                                train_config,
+                                model_tc,
                                 model["dpsgd_params"],
                                 st.session_state.data_result,
                                 target_folder=model["target_folder"],
@@ -78,7 +83,7 @@ def _render_all_model_training(runner: object, train_config: dict, models: list[
                             )
                         else:
                             result = runner.train_standard(  # type: ignore[attr-defined]
-                                train_config,
+                                model_tc,
                                 st.session_state.data_result,
                                 target_folder=model["target_folder"],
                                 log_container=log_ph,

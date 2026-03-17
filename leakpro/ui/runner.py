@@ -366,12 +366,16 @@ class LeakProRunner:
     # ------------------------------------------------------------------
 
     def run_audit(
-        self, target_folder: str, dpsgd: bool = False, log_container: object | None = None
+        self,
+        target_folder: str,
+        attack_list: list[dict] | None = None,
+        dpsgd: bool = False,
+        log_container: object | None = None,
     ) -> list:
         """Run LeakPro MIA attacks against the model in target_folder.
 
-        Writes a temporary audit config overriding target.target_folder,
-        runs the audit, then deletes the temp file.
+        Writes a temporary audit config overriding target.target_folder and
+        (optionally) audit.attack_list, runs the audit, then deletes the temp file.
         """
         with _in_cifar_dir():
             if dpsgd:
@@ -386,6 +390,8 @@ class LeakProRunner:
             with open(base_config) as f:
                 config = yaml.safe_load(f)
             config["target"]["target_folder"] = target_folder
+            if attack_list:
+                config["audit"]["attack_list"] = attack_list
 
             temp_path = f"_audit_temp_{uuid.uuid4().hex}.yaml"
             try:

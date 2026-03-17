@@ -14,9 +14,12 @@ def render_audit() -> None:
     models: list[dict] = st.session_state.get("models", [])
     trained_models = [m for m in models if m.get("train_result_dict")]
 
-    ac = st.session_state.get("audit_config", {})
-    attack_names = [a["attack"] for a in ac.get("audit", {}).get("attack_list", [])]
-    st.caption(f"Attacks: {', '.join(attack_names) if attack_names else 'none selected'}")
+    # Collect all unique attack names across all models
+    all_attacks: set[str] = set()
+    for m in models:
+        for a in (m.get("attack_list") or []):
+            all_attacks.add(a["attack"])
+    st.caption(f"Attacks (across all models): {', '.join(sorted(all_attacks)) if all_attacks else 'none selected'}")
 
     if not trained_models:
         st.warning("No trained models found. Go back to Stage 2 and train your models first.")
@@ -65,6 +68,7 @@ def _run_audit_loop(runner: object, trained_models: list[dict], all_models: list
             try:
                 results = runner.run_audit(  # type: ignore[attr-defined]
                     target_folder=model["target_folder"],
+                    attack_list=model.get("attack_list"),
                     dpsgd=model["dpsgd_enabled"],
                     log_container=log_ph,
                 )

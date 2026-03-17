@@ -29,8 +29,7 @@ st.set_page_config(
 # ---- Session state defaults --------------------------------------------
 _STAGE_DEFAULTS: dict = {
     "stage": 0,
-    "train_config": None,
-    "audit_config": None,
+    "config_phase": 1,  # 1 = model count selector, 2 = per-model tabs
     "data_result": None,
     "models": [],  # list of model spec dicts — populated by configure.py
 }
@@ -50,7 +49,7 @@ _STAGES = [
 
 _STAGE_DONE_FLAGS = {
     0: lambda: st.session_state.stage > 0,
-    1: lambda: st.session_state.train_config is not None and st.session_state.stage > 1,
+    1: lambda: bool(st.session_state.get("models")) and st.session_state.stage > 1,
     2: lambda: any(m.get("train_result_dict") for m in st.session_state.get("models", [])),
     3: lambda: any(m.get("audit_results") for m in st.session_state.get("models", [])),
     4: lambda: False,  # results stage is never "done"
