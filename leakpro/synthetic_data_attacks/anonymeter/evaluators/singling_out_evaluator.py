@@ -15,7 +15,6 @@ from sklearn.tree import DecisionTreeRegressor
 from leakpro.synthetic_data_attacks.anonymeter.stats.confidence import EvaluationResults
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
-from leakpro.utils.logger import logger
 
 # Set rng
 rng = np.random.default_rng()
@@ -462,7 +461,7 @@ def multivariate_singling_out_queries(  # noqa: C901, PLR0912, PLR0915
                 mask = ~df[col].isna()
                 if mask.sum() == 0:
                     continue  # skip column if all values are NaN
-                elif mask.sum() / len(df[col]) <= 0.95:
+                if mask.sum() / len(df[col]) <= 0.95:
                     logger.warning(f"Column {col} has {(1-(mask.sum() / len(df[col])))*100:.1f}% NaN values.")
                 x_nonan = df.loc[mask, [col]]
                 tree = DecisionTreeRegressor(**tree_params)
