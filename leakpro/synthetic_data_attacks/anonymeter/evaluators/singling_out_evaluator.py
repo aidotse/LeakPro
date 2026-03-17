@@ -667,6 +667,8 @@ class SinglingOutEvaluator(BaseModel):
     use_medians: bool = False
     use_tree: bool = True
     tree_params: Optional[Dict[str, Any]] = None
+    categorical_threshold: int = 2
+    numerical_to_categorical: bool = True
     #Following parameters are set in evaluate method
     main_queries: Optional[UniqueSinglingOutQueries] = None
     naive_queries: Optional[UniqueSinglingOutQueries] = None
