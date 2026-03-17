@@ -1,0 +1,27 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ../../          # repo root (needs leakpro/ package)
+      dockerfile: leakpro/webapp/Dockerfile.backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - leakpro_jobs:/data/jobs
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  leakpro_jobs:
