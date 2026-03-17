@@ -284,6 +284,7 @@ def test_multivariate_singling_out_queries() -> None:
             assert rest_query == '.isna()' or rest_query[0:2] == '=='
         else: #All the rest (categories or similar)
             assert rest_query[0:2] == '=='
+
     #Create input dataframe and run convert_df_numerical_columns_to_categories_with_threshold
     n_queries = 5
     n_cols = 4
