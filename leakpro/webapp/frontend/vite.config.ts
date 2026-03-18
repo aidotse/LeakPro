@@ -6,7 +6,10 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/jobs": "http://localhost:8000",
+      "/jobs": {
+        target: "http://localhost:8000",
+        ws: true,
+      },
     },
   },
 });

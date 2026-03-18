@@ -54,10 +54,11 @@ def _get_handler_cls(job_dir: Path, preset: str | None):
     sys.path.insert(0, str(handler_path.parent))
     spec.loader.exec_module(mod)
 
-    # Return first class that has a 'train' method
+    import inspect
+    # Return first concrete class that has a 'train' method
     for name in dir(mod):
         obj = getattr(mod, name)
-        if isinstance(obj, type) and hasattr(obj, "train") and name != "object":
+        if isinstance(obj, type) and hasattr(obj, "train") and not inspect.isabstract(obj) and name != "object":
             return obj
     raise ValueError(f"No handler class found in {handler_path}")
 
@@ -92,7 +93,11 @@ def run_audit_job(
         for model_spec in models:
             model_name = model_spec["name"]
             target_folder = str(job_dir / "models" / model_name)
-            attack_list = [a["attack"] for a in model_spec.get("attacks", [])]
+            # attack_list must be list[dict] — strip UI-only keys
+            attack_list = [
+                {"attack": a["attack"], **{k: v for k, v in a.get("params", {}).items() if k != "instance_label"}}
+                for a in model_spec.get("attacks", [])
+            ]
 
             log_q.put(f"[worker] Auditing model: {model_name}")
 

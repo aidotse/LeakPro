@@ -114,6 +114,8 @@ export interface TrainParams {
   learning_rate: number;
   batch_size: number;
   optimizer: string;
+  f_train: number;
+  f_test: number;
   dpsgd: boolean;
   target_epsilon?: number;
   target_delta?: number;

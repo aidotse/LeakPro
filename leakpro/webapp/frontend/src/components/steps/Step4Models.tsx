@@ -1,4 +1,6 @@
 import React, { useState } from "react";
+import Plot from "react-plotly.js";
+import type Plotly from "plotly.js";
 import { api, CompatResult, TrainParams } from "../../api";
 import ServerOrUpload from "../ServerOrUpload";
 
@@ -165,19 +167,27 @@ function UploadModelForm({ jobId, onAdded, existingNames }: {
 // ---------------------------------------------------------------------------
 // Train sub-form
 // ---------------------------------------------------------------------------
+interface TrainMetrics {
+  model: string;
+  loss_history: number[];
+  accuracy_history: number[];
+}
+
 function TrainModelForm({ jobId, onAdded, existingCount }: {
   jobId: string; onAdded: (m: ModelEntry) => void; existingCount: number;
 }) {
   const [cards, setCards] = useState([defaultParams(existingCount)]);
   const [logs, setLogs] = useState<string[]>([]);
   const [training, setTraining] = useState(false);
+  const [progress, setProgress] = useState<{ epoch: number; total: number; model: string } | null>(null);
+  const [metrics, setMetrics] = useState<TrainMetrics[]>([]);
   const logEndRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [logs]);
 
-  const addCard = () => setCards((prev) => [...prev, defaultParams(prev.length + existingCount)]);
+  const addCard = () => setCards((prev) => [...prev, defaultParams(prev.length + existingCount + metrics.length)]);
   const removeCard = (i: number) => setCards((prev) => prev.filter((_, j) => j !== i));
   const update = (i: number, patch: Partial<TrainParams>) =>
     setCards((prev) => prev.map((c, j) => j === i ? { ...c, ...patch } : c));
@@ -185,47 +195,56 @@ function TrainModelForm({ jobId, onAdded, existingCount }: {
   const trainAll = async () => {
     setTraining(true);
     setLogs([]);
+    setProgress(null);
 
-    // Open WebSocket for log stream
+    // Only train the cards that are currently shown (not already-trained models)
+    const toTrain = [...cards];
+
     const wsUrl = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/jobs/${jobId}/logs`;
     const ws = new WebSocket(wsUrl);
+
     ws.onmessage = (e) => {
       const msg: string = e.data;
-      if (!msg.startsWith("__STATUS__")) {
-        setLogs((prev) => [...prev, msg]);
+      if (msg.startsWith("__STATUS__")) return;
+      if (msg.startsWith("__PROGRESS__")) {
+        const rest = msg.slice("__PROGRESS__".length);
+        const [modelName, epochStr, totalStr] = rest.split("|");
+        setProgress({ model: modelName, epoch: Number(epochStr), total: Number(totalStr) });
+        return;
       }
+      if (msg.startsWith("__METRICS__")) {
+        try {
+          const m: TrainMetrics = JSON.parse(msg.slice("__METRICS__".length));
+          setMetrics((prev) => [...prev.filter((x) => x.model !== m.model), m]);
+        } catch { /* ignore */ }
+        return;
+      }
+      if (msg === "__TRAIN_DONE__") {
+        ws.close();
+        setTraining(false);
+        setProgress(null);
+        for (const params of toTrain) {
+          onAdded({ name: params.name, source: "trained", status: "ready",
+            dpsgd: params.dpsgd, targetEpsilon: params.target_epsilon, trainParams: params });
+        }
+        // Reset form to a fresh card (prevents re-training already-trained models)
+        setCards([defaultParams(existingCount + toTrain.length)]);
+        return;
+      }
+      setLogs((prev) => [...prev, msg]);
     };
 
-    for (const params of cards) {
-      await api.trainModel(jobId, params);
-      onAdded({
-        name: params.name,
-        source: "trained",
-        status: "training",
-        dpsgd: params.dpsgd,
-        targetEpsilon: params.target_epsilon,
-        trainParams: params,
-      });
-    }
+    ws.onclose = () => { setTraining(false); setProgress(null); };
 
-    // Poll until all models are ready
-    const poll = setInterval(async () => {
-      // Mark models done after a short delay (real status comes from logs)
-      setTraining(false);
-      clearInterval(poll);
-      ws.close();
-      for (const params of cards) {
-        onAdded({
-          name: params.name,
-          source: "trained",
-          status: "ready",
-          dpsgd: params.dpsgd,
-          targetEpsilon: params.target_epsilon,
-          trainParams: params,
-        });
-      }
-    }, 2000);
+    for (const params of toTrain) {
+      // Mark only this batch as "training" — don't touch already-ready models
+      onAdded({ name: params.name, source: "trained", status: "training",
+        dpsgd: params.dpsgd, targetEpsilon: params.target_epsilon, trainParams: params });
+      await api.trainModel(jobId, params);
+    }
   };
+
+  const pct = progress ? Math.round((progress.epoch / progress.total) * 100) : 0;
 
   return (
     <div className="flex flex-col gap-6">
@@ -249,19 +268,88 @@ function TrainModelForm({ jobId, onAdded, existingCount }: {
         </button>
       </div>
 
+      {/* Epoch progress bar */}
+      {training && progress && (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between text-xs text-slate-500">
+            <span className="font-semibold">{progress.model} — Epoch {progress.epoch} / {progress.total}</span>
+            <span className="font-mono">{pct}%</span>
+          </div>
+          <div className="h-2 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+            <div
+              className="h-full rounded-full bg-primary transition-all duration-300"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Live log stream */}
-      {logs.length > 0 && (
+      {(logs.length > 0 || training) && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
           <div className="px-4 py-2 bg-slate-100 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 text-xs font-mono text-slate-500 flex items-center gap-2">
             <span className={`size-2 rounded-full ${training ? "bg-green-400 animate-pulse" : "bg-slate-400"}`} />
             Training log
           </div>
           <div className="bg-slate-950 p-4 h-48 overflow-y-auto font-mono text-xs text-slate-300 space-y-0.5">
+            {logs.length === 0 && <span className="text-slate-600 animate-pulse">Waiting for output…</span>}
             {logs.map((line, i) => <div key={i}>{line}</div>)}
             <div ref={logEndRef} />
           </div>
         </div>
       )}
+
+      {/* Per-model metrics charts */}
+      {metrics.map((m) => (
+        <TrainMetricsChart key={m.model} metrics={m} />
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Training metrics chart
+// ---------------------------------------------------------------------------
+function TrainMetricsChart({ metrics }: { metrics: TrainMetrics }) {
+  const epochs = metrics.loss_history.map((_, i) => i + 1);
+  const darkMode = document.documentElement.classList.contains("dark");
+  const gridColor = darkMode ? "#334155" : "#e2e8f0";
+  const fontColor = darkMode ? "#94a3b8" : "#64748b";
+
+  const layout: Partial<Plotly.Layout> = {
+    paper_bgcolor: "transparent",
+    plot_bgcolor: "transparent",
+    margin: { t: 30, r: 20, b: 40, l: 45 },
+    height: 180,
+    legend: { orientation: "h", y: -0.25, font: { size: 11, color: fontColor } },
+    xaxis: { title: "Epoch", gridcolor: gridColor, color: fontColor, tickfont: { size: 10 } },
+    yaxis: { gridcolor: gridColor, color: fontColor, tickfont: { size: 10 } },
+    font: { family: "Inter, sans-serif" },
+  };
+
+  return (
+    <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+      <div className="px-4 py-2 bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 text-xs font-semibold text-slate-500 flex items-center gap-2">
+        <span className="material-symbols-outlined text-sm text-green-500">show_chart</span>
+        {metrics.model} — Training curves
+      </div>
+      <div className="grid grid-cols-2 divide-x divide-slate-200 dark:divide-slate-800 bg-white dark:bg-slate-950">
+        <Plot
+          data={[{ x: epochs, y: metrics.loss_history, type: "scatter", mode: "lines+markers",
+            name: "Train loss", line: { color: "#193ce6", width: 2 }, marker: { size: 4 } }]}
+          layout={{ ...layout, title: { text: "Loss", font: { size: 12, color: fontColor } } }}
+          config={{ displayModeBar: false, responsive: true }}
+          style={{ width: "100%" }}
+        />
+        <Plot
+          data={[{ x: epochs, y: metrics.accuracy_history.map((v) => v * 100), type: "scatter", mode: "lines+markers",
+            name: "Train accuracy", line: { color: "#22c55e", width: 2 }, marker: { size: 4 } }]}
+          layout={{ ...layout, title: { text: "Accuracy (%)", font: { size: 12, color: fontColor } },
+            yaxis: { ...layout.yaxis, range: [0, 100] } }}
+          config={{ displayModeBar: false, responsive: true }}
+          style={{ width: "100%" }}
+        />
+      </div>
     </div>
   );
 }
@@ -300,6 +388,14 @@ function TrainCard({ params, onChange, onRemove }: {
             <option value="sgd">SGD</option>
           </select>
         </div>
+      </div>
+
+      {/* Data split */}
+      <div className="grid grid-cols-2 gap-3">
+        <NumberField label="Train fraction (f_train)" value={params.f_train ?? 0.5} min={0.1} max={0.9} step={0.05}
+          onChange={(v) => onChange({ f_train: v })} />
+        <NumberField label="Test fraction (f_test)" value={params.f_test ?? 0.5} min={0.1} max={0.9} step={0.05}
+          onChange={(v) => onChange({ f_test: v })} />
       </div>
 
       {/* DP-SGD toggle */}
@@ -382,7 +478,7 @@ function ModelCard({ model, onRemove }: { model: ModelEntry; onRemove: () => voi
       </div>
       <div className="flex-1">
         <p className="font-bold text-sm">{model.name}</p>
-        <p className="text-xs text-slate-500">{model.source === "uploaded" ? "Uploaded" : "Training…"}{model.dpsgd ? " · DP-SGD (ε=" + model.targetEpsilon + ")" : ""}</p>
+        <p className="text-xs text-slate-500">{model.source === "uploaded" ? "Uploaded" : model.status === "ready" ? "Trained" : "Training…"}{model.dpsgd ? " · DP-SGD (ε=" + model.targetEpsilon + ")" : ""}</p>
       </div>
       <button onClick={onRemove} className="text-slate-400 hover:text-red-500 transition-colors">
         <span className="material-symbols-outlined text-base">close</span>
@@ -398,6 +494,8 @@ function defaultParams(n: number): TrainParams {
     learning_rate: 0.001,
     batch_size: 128,
     optimizer: "adam",
+    f_train: 0.5,
+    f_test: 0.5,
     dpsgd: false,
   };
 }

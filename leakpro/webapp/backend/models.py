@@ -73,6 +73,8 @@ class TrainParams(BaseModel):
     learning_rate: float = 0.001
     batch_size: int = 128
     optimizer: str = "adam"       # "adam" | "sgd"
+    f_train: float = 0.5          # fraction of dataset used for training
+    f_test: float = 0.5           # fraction of dataset used for testing
     dpsgd: bool = False
     target_epsilon: float | None = None
     target_delta: float | None = None

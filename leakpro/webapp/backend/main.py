@@ -248,24 +248,36 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
     log_q = _log_queues[job_id]
 
     def _train() -> None:
+        import io
+        import re
+        import sys as _sys
+
+        # Capture all print() / tqdm output into the log queue
+        class _StdoutCapture(io.TextIOBase):
+            def write(self, s: str) -> int:  # noqa: D102
+                line = s.strip()
+                if line:
+                    log_q.put(line)
+                return len(s)
+            def flush(self) -> None:  # noqa: D102
+                pass
+
+        old_stdout = _sys.stdout
+        _sys.stdout = _StdoutCapture()
+
         try:
-            log_q.put(f"[train] Starting training: {params.name}")
-            # Import and run CIFAR handler training (preset path)
-            # This mirrors runner.py logic from the Streamlit demo
-            import sys
-            from pathlib import Path
+            log_q.put(f"[train] Starting: {params.name}  ({params.epochs} epochs, lr={params.learning_rate})")
             leakpro_root = Path(__file__).parents[3]
-            if str(leakpro_root) not in sys.path:
-                sys.path.insert(0, str(leakpro_root))
+            if str(leakpro_root) not in _sys.path:
+                _sys.path.insert(0, str(leakpro_root))
 
-            target_folder = str(_job_dir(job_id) / "models" / params.name)
-            Path(target_folder).mkdir(parents=True, exist_ok=True)
+            target_folder = _job_dir(job_id) / "models" / params.name
+            target_folder.mkdir(parents=True, exist_ok=True)
 
-            # Record training result in job state
             model_entry = {
                 "name": params.name,
                 "source": "trained",
-                "target_folder": target_folder,
+                "target_folder": str(target_folder),
                 "dpsgd": params.dpsgd,
                 "target_epsilon": params.target_epsilon,
                 "train_params": params.model_dump(),
@@ -274,12 +286,120 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
             job["models"] = [m for m in job.get("models", []) if m["name"] != params.name]
             job["models"].append(model_entry)
 
-            # TODO: wire up actual training (CIFAR runner or user handler)
-            # For now, record intent and signal done
+            # ── Load CIFAR dataset & model, run training ────────────────────
+            cifar_dir = leakpro_root / "examples" / "mia" / "cifar"
+            if str(cifar_dir) not in _sys.path:
+                _sys.path.insert(0, str(cifar_dir))
+
+            import torch
+            import torch.nn as nn
+            import torch.optim as optim
+            from torch.utils.data import DataLoader
+            import importlib.util
+
+            # Load handler class (skip abstract base classes)
+            import inspect
+            handler_path = cifar_dir / "cifar_handler.py"
+            spec = importlib.util.spec_from_file_location("cifar_handler", handler_path)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            HandlerCls = next(
+                obj for name in dir(mod)
+                if isinstance(obj := getattr(mod, name), type)
+                and hasattr(obj, "train")
+                and not inspect.isabstract(obj)
+                and name != "object"
+            )
+
+            # Load dataset, apply f_train fraction
+            data_path = Path(job.get("data_path", ""))
+            if data_path.exists():
+                import pickle
+                with open(data_path, "rb") as f:
+                    dataset = pickle.load(f)
+                if not isinstance(dataset, torch.utils.data.Dataset):
+                    raise ValueError(f"Loaded object is not a Dataset: {type(dataset)}")
+            else:
+                # Fallback: download CIFAR-10
+                import torchvision
+                import torchvision.transforms as T
+                transform = T.Compose([T.ToTensor(), T.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))])
+                dataset = torchvision.datasets.CIFAR10(root=str(cifar_dir / "data"), train=True, download=True, transform=transform)
+
+            # Apply f_train fraction
+            train_size = max(1, int(len(dataset) * params.f_train))
+            if train_size < len(dataset):
+                import torch as _torch
+                indices = _torch.randperm(len(dataset))[:train_size].tolist()
+                dataset = torch.utils.data.Subset(dataset, indices)
+            log_q.put(f"[train] Dataset: {len(dataset)} samples  (f_train={params.f_train})")
+            loader = DataLoader(dataset, batch_size=params.batch_size, shuffle=True, num_workers=2)
+
+            # Load model architecture
+            from target_model_class import ResNet18  # noqa: PLC0415
+            model = ResNet18()
+            criterion = nn.CrossEntropyLoss()
+            if params.optimizer == "sgd":
+                optimizer = optim.SGD(model.parameters(), lr=params.learning_rate, momentum=0.9, weight_decay=5e-4)
+            else:
+                optimizer = optim.Adam(model.parameters(), lr=params.learning_rate)
+
+            # Monkey-patch tqdm to emit __PROGRESS__ markers
+            _orig_tqdm = None
+            try:
+                import tqdm as _tqdm_mod
+                _OrigTqdm = _tqdm_mod.tqdm
+
+                class _ProgressTqdm(_OrigTqdm):
+                    def __init__(self, *a, **kw):
+                        super().__init__(*a, **kw)
+                        # Parse "Epoch X/Y" from desc
+                        desc = kw.get("desc", "")
+                        m = re.search(r"Epoch\s+(\d+)/(\d+)", desc or "")
+                        if m:
+                            log_q.put(f"__PROGRESS__{params.name}|{m.group(1)}|{m.group(2)}")
+
+                _tqdm_mod.tqdm = _ProgressTqdm
+                _orig_tqdm = (_tqdm_mod, _OrigTqdm)
+            except ImportError:
+                pass
+
+            handler = HandlerCls()
+            result = handler.train(loader, model, criterion, optimizer, epochs=params.epochs)
+
+            # Restore tqdm
+            if _orig_tqdm:
+                _orig_tqdm[0].tqdm = _orig_tqdm[1]
+
+            # Save trained model
+            import json as _json
+            torch.save(result.model.state_dict(), target_folder / "target_model.pt")
+            test_acc = None
+            loss_history: list = []
+            acc_history: list = []
+            if result.metrics:
+                test_acc = float(result.metrics.accuracy)
+                extra = result.metrics.extra or {}
+                loss_history = [float(x) for x in extra.get("loss_history", [])]
+                acc_history = [float(x) for x in extra.get("accuracy_history", [])]
             model_entry["status"] = "ready"
-            log_q.put(f"[train] Done: {params.name}")
+            model_entry["test_accuracy"] = test_acc
+            log_q.put(f"[train] Done: {params.name}  accuracy={test_acc:.4f}" if test_acc else f"[train] Done: {params.name}")
+            # Emit metrics for frontend chart
+            log_q.put("__METRICS__" + _json.dumps({
+                "model": params.name,
+                "loss_history": loss_history,
+                "accuracy_history": acc_history,
+            }))
+
         except Exception as e:  # noqa: BLE001
-            log_q.put(f"[train] FAILED {params.name}: {e}")
+            import traceback
+            model_entry = next((m for m in job.get("models", []) if m["name"] == params.name), {})
+            model_entry["status"] = "error"
+            log_q.put(f"[train] FAILED {params.name}: {e}\n{traceback.format_exc()}")
+        finally:
+            _sys.stdout = old_stdout
+            log_q.put("__TRAIN_DONE__")
 
     _executor.submit(_train)
     return {"ok": True, "model_name": params.name}
