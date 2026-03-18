@@ -1,5 +1,7 @@
 """Utils used for GIA training."""
+
 from collections import OrderedDict
+from typing import Optional
 
 import torch
 from torch import cuda, device, nn
@@ -14,10 +16,12 @@ class MetaModule(nn.Module):
     This avoids monkey-patching module.forward and is compatible with ConvNeXt.
     """
 
-    def __init__(self: Self, net: nn.Module) -> None:
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+    def __init__(self: Self, net: nn.Module, device: Optional[torch.device] = None) -> None:
+
+        if device is None:
+            device = device("cuda" if cuda.is_available() else "cpu")
         super().__init__()
-        self.net = net.to(gpu_or_cpu)
+        self.net = net.to(device)
 
         self.parameters = OrderedDict(self.net.named_parameters())
 
