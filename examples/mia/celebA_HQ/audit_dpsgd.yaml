@@ -22,6 +22,7 @@ target:
   target_folder: "./target_dpsgd"
   # Data paths
   data_path: "./data/celeba_hq_data.pkl"
+  dpsgd_path: "./target_dpsgd/dpsgd_dic.pkl"
 
 shadow_model:
   
