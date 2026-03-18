@@ -19,6 +19,7 @@ def train(
     criterion: Module,
     epochs: int,
     device: Optional[torch.device] = None,
+    return_delta: bool = True,
 ) -> list:
     """Model training procedure for GIA.
 
@@ -50,7 +51,10 @@ def train(
             patched_model.parameters.items(), OrderedDict(model.named_parameters()).items()
         )
     )
-    return list(model_delta.values()), list(patched_model.parameters.values())
+    if return_delta:
+        return list(model_delta.values())
+
+    return list(patched_model.parameters.values())
 
 
 def train_nostep(
