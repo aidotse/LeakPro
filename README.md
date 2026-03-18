@@ -147,12 +147,23 @@ For full documentation see the **[LeakPro Wiki](https://github.com/aidotse/LeakP
 - [Running MIA Attacks — audit.yaml config reference for all MIA attacks](https://github.com/aidotse/LeakPro/wiki/Running-MIA-Attacks)
 
 ## To Contribute
+
+### External contributors
+1. **Fork the repository** by clicking "Fork" on the GitHub page
+2. **Clone your fork, create a branch, and make your changes:**
+`git clone https://github.com/<your-username>/LeakPro.git`
+`git checkout -b my-feature-branch`
+3. **Push to your fork:**
+`git push origin my-feature-branch`
+4. **Open a Pull Request** from your fork to `aidotse/LeakPro:main` and request a review — a maintainer will review and merge it
+
+### Core team
 0. **Ensure local repo is up-to-date:**
 `git fetch origin`
 2. **Create feature branch**
  `git checkout -b my-feature-branch`
 3. **Make changes and commit:**
-`git add . ` 
+`git add . `
 `git commit -m "Added new feature" `
 4. **Ensure the local main is up to date:**
 `git checkout main`
@@ -161,9 +172,8 @@ For full documentation see the **[LeakPro Wiki](https://github.com/aidotse/LeakP
 `git checkout my-feature-branch`
 `git merge main`
 6. **Resolve conflicts, add and commit.**
-7. **Push your update to the remore repository**
+7. **Push your branch and open a Pull Request — PRs require at least one approval from another team member before merging**
 `git push origin my-feature-branch`
-8. **Open pull request**
 
 
 ## Research Outputs  
