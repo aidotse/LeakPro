@@ -146,10 +146,11 @@ def test_random_query_value_formatting() -> None:
     This test ensures values are correctly formatted for different dtypes
     in query generation, including categorical columns with numeric codes.
     """
-    cols = ["integer", "float"]
+    cols = ["integer", "float", "numeric_category"]
     u_values = [
         [1, 2, 3],  # test values
         [1.0, 2.0, 3.0],  # test values
+        [1, 2, 3],  # categorical with numeric codes
     ]
     unique_values = {}
     for col, u_values_ in zip(cols, u_values):
@@ -157,10 +158,15 @@ def test_random_query_value_formatting() -> None:
     dtypes = {
         "integer": np.dtype("int64"),
         "float": np.dtype("float64"),
+        "numeric_category": pd.CategoricalDtype(categories=[1, 2, 3]),
     }
     query_all = singl_ev.random_query(unique_values=unique_values, dtypes=dtypes, cols=cols)
 
-    test_df = pd.DataFrame({"integer": [1, 2, 3], "float": [1.0, 2.0, 3.0]})
+    test_df = pd.DataFrame({
+        "integer": [1, 2, 3],
+        "float": [1.0, 2.0, 3.0],
+        "numeric_category": pd.Series([1, 2, 3], dtype="category")
+    })
     result = test_df.query(query_all, engine="python")
     assert isinstance(result, pd.DataFrame)
 
@@ -487,3 +493,23 @@ def test_num_2_col() -> None:
         assert dataset["num2"].dtype.name == "category"
         assert dataset["num2"].dtype.categories.dtype == "int64"
         assert pd.api.types.is_integer_dtype(dataset["num3"].dtype)
+
+
+def test_singling_out_evaluator_with_numeric_categorical_column() -> None:
+    """End-to-end for numeric columns converted to category."""
+    ori = pd.DataFrame({"code": [1, 2, 3], "value": [10, 20, 30]})
+    syn = pd.DataFrame({"code": [1, 2, 1], "value": [10, 20, 10]})
+
+    soe = singl_ev.SinglingOutEvaluator(
+        ori=ori,
+        syn=syn,
+        n_cols=1,
+        n_attacks=3,
+        categorical_threshold=2,
+        numerical_to_categorical=True,
+    )
+
+    soe.evaluate()
+
+    assert soe.syn["code"].dtype.name == "category"
+    assert isinstance(soe.naive_queries, singl_ev.UniqueSinglingOutQueries)
