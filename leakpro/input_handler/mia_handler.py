@@ -198,8 +198,10 @@ class MIAHandler:
         targets = self.population.targets[dataset_indices]
 
         # Use population's params if none provided (preserves dataset-specific settings)
-        if params is None:
-            params = self.population.return_params()
+        if params is None and hasattr(self.population, "return_params"):
+            params = self.population.return_params() 
+        elif params is None:
+            params = {}
         return self.UserDataset(data, targets, **params)
 
     def get_dataloader(self: Self,
@@ -208,8 +210,6 @@ class MIAHandler:
                        batch_size:int=None,
                        shuffle:bool=None) -> DataLoader:
         """Default implementation of the dataloader."""
-        if params is None:
-            params = {}
         dataset = self.get_dataset(dataset_indices, params)
 
         # Get default parameters from stored config (includes batch size, collate_fn, shuffle etc.)
