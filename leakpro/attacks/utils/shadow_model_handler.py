@@ -188,7 +188,7 @@ class ShadowModelHandler(ModelHandler):
         if sampling_method == "balanced":
             assert np.all(np.sum(A,axis=0) == num_models//2)
         shadow_population = np.array(shadow_population)
-        
+
         for i, indx in enumerate(indices_to_use):
             # Get dataloader based on sampling method
             if sampling_method == "balanced":

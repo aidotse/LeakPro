@@ -199,7 +199,7 @@ class MIAHandler:
 
         # Use population's params if none provided (preserves dataset-specific settings)
         if params is None and hasattr(self.population, "return_params"):
-            params = self.population.return_params() 
+            params = self.population.return_params()
         elif params is None:
             params = {}
         return self.UserDataset(data, targets, **params)
