@@ -1,7 +1,7 @@
 import os, sys, yaml, numpy as np, matplotlib.pyplot as plt, torch, pandas as pd
 
 project_root = os.path.abspath(os.path.join(os.getcwd(), "../../.."))
-sys.path.append(project_root)
+sys.path.insert(0, project_root)
 
 from examples.mia.time_series_mia.utils.data_preparation import preprocess_dataset, get_dataloaders
 from examples.mia.time_series_mia.utils.metrics import smape, nd
