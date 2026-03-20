@@ -2,6 +2,7 @@
 # This file is part of Anonymeter and is released under BSD 3-Clause Clear License.
 # Copyright (c) 2022 Anonos IP LLC.
 # See https://github.com/statice/anonymeter/blob/main/LICENSE.md for details.
+import random
 import re
 from typing import List
 
@@ -284,6 +285,7 @@ def test_multivariate_singling_out_queries() -> None:
             assert rest_query == '.isna()' or rest_query[0:2] == '=='
         else: #All the rest (categories or similar)
             assert rest_query[0:2] == '=='
+
     #Create input dataframe and run convert_df_numerical_columns_to_categories_with_threshold
     n_queries = 5
     n_cols = 4
@@ -297,15 +299,29 @@ def test_multivariate_singling_out_queries() -> None:
         "c5": ['a', 'b', 'c', 'd', 'e'], #String categorical
     })
     singl_ev.convert_df_numerical_columns_to_categories_with_threshold(df=df, threshold=threshold)
+
+    # Make this test deterministic; otherwise some random runs do not cover all columns.
+    old_random_state = random.getstate()
+    old_rng = singl_ev.rng
+    random.seed(0)
+    singl_ev.rng = np.random.default_rng(0)
+
     #Run multivariate_singling_out_queries and assert results
-    queries = singl_ev.multivariate_singling_out_queries(df=df, n_queries=n_queries, n_cols=n_cols, max_attempts=None)
+    try:
+        queries = singl_ev.multivariate_singling_out_queries(
+            df=df, n_queries=n_queries, n_cols=n_cols, max_attempts=None, use_tree=False
+        )
+    finally:
+        random.setstate(old_random_state)
+        singl_ev.rng = old_rng
+
     assert len(queries) == n_queries
     all_columns = set()
     for query in queries:
         for col_query in query.split('&'):
             col_query = col_query.strip()
             col = col_query[0:2]
-            rest_query = col_query[2:]
+            rest_query = col_query[2:].lstrip()
             aux_assert_col_query(col=col, rest_query=rest_query)
             all_columns.add(col)
     assert all_columns == set(df.columns)
@@ -318,7 +334,8 @@ def test_main_singling_out_attack() -> None:
     n_attacks = 10
     n_cols = 3
     #Get queries
-    queries = singl_ev.main_singling_out_attack(ori=ori, syn=syn, n_attacks=n_attacks, n_cols=n_cols, max_attempts=None)
+    queries = singl_ev.main_singling_out_attack(ori=ori, syn=syn, n_attacks=n_attacks, n_cols=n_cols, max_attempts=None,
+        use_tree=False)
     assert isinstance(queries, singl_ev.UniqueSinglingOutQueries)
     if queries.count>0:
         for query in queries.queries:
@@ -354,7 +371,7 @@ def test_SinglingOutEvaluator(n_cols: int) -> None: # noqa: N802
     ori = get_adult(return_ori=True, n_samples=10)
     syn = get_adult(return_ori=False, n_samples=10)
     #Instantiate SinglingOutEvaluator
-    soe = singl_ev.SinglingOutEvaluator(ori=ori, syn=syn, n_cols=n_cols, n_attacks=5)
+    soe = singl_ev.SinglingOutEvaluator(ori=ori, syn=syn, n_cols=n_cols, n_attacks=5, use_tree=False)
     assert (soe.ori.values == ori.values).all()
     assert (soe.syn.values == syn.values).all()
     assert soe.n_cols == n_cols
@@ -389,6 +406,7 @@ def test_num_2_col() -> None:
         n_attacks=1,
         categorical_threshold=2,
         numerical_to_categorical=True,
+        use_tree=False
     )
     for dataset in (soe.ori, soe.syn):
         assert dataset["num2"].dtype.name == "category"
