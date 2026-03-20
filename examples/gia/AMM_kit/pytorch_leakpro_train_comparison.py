@@ -53,24 +53,26 @@ def build_leakpro_optimizer(
     name: OptimizerName,
     learning_rate: float,
     differentiable: bool = True,
-):
+    foreach: bool = True,
+) -> gia_optimizers.MetaOptimizer:
+
     if name == "adam":
         return gia_optimizers.MetaAdam(
             lr=learning_rate,
-            betas=(0.9, 0.999),
-            eps=1e-8,
-            weight_decay=0.0,
-            amsgrad=False,
-            foreach=False,
-            fused=False,
-            decoupled_weight_decay=False,
-            differentiable=differentiable,
+            #betas=(0.9, 0.999),
+            #eps=1e-8,
+            #weight_decay=0.0,
+            #amsgrad=False,
+            foreach=foreach,
+            #fused=False,
+            #decoupled_weight_decay=False,
+            #differentiable=differentiable,
         )
 
     if name == "sgd":
         return gia_optimizers.MetaSGD(
             lr=learning_rate,
-            foreach=False,
+            foreach=foreach,
         )
 
     raise ValueError(f"Unsupported optimizer: {name}")
@@ -85,12 +87,12 @@ def build_torch_optimizer(
         return torch.optim.Adam(
             model.parameters(),
             lr=learning_rate,
-            betas=(0.9, 0.999),
-            eps=1e-8,
-            weight_decay=0.0,
-            amsgrad=False,
-            foreach=False,
-            fused=False,
+            #betas=(0.9, 0.999),
+            #eps=1e-8,
+            #weight_decay=0.0,
+            #amsgrad=False,
+            #foreach=False,
+            #fused=False,
         )
 
     if name == "sgd":
@@ -127,13 +129,15 @@ def run_leakpro_train(
 
     model_leakpro = copy.deepcopy(model)
 
-    _, updated_params = train_leakpro(
+    updated_params = train_leakpro(
         model_leakpro,
         dataloader,
         configs.optimizer,
         configs.criterion,
         configs.epochs,
         device=device,
+        return_delta= False,
+
     )
 
     return [param.detach().cpu().clone() for param in updated_params]
@@ -165,13 +169,13 @@ def run_scaleout_train(
 
 def test_leakpro_train_comparison() -> None:
     epochs = 10
-    learning_rate = 0.001
-    optimizer_name: OptimizerName = "adam"
-    leakpro_differentiable = False
+    learning_rate = 0.01
+    optimizer_name: OptimizerName = "sgd"
+    leakpro_differentiable = True
     num_runs = 5
 
     dataloader, data_mean, data_std = get_cifar10_loader(
-        num_images=25,
+        num_images=20,
         batch_size=5,
         num_workers=0,
     )
@@ -214,8 +218,16 @@ def test_leakpro_train_comparison() -> None:
     ]
 
     orig_norm = tensor_list_l2norm([p.detach().cpu() for p in model.parameters()])
-    leakpro_mean_norm = np.mean([tensor_list_l2norm(run) for run in leakpro_runs])
-    scaleout_mean_norm = np.mean([tensor_list_l2norm(run) for run in scaleout_runs])
+    delta_leakpro_params = [
+        [param - orig_param for param, orig_param in zip(run, model.parameters())]
+        for run in leakpro_runs
+    ]
+    delta_scaleout_params = [
+        [param - orig_param for param, orig_param in zip(run, model.parameters())]
+        for run in scaleout_runs
+    ]
+    leakpro_mean_norm = np.mean([tensor_list_l2norm(run) for run in delta_leakpro_params])
+    scaleout_mean_norm = np.mean([tensor_list_l2norm(run) for run in delta_scaleout_params])
 
     cross_diffs = [
         compare_tensor_lists(leakpro_run, scaleout_run)

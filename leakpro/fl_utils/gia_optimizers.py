@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 
-from torch import Tensor, zeros_like
+from torch import Tensor, nan, zeros_like
 import torch
 from torch.autograd import grad
 
@@ -16,6 +16,10 @@ class MetaOptimizer(ABC):
     def __init__(self: "MetaOptimizer") -> None:
         """Initialize the MetaOptimizer."""
         raise NotImplementedError("This is an abstract class and should not be instantiated directly.")
+
+    def reset(self: "MetaOptimizer") -> None:
+        """Reset the optimizer state."""
+        raise NotImplementedError("This method should be implemented by subclasses.")
 
     @abstractmethod
     def step(self: "MetaOptimizer", loss: Tensor, params: Dict[str, Tensor]) -> OrderedDict[str, Tensor]:
@@ -41,6 +45,10 @@ class MetaSGD(MetaOptimizer):
         """Init."""
         self.lr = lr
         self.foreach = foreach
+
+    def reset(self: Self) -> None:
+        """Reset the optimizer state."""
+        pass
 
     def step(self: Self, loss: Tensor, params: Dict[str, Tensor]) -> OrderedDict[str, Tensor]:
         """Perform a single optimization step.
@@ -91,136 +99,65 @@ class MetaSGD(MetaOptimizer):
 
 
 class MetaAdam(MetaOptimizer):
-    """Differentiable Adam that aims to mirror torch.optim.Adam as closely as possible."""
+    """Implementation of Adam which perform step to a new set of parameters."""
 
     def __init__(
-        self: Self,
-        lr: float = 1e-3,
-        betas: Tuple[float, float] = (0.9, 0.999),
-        eps: float = 1e-8,
-        weight_decay: float = 0.0,
-        amsgrad: bool = False,
-        foreach: bool | None = None,
-        fused: bool | None = None,
-        maximize: bool = False,
-        capturable: bool = False,
-        decoupled_weight_decay: bool = False,
-        differentiable: bool = True,
+        self: Self, lr: float = 1e-2, betas: Tuple[float, float] = (0.9, 0.999), eps: float = 1e-08, weight_decay: float = 0
     ) -> None:
+        """Initializes the MetaAdam optimizer.
+
+        Args:
+        ----
+            lr (float, optional): Learning rate. Default is 1e-2.
+            betas (Tuple[float, float], optional): Coefficients used for computing running averages of gradient and its square.
+            Default is (0.9, 0.999).
+            eps (float, optional): Term added to the denominator to improve numerical stability. Default is 1e-08.
+            weight_decay (float, optional): Weight decay (L2 penalty). Default is 0.
+
+        """
         self.lr = lr
+        self.weight_decay = weight_decay
         self.beta1 = betas[0]
         self.beta2 = betas[1]
         self.eps = eps
-        self.weight_decay = weight_decay
-        self.amsgrad = amsgrad
-        self.foreach = foreach
-        self.fused = fused
-        self.maximize = maximize
-        self.capturable = capturable
-        self.decoupled_weight_decay = decoupled_weight_decay
-        self.differentiable = differentiable
-
-        self.m: Dict[str, Tensor] = {}
-        self.v: Dict[str, Tensor] = {}
-        self.vmax: Dict[str, Tensor] = {}
-        self.steps: Dict[str, Tensor] = {}
+        self.m = {}
+        self.v = {}
+        self.t = 0
 
     def step(self: Self, loss: Tensor, params: Dict[str, Tensor]) -> OrderedDict[str, Tensor]:
-        """Perform one differentiable Adam step and return updated params."""
-        grad_params = [(name, p) for name, p in params.items() if p.requires_grad]
+        """Perform a single optimization step.
 
-        all_names = [name for name, _ in grad_params]
-        all_p_list = [p for _, p in grad_params]
+        Args:
+        ----
+            loss (torch.Tensor): The loss value calculated from the model's output.
+            params (Dict[str, torch.Tensor]): A dictionary of model parameters to be updated.
 
-        grads = grad(
-            loss,
-            all_p_list,
-            retain_graph=True,
-            create_graph=True,
-            only_inputs=True,
-            allow_unused=True,
+        Returns:
+        -------
+            OrderedDict[str, torch.Tensor]: A new set of parameters which have been updated.
+
+        """
+        gradients = grad(
+            loss, [p for p in params.values() if p.requires_grad], retain_graph=True, create_graph=True, only_inputs=True
         )
 
-        active = [(name, p, g) for (name, p), g in zip(grad_params, grads) if g is not None]
+        if self.weight_decay != 0:
+            gradients = [grad + self.weight_decay * param for grad, param in zip(gradients, params.values())]
 
-        names = [name for name, _, _ in active]
-        p_list = [p for _, p, _ in active]
-        g_list = [g for _, _, g in active]
+        # Initialize m and v
+        if not self.m:
+            self.m = {name: zeros_like(param) for name, param in params.items()}
+            self.v = {name: zeros_like(param) for name, param in params.items()}
+        self.t += 1
+        new_params = OrderedDict()
+        for (name, param), gradient in zip(params.items(), gradients):
+            self.m[name] = self.beta1 * self.m[name] + (1 - self.beta1) * gradient
+            self.v[name] = self.beta2 * self.v[name] + (1 - self.beta2) * (gradient**2)
 
-        # Lazy init optimizer state
-        for name, p in grad_params:
-            if name not in self.m:
-                self.m[name] = torch.zeros_like(p)
-                self.v[name] = torch.zeros_like(p)
-                if self.amsgrad:
-                    self.vmax[name] = torch.zeros_like(p)
-                # Match torch.optim.Adam initialization more closely
-                # If capturable or fused: keep step tensor on param device
-                # Otherwise: CPU scalar tensor
-                if self.capturable or self.fused:
-                    self.steps[name] = torch.zeros((), dtype=torch.float32, device=p.device)
-                else:
-                    self.steps[name] = torch.tensor(0.0, dtype=torch.float32)
+            m_hat = self.m[name] / (1 - self.beta1**self.t)
+            v_hat = self.v[name] / (1 - self.beta2**self.t)
 
-        # Clone so we produce updated tensors out-of-place
-        new_p_list = [p.clone() for p in p_list]
-        exp_avgs = [self.m[name].clone() for name in names]
-        exp_avg_sqs = [self.v[name].clone() for name in names]
-        max_exp_avg_sqs = [self.vmax[name].clone() for name in names] if self.amsgrad else []
-        # state_steps = [self.steps[name].clone() for name in names]
-        state_steps = [self.steps[name] for name in names]
+            adam_grad = m_hat / (v_hat.sqrt() + self.eps)
 
-        # Functional Adam call, closest path to torch.optim.Adam behavior.
-        adam_kwargs = dict(
-            params=new_p_list,
-            grads=g_list,
-            exp_avgs=exp_avgs,
-            exp_avg_sqs=exp_avg_sqs,
-            max_exp_avg_sqs=max_exp_avg_sqs,
-            state_steps=state_steps,
-            foreach=self.foreach,
-            capturable=self.capturable,
-            differentiable=self.differentiable,
-            fused=self.fused,
-            grad_scale=None,
-            found_inf=None,
-            has_complex=any(torch.is_complex(p) for p in new_p_list),
-            amsgrad=self.amsgrad,
-            beta1=self.beta1,
-            beta2=self.beta2,
-            lr=self.lr,
-            weight_decay=self.weight_decay,
-            eps=self.eps,
-            maximize=self.maximize,
-        )
-
-        # Newer PyTorch versions support this kwarg.
-        # Keep it guarded so the code is easier to adapt across versions.
-        try:
-            torch.optim._functional.adam(
-                decoupled_weight_decay=self.decoupled_weight_decay,
-                **adam_kwargs,
-            )
-        except TypeError:
-            # Older PyTorch versions do not support decoupled_weight_decay here.
-            # In that case this will behave like classic Adam, not AdamW-style decay.
-            if self.decoupled_weight_decay:
-                raise RuntimeError(
-                    "This PyTorch version does not support decoupled_weight_decay "
-                    "in torch.optim._functional.adam. Upgrade PyTorch to match AdamW-style behavior."
-                )
-            torch.optim._functional.adam(**adam_kwargs)
-
-        # Persist state
-        for i, name in enumerate(names):
-            self.m[name] = exp_avgs[i]
-            self.v[name] = exp_avg_sqs[i]
-            self.steps[name] = state_steps[i]
-            if self.amsgrad:
-                self.vmax[name] = max_exp_avg_sqs[i]
-
-        updated_params = OrderedDict(params)
-        for name, new_p in zip(names, new_p_list):
-            updated_params[name] = new_p
-
-        return updated_params
+            new_params[name] = param - self.lr * adam_grad
+        return new_params
