@@ -1,10 +1,15 @@
+
 audit:  # Configurations for auditing
   random_seed: 1236  # Integer specifying the random seed
   attack_list:
+    # - rmia:
+    #   online: False
+    #   num_shadow_models: 2
+    #   gamma: 1
     - attack: lira
       online: True
       num_shadow_models: 2
-      training_data_fraction: 0.1
+      training_data_fraction: 0.6
 
   output_dir: "./leakpro_output"
   attack_type: "mia" #mia, gia
@@ -16,11 +21,9 @@ target:
   model_class: "ResNet18_DPsgd" 
   target_folder: "./target_dpsgd"
   # Data paths
-  data_path: "./data/cifar10.pkl"
+  data_path: "./data/celeba_hq_data.pkl"
   dpsgd_path: "./target_dpsgd/dpsgd_dic.pkl"
 
 shadow_model:
-  # module_path: "./target_model_class.py"
-  # model_class: "ResNet18"
-
+  
 distillation_model:
