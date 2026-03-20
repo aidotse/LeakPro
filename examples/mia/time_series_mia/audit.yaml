@@ -6,9 +6,12 @@ audit: # Configurations for auditing
     - attack: dts
       num_shadow_models: 64
       online: True
-      clf_model: "InceptionTimeS"
+      clf_model: "InceptionTime"
       clf_model_kwargs:
+        # kernel_sizes: [20, 15, 10]  # will overide max_kernel_size
         max_kernel_size: 15
+        # If neither kernel_sizes or max_kernel_size is set kernel_sizes will be set based on seq_length:
+        # [2, 4, 8] if seq_length < 81 else [10, 20, 40]
       clf_batch_size: 512
       clf_max_epochs: 64
 
@@ -22,14 +25,14 @@ audit: # Configurations for auditing
     #   clf_max_epochs: 64
 
     # DTS LSTM
-    - attack: dts
-      num_shadow_models: 64
-      online: True
-      clf_model: LSTM
-      clf_model_kwargs:
-        hidden_size: 128
-      clf_batch_size: 512
-      clf_max_epochs: 64
+    # - attack: dts
+    #   num_shadow_models: 64
+    #   online: True
+    #   clf_model: LSTM
+    #   clf_model_kwargs:
+    #     hidden_size: 128
+    #   clf_batch_size: 512
+    #   clf_max_epochs: 64
 
     # - attack: dts
     #   num_shadow_models: 64
@@ -41,10 +44,10 @@ audit: # Configurations for auditing
     #   clf_max_epochs: 64
 
     # MS-lira
-    - attack: multi_signal_lira
-      signal_names: ["MSELoss", "MAELoss", "RescaledSMAPELoss", "TrendLoss", "SeasonalityLoss", "TS2VecLoss"]
-      num_shadow_models: 64
-      online: True
+    # - attack: multi_signal_lira
+    #   signal_names: ["MSELoss", "MAELoss", "RescaledSMAPELoss", "TrendLoss", "SeasonalityLoss", "TS2VecLoss"]
+    #   num_shadow_models: 64
+    #   online: True
 
     # - attack: multi_signal_lira
     #   signal_names: ["MSELoss", "MAELoss", "RescaledSMAPELoss", "TrendLoss", "SeasonalityLoss", "TS2VecLoss"]
@@ -266,7 +269,7 @@ audit: # Configurations for auditing
     #   subset_size: 50
     #   num_pairs: 9
 
-  output_dir: "./leakpro_outpu_dpsgdt"
+  output_dir: "./leakpro_output"
   attack_type: "mia" #mia, gia
   data_modality: "timeseries" #image, tabular, timeseries
 
