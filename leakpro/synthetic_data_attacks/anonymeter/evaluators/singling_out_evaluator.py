@@ -25,6 +25,52 @@ def escape_quotes(*, input: str) -> str:
     return input.replace('"', '\\"').replace("'", "\\'")
 
 
+def _to_python_scalar(val: Any) -> Any:  # noqa: ANN401
+    """Convert numpy scalar to plain python scalar if possible."""
+    if hasattr(val, "item"):
+        try:
+            return val.item()
+        except Exception:  # noqa: S110
+            pass
+    return val
+
+
+def _format_literal_for_query(val: Any, dtype: Any) -> Optional[str]:  # noqa: ANN401, PLR0911
+    """Return a string representation suitable for df.query expression.
+
+    Handles numpy scalars, datetime, boolean, numeric, and string/categorical types.
+
+    Args:
+        val: The value to format.
+        dtype: The pandas dtype of the column.
+
+    Returns:
+        A string representation of the value, or None if value is NaN.
+
+    """
+    if pd.isna(val):
+        return None
+    v = _to_python_scalar(val)
+    # datetime -> quoted ISO
+    if is_datetime64_any_dtype(dtype):
+        escaped = str(v).replace("'", "\\'")
+        return f"'{escaped}'"
+    # bool
+    if isinstance(v, (bool, np.bool_)) or is_bool_dtype(dtype):
+        return "True" if bool(v) else "False"
+    # numeric
+    if is_numeric_dtype(dtype) or isinstance(v, (int, float, np.integer, np.floating)):
+        if isinstance(v, (np.integer, int)):
+            return str(int(v))
+        try:
+            return repr(float(v))
+        except Exception:
+            return repr(v)
+    # string / categorical
+    escaped = str(v).replace("'", "\\'")
+    return f"'{escaped}'"
+
+
 def safe_query_elements(*, query: str, df: pd.DataFrame) -> List[int]:
     """Return elements indexes in df satisfying a given query."""
     try:
@@ -56,31 +102,35 @@ def random_operator(*, data_type: str) -> str:
     return rng.choice(ops)
 
 
-def random_query(*, unique_values: Dict[str, List[Any]], cols: List[str]) -> str:
-    """Function returns a random query for given columns."""
+def random_query(*, unique_values: Dict[str, List[Any]], dtypes: "pd.DataFrame", cols: List[str]) -> str:
+    """Function returns a random query for given columns.
+
+    Args:
+        unique_values: Dictionary mapping column names to their unique values (numpy arrays).
+        dtypes: DataFrame dtypes Series for dtype-aware type detection.
+        cols: List of column names to include in the query.
+
+    """
     query = []
     for col in cols:
         # Get values and choose a value
         values = unique_values[col]
         val = rng.choice(values)
+        dtype = dtypes[col]
         # NaNs
         if pd.isna(val):
             sub_query = f"{random_operator(data_type='boolean')}{col}.isna()"
         # Boolean
-        elif is_bool_dtype(values):
+        elif is_bool_dtype(dtype):
             sub_query = f"{random_operator(data_type='boolean')}{col}"
-        # Categorical
-        elif isinstance(values, pd.CategoricalDtype):
-            sub_query = f"{col}{random_operator(data_type='categorical')}{val}"
         # Numerical
-        elif is_numeric_dtype(values):
-            sub_query = f"{col}{random_operator(data_type='numerical')}{val}"
-        # Categorical with escape quotes
-        elif isinstance(val, str):
-            sub_query = f"{col}{random_operator(data_type='categorical')}'{escape_quotes(input=val)}'"
-        # Categorical
+        elif is_numeric_dtype(dtype):
+            lit = _format_literal_for_query(val, dtype)
+            sub_query = f"{col}{random_operator(data_type='numerical')}{lit}"
+        # Categorical / string
         else:
-            sub_query = f"{col}{random_operator(data_type='categorical')}'{val}'"
+            lit = _format_literal_for_query(val, dtype)
+            sub_query = f"{col}.isna()" if lit is None else f"{col}{random_operator(data_type='categorical')}{lit}"
         # Append to query
         query.append(sub_query)
     return " & ".join(query)
@@ -90,6 +140,7 @@ def random_queries(*, df: pd.DataFrame, n_queries: int, n_cols: int) -> List[str
     """Function returns n_queries random queries each with size n_cols on df as input."""
     # Get unique_values
     unique_values = {col: df[col].unique() for col in df.columns}
+    dtypes = df.dtypes
     # Placeholder queries
     queries = []
     # Iterate through range n_queries
@@ -97,7 +148,7 @@ def random_queries(*, df: pd.DataFrame, n_queries: int, n_cols: int) -> List[str
         # Get random columns
         random_cols = rng.choice(df.columns, size=n_cols, replace=False).tolist()
         # Get random query
-        query = random_query(unique_values=unique_values, cols=random_cols)
+        query = random_query(unique_values=unique_values, dtypes=dtypes, cols=random_cols)
         # Append to queries
         queries.append(query)
     return queries
@@ -715,13 +766,11 @@ class SinglingOutEvaluator(BaseModel):
         # Convert numeric columns with low unique counts (<= categorical_threshold) to categorical
         if self.numerical_to_categorical:
             self.ori = convert_df_numerical_columns_to_categories_with_threshold(
-                df=self.ori,
-                threshold=self.categorical_threshold
-                )
+                df=self.ori, threshold=self.categorical_threshold
+            )
             self.syn = convert_df_numerical_columns_to_categories_with_threshold(
-                df=self.syn,
-                threshold=self.categorical_threshold
-                )
+                df=self.syn, threshold=self.categorical_threshold
+            )
 
     def evaluate(self: Self) -> EvaluationResults:
         """Run the singling-out attacks (main and naive) and set and return results."""
