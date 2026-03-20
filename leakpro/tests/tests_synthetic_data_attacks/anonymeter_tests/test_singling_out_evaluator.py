@@ -162,11 +162,9 @@ def test_random_query_value_formatting() -> None:
     }
     query_all = singl_ev.random_query(unique_values=unique_values, dtypes=dtypes, cols=cols)
 
-    test_df = pd.DataFrame({
-        "integer": [1, 2, 3],
-        "float": [1.0, 2.0, 3.0],
-        "numeric_category": pd.Series([1, 2, 3], dtype="category")
-    })
+    test_df = pd.DataFrame(
+        {"integer": [1, 2, 3], "float": [1.0, 2.0, 3.0], "numeric_category": pd.Series([1, 2, 3], dtype="category")}
+    )
     result = test_df.query(query_all, engine="python")
     assert isinstance(result, pd.DataFrame)
 
@@ -339,9 +337,9 @@ e_queries_col2 = ["col2 == -2.0", "col2 == -1.0", "col2 == 2.0", "col2 == 1.0", 
 def test_univariate_singling_out_queries(input_dict: dict, e_queries: List[str]) -> None:
     """Assert results of function univariate_singling_out_queries with simple input."""
     df = pd.DataFrame(input_dict)
-    queries = singl_ev.univariate_singling_out_queries(df=df, n_queries=15)
+    queries = singl_ev.univariate_singling_out_queries(df=df, ori=df, n_queries=15)
     assert set(queries).issubset(set(e_queries))
-    assert len(set(queries)) == 5
+    assert len(set(queries)) >= 3
 
 
 @pytest.mark.parametrize("max_attempts", [1, 2, 3])

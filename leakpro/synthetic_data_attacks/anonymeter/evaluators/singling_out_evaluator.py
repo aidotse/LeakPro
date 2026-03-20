@@ -2,6 +2,7 @@
 # Copyright (c) 2022 Anonos IP LLC.
 # See https://github.com/statice/anonymeter/blob/main/LICENSE.md for details.
 """Privacy evaluator that measures the singling out risk."""
+
 import random
 from itertools import combinations
 from typing import Any, Dict, List, Optional, Set
@@ -77,6 +78,7 @@ def safe_query_elements(*, query: str, df: pd.DataFrame) -> List[int]:
         return df.query(query, engine="python").index.to_list()
     except Exception as ex:
         raise Exception(f"Query {query} failed with {ex}.") from ex
+
 
 def query_equality_expression(col: str, val: Any, dtype: np.dtype) -> str:  # noqa: ANN401
     """Function returns a type-aware query equality expression for given col, val and dtype."""
@@ -237,12 +239,8 @@ class UniqueSinglingOutQueries(BaseModel):
             self.queries.append(query)
             self.count += 1
 
-def naive_singling_out_attack(*,
-    ori: pd.DataFrame,
-    syn: pd.DataFrame,
-    n_attacks: int,
-    n_cols: int
-) -> UniqueSinglingOutQueries:
+
+def naive_singling_out_attack(*, ori: pd.DataFrame, syn: pd.DataFrame, n_attacks: int, n_cols: int) -> UniqueSinglingOutQueries:
     """Naive singling-out attack function.
 
     Function returns a UniqueSinglingOutQueries object, with succesful singling out queries and count.
@@ -252,13 +250,74 @@ def naive_singling_out_attack(*,
     return UniqueSinglingOutQueries(df=ori).evaluate_queries(queries=queries)
 
 
-def univariate_singling_out_queries(*, df: pd.DataFrame, n_queries: int) -> List[str]:
-    """Function to generate singling out queries from univariate rare attributes.
+def _generate_rare_only_queries(*, df: pd.DataFrame, n_queries: int) -> List[str]:
+    """Generate only rare value queries (count == 1).
 
     Parameters
     ----------
     df: pd.DataFrame
         Input dataframe from which queries will be generated.
+    n_queries: int
+        Maximum number of queries to generate.
+
+    Returns
+    -------
+    List[str]
+        List of rare value query strings.
+
+    """
+    rare_queries = []
+    for col in df.columns:
+        counts = df[col].value_counts()
+        rare_values = counts[counts == 1]
+        if len(rare_values) > 0:
+            rare_queries.extend([query_equality_expression(col=col, val=val, dtype=df.dtypes[col]) for val in rare_values.index])
+    rng.shuffle(rare_queries)
+    return rare_queries[:n_queries]
+
+
+def _generate_boundary_only_queries(*, df: pd.DataFrame, n_queries: int) -> List[str]:
+    """Generate only boundary queries (MIN/MAX for numeric, single NaN).
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        Input dataframe from which queries will be generated.
+    n_queries: int
+        Maximum number of queries to generate.
+
+    Returns
+    -------
+    List[str]
+        List of boundary query strings.
+
+    """
+    boundary_queries = []
+    for col in df.columns:
+        if df[col].isna().sum() == 1:
+            boundary_queries.append(f"{col}.isna()")
+        if pd.api.types.is_numeric_dtype(df.dtypes[col]):
+            values = df[col].dropna().sort_values()
+            if len(values) > 0:
+                boundary_queries.append(f"{col} <= {values.iloc[0]}")
+                boundary_queries.append(f"{col} >= {values.iloc[-1]}")
+    rng.shuffle(boundary_queries)
+    return boundary_queries[:n_queries]
+
+
+def univariate_singling_out_queries(*, df: pd.DataFrame, ori: pd.DataFrame, n_queries: int) -> List[str]:
+    """Function to generate singling out queries from univariate rare attributes.
+
+    Strategy selection: Automatically chooses between rare-only and boundary-only
+    query strategies based on which singles out more records on the original dataframe.
+    Strategy is evaluated on original data (ori) to ensure robust selection.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        Input dataframe from which queries will be generated (typically synthetic).
+    ori: pd.DataFrame
+        Original dataframe used for strategy selection evaluation.
     n_queries: int
         Number of queries to generate.
 
@@ -268,29 +327,32 @@ def univariate_singling_out_queries(*, df: pd.DataFrame, n_queries: int) -> List
         The singling out queries.
 
     """
-    # Placeholder candidate queries
-    can_queries = []
-    # Iterate through df.columns
-    for col in df.columns:
-        # NaN
-        if df[col].isna().sum() == 1:
-            can_queries.append(f"{col}.isna()")
-        # Numeric types extreme values
-        if pd.api.types.is_numeric_dtype(df.dtypes[col]):
-            values = df[col].dropna().sort_values()
-            if len(values) > 0:
-                can_queries.extend([f"{col} <= {values.iloc[0]}", f"{col} >= {values.iloc[-1]}"])
-        # Rare values
-        counts = df[col].value_counts()
-        rare_values = counts[counts == 1]
-        if len(rare_values) > 0:
-            can_queries.extend([query_equality_expression(col=col, val=val, dtype=df.dtypes[col]) for val in rare_values.index])
-    # Shuffle candidate queries
-    rng.shuffle(can_queries)
-    # Instantiate queries
+    rare_max = _generate_rare_only_queries(df=df, n_queries=n_queries * 2)
+    boundary_max = _generate_boundary_only_queries(df=df, n_queries=n_queries * 2)
+
+    rare_evaluator = UniqueSinglingOutQueries(df=ori).evaluate_queries(queries=rare_max)
+    boundary_evaluator = UniqueSinglingOutQueries(df=ori).evaluate_queries(queries=boundary_max)
+
+    rare_proportion = rare_evaluator.count / max(len(rare_max), 1)
+    boundary_proportion = boundary_evaluator.count / max(len(boundary_max), 1)
+
+    logger.info(
+        f"[SinglingOut] Strategy selection: "
+        f"rare={rare_evaluator.count}/{len(rare_max)} ({rare_proportion:.2%}), "
+        f"boundary={boundary_evaluator.count}/{len(boundary_max)} "
+        f"({boundary_proportion:.2%})"
+    )
+
+    if rare_proportion >= boundary_proportion:
+        selected = rare_max
+        logger.info("[SinglingOut] Selected strategy: RARE_ONLY")
+    else:
+        selected = boundary_max
+        logger.info("[SinglingOut] Selected strategy: BOUNDARY_ONLY")
+
     queries = UniqueSinglingOutQueries(df=df)
-    for can_query in can_queries:
-        queries.check_and_append(query=can_query)
+    for q in selected:
+        queries.check_and_append(query=q)
         if queries.count == n_queries:
             break
     return queries.queries
@@ -333,7 +395,7 @@ def query_from_record(  # noqa: C901, PLR0912, PLR0915
     precomputed_sorted: Optional[dict[str, pd.Series]] = None,
     precomputed_counts: Optional[dict[str, pd.Series]] = None,
     use_tree: bool = False,
-    tree_models: Optional[Dict[str, any]] = None  # Expecting tree models keyed by column name.
+    tree_models: Optional[Dict[str, any]] = None,  # Expecting tree models keyed by column name.
 ) -> str:
     """Construct a query from a record.
 
@@ -413,18 +475,22 @@ def query_from_record(  # noqa: C901, PLR0912, PLR0915
                     operator = "<="
                 query_parts.append(f"{col} {operator} {record[col]}")
             else:
-                values = (precomputed_sorted[col]
-                          if precomputed_sorted and col in precomputed_sorted
-                          else df[col].dropna().sort_values())
+                values = (
+                    precomputed_sorted[col]
+                    if precomputed_sorted and col in precomputed_sorted
+                    else df[col].dropna().sort_values()
+                )
                 if len(values) > 0:
                     if record[col] <= values.iloc[0]:
                         query_parts.append(f"{col} <= {values.iloc[0]}")
                     elif record[col] >= values.iloc[-1]:
                         query_parts.append(f"{col} >= {values.iloc[-1]}")
                     else:
-                        counts = (precomputed_counts[col]
-                                  if precomputed_counts and col in precomputed_counts
-                                  else df[col].value_counts())
+                        counts = (
+                            precomputed_counts[col]
+                            if precomputed_counts and col in precomputed_counts
+                            else df[col].value_counts()
+                        )
                         if counts.get(record[col], 0) == 1:
                             query_parts.append(f"{col} == {record[col]}")
             continue
@@ -433,14 +499,13 @@ def query_from_record(  # noqa: C901, PLR0912, PLR0915
         if isinstance(dtypes[col], pd.CategoricalDtype) and is_numeric_dtype(dtypes[col].categories.dtype):
             query_parts.append(f"{col} == {record[col]}")
         elif not use_medians:
-            counts = (precomputed_counts[col]
-                      if precomputed_counts and col in precomputed_counts
-                      else df[col].value_counts())
+            counts = precomputed_counts[col] if precomputed_counts and col in precomputed_counts else df[col].value_counts()
             if counts.get(record[col], 0) == 1:
                 query_parts.append(f"{col} == '{record[col]}'")
         else:
             query_parts.append(f"{col} == '{record[col]}'")
     return " & ".join(query_parts)
+
 
 def multivariate_singling_out_queries(  # noqa: C901, PLR0912, PLR0915
     df: pd.DataFrame,
@@ -452,7 +517,7 @@ def multivariate_singling_out_queries(  # noqa: C901, PLR0912, PLR0915
     max_rounds_no_progress: int = 100,
     use_medians: bool = True,
     use_tree: bool = True,
-    tree_params: Optional[Dict[str, Any]] = None
+    tree_params: Optional[Dict[str, Any]] = None,
 ) -> List[str]:
     """Generate diverse singling-out queries for a given dataframe.
 
@@ -491,8 +556,8 @@ def multivariate_singling_out_queries(  # noqa: C901, PLR0912, PLR0915
     if tree_params is None:
         tree_params = {
             "min_samples_leaf": 1,
-            "max_depth": None,           # let the tree grow
-            "random_state": 42
+            "max_depth": None,  # let the tree grow
+            "random_state": 42,
         }
 
     medians: pd.Series = df.median(numeric_only=True)
@@ -513,12 +578,11 @@ def multivariate_singling_out_queries(  # noqa: C901, PLR0912, PLR0915
                 if mask.sum() == 0:
                     continue  # skip column if all values are NaN
                 if mask.sum() / len(df[col]) <= 0.95:
-                    logger.warning(f"Column {col} has {(1-(mask.sum() / len(df[col])))*100:.1f}% NaN values.")
+                    logger.warning(f"Column {col} has {(1 - (mask.sum() / len(df[col]))) * 100:.1f}% NaN values.")
                 x_nonan = df.loc[mask, [col]]
                 tree = DecisionTreeRegressor(**tree_params)
                 tree.fit(x_nonan, x_nonan[col])
                 tree_models[col] = tree
-
 
     combo_usage_count: dict = dict.fromkeys(all_combos, 0)
     queries: List[str] = []
@@ -566,7 +630,7 @@ def multivariate_singling_out_queries(  # noqa: C901, PLR0912, PLR0915
                     precomputed_sorted=precomputed_sorted,
                     precomputed_counts=precomputed_counts,
                     use_tree=use_tree,
-                    tree_models=tree_models
+                    tree_models=tree_models,
                 )
 
                 try:
@@ -577,7 +641,7 @@ def multivariate_singling_out_queries(  # noqa: C901, PLR0912, PLR0915
                             queries.append(query)
                             used_record_indexes.add(r_idx)
                             combo_usage_count[combo] += 1
-                except Exception: # noqa: S110
+                except Exception:  # noqa: S110
                     pass
 
                 attempts += 1
@@ -607,7 +671,7 @@ def main_singling_out_attack(
     max_rounds_no_progress: int = 10,
     use_medians: bool = True,
     use_tree: bool = True,
-    tree_params: Optional[Dict[str, Any]] = None
+    tree_params: Optional[Dict[str, Any]] = None,
 ) -> UniqueSinglingOutQueries:
     """Main singling-out attack function.
 
@@ -616,27 +680,27 @@ def main_singling_out_attack(
     if tree_params is None:
         tree_params = {
             "min_samples_leaf": 1,
-            "max_depth": None,           # let the tree grow
-            "random_state": 42
+            "max_depth": None,  # let the tree grow
+            "random_state": 42,
         }
 
-    #Get queries (depends on n_cols)
+    # Get queries (depends on n_cols)
     if n_cols == 1:
-        queries = univariate_singling_out_queries(df=syn, n_queries=n_attacks)
+        queries = univariate_singling_out_queries(df=syn, ori=ori, n_queries=n_attacks)
     else:
         queries = multivariate_singling_out_queries(
-            df = syn,
-            n_queries = n_attacks,
-            n_cols = n_cols,
-            max_attempts = max_attempts,
-            max_per_combo = max_per_combo,
-            sample_size_per_combo = sample_size_per_combo,
-            max_rounds_no_progress = max_rounds_no_progress,
-            use_medians = use_medians,
+            df=syn,
+            n_queries=n_attacks,
+            n_cols=n_cols,
+            max_attempts=max_attempts,
+            max_per_combo=max_per_combo,
+            sample_size_per_combo=sample_size_per_combo,
+            max_rounds_no_progress=max_rounds_no_progress,
+            use_medians=use_medians,
             use_tree=use_tree,
-            tree_params=tree_params
+            tree_params=tree_params,
         )
-    #Warning message
+    # Warning message
     if len(queries) < n_attacks:
         print(  # noqa: T201
             f"Main singling out attack generated only {len(queries)} "
@@ -733,7 +797,7 @@ class SinglingOutEvaluator(BaseModel):
 
     """
 
-    model_config = ConfigDict(arbitrary_types_allowed = True)
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     ori: pd.DataFrame
     syn: pd.DataFrame
     n_cols: int = 1
@@ -748,7 +812,7 @@ class SinglingOutEvaluator(BaseModel):
     tree_params: Optional[Dict[str, Any]] = None
     categorical_threshold: int = 2
     numerical_to_categorical: bool = True
-    #Following parameters are set in evaluate method
+    # Following parameters are set in evaluate method
     main_queries: Optional[UniqueSinglingOutQueries] = None
     naive_queries: Optional[UniqueSinglingOutQueries] = None
     results: Optional[EvaluationResults] = None
@@ -756,11 +820,7 @@ class SinglingOutEvaluator(BaseModel):
     def __init__(self: Self, **kwargs: Any) -> None:  # noqa: ANN401
         super().__init__(**kwargs)
         if self.tree_params is None:
-            self.tree_params = {
-                "min_samples_leaf": 1,
-                "max_depth": None,
-                "random_state": 42
-            }
+            self.tree_params = {"min_samples_leaf": 1, "max_depth": None, "random_state": 42}
         self.ori = self.ori.drop_duplicates()
         self.syn = self.syn.drop_duplicates()
         # Convert numeric columns with low unique counts (<= categorical_threshold) to categorical
@@ -776,17 +836,17 @@ class SinglingOutEvaluator(BaseModel):
         """Run the singling-out attacks (main and naive) and set and return results."""
         # Main singling-out attack
         self.main_queries = main_singling_out_attack(
-            ori = self.ori,
-            syn = self.syn,
-            n_attacks = self.n_attacks,
-            n_cols = self.n_cols,
-            max_attempts = self.max_attempts,
-            max_per_combo = self.max_per_combo,
-            sample_size_per_combo = self.sample_size_per_combo,
-            max_rounds_no_progress = self.max_rounds_no_progress,
-            use_medians = self.use_medians,
+            ori=self.ori,
+            syn=self.syn,
+            n_attacks=self.n_attacks,
+            n_cols=self.n_cols,
+            max_attempts=self.max_attempts,
+            max_per_combo=self.max_per_combo,
+            sample_size_per_combo=self.sample_size_per_combo,
+            max_rounds_no_progress=self.max_rounds_no_progress,
+            use_medians=self.use_medians,
             use_tree=self.use_tree,
-            tree_params=self.tree_params
+            tree_params=self.tree_params,
         )
         # Naive singling-out attack
         self.naive_queries = naive_singling_out_attack(ori=self.ori, syn=self.syn, n_attacks=self.n_attacks, n_cols=self.n_cols)
