@@ -1,13 +1,14 @@
 """Train function that keeps the computational graph intact."""
 
 from collections import OrderedDict
+from typing import Optional
+
 import torch
 from torch import Tensor, cuda
 from torch.autograd import grad
 from torch.nn import Module
 from torch.utils.data import DataLoader
-from typing import Optional
-import torch
+
 from leakpro.fl_utils.gia_module_to_functional import MetaModule
 from leakpro.fl_utils.gia_optimizers import MetaOptimizer
 

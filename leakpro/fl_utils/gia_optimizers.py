@@ -3,8 +3,8 @@
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 
-from torch import Tensor, nan, zeros_like
 import torch
+from torch import Tensor, zeros_like
 from torch.autograd import grad
 
 from leakpro.utils.import_helper import Dict, Self, Tuple

@@ -4,7 +4,7 @@ from collections import OrderedDict
 from typing import Optional
 
 import torch
-from torch import cuda, device, nn
+from torch import cuda, nn
 from torch.func import functional_call
 
 from leakpro.utils.import_helper import Any, Dict, Self
