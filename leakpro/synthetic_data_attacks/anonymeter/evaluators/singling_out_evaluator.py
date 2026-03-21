@@ -540,7 +540,7 @@ def multivariate_singling_out_queries(  # noqa: C901, PLR0912, PLR0915
             if combo_usage_count[combo] >= max_per_combo:
                 continue
 
-            groups: pd.Series = df.groupby(list(combo)).size()
+            groups: pd.Series = df.groupby(list(combo), observed=False).size()
             unique_groups: pd.Series = groups[groups == 1]
             if unique_groups.empty:
                 continue
