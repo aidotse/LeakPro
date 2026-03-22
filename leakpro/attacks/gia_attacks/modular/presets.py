@@ -26,7 +26,9 @@ Attacks:
 
 """
 
+import logging
 from dataclasses import dataclass
+from typing import Tuple
 
 from torch import nn
 
@@ -44,8 +46,20 @@ from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks
     ProxyBNStatisticsStrategy,
     RunningBNStatisticsStrategy,
 )
+from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.consensus_strategies import (
+    AggregationStrategy,
+    EpochMatchingConsensus,
+    MeanSeedAggregation,
+    NoSeedAggregation,
+    RegisteredSeedAggregation,
+)
 from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.constraints import (
     ClipConstraint,
+)
+from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.epoch_strategies import (
+    EpochHandlingStrategy,
+    MultiEpochSeparate,
+    SingleStorageReused,
 )
 from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.label_strategies import (
     FixedLabels,
@@ -53,7 +67,10 @@ from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks
 )
 from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.loss_components import (
     BNStatisticsRegularization,
+    EpochOrderInvariantPrior,
     GradientMatchingLoss,
+    GroupConsistencyRegularization,
+    L2Regularization,
     LabelEntropyRegularization,
     TVRegularization,
 )
@@ -62,8 +79,10 @@ from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks
 )
 from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.training_simulator import (
     MultiEpochTrainingSimulation,
+    TrainingSettings,
 )
 from leakpro.attacks.gia_attacks.modular.core.threat_model import (
+    ThreatModel,
     model_a_eavesdropper,
     model_b_informed,
     model_c_parameter_aware,
@@ -71,6 +90,9 @@ from leakpro.attacks.gia_attacks.modular.core.threat_model import (
     model_e_statistical,
 )
 from leakpro.attacks.gia_attacks.modular.orchestrator import ModularGIAOrchestrator
+from leakpro.fl_utils.fl_client_simulator import ClientObservations
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -79,6 +101,13 @@ class AttackConfig:
 
     This stores all parameters needed to construct an attack. Modify any
     attributes before calling .build() to customize the attack.
+
+    Training Settings:
+    -----------------
+    Config parameters (training_simulator_*) define base values for attack simulation.
+    Use the `use_client_*` flags to control which parameters should be overridden
+    by actual client training settings when available.
+
     """
 
     # Attack strategy
@@ -88,10 +117,16 @@ class AttackConfig:
     # Loss components
     gradient_loss_type: str = "cosine"  # "l2", "cosine", "fisher"
     tv_weight: float = 0.0  # Total variation regularization weight
+    l2_weight: float = 0.0  # L2 regularization weight
     bn_weight: float = 0.0  # Batch normalization statistics weight
     bn_strategy: str = "running"  # "running", "inferred", "proxy"
     bn_momentum: float = 0.1  # Only for inferred strategy
     label_entropy_weight: float = 0.0  # Entropy regularization for joint label optimization
+    group_weight: float = 0.0  # Group consistency regularization weight (multi-seed)
+
+    # Multi-seed optimization (See Through Gradients)
+    num_seeds_per_image: int = 1  # Number of random seeds per image (G in paper)
+    seed_aggregation_method: str = "none"  # "none", "mean", "registered"
 
     # Optimizer settings
     learning_rate: float = 0.1
@@ -104,11 +139,28 @@ class AttackConfig:
 
     # Step strategy
     use_gradient_sign: bool = False  # Use sign of gradients in updates
+    gradient_noise_std: float = 0.0  # Std dev of Gaussian noise added to gradients
 
-    # Training simulation
+    # Training simulation parameters (used as base, can be overridden by client)
     training_simulator_epochs: int = 1
     training_simulator_compute_mode: str = "gradients"  # "gradients" or "updates"
     training_simulator_model_mode: str = "eval"  # "eval" or "train"
+    training_simulator_mode: str = "attack"  # "attack" (deterministic) or "client" (shuffled batches)
+    training_simulator_batch_size: int | None = None  # Mini-batch size for gradient updates (not total images)
+
+    # Client settings override control (which settings to copy from client observations)
+    use_client_epochs: bool = True  # If True, use client's epochs instead of training_simulator_epochs
+    use_client_batch_size: bool = True  # If True, use client's batch_size
+    use_client_compute_mode: bool = True  # If True, use client's compute_mode
+    use_client_model_mode: bool = True  # If True, use client's model_mode
+
+    # Epoch handling strategy for reconstruction
+    epoch_handling_strategy: str = "repeated_same"  # "multi_epoch_separate" or "repeated_same"
+
+    # FedAvg-specific parameters (Dimitrov attack)
+    fedavg_lambda_inv: float = 0.0  # Weight for epoch order-invariant prior
+    fedavg_order_invariant_fn: str = "mean"  # "mean", "sum", "variance"
+    fedavg_matching_metric: str = "l2"  # Metric for epoch matching ("l2", "cosine")
 
     # Constraint
     use_clip_constraint: bool = True  # Clip reconstruction to valid range
@@ -116,9 +168,8 @@ class AttackConfig:
     # Loss function
     loss_fn: nn.Module | None = None  # Custom loss function (default: CrossEntropyLoss)
 
-    def build(self, training_simulator: MultiEpochTrainingSimulation = None) -> ModularGIAOrchestrator:
-        """Build the attack orchestrator from this configuration."""
-        # Build threat model using literature taxonomy
+    def _build_threat_model(self) -> ThreatModel:
+        """Build threat model from configuration."""
         threat_model_factories = {
             "model_a": model_a_eavesdropper,
             "model_b": model_b_informed,
@@ -133,9 +184,10 @@ class AttackConfig:
                 f"Available: {list(threat_model_factories.keys())}"
             )
 
-        threat_model = threat_model_factories[self.threat_model_type]()
+        return threat_model_factories[self.threat_model_type]()
 
-        # Build label inference and strategy
+    def _build_label_components(self) -> Tuple:
+        """Build label inference and strategy components."""
         label_factories = {
             "oracle": (OracleLabels, FixedLabels),
             "idlg": (IDLGLabelInference, FixedLabels),
@@ -143,22 +195,33 @@ class AttackConfig:
         }
 
         label_inference_cls, label_strategy_cls = label_factories[self.labels]
+        return label_inference_cls(), label_strategy_cls()
 
-        label_inference = label_inference_cls()
-        label_strategy = label_strategy_cls()
+    def _build_bn_loss_component(self) -> BNStatisticsRegularization:
+        """Build batch normalization statistics loss component."""
+        if self.bn_strategy == "running":
+            bn_strategy_obj = RunningBNStatisticsStrategy()
+        elif self.bn_strategy == "inferred":
+            bn_strategy_obj = InferredBNStatisticsStrategy(momentum=self.bn_momentum)
+        elif self.bn_strategy == "proxy":
+            bn_strategy_obj = ProxyBNStatisticsStrategy()
+        else:
+            raise ValueError(f"Unknown bn_strategy: {self.bn_strategy}")
 
-        # Build initialization
-        initialization = RandomNoiseInitialization(mean=0.0, std=1.0)
+        return BNStatisticsRegularization(strategy=bn_strategy_obj, weight=self.bn_weight)
 
-        # Build training simulator first (needed by loss components)
-        if training_simulator is None:
-            training_simulator = MultiEpochTrainingSimulation(
-                epochs=self.training_simulator_epochs,
-                compute_mode=self.training_simulator_compute_mode,
-                model_mode=self.training_simulator_model_mode,
-            )
+    def _build_loss_components(
+        self,
+        training_simulator: MultiEpochTrainingSimulation,
+        training_settings: TrainingSettings,
+    ) -> list:
+        """Build loss components from configuration.
 
-        # Build loss components (pass training_simulator explicitly to those that need it)
+        Args:
+            training_simulator: The training simulator to use
+            training_settings: The training settings (contains actual epochs to use)
+
+        """
         loss_components = [
             GradientMatchingLoss(
                 loss_type=self.gradient_loss_type,
@@ -170,30 +233,163 @@ class AttackConfig:
         if self.tv_weight > 0:
             loss_components.append(TVRegularization(weight=self.tv_weight))
 
-        if self.bn_weight > 0:
-            if self.bn_strategy == "running":
-                bn_strategy_obj = RunningBNStatisticsStrategy()
-            elif self.bn_strategy == "inferred":
-                bn_strategy_obj = InferredBNStatisticsStrategy(momentum=self.bn_momentum)
-            elif self.bn_strategy == "proxy":
-                bn_strategy_obj = ProxyBNStatisticsStrategy()
-            else:
-                raise ValueError(f"Unknown bn_strategy: {self.bn_strategy}")
+        if self.l2_weight > 0:
+            loss_components.append(L2Regularization(weight=self.l2_weight))
 
-            loss_components.append(
-                BNStatisticsRegularization(strategy=bn_strategy_obj, weight=self.bn_weight)
-            )
+        if self.bn_weight > 0:
+            loss_components.append(self._build_bn_loss_component())
 
         if self.label_entropy_weight > 0 and self.labels == "joint":
             loss_components.append(
                 LabelEntropyRegularization(weight=self.label_entropy_weight)
             )
 
+        # Add epoch order-invariant prior for multi-epoch FedAvg attacks
+        if self.fedavg_lambda_inv > 0 and training_settings.epochs > 1:
+            loss_components.append(
+                EpochOrderInvariantPrior(
+                    order_invariant_function=self.fedavg_order_invariant_fn,
+                    weight=self.fedavg_lambda_inv,
+                    epochs=training_settings.epochs,
+                )
+            )
+
+        return loss_components
+
+    def _build_seed_aggregation(self) -> AggregationStrategy:
+        """Build seed aggregation strategy from configuration."""
+        if self.seed_aggregation_method == "mean":
+            return MeanSeedAggregation()
+        if self.seed_aggregation_method == "registered":
+            return RegisteredSeedAggregation()
+        if self.seed_aggregation_method == "none":
+            return NoSeedAggregation()
+        raise ValueError(f"Unknown seed_aggregation_method: {self.seed_aggregation_method}")
+
+    def _build_epoch_handling_strategy(self) -> EpochHandlingStrategy:
+        """Build epoch handling strategy from configuration."""
+        if self.epoch_handling_strategy == "multi_epoch_separate":
+            return MultiEpochSeparate()
+        if self.epoch_handling_strategy == "repeated_same":
+            return SingleStorageReused()
+        raise ValueError(f"Unknown epoch_handling_strategy: {self.epoch_handling_strategy}")
+
+    def build(
+        self,
+        client_observations: ClientObservations | None = None,
+    ) -> ModularGIAOrchestrator:
+        """Build the attack orchestrator from this configuration.
+
+        Args:
+            client_observations: Optional ClientObservations (used for validation only).
+                Config parameters are always used as specified.
+
+        """
+        # Build threat model
+        threat_model = self._build_threat_model()
+
+        # Build label inference and strategy
+        label_inference, label_strategy = self._build_label_components()
+
+        # Build initialization (epochs will be determined at runtime from client_observations)
+        initialization = RandomNoiseInitialization(mean=0.0, std=1.0)
+
+        # Build epoch handling strategy
+        epoch_handling_strategy = self._build_epoch_handling_strategy()
+
+        # Determine training settings: start with config values, override with client if flags set
+        epochs = self.training_simulator_epochs
+        batch_size = self.training_simulator_batch_size
+        compute_mode = self.training_simulator_compute_mode
+        model_mode = self.training_simulator_model_mode
+
+        # Apply client settings if requested and available
+        if client_observations is not None and client_observations.training_settings is not None:
+            client_settings = client_observations.training_settings
+
+            if self.use_client_epochs:
+                epochs = client_settings.epochs
+                logger.info(f"✓ Using client epochs: {epochs}")
+
+            if self.use_client_batch_size and client_settings.training_batch_size is not None:
+                batch_size = client_settings.training_batch_size
+                logger.info(f"✓ Using client batch_size: {batch_size}")
+
+            if self.use_client_compute_mode:
+                compute_mode = client_settings.compute_mode
+                logger.info(f"✓ Using client compute_mode: {compute_mode}")
+
+            if self.use_client_model_mode:
+                model_mode = client_settings.model_mode
+                logger.info(f"✓ Using client model_mode: {model_mode}")
+
+        # Create final training settings
+        training_settings = TrainingSettings(
+            epochs=epochs,
+            optimizer_type="sgd",
+            training_batch_size=batch_size,
+            compute_mode=compute_mode,
+            model_mode=model_mode,
+            shuffle_mode=self.training_simulator_mode,
+        )
+
+        logger.info(
+            f"✓ Attack configured with: "
+            f"epochs={training_settings.epochs}, "
+            f"compute_mode={training_settings.compute_mode}, "
+            f"batch_size={training_settings.training_batch_size}"
+        )
+
+        # Build training simulator for attack (uses "attack" mode - deterministic)
+        training_simulator = MultiEpochTrainingSimulation(
+            epochs=training_settings.epochs,
+            optimizer_type=training_settings.optimizer_type,
+            batch_size=training_settings.training_batch_size,
+            compute_mode=training_settings.compute_mode,
+            model_mode=training_settings.model_mode,
+            shuffle_mode="attack",  # Attack always uses deterministic mode
+            epoch_handling_strategy=epoch_handling_strategy,  # Pass strategy to simulator
+            )
+
+        # Build loss components (pass training_settings for accurate epoch counts)
+        loss_components = self._build_loss_components(training_simulator, training_settings)
+
+        # Build seed aggregation strategy
+        seed_aggregation = self._build_seed_aggregation()
+
+        # Build epoch aggregation strategy for multi-epoch attacks
+        # Automatically enabled when:
+        # - Multiple epochs (> 1)
+        # - Using multi-epoch-separate strategy (Dimitrov-style)
+        epoch_aggregation = None
+        if (training_settings.epochs > 1 and
+            self.epoch_handling_strategy == "multi_epoch_separate"):
+            epoch_aggregation = EpochMatchingConsensus(
+                epochs=training_settings.epochs,
+                metric=self.fedavg_matching_metric,
+            )
+            logger.info(
+                f"✓ Enabled epoch matching aggregation: "
+                f"epochs={training_settings.epochs}, metric={self.fedavg_matching_metric}"
+            )
+
+        # Add group consistency if multi-seed and weight > 0
+        if self.group_weight > 0 and self.num_seeds_per_image > 1:
+            loss_components.append(
+                GroupConsistencyRegularization(
+                    seed_aggregation=seed_aggregation,
+                    weight=self.group_weight
+                )
+            )
+
         # Build constraint
         constraint = ClipConstraint() if self.use_clip_constraint else None
 
         # Build step strategy
-        step_strategy = StandardStepStrategy(use_gradient_sign=self.use_gradient_sign) if self.use_gradient_sign else None
+        step_strategy = StandardStepStrategy(
+            use_gradient_sign=self.use_gradient_sign,
+            gradient_noise_std=self.gradient_noise_std
+        ) if self.use_gradient_sign or self.gradient_noise_std > 0 else None
 
         # Build optimizer
         optimization = ComposableOptimizer(
@@ -210,6 +406,8 @@ class AttackConfig:
             log_interval=self.log_interval,
             training_simulator=training_simulator,
             loss_fn=self.loss_fn,
+            seed_aggregation=seed_aggregation if self.num_seeds_per_image > 1 else None,
+            epoch_aggregation=epoch_aggregation,
         )
 
         return ModularGIAOrchestrator(
@@ -217,6 +415,8 @@ class AttackConfig:
             label_inference=label_inference,
             initialization=initialization,
             optimization=optimization,
+            num_seeds_per_image=self.num_seeds_per_image,
+            epoch_handling_strategy=epoch_handling_strategy,
         )
 
 
@@ -364,6 +564,8 @@ def inverting_gradients_attack() -> AttackConfig:
         use_clip_constraint=True,
         training_simulator_epochs=1,
         training_simulator_model_mode="eval",
+        training_simulator_compute_mode="updates",
+        use_client_compute_mode=True,  # Use client's actual compute mode
     )
 
 
@@ -412,6 +614,8 @@ def huang_attack() -> AttackConfig:
         use_clip_constraint=True,
         training_simulator_epochs=1,
         training_simulator_model_mode="train",
+        training_simulator_compute_mode="updates",
+        use_client_compute_mode=True,  # Use client's actual compute mode
     )
 
 
@@ -460,6 +664,8 @@ def gia_running_attack() -> AttackConfig:
         use_clip_constraint=True,
         training_simulator_epochs=1,
         training_simulator_model_mode="train",
+        training_simulator_compute_mode="updates",
+        use_client_compute_mode=True,  # Use client's actual compute mode
     )
 
 
@@ -514,6 +720,178 @@ def gia_estimate_attack() -> AttackConfig:
         use_clip_constraint=True,
         training_simulator_epochs=1,
         training_simulator_model_mode="train",
+        training_simulator_compute_mode="updates",
+        use_client_compute_mode=True,  # Use client's actual compute mode
+    )
+
+
+def see_through_gradients_attack() -> AttackConfig:
+    """See Through Gradients attack with multi-seed optimization and BN matching.
+
+    This attack (Yin et al., CVPR 2021) is designed for batch gradient inversion
+    and introduces two key innovations:
+
+    1. **Multi-seed optimization**: Each image in the batch is reconstructed using
+       G parallel random initializations (seeds) that are jointly optimized. This
+       helps overcome local minima and spatial ambiguity caused by CNN translational
+       invariance.
+
+    2. **Group consistency regularization**: Seeds for the same image are regularized
+       to stay near their group consensus (mean), preventing excessive divergence
+       while allowing exploration of the optimization landscape.
+
+    After optimization, the G seeds per image are aggregated (averaged) to produce
+    the final reconstruction.
+
+    Threat Model: Model E (Statistical-Informed Eavesdropper)
+    - Has access to: Gradients + BN running statistics + auxiliary knowledge
+
+    Components:
+    - iDLG label inference (batch-aware analytical inference)
+    - Multi-seed random noise initialization (G=4 seeds per image)
+    - Adam optimizer with cosine LR schedule
+    - Gradient noise injection (Gaussian noise added to gradients during optimization)
+    - Loss components:
+      * Gradient matching (L2 distance, weight=1.0)
+      * BN statistics matching (weight=0.01)
+      * TV regularization (weight=1e-4)
+      * L2 regularization (weight=1e-6)
+      * Group consistency (weight=0.001)
+    - Mean seed aggregation (pixel-wise averaging across seeds)
+
+    Default Settings:
+        - num_seeds_per_image: 4 (G in paper)
+        - seed_aggregation_method: "mean"
+        - group_weight: 0.001 (α_group in paper)
+        - learning_rate: 0.1
+        - max_iterations: 8000
+        - optimizer_type: "adam"
+        - scheduler_type: "cosine"
+        - gradient_loss_type: "l2"
+        - gradient_noise_std: 0.01
+        - tv_weight: 1e-4
+        - l2_weight: 1e-6
+        - bn_weight: 0.01
+        - bn_strategy: "running"
+        - labels: "oracle"
+
+    Memory Note:
+        Multi-seed optimization requires G× memory (e.g., 4 seeds → 4× memory).
+        For a batch of N=8 images with G=4 seeds, you're optimizing 32 images
+        simultaneously. Consider reducing batch size if memory is limited.
+
+    Usage:
+        # Basic usage
+        config = see_through_gradients_attack()
+        attack = config.build()
+
+        # Adjust for memory constraints
+        config = see_through_gradients_attack()
+        config.num_seeds_per_image = 2  # Reduce to 2 seeds
+        config.max_iterations = 4000  # Fewer iterations
+        attack = config.build()
+
+        # Disable multi-seed (fallback to single-seed)
+        config = see_through_gradients_attack()
+        config.num_seeds_per_image = 1
+        config.group_weight = 0.0
+        config.seed_aggregation_method = "none"
+        attack = config.build()
+
+    Reference:
+        Yin, H., Molchanov, P., Alvarez, J. M., Li, Z., Mallya, A., Hoiem, D.,
+        ... & Kautz, J. (2021). See through Gradients: Image Batch Recovery via
+        GradInversion. In CVPR 2021.
+
+        Equation 11: Group consistency regularization
+        L_group = α_group * Σ_g ||x̂_g - E(x̂_group)||²
+
+    """
+    return AttackConfig(
+        threat_model_type="model_e",  # Has BN statistics + full capabilities
+        labels="oracle",
+        gradient_loss_type="l2",
+        tv_weight=1e-4,
+        l2_weight=1e-6,
+        bn_weight=1e-2,
+        bn_strategy="running",
+        group_weight=1e-2,
+        num_seeds_per_image=4,
+        seed_aggregation_method="mean",
+        learning_rate=0.1,
+        max_iterations=8000,
+        optimizer_type="adam",
+        scheduler_type="cosine",
+        gradient_noise_std=0.2,  # Add noise to gradients during optimization
+        use_clip_constraint=True,
+        training_simulator_epochs=1,
+        training_simulator_model_mode="train",
+        training_simulator_compute_mode="updates",
+        use_client_compute_mode=True,  # Use client's actual compute mode
+    )
+
+
+def dimitrov_fedavg_attack() -> AttackConfig:
+    """Dimitrov et al. FedAvg multi-epoch attack (2022).
+
+    This attack reconstructs client data from FedAvg parameter updates
+    where the client performs multiple local epochs with multiple batches
+    per epoch. The key innovation is simulating the full FedAvg training
+    process and using an epoch order-invariant prior.
+
+    Key features:
+    - Reconstructs E×N images (one per image per epoch)
+    - Simulates client training end-to-end
+    - Uses order-invariant prior to match images across epochs
+    - Epoch matching automatically enabled (fedavg_lambda_inv > 0)
+
+    Training Settings:
+    - By default, uses client's actual epochs (use_client_epochs=True)
+    - Fallback: 3 epochs if client settings unavailable
+
+    Usage examples:
+        # Use client's actual epochs (default behavior)
+        config = dimitrov_fedavg_attack()
+        attack = config.build(client_observations)
+
+    Reference:
+        Dimitrov, D. I., Balunovic, M., Konstantinov, N., & Vechev, M. (2022).
+        Data Leakage in Federated Averaging. Transactions on Machine Learning
+        Research.
+
+    """
+    return AttackConfig(
+        threat_model_type="model_c",  # Has local hyperparameters
+        labels="oracle",
+        gradient_loss_type="cosine",
+        tv_weight=1e-4,
+        l2_weight=0.0,
+        bn_weight=0.0,
+        learning_rate=1.0,
+        max_iterations=8000,
+        optimizer_type="adam",
+        scheduler_type="cosine",
+        use_clip_constraint=True,
+        # Multi-epoch training simulation (fallback if client settings unavailable)
+        training_simulator_epochs=3,
+        training_simulator_compute_mode="updates",  # FedAvg uses parameter updates
+        training_simulator_model_mode="eval",
+        training_simulator_mode="attack",  # "attack" (deterministic) or "client" (realistic)
+        training_simulator_batch_size=1,
+        # Client settings override (Dimitrov uses client's actual training settings)
+        use_client_epochs=True,  # Use client's actual epochs
+        use_client_batch_size=True,  # Use client's actual batch size
+        use_client_compute_mode=True,  # Use client's actual compute mode
+        use_client_model_mode=True,  # Use client's actual model mode
+        # Epoch handling - separate images per epoch (Dimitrov style)
+        epoch_handling_strategy="multi_epoch_separate",
+        # FedAvg-specific parameters
+        fedavg_lambda_inv=1e-6,  # Weight for epoch order-invariant prior (also enables epoch matching)
+        fedavg_order_invariant_fn="mean",  # "mean", "sum", "variance"
+        fedavg_matching_metric="l2",  # Metric for epoch matching
+        # Single seed
+        num_seeds_per_image=1,
+        seed_aggregation_method="none",
     )
 
 
@@ -525,4 +903,6 @@ __all__ = [
     "huang_attack",
     "gia_running_attack",
     "gia_estimate_attack",
+    "see_through_gradients_attack",
+    "dimitrov_fedavg_attack",
 ]

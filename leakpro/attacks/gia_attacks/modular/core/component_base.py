@@ -146,16 +146,65 @@ class InitializationStrategy(Component):
         shape: tuple[int, ...],
         device: torch.device,
         dtype: torch.dtype = torch.float32,
+        num_seeds: int = 1,
     ) -> InitializationResult:
         """Initialize reconstruction.
 
         Args:
-            shape: Shape of reconstruction tensor
+            shape: Shape of reconstruction tensor (e.g., [B, C, H, W])
             device: Device to create tensor on
             dtype: Data type for tensor
+            num_seeds: Number of seeds per image for multi-seed optimization
 
         Returns:
-            InitializationResult with initial reconstruction
+            InitializationResult with initial reconstruction.
+            Shape will be [B, G, C, H, W] if num_seeds > 1, else [B, C, H, W]
+
+        """
+        pass
+
+
+# =============================================================================
+# Seed Aggregation Components
+# =============================================================================
+
+
+class AggregationStrategy(Component):
+    """Base class for aggregation strategies.
+
+    Aggregation strategies handle combining multiple reconstruction candidates
+    into a consensus reconstruction. This includes:
+    - Seed aggregation: Combining multiple random initializations per image
+    - Epoch aggregation: Matching and averaging across training epochs (FedAvg)
+
+    When reconstruction has shape [E, N, G, C, H, W] where:
+    - E = number of epochs (1 for single-epoch attacks)
+    - N = num_images (number of images being reconstructed)
+    - G = number of seeds per image
+    - C, H, W = image dimensions
+
+    This component computes consensus, used both:
+    1. During optimization for group consistency regularization
+    2. After optimization for final aggregation
+
+    References:
+        - Yin et al., "See through Gradients", CVPR 2021 (seed aggregation)
+        - Dimitrov et al., "Data Leakage in Federated Averaging", 2022 (epoch matching)
+
+    """
+
+    @abstractmethod
+    def compute_consensus(self, reconstruction: torch.Tensor) -> torch.Tensor:
+        """Compute consensus across seeds.
+
+        Used both during optimization (for group consistency loss) and
+        after optimization (for final aggregation).
+
+        Args:
+            reconstruction: Tensor of shape [B, G, C, H, W]
+
+        Returns:
+            Consensus tensor of shape [B, C, H, W]
 
         """
         pass
@@ -229,6 +278,8 @@ __all__ = [
     # Initialization
     "InitializationResult",
     "InitializationStrategy",
+    # Seed Aggregation
+    "AggregationStrategy",
     # Optimization
     "OptimizationState",
     "OptimizationStrategy",

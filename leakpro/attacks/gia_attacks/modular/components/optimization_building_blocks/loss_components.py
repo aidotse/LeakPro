@@ -13,10 +13,14 @@ from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks
     BNStatisticsStrategy,
 )
 from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.training_simulator import (
-    DirectGradientComputation,
+    MultiEpochTrainingSimulation,
     TrainingSimulator,
 )
-from leakpro.attacks.gia_attacks.modular.core.component_base import Component, ComponentMetadata
+from leakpro.attacks.gia_attacks.modular.core.component_base import (
+    AggregationStrategy,
+    Component,
+    ComponentMetadata,
+)
 from leakpro.fl_utils.fl_client_simulator import ClientObservations
 
 
@@ -105,7 +109,9 @@ class GradientMatchingLoss(LossComponent):
         """
         super().__init__(weight)
         self.loss_type = loss_type
-        self.training_simulator = training_simulator or DirectGradientComputation()
+        self.training_simulator = training_simulator or MultiEpochTrainingSimulation(
+            epochs=1, compute_mode="gradients", model_mode="eval"
+        )
 
         if loss_type not in ["l2", "cosine", "fisher"]:
             raise ValueError(f"Unknown loss_type: {loss_type}")
@@ -126,9 +132,9 @@ class GradientMatchingLoss(LossComponent):
         """Compute gradient matching loss.
 
         Args:
-            reconstruction: Current reconstruction
+            reconstruction: Current reconstruction from optimizer [E, B, G, C, H, W]
             model: Target model
-            labels: Labels for reconstruction
+            labels: Labels for reconstruction [B] or [B, K]
             target_gradients: True gradients/updates to match
             loss_fn: Loss function for gradient computation
 
@@ -144,8 +150,47 @@ class GradientMatchingLoss(LossComponent):
             labels=labels,
             loss_fn=loss_fn,
         )
-        reconstructed_values = list(reconstructed_values_dict.values())
 
+        # Check if multi-seed results
+        if "seed_results" in reconstructed_values_dict:
+            # Multi-seed: compute loss for each seed and average
+            seed_gradients = reconstructed_values_dict["seed_results"]
+            num_seeds = reconstructed_values_dict["num_seeds"]
+
+            total_loss = 0.0
+            for seed_grads in seed_gradients:
+                reconstructed_values = list(seed_grads.values())
+                seed_loss = self._compute_matching_loss(
+                    reconstructed_values, target_gradients
+                )
+                total_loss += seed_loss
+
+            # Average across seeds
+            total_loss = total_loss / num_seeds
+        else:
+            # Single seed: compute loss directly
+            reconstructed_values = list(reconstructed_values_dict.values())
+            total_loss = self._compute_matching_loss(
+                reconstructed_values, target_gradients
+            )
+
+        return total_loss * self.weight
+
+    def _compute_matching_loss(
+        self,
+        reconstructed_values: List[torch.Tensor],
+        target_gradients: List[torch.Tensor],
+    ) -> torch.Tensor:
+        """Compute matching loss between reconstructed and target gradients.
+
+        Args:
+            reconstructed_values: List of reconstructed gradient tensors
+            target_gradients: List of target gradient tensors
+
+        Returns:
+            Matching loss (scalar)
+
+        """
         # Match values using specified distance metric
         if self.loss_type == "l2":
             total_loss = sum(
@@ -167,7 +212,8 @@ class GradientMatchingLoss(LossComponent):
                 total_loss +=  (fisher_weight * (g_rec - g_target).pow(2)).sum()
         else:
             raise ValueError(f"Unknown loss_type: {self.loss_type}")
-        return total_loss * self.weight
+
+        return total_loss
 
 
 class TVRegularization(LossComponent):
@@ -193,7 +239,7 @@ class TVRegularization(LossComponent):
         """Compute TV loss.
 
         Args:
-            reconstruction: Current reconstruction
+            reconstruction: Current reconstruction [E, N, G, C, H, W]
             model: Not used
             labels: Not used
             target_gradients: Not used
@@ -204,9 +250,69 @@ class TVRegularization(LossComponent):
 
         """
         _ = (model, labels, target_gradients, loss_fn)  # Unused parameters
-        dx = torch.abs(reconstruction[:, :, :, :-1] - reconstruction[:, :, :, 1:])
-        dy = torch.abs(reconstruction[:, :, :-1, :] - reconstruction[:, :, 1:, :])
-        return self.weight * dx.mean() + self.weight * dy.mean()
+
+        # Expect [E, N, G, C, H, W] format
+        num_epochs, num_images, num_seeds = reconstruction.shape[:3]
+
+        # Apply TV to each epoch and seed independently, then average
+        total_tv = 0.0
+        for e in range(num_epochs):
+            for g in range(num_seeds):
+                seed_rec = reconstruction[e, :, g, ...]  # [N, C, H, W]
+                dx = torch.abs(seed_rec[:, :, :, :-1] - seed_rec[:, :, :, 1:])
+                dy = torch.abs(seed_rec[:, :, :-1, :] - seed_rec[:, :, 1:, :])
+                total_tv += dx.mean() + dy.mean()
+
+        return self.weight * total_tv / (num_epochs * num_seeds)
+
+
+class L2Regularization(LossComponent):
+    """L2 regularization on reconstruction pixel values.
+
+    Penalizes large pixel values by adding L2 norm to the loss:
+        L_l2 = weight * ||reconstruction||²
+
+    This encourages smaller, more constrained reconstructions and can
+    help prevent extreme pixel values.
+
+    Reference:
+        Yin et al., "See through Gradients", CVPR 2021
+    """
+
+    def __init__(self, weight: float = 1e-4) -> None:
+        """Initialize L2 regularization."""
+        super().__init__(weight)
+
+    @property
+    def name(self) -> str:
+        """Name of this loss component."""
+        return "L2Regularization"
+
+    def compute(
+        self,
+        reconstruction: torch.Tensor,
+        model: nn.Module,
+        labels: torch.Tensor,
+        target_gradients: List[torch.Tensor],
+        loss_fn: nn.Module,
+    ) -> torch.Tensor:
+        """Compute L2 regularization loss.
+
+        Args:
+            reconstruction: Current reconstruction [E, B, G, C, H, W]
+            model: Not used
+            labels: Not used
+            target_gradients: Not used
+            loss_fn: Not used
+
+        Returns:
+            L2 regularization loss
+
+        """
+        _ = (model, labels, target_gradients, loss_fn)  # Unused parameters
+
+        # Compute squared L2 norm
+        return self.weight * reconstruction.pow(2).mean()
 
 
 class LabelEntropyRegularization(LossComponent):
@@ -396,10 +502,253 @@ class BNStatisticsRegularization(LossComponent):
         return metadata.required_capabilities
 
 
+class GroupConsistencyRegularization(LossComponent):
+    """Group consistency regularization for multi-seed optimization.
+
+    Encourages multiple seeds for the same image to converge towards a
+    consensus, preventing excessive divergence while allowing exploration.
+
+    For reconstruction with shape [B, G, C, H, W]:
+    - Computes consensus image for each of B images across its G seeds
+    - Penalizes each seed for deviating from the consensus
+
+    Loss formula (from See Through Gradients paper):
+        L_group = (1/G) * Σ_g ||x̂_g - E(x̂_group)||²
+
+    Where E(x̂_group) is the consensus (typically mean) across seeds.
+
+    Reference:
+        Yin et al., "See through Gradients: Image Batch Recovery via
+        GradInversion", CVPR 2021, Equation 11
+    """
+
+    def __init__(
+        self,
+        seed_aggregation: AggregationStrategy,
+        weight: float = 0.01,
+    ) -> None:
+        """Initialize group consistency regularization.
+
+        Args:
+            seed_aggregation: Strategy for computing consensus across seeds
+            weight: Regularization weight (α_group in paper)
+
+        """
+        super().__init__(weight)
+        self.seed_aggregation = seed_aggregation
+
+    @property
+    def name(self) -> str:
+        """Name of this loss component."""
+        return "GroupConsistencyRegularization"
+
+    def compute(
+        self,
+        reconstruction: torch.Tensor,
+        model: nn.Module,
+        labels: torch.Tensor,
+        target_gradients: List[torch.Tensor],
+        loss_fn: nn.Module,
+    ) -> torch.Tensor:
+        """Compute group consistency regularization loss.
+
+        Args:
+            reconstruction: Current reconstruction, shape [E, B, G, C, H, W]
+            model: Not used
+            labels: Not used
+            target_gradients: Not used
+            loss_fn: Not used
+
+        Returns:
+            Group consistency loss (scalar)
+
+        """
+        _ = (model, labels, target_gradients, loss_fn)  # Unused parameters
+
+        # Expect [E, B, G, C, H, W] format
+        num_epochs, num_images, num_seeds = reconstruction.shape[:3]
+
+        if num_seeds == 1:
+            # Single seed, no consistency needed
+            return torch.tensor(0.0, device=reconstruction.device)
+
+        # Compute consensus for each image across its seeds
+        # consensus shape: [E, B, C, H, W]
+        consensus = self.seed_aggregation.compute_consensus(reconstruction)
+
+        # Compute deviation of each seed from its group consensus
+        total_loss = torch.tensor(0.0, device=reconstruction.device)
+
+        for g in range(num_seeds):
+            seed_reconstruction = reconstruction[:, :, g, ...]  # [E, B, C, H, W]
+            deviation = (seed_reconstruction - consensus).pow(2).mean()
+            total_loss += deviation
+
+        # Average across seeds
+        total_loss = total_loss / num_seeds
+
+        return self.weight * total_loss
+
+    @classmethod
+    def get_metadata(cls) -> ComponentMetadata:
+        """Return metadata for group consistency regularization."""
+        return ComponentMetadata(
+            name="GroupConsistencyRegularization",
+            display_name="Group Consistency Regularization",
+            description="Regularizes multiple seeds to stay near consensus",
+            required_capabilities={},
+            paper_reference="Yin et al., See Through Gradients, CVPR 2021",
+        )
+
+
+class EpochOrderInvariantPrior(LossComponent):
+    """Epoch order-invariant prior for FedAvg multi-epoch attacks.
+
+    Enforces that order-invariant functions over all images in different epochs
+    should produce the same result, since each image appears exactly once per epoch.
+
+    Implements Equation 3 from Dimitrov et al.:
+    L_inv = (1/E²) Σ_{e1,e2} D_inv(g(X̃_{e1}), g(X̃_{e2}))
+
+    Reference:
+        Dimitrov et al., "Data Leakage in Federated Averaging", TMLR 2022
+    """
+
+    def __init__(
+        self,
+        order_invariant_function: str = "mean",
+        distance_function: str = "l2",
+        weight: float = 0.1,
+        epochs: int = 3,
+    ) -> None:
+        """Initialize epoch order-invariant prior.
+
+        Args:
+            order_invariant_function: Function to aggregate images within an epoch
+                - "mean": Mean of all images
+                - "sum": Sum of all images
+                - "variance": Variance across images
+            distance_function: Distance to compare aggregated epoch representations
+                - "l2": L2 distance
+                - "l1": L1 distance
+            weight: Loss weight (λ_inv in paper)
+            epochs: Number of epochs (E)
+
+        """
+        super().__init__(weight)
+        self.order_invariant_function = order_invariant_function
+        self.distance_function = distance_function
+        self.epochs = epochs
+
+        if order_invariant_function not in ["mean", "sum", "variance"]:
+            raise ValueError(f"Unknown order_invariant_function: {order_invariant_function}")
+
+        if distance_function not in ["l2", "l1"]:
+            raise ValueError(f"Unknown distance_function: {distance_function}")
+
+    @property
+    def name(self) -> str:
+        """Name of this loss component."""
+        return f"EpochOrderInvariantPrior(g={self.order_invariant_function})"
+
+    @classmethod
+    def get_metadata(cls) -> ComponentMetadata:
+        """Return metadata for this loss component."""
+        return ComponentMetadata(
+            name=cls.__name__,
+            display_name="Epoch Order-Invariant Prior (FedAvg)",
+            description="Enforce order-invariant properties across epochs",
+            required_capabilities={},
+            paper_reference="Dimitrov et al., Data Leakage in Federated Averaging, TMLR 2022",
+        )
+
+    def compute(
+        self,
+        reconstruction: torch.Tensor,
+        model: nn.Module,
+        labels: torch.Tensor,
+        target_gradients: List[torch.Tensor],
+        loss_fn: nn.Module,
+    ) -> torch.Tensor:
+        """Compute epoch order-invariant prior loss.
+
+        Args:
+            reconstruction: Reconstruction in [E, B, G, C, H, W] format
+            model: Target model (unused)
+            labels: Labels (unused)
+            target_gradients: Target gradients (unused)
+            loss_fn: Loss function (unused)
+
+        Returns:
+            Loss tensor (scalar)
+
+        """
+        _ = (model, labels, target_gradients, loss_fn)  # Unused
+
+        num_epochs, num_images, num_seeds = reconstruction.shape[:3]
+
+        # Validate dimensions
+        if num_epochs != self.epochs:
+            raise ValueError(f"Expected E={self.epochs} epochs, got {num_epochs}")
+
+        # No prior applies for single epoch
+        if num_epochs == 1:
+            return torch.tensor(0.0, device=reconstruction.device, dtype=reconstruction.dtype)
+
+        # Process each seed separately and average
+        total_loss = sum(
+            self._compute_single_seed_prior(reconstruction[:, :, g, ...])
+            for g in range(num_seeds)
+        ) / num_seeds
+
+        return total_loss * self.weight
+
+    def _compute_single_seed_prior(self, reconstruction: torch.Tensor) -> torch.Tensor:
+        """Compute prior for a single seed.
+
+        Args:
+            reconstruction: Shape [E, B, C, H, W]
+
+        Returns:
+            Prior loss (scalar)
+
+        """
+        num_epochs = reconstruction.shape[0]
+
+        # Compute order-invariant representation for each epoch
+        epoch_representations = []
+        for e in range(num_epochs):
+            epoch_images = reconstruction[e]  # [B, C, H, W]
+
+            # Apply order-invariant function
+            if self.order_invariant_function == "mean":
+                epoch_repr = epoch_images.mean(dim=0)
+            elif self.order_invariant_function == "sum":
+                epoch_repr = epoch_images.sum(dim=0)
+            elif self.order_invariant_function == "variance":
+                epoch_repr = epoch_images.var(dim=0)
+
+            epoch_representations.append(epoch_repr)
+
+        # Compute pairwise distances (upper triangle only)
+        total_loss = 0.0
+        for e1 in range(num_epochs):
+            for e2 in range(e1 + 1, num_epochs):
+                repr1, repr2 = epoch_representations[e1], epoch_representations[e2]
+                dist = (repr1 - repr2).pow(2).sum() if self.distance_function == "l2" else (repr1 - repr2).abs().sum()
+                total_loss += dist
+
+        # Normalize by number of pairs: E*(E-1)/2
+        return total_loss / (num_epochs * (num_epochs - 1) / 2) if num_epochs > 1 else total_loss
+
+
 __all__ = [
     "LossComponent",
     "GradientMatchingLoss",
     "TVRegularization",
+    "L2Regularization",
     "LabelEntropyRegularization",
     "BNStatisticsRegularization",
+    "GroupConsistencyRegularization",
+    "EpochOrderInvariantPrior",
 ]

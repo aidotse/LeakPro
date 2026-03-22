@@ -10,7 +10,7 @@ from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks
 from leakpro.fl_utils.fl_client_simulator import FLClientSimulator
 from leakpro.utils.seed import seed_everything
 from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.training_simulator import (
-    MultiEpochTrainingSimulation,
+    TrainingSettings,
 )
 
 from cifar import get_cifar10_loader
@@ -33,25 +33,29 @@ def main():
     # Data
     print("Loading CIFAR-10...")
     dataloader, data_mean, data_std = get_cifar10_loader(
-        num_images=8,
-        batch_size=8,
+        num_images=4,
+        batch_size=4,
         num_workers=0
     )
 
     proxy_dataloader, _, _ = get_cifar10_loader(
         start_idx=32,
-        num_images=8,
-        batch_size=8,
+        num_images=4,
+        batch_size=4,
         num_workers=0
     )
     
     data_mean = data_mean.to(device)
     data_std = data_std.to(device)
-    
-    training_simulator = MultiEpochTrainingSimulation(epochs=1, 
-                                                      compute_mode="updates", 
-                                                      model_mode="train",
-                                                      )
+
+    training_settings = TrainingSettings(
+        epochs=1,
+        optimizer_type="sgd",
+        training_batch_size=4,
+        compute_mode="updates",
+        model_mode="train",
+        shuffle_mode="client",
+    )
 
     client_simulator = FLClientSimulator(
         client_data=dataloader,
@@ -63,7 +67,7 @@ def main():
 
     client_observation = client_simulator.train_and_observe(
         server_model=model,
-        training_simulator=training_simulator,
+        training_settings=training_settings,
         loss_fn=nn.CrossEntropyLoss(),
         send_labels_to_server=True, 
         threat_model="gia_running",
@@ -92,7 +96,7 @@ def main():
     for attack_name, attack in attacks:
         print(f"\n{'='*20} Running {attack_name} Attack {'='*20}\n")
         attack.max_iterations = 4000
-        attack = attack.build(training_simulator=training_simulator)
+        attack = attack.build(client_observations=client_observation)
         reconstruction, attack_config = attack.run_attack(
             target_model=model,
             input_shape=input_shape,
