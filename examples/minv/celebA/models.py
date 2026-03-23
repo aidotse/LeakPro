@@ -26,7 +26,7 @@ class VGG16(nn.Module):
         feature = feature.view(feature.size(0), -1)
         feature = self.bn(feature)
         res = self.fc_layer(feature)
-        # Important to resolve the issue of returning feature or not
+
         if self.return_feature:
             return [feature, res]
         else:

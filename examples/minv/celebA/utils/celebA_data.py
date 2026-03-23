@@ -125,8 +125,8 @@ def get_celebA_train_test_loader(train_config):
     train_subset = Subset(population_dataset, train_indices)
     test_subset = Subset(population_dataset, test_indices)
 
-    train_loader = DataLoader(train_subset, batch_size =batch_size, shuffle=True)
-    test_loader = DataLoader(test_subset, batch_size= batch_size, shuffle=False)
+    train_loader = DataLoader(train_subset, batch_size=batch_size, shuffle=True)
+    test_loader = DataLoader(test_subset, batch_size=batch_size, shuffle=False)
 
 
     return train_loader, test_loader
@@ -147,5 +147,5 @@ def get_celebA_publicloader(train_config):
             population_dataset = pickle.load(file)
             print(f"Load data from {data_dir}")
 
-    return DataLoader(population_dataset, batch_size =batch_size, shuffle=False)
+    return DataLoader(population_dataset, batch_size=batch_size, shuffle=False)
 

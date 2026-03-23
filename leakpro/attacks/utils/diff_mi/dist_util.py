@@ -18,8 +18,6 @@ except Exception:  # pragma: no cover - optional dependency
 # The GPU for a given rank is (rank % GPUS_PER_NODE).
 GPUS_PER_NODE = 1
 
-SETUP_RETRY_COUNT = 3
-
 
 def setup_dist() -> None:
     """Setup a distributed process group."""
