@@ -504,8 +504,9 @@ class GaussianDiffusion:
             img = th.randn(*shape, device=device)
         indices = list(range(self.num_timesteps))[::-1]
 
-        from tqdm.auto import tqdm
-        indices = tqdm(indices)
+        if progress:
+            from tqdm.auto import tqdm
+            indices = tqdm(indices)
 
         for i in indices:
             t = th.tensor([i] * shape[0], device=device)

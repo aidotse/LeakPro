@@ -332,7 +332,6 @@ def save_tensor(
 
     return label_paths
 
-
 def calc_lpips(
     private_data: torch.utils.data.DataLoader,
     fakes: torch.Tensor,
@@ -341,53 +340,95 @@ def calc_lpips(
 ) -> tuple[float, float]:
     """Calculate LPIPS distance between reconstructed data and target data.
 
+    For each fake image, this computes LPIPS against all real images with the
+    same label, keeps the minimum distance, and then averages over fakes.
+
     Args:
     ----
         private_data: DataLoader containing private/real data.
-        fakes: Reconstructed data (Tensor).
-        fake_targets: Corresponding target labels (Tensor).
+        fakes: Reconstructed data tensor of shape [N, C, H, W].
+        fake_targets: Corresponding labels tensor of shape [N].
         device: Device to run the computations on.
 
     Returns:
     -------
-        value_a: Average LPIPS distance using AlexNet.
-        value_v: Average LPIPS distance using VGG.
-
+        value_a: Mean LPIPS distance using AlexNet features.
+        value_v: Mean LPIPS distance using VGG features.
     """
     try:
-        loss_fn_alex = lpips.LPIPS(net="alex").to(device)  # best forward scores
-        loss_fn_vgg = lpips.LPIPS(net="vgg").to(device)  # closer to "traditional" perceptual loss, when used for optimization
+        loss_fn_alex = lpips.LPIPS(net="alex").to(device)
+        loss_fn_vgg = lpips.LPIPS(net="vgg").to(device)
+        loss_fn_alex.eval()
+        loss_fn_vgg.eval()
 
-        # Load real data and labels from private_data dataloader
-        real_data, real_targets = None, None
+        real_batches = []
+        target_batches = []
         for x in private_data:
-            real_data = x[0] if real_data is None else torch.cat([real_data, x[0]], dim=0)
-            real_targets = x[1] if real_targets is None else torch.cat([real_targets, x[1]], dim=0)
+            real_batches.append(x[0])
+            target_batches.append(x[1])
 
-        real_data = real_data.to(device)
-        real_targets = real_targets.to(device)
+        if len(real_batches) == 0:
+            logger.warning("LPIPS calculation skipped: private_data is empty.")
+            return -1.0, -1.0
 
-        # Get fake data and labels
+        real_data = torch.cat(real_batches, dim=0).to(device)
+        real_targets = torch.cat(target_batches, dim=0).to(device)
+
+        if fakes.numel() == 0 or fake_targets.numel() == 0:
+            logger.warning("LPIPS calculation skipped: no fake samples provided.")
+            return -1.0, -1.0
+
         fakes = fakes.to(device)
         fake_targets = fake_targets.to(device)
-        bs = fake_targets.size(0)
-        value_a, value_v = 0, 0
 
-        # Calculate metric
-        for i in range(bs):
-            single_value_a, single_value_v = -1, -1
-            idx = torch.nonzero(real_targets == fake_targets[i]).squeeze(1)
-            for j in idx:
-                temp_value_a = loss_fn_alex(fakes[i].unsqueeze(0), real_data[j].unsqueeze(0))
-                temp_value_v = loss_fn_vgg(fakes[i].unsqueeze(0), real_data[j].unsqueeze(0))
-                single_value_a = max(single_value_a, temp_value_a)
-                single_value_v = max(single_value_v, temp_value_v)
-            value_a += single_value_a
-            value_v += single_value_v
-        value_a = (value_a / bs).item()
-        value_v = (value_v / bs).item()
+        # LPIPS expects inputs in [-1, 1]. Convert only if inputs look like [0, 1].
+        if real_data.min() >= 0 and real_data.max() <= 1:
+            real_data = real_data * 2 - 1
+        if fakes.min() >= 0 and fakes.max() <= 1:
+            fakes = fakes * 2 - 1
+
+        alex_vals = []
+        vgg_vals = []
+
+        unique_labels = torch.unique(fake_targets)
+
+        with torch.inference_mode():
+            for label in unique_labels:
+                fake_idx = torch.nonzero(fake_targets == label).squeeze(1)
+                real_idx = torch.nonzero(real_targets == label).squeeze(1)
+
+                if fake_idx.numel() == 0 or real_idx.numel() == 0:
+                    continue
+
+                fake_l = fakes[fake_idx]      # [nf, C, H, W]
+                real_l = real_data[real_idx]  # [nr, C, H, W]
+
+                nf = fake_l.shape[0]
+                nr = real_l.shape[0]
+
+                chunk = 16
+                for start in range(0, nf, chunk):
+                    fake_chunk = fake_l[start:start + chunk]
+                    nfc = fake_chunk.shape[0]
+
+                    fake_rep = fake_chunk.repeat_interleave(nr, dim=0)
+                    real_rep = real_l.repeat(nfc, 1, 1, 1)
+
+                    d_alex = loss_fn_alex(fake_rep, real_rep).view(nfc, nr)
+                    d_vgg = loss_fn_vgg(fake_rep, real_rep).view(nfc, nr)
+
+                    alex_vals.append(d_alex.min(dim=1).values)
+                    vgg_vals.append(d_vgg.min(dim=1).values)
+
+        if len(alex_vals) == 0 or len(vgg_vals) == 0:
+            logger.warning("LPIPS calculation skipped: no overlapping labels between real and fake samples.")
+            return -1.0, -1.0
+
+        value_a = torch.cat(alex_vals, dim=0).mean().item()
+        value_v = torch.cat(vgg_vals, dim=0).mean().item()
 
         return value_a, value_v
+
     except Exception as e:
         logger.error(f"LPIPS calculation failed: {e}")
         return -1.0, -1.0
@@ -467,24 +508,47 @@ def calc_mse(
 ) -> tuple[float, dict[int, float], list[float], list[torch.Tensor], list[torch.Tensor]]:
     """Calculate mean squared error between real and fake data grouped by labels.
 
+    For each label, computes the full pairwise MSE matrix between real and fake samples, 
+    stores the average pairwise MSE for that label and for each real sample, stores the 
+    minimum-MSE fake sample and that minimum value
+
     Args:
     ----
         private_data: DataLoader containing private/real data.
-        labels: True labels for real data (Tensor).
-        fakes: Reconstructed/fake data (Tensor).
-        fake_labels: Labels for fake data (Tensor).
+        fakes: Reconstructed/fake data tensor of shape [N, C, H, W].
+        fake_labels: Labels for fake data tensor of shape [N].
         device: Device to run the computations on.
 
     Returns:
     -------
-        avg_mse: Average MSE across all label groups.
-        mse_per_label: Dictionary mapping each label to its MSE value.
-
+        avg_mse: Average label-wise MSE across all labels.
+        mse_per_label: Dictionary mapping each label to its average pairwise MSE.
+        mse_values_arr: List of minimum MSE values, one per real sample that had at least one fake of the same label.
+        mse_min_fake: List of fake tensors achieving the minimum MSE for each real sample.
+        mse_min_real: List of real tensors corresponding to each minimum-MSE match.
     """
-    real, labels = None, None
+
+    real_batches = []
+    label_batches = []
     for x in private_data:
-        real = x[0] if real is None else torch.cat([real, x[0]], dim=0)
-        labels = x[1] if labels is None else torch.cat([labels, x[1]], dim=0)
+        real_batches.append(x[0])
+        label_batches.append(x[1])
+
+    if len(real_batches) == 0:
+        logger.warning("MSE calculation skipped: private_data is empty.")
+        return 0.0, {}, [], [], []
+
+    real = torch.cat(real_batches, dim=0)
+    labels = torch.cat(label_batches, dim=0)
+
+    if fakes.numel() == 0 or fake_labels.numel() == 0:
+        logger.warning("MSE calculation skipped: no fake samples provided.")
+        return 0.0, {}, [], [], []
+
+    real = real.to(device)
+    labels = labels.to(device)
+    fakes = fakes.to(device)
+    fake_labels = fake_labels.to(device)
 
     unique_labels = torch.unique(labels)
     mse_values = []
@@ -493,44 +557,40 @@ def calc_mse(
     mse_min_fake = []
     mse_per_label = {}
 
-    for label in unique_labels:
-        # Get all real data with this label
-        real_idx = torch.nonzero(labels == label).squeeze(1)
-        real_data = real[real_idx]
+    with torch.inference_mode():
+        for label in unique_labels:
+            real_idx = torch.nonzero(labels == label).squeeze(1)
+            fake_idx = torch.nonzero(fake_labels == label).squeeze(1)
 
-        # Get all fake data with this label
-        fake_idx = torch.nonzero(fake_labels == label).squeeze(1)
-        fake_data = fakes[fake_idx]
+            if real_idx.numel() == 0 or fake_idx.numel() == 0:
+                continue
 
-        if len(real_data) == 0 or len(fake_data) == 0:
-            continue
+            real_data = real[real_idx]   # [nr, C, H, W]
+            fake_data = fakes[fake_idx]  # [nf, C, H, W]
 
-        # Calculate MSE
-        label_mse = []
-        for real_data_point in real_data:
-            min_label_mse = 0
-            for fake_data_point in fake_data:
-                mse = functional.mse_loss(real_data_point.to(device=device), fake_data_point.to(device=device))
-                label_mse.append(mse.item())
+            nr = real_data.shape[0]
+            nf = fake_data.shape[0]
 
-                # Use the minimum MSE fake image for this real image
-                if min_label_mse == 0 or mse.item() < min_label_mse:
-                    min_label_mse = mse.item()
-                    min_real_data_point = real_data_point
-                    min_fake_data_point = fake_data_point
-                min_label_mse = mse.item() if min_label_mse == 0 else min(min_label_mse, mse.item())
+            real_flat = real_data.view(nr, -1).float()
+            fake_flat = fake_data.view(nf, -1).float()
 
-            # Store all MSE values for this label
-            mse_values_arr.append(min_label_mse)
+            dim = real_flat.shape[1]
 
-            # Store the real and fake data point with the lowest mse
-            mse_min_real.append(min_real_data_point)
-            mse_min_fake.append(min_fake_data_point)
+            real_sq = (real_flat ** 2).sum(dim=1, keepdim=True)      # [nr, 1]
+            fake_sq = (fake_flat ** 2).sum(dim=1).unsqueeze(0)       # [1, nf]
+            mse_matrix = (real_sq + fake_sq - 2.0 * (real_flat @ fake_flat.t())) / dim
+            mse_matrix = torch.clamp(mse_matrix, min=0.0)            # numerical safety
 
-        # Average MSE
-        avg_label_mse = statistics.mean(label_mse)
-        mse_per_label[label.item()] = avg_label_mse
-        mse_values.append(avg_label_mse)
+            avg_label_mse = mse_matrix.mean().item()
+            mse_per_label[int(label.item())] = avg_label_mse
+            mse_values.append(avg_label_mse)
+
+            min_mse_vals, min_fake_pos = mse_matrix.min(dim=1)       # one min per real sample
+            mse_values_arr.extend(min_mse_vals.detach().cpu().tolist())
+
+            for r_pos, f_pos in enumerate(min_fake_pos.tolist()):
+                mse_min_real.append(real_data[r_pos].detach().cpu())
+                mse_min_fake.append(fake_data[f_pos].detach().cpu())
 
     avg_mse = statistics.mean(mse_values) if mse_values else 0.0
 
@@ -571,7 +631,7 @@ def calc_pytorch_fid(
     m1, s1 = compute_statistics_from_tensor(fake_data, model, batch_size, dims, device)
 
     # Get activations for private data
-    m2, s2 = compute_statistics_from_dataloader(private_data, model, batch_size, dims, device)
+    m2, s2 = compute_statistics_from_dataloader(private_data, model, dims, device)
 
     # Calculate FID
     return float(calculate_frechet_distance(m1, s1, m2, s2))

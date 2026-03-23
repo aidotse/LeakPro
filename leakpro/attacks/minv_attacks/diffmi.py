@@ -288,11 +288,11 @@ class AttackDiffMi(AbstractMINV):
         logger.info(f"Saved {self.config.diffmiattack.repeat_n}x{effective_label_num} generated images.")
 
         recon_path = f"{self.output_dir}/results/Diff-Mi/all_recreated"
-        save_tensor(recon_list, labels, recon_path)
+        save_tensor(recon_list, labels, recon_path, file_extension=".png")
         logger.info(f"All recreated images saved at: {recon_path}")
 
         success_path = f"{self.output_dir}/results/Diff-Mi/success_recreated"
-        save_tensor(success_list, success_label_list, success_path)
+        save_tensor(success_list, success_label_list, success_path, file_extension=".png")
         logger.info(f"Successful recreated images saved at: {success_path}")
 
         # Calculate additional metrics

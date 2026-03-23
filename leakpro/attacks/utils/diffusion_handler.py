@@ -137,6 +137,9 @@ class DiffMiHandler():
             self.get_pretrained()
             self.fine_tune()
             self.diffusion_model.load_state_dict(self._safe_torch_load(fine_tune_path))
+
+        if self.configs.finetune.use_fp16:
+            self.diffusion_model.convert_to_fp16()
         return self.diffusion_model
 
 
@@ -164,6 +167,9 @@ class DiffMiHandler():
             logger.warning("Pre-trained path not found or doesn't exist")
             self.pre_train()
             self.diffusion_model.load_state_dict(self._safe_torch_load(pre_trained_path))
+
+        if self.configs.pretrain.use_fp16:
+            self.diffusion_model.convert_to_fp16()
         return self.diffusion_model
 
     def pre_train(self) -> None:
@@ -235,7 +241,53 @@ class DiffMiHandler():
             tuple: A tuple containing the generated samples, the class labels.
 
         """
-        pass
+        if batch_size is None:
+            if self.configs.diffmiattack is not None:
+                batch_size = self.configs.diffmiattack.batch_size
+            else:
+                batch_size = self.configs.pretrain.batch_size
+        if batch_size <= 0:
+            raise ValueError("batch_size must be a positive integer.")
+
+        if not hasattr(self, "diffusion_model") or not hasattr(self, "diffusion"):
+            model = self.get_finetuned() if self.configs.do_fine_tune else self.get_pretrained()
+        else:
+            model = self.diffusion_model
+
+        device = torch.device("cuda" if torch.cuda.is_available() else next(model.parameters()).device)
+        model = model.to(device=device)
+        model.eval()
+
+        image_size = int(getattr(model, "image_size", self.configs.pretrain.image_size))
+        in_channels = int(getattr(model, "in_channels", 3))
+        num_classes = getattr(model, "num_classes", None)
+
+        model_kwargs = None
+        labels = None
+        if num_classes is not None:
+            conditional_classes = max(int(num_classes) - 1, 1)
+            if label is None:
+                labels = torch.randint(0, conditional_classes, (batch_size,), device=device)
+            else:
+                if not 0 <= label < conditional_classes:
+                    raise ValueError(
+                        f"label must be in [0, {conditional_classes - 1}] for this diffusion model."
+                    )
+                labels = torch.full((batch_size,), label, device=device, dtype=torch.long)
+            model_kwargs = {"y": labels}
+        elif label is not None:
+            logger.warning("Ignoring label because the diffusion model is not class-conditional.")
+
+        with torch.no_grad():
+            samples = self.diffusion.p_sample_loop(
+                model,
+                (batch_size, in_channels, image_size, image_size),
+                model_kwargs=model_kwargs,
+                device=device,
+                progress=True,
+            )
+
+        return ((samples + 1) / 2).clamp(0, 1), labels
 
     def save_diffusion_model(self, diffusion_model: Module, path: str) -> None:
         """Save the diffusion model.
