@@ -162,11 +162,9 @@ def test_random_query_value_formatting() -> None:
     }
     query_all = singl_ev.random_query(unique_values=unique_values, dtypes=dtypes, cols=cols)
 
-    test_df = pd.DataFrame({
-        "integer": [1, 2, 3],
-        "float": [1.0, 2.0, 3.0],
-        "numeric_category": pd.Series([1, 2, 3], dtype="category")
-    })
+    test_df = pd.DataFrame(
+        {"integer": [1, 2, 3], "float": [1.0, 2.0, 3.0], "numeric_category": pd.Series([1, 2, 3], dtype="category")}
+    )
     result = test_df.query(query_all, engine="python")
     assert isinstance(result, pd.DataFrame)
 
@@ -390,9 +388,7 @@ def test_multivariate_singling_out_queries() -> None:
 
     # Run multivariate_singling_out_queries and assert results
     try:
-        queries = singl_ev.multivariate_singling_out_queries(
-            df=df, n_queries=n_queries, n_cols=n_cols, max_attempts=None, use_tree=False
-        )
+        queries = singl_ev.multivariate_singling_out_queries(df=df, n_queries=n_queries, n_cols=n_cols, max_attempts=None)
     finally:
         random.setstate(old_random_state)
         singl_ev.rng = old_rng
@@ -416,9 +412,7 @@ def test_main_singling_out_attack() -> None:
     n_attacks = 10
     n_cols = 3
     # Get queries
-    queries = singl_ev.main_singling_out_attack(
-        ori=ori, syn=syn, n_attacks=n_attacks, n_cols=n_cols, max_attempts=None, use_tree=False
-    )
+    queries = singl_ev.main_singling_out_attack(ori=ori, syn=syn, n_attacks=n_attacks, n_cols=n_cols, max_attempts=None)
     assert isinstance(queries, singl_ev.UniqueSinglingOutQueries)
     if queries.count > 0:
         for query in queries.queries:
@@ -457,7 +451,7 @@ def test_SinglingOutEvaluator(n_cols: int) -> None:  # noqa: N802
     ori = get_adult(return_ori=True, n_samples=10)
     syn = get_adult(return_ori=False, n_samples=10)
     # Instantiate SinglingOutEvaluator
-    soe = singl_ev.SinglingOutEvaluator(ori=ori, syn=syn, n_cols=n_cols, n_attacks=5, use_tree=False)
+    soe = singl_ev.SinglingOutEvaluator(ori=ori, syn=syn, n_cols=n_cols, n_attacks=5)
     assert (soe.ori.values == ori.values).all()
     assert (soe.syn.values == syn.values).all()
     assert soe.n_cols == n_cols
@@ -487,7 +481,7 @@ def test_num_2_col() -> None:
         }
     )
     soe = singl_ev.SinglingOutEvaluator(
-        ori=df, syn=df, n_cols=1, n_attacks=1, categorical_threshold=2, numerical_to_categorical=True, use_tree=False
+        ori=df, syn=df, n_cols=1, n_attacks=1, categorical_threshold=2, numerical_to_categorical=True
     )
     for dataset in (soe.ori, soe.syn):
         assert dataset["num2"].dtype.name == "category"
