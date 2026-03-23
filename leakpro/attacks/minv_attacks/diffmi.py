@@ -320,7 +320,6 @@ class AttackDiffMi(AbstractMINV):
                 private_data=self.private_dataloader,
                 fakes=success_list,
                 fake_targets=success_label_list,
-                anno="",
                 device=self.device,
             )
             logger.info(f"LPIPS Alex: {value_a:.4f}, VGG: {value_v:.4f}")

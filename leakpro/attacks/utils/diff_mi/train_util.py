@@ -94,6 +94,7 @@ class PreTrain:
             model=self.model,
             use_fp16=self.use_fp16,
             fp16_scale_growth=args.fp16_scale_growth,
+            caller="pretrain",
         )
 
         self.opt = AdamW(
@@ -389,6 +390,7 @@ class FineTune:
                      "middle_block.1.proj"], []],
             use_fp16=self.use_fp16,
             fp16_scale_growth=self.fp16_scale_growth,
+            caller="finetune",
         )
         self.opt_cls = AdamW(
             self.mp_trainer_cls.master_params, lr=self.lr, weight_decay=self.weight_decay
@@ -544,7 +546,9 @@ class FineTune:
 
                 if acc_mean > self.best_mean_acc:
                     self.best_mean_acc = acc_mean
-                    self.state_dict = self.mp_trainer_cls.master_params_to_state_dict(self.mp_trainer_cls.model_params)
+                    self.state_dict = self.mp_trainer_cls.master_params_to_state_dict(
+                        self.mp_trainer_cls.master_params
+                    )
                     self.save()
             epoch_idx += 1
 
