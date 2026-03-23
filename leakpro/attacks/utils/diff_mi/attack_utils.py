@@ -337,7 +337,6 @@ def calc_lpips(
     private_data: torch.utils.data.DataLoader,
     fakes: torch.Tensor,
     fake_targets: torch.Tensor,
-    anno: str = "",
     device: Union[torch.device, str] = "cuda",
 ) -> tuple[float, float]:
     """Calculate LPIPS distance between reconstructed data and target data.
@@ -347,7 +346,6 @@ def calc_lpips(
         private_data: DataLoader containing private/real data.
         fakes: Reconstructed data (Tensor).
         fake_targets: Corresponding target labels (Tensor).
-        anno: Annotation string for logging.
         device: Device to run the computations on.
 
     Returns:
@@ -357,7 +355,6 @@ def calc_lpips(
 
     """
     try:
-        _ = anno
         loss_fn_alex = lpips.LPIPS(net="alex").to(device)  # best forward scores
         loss_fn_vgg = lpips.LPIPS(net="vgg").to(device)  # closer to "traditional" perceptual loss, when used for optimization
 
@@ -402,7 +399,6 @@ def calc_knn(
     private_idents: np.ndarray,
     evaluation_model: torch.nn.Module,
     batch_size: int = 64,
-    anno: str = "",
     device: Union[torch.device, str] = "cuda",
     dims: tuple[int, int] = (64, 64),
 ) -> tuple[float, np.ndarray]:
@@ -416,7 +412,6 @@ def calc_knn(
         private_idents: Labels corresponding to the private features (np.ndarray).
         evaluation_model: Pre-trained feature extractor model.
         batch_size: Batch size for processing data.
-        anno: Annotation string for logging.
         device: Device to run the computations on.
         dims: Dimensions to resize data for the feature extractor.
 
@@ -427,7 +422,6 @@ def calc_knn(
 
     """
 
-    _ = anno
     # get features of reconstructed data
     inferred_feats = None
     for i, data in enumerate(torch.utils.data.DataLoader(fake_data, batch_size=batch_size)):
@@ -470,7 +464,6 @@ def calc_mse(
     fakes: torch.Tensor,
     fake_labels: torch.Tensor,
     device: Union[torch.device, str] = "cuda",
-    anno: str = "",
 ) -> tuple[float, dict[int, float], list[float], list[torch.Tensor], list[torch.Tensor]]:
     """Calculate mean squared error between real and fake data grouped by labels.
 
@@ -481,7 +474,6 @@ def calc_mse(
         fakes: Reconstructed/fake data (Tensor).
         fake_labels: Labels for fake data (Tensor).
         device: Device to run the computations on.
-        anno: Annotation string for logging.
 
     Returns:
     -------
@@ -489,7 +481,6 @@ def calc_mse(
         mse_per_label: Dictionary mapping each label to its MSE value.
 
     """
-    _ = anno
     real, labels = None, None
     for x in private_data:
         real = x[0] if real is None else torch.cat([real, x[0]], dim=0)
@@ -551,8 +542,6 @@ def calc_pytorch_fid(
     batch_size: int = 50,
     device: Union[torch.device, str] = "cuda",
     dims: int = 2048,
-    num_workers: int = 1,
-    anno: str = "",
 ) -> float:
     """Calculate FID score between fake data tensors and private dataset.
 
@@ -563,17 +552,12 @@ def calc_pytorch_fid(
         batch_size: Batch size for processing.
         device: Device to run calculations.
         dims: Dimensionality of Inception features.
-        num_workers: Number of parallel dataloader workers.
-        anno: Annotation string for logging.
 
     Returns:
     -------
         fid_value: Computed FID score.
 
     """
-
-    _ = num_workers
-    _ = anno
     # Load InceptionV3 model
     try:
         model = inception_v3(pretrained=True, transform_input=False).to(device)
@@ -625,7 +609,6 @@ def compute_statistics_from_tensor(
 def compute_statistics_from_dataloader(
     dataloader: torch.utils.data.DataLoader,
     model: torch.nn.Module,
-    batch_size: int,
     dims: int,
     device: Union[torch.device, str],
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -645,7 +628,7 @@ def compute_statistics_from_dataloader(
         sigma: Covariance of activations.
 
     """
-    act = get_activations_from_dataloader(dataloader, model, batch_size, dims, device)
+    act = get_activations_from_dataloader(dataloader, model, dims, device)
     mu = np.mean(act, axis=0)
     sigma = np.cov(act, rowvar=False)
     return mu, sigma
@@ -706,7 +689,6 @@ def get_activations_from_tensor(
 def get_activations_from_dataloader(
     dataloader: torch.utils.data.DataLoader,
     model: torch.nn.Module,
-    batch_size: int,
     dims: int,
     device: Union[torch.device, str],
 ) -> np.ndarray:
@@ -716,7 +698,6 @@ def get_activations_from_dataloader(
     ----
         dataloader: DataLoader containing data.
         model: Inception model.
-        batch_size: Batch size for processing.
         dims: Dimensionality of features.
         device: Device to run calculations.
 
@@ -725,7 +706,6 @@ def get_activations_from_dataloader(
         pred_arr: Array of activations.
 
     """
-    _ = batch_size
     model.eval()
 
     # First pass to count samples

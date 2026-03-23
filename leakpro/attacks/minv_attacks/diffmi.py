@@ -229,7 +229,6 @@ class AttackDiffMi(AbstractMINV):
             )
         labels = torch.cat([torch.randperm(effective_label_num) for _ in range(repeat_n)]).to(self.device)
         label_dataset = DataLoader(labels, batch_size=self.config.diffmiattack.batch_size, shuffle=False)
-        _ = math.ceil(len(labels) / self.config.diffmiattack.batch_size) - 1
 
         for _, classes in tqdm(enumerate(label_dataset), total=len(label_dataset)):
             classes = classes.to(self.device)
