@@ -354,6 +354,7 @@ def calc_lpips(
     -------
         value_a: Mean LPIPS distance using AlexNet features.
         value_v: Mean LPIPS distance using VGG features.
+
     """
     try:
         loss_fn_alex = lpips.LPIPS(net="alex").to(device)
@@ -526,6 +527,7 @@ def calc_mse(
         mse_values_arr: List of minimum MSE values, one per real sample that had at least one fake of the same label.
         mse_min_fake: List of fake tensors achieving the minimum MSE for each real sample.
         mse_min_real: List of real tensors corresponding to each minimum-MSE match.
+
     """
 
     real_batches = []

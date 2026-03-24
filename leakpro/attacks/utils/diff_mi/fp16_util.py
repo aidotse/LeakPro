@@ -177,7 +177,8 @@ class MixedPrecisionTrainer:
     This helper manages full-precision master parameters for optimization when
     fp16 training is enabled, while keeping the model parameters synchronized.
     It also supports restricting optimization to a selected subset of layers
-    during fine-tuning."""
+    during fine-tuning.
+    """
 
     def __init__(
         self,
@@ -205,6 +206,7 @@ class MixedPrecisionTrainer:
 
         Returns:
             None
+
         """
 
         self.model = model
