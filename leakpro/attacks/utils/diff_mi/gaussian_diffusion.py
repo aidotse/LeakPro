@@ -693,35 +693,6 @@ class GaussianDiffusion:
                     yield out
                     img = out["sample"]
 
-        else:  # Re-noised algorithm by lox
-            indices = list(range(self.num_timesteps))[::-1]
-
-            for iter in range(10):
-                if iter == 0:
-                    if noise is not None:
-                        img = noise
-                    else:
-                        img = th.randn(*shape, device=device)
-                else:
-                    img = self.re_add_noise(shape, img, self.num_timesteps-1, device)
-
-                from tqdm.auto import tqdm
-                for i in tqdm(indices, desc=f"Re-noised epoch {iter}"):
-                    t = th.tensor([i] * shape[0], device=device)
-                    with th.no_grad():
-                        out = self.ddim_sample(
-                            model,
-                            img,
-                            t,
-                            clip_denoised=clip_denoised,
-                            denoised_fn=denoised_fn,
-                            cond_fn=cond_fn,
-                            model_kwargs=model_kwargs,
-                            eta=eta,
-                        )
-                        yield out
-                        img = out["sample"]
-
     def _vb_terms_bpd(
         self, model, x_start, x_t, t, clip_denoised=True, model_kwargs=None
     ):

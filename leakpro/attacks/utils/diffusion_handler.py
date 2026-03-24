@@ -88,7 +88,7 @@ class DiffMiHandler():
             self.diffusion_model = self.diffusion_model_blueprint(**diffusion_model_params)
             self.diffusion = self.gaussian_diffusion_blueprint(**gaussian_diffusion_params)
 
-        elif not self.diffusion_path and self.diffusion_model_class == "UNetModel":
+        elif not self.diffusion_path and self.diffusion_model_class in {"UNet", "UNetModel", None}:
             logger.info("Using default Diffusion UNet model from Diff-MI.")
 
             self.diffusion_model = create_model(
