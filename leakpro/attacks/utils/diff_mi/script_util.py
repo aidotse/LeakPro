@@ -10,7 +10,6 @@ NUM_CLASSES = 1000 + 1
 
 def model_and_diffusion_defaults() -> dict:
     """Defaults for image training."""
-
     res = {
         "image_size": 64,
         "num_channels": 128,
@@ -34,7 +33,6 @@ def model_and_diffusion_defaults() -> dict:
 
 def model_defaults() -> dict:
     """Defaults for image training."""
-
     return {
         "image_size": 64,
         "num_channels": 128,
@@ -56,7 +54,6 @@ def model_defaults() -> dict:
 
 def diffusion_defaults() -> dict:
     """Defaults for diffusion training."""
-
     return {
         "learn_sigma": False,
         "diffusion_steps": 1000,
@@ -96,7 +93,6 @@ def create_model_and_diffusion(
     w: float | None = None,
 ) -> tuple[UNetModel, SpacedDiffusion]:
     """Create a model and diffusion process."""
-
     model = create_model(
         image_size,
         num_channels,
@@ -149,7 +145,6 @@ def create_model(
     num_classes: int = NUM_CLASSES,
 ) -> UNetModel:
     """Create a U-Net model."""
-
     if channel_mult == "":
         if image_size == 512:
             channel_mult = (0.5, 1, 1, 2, 2, 4, 4)
@@ -207,7 +202,6 @@ def create_classifier_and_diffusion(
     rescale_learned_sigmas: bool,
 ) -> tuple[EncoderUNetModel, SpacedDiffusion]:
     """Create a classifier and diffusion process."""
-
     classifier = create_classifier(
         image_size,
         classifier_use_fp16,
@@ -242,7 +236,6 @@ def create_classifier(
     out_channels: int = 1000,
 ) -> EncoderUNetModel:
     """Create a U-Net classifier model."""
-
     if image_size == 512:
         channel_mult = (0.5, 1, 1, 2, 2, 4, 4)
     elif image_size == 256:
@@ -287,7 +280,6 @@ def create_gaussian_diffusion(
     timestep_respacing: list[int] | str = "",
 ) -> SpacedDiffusion:
     """Create a Gaussian diffusion process."""
-
     betas = gd.get_named_beta_schedule(noise_schedule, diffusion_steps)
     if use_kl:
         loss_type = gd.LossType.RESCALED_KL

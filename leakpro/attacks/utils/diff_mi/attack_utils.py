@@ -485,7 +485,6 @@ def calc_knn(
         knn_arr: Array of Minimum KNN distances for each reconstructed image.
 
     """
-
     # get features of reconstructed data
     inferred_feats = None
     for i, data in enumerate(torch.utils.data.DataLoader(fake_data, batch_size=batch_size)):
@@ -551,7 +550,6 @@ def calc_mse(
         mse_min_real: List of real tensors corresponding to each minimum-MSE match.
 
     """
-
     real_batches = []
     label_batches = []
     for x in private_data:
@@ -842,7 +840,6 @@ def calculate_frechet_distance(
         fid: Frechet distance.
 
     """
-
     mu1 = np.atleast_1d(mu1)
     mu2 = np.atleast_1d(mu2)
 

@@ -117,7 +117,6 @@ class NoiseScheduleVP:
         >>> ns = NoiseScheduleVP('linear', continuous_beta_0=0.1, continuous_beta_1=20.)
 
         """
-
         if schedule not in ["discrete", "linear", "cosine"]:
             raise ValueError(
                 "Unsupported noise schedule {}. The schedule needs to be 'discrete' or 'linear' or 'cosine'".format(schedule)
@@ -338,7 +337,7 @@ def model_wrapper(
             return torch.autograd.grad(log_prob.sum(), x_in)[0]
 
     def model_fn(x: Tensor, t_continuous: Tensor) -> Tensor:
-        """The noise prediction model function used by DPM-Solver."""
+        """Return the noise prediction used by DPM-Solver."""
         return _guided_noise_pred_fn(
             noise_pred_fn=noise_pred_fn,
             get_model_input_time=lambda t_value: _get_model_input_time(noise_schedule, t_value),
@@ -513,7 +512,7 @@ class DPMSolver:
         self.thresholding_max_val = thresholding_max_val
 
     def dynamic_thresholding_fn(self, x0: Tensor, _t: Tensor) -> Tensor:
-        """The dynamic thresholding method."""
+        """Apply dynamic thresholding to the predicted clean sample."""
         dims = x0.dim()
         p = self.dynamic_thresholding_ratio
         s = torch.quantile(torch.abs(x0).reshape((x0.shape[0], -1)), p, dim=1)
@@ -1233,7 +1232,7 @@ class DPMSolver:
         t_err: float = 1e-5,
         solver_type: Literal["dpmsolver", "taylor"] = "dpmsolver",
     ) -> Tensor:
-        """The adaptive step size solver based on singlestep DPM-Solver.
+        """Run the adaptive step size solver based on singlestep DPM-Solver.
 
         Args:
             x: A pytorch tensor. The initial value at time `t_T`.
@@ -1792,7 +1791,7 @@ DPM_Solver = DPMSolver
 
 
 def interpolate_fn(x: Tensor, xp: Tensor, yp: Tensor) -> Tensor:
-    """A piecewise linear function y = f(x), using xp and yp as keypoints.
+    """Compute a piecewise linear function y = f(x) using xp and yp as keypoints.
 
     We implement f(x) in a differentiable way (i.e. applicable for autograd).
     The function f(x) is well-defined for all x-axis. For x beyond the bounds

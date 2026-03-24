@@ -194,7 +194,6 @@ class MixedPrecisionTrainer:
             None
 
         """
-
         self.model = model
         self.use_fp16 = use_fp16
         self.fp16_scale_growth = fp16_scale_growth

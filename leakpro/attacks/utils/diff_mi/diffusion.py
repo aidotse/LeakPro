@@ -47,6 +47,17 @@ class InferenceModel(nn.Module):
         data_height: int = 64,
         data_width: int = 64,
     ) -> None:
+        """Initialize the optimization image tensor.
+
+        Args:
+        ----
+            x: Optional initial image tensor.
+            batch_size: Number of images to optimize when `x` is not provided.
+            data_channels: Number of image channels.
+            data_height: Image height.
+            data_width: Image width.
+
+        """
         super().__init__()
         if x is None:
             self.img = nn.Parameter(torch.randn(batch_size, data_channels, data_height, data_width))
@@ -70,6 +81,18 @@ class GaussianDiffusion:
         b0: float = 1e-4,
         b_t: float = 2e-2,
     ) -> None:
+        """Initialize the diffusion schedule and DDIM helper values.
+
+        Args:
+        ----
+            num_steps: Number of diffusion steps.
+            schedule: Noise schedule name.
+            ddim_timesteps: Number of DDIM steps used for inversion.
+            ddim_eta: DDIM noise scale.
+            b0: Initial beta value for the linear schedule.
+            b_t: Final beta value for the linear schedule.
+
+        """
         # Diffusion steps
         self.T = num_steps
         self.ddim_timesteps = max(1, min(ddim_timesteps, num_steps))
@@ -160,7 +183,6 @@ class GaussianDiffusion:
         device: Union[torch.device, str] = "cuda",
     ) -> torch.Tensor:
         """Run the DDIM reverse process."""
-
         c = max(int(self.T / self.ddim_timesteps), 1)
         ddim_start = max(int(math.ceil(start_t / c)), 1)
         time_range = range(ddim_start, 0, -1)

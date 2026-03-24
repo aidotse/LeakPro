@@ -30,6 +30,16 @@ class AttentionPool2d(nn.Module):
         num_heads_channels: int,
         output_dim: int | None = None,
     ) -> None:
+        """Initialize the 2D attention pooling block.
+
+        Args:
+        ----
+            spacial_dim: Spatial resolution of the pooled feature map.
+            embed_dim: Embedding dimension of the input features.
+            num_heads_channels: Number of channels per attention head.
+            output_dim: Optional output embedding dimension.
+
+        """
         super().__init__()
         self.positional_embedding = nn.Parameter(
             th.randn(embed_dim, spacial_dim ** 2 + 1) / embed_dim ** 0.5
@@ -41,7 +51,6 @@ class AttentionPool2d(nn.Module):
 
     def forward(self, x: th.Tensor) -> th.Tensor:
         """Apply attention pool2d to `x`."""
-
         b, c, *_spatial = x.shape
         x = x.reshape(b, c, -1)  # NC(HW)
         x = th.cat([x.mean(dim=-1, keepdim=True), x], dim=-1)  # NC(HW+1)
@@ -65,7 +74,6 @@ class TimestepEmbedSequential(nn.Sequential, TimestepBlock):
 
     def forward(self, x: th.Tensor, emb: th.Tensor) -> th.Tensor:
         """Apply the modules to `x` given `emb` timestep embeddings."""
-
         for layer in self:
             x = layer(x, emb) if isinstance(layer, TimestepBlock) else layer(x)
         return x
@@ -74,13 +82,25 @@ class TimestepEmbedSequential(nn.Sequential, TimestepBlock):
 class Upsample(nn.Module):
     """An upsampling layer with an optional convolution.
 
-    :param channels: channels in the inputs and outputs.
-    :param use_conv: a bool determining if a convolution is applied.
-    :param dims: determines if the signal is 1D, 2D, or 3D. If 3D, then
-                 upsampling occurs in the inner-two dimensions.
+    Args:
+    ----
+        channels: Number of input and output channels.
+        use_conv: Whether to apply a convolution after upsampling.
+        dims: Signal dimensionality. If `3`, upsampling is only applied in the inner two dimensions.
+
     """
 
     def __init__(self, channels: int, use_conv: bool, dims: int = 2, out_channels: int | None = None) -> None:
+        """Initialize the upsampling layer.
+
+        Args:
+        ----
+            channels: Number of input channels.
+            use_conv: Whether to apply a convolution after upsampling.
+            dims: Signal dimensionality.
+            out_channels: Optional number of output channels.
+
+        """
         super().__init__()
         self.channels = channels
         self.out_channels = out_channels or channels
@@ -91,7 +111,6 @@ class Upsample(nn.Module):
 
     def forward(self, x: th.Tensor) -> th.Tensor:
         """Apply upsampling to `x`."""
-
         assert x.shape[1] == self.channels
         if self.dims == 3:
             x = f.interpolate(
@@ -107,13 +126,25 @@ class Upsample(nn.Module):
 class Downsample(nn.Module):
     """A downsampling layer with an optional convolution.
 
-    :param channels: channels in the inputs and outputs.
-    :param use_conv: a bool determining if a convolution is applied.
-    :param dims: determines if the signal is 1D, 2D, or 3D. If 3D, then
-                 downsampling occurs in the inner-two dimensions.
+    Args:
+    ----
+        channels: Number of input and output channels.
+        use_conv: Whether to apply a convolution while downsampling.
+        dims: Signal dimensionality. If `3`, downsampling is only applied in the inner two dimensions.
+
     """
 
     def __init__(self, channels: int, use_conv: bool, dims: int = 2, out_channels: int | None = None) -> None:
+        """Initialize the downsampling layer.
+
+        Args:
+        ----
+            channels: Number of input channels.
+            use_conv: Whether to use a convolution for downsampling.
+            dims: Signal dimensionality.
+            out_channels: Optional number of output channels.
+
+        """
         super().__init__()
         self.channels = channels
         self.out_channels = out_channels or channels
@@ -130,7 +161,6 @@ class Downsample(nn.Module):
 
     def forward(self, x: th.Tensor) -> th.Tensor:
         """Apply downsampling to `x`."""
-
         assert x.shape[1] == self.channels
         return self.op(x)
 
@@ -138,17 +168,18 @@ class Downsample(nn.Module):
 class ResBlock(TimestepBlock):
     """A residual block that can optionally change the number of channels.
 
-    :param channels: the number of input channels.
-    :param emb_channels: the number of timestep embedding channels.
-    :param dropout: the rate of dropout.
-    :param out_channels: if specified, the number of out channels.
-    :param use_conv: if True and out_channels is specified, use a spatial
-        convolution instead of a smaller 1x1 convolution to change the
-        channels in the skip connection.
-    :param dims: determines if the signal is 1D, 2D, or 3D.
-    :param use_checkpoint: if True, use gradient checkpointing on this module.
-    :param up: if True, use this block for upsampling.
-    :param down: if True, use this block for downsampling.
+    Args:
+    ----
+        channels: Number of input channels.
+        emb_channels: Number of timestep embedding channels.
+        dropout: Dropout rate.
+        out_channels: Optional number of output channels.
+        use_conv: Whether to use a spatial convolution in the skip connection when channel count changes.
+        dims: Signal dimensionality.
+        use_checkpoint: Whether to use gradient checkpointing.
+        up: Whether the block performs upsampling.
+        down: Whether the block performs downsampling.
+
     """
 
     def __init__(
@@ -164,6 +195,22 @@ class ResBlock(TimestepBlock):
         up: bool = False,
         down: bool = False,
     ) -> None:
+        """Initialize the residual block.
+
+        Args:
+        ----
+            channels: Number of input channels.
+            emb_channels: Number of timestep embedding channels.
+            dropout: Dropout rate.
+            out_channels: Optional number of output channels.
+            use_conv: Whether to use a spatial convolution in the skip path.
+            use_scale_shift_norm: Whether to use scale-shift normalization.
+            dims: Signal dimensionality.
+            use_checkpoint: Whether to use gradient checkpointing.
+            up: Whether this block performs upsampling.
+            down: Whether this block performs downsampling.
+
+        """
         super().__init__()
         self.channels = channels
         self.emb_channels = emb_channels
@@ -218,9 +265,15 @@ class ResBlock(TimestepBlock):
     def forward(self, x: th.Tensor, emb: th.Tensor) -> th.Tensor:
         """Apply the block to a Tensor, conditioned on a timestep embedding.
 
-        :param x: an [N x C x ...] Tensor of features.
-        :param emb: an [N x emb_channels] Tensor of timestep embeddings.
-        :return: an [N x C x ...] Tensor of outputs.
+        Args:
+        ----
+            x: Feature tensor with shape `[N, C, ...]`.
+            emb: Timestep embedding tensor with shape `[N, emb_channels]`.
+
+        Returns:
+        -------
+            Output tensor with shape `[N, C, ...]`.
+
         """
         return checkpoint(
             self._forward, (x, emb), self.parameters(), self.use_checkpoint
@@ -264,6 +317,17 @@ class AttentionBlock(nn.Module):
         use_checkpoint: bool = False,
         use_new_attention_order: bool = False,
     ) -> None:
+        """Initialize the attention block.
+
+        Args:
+        ----
+            channels: Number of input channels.
+            num_heads: Number of attention heads.
+            num_head_channels: Number of channels per attention head.
+            use_checkpoint: Whether to use gradient checkpointing.
+            use_new_attention_order: Whether to use the alternative QKV ordering.
+
+        """
         super().__init__()
         self.channels = channels
         if num_head_channels == -1:
@@ -287,7 +351,6 @@ class AttentionBlock(nn.Module):
 
     def forward(self, x: th.Tensor) -> th.Tensor:
         """Apply the attention block to an input Tensor."""
-
         return checkpoint(self._forward, (x,), self.parameters(), True)
 
     def _forward(self, x: th.Tensor) -> th.Tensor:
@@ -300,7 +363,7 @@ class AttentionBlock(nn.Module):
 
 
 def count_flops_attn(model: nn.Module, _x: tuple, y: tuple) -> None:
-    """A counter for the `thop` package to count the operations in an attention operation.
+    """Count operations in an attention block for the `thop` package.
 
     Meant to be used like:
     macs, params = thop.profile(
@@ -321,14 +384,27 @@ class QKVAttentionLegacy(nn.Module):
     """A module which performs QKV attention, matches legacy QKVAttention + input/ouput heads shaping."""
 
     def __init__(self, n_heads: int) -> None:
+        """Initialize the legacy QKV attention module.
+
+        Args:
+        ----
+            n_heads: Number of attention heads.
+
+        """
         super().__init__()
         self.n_heads = n_heads
 
     def forward(self, qkv: th.Tensor) -> th.Tensor:
         """Apply QKV attention.
 
-        :param qkv: an [N x (H * 3 * C) x T] tensor of Qs, Ks, and Vs.
-        :return: an [N x (H * C) x T] tensor after attention.
+        Args:
+        ----
+            qkv: Tensor of Q, K, and V values with shape `[N, H * 3 * C, T]`.
+
+        Returns:
+        -------
+            Attention output tensor with shape `[N, H * C, T]`.
+
         """
         bs, width, length = qkv.shape
         assert width % (3 * self.n_heads) == 0
@@ -345,21 +421,33 @@ class QKVAttentionLegacy(nn.Module):
     @staticmethod
     def count_flops(model: nn.Module, _x: tuple, y: tuple) -> None:
         """Count the FLOPs for the attention operation."""
-
         return count_flops_attn(model, _x, y)
 
 class QKVAttention(nn.Module):
     """A module which performs QKV attention and splits in a different order."""
 
     def __init__(self, n_heads: int) -> None:
+        """Initialize the QKV attention module.
+
+        Args:
+        ----
+            n_heads: Number of attention heads.
+
+        """
         super().__init__()
         self.n_heads = n_heads
 
     def forward(self, qkv: th.Tensor) -> th.Tensor:
         """Apply QKV attention.
 
-        :param qkv: an [N x (3 * H * C) x T] tensor of Qs, Ks, and Vs.
-        :return: an [N x (H * C) x T] tensor after attention.
+        Args:
+        ----
+            qkv: Tensor of Q, K, and V values with shape `[N, 3 * H * C, T]`.
+
+        Returns:
+        -------
+            Attention output tensor with shape `[N, H * C, T]`.
+
         """
         bs, width, length = qkv.shape
         assert width % (3 * self.n_heads) == 0
@@ -378,38 +466,32 @@ class QKVAttention(nn.Module):
     @staticmethod
     def count_flops(model: nn.Module, _x: tuple, y: tuple) -> None:
         """Count the FLOPs for the attention operation."""
-
         return count_flops_attn(model, _x, y)
 
 
 class UNetModel(nn.Module):
     """The full UNet model with attention and timestep embedding.
 
-    :param in_channels: channels in the input Tensor.
-    :param model_channels: base channel count for the model.
-    :param out_channels: channels in the output Tensor.
-    :param num_res_blocks: number of residual blocks per downsample.
-    :param attention_resolutions: a collection of downsample rates at which
-        attention will take place. May be a set, list, or tuple.
-        For example, if this contains 4, then at 4x downsampling, attention
-        will be used.
-    :param dropout: the dropout probability.
-    :param channel_mult: channel multiplier for each level of the UNet.
-    :param conv_resample: if True, use learned convolutions for upsampling and
-        downsampling.
-    :param dims: determines if the signal is 1D, 2D, or 3D.
-    :param num_classes: if specified (as an int), then this model will be
-        class-conditional with `num_classes` classes.
-    :param use_checkpoint: use gradient checkpointing to reduce memory usage.
-    :param num_heads: the number of attention heads in each attention layer.
-    :param num_heads_channels: if specified, ignore num_heads and instead use
-                               a fixed channel width per attention head.
-    :param num_heads_upsample: works with num_heads to set a different number
-                               of heads for upsampling. Deprecated.
-    :param use_scale_shift_norm: use a FiLM-like conditioning mechanism.
-    :param resblock_updown: use residual blocks for up/downsampling.
-    :param use_new_attention_order: use a different attention pattern for potentially
-                                    increased efficiency.
+    Args:
+    ----
+        in_channels: Number of input channels.
+        model_channels: Base channel count for the model.
+        out_channels: Number of output channels.
+        num_res_blocks: Number of residual blocks per downsampling level.
+        attention_resolutions: Downsampling factors where attention is applied.
+        dropout: Dropout probability.
+        channel_mult: Channel multiplier for each UNet level.
+        conv_resample: Whether to use learned convolutions for upsampling and downsampling.
+        dims: Signal dimensionality.
+        num_classes: Optional number of conditioning classes.
+        use_checkpoint: Whether to use gradient checkpointing.
+        num_heads: Number of attention heads.
+        num_heads_channels: Fixed channel width per attention head when provided.
+        num_heads_upsample: Number of heads used in upsampling blocks.
+        use_scale_shift_norm: Whether to use FiLM-like conditioning.
+        resblock_updown: Whether to use residual blocks for upsampling and downsampling.
+        use_new_attention_order: Whether to use the alternative attention ordering.
+
     """
 
     def __init__( # noqa: C901 PLR0915
@@ -435,6 +517,32 @@ class UNetModel(nn.Module):
         use_new_attention_order: bool = False,
         classifier: nn.Module | None = None,
     ) -> None:
+        """Initialize the full UNet model.
+
+        Args:
+        ----
+            image_size: Input image size.
+            in_channels: Number of input channels.
+            model_channels: Base channel count for the model.
+            out_channels: Number of output channels.
+            num_res_blocks: Number of residual blocks per level.
+            attention_resolutions: Downsampling factors that use attention.
+            dropout: Dropout rate.
+            channel_mult: Channel multiplier per level.
+            conv_resample: Whether to use learned up/downsampling convolutions.
+            dims: Signal dimensionality.
+            num_classes: Optional number of conditioning classes.
+            use_checkpoint: Whether to use gradient checkpointing.
+            use_fp16: Whether to use float16 in the torso.
+            num_heads: Number of attention heads.
+            num_head_channels: Number of channels per attention head.
+            num_heads_upsample: Number of heads used in upsampling blocks.
+            use_scale_shift_norm: Whether to use scale-shift normalization.
+            resblock_updown: Whether to use residual up/downsampling blocks.
+            use_new_attention_order: Whether to use the alternative attention ordering.
+            classifier: Optional feature extractor for classifier-guided conditioning.
+
+        """
         super().__init__()
 
         if num_heads_upsample == -1:
@@ -607,14 +715,12 @@ class UNetModel(nn.Module):
 
     def convert_to_fp16(self) -> None:
         """Convert the torso of the model to float16."""
-
         self.input_blocks.apply(convert_module_to_f16)
         self.middle_block.apply(convert_module_to_f16)
         self.output_blocks.apply(convert_module_to_f16)
 
     def convert_to_fp32(self) -> None:
         """Convert the torso of the model to float32."""
-
         self.input_blocks.apply(convert_module_to_f32)
         self.middle_block.apply(convert_module_to_f32)
         self.output_blocks.apply(convert_module_to_f32)
@@ -622,10 +728,16 @@ class UNetModel(nn.Module):
     def forward(self, x: th.Tensor, timesteps: th.Tensor, y: th.Tensor | None = None) -> th.Tensor:
         """Apply the model to an input batch.
 
-        :param x: an [N x C x ...] Tensor of inputs.
-        :param timesteps: a 1-D batch of timesteps.
-        :param y: an [N] Tensor of labels, if class-conditional.
-        :return: an [N x C x ...] Tensor of outputs.
+        Args:
+        ----
+            x: Input tensor with shape `[N, C, ...]`.
+            timesteps: One-dimensional batch of timesteps.
+            y: Optional class labels with shape `[N]`.
+
+        Returns:
+        -------
+            Output tensor with shape `[N, C, ...]`.
+
         """
         assert (y is not None) == (
             self.num_classes is not None
@@ -660,11 +772,20 @@ class SuperResModel(UNetModel):
     """
 
     def __init__(self, image_size: int, in_channels: int, *args, **kwargs) -> None: # noqa: ANN002 ANN003
+        """Initialize the super-resolution UNet model.
+
+        Args:
+        ----
+            image_size: Input image size.
+            in_channels: Number of high-resolution input channels.
+            *args: Positional arguments forwarded to `UNetModel`.
+            **kwargs: Keyword arguments forwarded to `UNetModel`.
+
+        """
         super().__init__(image_size, in_channels * 2, *args, **kwargs)
 
     def forward(self, x: th.Tensor, timesteps: th.Tensor, low_res: th.Tensor | None = None, **kwargs) -> th.Tensor: # noqa: ANN002 ANN003
         """Apply the model to an input batch."""
-
         _, _, new_height, new_width = x.shape
         upsampled = f.interpolate(low_res, (new_height, new_width), mode="bilinear")
         x = th.cat([x, upsampled], dim=1)
@@ -699,6 +820,31 @@ class EncoderUNetModel(nn.Module):
         use_new_attention_order: bool = False,
         pool: str = "adaptive",
     ) -> None:
+        """Initialize the encoder UNet model.
+
+        Args:
+        ----
+            image_size: Input image size.
+            in_channels: Number of input channels.
+            model_channels: Base channel count for the model.
+            out_channels: Number of output channels.
+            num_res_blocks: Number of residual blocks per level.
+            attention_resolutions: Downsampling factors that use attention.
+            dropout: Dropout rate.
+            channel_mult: Channel multiplier per level.
+            conv_resample: Whether to use learned up/downsampling convolutions.
+            dims: Signal dimensionality.
+            use_checkpoint: Whether to use gradient checkpointing.
+            use_fp16: Whether to use float16 in the torso.
+            num_heads: Number of attention heads.
+            num_head_channels: Number of channels per attention head.
+            num_heads_upsample: Number of heads used in upsampling blocks.
+            use_scale_shift_norm: Whether to use scale-shift normalization.
+            resblock_updown: Whether to use residual up/downsampling blocks.
+            use_new_attention_order: Whether to use the alternative attention ordering.
+            pool: Pooling strategy for the encoder head.
+
+        """
         super().__init__()
 
         if num_heads_upsample == -1:
@@ -852,22 +998,26 @@ class EncoderUNetModel(nn.Module):
 
     def convert_to_fp16(self) -> None:
         """Convert the torso of the model to float16."""
-
         self.input_blocks.apply(convert_module_to_f16)
         self.middle_block.apply(convert_module_to_f16)
 
     def convert_to_fp32(self) -> None:
         """Convert the torso of the model to float32."""
-
         self.input_blocks.apply(convert_module_to_f32)
         self.middle_block.apply(convert_module_to_f32)
 
     def forward(self, x: th.Tensor, timesteps: th.Tensor) -> th.Tensor:
         """Apply the model to an input batch.
 
-        :param x: an [N x C x ...] Tensor of inputs.
-        :param timesteps: a 1-D batch of timesteps.
-        :return: an [N x K] Tensor of outputs.
+        Args:
+        ----
+            x: Input tensor with shape `[N, C, ...]`.
+            timesteps: One-dimensional batch of timesteps.
+
+        Returns:
+        -------
+            Output tensor with shape `[N, K]`.
+
         """
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
 

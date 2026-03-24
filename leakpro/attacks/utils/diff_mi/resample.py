@@ -13,8 +13,11 @@ from . import dist_util
 def create_named_schedule_sampler(name: str, diffusion: SpacedDiffusion) -> ABC:
     """Create a ScheduleSampler from a library of pre-defined samplers.
 
-    :param name: the name of the sampler.
-    :param diffusion: the diffusion object to sample for.
+    Args:
+    ----
+        name: Name of the sampler.
+        diffusion: Diffusion object to sample for.
+
     """
     if name == "uniform":
         return UniformSampler(diffusion)
@@ -42,11 +45,15 @@ class ScheduleSampler(ABC):
     def sample(self, batch_size: int, device: th.device) -> tuple[th.Tensor, th.Tensor]:
         """Importance-sample timesteps for a batch.
 
-        :param batch_size: the number of timesteps.
-        :param device: the torch device to save to.
-        :return: a tuple (timesteps, weights):
-                 - timesteps: a tensor of timestep indices.
-                 - weights: a tensor of weights to scale the resulting losses.
+        Args:
+        ----
+            batch_size: Number of timesteps to sample.
+            device: Torch device to place the results on.
+
+        Returns:
+        -------
+            Tuple of timestep indices and importance weights.
+
         """
         w = self.weights()
         p = w / np.sum(w)
@@ -61,6 +68,13 @@ class UniformSampler(ScheduleSampler):
     """A schedule sampler that samples uniformly."""
 
     def __init__(self, diffusion: SpacedDiffusion) -> None:
+        """Initialize the uniform timestep sampler.
+
+        Args:
+        ----
+            diffusion: Diffusion process used to determine the number of timesteps.
+
+        """
         self.diffusion = diffusion
         self._weights = np.ones([diffusion.num_timesteps])
 
@@ -80,10 +94,12 @@ class LossAwareSampler(ScheduleSampler):
         This method will perform synchronization to make sure all of the ranks
         maintain the exact same reweighting.
 
-        :param local_ts: an integer Tensor of timesteps.
-        :param local_losses: a 1D Tensor of losses.
-        """
+        Args:
+        ----
+            local_ts: Integer tensor of timesteps.
+            local_losses: One-dimensional tensor of losses.
 
+        """
         if not dist.is_initialized():
             self.update_with_all_losses(local_ts.tolist(), local_losses.tolist())
             return
@@ -123,8 +139,11 @@ class LossAwareSampler(ScheduleSampler):
         ranks with identical arguments. Thus, it should have deterministic
         behavior to maintain state across workers.
 
-        :param ts: a list of int timesteps.
-        :param losses: a list of float losses, one per timestep.
+        Args:
+        ----
+            ts: Timesteps to update.
+            losses: Loss values, one per timestep.
+
         """
 
 
@@ -132,6 +151,15 @@ class LossSecondMomentResampler(LossAwareSampler):
     """A schedule sampler that uses the second moment of the loss to reweight."""
 
     def __init__(self, diffusion: SpacedDiffusion, history_per_term: int = 10, uniform_prob: float = 0.001) -> None:
+        """Initialize the second-moment loss resampler.
+
+        Args:
+        ----
+            diffusion: Diffusion process used to determine the number of timesteps.
+            history_per_term: Number of recent losses retained per timestep.
+            uniform_prob: Probability mass reserved for uniform sampling.
+
+        """
         self.diffusion = diffusion
         self.history_per_term = history_per_term
         self.uniform_prob = uniform_prob
@@ -152,7 +180,6 @@ class LossSecondMomentResampler(LossAwareSampler):
 
     def update_with_all_losses(self, ts: list[int], losses: list[float]) -> None:
         """Update the reweighting using losses from a model."""
-
         for t, loss in zip(ts, losses):
             if self._loss_counts[t] == self.history_per_term:
                 # Shift out the oldest loss term.

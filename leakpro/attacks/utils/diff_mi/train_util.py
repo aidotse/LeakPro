@@ -135,7 +135,6 @@ class PreTrain:
 
     def _load_and_sync_parameters(self) -> None:
         """Load model parameters from checkpoint and sync across processes."""
-
         resume_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
 
         if resume_checkpoint:
@@ -155,7 +154,6 @@ class PreTrain:
 
     def _load_ema_parameters(self, rate: float) -> list[th.Tensor]:
         """Load EMA parameters from checkpoint."""
-
         ema_params = copy.deepcopy(self.mp_trainer.master_params)
 
         main_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
@@ -172,7 +170,6 @@ class PreTrain:
 
     def _load_optimizer_state(self) -> None:
         """Load optimizer state from checkpoint."""
-
         main_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
         opt_checkpoint = bf.join(
             bf.dirname(main_checkpoint), f"opt{self.resume_step:06}.pt"
@@ -186,7 +183,6 @@ class PreTrain:
 
     def run(self) -> None:
         """Run the pre-training loop."""
-
         while (
             not self.lr_anneal_steps
             or self.step + self.resume_step < self.lr_anneal_steps
@@ -214,7 +210,6 @@ class PreTrain:
 
     def run_step(self, batch: th.Tensor, cond: dict[str, th.Tensor]) -> None:
         """Run a single step of training."""
-
         self.forward_backward(batch, cond)
         took_step = self.mp_trainer.optimize(self.opt)
         if took_step:
@@ -223,7 +218,6 @@ class PreTrain:
 
     def forward_backward(self, batch: th.Tensor, cond: dict[str, th.Tensor]) -> None:
         """Run the forward and backward passes."""
-
         self.mp_trainer.zero_grad()
         for i in range(0, batch.shape[0], self.microbatch):
             micro = batch[i : i + self.microbatch].to(dist_util.dev())
@@ -261,13 +255,11 @@ class PreTrain:
 
     def _update_ema(self) -> None:
         """Update the EMA parameters."""
-
         for rate, params in zip(self.ema_rate, self.ema_params):
             update_ema(params, self.mp_trainer.master_params, rate=rate)
 
     def _anneal_lr(self) -> None:
         """Anneal the learning rate, if specified."""
-
         if not self.lr_anneal_steps:
             return
         frac_done = (self.step + self.resume_step) / self.lr_anneal_steps
@@ -277,7 +269,6 @@ class PreTrain:
 
     def _dump_loggs(self) -> None:
         """Dump training statistics to the logger."""
-
         logger.info("***** Training statistics *****")
         logger.info(f"Step: {self.step + self.resume_step}")
         logger.info(f"Samples: {(self.step + self.resume_step + 1) * self.global_batch}")
@@ -303,7 +294,6 @@ class PreTrain:
                 None
 
             """
-
             state_dict = self.mp_trainer.master_params_to_state_dict(params)
             if dist_util.get_rank() == 0:
                 logger.info(f"saving model {rate}...")
@@ -354,7 +344,6 @@ class FineTune:
             None
 
         """
-
         dist_util.setup_dist()
         self.threshold = args.threshold
         self.epochs = args.epochs
@@ -434,7 +423,6 @@ class FineTune:
 
     def _load_and_sync_parameters(self) -> None:
         """Load model parameters from checkpoint and sync across processes."""
-
         resume_checkpoint = find_resume_checkpoint() or self.resume_checkpoint
         if resume_checkpoint and dist_util.get_rank() == 0:
             logger.info(f"loading model from checkpoint: {resume_checkpoint}...")
@@ -456,7 +444,6 @@ class FineTune:
             None
 
         """
-
         self.best_mean_acc = 0.0
         acc_mean = 0.0
         epoch_idx = 0
@@ -602,7 +589,6 @@ def find_resume_checkpoint() -> Optional[str]:
 
 def find_ema_checkpoint(main_checkpoint: Optional[str], step: int, rate: float) -> Optional[str]:
     """Find the EMA checkpoint corresponding to the main checkpoint, step, and rate."""
-
     if main_checkpoint is None:
         return None
     filename = f"ema_{rate}_{(step):06d}.pt"
@@ -626,7 +612,6 @@ def log_loss_dict(diffusion: object, ts: th.Tensor, losses: dict[str, th.Tensor]
         loggs: The logged loss dictionary.
 
     """
-
     loggs = {}
     for key, values in losses.items():
         loggs[key] = values.mean().item()

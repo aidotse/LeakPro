@@ -21,16 +21,16 @@ def space_timesteps(num_timesteps: int, section_counts: Union[list, str]) -> set
     If the stride is a string starting with "ddim", then the fixed striding
     from the DDIM paper is used, and only one section is allowed.
 
-    :param num_timesteps: the number of diffusion steps in the original
-                          process to divide up.
-    :param section_counts: either a list of numbers, or a string containing
-                           comma-separated numbers, indicating the step count
-                           per section. As a special case, use "ddimN" where N
-                           is a number of steps to use the striding from the
-                           DDIM paper.
-    :return: a set of diffusion steps from the original process to use.
-    """
+    Args:
+    ----
+        num_timesteps: Number of diffusion steps in the original process.
+        section_counts: Step counts per section, or a `ddimN` string for DDIM striding.
 
+    Returns:
+    -------
+        Set of diffusion steps selected from the original process.
+
+    """
     if isinstance(section_counts, str):
         if section_counts.startswith("ddim"):
             desired_count = int(section_counts[len("ddim") :])
@@ -66,12 +66,22 @@ def space_timesteps(num_timesteps: int, section_counts: Union[list, str]) -> set
 class SpacedDiffusion(GaussianDiffusion):
     """A diffusion process which can skip steps in a base diffusion process.
 
-    :param use_timesteps: a collection (sequence or set) of timesteps from the
-                          original diffusion process to retain.
-    :param kwargs: the kwargs to create the base diffusion process.
+    Args:
+    ----
+        use_timesteps: Timesteps retained from the original diffusion process.
+        kwargs: Arguments used to construct the base diffusion process.
+
     """
 
     def __init__(self, use_timesteps: Union[set, list], **kwargs) -> None: # noqa: ANN003
+        """Initialize the spaced diffusion process.
+
+        Args:
+        ----
+            use_timesteps: Timesteps retained from the original diffusion process.
+            **kwargs: Arguments forwarded to the base diffusion process.
+
+        """
         self.use_timesteps = set(use_timesteps)
         self.timestep_map = []
         self.original_num_steps = len(kwargs["betas"])
@@ -91,29 +101,24 @@ class SpacedDiffusion(GaussianDiffusion):
         self, model: th.nn.Module, *args, **kwargs # noqa: ANN002 ANN003
     ) -> th.tensor:
         """Mean and variance for the diffusion posterior distribution."""
-
         return super().p_mean_variance(self._wrap_model(model), *args, **kwargs)
 
     def training_losses(
         self, model: th.nn.Module, *args, **kwargs # noqa: ANN002 ANN003
     ) -> th.tensor:
         """Training loss for the diffusion model."""
-
         return super().training_losses(self._wrap_model(model), *args, **kwargs)
 
     def condition_mean(self, cond_fn: th.nn.Module, *args, **kwargs) -> th.tensor: # noqa: ANN002 ANN003
         """Return the mean of the conditional distribution."""
-
         return super().condition_mean(self._wrap_model(cond_fn), *args, **kwargs)
 
     def condition_score(self, cond_fn: th.nn.Module, *args, **kwargs) -> th.tensor: # noqa: ANN002 ANN003
         """Return the score of the conditional distribution."""
-
         return super().condition_score(self._wrap_model(cond_fn), *args, **kwargs)
 
     def _wrap_model(self, model: th.nn.Module) -> "_WrappedModel":
         """Wrap the model to remap the timesteps according to the new diffusion process."""
-
         if isinstance(model, _WrappedModel):
             return model
         return _WrappedModel(
@@ -122,12 +127,21 @@ class SpacedDiffusion(GaussianDiffusion):
 
     def _scale_timesteps(self, t: th.tensor) -> th.tensor:
         """Scale the timesteps according to the original diffusion process."""
-
         return t
 
 
 class _WrappedModel:
     def __init__(self, model: th.nn.Module, timestep_map: list, rescale_timesteps: bool, original_num_steps: int) -> None:
+        """Initialize the timestep-remapping model wrapper.
+
+        Args:
+        ----
+            model: Wrapped model.
+            timestep_map: Mapping from spaced timesteps to original timesteps.
+            rescale_timesteps: Whether to rescale remapped timesteps.
+            original_num_steps: Number of steps in the original diffusion process.
+
+        """
         self.model = model
         self.timestep_map = timestep_map
         self.rescale_timesteps = rescale_timesteps

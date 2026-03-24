@@ -93,8 +93,14 @@ def mean_flat(tensor: th.Tensor) -> th.Tensor:
 def normalization(channels: int) -> nn.Module:
     """Make a standard normalization layer.
 
-    :param channels: number of input channels.
-    :return: an nn.Module for normalization.
+    Args:
+    ----
+        channels: Number of input channels.
+
+    Returns:
+    -------
+        Normalization module for the given number of channels.
+
     """
     return GroupNorm32(32, channels)
 
@@ -102,11 +108,16 @@ def normalization(channels: int) -> nn.Module:
 def timestep_embedding(timesteps: th.Tensor, dim: int, max_period: int = 10000) -> th.Tensor:
     """Create sinusoidal timestep embeddings.
 
-    :param timesteps: a 1-D Tensor of N indices, one per batch element.
-                      These may be fractional.
-    :param dim: the dimension of the output.
-    :param max_period: controls the minimum frequency of the embeddings.
-    :return: an [N x dim] Tensor of positional embeddings.
+    Args:
+    ----
+        timesteps: One-dimensional tensor of timestep indices. These may be fractional.
+        dim: Output embedding dimension.
+        max_period: Controls the minimum frequency of the embeddings.
+
+    Returns:
+    -------
+        Tensor of positional embeddings with shape `[N, dim]`.
+
     """
     half = dim // 2
     freqs = th.exp(

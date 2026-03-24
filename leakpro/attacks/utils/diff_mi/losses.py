@@ -56,11 +56,16 @@ def discretized_gaussian_log_likelihood(
 ) -> th.Tensor:
     """Compute the log-likelihood of a Gaussian distribution discretizing to an image.
 
-    :param x: the target images. It is assumed that this was uint8 values,
-              rescaled to the range [-1, 1].
-    :param means: the Gaussian mean Tensor.
-    :param log_scales: the Gaussian log stddev Tensor.
-    :return: a tensor like x of log probabilities (in nats).
+    Args:
+    ----
+        x: Target images rescaled to the range `[-1, 1]`.
+        means: Gaussian mean tensor.
+        log_scales: Gaussian log-standard-deviation tensor.
+
+    Returns:
+    -------
+        Tensor of log probabilities with the same shape as `x`.
+
     """
     assert x.shape == means.shape == log_scales.shape
     centered_x = x - means

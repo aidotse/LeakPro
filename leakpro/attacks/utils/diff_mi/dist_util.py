@@ -20,7 +20,7 @@ GPUS_PER_NODE = 1
 
 
 def setup_dist() -> None:
-    """Setup a distributed process group."""
+    """Set up a distributed process group."""
     if dist.is_initialized():
         return
     if MPI is None:
