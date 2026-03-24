@@ -334,6 +334,7 @@ class AttackDiffMi(AbstractMINV):
                 device=self.device,
             )
             logger.info(f"Average MSE: {avg_mse:.4f}")
+
         elif self.config.diffmiattack.calc_mse:
             logger.warning("Skipping MSE calculation because no successful reconstructions were produced.")
 
@@ -354,6 +355,10 @@ class AttackDiffMi(AbstractMINV):
                 "lpips_alex": value_a,
                 "lpips_vgg": value_v,
                 "mse": avg_mse,
+                "mse_per_label": mse_per_label,
+                "mse_arr": mse_arr,
+                "mse_min_fake": mse_min_fake,
+                "mse_min_real": mse_min_real,
                 "fid": fid_value,
                 },
             )
