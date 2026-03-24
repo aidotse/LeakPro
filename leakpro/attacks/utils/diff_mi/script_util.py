@@ -1,6 +1,6 @@
 """Utilities for creating models and diffusion processes."""
 
-from typing import Union
+from typing import Literal
 
 from . import gaussian_diffusion as gd
 from .respace import SpacedDiffusion, space_timesteps
@@ -11,91 +11,90 @@ NUM_CLASSES = 1000 + 1
 def model_and_diffusion_defaults() -> dict:
     """Defaults for image training."""
 
-    res = dict(
-        image_size=64,
-        num_channels=128,
-        num_res_blocks=3,
-        num_classes=NUM_CLASSES,
-        num_heads=4,
-        num_heads_upsample=-1,
-        num_head_channels=-1,
-        attention_resolutions="16,8",
-        channel_mult="",
-        dropout=0.0,
-        class_cond=False,
-        use_checkpoint=False,
-        use_scale_shift_norm=True,
-        resblock_updown=False,
-        use_fp16=False,
-        use_new_attention_order=False,
-    )
+    res = {
+        "image_size": 64,
+        "num_channels": 128,
+        "num_res_blocks": 3,
+        "num_classes": NUM_CLASSES,
+        "num_heads": 4,
+        "num_heads_upsample": -1,
+        "num_head_channels": -1,
+        "attention_resolutions": "16,8",
+        "channel_mult": "",
+        "dropout": 0.0,
+        "class_cond": False,
+        "use_checkpoint": False,
+        "use_scale_shift_norm": True,
+        "resblock_updown": False,
+        "use_fp16": False,
+        "use_new_attention_order": False,
+    }
     res.update(diffusion_defaults())
     return res
 
 def model_defaults() -> dict:
     """Defaults for image training."""
 
-    model_default = dict(
-        image_size=64,
-        num_channels=128,
-        num_res_blocks=3,
-        num_classes=NUM_CLASSES,
-        num_heads=4,
-        num_heads_upsample=-1,
-        num_head_channels=-1,
-        attention_resolutions="16,8",
-        channel_mult="",
-        dropout=0.0,
-        class_cond=False,
-        use_checkpoint=False,
-        use_scale_shift_norm=True,
-        resblock_updown=False,
-        use_fp16=False,
-        use_new_attention_order=False,
-    )
-    return model_default
+    return {
+        "image_size": 64,
+        "num_channels": 128,
+        "num_res_blocks": 3,
+        "num_classes": NUM_CLASSES,
+        "num_heads": 4,
+        "num_heads_upsample": -1,
+        "num_head_channels": -1,
+        "attention_resolutions": "16,8",
+        "channel_mult": "",
+        "dropout": 0.0,
+        "class_cond": False,
+        "use_checkpoint": False,
+        "use_scale_shift_norm": True,
+        "resblock_updown": False,
+        "use_fp16": False,
+        "use_new_attention_order": False,
+    }
 
 def diffusion_defaults() -> dict:
     """Defaults for diffusion training."""
 
-    return dict(
-        learn_sigma=False,
-        diffusion_steps=1000,
-        noise_schedule="linear",
-        timestep_respacing="",
-        use_kl=False,
-        predict_xstart=False,
-        rescale_timesteps=False,
-        rescale_learned_sigmas=False,
-    )
+    return {
+        "learn_sigma": False,
+        "diffusion_steps": 1000,
+        "noise_schedule": "linear",
+        "timestep_respacing": "",
+        "use_kl": False,
+        "predict_xstart": False,
+        "rescale_timesteps": False,
+        "rescale_learned_sigmas": False,
+    }
 
 def create_model_and_diffusion(
-    image_size,
-    class_cond,
-    num_classes,
-    learn_sigma,
-    num_channels,
-    num_res_blocks,
-    channel_mult,
-    num_heads,
-    num_head_channels,
-    num_heads_upsample,
-    attention_resolutions,
-    dropout,
-    diffusion_steps,
-    noise_schedule,
-    timestep_respacing,
-    use_kl,
-    predict_xstart,
-    rescale_timesteps,
-    rescale_learned_sigmas,
-    use_checkpoint,
-    use_scale_shift_norm,
-    resblock_updown,
-    use_fp16,
-    use_new_attention_order,
-    w=None,
-) -> tuple:
+    image_size: int,
+    class_cond: bool,
+    num_classes: int,
+    learn_sigma: bool,
+    num_channels: int,
+    num_res_blocks: int,
+    channel_mult: str,
+    num_heads: int,
+    num_head_channels: int,
+    num_heads_upsample: int,
+    attention_resolutions: str,
+    dropout: float,
+    diffusion_steps: int,
+    noise_schedule: str,
+    timestep_respacing: list[int] | str,
+    use_kl: bool,
+    predict_xstart: bool,
+    rescale_timesteps: bool,
+    rescale_learned_sigmas: bool,
+    use_checkpoint: bool,
+    use_scale_shift_norm: bool,
+    resblock_updown: bool,
+    use_fp16: bool,
+    use_new_attention_order: bool,
+    w: float | None = None,
+) -> tuple[UNetModel, SpacedDiffusion]:
     """Create a model and diffusion process."""
 
     model = create_model(
@@ -130,25 +129,24 @@ def create_model_and_diffusion(
     )
     return model, diffusion
 
-
 def create_model(
-    image_size,
-    num_channels,
-    num_res_blocks,
-    channel_mult="",
-    learn_sigma=False,
-    class_cond=False,
-    use_checkpoint=False,
-    attention_resolutions="16",
-    num_heads=1,
-    num_head_channels=-1,
-    num_heads_upsample=-1,
-    use_scale_shift_norm=False,
-    dropout=0,
-    resblock_updown=False,
-    use_fp16=False,
-    use_new_attention_order=False,
-    num_classes=NUM_CLASSES,
+    image_size: int,
+    num_channels: int,
+    num_res_blocks: int,
+    channel_mult: str = "",
+    learn_sigma: bool = False,
+    class_cond: bool = False,
+    use_checkpoint: bool = False,
+    attention_resolutions: str = "16",
+    num_heads: int = 1,
+    num_head_channels: int = -1,
+    num_heads_upsample: int = -1,
+    use_scale_shift_norm: bool = False,
+    dropout: float = 0,
+    resblock_updown: bool = False,
+    use_fp16: bool = False,
+    use_new_attention_order: bool = False,
+    num_classes: int = NUM_CLASSES,
 ) -> UNetModel:
     """Create a U-Net model."""
 
@@ -190,25 +188,24 @@ def create_model(
         use_new_attention_order=use_new_attention_order,
     )
 
-
 def create_classifier_and_diffusion(
-    image_size,
-    classifier_use_fp16,
-    classifier_width,
-    classifier_depth,
-    classifier_attention_resolutions,
-    classifier_use_scale_shift_norm,
-    classifier_resblock_updown,
-    classifier_pool,
-    learn_sigma,
-    diffusion_steps,
-    noise_schedule,
-    timestep_respacing,
-    use_kl,
-    predict_xstart,
-    rescale_timesteps,
-    rescale_learned_sigmas,
-) -> tuple:
+    image_size: int,
+    classifier_use_fp16: bool,
+    classifier_width: int,
+    classifier_depth: int,
+    classifier_attention_resolutions: str,
+    classifier_use_scale_shift_norm: bool,
+    classifier_resblock_updown: bool,
+    classifier_pool: str,
+    learn_sigma: bool,
+    diffusion_steps: int,
+    noise_schedule: str,
+    timestep_respacing: list[int] | str,
+    use_kl: bool,
+    predict_xstart: bool,
+    rescale_timesteps: bool,
+    rescale_learned_sigmas: bool,
+) -> tuple[EncoderUNetModel, SpacedDiffusion]:
     """Create a classifier and diffusion process."""
 
     classifier = create_classifier(
@@ -233,17 +230,16 @@ def create_classifier_and_diffusion(
     )
     return classifier, diffusion
 
-
 def create_classifier(
-    image_size,
-    classifier_use_fp16,
-    classifier_width,
-    classifier_depth,
-    classifier_attention_resolutions,
-    classifier_use_scale_shift_norm,
-    classifier_resblock_updown,
-    classifier_pool,
-    out_channels=1000,
+    image_size: int,
+    classifier_use_fp16: bool,
+    classifier_width: int,
+    classifier_depth: int,
+    classifier_attention_resolutions: str,
+    classifier_use_scale_shift_norm: bool,
+    classifier_resblock_updown: bool,
+    classifier_pool: Literal["adaptive", "attention", "spatial", "spatial_v2"],
+    out_channels: int = 1000,
 ) -> EncoderUNetModel:
     """Create a U-Net classifier model."""
 
@@ -283,12 +279,12 @@ def create_gaussian_diffusion(
     w: float = 1.0,
     learn_sigma: bool =False,
     sigma_small: bool =False,
-    noise_schedule="linear",
+    noise_schedule: str = "linear",
     use_kl: bool =False,
     predict_xstart: bool =False,
     rescale_timesteps: bool =False,
     rescale_learned_sigmas: bool =False,
-    timestep_respacing: Union[list, str] ="",
+    timestep_respacing: list[int] | str = "",
 ) -> SpacedDiffusion:
     """Create a Gaussian diffusion process."""
 

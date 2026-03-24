@@ -1,5 +1,4 @@
 """Implementation of the Diff-Mi attack."""
-import math
 import os
 from typing import Any, Dict, Optional
 

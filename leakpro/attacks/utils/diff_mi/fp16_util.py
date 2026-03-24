@@ -15,14 +15,12 @@ def convert_module_to_f16(layer: nn.Module) -> None:
         if layer.bias is not None:
             layer.bias.data = layer.bias.data.half()
 
-
 def convert_module_to_f32(layer: nn.Module) -> None:
     """Convert primitive modules to float32, undoing convert_module_to_f16()."""
     if isinstance(layer, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
         layer.weight.data = layer.weight.data.float()
         if layer.bias is not None:
             layer.bias.data = layer.bias.data.float()
-
 
 def make_master_params(param_groups_and_shapes: list) -> list[nn.Parameter]:
     """Copy model parameters into a (differently-shaped) list of full-precision parameters."""
@@ -43,7 +41,6 @@ def make_master_params(param_groups_and_shapes: list) -> list[nn.Parameter]:
 
     return master_params
 
-
 def model_grads_to_master_grads(
     param_groups_and_shapes: list, master_params: list[nn.Parameter]
 ) -> None:
@@ -61,7 +58,6 @@ def model_grads_to_master_grads(
         else:
             master_param.grad.detach().copy_(flat_grad)
 
-
 def master_params_to_model_params(
     param_groups_and_shapes: list, master_params: list[nn.Parameter]
 ) -> None:
@@ -74,20 +70,15 @@ def master_params_to_model_params(
         ):
             param.detach().copy_(unflat_master_param)
 
-
 def unflatten_master_params(param_group: list, master_param: th.Tensor) -> list[nn.Parameter]:
     """Unflatten a master parameter tensor into the shapes of the given param_group."""
     return _unflatten_dense_tensors(master_param, [param for (_, param) in param_group])
 
-
-def get_param_groups_and_shapes(named_model_params, params: list[int] | None = None) -> list:
+def get_param_groups_and_shapes(named_model_params: object, params: list[int] | None = None) -> list:
     """From named model parameters, get parameter groups and their shapes."""
     model_params = list(named_model_params)
 
-    if params is not None:
-        named_model_params = [model_params[i] for i in params]
-    else:
-        named_model_params = model_params
+    named_model_params = [model_params[i] for i in params] if params is not None else model_params
 
     scalar_vector_named_params = (
         [(n, p) for (n, p) in named_model_params if p.ndim <= 1],
@@ -108,7 +99,6 @@ def get_param_groups_and_shapes(named_model_params, params: list[int] | None = N
         raise ValueError("No parameters found for mixed-precision training.")
 
     return param_groups
-
 
 def master_params_to_state_dict(
     model: nn.Module,
@@ -135,7 +125,6 @@ def master_params_to_state_dict(
 
     return state_dict
 
-
 def state_dict_to_master_params(
     model: nn.Module, state_dict: dict, use_fp16: bool
 ) -> list[nn.Parameter]:
@@ -150,12 +139,10 @@ def state_dict_to_master_params(
         master_params = [state_dict[name] for name, _ in model.named_parameters()]
     return master_params
 
-
 def zero_master_grads(master_params: list[nn.Parameter]) -> None:
     """Zero out the gradients of the master parameters."""
     for param in master_params:
         param.grad = None
-
 
 def zero_grad(model_params: list[nn.Parameter]) -> None:
     """Zero out the gradients of the model parameters."""
@@ -163,7 +150,6 @@ def zero_grad(model_params: list[nn.Parameter]) -> None:
         if param.grad is not None:
             param.grad.detach_()
             param.grad.zero_()
-
 
 def param_grad_or_zeros(param: nn.Parameter) -> th.Tensor:
     """Return the gradient of the parameter, or zeros if it is None."""
@@ -177,7 +163,8 @@ class MixedPrecisionTrainer:
     This helper manages full-precision master parameters for optimization when
     fp16 training is enabled, while keeping the model parameters synchronized.
     It also supports restricting optimization to a selected subset of layers
-    during fine-tuning."""
+    during fine-tuning.
+    """
 
     def __init__(
         self,
@@ -205,6 +192,7 @@ class MixedPrecisionTrainer:
 
         Returns:
             None
+
         """
 
         self.model = model
@@ -306,22 +294,21 @@ class MixedPrecisionTrainer:
                     grad_norm += th.norm(p.grad, p=2, dtype=th.float32).item() ** 2
         return np.sqrt(grad_norm) / grad_scale, np.sqrt(param_norm)
 
-def master_params_to_state_dict(self, master_params: list[nn.Parameter]) -> dict:
-    """Convert master parameters to a state dictionary."""
-    if self.use_fp16 and len(master_params) != len(self.param_groups_and_shapes):
-        raise ValueError(
-            f"Expected {len(self.param_groups_and_shapes)} fp16 master param groups, "
-            f"got {len(master_params)} tensors."
-        )
+    def master_params_to_state_dict(self, master_params: list[nn.Parameter]) -> dict:
+        """Convert master parameters to a state dictionary."""
+        if self.use_fp16 and len(master_params) != len(self.param_groups_and_shapes):
+            raise ValueError(
+                f"Expected {len(self.param_groups_and_shapes)} fp16 master param groups, "
+                f"got {len(master_params)} tensors."
+            )
 
-    return master_params_to_state_dict(
-        self.model, self.param_groups_and_shapes, master_params, self.use_fp16
-    )
+        return master_params_to_state_dict(
+            self.model, self.param_groups_and_shapes, master_params, self.use_fp16
+        )
 
     def state_dict_to_master_params(self, state_dict: dict) -> list[nn.Parameter]:
         """Convert a state dictionary to master parameters."""
         return state_dict_to_master_params(self.model, state_dict, self.use_fp16)
-
 
 def check_overflow(value: float) -> bool:
     """Check if a value is infinite or NaN."""

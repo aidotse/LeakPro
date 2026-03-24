@@ -354,84 +354,107 @@ def calc_lpips(
     -------
         value_a: Mean LPIPS distance using AlexNet features.
         value_v: Mean LPIPS distance using VGG features.
+
     """
     try:
-        loss_fn_alex = lpips.LPIPS(net="alex").to(device)
-        loss_fn_vgg = lpips.LPIPS(net="vgg").to(device)
-        loss_fn_alex.eval()
-        loss_fn_vgg.eval()
-
-        real_batches = []
-        target_batches = []
-        for x in private_data:
-            real_batches.append(x[0])
-            target_batches.append(x[1])
-
-        if len(real_batches) == 0:
+        loss_fn_alex, loss_fn_vgg = _create_lpips_losses(device)
+        real_data, real_targets = _collect_private_batches(private_data, device)
+        if real_data is None or real_targets is None:
             logger.warning("LPIPS calculation skipped: private_data is empty.")
             return -1.0, -1.0
-
-        real_data = torch.cat(real_batches, dim=0).to(device)
-        real_targets = torch.cat(target_batches, dim=0).to(device)
 
         if fakes.numel() == 0 or fake_targets.numel() == 0:
             logger.warning("LPIPS calculation skipped: no fake samples provided.")
             return -1.0, -1.0
 
-        fakes = fakes.to(device)
+        fakes = _normalize_lpips_input(fakes.to(device))
         fake_targets = fake_targets.to(device)
+        real_data = _normalize_lpips_input(real_data)
 
-        # LPIPS expects inputs in [-1, 1]. Convert only if inputs look like [0, 1].
-        if real_data.min() >= 0 and real_data.max() <= 1:
-            real_data = real_data * 2 - 1
-        if fakes.min() >= 0 and fakes.max() <= 1:
-            fakes = fakes * 2 - 1
-
-        alex_vals = []
-        vgg_vals = []
-
-        unique_labels = torch.unique(fake_targets)
-
-        with torch.inference_mode():
-            for label in unique_labels:
-                fake_idx = torch.nonzero(fake_targets == label).squeeze(1)
-                real_idx = torch.nonzero(real_targets == label).squeeze(1)
-
-                if fake_idx.numel() == 0 or real_idx.numel() == 0:
-                    continue
-
-                fake_l = fakes[fake_idx]      # [nf, C, H, W]
-                real_l = real_data[real_idx]  # [nr, C, H, W]
-
-                nf = fake_l.shape[0]
-                nr = real_l.shape[0]
-
-                chunk = 16
-                for start in range(0, nf, chunk):
-                    fake_chunk = fake_l[start:start + chunk]
-                    nfc = fake_chunk.shape[0]
-
-                    fake_rep = fake_chunk.repeat_interleave(nr, dim=0)
-                    real_rep = real_l.repeat(nfc, 1, 1, 1)
-
-                    d_alex = loss_fn_alex(fake_rep, real_rep).view(nfc, nr)
-                    d_vgg = loss_fn_vgg(fake_rep, real_rep).view(nfc, nr)
-
-                    alex_vals.append(d_alex.min(dim=1).values)
-                    vgg_vals.append(d_vgg.min(dim=1).values)
+        alex_vals, vgg_vals = _compute_lpips_by_label(
+            loss_fn_alex=loss_fn_alex,
+            loss_fn_vgg=loss_fn_vgg,
+            real_data=real_data,
+            real_targets=real_targets,
+            fakes=fakes,
+            fake_targets=fake_targets,
+        )
 
         if len(alex_vals) == 0 or len(vgg_vals) == 0:
             logger.warning("LPIPS calculation skipped: no overlapping labels between real and fake samples.")
             return -1.0, -1.0
 
-        value_a = torch.cat(alex_vals, dim=0).mean().item()
-        value_v = torch.cat(vgg_vals, dim=0).mean().item()
-
-        return value_a, value_v
-
+        return torch.cat(alex_vals, dim=0).mean().item(), torch.cat(vgg_vals, dim=0).mean().item()
     except Exception as e:
         logger.error(f"LPIPS calculation failed: {e}")
         return -1.0, -1.0
+
+
+def _create_lpips_losses(device: Union[torch.device, str]) -> tuple[lpips.LPIPS, lpips.LPIPS]:
+    loss_fn_alex = lpips.LPIPS(net="alex").to(device)
+    loss_fn_vgg = lpips.LPIPS(net="vgg").to(device)
+    loss_fn_alex.eval()
+    loss_fn_vgg.eval()
+    return loss_fn_alex, loss_fn_vgg
+
+
+def _collect_private_batches(
+    private_data: torch.utils.data.DataLoader,
+    device: Union[torch.device, str],
+) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+    real_batches = []
+    target_batches = []
+    for batch in private_data:
+        real_batches.append(batch[0])
+        target_batches.append(batch[1])
+
+    if len(real_batches) == 0:
+        return None, None
+
+    return torch.cat(real_batches, dim=0).to(device), torch.cat(target_batches, dim=0).to(device)
+
+
+def _normalize_lpips_input(data: torch.Tensor) -> torch.Tensor:
+    if data.min() >= 0 and data.max() <= 1:
+        return data * 2 - 1
+    return data
+
+
+def _compute_lpips_by_label(
+    loss_fn_alex: lpips.LPIPS,
+    loss_fn_vgg: lpips.LPIPS,
+    real_data: torch.Tensor,
+    real_targets: torch.Tensor,
+    fakes: torch.Tensor,
+    fake_targets: torch.Tensor,
+    chunk_size: int = 16,
+) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
+    alex_vals = []
+    vgg_vals = []
+
+    with torch.inference_mode():
+        for label in torch.unique(fake_targets):
+            fake_idx = torch.nonzero(fake_targets == label).squeeze(1)
+            real_idx = torch.nonzero(real_targets == label).squeeze(1)
+            if fake_idx.numel() == 0 or real_idx.numel() == 0:
+                continue
+
+            fake_label = fakes[fake_idx]
+            real_label = real_data[real_idx]
+            num_real = real_label.shape[0]
+
+            for start in range(0, fake_label.shape[0], chunk_size):
+                fake_chunk = fake_label[start:start + chunk_size]
+                num_fake_chunk = fake_chunk.shape[0]
+                fake_rep = fake_chunk.repeat_interleave(num_real, dim=0)
+                real_rep = real_label.repeat(num_fake_chunk, 1, 1, 1)
+
+                d_alex = loss_fn_alex(fake_rep, real_rep).view(num_fake_chunk, num_real)
+                d_vgg = loss_fn_vgg(fake_rep, real_rep).view(num_fake_chunk, num_real)
+                alex_vals.append(d_alex.min(dim=1).values)
+                vgg_vals.append(d_vgg.min(dim=1).values)
+
+    return alex_vals, vgg_vals
 
 def calc_knn(
     fake_data: torch.Tensor,
@@ -508,8 +531,8 @@ def calc_mse(
 ) -> tuple[float, dict[int, float], list[float], list[torch.Tensor], list[torch.Tensor]]:
     """Calculate mean squared error between real and fake data grouped by labels.
 
-    For each label, computes the full pairwise MSE matrix between real and fake samples, 
-    stores the average pairwise MSE for that label and for each real sample, stores the 
+    For each label, computes the full pairwise MSE matrix between real and fake samples,
+    stores the average pairwise MSE for that label and for each real sample, stores the
     minimum-MSE fake sample and that minimum value
 
     Args:
@@ -526,6 +549,7 @@ def calc_mse(
         mse_values_arr: List of minimum MSE values, one per real sample that had at least one fake of the same label.
         mse_min_fake: List of fake tensors achieving the minimum MSE for each real sample.
         mse_min_real: List of real tensors corresponding to each minimum-MSE match.
+
     """
 
     real_batches = []

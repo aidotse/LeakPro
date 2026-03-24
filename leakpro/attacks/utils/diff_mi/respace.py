@@ -111,7 +111,7 @@ class SpacedDiffusion(GaussianDiffusion):
 
         return super().condition_score(self._wrap_model(cond_fn), *args, **kwargs)
 
-    def _wrap_model(self, model: th.nn.Module):
+    def _wrap_model(self, model: th.nn.Module) -> "_WrappedModel":
         """Wrap the model to remap the timesteps according to the new diffusion process."""
 
         if isinstance(model, _WrappedModel):
