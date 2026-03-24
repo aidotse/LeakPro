@@ -708,7 +708,7 @@ class GaussianDiffusion:
         The resulting units are bits (rather than nats, as one might expect).
         This allows for comparison to other papers.
 
-        Returns:
+        Returns
         -------
             Dictionary containing the per-sample bound term and the predicted `x_0`.
 
