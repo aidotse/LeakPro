@@ -1,6 +1,6 @@
 """Hyperparameter tuning with optuna on evaluating."""
 from coco import get_coco_detection_loader
-from leakpro.attacks.gia_attacks.gia_running import GIABaseRunning
+from leakpro.attacks.gia_attacks.gia_running import GIABaseRunning, GIABaseRunningConfig
 from leakpro.attacks.gia_attacks.invertinggradients import InvertingGradients, InvertingConfig
 from leakpro.fl_utils.data_utils import GiaImageYoloExtension
 from leakpro.fl_utils.gia_optimizers import MetaSGD
@@ -15,7 +15,8 @@ if __name__ == "__main__":
     # This is a modified version of the yolo_v8_nano, where ALL CSP modules have been exchanged for resnet basicblock layers.
     # With these design changes we can get a small amount of information leakage from the model.
     model = yolo_v8_n_basicblock()
-    configs = InvertingConfig()
+    model.eval()
+    configs = GIABaseRunningConfig()
     configs.optimizer = MetaSGD(lr=0.1)
     configs.data_extension = GiaImageYoloExtension()
     gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
@@ -30,7 +31,7 @@ if __name__ == "__main__":
         client_loader, _, _ = get_coco_detection_loader(start_idx=108000+i, num_images=1, batch_size=1, aug=False)
         trial_data.append(client_loader)
     # Initialize attack object and run with optuna.
-    attack_object = InvertingGradients(model, client_loader, data_mean, data_std, configs=configs, train_fn=trainyolo,optuna_trial_data=trial_data)
+    attack_object = GIABaseRunning(model, client_loader, data_mean, data_std, configs=configs, train_fn=trainyolo,optuna_trial_data=trial_data)
     optuna_config = OptunaConfig()
     optuna_config.n_trials = 100
     attack_object.run_with_optuna(optuna_config=optuna_config)
