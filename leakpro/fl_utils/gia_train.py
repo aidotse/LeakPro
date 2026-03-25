@@ -1,7 +1,10 @@
 """Train function that keeps the computational graph intact."""
-from collections import OrderedDict
 
-from torch import Tensor, cuda, device
+from collections import OrderedDict
+from typing import Optional
+
+import torch
+from torch import Tensor, cuda
 from torch.autograd import grad
 from torch.nn import Module
 from torch.utils.data import DataLoader
@@ -16,6 +19,8 @@ def train(
     optimizer: MetaOptimizer,
     criterion: Module,
     epochs: int,
+    device: Optional[torch.device] = None,
+    return_delta: bool = True,
 ) -> list:
     """Model training procedure for GIA.
 
@@ -27,22 +32,31 @@ def train(
 
     Training does not update the original model, but returns a norm of what the update would have been.
     """
-    gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
-    model.to(gpu_or_cpu)
-    patched_model = MetaModule(model)
+    if device is None:
+        device = torch.device("cuda" if cuda.is_available() else "cpu")
+    model.to(device)
+    patched_model = MetaModule(model, device=device)
     outputs = None
     for _ in range(epochs):
         for inputs, labels in data:
-            inputs, labels = inputs.to(gpu_or_cpu, non_blocking=True), (labels.to(gpu_or_cpu, non_blocking=True) if
-                                                                        isinstance(labels, Tensor) else labels)
+            inputs, labels = (
+                inputs.to(device, non_blocking=True),
+                (labels.to(device, non_blocking=True) if isinstance(labels, Tensor) else labels),
+            )
             outputs = patched_model(inputs, patched_model.parameters)
-            loss = criterion(outputs, labels).sum()
+            loss = criterion(outputs, labels)  # .sum()
             patched_model.parameters = optimizer.step(loss, patched_model.parameters)
-    model_delta = OrderedDict((name, param - param_origin)
-                                            for ((name, param), (name_origin, param_origin))
-                                            in zip(patched_model.parameters.items(),
-                                                    OrderedDict(model.named_parameters()).items()))
-    return list(model_delta.values())
+    model_delta = OrderedDict(
+        (name, param - param_origin)
+        for ((name, param), (name_origin, param_origin)) in zip(
+            patched_model.parameters.items(), OrderedDict(model.named_parameters()).items()
+        )
+    )
+    if return_delta:
+        return list(model_delta.values())
+
+    return list(patched_model.parameters.values())
+
 
 def train_nostep(
     model: Module,
@@ -50,6 +64,7 @@ def train_nostep(
     optimizer: MetaOptimizer,  # noqa: ARG001
     criterion: Module,
     epochs: int,
+    device: Optional[torch.device] = None,
 ) -> list:
     """Model training procedure for GIA.
 
@@ -61,20 +76,23 @@ def train_nostep(
 
     Training does not update the original model, but returns a norm of what the update would have been.
     """
-    gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
-    model.to(gpu_or_cpu)
+    if device is None:
+        device = torch.device("cuda" if cuda.is_available() else "cpu")
+    model.to(device)
     outputs = None
     for _ in range(epochs):
         for inputs, labels in data:
-            inputs, labels = inputs.to(gpu_or_cpu, non_blocking=True), (labels.to(gpu_or_cpu, non_blocking=True) if
-                                                                        isinstance(labels, Tensor) else labels)
+            inputs, labels = (
+                inputs.to(device, non_blocking=True),
+                (labels.to(device, non_blocking=True) if isinstance(labels, Tensor) else labels),
+            )
             outputs = model(inputs)
             loss = criterion(outputs, labels).sum()
             grads = grad(
-                loss,list(model.parameters()),
-                retain_graph=True, create_graph=True, only_inputs=True, allow_unused=True
+                loss, list(model.parameters()), retain_graph=True, create_graph=True, only_inputs=True, allow_unused=True
             )
     return grads
+
 
 def trainyolo(
     model: Module,
@@ -82,6 +100,7 @@ def trainyolo(
     optimizer: MetaOptimizer,
     criterion: Module,
     epochs: int,
+    device: Optional[torch.device] = None,
 ) -> list:
     """Model training procedure for GIA.
 
@@ -93,19 +112,24 @@ def trainyolo(
 
     Training does not update the original model, but returns a norm of what the update would have been.
     """
-    gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
-    model.to(gpu_or_cpu)
+    if device is None:
+        device = torch.device("cuda" if cuda.is_available() else "cpu")
+    model.to(device)
     patched_model = MetaModule(model)
     outputs = None
     for _ in range(epochs):
         for inputs, labels, _ in data:
-            inputs, labels = inputs.to(gpu_or_cpu, non_blocking=True), (labels.to(gpu_or_cpu, non_blocking=True) if
-                                                                        isinstance(labels, Tensor) else labels)
+            inputs, labels = (
+                inputs.to(device, non_blocking=True),
+                (labels.to(device, non_blocking=True) if isinstance(labels, Tensor) else labels),
+            )
             outputs = patched_model(inputs, patched_model.parameters)
             loss = criterion(outputs, labels).sum()
             patched_model.parameters = optimizer.step(loss, patched_model.parameters)
-    model_delta = OrderedDict((name, param - param_origin)
-                                            for ((name, param), (name_origin, param_origin))
-                                            in zip(patched_model.parameters.items(),
-                                                    OrderedDict(model.named_parameters()).items()))
+    model_delta = OrderedDict(
+        (name, param - param_origin)
+        for ((name, param), (name_origin, param_origin)) in zip(
+            patched_model.parameters.items(), OrderedDict(model.named_parameters()).items()
+        )
+    )
     return list(model_delta.values())

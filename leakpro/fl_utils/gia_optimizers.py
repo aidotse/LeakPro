@@ -1,7 +1,9 @@
 """Optimizer objects used for GIA training to allow graph utilization through multiple epochs."""
+
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 
+import torch
 from torch import Tensor, zeros_like
 from torch.autograd import grad
 
@@ -14,6 +16,10 @@ class MetaOptimizer(ABC):
     def __init__(self: "MetaOptimizer") -> None:
         """Initialize the MetaOptimizer."""
         raise NotImplementedError("This is an abstract class and should not be instantiated directly.")
+
+    def reset(self: "MetaOptimizer") -> None:
+        """Reset the optimizer state."""
+        raise NotImplementedError("This method should be implemented by subclasses.")
 
     @abstractmethod
     def step(self: "MetaOptimizer", loss: Tensor, params: Dict[str, Tensor]) -> OrderedDict[str, Tensor]:
@@ -31,12 +37,18 @@ class MetaOptimizer(ABC):
         """
         raise NotImplementedError("This method should be implemented by subclasses.")
 
+
 class MetaSGD(MetaOptimizer):
     """Implementation of SGD which perform step to a new set of parameters."""
 
-    def __init__(self: Self, lr: float=1e-2) -> None:
+    def __init__(self: Self, lr: float = 1e-2, foreach: bool = True) -> None:
         """Init."""
         self.lr = lr
+        self.foreach = foreach
+
+    def reset(self: Self) -> None:
+        """Reset the optimizer state."""
+        pass
 
     def step(self: Self, loss: Tensor, params: Dict[str, Tensor]) -> OrderedDict[str, Tensor]:
         """Perform a single optimization step.
@@ -53,31 +65,45 @@ class MetaSGD(MetaOptimizer):
         """
         grad_params = [(name, param) for name, param in params.items() if param.requires_grad]
 
-        # Compute gradients only for grad params
-        grads = grad(
-            loss, [param for _, param in grad_params],
-            retain_graph=True, create_graph=True, only_inputs=True, allow_unused=True
-        )
+        p_list = [param for _, param in grad_params]
 
-        grad_iter = iter(grads)
+        # Compute gradients only for grad params
+        grads = grad(loss, p_list, retain_graph=True, create_graph=True, only_inputs=True, allow_unused=True)
+
+        # Match PyTorch behavior better: None grads should behave like zero update
+        g_list = []
+        for p, g in zip(p_list, grads):
+            if g is None:
+                g_list.append(torch.zeros_like(p))
+            else:
+                g_list.append(g)
+
+        # Update in a way similar to torch.optim.SGD
+        if self.foreach and hasattr(torch, "_foreach_add"):
+            # Out-of-place foreach op, returns new tensors and keeps graph
+            new_p_list = torch._foreach_add(p_list, g_list, alpha=-self.lr)
+        else:
+            new_p_list = [p - self.lr * g for p, g in zip(p_list, g_list)]
+
+        new_param_iter = iter(new_p_list)
         updated_params = OrderedDict()
 
         for name, param in params.items():
             if param.requires_grad:
-                grad_value = next(grad_iter)
-                if grad_value is None:
-                    grad_value = 1
-                updated_params[name] = param - self.lr * grad_value
+                updated_params[name] = next(new_param_iter)
             else:
-                # Leave params that does not require grad as they are
+                # Leave params that do not require grad as they are
                 updated_params[name] = param
+
         return updated_params
+
 
 class MetaAdam(MetaOptimizer):
     """Implementation of Adam which perform step to a new set of parameters."""
 
-    def __init__(self: Self, lr: float = 1e-2, betas: Tuple[float, float] = (0.9, 0.999), eps: float = 1e-08,
-                 weight_decay: float = 0) -> None:
+    def __init__(
+        self: Self, lr: float = 1e-2, betas: Tuple[float, float] = (0.9, 0.999), eps: float = 1e-08, weight_decay: float = 0
+    ) -> None:
         """Initializes the MetaAdam optimizer.
 
         Args:
@@ -111,8 +137,9 @@ class MetaAdam(MetaOptimizer):
             OrderedDict[str, torch.Tensor]: A new set of parameters which have been updated.
 
         """
-        gradients = grad(loss, [p for p in params.values() if p.requires_grad],
-                         retain_graph=True, create_graph=True, only_inputs=True)
+        gradients = grad(
+            loss, [p for p in params.values() if p.requires_grad], retain_graph=True, create_graph=True, only_inputs=True
+        )
 
         if self.weight_decay != 0:
             gradients = [grad + self.weight_decay * param for grad, param in zip(gradients, params.values())]
@@ -125,7 +152,7 @@ class MetaAdam(MetaOptimizer):
         new_params = OrderedDict()
         for (name, param), gradient in zip(params.items(), gradients):
             self.m[name] = self.beta1 * self.m[name] + (1 - self.beta1) * gradient
-            self.v[name] = self.beta2 * self.v[name] + (1 - self.beta2) * (gradient ** 2)
+            self.v[name] = self.beta2 * self.v[name] + (1 - self.beta2) * (gradient**2)
 
             m_hat = self.m[name] / (1 - self.beta1**self.t)
             v_hat = self.v[name] / (1 - self.beta2**self.t)
