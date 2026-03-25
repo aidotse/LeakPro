@@ -179,12 +179,16 @@ class ShadowModelTrainingSchema(BaseModel):
     train_indices: List[int] = Field(..., description="Indices of training samples")
     num_train: int = Field(..., ge=0, description="Number of training samples")
     optimizer: str = Field(..., description="Optimizer name")
+    optimizer_params: Dict[str, Any] = Field(default_factory=dict, description="Optimizer parameters")
     criterion: str = Field(..., description="Criterion (loss function) name")
+    criterion_params: Dict[str, Any] = Field(default_factory=dict, description="Criterion parameters")
     epochs: int = Field(..., ge=1, description="Number of training epochs")
+    batch_size: Optional[int] = Field(default=None, ge=1, description="Batch size used during training")
     train_result: EvalOutput = Field(..., description="Evaluation output for the training set")
     test_result: EvalOutput = Field(..., description="Evaluation output for the test set")
     online: bool = Field(..., description="Online vs. offline training")
     model_class: str = Field(..., description="Model class name")
+    model_module_path: Optional[str] = Field(default=None, description="Path to the model module")
     target_model_hash: str = Field(..., description="Hash of target model")
 
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields

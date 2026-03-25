@@ -39,6 +39,7 @@ class ModelHandler():
 
         # get the bluepring for the model
         if self.use_target_model_setup:
+            self.model_path = handler.configs.target.module_path
             self.model_class = handler.target_model_blueprint.__name__
             self.model_blueprint = handler.target_model_blueprint
         else:
@@ -51,23 +52,29 @@ class ModelHandler():
                 raise ValueError(f"Failed to create model blueprint from {self.model_class} in {self.model_path}") from e
 
         if self.use_target_model_setup:
-            self.init_params = target_setup.init_params
+            self.init_params = (target_setup.init_params or {}).copy()
             optimizer_name = target_setup.optimizer.name
-            self.optimizer_config = target_setup.optimizer.params
+            self.optimizer_config = (target_setup.optimizer.params or {}).copy()
             criterion_name = target_setup.criterion.name
-            self.loss_config = target_setup.criterion.params
+            self.loss_config = (target_setup.criterion.params or {}).copy()
             self.epochs = target_setup.epochs
+            self.batch_size = target_setup.data_loader.params.get("batch_size")
         else:
             # Inherit defaults from target and apply caller overrides when present.
-            self.init_params = target_setup.init_params.copy()
+            self.init_params = (target_setup.init_params or {}).copy()
             self.init_params.update(caller_configs.init_params or {})
             optimizer_cfg = caller_configs.optimizer or target_setup.optimizer
             criterion_cfg = caller_configs.criterion or target_setup.criterion
             optimizer_name = optimizer_cfg.name
-            self.optimizer_config = optimizer_cfg.params
+            self.optimizer_config = (optimizer_cfg.params or {}).copy()
             criterion_name = criterion_cfg.name
-            self.loss_config = criterion_cfg.params
+            self.loss_config = (criterion_cfg.params or {}).copy()
             self.epochs = caller_configs.epochs if caller_configs.epochs is not None else target_setup.epochs
+            target_batch_size = target_setup.data_loader.params.get("batch_size")
+            self.batch_size = caller_configs.batch_size if caller_configs.batch_size is not None else target_batch_size
+
+        self.optimizer_name = optimizer_name.lower()
+        self.criterion_name = criterion_name.lower()
 
         # Get optimizer class
         self.optimizer_class = self._get_optimizer_class(optimizer_name)
