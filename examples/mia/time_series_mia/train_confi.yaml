@@ -1,0 +1,25 @@
+run: # Configurations for a specific run
+  random_seed: 45 # Integer number of specifying random seed
+  log_dir: target # String for indicating where to save all the information, including models and computed signals. We can reuse the models saved in the same log_dir.
+
+train: # Configuration for training
+  epochs: 50 # Integer number for indicating the epochs for training target model.
+  batch_size: 1024 # Integer number for indicating batch size for training the target model.
+  optimizer: Adam # String which indicates the optimizer. We support Adam and SGD.
+  loss: mae
+  early_stopping: True  # Whether to use early stopping (both in target and shadow models)
+  patience: 2 # The number of epochs without validation loss improvement before early stopping
+
+data: # Configuration for data
+  dataset: ELD # String indicates the name of the dataset
+  f_train: 0.2 # Float number from 0 to 1 indicating the fraction of the train dataset
+  f_test: 0.2 # Float number from 0 to 1 indicating the size of the test set
+  f_val: 0.2 # Float number from 0 to 1 indicating the size of the val set (will be excluded from audit)
+  scaling: robust
+  data_dir: data # String about where to find the data.
+  lookback: 100
+  horizon: 20
+  num_individuals: 200
+  k_lead: 1 # Number of leading variables to use
+  stride: 1
+  num_time_steps: 15000
