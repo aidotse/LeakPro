@@ -13,7 +13,7 @@ from leakpro.attacks.utils.model_handler import ModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.schemas import ShadowModelTrainingSchema, TrainingOutput
 from leakpro.signals.signal_extractor import PytorchModel
-from leakpro.utils.import_helper import Self, Tuple
+from leakpro.utils.import_helper import Any, Dict, List, Self, Tuple, Union
 from leakpro.utils.logger import logger
 
 
@@ -67,7 +67,7 @@ class ShadowModelHandler(ModelHandler):
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    def _freeze_value(self:Self, value):  # noqa: ANN001, ANN201
+    def _freeze_value(self:Self, value: Union[List, Dict, Any]) -> Union[tuple, Any]:
         """Convert nested config values to a stable, comparable structure.
 
         Args:
@@ -149,7 +149,7 @@ class ShadowModelHandler(ModelHandler):
             self._freeze_value(metadata.init_params),
         )
 
-    def _filter(self:Self, data_size:int, online:bool)->list[int]:
+    def _filter(self:Self, data_size:int, online:bool) -> tuple[list[int], list[int]]:
         """Find cached shadow models compatible with the current configuration.
 
         Args:
@@ -161,7 +161,7 @@ class ShadowModelHandler(ModelHandler):
 
         Returns:
         -------
-            list[int]: Two lists packed in a tuple-like return value:
+            tuple[list[int], list[int]]: Two lists packed in a tuple-like return value:
             all discovered metadata indices and the subset whose stored
             signature matches the current effective training configuration.
 

@@ -35,43 +35,7 @@ class ModelHandler():
 
         caller_configs = getattr(handler.configs, caller) if caller is not None else None
         self.use_target_model_setup = caller_configs is None
-        target_setup = handler.target_model_metadata
-
-        # get the bluepring for the model
-        if self.use_target_model_setup:
-            self.model_path = handler.configs.target.module_path
-            self.model_class = handler.target_model_blueprint.__name__
-            self.model_blueprint = handler.target_model_blueprint
-        else:
-            # Allow partial shadow model config by inheriting from the target setup.
-            self.model_path = caller_configs.module_path or handler.configs.target.module_path
-            self.model_class = caller_configs.model_class or handler.configs.target.model_class
-            try:
-                self.model_blueprint = self._import_model_from_path(self.model_path, self.model_class)
-            except Exception as e:
-                raise ValueError(f"Failed to create model blueprint from {self.model_class} in {self.model_path}") from e
-
-        if self.use_target_model_setup:
-            self.init_params = (target_setup.init_params or {}).copy()
-            optimizer_name = target_setup.optimizer.name
-            self.optimizer_config = (target_setup.optimizer.params or {}).copy()
-            criterion_name = target_setup.criterion.name
-            self.loss_config = (target_setup.criterion.params or {}).copy()
-            self.epochs = target_setup.epochs
-            self.batch_size = target_setup.data_loader.params.get("batch_size")
-        else:
-            # Inherit defaults from target and apply caller overrides when present.
-            self.init_params = (target_setup.init_params or {}).copy()
-            self.init_params.update(caller_configs.init_params or {})
-            optimizer_cfg = caller_configs.optimizer or target_setup.optimizer
-            criterion_cfg = caller_configs.criterion or target_setup.criterion
-            optimizer_name = optimizer_cfg.name
-            self.optimizer_config = (optimizer_cfg.params or {}).copy()
-            criterion_name = criterion_cfg.name
-            self.loss_config = (criterion_cfg.params or {}).copy()
-            self.epochs = caller_configs.epochs if caller_configs.epochs is not None else target_setup.epochs
-            target_batch_size = target_setup.data_loader.params.get("batch_size")
-            self.batch_size = caller_configs.batch_size if caller_configs.batch_size is not None else target_batch_size
+        optimizer_name, criterion_name = self._load_model_setup(caller_configs)
 
         self.optimizer_name = optimizer_name.lower()
         self.criterion_name = criterion_name.lower()
@@ -102,6 +66,41 @@ class ModelHandler():
 
         criterion = self.handler.get_criterion()
         self.cache_logits(PytorchModel(self.handler.target_model, criterion), name="target")
+
+    def _load_model_setup(self:Self, caller_configs) -> Tuple[str, str]:  # noqa: ANN001
+        """Load the effective model, optimizer, and criterion setup."""
+        target_setup = self.handler.target_model_metadata
+
+        if self.use_target_model_setup:
+            self.model_path = self.handler.configs.target.module_path
+            self.model_class = self.handler.target_model_blueprint.__name__
+            self.model_blueprint = self.handler.target_model_blueprint
+            self.init_params = (target_setup.init_params or {}).copy()
+            self.optimizer_config = (target_setup.optimizer.params or {}).copy()
+            self.loss_config = (target_setup.criterion.params or {}).copy()
+            self.epochs = target_setup.epochs
+            self.batch_size = target_setup.data_loader.params.get("batch_size")
+            return target_setup.optimizer.name, target_setup.criterion.name
+
+        # Allow partial shadow model config by inheriting from the target setup.
+        self.model_path = caller_configs.module_path or self.handler.configs.target.module_path
+        self.model_class = caller_configs.model_class or self.handler.configs.target.model_class
+        try:
+            self.model_blueprint = self._import_model_from_path(self.model_path, self.model_class)
+        except Exception as e:
+            raise ValueError(f"Failed to create model blueprint from {self.model_class} in {self.model_path}") from e
+
+        # Inherit defaults from target and apply caller overrides when present.
+        self.init_params = (target_setup.init_params or {}).copy()
+        self.init_params.update(caller_configs.init_params or {})
+        optimizer_cfg = caller_configs.optimizer or target_setup.optimizer
+        criterion_cfg = caller_configs.criterion or target_setup.criterion
+        self.optimizer_config = (optimizer_cfg.params or {}).copy()
+        self.loss_config = (criterion_cfg.params or {}).copy()
+        self.epochs = caller_configs.epochs if caller_configs.epochs is not None else target_setup.epochs
+        target_batch_size = target_setup.data_loader.params.get("batch_size")
+        self.batch_size = caller_configs.batch_size if caller_configs.batch_size is not None else target_batch_size
+        return optimizer_cfg.name, criterion_cfg.name
 
 
     def cache_logits(self:Self, model:Union[Module, list[Module]], name:str) -> None:
