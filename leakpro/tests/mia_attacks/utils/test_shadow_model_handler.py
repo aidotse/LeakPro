@@ -174,7 +174,7 @@ def test_shadow_model_filter_requires_full_config_match(image_handler: ImageInpu
 
     all_indices, filtered_indices = sm._filter(data_size=5, online=True)
 
-    assert all_indices == [0, 1]
+    assert sorted(all_indices) == [0, 1]
     assert filtered_indices == [0]
 
 
