@@ -1,0 +1,117 @@
+created_at: '2025-09-14T23:26:15.360800Z'
+library: treegrad
+model_name: TGDClassifier
+data:
+  target: identity
+  continuous_cols:
+  - Weight (Lbs)
+  - BMI (kg/m2)
+  - Height (Inches)
+  - num_medications
+  - num_procedures
+  - length_of_stay
+  categorical_cols:
+  - race
+  - insurance
+  - gender
+  - curr_service_MED
+  - curr_service_CMED
+  - '51248'
+  - '51249'
+  - '50912'
+  - '51003'
+  - '50931'
+  - '51006'
+  - '51301'
+  - '50970'
+  - '51265'
+  - '51275'
+  - '51277'
+  - med_Aspirin
+  - '51250'
+  - '50882'
+  - '50902'
+  - '51221'
+  - med_Sodium Chloride 0.9%  Flush
+  - '50893'
+  - '51279'
+  - curr_service_OMED
+  - '52172'
+  - '51222'
+  - curr_service_SURG
+  - '51256'
+  - med_Acetaminophen
+  - '50971'
+  - '51274'
+  - '51237'
+  - '50983'
+  - '51244'
+  - med_Heparin
+  - '50910'
+  - '50960'
+  - curr_service_OBS
+  - med_Furosemide
+  - curr_service_NMED
+  - '50868'
+  - '51493'
+  - '50878'
+  feature_order:
+  - Weight (Lbs)
+  - BMI (kg/m2)
+  - Height (Inches)
+  - num_medications
+  - num_procedures
+  - length_of_stay
+  - race
+  - insurance
+  - gender
+  - curr_service_MED
+  - curr_service_CMED
+  - '51248'
+  - '51249'
+  - '50912'
+  - '51003'
+  - '50931'
+  - '51006'
+  - '51301'
+  - '50970'
+  - '51265'
+  - '51275'
+  - '51277'
+  - med_Aspirin
+  - '51250'
+  - '50882'
+  - '50902'
+  - '51221'
+  - med_Sodium Chloride 0.9%  Flush
+  - '50893'
+  - '51279'
+  - curr_service_OMED
+  - '52172'
+  - '51222'
+  - curr_service_SURG
+  - '51256'
+  - med_Acetaminophen
+  - '50971'
+  - '51274'
+  - '51237'
+  - '50983'
+  - '51244'
+  - med_Heparin
+  - '50910'
+  - '50960'
+  - curr_service_OBS
+  - med_Furosemide
+  - curr_service_NMED
+  - '50868'
+  - '51493'
+  - '50878'
+  train_size: 19033
+  test_size: 4759
+  num_classes: 70
+training:
+  n_estimators: 100
+  learning_rate: 0.01
+  num_leaves: 31
+  max_depth: -1
+  random_state: 123

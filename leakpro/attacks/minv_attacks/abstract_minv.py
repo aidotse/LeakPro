@@ -43,13 +43,16 @@ class AbstractMINV(ABC):
         """
         # These objects are shared and should be initialized only once
         if not AbstractMINV._initialized:
-            AbstractMINV.target_model = PytorchModel(handler.target_model, handler.get_criterion())
+            model_type = handler.configs.target.model_type
+            if model_type == "torch":
+                AbstractMINV.target_model = PytorchModel(handler.target_model, handler.get_criterion())
+            elif model_type == "xgboost":
+                AbstractMINV.target_model = handler.target_model
+
             # Ensure that public_data_path is provided
             AbstractMINV.public_data_path = handler.configs.target.public_data_path
             AbstractMINV.handler = handler
             AbstractMINV._initialized = True
-
-        # TODO: Class attributes initialized checks
 
 
     def _validate_config(self: Self, name: str, value: float, min_val: float, max_val: float) -> None:

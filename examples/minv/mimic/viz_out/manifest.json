@@ -1,0 +1,14 @@
+{
+  "class_counts_png": "viz_out/class_counts.png",
+  "class_counts_csv": "viz_out/class_counts.csv",
+  "feature_ranking_csv": "viz_out/feature_ranking.csv",
+  "hists_top_features_png": "viz_out/hists_top_features.png",
+  "hists_data_dir": "viz_out/hist_data",
+  "pca_png": "viz_out/pca_scatter.png",
+  "pca_embedding_csv": "viz_out/pca_embedding.csv",
+  "tsne_png": "viz_out/tsne_scatter.png",
+  "tsne_embedding_csv": "viz_out/tsne_embedding.csv",
+  "lda_png": "viz_out/lda_scatter.png",
+  "corr_heatmap_png": "viz_out/corr_heatmap.png",
+  "corr_matrix_csv": "viz_out/corr_matrix.csv"
+}

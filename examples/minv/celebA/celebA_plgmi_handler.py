@@ -134,6 +134,9 @@ class CelebA_InputHandler(AbstractInputHandler):
         dis_losses = []
         inv_losses = []
         
+        gen.load_state_dict(torch.load('./gen_3000.pth'))
+        dis.load_state_dict(torch.load('./dis_3000.pth'))
+        
         # Augmentations for generated images. TODO: Move this to a image modality extension and have it as an input
         aug_list = kornia.augmentation.container.ImageSequential(
             kornia.augmentation.RandomResizedCrop((64, 64), scale=(0.8, 1.0), ratio=(1.0, 1.0)),

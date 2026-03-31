@@ -1,6 +1,10 @@
 """Implementation of the PLGMI attack."""
 from typing import Any, Dict, Optional
 
+import cudf
+import numpy as np
+import optuna
+import pandas as pd
 import torch
 from kornia import augmentation
 from pydantic import BaseModel, Field
@@ -12,6 +16,7 @@ from leakpro.attacks.utils import gan_losses
 from leakpro.attacks.utils.gan_handler import GANHandler
 from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.input_handler.modality_extensions.image_metrics import ImageMetrics
+from leakpro.input_handler.modality_extensions.tabular_metrics import TabularMetrics
 from leakpro.reporting.minva_result import MinvResult
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
@@ -55,12 +60,15 @@ class AttackPLGMI(AbstractMINV):
 
         # Model parameters
         generator: GANConfig = Field(..., description="Configuration for the generator")
-        discriminator: GANConfig = Field(..., description="Configuration for the discriminator")
+        discriminator: Optional[GANConfig] = Field(..., description="Configuration for the discriminator")
 
         # Latent space parameters
         dim_z: int = Field(128, ge=1, description="Dimension of the latent space")
         z_optimization_iter: int = Field(1000, ge=1, description="Number of iterations for optimizing z")
         z_optimization_lr: float = Field(0.0002, ge=0.0, description="Learning rate for optimizing z")
+
+        # dataloader or dataframe
+        data_format: str = Field("dataloader", description="Data format for the pseudo labels")
 
 
         # TODO: Most of these are not necessary if models are pre-trained
@@ -90,8 +98,10 @@ class AttackPLGMI(AbstractMINV):
 
         self.num_classes = self.handler.get_num_classes()
 
-        self.configs.generator.init_params["num_classes"] = self.num_classes
-        self.configs.discriminator.init_params["num_classes"] = self.num_classes
+        if self.configs.generator is not None:
+            self.configs.generator.init_params["num_classes"] = self.num_classes
+        if self.configs.discriminator is not None:
+            self.configs.discriminator.init_params["num_classes"] = self.num_classes
 
 
 
@@ -116,19 +126,35 @@ class AttackPLGMI(AbstractMINV):
         }
 
 
-    def top_n_selection(self:Self) -> DataLoader:
+    def top_n_selection(self:Self) -> DataLoader:  # noqa: C901, PLR0912
         """"Top n selection of pseudo labels."""
         # TODO: This does not scale well. Consider creating a class for the dataloader and implementing the __getitem__ method.
         logger.info("Performing top-n selection for pseudo labels")
         self.target_model.eval()
         self.target_model.to(self.device)
         all_confidences = []
-        for entry, _ in self.public_dataloader:
+        self.target_model.to(self.device)
+
+        # TODO: Maybe this is handler/modality functions
+        if self.data_format == "dataloader":
+            for entry, _ in self.public_dataloader:
+                with torch.no_grad():
+                    outputs = self.target_model(entry.to(self.device))
+                    confidences = F.softmax(outputs, dim=1)
+                    all_confidences.append(confidences)
+            # Concatenate all confidences
+
+        elif self.data_format == "dataframe":
+            # Remove "identity" column from dataset
+            public_data = self.public_dataloader.dataset.drop(columns=["identity"])
             with torch.no_grad():
-                outputs = self.target_model(entry.to(self.device))
+                outputs = self.target_model(public_data)
                 confidences = F.softmax(outputs, dim=1)
                 all_confidences.append(confidences)
-        # Concatenate all confidences
+
+        else:
+            raise ValueError("Data format not supported")
+
         self.confidences = torch.cat(all_confidences)
 
         logger.info("Retrieved confidences from the target model")
@@ -151,14 +177,32 @@ class AttackPLGMI(AbstractMINV):
 
         # Create pseudo dataloader from top-n pseudo_map
         pseudo_data = []
-        for i in range(self.num_classes):
-            for index, _ in top_n_pseudo_map[i]:
-                # Append the image and pseudo label (index i) to the pseudo data
-                pseudo_data.append((self.public_dataloader.dataset[index][0], i))
 
+
+        if self.data_format == "dataloader":
+            for i in range(self.num_classes):
+                for index, _ in top_n_pseudo_map[i]:
+                    # Append the image and pseudo label (index i) to the pseudo data
+                    pseudo_data.append((self.public_dataloader.dataset[index][0], i))
+        elif self.data_format == "dataframe":
+            for i in range(self.num_classes):
+                for index, _ in top_n_pseudo_map[i]:
+                    # Append the image and pseudo label (index i) to the pseudo data
+                    # Name the column with i is "pseudo_label"
+                    pseudo_entry = public_data.iloc[index].copy()
+                    pseudo_entry["pseudo_label"] = i
+                    pseudo_data.append(pseudo_entry)
+            if torch.cuda.is_available() and isinstance(public_data, cudf.DataFrame):
+                pseudo_data = cudf.DataFrame(pseudo_data)
+            else:
+                pseudo_data = pd.DataFrame(pseudo_data)
+
+            logger.info(f"Number of unique classes in pseudo data: {pseudo_data['pseudo_label'].nunique()}")
         logger.info("Created pseudo dataloader")
-        # pseudo_data is now a list of tuples (image, pseudo_label)
-        # We want to set the default device to the sampler in the returned dataloader to be on device
+
+        # pseudo_data is now a list of tuples (entry, pseudo_label)
+        # We want to set the default device to the sampler in the returned dataloader
+        # to be on device, does not apply when using CTGAN
         return DataLoader(pseudo_data, batch_size=self.batch_size, shuffle=True, generator=torch.Generator(device=self.device))
 
 
@@ -168,56 +212,72 @@ class AttackPLGMI(AbstractMINV):
 
         # Get the target model from the handler
         self.target_model = self.handler.target_model
+        if self.data_format == "dataframe":
+            self.gan_handler = GANHandler(self.handler, configs=self.configs, use_discriminator=False)
+            self.generator = self.gan_handler.get_generator()
 
-        self.gan_handler = GANHandler(self.handler, configs=self.configs)
+            self.discriminator = None
+            self.gen_optimizer = None
+            self.dis_optimizer = None
+        elif self.data_format == "dataloader":
+            self.gan_handler = GANHandler(self.handler, configs=self.configs)
+            self.generator = self.gan_handler.get_generator()
+
+            # Get the discriminator
+            self.discriminator = self.gan_handler.get_discriminator()
+            # Set Adam optimizer for both generator and discriminator
+            self.gen_optimizer = torch.optim.Adam(self.generator.parameters(), lr=self.gen_lr,
+                                                betas=(self.gen_beta1, self.gen_beta2))
+            self.dis_optimizer = torch.optim.Adam(self.discriminator.parameters(), lr=self.dis_lr,
+                                                betas=(self.dis_beta1, self.dis_beta2))
+        else:
+            raise ValueError("Data format not supported")
+
         # TODO: Change structure of how we load data, handler or model_handler should do this, not gan_handler
         # Get public dataloader
         self.public_dataloader = self.handler.get_public_dataloader(self.configs.batch_size)
 
-        # Get discriminator
-        self.discriminator = self.gan_handler.get_discriminator()
-
-        # Get generator
-        self.generator = self.gan_handler.get_generator()
-
-        # Set Adam optimizer for both generator and discriminator
-        self.gen_optimizer = torch.optim.Adam(self.generator.parameters(), lr=self.gen_lr,
-                                              betas=(self.gen_beta1, self.gen_beta2))
-        self.dis_optimizer = torch.optim.Adam(self.discriminator.parameters(), lr=self.dis_lr,
-                                               betas=(self.dis_beta1, self.dis_beta2))
-
         # Train the GAN
+        # self.gan_handler.trained_bool = True
         if not self.gan_handler.trained_bool:
             logger.info("GAN not trained, getting psuedo labels")
             # Top-n-selection to get pseudo labels
             self.pseudo_loader = self.top_n_selection()
+
+            # Print number of unique classes in pseudo_loader
+
+
             logger.info("Training the GAN")
             # TODO: Change this input structure to just pass the attack class
             self.handler.train_gan(pseudo_loader = self.pseudo_loader,
-                                        gen = self.generator,
-                                        dis = self.discriminator,
-                                        gen_criterion = gan_losses.GenLoss(loss_type="hinge", is_relativistic=False),
-                                        dis_criterion = gan_losses.DisLoss(loss_type="hinge", is_relativistic=False),
-                                        inv_criterion = gan_losses.max_margin_loss,
-                                        target_model = self.target_model,
-                                        opt_gen = self.gen_optimizer,
-                                        opt_dis = self.dis_optimizer,
-                                        n_iter = self.n_iter,
-                                        checkpoint_interval = self.checkpoint_interval,
-                                        n_dis  = self.n_dis,
-                                        device = self.device,
-                                        alpha = self.alpha,
-                                        log_interval = self.log_interval,
-                                        sample_from_generator = lambda: \
-                                            self.gan_handler.sample_from_generator(batch_size=self.batch_size))
-            # Save generator
-            # self.gan_handler.save_generator(self.generator,
-            #                                 self.output_dir + "/trained_models/plgmi_generator.pth")  # noqa: ERA001
+                                    gen = self.generator,
+                                    dis = self.discriminator,
+                                    gen_criterion = gan_losses.GenLoss(loss_type="hinge", is_relativistic=False),
+                                    dis_criterion = gan_losses.DisLoss(loss_type="hinge", is_relativistic=False),
+                                    inv_criterion = gan_losses.max_margin_loss,
+                                    target_model = self.target_model,
+                                    opt_gen = self.gen_optimizer,
+                                    opt_dis = self.dis_optimizer,
+                                    n_iter = self.n_iter,
+                                    n_dis  = self.n_dis,
+                                    device = self.device,
+                                    alpha = self.alpha,
+                                    log_interval = self.log_interval,
+                                    sample_from_generator = lambda: \
+                                        self.gan_handler.sample_from_generator(batch_size=self.batch_size))
+
             self.gan_handler.trained_bool = True
         else:
-            logger.info("GAN already trained, skipping training")
+            logger.info("GAN already trained, loading from file")
+            from ctgan import CTGAN  # or your CustomCTGAN if you're using that
+            ctgan = CTGAN.load("ctgan.pkl")
+            ctgan.eval()
+            self.generator = ctgan  # Replace uninitialized generator
 
-        # Save the trained generator
+        if self.generator.loss_values is not None:
+            self.generator.loss_values.to_pickle("GAN_losses.pkl")
+        else:
+            logger.warning("No generator loss values found — skipping save.")
 
 
     def run_attack(self:Self) -> MinvResult:
@@ -226,31 +286,81 @@ class AttackPLGMI(AbstractMINV):
         # Define image metrics class
 
         self.evaluation_model = self.target_model # TODO: Change to evaluation model
-
         reconstruction_configs = self.handler.configs.audit.reconstruction
 
         num_audited_classes = reconstruction_configs.num_audited_classes
 
-        # Get random labels
-        labels = torch.randint(0, self.num_classes, (num_audited_classes,)).to(self.device)
+        # Number of unique categories seen by the generator during training
+        # If the pseudo_labeling did not find all classes, we get num_unique_categories < num_classes
+        num_unique_categories = (self.generator._data_sampler._n_categories
+                                 - self.generator._data_sampler._discrete_column_cond_st[-1])
+
+        if self.num_classes > num_unique_categories:
+            logger.info(
+                "Auditing %d classes out of %d classes instead,"
+                " due to partial class separation in psuedo-labeling step.",
+                num_unique_categories,
+                self.num_classes,
+            )
+            # Get random labels
+            #labels = torch.randint(0, num_unique_categories, (num_audited_classes,)).to(self.device)
+            labels = torch.arange(num_unique_categories).to(self.device)
+
+        else:
+            # Get random labels
+            #labels = torch.randint(0, self.num_classes, (num_audited_classes,)).to(self.device)
+            labels = torch.arange(num_audited_classes).to(self.device)
+
+        # Get range of labels from 0 to num_audited_classes
+        #labels = torch.arange(num_audited_classes).to(self.device)
+
+        random_z = torch.randn(num_audited_classes, self.generator.dim_z, device=self.device)
 
         # Optimize z, TODO: Optimize in batches
-        opt_z = self.optimize_z(y=labels, lr= self.configs.z_optimization_lr,
+
+        if self.data_format == "dataloader":
+
+            opt_z = self.optimize_z_grad(y=labels,
                                 iter_times=self.configs.z_optimization_iter).to(self.device)
 
-        # Compute image metrics for the optimized z and labels
-        image_metrics = ImageMetrics(self.handler, self.gan_handler,
-                                     reconstruction_configs,
-                                     labels=labels,
-                                     z=opt_z)
-        logger.info(image_metrics.results)
-        # TODO: Implement a class with a .save function.
-        return image_metrics
+            # Compute image metrics for the optimized z and labels
+            metrics = ImageMetrics(self.handler, self.gan_handler,
+                                        reconstruction_configs,
+                                        labels=labels,
+                                        z=opt_z)
+            # TODO: Implement a class with a .save function.
 
-    def optimize_z(self:Self,
+        elif self.data_format == "dataframe":
+            # Accuracy of the target model on the random labels
+            # initial_metrics = TabularMetrics(self.handler, self.gan_handler,
+            #                             reconstruction_configs,
+            #                             labels=labels,
+            #                             z=random_z)
+            # logger.info("INITIAL ACCURACY:", initial_metrics.results)
+
+            # generate samples from the generator
+            if self.handler.configs.target.model_type == "xgboost":
+                opt_z = self.optimize_z_no_grad(y=labels,
+                                iter_times=self.configs.z_optimization_iter)
+            elif self.handler.configs.target.model_type == "pytorch_tabular":
+                opt_z = self.optimize_z_grad(y=labels,
+                                iter_times=self.configs.z_optimization_iter, augment=False)
+
+            metrics = TabularMetrics(self.handler, self.gan_handler,
+                                        reconstruction_configs,
+                                        labels=labels,
+                                        z=opt_z)
+
+        return metrics
+<<<<<<< Updated upstream
+=======
+        # return metrics
+>>>>>>> Stashed changes
+
+    def optimize_z_grad(self:Self,
                    y: torch.tensor,
-                   lr: float =2e-2,
-                   iter_times: int = 10) -> torch.tensor:
+                   iter_times: int = 10,
+                   augment: bool = True) -> torch.tensor:
         """Find the optimal latent vectors z for labels y.
 
         Args:
@@ -258,6 +368,11 @@ class AttackPLGMI(AbstractMINV):
             y (torch.tensor): The class labels.
             lr (float): The learning rate for optimization.
             iter_times (int): The number of iterations for optimization.
+            augment (bool): Whether to apply data augmentation.
+
+        Returns:
+        -------
+            torch.tensor: Optimized latent vectors.
 
         """
         bs = y.shape[0] # Number of samples
@@ -270,48 +385,116 @@ class AttackPLGMI(AbstractMINV):
         self.evaluation_model.eval()
         self.evaluation_model.to(self.device)
 
-        aug_list = augmentation.container.ImageSequential(
-            augmentation.RandomResizedCrop((64, 64), scale=(0.8, 1.0), ratio=(1.0, 1.0)),
-            augmentation.ColorJitter(brightness=0.2, contrast=0.2),
-            augmentation.RandomHorizontalFlip(),
-            augmentation.RandomRotation(5),
-        ).to(self.device) # TODO: Move this to a image modality extension and have it as an input
+        if augment:
+            aug_list = augmentation.container.ImageSequential(
+                augmentation.RandomResizedCrop((64, 64), scale=(0.8, 1.0), ratio=(1.0, 1.0)),
+                augmentation.ColorJitter(brightness=0.2, contrast=0.2),
+                augmentation.RandomHorizontalFlip(),
+                augmentation.RandomRotation(5),
+            ).to(self.device) # TODO: Move this to a image modality extension and have it as an input
+        else:
+            def aug_list(x):  # noqa: ANN001, ANN202
+                return x
 
         logger.info("Optimizing z for the PLG-MI attack")
-
         z = torch.randn(bs, self.generator.dim_z, device=self.device)
-        z.requires_grad = True
+        z.requires_grad = False
 
-        optimizer = torch.optim.Adam([z], lr=lr)
+        #optimizer = torch.optim.Adam([z], lr=self.configs.z_optimization_lr)
+        min_loss = 1e6
 
         for i in range(iter_times):
-
+            z = torch.randn(bs, self.generator.dim_z, device=self.device)
             # Generate fake images
             fake = self.generator(z, y)
 
-            # Average the output of the target model
+            if self.handler.configs.target.model_type == "pytorch_tabular":
+                #y = fake["pseudo_label"].values
+                #y = torch.tensor(y, dtype=torch.long).to(self.device)
+                fake = fake.drop(columns=["pseudo_label"])
+
             out1 = self.target_model(aug_list(fake))
-            out2 = self.target_model(aug_list(fake))
+            #out2 = self.target_model(aug_list(fake))
 
-            if z.grad is not None:
-                z.grad.data.zero_()
+            # if z.grad is not None:
+            #     z.grad.data.zero_()
 
-            # Compute the loss
-            inv_loss = F.cross_entropy(out1, y) + F.cross_entropy(out2, y)
+            # Compute inversion loss
+            inv_loss = F.cross_entropy(out1, y) #+ F.cross_entropy(out2, y)
+
+            if inv_loss < min_loss:
+                min_loss = inv_loss
+                # Save the best z
+                best_z = z.clone()
 
             # Update the latent vector z
-            optimizer.zero_grad()
-            inv_loss.backward()
-            optimizer.step()
+            # print("Before backward:", z.grad)
+            # optimizer.zero_grad()
+            # inv_loss.backward()
+            # optimizer.step()
 
+            # print("After backward:", z.grad)
             inv_loss_val = inv_loss.item()
 
             if (i + 1) % self.log_interval == 0:
                 with torch.no_grad():
-                    fake_img = self.generator(z, y)
-                    eval_prob = self.evaluation_model(fake_img)
+                    eval_prob = self.evaluation_model(fake)
                     eval_iden = torch.argmax(eval_prob, dim=1).view(-1)
                     acc = y.eq(eval_iden.long()).sum().item() * 1.0 / bs
                     logger.info("Iteration:{}\tInv Loss:{:.2f}\tAttack Acc:{:.2f}".format(i + 1, inv_loss_val, acc))
 
-        return z
+        return best_z
+
+    def optimize_z_no_grad(self, y: torch.tensor, iter_times: int = 10) -> torch.tensor:
+        """Find the optimal latent vectors z for labels y.
+
+        Args:
+        ----
+            y (torch.tensor): The class labels.
+            lr (float): The learning rate for optimization.
+            iter_times (int): The number of iterations for optimization.
+
+        Returns:
+        -------
+            torch.tensor: Optimized latent vectors.
+
+        """
+        bs = y.shape[0]  # Batch size
+        y = y.view(-1).long().to(self.device)
+        self.generator.eval()
+        self.generator.to(self.device)
+        self.target_model.eval()
+        self.target_model.to(self.device)
+        self.evaluation_model.eval()
+        self.evaluation_model.to(self.device)
+
+
+        # Use Optuna for Bayesian optimization
+        def objective(trial: optuna.trial.Trial) -> float:
+            # Suggest values for each dimension of z
+            z_numpy = np.array([trial.suggest_float(f"z_{i}", -3, 3) for i in range(bs * self.generator.dim_z)])
+            z_numpy = z_numpy.reshape(bs, self.generator.dim_z)  # Reshape to match the required shape
+
+            z_tensor = torch.tensor(z_numpy, dtype=torch.float32, device=self.device)
+
+            fake = self.generator(z_tensor, y)
+            fake = fake.drop(columns=["pseudo_label"])  # Remove pseudo_label
+            out1 = self.target_model(fake)
+
+            # Cross entropy
+            return F.cross_entropy(out1, y)
+
+        optuna.logging.set_verbosity(optuna.logging.WARNING)
+        study = optuna.create_study(direction="minimize")
+
+        logger.info("Optimizing z using Optuna")
+        study.optimize(objective, n_trials=iter_times, show_progress_bar=True, n_jobs=-1)
+
+        # Convert the dictionary values to a NumPy array
+        z_numpy = np.array(list(study.best_params.values()))
+
+        # Reshape the array to match the required shape (bs, self.generator.dim_z)
+        z_numpy = z_numpy.reshape(bs, self.generator.dim_z)
+
+        # Convert the NumPy array to a PyTorch tensor
+        return torch.tensor(z_numpy, dtype=torch.float32, device=self.device)

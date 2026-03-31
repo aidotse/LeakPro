@@ -1,0 +1,12 @@
+data/*
+!data/.gitkeep
+
+leakpro_output/*
+target*/*
+lightning_logs/*
+saved_models/*
+.pt_tmp/*
+*.pkl
+iframe_figures/*
+*.csv
+audit_*.yaml

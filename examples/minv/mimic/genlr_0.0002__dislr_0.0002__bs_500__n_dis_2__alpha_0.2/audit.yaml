@@ -1,0 +1,52 @@
+audit:
+  random_seed: 1234
+  data_modality: image
+  attack_list:
+  - attack: plgmi
+    top_n: 100
+    n_dis: 2
+    n_iter: 2000
+    batch_size: 500
+    gen_lr: 0.0002
+    dis_lr: 0.0002
+    gen_beta1: 0.0
+    gen_beta2: 0.9
+    dis_beta1: 0.0
+    dis_beta2: 0.9
+    dim_z: 256
+    alpha: 0.2
+    log_interval: 10
+    z_optimization_iter: 100
+    z_optimization_lr: 0.1
+    num_classes: 20
+    data_format: dataframe
+    generator:
+      module_path: ./utils/CTGAN_extended.py
+      model_class: CustomCTGAN
+      checkpoint_path: ./ctgan.pkl
+      init_params:
+        embedding_dim: 256
+        verbose: true
+    discriminator: null
+  reconstruction:
+    batch_size: 4000
+    num_class_samples: 1000
+    num_audited_classes: 20
+    eval_model:
+      module_path: ./utils/tabular_wrapper.py
+      model_class: TabularWrapper
+      eval_folder: ./target
+    metrics:
+      accuracy: null
+      quality_metrics: null
+      plot_densities: null
+      plot_categorical_densities: null
+  output_dir: ./leakpro_output
+  attack_type: minv
+target:
+  module_path: ./utils/tabular_wrapper.py
+  model_class: TabularWrapper
+  model_type: pytorch_tabular
+  target_folder: ./target
+  data_path: ./data2/private_df.pkl
+  public_data_path: ./data2/public_df.pkl
