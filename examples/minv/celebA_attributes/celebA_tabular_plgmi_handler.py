@@ -1,22 +1,21 @@
+
+import pandas as pd
 import torch
 from torch import cuda, device, optim
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from leakpro import AbstractInputHandler
-from leakpro.attacks.utils import gan_losses
-from leakpro.schemas import TrainingOutput
-import pickle
 
-import pandas as pd
+from leakpro import AbstractInputHandler
+from leakpro.schemas import TrainingOutput
+
 
 class CelebA_InputHandler(AbstractInputHandler):
     """Class to handle the user input for the CelebA dataset for plgmi attack."""
-    
+
     def __init__(self, configs: dict) -> None:
         super().__init__(configs=configs)
-        print("Configurations:", configs)
-        
+
     def get_criterion(self) -> torch.nn.Module:
         """Set the CrossEntropyLoss for the model."""
         return CrossEntropyLoss()
@@ -60,13 +59,13 @@ class CelebA_InputHandler(AbstractInputHandler):
                 total_samples += labels.size(0)
 
         avg_train_loss = train_loss / len(dataloader)
-        train_accuracy = train_acc / total_samples  
+        train_accuracy = train_acc / total_samples
         model.to("cpu")
 
         output = {"model": model, "metrics": {"accuracy": train_accuracy, "loss": avg_train_loss}}
         return TrainingOutput(**output)
-    
-    
+
+
     def evaluate(self, dataloader: DataLoader, model: torch.nn.Module, criterion: torch.nn.Module) -> dict:
         """Evaluate the model."""
         gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
@@ -84,7 +83,7 @@ class CelebA_InputHandler(AbstractInputHandler):
                 test_acc += (preds == labels).sum().item()
                 test_loss += loss.item()* labels.size(0)
                 total_samples += labels.size(0)
-        
+
         avg_test_loss = test_loss / len(dataloader)
         test_accuracy = test_acc / total_samples
         model.to("cpu")
@@ -109,42 +108,43 @@ class CelebA_InputHandler(AbstractInputHandler):
                     sample_from_generator: callable
                   ) -> None:
         """Train the CTGAN model. Inspired by CTGAN from https://github.com/sdv-dev/CTGAN.
-        
-            Args:
-                pseudo_loader: DataLoader for the pseudo data.
-                gen: Generator model.
-                dis: Discriminator model.
-                gen_criterion: Generator criterion.
-                dis_criterion: Discriminator criterion.
-                inv_criterion: Inverted criterion.
-                target_model: Target model.
-                opt_gen: Generator optimizer.
-                opt_dis: Discriminator optimizer.
-                n_iter: Number of iterations.
-                n_dis: Number of discriminator updates per generator update.
-                device: Device to run the training.
-                alpha: Alpha value for the invariance loss.
-                log_interval: Log interval.
-                sample_from_generator: Function to sample from the generator.
+
+        Args:
+            pseudo_loader: DataLoader for the pseudo data.
+            gen: Generator model.
+            dis: Discriminator model.
+            gen_criterion: Generator criterion.
+            dis_criterion: Discriminator criterion.
+            inv_criterion: Inverted criterion.
+            target_model: Target model.
+            opt_gen: Generator optimizer.
+            opt_dis: Discriminator optimizer.
+            n_iter: Number of iterations.
+            n_dis: Number of discriminator updates per generator update.
+            device: Device to run the training.
+            alpha: Alpha value for the invariance loss.
+            log_interval: Log interval.
+            sample_from_generator: Function to sample from the generator.
+
         """
         torch.set_default_device(device)
         torch.backends.cudnn.benchmark = True
 
         target_model.to(device)
-        
+
         ctgan = gen
-        
+
         # discrete columns are the first 40 columns in the dataset
         discrete_columns = pseudo_loader.dataset.columns[:40]
-        
+
         # add 'pseudo_label' to the discrete columns
-        discrete_columns = discrete_columns.append(pd.Index(['pseudo_label']))
-        
+        discrete_columns = discrete_columns.append(pd.Index(["pseudo_label"]))
+
         #print(discrete_columns)
-        
+
         #print(pseudo_loader.dataset.head())
         # ctgan takes dataframe or numpy array as input
-        ctgan.fit(train_data= pseudo_loader.dataset, 
+        ctgan.fit(train_data= pseudo_loader.dataset,
                     target_model=target_model,
                     num_classes=7011,
                     inv_criterion=inv_criterion,
@@ -153,11 +153,10 @@ class CelebA_InputHandler(AbstractInputHandler):
                     alpha=alpha,
                     discrete_columns=discrete_columns,
                     use_inv_loss=True)
-        
-        
-        ctgan.save("ctgan.pth")
-        
 
-        
-    
-    
+
+        ctgan.save("ctgan.pth")
+
+
+
+

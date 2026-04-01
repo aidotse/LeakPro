@@ -1,6 +1,7 @@
 import os
 import sys
 import warnings
+
 import yaml
 
 # Suppres warnings, pytorch_tabular is very verbose
@@ -8,8 +9,9 @@ warnings.filterwarnings("ignore")
 project_root = os.path.abspath(os.path.join(os.getcwd(), "../../.."))
 sys.path.insert(0,project_root)
 
-from leakpro import LeakPro
 from examples.minv.mimic.mimic_plgmi_handler import Mimic_InputHandler
+from leakpro import LeakPro
+
 config_path = "audit.yaml"
 
 # Initialize the LeakPro object
@@ -21,7 +23,6 @@ results = leakpro.run_audit()
 
 ######################################
 import re
-import plotly.io as pio
 
 with open("audit.yaml", "r") as f:   # <-- change to your yaml path
     cfg = yaml.safe_load(f)
@@ -48,10 +49,9 @@ outdir = (
 os.makedirs(outdir, exist_ok=True)
 
 ######################################
-import pandas as pd
 import pickle
-import matplotlib.pyplot as plt
 
+import matplotlib.pyplot as plt
 
 # -------- settings --------
 os.makedirs(outdir, exist_ok=True)
@@ -83,7 +83,6 @@ plt.close(fig3)
 ######################################
 import os
 import re
-import plotly.io as pio
 
 # Make sure kaleido is installed: pip install -U kaleido
 
@@ -92,7 +91,7 @@ os.makedirs(outdir, exist_ok=True)
 
 def safe(name: str) -> str:
     """Make a safe filename from a column name."""
-    return re.sub(r'[^-\w\. ]', '_', name).strip().replace(' ', '_')
+    return re.sub(r"[^-\w\. ]", "_", name).strip().replace(" ", "_")
 
 # Save numerical plots
 for col, fig in results[0].numerical_plots.items():
@@ -105,9 +104,8 @@ for col, fig in results[0].categorical_plots.items():
     fig.write_image(os.path.join(outdir, filename), scale=2)
 ######################################
 # ================== COLLECT ARTIFACTS ==================
-from pathlib import Path
 import shutil
-import glob
+from pathlib import Path
 
 cwd = Path.cwd()
 outpath = Path(outdir)  # already defined above
@@ -127,6 +125,6 @@ for fname in ("ctgan.pkl", "GAN_losses.pkl"):
             if dst.exists():
                 dst.unlink()
             shutil.move(str(src), str(dst))
-        except Exception as e:
-            print(f"[WARN] Could not move {fname}: {e}")
+        except Exception:
+            pass
 ######################################

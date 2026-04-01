@@ -1,7 +1,7 @@
-import os
-import matplotlib.pyplot as plt
-import matplotlib.image as mpimg
 from pathlib import Path
+
+import matplotlib.image as mpimg
+import matplotlib.pyplot as plt
 
 # Root directory where all your experiment folders are
 ROOT = Path(".")   # change if needed
@@ -15,8 +15,6 @@ folders = sorted(folders)
 # Number of subplots
 n = len(folders)
 cols = 5   # number of columns in grid
-print(cols)
-print(n)
 rows = (n + cols - 1) // cols
 
 fig, axes = plt.subplots(rows, cols, figsize=(6*cols, 5*rows))

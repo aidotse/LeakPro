@@ -1,8 +1,8 @@
 import os
 import sys
+
 import yaml
 from sklearn.preprocessing import LabelEncoder
-import pickle
 
 # Path to the dataset zip file
 data_folder = "./data"
@@ -11,10 +11,10 @@ data_folder = "./data"
 project_root = os.path.abspath(os.path.join(os.getcwd(), "../../.."))
 sys.path.append(project_root)
 
-from examples.minv.celebA_attributes.utils.celebA_tabular_data import get_celebA_train_testloader, get_celebA_publicloader
+from examples.minv.celebA_attributes.utils.celebA_tabular_data import get_celebA_publicloader, get_celebA_train_testloader
 
 # Load the config.yaml file
-with open('train_config.yaml', 'r') as file:
+with open("train_config.yaml", "r") as file:
     train_config = yaml.safe_load(file)
 
 # Generate the dataset and dataloaders
@@ -27,7 +27,6 @@ train_loader, test_loader = get_celebA_train_testloader(train_config, random_sta
 public_loader = get_celebA_publicloader(train_config)
 
 
-from examples.minv.celebA_attributes.utils.celebA_tabular_model_xgboost import train_xgboost_model
 le = LabelEncoder()
 le.fit(train_loader.dataset.labels)
 train_loader.dataset.labels = le.transform(train_loader.dataset.labels)
@@ -38,8 +37,9 @@ train_loader.dataset.labels = le.transform(train_loader.dataset.labels)
 #print(f"Training Accuracy: {train_acc:.4f}, Training Loss (mlogloss): {train_loss:.4f}")
 
 
-from leakpro import LeakPro
 from examples.minv.celebA_attributes.celebA_tabular_plgmi_handler import CelebA_InputHandler
+from leakpro import LeakPro
+
 config_path = "audit.yaml"
 
 

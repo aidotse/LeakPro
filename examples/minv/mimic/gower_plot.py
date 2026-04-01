@@ -1,7 +1,8 @@
 import os
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 
 # === paths (edit if needed) ===
 FOLDER_NOINV = "gower_plots"
@@ -11,11 +12,12 @@ CLASSES = list(range(20))   # 0..19
 BINS_DEFAULT = np.linspace(0.0, 1.0, 31)  # Gower distance is in [0,1]
 
 def read_class_csv(folder, cls):
-    """
-    Try to read either raw distances or pre-binned histogram CSV for a class.
+    """Try to read either raw distances or pre-binned histogram CSV for a class.
+
     Returns:
         ("dist", distances_np)  OR  ("hist", (bin_edges_np, counts_np))
     Raises FileNotFoundError if nothing found.
+
     """
     # Most likely filenames (try in order)
     candidates = [
@@ -54,20 +56,20 @@ def counts_from_either(kind, payload, bins):
         distances = payload
         c, _ = np.histogram(distances, bins=bins)
         return c.astype(int)
-    else:  # kind == "hist"
-        edges_existing, counts_existing = payload
-        # If edges match bins, just return
-        if np.allclose(edges_existing, bins):
-            return counts_existing.astype(int)
-        # Otherwise, approximate by distributing existing bin counts into the requested bins
-        # (simple nearest-edge mapping)
-        # Map each existing bin's center to a new bin
-        centers = 0.5 * (edges_existing[:-1] + edges_existing[1:])
-        idx = np.searchsorted(bins, centers, side="right") - 1
-        valid = (idx >= 0) & (idx < len(bins) - 1)
-        out = np.zeros(len(bins)-1, dtype=float)
-        np.add.at(out, idx[valid], counts_existing[valid])
-        return out.astype(int)
+    # kind == "hist"
+    edges_existing, counts_existing = payload
+    # If edges match bins, just return
+    if np.allclose(edges_existing, bins):
+        return counts_existing.astype(int)
+    # Otherwise, approximate by distributing existing bin counts into the requested bins
+    # (simple nearest-edge mapping)
+    # Map each existing bin's center to a new bin
+    centers = 0.5 * (edges_existing[:-1] + edges_existing[1:])
+    idx = np.searchsorted(bins, centers, side="right") - 1
+    valid = (idx >= 0) & (idx < len(bins) - 1)
+    out = np.zeros(len(bins)-1, dtype=float)
+    np.add.at(out, idx[valid], counts_existing[valid])
+    return out.astype(int)
 
 # --- figure with 20 subplots (4 x 5) ---
 fig, axes = plt.subplots(4, 5, figsize=(20, 14), sharex=True, sharey=True)
@@ -80,9 +82,8 @@ for i, cls in enumerate(CLASSES):
     try:
         kind_noinv, payload_noinv = read_class_csv(FOLDER_NOINV, cls)
         kind_inv,   payload_inv   = read_class_csv(FOLDER_INV,   cls)
-    except FileNotFoundError as e:
+    except FileNotFoundError:
         ax.set_visible(False)
-        print(e)
         continue
 
     # Choose a common binning (prefer pre-binned edges if both sides have them and match; else default)
@@ -121,9 +122,9 @@ plt.savefig(out_path, dpi=200)
 plt.close(fig)
 
 if any_plotted:
-    print(f"Saved: {out_path}")
+    pass
 else:
-    print("No plots generated — CSVs not found.")
+    pass
 
 
 

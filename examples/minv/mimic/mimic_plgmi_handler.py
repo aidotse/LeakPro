@@ -1,22 +1,20 @@
+
 import torch
 from torch import cuda, device, optim
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+
 from leakpro import AbstractInputHandler
-from leakpro.attacks.utils import gan_losses
 from leakpro.schemas import TrainingOutput
-import pickle
-import pandas as pd
-from ctgan import CTGAN
+
 
 class Mimic_InputHandler(AbstractInputHandler):
     """Class to handle the user input for the CelebA dataset for plgmi attack."""
-    
+
     def __init__(self, configs: dict) -> None:
         super().__init__(configs=configs)
-        print("Configurations:", configs)
-        
+
     def get_criterion(self) -> torch.nn.Module:
         """Set the CrossEntropyLoss for the model."""
         return CrossEntropyLoss()
@@ -60,13 +58,13 @@ class Mimic_InputHandler(AbstractInputHandler):
                 total_samples += labels.size(0)
 
         avg_train_loss = train_loss / len(dataloader)
-        train_accuracy = train_acc / total_samples  
+        train_accuracy = train_acc / total_samples
         model.to("cpu")
 
         output = {"model": model, "metrics": {"accuracy": train_accuracy, "loss": avg_train_loss}}
         return TrainingOutput(**output)
-    
-    
+
+
     def evaluate(self, dataloader: DataLoader, model: torch.nn.Module, criterion: torch.nn.Module) -> dict:
         """Evaluate the model."""
         gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
@@ -84,7 +82,7 @@ class Mimic_InputHandler(AbstractInputHandler):
                 test_acc += (preds == labels).sum().item()
                 test_loss += loss.item()* labels.size(0)
                 total_samples += labels.size(0)
-        
+
         avg_test_loss = test_loss / len(dataloader)
         test_accuracy = test_acc / total_samples
         model.to("cpu")
@@ -109,48 +107,49 @@ class Mimic_InputHandler(AbstractInputHandler):
                     sample_from_generator: callable
                   ) -> None:
         """Train the CTGAN model. Inspired by CTGAN from https://github.com/sdv-dev/CTGAN.
-        
-            Args:
-                pseudo_loader: DataLoader for the pseudo data.
-                gen: Generator model.
-                dis: Discriminator model.
-                gen_criterion: Generator criterion.
-                dis_criterion: Discriminator criterion.
-                inv_criterion: Inverted criterion.
-                target_model: Target model.
-                opt_gen: Generator optimizer.
-                opt_dis: Discriminator optimizer.
-                n_iter: Number of iterations.
-                n_dis: Number of discriminator updates per generator update.
-                device: Device to run the training.
-                alpha: Alpha value for the invariance loss.
-                log_interval: Log interval.
-                sample_from_generator: Function to sample from the generator.
+
+        Args:
+            pseudo_loader: DataLoader for the pseudo data.
+            gen: Generator model.
+            dis: Discriminator model.
+            gen_criterion: Generator criterion.
+            dis_criterion: Discriminator criterion.
+            inv_criterion: Inverted criterion.
+            target_model: Target model.
+            opt_gen: Generator optimizer.
+            opt_dis: Discriminator optimizer.
+            n_iter: Number of iterations.
+            n_dis: Number of discriminator updates per generator update.
+            device: Device to run the training.
+            alpha: Alpha value for the invariance loss.
+            log_interval: Log interval.
+            sample_from_generator: Function to sample from the generator.
+
         """
         torch.set_default_device(device)
         torch.backends.cudnn.benchmark = True
 
         target_model.to(device)
-        continuous_col_names = ['length_of_stay', 'num_procedures', 'num_medications', 'BMI',
-       'BMI (kg/m2)', 'Height', 'Height (Inches)', 'Weight', 'Weight (Lbs)',
-       'eGFR', 'systolic', 'diastolic']
+        continuous_col_names = ["length_of_stay", "num_procedures", "num_medications", "BMI",
+       "BMI (kg/m2)", "Height", "Height (Inches)", "Weight", "Weight (Lbs)",
+       "eGFR", "systolic", "diastolic"]
         # Categorical column names, the rest are categorical
         discrete_columns = [col for col in pseudo_loader.dataset.columns if col not in continuous_col_names]
-        
+
         #gen = CTGAN(epochs = n_iter , verbose=True)
 
         #gen.fit(train_data = pseudo_loader.dataset, discrete_columns = discrete_columns)
 
         #gen.save("ctgan_standard.pkl")
-       
+
         ctgan = gen
-        
-         
+
+
         #print(discrete_columns)
-        
+
         #print(pseudo_loader.dataset.head())
         # ctgan takes dataframe or numpy array as input
-        ctgan.fit(train_data= pseudo_loader.dataset, 
+        ctgan.fit(train_data= pseudo_loader.dataset,
                     target_model=target_model,
                     num_classes=705, # TODO: Fix this, currently doesnt do anything
                     inv_criterion=inv_criterion,
@@ -163,7 +162,6 @@ class Mimic_InputHandler(AbstractInputHandler):
                     n_dis=n_dis)
         #gen.fit(train_data = pseudo_loader.dataset, discrete_columns = discrete_columns)
         ctgan.save("ctgan.pkl")
-    
-        
-    
- 
+
+
+

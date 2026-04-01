@@ -1,14 +1,17 @@
-import xgboost as xgb
-import pickle
 import os
-import numpy as np
+import pickle
+
 import cupy as cp
-from sklearn.metrics import accuracy_score, log_loss
+import numpy as np
 import torch
-from leakpro.schemas import MIAMetaDataSchema, OptimizerConfig, LossConfig
+import xgboost as xgb
+from sklearn.metrics import accuracy_score, log_loss
+
+from leakpro.schemas import LossConfig, MIAMetaDataSchema, OptimizerConfig
+
 
 class xgboost_model(xgb.XGBClassifier):
-    def __init__(self):
+    def __init__(self) -> None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
         params = {
@@ -28,27 +31,24 @@ class xgboost_model(xgb.XGBClassifier):
 
         super().__init__(**params)
 
-    def eval(self):
+    def eval(self) -> None:
         pass
-    
+
     def __call__(self, entry):
         """Make the model callable with PyTorch tensors."""
         if isinstance(entry, torch.Tensor):
             # Convert PyTorch tensor to CuPy array directly on GPU
-            if entry.is_cuda:
-                entry = cp.from_dlpack(torch.to_dlpack(entry))
-            else:
-                entry = cp.asarray(entry.detach().numpy(), order='C')
-            
+            entry = cp.from_dlpack(torch.to_dlpack(entry)) if entry.is_cuda else cp.asarray(entry.detach().numpy(), order="C")
+
         output = self.predict_proba(entry)  # Get class probabilities
         return torch.from_dlpack(cp.array(np.from_dlpack(output)))  # Convert back to PyTorch tensor
-    
+
     def to(self, device):
         """Override the to method to make it compatible with PyTorch models."""
         return self
 
 
-def train_xgboost_model(train_data, train_labels, test_data, test_labels, log_dir="logs"):    
+def train_xgboost_model(train_data, train_labels, test_data, test_labels, log_dir="logs"):
 
     model = xgboost_model()
     model.fit(train_data, train_labels, eval_set=[(train_data, train_labels)],verbose=True)
@@ -58,20 +58,20 @@ def train_xgboost_model(train_data, train_labels, test_data, test_labels, log_di
     test_preds = model.predict(test_data)
     train_probs = model.predict_proba(train_data)
     #test_probs = model.predict_proba(test_data)
-    
+
     # Metrics
     train_acc = accuracy_score(train_labels, train_preds)
     test_acc = accuracy_score(test_labels, test_preds)
     train_loss = log_loss(train_labels, train_probs, labels=np.unique(train_labels))
     #test_loss = log_loss(test_labels, test_probs, labels=np.unique(test_labels))
-    
+
     # Save model
     model.device = "cpu"
     os.makedirs(log_dir, exist_ok=True)
     model_save_path = os.path.join(log_dir, "target_model.pkl")
     with open(model_save_path, "wb") as f:
         pickle.dump(model, f)
-    
+
     optimizer_data = {
         "name": "0",
         "lr": 0,
@@ -103,5 +103,5 @@ def train_xgboost_model(train_data, train_labels, test_data, test_labels, log_di
 
     with open("target/model_metadata.pkl", "wb") as f:
         pickle.dump(meta_data, f)
-    
+
     return train_acc, test_acc, train_loss #, test_loss

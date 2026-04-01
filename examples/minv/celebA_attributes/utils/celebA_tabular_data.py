@@ -1,21 +1,22 @@
-from sklearn.model_selection import train_test_split
 import pandas as pd
 import torch
-from torch.utils.data import Dataset, DataLoader
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+from torch.utils.data import DataLoader, Dataset
 
 
 class CelebATabularDataset(Dataset):
     """Dataset class for the CelebA attributes dataset."""
-    def __init__(self, features, labels, scaler=None):
+
+    def __init__(self, features, labels, scaler=None) -> None:
         self.features = features
         self.labels = labels
         self.scaler = scaler
-        
+
         #if self.scaler is not None:
            # self.features = pd.DataFrame(self.scaler.transform(self.features), columns=self.features.columns)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.features)
 
     def __getitem__(self, idx):
@@ -27,8 +28,8 @@ class CelebATabularDataset(Dataset):
     def from_celebA(cls, path):
         # read data from pkl file
         df = pd.read_pickle(path)
-        features = df.drop('identity', axis=1)
-        labels = df['identity'] - 1
+        features = df.drop("identity", axis=1)
+        labels = df["identity"] - 1
 
         return cls(features, labels)
 
@@ -41,7 +42,7 @@ def get_celebA_train_testloader(train_config, random_state=42):
 
     # Load the data
     private_dataset = CelebATabularDataset.from_celebA(data_dir)
-    
+
     dataset_size = len(private_dataset)
     train_size = int(train_fraction * dataset_size)
     test_size = int(test_fraction * dataset_size)
@@ -52,7 +53,7 @@ def get_celebA_train_testloader(train_config, random_state=42):
     scaler = StandardScaler()
     train_features = private_dataset.features.iloc[train_indices]
     scaler.fit(train_features)
-    
+
     train_subset = CelebATabularDataset(private_dataset.features.iloc[train_indices], private_dataset.labels.iloc[train_indices], scaler=scaler)
     test_subset = CelebATabularDataset(private_dataset.features.iloc[test_indices], private_dataset.labels.iloc[test_indices], scaler=scaler)
 

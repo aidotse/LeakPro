@@ -1,6 +1,5 @@
 import pandas as pd
 
-
 path = "data/physionet.org/files/mimiciv/3.1/"
 
 # Load required tables
@@ -31,12 +30,10 @@ lab_events_one_hot = pd.concat([lab_events_one_hot["hadm_id"], numeric_columns],
 # Group by 'hadm_id' and aggregate using logical OR (max for binary data)
 lab_events_grouped = lab_events_one_hot.groupby("hadm_id").max().reset_index()
 
-print(lab_events_grouped)
 
 # Pickle lab_events_grouped
 lab_events_grouped.to_pickle("data/lab_events_grouped.pkl")
 
-print("DataFrame has been pickled to 'data/lab_events_grouped.pkl'")
 
 # read data/private_df.pkl
 

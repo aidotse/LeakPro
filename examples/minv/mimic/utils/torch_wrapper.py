@@ -1,11 +1,18 @@
 # utils/treegrad_wrapper.py
-import os, joblib, yaml, numpy as np, pandas as pd, torch
+import contextlib
+import os
+
+import joblib
+import numpy as np
+import pandas as pd
+import torch
+import yaml
+
 
 class TorchWrapper:
     @classmethod
     def load_model(cls, model_path=None, **kwargs):
-        """
-        Accepts:
+        """Accepts:
           - path to a file (e.g., ./target_tabular/model.ckpt),
           - path to a directory (e.g., ./target_tabular),
           - or None.
@@ -29,7 +36,7 @@ class TorchWrapper:
 
         return cls(artifacts_dir=artifacts_dir, **kwargs)
 
-    def __init__(self, artifacts_dir="./target"):
+    def __init__(self, artifacts_dir="./target") -> None:
         self.artifacts_dir = artifacts_dir
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -47,8 +54,8 @@ class TorchWrapper:
             dm = joblib.load(os.path.join(artifacts_dir, "datamodule.sav"))
         except Exception:
             dm = {}
-        self.classes_ = dm.get("classes_", None)
-        self.n_classes_ = dm.get("n_classes_", None)
+        self.classes_ = dm.get("classes_")
+        self.n_classes_ = dm.get("n_classes_")
 
         bundle = joblib.load(os.path.join(artifacts_dir, "model.ckpt"))
         self.model = bundle["model"]
@@ -79,10 +86,8 @@ class TorchWrapper:
         return self
 
     def eval(self):
-        try:
+        with contextlib.suppress(Exception):
             self.model.eval()
-        except Exception:
-            pass
         return self
 
     def _df_to_tensor(self, df: pd.DataFrame, requires_grad: bool) -> torch.Tensor:

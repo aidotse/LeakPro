@@ -1,21 +1,21 @@
+
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn.functional as F
 from ctgan import CTGAN
-from ctgan.synthesizers.ctgan import Generator, Discriminator
 from ctgan.data_sampler import DataSampler
 from ctgan.data_transformer import DataTransformer
-import torch
-import torch.optim as optim
-import torch.nn.functional as F
-import pandas as pd
-import numpy as np
-import warnings
+from ctgan.synthesizers.ctgan import Discriminator, Generator
+from torch import optim
 from tqdm import tqdm
-from torch import cuda, device
+
 
 class CustomCTGAN(CTGAN):
-    def __init__(self, 
-                 embedding_dim=256, 
-                 generator_dim=(256, 256), 
-                 discriminator_dim=(256, 256), 
+    def __init__(self,
+                 embedding_dim=256,
+                 generator_dim=(256, 256),
+                 discriminator_dim=(256, 256),
                  generator_lr = 2e-4,
                  generator_decay=1e-6,
                  discriminator_lr=2e-5,
@@ -23,32 +23,32 @@ class CustomCTGAN(CTGAN):
                  num_classes=5088,
                  batch_size=500,
                  discriminator_steps=5,
-                 log_frequency=True, 
-                 verbose=False, 
-                 epochs=300, 
+                 log_frequency=True,
+                 verbose=False,
+                 epochs=300,
                  pac=10,
-                 only_pseudo_label_conditioning=True, 
-                 cuda=True):
-        
+                 only_pseudo_label_conditioning=True,
+                 cuda=True) -> None:
+
         self.dim_z = embedding_dim
 
-        super().__init__(embedding_dim, generator_dim, discriminator_dim, 
-                         generator_lr, generator_decay, discriminator_lr, 
-                         discriminator_decay, batch_size, discriminator_steps, 
+        super().__init__(embedding_dim, generator_dim, discriminator_dim,
+                         generator_lr, generator_decay, discriminator_lr,
+                         discriminator_decay, batch_size, discriminator_steps,
                          log_frequency, verbose, epochs, pac, cuda)
-        
+
         self._transformer = DataTransformer()
 
         self.only_psuedo_label_conditioning = only_pseudo_label_conditioning
-        
-    def to(self, device):
+
+    def to(self, device) -> None:
         self._device = device
         self._generator.to(device)
 
-    
-    def eval(self):
+
+    def eval(self) -> None:
         self._generator.eval()
-        
+
     def __call__(self, z=None, y=None):
         """Sample data similar to the training data.
 
@@ -66,38 +66,39 @@ class CustomCTGAN(CTGAN):
 
         Returns:
             numpy.ndarray or pandas.DataFrame
+
         """
         if self._transformer is None:
             raise ValueError("The transformer has not been initialized. Please call the `fit` method first.")
-    
+
         if y is not None:
-            # TODO: If desired, support for conditioning on other discrete 
+            # TODO: If desired, support for conditioning on other discrete
             # columns than pseudo-labels can be implemented here for correct sampling.
 
             # Batch size is length of y
             bs = y.shape[0]
             condition_values = y.detach().cpu().numpy()
-        
+
             discrete_column_id = np.array([self._data_sampler._n_discrete_columns-1]*bs)
-            cond = np.zeros((bs, self._data_sampler._n_categories), dtype='float32')
+            cond = np.zeros((bs, self._data_sampler._n_categories), dtype="float32")
             category_id = self._data_sampler._discrete_column_cond_st[discrete_column_id] + condition_values
             cond[np.arange(bs), category_id] = 1
             c1 = cond
-            
+
         else:
             bs = z.shape[0]
             c1 = self._data_sampler.sample_original_condvec(bs)
 
         c1 = torch.from_numpy(c1).to(self._device)
-        
+
         if z is None:
             mean = torch.zeros(bs, self._embedding_dim)
             std = mean + 1
             fakez = torch.normal(mean=mean, std=std).to(self._device)
         else:
             fakez = z
-        
-        
+
+
         fakez = torch.cat([z, c1], dim=1)
 
         fake = self._generator(fakez)
@@ -105,8 +106,8 @@ class CustomCTGAN(CTGAN):
 
         samples = self._transformer.inverse_transform(fakeact.detach().cpu().numpy())
 
-        '''
-        for condition_value in condition_values:        
+        """
+        for condition_value in condition_values:
             if condition_column is not None and condition_value is not None:
                 try:
                     condition_info = self._transformer.convert_column_name_value_to_id(
@@ -129,8 +130,8 @@ class CustomCTGAN(CTGAN):
                 fakez = torch.normal(mean=mean, std=std).to(self._device)
             else:
                 fakez = z
-            
-            
+
+
             if global_condition_vec is not None:
                 condvec = global_condition_vec.copy()
             else:
@@ -153,18 +154,19 @@ class CustomCTGAN(CTGAN):
             # add row to samples
             samples = pd.concat([samples, sample])
 
-        '''    
+        """
         return samples
-    
+
     def sample_condvec(self, batch):
         """Generate the conditional vector for training. Supports conditioning on all discrete columns or only the pseudo label column.
+
         Args:
             batch (int):
                 The batch size.
             only_pseudo_label_conditioning (bool):
                 If True, only sample the pseudo label column.
                 If False, sample all discrete columns.
-        
+
         Returns:
             cond (batch x #categories):
                 The conditional vector.
@@ -174,6 +176,7 @@ class CustomCTGAN(CTGAN):
                 Integer representation of mask.
             category_id_in_col (batch):
                 Selected category in the selected discrete column.
+
         """
         if self._data_sampler._n_discrete_columns == 0:
             return None
@@ -182,20 +185,19 @@ class CustomCTGAN(CTGAN):
             discrete_column_id = np.array([self._data_sampler._n_discrete_columns-1]*batch)
         else:
             discrete_column_id = np.random.choice(np.arange(self._data_sampler._n_discrete_columns), batch)
-        
-        cond = np.zeros((batch, self._data_sampler._n_categories), dtype='float32')
-        mask = np.zeros((batch, self._data_sampler._n_discrete_columns), dtype='float32')
+
+        cond = np.zeros((batch, self._data_sampler._n_categories), dtype="float32")
+        mask = np.zeros((batch, self._data_sampler._n_discrete_columns), dtype="float32")
         mask[np.arange(batch), discrete_column_id] = 1
         category_id_in_col = self._data_sampler._random_choice_prob_index(discrete_column_id)
         category_id = self._data_sampler._discrete_column_cond_st[discrete_column_id] + category_id_in_col
         cond[np.arange(batch), category_id] = 1
-        
+
         return cond, mask, discrete_column_id, category_id_in_col
 
 
-    def fit(self, train_data, target_model, num_classes, inv_criterion, gen_criterion, dis_criterion, n_iter, n_dis, alpha = 0.1, discrete_columns=(), use_inv_loss=True):
-        """
-        Fit the CTGAN model to the training data using pseudo-labeled guidance as in the PLG-MI attack.
+    def fit(self, train_data, target_model, num_classes, inv_criterion, gen_criterion, dis_criterion, n_iter, n_dis, alpha = 0.1, discrete_columns=(), use_inv_loss=True) -> None:
+        """Fit the CTGAN model to the training data using pseudo-labeled guidance as in the PLG-MI attack.
 
         Args:
             train_data (pandas.DataFrame):
@@ -214,6 +216,7 @@ class CustomCTGAN(CTGAN):
                 Alpha value for the inversion loss.
             discrete_columns (list of str):
                 List of column names that are discrete.
+
         """
         epochs = n_iter
         self._validate_discrete_columns(train_data, discrete_columns)
@@ -224,7 +227,7 @@ class CustomCTGAN(CTGAN):
         self._transformer.fit(train_data, discrete_columns)
 
         train_data = self._transformer.transform(train_data)
-        
+
         self.num_classes = num_classes
 
         self._data_sampler = DataSampler(
@@ -257,20 +260,20 @@ class CustomCTGAN(CTGAN):
         mean = torch.zeros(self._batch_size, self._embedding_dim, device=self._device)
         std = mean + 1
 
-        self.loss_values = pd.DataFrame(columns=['Epoch', 'Generator Loss', 'Distriminator Loss', 'Inversion Loss', 'C_loss'])
+        self.loss_values = pd.DataFrame(columns=["Epoch", "Generator Loss", "Distriminator Loss", "Inversion Loss", "C_loss"])
 
         epoch_iterator = tqdm(range(epochs), disable=(not self._verbose))
         if self._verbose:
-            description = 'Gen. ({gen:.2f}) | Dis. ({dis:.2f}) | Inv. ({inv:.2f}) | CE. ({c_loss:.2f}) | Acc. ({acc:.2f})'
+            description = "Gen. ({gen:.2f}) | Dis. ({dis:.2f}) | Inv. ({inv:.2f}) | CE. ({c_loss:.2f}) | Acc. ({acc:.2f})"
             epoch_iterator.set_description(description.format(gen=0, dis=0, inv=0, c_loss=0, acc=0))
 
         steps_per_epoch = max(len(train_data) // self._batch_size, 1)
         for i in epoch_iterator:
             for id_ in range(steps_per_epoch):
-                for n in range(n_dis):
-                    
+                for _n in range(n_dis):
+
                     # TODO: Only condition on pseudo-labels
-                    
+
                     fakez = torch.normal(mean=mean, std=std)
 
                     condvec = self.sample_condvec(self._batch_size)
@@ -295,7 +298,7 @@ class CustomCTGAN(CTGAN):
                     fake = self._generator(fakez)
                     fakeact = self._apply_activate(fake)
 
-                    real = torch.from_numpy(real.astype('float32')).to(self._device)
+                    real = torch.from_numpy(real.astype("float32")).to(self._device)
 
                     if c1 is not None:
                         fake_cat = torch.cat([fakeact, c1], dim=1)
@@ -303,8 +306,8 @@ class CustomCTGAN(CTGAN):
                     else:
                         real_cat = real
                         fake_cat = fakeact
-                    
-                    
+
+
                     y_fake = discriminator(fake_cat)
                     y_real = discriminator(real_cat)
 
@@ -322,7 +325,7 @@ class CustomCTGAN(CTGAN):
 
                 fakez = torch.normal(mean=mean, std=std)
                 condvec = self.sample_condvec(self._batch_size)
-           
+
                 if condvec is None:
                     c1, m1, col, opt = None, None, None, None
                 else:
@@ -331,41 +334,32 @@ class CustomCTGAN(CTGAN):
                     m1 = torch.from_numpy(m1).to(self._device)
                     fakez = torch.cat([fakez, c1], dim=1)
 
-                   
+
                 fake = self._generator(fakez)
                 fakeact = self._apply_activate(fake)
 
-                if c1 is not None:
-                    y_fake = discriminator(torch.cat([fakeact, c1], dim=1))
-                else:
-                    y_fake = discriminator(fakeact)
+                y_fake = discriminator(torch.cat([fakeact, c1], dim=1)) if c1 is not None else discriminator(fakeact)
 
                 # Fake feature vector
                 fakefeat = fakeact
-                
+
                 fakefeat = fakefeat.detach().cpu().numpy()
-                     
+
                 sample = self._transformer.inverse_transform(fakefeat)
                 #sample_copy = sample.copy()
-                pseudo_label_batch = sample['pseudo_label'].values
+                pseudo_label_batch = sample["pseudo_label"].values
                 pseudo_label_batch = torch.tensor(pseudo_label_batch, device=self._device)
                 #remove 'pseudo_label' column
-                sample = sample.drop(columns=['pseudo_label'])
-                
-                # Check 
-                if condvec is None or not use_inv_loss:
-                    inv_loss = 0
-                else:
-                    inv_loss  = inv_criterion(target_model(sample), pseudo_label_batch)
+                sample = sample.drop(columns=["pseudo_label"])
 
-                if condvec is None:
-                    cross_entropy = 0
-                else:
-                    cross_entropy = self._cond_loss(fake, c1, m1)
+                # Check
+                inv_loss = 0 if condvec is None or not use_inv_loss else inv_criterion(target_model(sample), pseudo_label_batch)
+
+                cross_entropy = 0 if condvec is None else self._cond_loss(fake, c1, m1)
 
                 beta = 1.0
                 loss_g = gen_criterion(y_fake)
-                loss_all = loss_g + inv_loss*alpha + beta*cross_entropy 
+                loss_all = loss_g + inv_loss*alpha + beta*cross_entropy
 
                 optimizerG.zero_grad(set_to_none=False)
                 loss_all.backward()
@@ -373,10 +367,7 @@ class CustomCTGAN(CTGAN):
 
             generator_loss = loss_g.detach().cpu().item()
             discriminator_loss = loss_d.detach().cpu().item()
-            if use_inv_loss:
-                inversion_loss = inv_loss.detach().cpu().item()
-            else:
-                inversion_loss = 0
+            inversion_loss = inv_loss.detach().cpu().item() if use_inv_loss else 0
 
             with torch.no_grad():
                 # Compute accuracy
@@ -387,14 +378,14 @@ class CustomCTGAN(CTGAN):
                 acc = acc.item()
 
             cross_entropy = cross_entropy.detach().cpu().item()
-            
+
             epoch_loss_df = pd.DataFrame({
-                'Epoch': [i],
-                'Generator Loss': [generator_loss],
-                'Discriminator Loss': [discriminator_loss],
-                'Inversion Loss': [inversion_loss],
-                'Conditioning Loss (CE)': [cross_entropy],
-                'Accuracy' : [acc]
+                "Epoch": [i],
+                "Generator Loss": [generator_loss],
+                "Discriminator Loss": [discriminator_loss],
+                "Inversion Loss": [inversion_loss],
+                "Conditioning Loss (CE)": [cross_entropy],
+                "Accuracy" : [acc]
             })
             if not self.loss_values.empty:
                 self.loss_values = pd.concat([self.loss_values, epoch_loss_df]).reset_index(
@@ -407,12 +398,14 @@ class CustomCTGAN(CTGAN):
                 epoch_iterator.set_description(
                     description.format(gen=generator_loss, dis=discriminator_loss, inv=inversion_loss,c_loss=cross_entropy, acc=acc)
                 )
-            
+
 from dataclasses import dataclass
-from typing import List, Literal, Optional, Tuple
+from typing import List, Literal, Tuple
+
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
+
 
 @dataclass
 class ContinuousSpec:
@@ -430,13 +423,13 @@ class DiscreteSpec:
 ColumnSpec = Tuple[str, "ContinuousSpec | DiscreteSpec"]
 
 class CTGANDecoder(nn.Module):
-    """
-    Differentiable mapper from CTGAN generator outputs h to raw-like tabular tensor.
+    """Differentiable mapper from CTGAN generator outputs h to raw-like tabular tensor.
     Expects h concatenated in the same order as specs:
       - continuous col: [alpha (1), beta (n_components)]
-      - discrete col:   [d (n_categories)]
+      - discrete col:   [d (n_categories)].
     """
-    def __init__(self, specs: List[ColumnSpec], hard_discrete: bool=False, gumbel_tau: float=0.5):
+
+    def __init__(self, specs: List[ColumnSpec], hard_discrete: bool=False, gumbel_tau: float=0.5) -> None:
         super().__init__()
         self.specs = specs
         self.hard_discrete = hard_discrete
@@ -449,11 +442,10 @@ class CTGANDecoder(nn.Module):
                 self.register_buffer(f"{name}__sigma", spec.sigma.view(-1))
 
     def forward(self, h: torch.Tensor) -> torch.Tensor:
+        """h: [B, D_total]
+        returns: concatenated raw-like tensor [B, sum(raw_dims)]  (discrete as expected one-hot or ST argmax).
         """
-        h: [B, D_total]
-        returns: concatenated raw-like tensor [B, sum(raw_dims)]  (discrete as expected one-hot or ST argmax)
-        """
-        B = h.shape[0]
+        h.shape[0]
         outs = []
         idx = 0
         for name, spec in self.specs:

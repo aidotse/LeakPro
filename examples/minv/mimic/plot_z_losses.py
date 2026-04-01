@@ -1,6 +1,7 @@
-import os, math
-import matplotlib.pyplot as plt
+import os
+
 import matplotlib.image as mpimg
+import matplotlib.pyplot as plt
 
 base = "./z_opt_plots"
 classes = list(range(20))
@@ -22,4 +23,3 @@ plt.tight_layout()
 out_path = os.path.join(base, "loss_curves_grid.png")
 plt.savefig(out_path, dpi=200)
 plt.close()
-print("Saved:", out_path)

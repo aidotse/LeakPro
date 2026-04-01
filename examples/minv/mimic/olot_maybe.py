@@ -1,13 +1,16 @@
-import os, json
+import json
+import os
+import re
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from sklearn.preprocessing import StandardScaler
-from sklearn.feature_selection import f_classif
 from sklearn.decomposition import PCA
-from sklearn.manifold import TSNE
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis as LDA
-import re, os
+from sklearn.feature_selection import f_classif
+from sklearn.manifold import TSNE
+from sklearn.preprocessing import StandardScaler
+
 
 def safe_name(s: str, maxlen: int = 120) -> str:
     s = str(s)
@@ -210,5 +213,3 @@ def visualize_tabular_and_save(
 
 df = pd.read_pickle("data/private_df.pkl")
 out = visualize_tabular_and_save(df, label_col="identity", top_k=6, use_tsne=True, out_dir="viz_out")
-print("Saved files:", json.dumps(out["paths"], indent=2))
-print("Top features:", out["top_features"])

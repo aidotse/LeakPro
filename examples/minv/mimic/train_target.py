@@ -1,11 +1,12 @@
 import os
 import sys
-import yaml
 import warnings
-from pytorch_tabular import TabularModel
-from pytorch_tabular.models import CategoryEmbeddingModelConfig, TabNetModelConfig, GANDALFConfig
-from pytorch_tabular.config import DataConfig, OptimizerConfig, TrainerConfig
+
 import pandas as pd
+import yaml
+from pytorch_tabular import TabularModel
+from pytorch_tabular.config import DataConfig, OptimizerConfig, TrainerConfig
+from pytorch_tabular.models import GANDALFConfig
 
 # Suppres warnings, pytorch_tabular is very verbose
 warnings.filterwarnings("ignore")
@@ -18,18 +19,18 @@ project_root = os.path.abspath(os.path.join(os.getcwd(), "../../.."))
 sys.path.append(project_root)
 
 # List of all possible continuous columns in MIMIC
-continuous_col_names = ['length_of_stay', 'num_procedures', 'num_medications', 'BMI',
-       'BMI (kg/m2)', 'Height', 'Height (Inches)', 'Weight', 'Weight (Lbs)',
-       'eGFR', 'systolic', 'diastolic']
+continuous_col_names = ["length_of_stay", "num_procedures", "num_medications", "BMI",
+       "BMI (kg/m2)", "Height", "Height (Inches)", "Weight", "Weight (Lbs)",
+       "eGFR", "systolic", "diastolic"]
 
-audit_file = 'audit_id_0.yaml'
-data_file = '/private_df_id_0.pkl'
+audit_file = "audit_id_0.yaml"
+data_file = "/private_df_id_0.pkl"
 
 # Load the config.yaml file
-with open('train_config.yaml', 'r') as file:
+with open("train_config.yaml", "r") as file:
     train_config = yaml.safe_load(file)
 
-with open(audit_file, 'r') as file:
+with open(audit_file, "r") as file:
     audit_config = yaml.safe_load(file)
 
 # Access the first attack in the attack_list
@@ -57,7 +58,7 @@ categorical_col_names = [col for col in df.columns if col not in continuous_col_
 categorical_col_names.remove("identity")
 
 # Ensure df_train contains at least one sample for every class
-df_train_min = df.groupby("identity").head(1)  
+df_train_min = df.groupby("identity").head(1)
 remaining_df = df.drop(df_train_min.index)
 
 # Determine the fraction for the remaining samples:
@@ -76,13 +77,10 @@ df_test = df_test[df_test["identity"].isin(df_train["identity"])]
 df_test = df_test.reset_index(drop=True)
 
 # Prints
-print("Number of unique classes in df_train: ", df_train["identity"].nunique())
-print("Shape of df_train: ", df_train.shape)
-print("Shape of df_test: ", df_test.shape)
 
 
 data_config = DataConfig(
-    target=['identity'],
+    target=["identity"],
     continuous_cols=continuous_col_names,
     categorical_cols=categorical_col_names,
     normalize_continuous_features=False,
@@ -92,7 +90,7 @@ trainer_config = TrainerConfig(
     auto_lr_find=False,
     batch_size=256,
     max_epochs=150,
-    early_stopping='train_loss_0',
+    early_stopping="train_loss_0",
 )
 
 optimizer_config = OptimizerConfig()

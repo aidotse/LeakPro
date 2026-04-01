@@ -1,12 +1,13 @@
 import os
 import sys
+import warnings
+
+import pandas as pd
 import yaml
 from pytorch_tabular import TabularModel
-from pytorch_tabular.models import CategoryEmbeddingModelConfig
 from pytorch_tabular.config import DataConfig, OptimizerConfig, TrainerConfig
-import pandas as pd
+from pytorch_tabular.models import CategoryEmbeddingModelConfig
 
-import warnings
 warnings.filterwarnings("ignore")
 
 
@@ -17,7 +18,7 @@ project_root = os.path.abspath(os.path.join(os.getcwd(), "../../.."))
 sys.path.append(project_root)
 
 # Load the config.yaml file
-with open('train_config.yaml', 'r') as file:
+with open("train_config.yaml", "r") as file:
     train_config = yaml.safe_load(file)
 
 # Generate the dataset and dataloaders
@@ -52,7 +53,7 @@ if train:
     categorical_col_names.remove("identity")
 
     data_config = DataConfig(
-        target=['identity'],
+        target=["identity"],
         continuous_cols=continuous_col_names,
         categorical_cols=categorical_col_names,
         #continuous_feature_transform="quantile_normal",
@@ -63,7 +64,7 @@ if train:
         auto_lr_find=True,
         batch_size=train_config["train"]["batch_size"],
         max_epochs=100,
-        early_stopping='train_loss_0'
+        early_stopping="train_loss_0"
     )
 
     optimizer_config = OptimizerConfig()
@@ -86,12 +87,12 @@ if train:
     results = tabular_model.evaluate(df_val)
     pred_df = tabular_model.predict(df_val.drop(columns=["identity"]))
 
-    print("validation preds: ", pred_df["identity_prediction"].value_counts())
     # Save the model
     tabular_model.save_model("./target")
 
-from leakpro import LeakPro
 from examples.minv.celebA_attributes.celebA_tabular_plgmi_handler import CelebA_InputHandler
+from leakpro import LeakPro
+
 config_path = "audit.yaml"
 
 

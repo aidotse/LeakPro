@@ -1,28 +1,25 @@
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import DataLoader
-from tqdm import tqdm
-from torch import cuda, device
 import os
-from torch.serialization import save
 import pickle
-from leakpro.schemas import MIAMetaDataSchema, OptimizerConfig, LossConfig
 
+import torch
+from torch import cuda, device, nn, optim
+from torch.serialization import save
+from tqdm import tqdm
 
+from leakpro.schemas import LossConfig, MIAMetaDataSchema, OptimizerConfig
 
 
 class ResNetTabular(nn.Module):
-    def __init__(self, input_dim, hidden_dim=128, output_dim=1, num_blocks=3, dropout=0.1):
+    def __init__(self, input_dim, hidden_dim=128, output_dim=1, num_blocks=3, dropout=0.1) -> None:
         super(ResNetTabular, self).__init__()
         self.init_params = {"num_classes": output_dim, "input_dim": input_dim}
 
         self.input_layer = nn.Linear(input_dim, hidden_dim)
-        
+
         self.blocks = nn.Sequential(*[
             ResNetBlock(hidden_dim, dropout) for _ in range(num_blocks)
         ])
-        
+
         self.output_layer = nn.Linear(hidden_dim, output_dim)
         self.activation = nn.Sigmoid()  # Use softmax for multi-class
 
@@ -32,7 +29,7 @@ class ResNetTabular(nn.Module):
         return self.activation(self.output_layer(x))
 
 class ResNetBlock(nn.Module):
-    def __init__(self, hidden_dim, dropout):
+    def __init__(self, hidden_dim, dropout) -> None:
         super(ResNetBlock, self).__init__()
 
         self.fc1 = nn.Linear(hidden_dim, hidden_dim)
@@ -53,23 +50,23 @@ def create_trained_model_and_metadata(model,
                                       test_loader,
                                       train_config):
     lr = train_config["train"]["learning_rate"]
-    momentum = train_config["train"]["momentum"]
+    train_config["train"]["momentum"]
     epochs = train_config["train"]["epochs"]
-    weight_decay = train_config["train"]["weight_decay"]
+    train_config["train"]["weight_decay"]
 
     device_name = device("cuda" if cuda.is_available() else "cpu")
     model.to(device_name)
-    
-    
+
+
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=lr, betas=(0.1, 0.9))
     train_losses, train_accuracies = [], []
     test_losses, test_accuracies = [], []
 
-    for e in tqdm(range(epochs), desc="Training Progress"):
+    for _e in tqdm(range(epochs), desc="Training Progress"):
         train_acc, train_loss = 0.0, 0.0
         model.train()
-        
+
         for data, target in train_loader:
             data, target = data.to(device_name), target.to(device_name)
             optimizer.zero_grad()
@@ -105,8 +102,7 @@ def create_trained_model_and_metadata(model,
         test_acc = test_acc.double() / len(test_loader.dataset)
         test_losses.append(test_loss)
         test_accuracies.append(test_acc.item())
-        print(f"Epoch {e+1}/{epochs}: Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}, Test Loss: {test_loss:.4f}, Test Acc: {test_acc:.4f}")
-        
+
     # Move the model back to the CPU
     model.to("cpu")
 
@@ -118,7 +114,7 @@ def create_trained_model_and_metadata(model,
     init_params = {}
     for key, value in model.init_params.items():
         init_params[key] = value
-    
+
     optimizer_data = {
         "name": optimizer.__class__.__name__.lower(),
         "lr": optimizer.param_groups[0].get("lr", 0),
@@ -127,9 +123,9 @@ def create_trained_model_and_metadata(model,
         "dampening": optimizer.param_groups[0].get("dampening", 0),
         "nesterov": optimizer.param_groups[0].get("nesterov", False)
     }
-    
+
     loss_data = {"name": criterion.__class__.__name__.lower()}
-    
+
     meta_data = MIAMetaDataSchema(
             train_indices=train_loader.dataset.indices,
             test_indices=test_loader.dataset.indices,
