@@ -130,6 +130,57 @@ if train:
     # Save the model
     tabular_model.save_model("./target/")
 
+<<<<<<< Updated upstream
+=======
+data_config = DataConfig(
+    target=['identity'],
+    continuous_cols=continuous_col_names,
+    categorical_cols=categorical_col_names,
+    normalize_continuous_features=False,
+)
+
+trainer_config = TrainerConfig(
+    auto_lr_find=False,
+    batch_size=256,
+    max_epochs=1,
+    early_stopping='train_loss_0',
+)
+
+optimizer_config = OptimizerConfig()
+
+model_config = CategoryEmbeddingModelConfig(
+    task="classification",
+    layers="2048-1024-512-256",
+    activation="ReLU",
+    learning_rate=1e-3,
+)
+
+# model_config = GANDALFConfig(
+# task="classification",
+# gflu_stages=16,
+# gflu_dropout=0.1,
+# embedding_dropout=0.1,
+# learning_rate=1e-3,
+# )
+
+tabular_model = TabularModel(
+    data_config=data_config,
+    model_config=model_config,
+    optimizer_config=optimizer_config,
+    trainer_config=trainer_config
+)
+
+tabular_model.fit(train=df_train, cache_data="none")# Defaults 80% train, 20% val split
+results = tabular_model.evaluate(df_test)
+pred_df = tabular_model.predict(df_test.drop(columns=["identity"]))
+
+# Create target directory if it does not exist
+if not os.path.exists("./target/"):
+    os.makedirs("./target/")
+
+# Save the model
+tabular_model.save_model("./target/")
+>>>>>>> Stashed changes
 
 from leakpro import LeakPro
 from examples.minv.mimic.mimic_plgmi_handler import Mimic_InputHandler

@@ -47,11 +47,15 @@ audit:  # Configurations for auditing
   attack_type: "minv" #mia, gia
   #data_modality: "tabular" #image, tabular
 
-target:
+# target:
   # Target model path
-  module_path: "./utils/tabular_wrapper.py"
-  model_class: "TabularWrapper"
-  model_type: "pytorch_tabular"
+  # module_path: "./utils/tabular_wrapper.py"
+  # model_class: "TabularWrapper"
+  # model_type: "pytorch_tabular"
+target:
+  module_path: "./utils/treegrad_wrapper.py"
+  model_class: "TreeGradWrapper"
+  model_type: "treegrad"   # If your framework ignores this, you can keep the old value.
   # Data paths
   target_folder: "./target"
   data_path: "./data/private_df.pkl"

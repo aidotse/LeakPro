@@ -108,6 +108,7 @@ class MINVHandler:
         # TODO: CLEANUP
         try:
             if model_type == "pytorch_tabular":
+            # if model_type == "treegrad":
                 # Loads model from path instead of file
                 self.target_model = self.target_model_blueprint.load_model(model_path)
             else:

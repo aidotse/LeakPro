@@ -20,6 +20,8 @@ from leakpro.input_handler.modality_extensions.tabular_metrics import TabularMet
 from leakpro.metrics.attack_result import MinvResult
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
+import joblib
+import os, yaml
 
 
 # TODO: Move this to a separate file (GanHandler?)
@@ -84,6 +86,11 @@ class AttackPLGMI(AbstractMINV):
         """
         logger.info("Configuring PLG-MI attack")
         self.configs = self.Config() if configs is None else self.Config(**configs)
+<<<<<<< Updated upstream
+=======
+        self.attack_id = 1 # Workaround for now - required by attack scheduler
+        self.use_reference_model = True
+>>>>>>> Stashed changes
 
         # Call the parent class constructor
         super().__init__(handler)
@@ -175,7 +182,6 @@ class AttackPLGMI(AbstractMINV):
 
         # Create pseudo dataloader from top-n pseudo_map
         pseudo_data = []
-
 
         if self.data_format == "dataloader":
             for i in range(self.num_classes):
@@ -282,18 +288,45 @@ class AttackPLGMI(AbstractMINV):
         """Run the attack."""
         logger.info("Running the PLG-MI attack")
         # Define image metrics class
+        # if getattr(self, "reference_model", None) is None:
+        #     self.load_reference_model(model_folder="./reference")
 
         self.evaluation_model = self.target_model # TODO: Change to evaluation model
         reconstruction_configs = self.handler.configs.audit.reconstruction
 
         num_audited_classes = reconstruction_configs.num_audited_classes
 
+<<<<<<< Updated upstream
         # Get random labels
         labels = torch.randint(0, self.num_classes, (num_audited_classes,)).to(self.device)
+=======
+
+        # Number of unique categories seen by the generator during training
+        # If the pseudo_labeling did not find all classes, we get num_unique_categories < num_classes
+        num_unique_categories = (self.generator._data_sampler._n_categories
+                                 - self.generator._data_sampler._discrete_column_cond_st[-1])
+
+        if self.num_classes > num_unique_categories:
+            logger.info(
+                "Auditing %d classes out of %d classes instead,"
+                " due to partial class separation in psuedo-labeling step.",
+                num_unique_categories,
+                self.num_classes,
+            )
+            # Get random labels
+            #labels = torch.randint(0, num_unique_categories, (num_audited_classes,)).to(self.device)
+            labels = torch.arange(num_unique_categories).to(self.device)
+
+        else:
+            # Get random labels
+            #labels = torch.randint(0, self.num_classes, (num_audited_classes,)).to(self.device)
+            labels = torch.arange(num_audited_classes).to(self.device)
+
+>>>>>>> Stashed changes
         # Get range of labels from 0 to num_audited_classes
         #labels = torch.arange(num_audited_classes).to(self.device)
 
-        random_z = torch.randn(num_audited_classes, self.generator.dim_z, device=self.device)
+        # random_z = torch.randn(num_audited_classes, self.generator.dim_z, device=self.device)
 
         # Optimize z, TODO: Optimize in batches
 
@@ -322,7 +355,7 @@ class AttackPLGMI(AbstractMINV):
                 opt_z = self.optimize_z_no_grad(y=labels,
                                 iter_times=self.configs.z_optimization_iter)
             elif self.handler.configs.target.model_type == "pytorch_tabular":
-                opt_z = self.optimize_z_grad(y=labels,
+                opt_z, a = self.optimize_z_grad_per_sample(y=labels,
                                 iter_times=self.configs.z_optimization_iter, augment=False)
 
             metrics = TabularMetrics(self.handler, self.gan_handler,
@@ -333,7 +366,7 @@ class AttackPLGMI(AbstractMINV):
         return metrics
         # return metrics
 
-    def optimize_z_grad(self:Self,
+    def optimize_z_grad_original(self:Self,
                    y: torch.tensor,
                    iter_times: int = 10,
                    augment: bool = True) -> torch.tensor:
@@ -419,6 +452,369 @@ class AttackPLGMI(AbstractMINV):
 
         return best_z
 
+    def optimize_z_grad_per_sample(self, y, iter_times=30, augment: bool = True):
+        """
+        For each label y[i], run 20 restarts and keep the best 10 (by final loss).
+        SIDE EFFECTS (no change to signature or returns):
+        - saves per-class loss-vs-iteration plots (mean ± std) of the kept top-k restarts
+        - saves per-class CSVs of those curves
+        - saves per-class mean/variance of final top-k losses
+
+        RETURNS (unchanged):
+        z_topk   : [num_samples, 10, dim_z]
+        loss_topk: [num_samples, 10]
+        """
+        import os
+        import numpy as np
+        import pandas as pd
+        import matplotlib.pyplot as plt
+        import torch
+
+        # --- hyperparams for the restart strategy ---
+        restarts  = 1
+        keep_topk = 1
+        lr        = 2e-4
+
+        assert restarts >= keep_topk, "restarts must be >= keep_topk"
+
+        y_all = y.view(-1).long().to(self.device)
+
+        # Target model
+        mdl = (self.target_model.model if hasattr(self.target_model, "model") else self.target_model).eval().to(self.device)
+        for p in mdl.parameters():
+            p.requires_grad_(False)  # we only optimize z
+
+        # Generator
+        gen = self.generator
+        gen.eval()
+        gen.to(self.device)
+
+        # Helper: forward to logits for a single sample (batch size 1)
+        def _forward_logits(z1, yi1):
+            if self.handler.configs.target.model_type == "pytorch_tabular":
+                # differentiable tabular path
+                fakeact, _ = gen.forward_fakeact_with_labels(z1, yi1.view(1))
+                x_cont, x_cat, _ = gen._pack_for_gandalf(fakeact)
+
+                batch = {}
+                if x_cont is not None and x_cont.numel() > 0:
+                    batch["continuous"] = x_cont.float()
+                if x_cat is not None and x_cat.numel() > 0:
+                    batch["categorical"] = x_cat.long()
+
+                assert batch, "No continuous or categorical features were produced for this batch."
+                out = mdl(batch)
+                logits = out["logits"] if isinstance(out, dict) else out
+                return logits
+            else:
+                imgs = gen(z1, yi1.view(1))
+                return mdl(imgs)
+
+        z_topk_list    = []
+        loss_topk_list = []
+        per_class_traces = {}  # cls -> list of np arrays (length iter_times), from kept restarts
+
+        for yi in y_all:
+            cls = int(yi.item())
+            candidates = []  # (final_loss_after_last_step, best_z_of_restart, trace_post_step[np(iter_times)])
+
+            for _ in range(restarts):
+                z   = torch.randn(1, gen.dim_z, device=self.device, requires_grad=True)
+                opt = torch.optim.Adam([z], lr=lr)
+
+                best_loss_r = float("inf")
+                best_z_r    = z.detach().clone()
+                trace = np.zeros(iter_times, dtype=np.float32)
+
+                for it in range(iter_times):
+                    # forward (with grad) -> loss_before
+                    logits = _forward_logits(z, yi)
+                    # inv_loss = gan_losses.max_margin_loss(logits, yi.view(1))
+                    temp = 2
+                    inv_loss = torch.nn.functional.cross_entropy(logits / temp, yi.view(1))
+
+                    # step
+                    opt.zero_grad(set_to_none=True)
+                    inv_loss.backward()
+                    grad_norm = z.grad.norm().item() if z.grad is not None else 0.0
+                    opt.step()
+
+                    # recompute loss AFTER the update (no grad) to plot meaningful progress
+                    with torch.no_grad():
+                        logits_after = _forward_logits(z, yi)
+                        # loss_after = gan_losses.max_margin_loss(logits_after, yi.view(1)).item()
+                        loss_after = torch.nn.functional.cross_entropy(logits_after/ temp, yi.view(1)).item()
+
+                    # record post-step loss
+                    trace[it] = float(loss_after)
+
+                    # track the best within this restart by current (post-step) loss
+                    if loss_after < best_loss_r:
+                        best_loss_r = loss_after
+                        best_z_r    = z.detach().clone()
+
+                    # optional lightweight logging
+                    if (it % 20) == 0:
+                        print(f"[it {it}] loss -> {loss_after:.3f}  ||grad_z||={grad_norm:.3f}")
+
+                candidates.append((best_loss_r, best_z_r, trace))
+
+            # keep top-k restarts for THIS sample
+            candidates.sort(key=lambda t: t[0])
+            top = candidates[:keep_topk]
+
+            # store returns
+            loss_topk_list.append(torch.tensor([t[0] for t in top], device=self.device))
+            z_topk_list.append(torch.stack([t[1].squeeze(0) for t in top], dim=0))  # [keep_topk, dim_z]
+
+            # accumulate traces for per-class plotting
+            per_class_traces.setdefault(cls, []).extend([t[2] for t in top])
+
+        z_topk   = torch.stack(z_topk_list, dim=0)    # [N, keep_topk, dim_z]
+        loss_topk = torch.stack(loss_topk_list, dim=0)  # [N, keep_topk]
+
+        # ---------- SAVE per-class plots & stats (side effects only) ----------
+        out_dir = os.path.join(os.getcwd(), "z_opt_plots")
+        os.makedirs(out_dir, exist_ok=True)
+
+        # 1) Loss-vs-iteration curves: mean ± std over kept traces
+        rows_curves = []
+        for cls, traces in per_class_traces.items():
+            T = np.stack(traces, axis=0)   # [n_traces, iter_times]
+            mean = T.mean(axis=0)
+            std  = T.std(axis=0, ddof=0)
+            iters = np.arange(1, mean.size + 1)
+
+            # plot
+            plt.figure(figsize=(6, 4))
+            plt.plot(iters, mean, label=f"class {cls} mean")
+            plt.fill_between(iters, mean - std, mean + std, alpha=0.3)
+            plt.xlabel("iteration"); plt.ylabel("loss")
+            plt.title(f"Loss vs. iteration (top-{keep_topk} restarts kept, class {cls}, n_traces={T.shape[0]})")
+            plt.tight_layout()
+            plt.savefig(os.path.join(out_dir, f"loss_curve_class_{cls}.png"), dpi=200)
+            plt.close()
+
+            # csv of curve data
+            pd.DataFrame({
+                "iteration": iters,
+                "mean": mean,
+                "std": std,
+                "n_traces": T.shape[0]
+            }).to_csv(os.path.join(out_dir, f"loss_curve_class_{cls}.csv"), index=False)
+
+            rows_curves.append({
+                "class": int(cls),
+                "n_traces": int(T.shape[0]),
+                "final_mean": float(mean[-1]),
+                "final_std":  float(std[-1]),
+            })
+
+        pd.DataFrame(rows_curves).sort_values("class").to_csv(
+            os.path.join(out_dir, "loss_curve_class_summary.csv"), index=False
+        )
+
+        # 2) Final top-k loss stats per class (mean/var of kept final losses)
+        y_cpu  = y_all.detach().cpu().numpy()
+        L_cpu  = loss_topk.detach().cpu().numpy()   # [N, keep_topk]
+        classes = np.unique(y_cpu)
+        rows_stats = []
+        for cls in classes:
+            mask = (y_cpu == cls)
+            if not mask.any():
+                continue
+            L_cls = L_cpu[mask].reshape(-1)  # flatten all kept losses for this class
+            rows_stats.append({
+                "class": int(cls),
+                "n_samples_in_class": int(mask.sum()),
+                "k_kept_per_sample": int(keep_topk),
+                "final_loss_mean": float(L_cls.mean()),
+                "final_loss_var":  float(L_cls.var(ddof=0)),
+            })
+
+        pd.DataFrame(rows_stats).sort_values("class").to_csv(
+            os.path.join(out_dir, "topk_final_loss_stats_by_class.csv"), index=False
+        )
+
+        # ---------- RETURN (unchanged) ----------
+        return z_topk, loss_topk
+
+
+
+    def optimize_z_grad(self:Self,
+                   y: torch.tensor,
+                   iter_times: int = 10,
+                   augment: bool = True) -> torch.tensor:
+        """Find the optimal latent vectors z for labels y.
+
+        Args:
+        ----
+            y (torch.tensor): The class labels.
+            lr (float): The learning rate for optimization.
+            iter_times (int): The number of iterations for optimization.
+            augment (bool): Whether to apply data augmentation.
+
+        Returns:
+        -------
+            torch.tensor: Optimized latent vectors.
+
+        """
+        bs = y.shape[0] # Number of samples
+        y = y.view(-1).long().to(self.device)
+
+        self.generator.eval()
+        self.generator.to(self.device)
+        self.target_model.eval()
+        self.target_model.to(self.device)
+        self.evaluation_model.eval()
+        self.evaluation_model.to(self.device)
+
+        if augment:
+            aug_list = augmentation.container.ImageSequential(
+                augmentation.RandomResizedCrop((64, 64), scale=(0.8, 1.0), ratio=(1.0, 1.0)),
+                augmentation.ColorJitter(brightness=0.2, contrast=0.2),
+                augmentation.RandomHorizontalFlip(),
+                augmentation.RandomRotation(5),
+            ).to(self.device) # TODO: Move this to a image modality extension and have it as an input
+        else:
+            def aug_list(x):  # noqa: ANN001, ANN202
+                return x
+
+        logger.info("Optimizing z for the PLG-MI attack")
+        # inside optimize_z_grad(...)
+        z = torch.randn(bs, self.generator.dim_z, device=self.device, requires_grad=True)
+        optimizer = torch.optim.Adam([z], lr=self.configs.z_optimization_lr)
+        min_loss = float("inf")
+        best_z = z.detach().clone()
+
+        mdl = self.target_model.model if hasattr(self.target_model, "model") else self.target_model
+        mdl = mdl.to(self.device).eval()
+
+        for i in range(iter_times):
+            if self.handler.configs.target.model_type == "pytorch_tabular":
+                # ---- differentiable tabular path ----
+                fakeact, _ = self.generator.forward_fakeact_with_labels(z, y)     # <<< NEW
+                x_cont, x_cat, _ = self.generator._pack_for_gandalf(fakeact)      # uses your torch invertor
+                batch = {}
+                if x_cont is not None: batch["continuous"]  = x_cont.float()
+                if x_cat  is not None: batch["categorical"] = x_cat.long()
+                out1 = mdl(batch)["logits"]
+            else:
+                # ---- image (original) path ----
+                fake = self.generator(z, y)                   # image tensor path only
+                out1 = self.target_model(aug_list(fake))
+
+            inv_loss = gan_losses.max_margin_loss(out1, y)
+
+            if inv_loss.item() < min_loss:
+                min_loss = inv_loss.item()
+                best_z = z.detach().clone()
+
+            optimizer.zero_grad()
+            inv_loss.backward()
+            optimizer.step()
+
+        return best_z
+
+    def optimize_z_grad2(self:Self,
+                   y: torch.tensor,
+                   iter_times: int = 10,
+                   augment: bool = True) -> torch.tensor:
+        """Find the optimal latent vectors z for labels y.
+
+        Args:
+        ----
+            y (torch.tensor): The class labels.
+            lr (float): The learning rate for optimization.
+            iter_times (int): The number of iterations for optimization.
+            augment (bool): Whether to apply data augmentation.
+
+        Returns:
+        -------
+            torch.tensor: Optimized latent vectors.
+
+        """
+        bs = y.shape[0] # Number of samples
+        y = y.view(-1).long().to(self.device)
+
+        self.generator.eval()
+        self.generator.to(self.device)
+        self.target_model.eval()
+        self.target_model.to(self.device)
+        self.evaluation_model.eval()
+        self.evaluation_model.to(self.device)
+
+        if augment:
+            aug_list = augmentation.container.ImageSequential(
+                augmentation.RandomResizedCrop((64, 64), scale=(0.8, 1.0), ratio=(1.0, 1.0)),
+                augmentation.ColorJitter(brightness=0.2, contrast=0.2),
+                augmentation.RandomHorizontalFlip(),
+                augmentation.RandomRotation(5),
+            ).to(self.device) # TODO: Move this to a image modality extension and have it as an input
+        else:
+            def aug_list(x):  # noqa: ANN001, ANN202
+                return x
+
+        logger.info("Optimizing z for the PLG-MI attack")
+        z = torch.randn(bs, self.generator.dim_z, device=self.device)
+        z = torch.nn.Parameter(z)
+        optimizer = torch.optim.Adam([z], lr=self.configs.z_optimization_lr)
+        min_loss = 1e6
+
+        for i in range(iter_times):
+            # z = torch.randn(bs, self.generator.dim_z, device=self.device)
+            # z.requires_grad = True
+            # Generate fake images
+            fake = self.generator(z, y)
+
+            if self.handler.configs.target.model_type == "pytorch_tabular":
+                #y = fake["pseudo_label"].values
+                #y = torch.tensor(y, dtype=torch.long).to(self.device)
+                fake = fake.drop(columns=["pseudo_label"])
+
+            out1 = self.target_model(aug_list(fake))
+            #out2 = self.target_model(aug_list(fake))
+
+            # if z.grad is not None:
+            #     z.grad.data.zero_()
+
+            # TODO: Change it latter
+            # Load a refrence model
+            # if True:
+                # Compute inversion loss
+                # inv_loss = self.compute_total_loss(fake,
+                                                # y,
+                                                # out1)
+                # logger.info(f"Using Ref model loss")
+            # else:
+                # inv_loss = F.cross_entropy(out1, y) #+ F.cross_entropy(out2, y)  # noqa: ERA001
+            inv_loss = gan_losses.max_margin_loss(out1, y)
+
+
+
+            # if inv_loss < min_loss:
+            #     min_loss = inv_loss
+            #     # Save the best z
+            #     best_z = z.clone()
+
+            # Update the latent vector z
+            print("Before backward:", z.grad)
+            optimizer.zero_grad()
+            inv_loss.backward()
+            optimizer.step()
+
+            # print("After backward:", z.grad)
+            inv_loss_val = inv_loss.item()
+
+            # if (i + 1) % self.log_interval == 0:
+            #     with torch.no_grad():
+            #         eval_prob = self.evaluation_model(fake)
+            #         eval_iden = torch.argmax(eval_prob, dim=1).view(-1)
+            #         acc = y.eq(eval_iden.long()).sum().item() * 1.0 / bs
+            #         logger.info("Iteration:{}\tInv Loss:{:.2f}\tAttack Acc:{:.2f}".format(i + 1, inv_loss_val, acc))
+
+        return z
+
     def optimize_z_no_grad(self, y: torch.tensor, iter_times: int = 10) -> torch.tensor:
         """Find the optimal latent vectors z for labels y.
 
@@ -471,3 +867,97 @@ class AttackPLGMI(AbstractMINV):
 
         # Convert the NumPy array to a PyTorch tensor
         return torch.tensor(z_numpy, dtype=torch.float32, device=self.device)
+
+
+
+    def load_reference_model(self, model_folder: str = "./reference") -> None:
+        """
+        Loads a TreeGrad (TGDClassifier) + preprocessing saved as:
+        model_folder/
+            ├─ model.ckpt            (joblib dict with {"model": tgd_model, ...})
+            ├─ custom_params.sav     (joblib: {"ohe","num_cols","cat_cols","feature_order","target_col"})
+            └─ config.yml            (optional)
+        Sets: self.reference_model  (callable like a torch model returning torch logits)
+        """
+        if model_folder is None or not os.path.isdir(model_folder):
+            raise FileNotFoundError(f"Model folder not found: {model_folder}")
+
+        bundle = joblib.load(os.path.join(model_folder, "model.ckpt"))   # {"model": tgd_model, ...}
+        meta   = joblib.load(os.path.join(model_folder, "custom_params.sav"))
+        # cfg = yaml.safe_load(open(os.path.join(model_folder, "config.yml"))) if os.path.exists(os.path.join(model_folder,"config.yml")) else {}
+
+        tgd_model = bundle["model"]
+        ohe        = meta["ohe"]
+        num_cols   = meta["num_cols"]
+        cat_cols   = meta["cat_cols"]
+        feat_order = meta["feature_order"]
+
+        class _RefModel(torch.nn.Module):
+            def __init__(self, model, ohe, num_cols, cat_cols, feat_order, device):
+                super().__init__()
+                self.model = model
+                self.ohe = ohe
+                self.num_cols = num_cols
+                self.cat_cols = cat_cols
+                self.feature_order = feat_order
+                self.device = torch.device(device)
+
+            def to(self, device):
+                self.device = torch.device(device); return self
+
+            def eval(self): return self  # no-op
+
+            @torch.no_grad()
+            def __call__(self, entry) -> torch.Tensor:
+                # Expect a pandas.DataFrame with original feature columns (tabular PLGMI uses this)
+                if isinstance(entry, pd.DataFrame):
+                    cols = [c for c in self.feature_order if c in entry.columns]
+                    X_df = entry[cols].copy()
+                    X_cat = self.ohe.transform(X_df[self.cat_cols]) if self.cat_cols else np.empty((len(X_df), 0))
+                    X_num = X_df[self.num_cols].to_numpy(dtype=float)    if self.num_cols else np.empty((len(X_df), 0))
+                    X_np  = np.hstack([X_cat, X_num]).astype("float32", copy=False)
+                elif isinstance(entry, torch.Tensor):
+                    # If you ever pass a preprocessed numeric tensor (OHE+num), allow it:
+                    X_np = entry.detach().cpu().numpy()
+                else:
+                    raise TypeError("reference_model expects pandas.DataFrame or preprocessed torch.Tensor")
+
+                if hasattr(self.model, "predict_proba"):
+                    prob = self.model.predict_proba(X_np)
+                    logits = np.log(np.clip(prob, 1e-12, 1.0))
+                    return torch.tensor(logits, dtype=torch.float32, device=self.device)
+                elif hasattr(self.model, "decision_function"):
+                    dec = self.model.decision_function(X_np)
+                    if dec.ndim == 1: dec = np.vstack([-dec, dec]).T
+                    return torch.tensor(dec, dtype=torch.float32, device=self.device)
+                else:
+                    raise RuntimeError("Reference model lacks predict_proba/decision_function.")
+
+        self.reference_model = _RefModel(tgd_model, ohe, num_cols, cat_cols, feat_order, self.device).to(self.device).eval()
+        logger.info(f"Loaded reference model from {model_folder}")
+
+
+
+
+    def compute_total_loss(
+            self,
+            x: torch.Tensor,               # generated samples; if you need R-gradient, x must require_grad=True
+            y: torch.Tensor,               # target class indices [B]
+            logits_T: torch.Tensor,        # target model logits on x  (T(x))
+            # beta: float = 1.0,             # weight on reference margin
+            ):
+        # 1) Target inversion loss (max-margin on T)
+        l_inv = gan_losses.max_margin_loss(logits_T, y)  # scalar
+
+
+        ref_logits = self.reference_model(x)
+        l_ref_max_margin = gan_losses.max_margin_loss(ref_logits, y) 
+        # if l is positive, it means the correct class logit is smaller than some other class logit by at least margin
+        l_total = l_inv -  l_ref_max_margin
+
+        return l_total
+
+def fixed_margin_loss(out, y, neg):
+    real = out.gather(1, y[:,None]).squeeze(1)
+    negv = out.gather(1, torch.tensor([neg], device=out.device).repeat(len(y))[:,None]).squeeze(1)
+    return (-real + negv).mean()
