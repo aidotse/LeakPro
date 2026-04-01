@@ -1,18 +1,19 @@
-"""Generator class from LetheSec/PLG-MI-Attack repository"""
+"""Generator class from LetheSec/PLG-MI-Attack repository"""  # noqa: D400, D415
 
 
 import math
+
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
+import torch.nn.functional as F  # noqa: N812
+from torch import nn
 from torch.nn import init
 
 
 class ResNetGenerator(nn.Module):
     """Generator generates 64x64."""
 
-    def __init__(self, num_features=64, dim_z=128, bottom_width=4,
-                 activation=F.relu, num_classes=0, distribution='normal'):
+    def __init__(self, num_features=64, dim_z=128, bottom_width=4,  # noqa: ANN001, ANN204
+                 activation=F.relu, num_classes=0, distribution="normal"):  # noqa: ANN001
         super(ResNetGenerator, self).__init__()
         self.num_features = num_features
         self.dim_z = dim_z
@@ -38,35 +39,35 @@ class ResNetGenerator(nn.Module):
         self.b6 = nn.BatchNorm2d(num_features)
         self.conv6 = nn.Conv2d(num_features, 3, 1, 1)
 
-    def _initialize(self):
+    def _initialize(self):  # noqa: ANN202
         init.xavier_uniform_(self.l1.weight.tensor)
         init.xavier_uniform_(self.conv7.weight.tensor)
 
-    def forward(self, z, y=None, **kwargs):
+    def forward(self, z, y=None, **kwargs):  # noqa: ANN001, ANN003, ANN201, D102
         h = self.l1(z).view(z.size(0), -1, self.bottom_width, self.bottom_width)
         for i in range(2, 6):
-            h = getattr(self, 'block{}'.format(i))(h, y, **kwargs)
+            h = getattr(self, "block{}".format(i))(h, y, **kwargs)
         h = self.activation(self.b6(h))
         return torch.tanh(self.conv6(h))
 
 
 class ConditionalBatchNorm2d(nn.BatchNorm2d):
-    """Conditional Batch Normalization"""
+    """Conditional Batch Normalization"""  # noqa: D400, D415
 
-    def __init__(self, num_features, eps=1e-05, momentum=0.1,
-                 affine=False, track_running_stats=True):
+    def __init__(self, num_features, eps=1e-05, momentum=0.1,  # noqa: ANN001, ANN204
+                 affine=False, track_running_stats=True):  # noqa: ANN001
         super(ConditionalBatchNorm2d, self).__init__(
             num_features, eps, momentum, affine, track_running_stats
         )
 
-    def forward(self, input, weight, bias, **kwargs):
+    def forward(self, input, weight, bias, **kwargs):  # noqa: ANN001, ANN003, ANN201, ARG002, D102
         self._check_input_dim(input)
 
         exponential_average_factor = 0.0
 
         if self.training and self.track_running_stats:
             self.num_batches_tracked += 1
-            if self.momentum is None:  # use cumulative moving average
+            if self.momentum is None:  # use cumulative moving average  # noqa: SIM108
                 exponential_average_factor = 1.0 / self.num_batches_tracked.item()
             else:  # use exponential moving average
                 exponential_average_factor = self.momentum
@@ -85,10 +86,10 @@ class ConditionalBatchNorm2d(nn.BatchNorm2d):
         return weight * output + bias
 
 
-class CategoricalConditionalBatchNorm2d(ConditionalBatchNorm2d):
+class CategoricalConditionalBatchNorm2d(ConditionalBatchNorm2d):  # noqa: D101
 
-    def __init__(self, num_classes, num_features, eps=1e-5, momentum=0.1,
-                 affine=False, track_running_stats=True):
+    def __init__(self, num_classes, num_features, eps=1e-5, momentum=0.1,  # noqa: ANN001, ANN204
+                 affine=False, track_running_stats=True):  # noqa: ANN001
         super(CategoricalConditionalBatchNorm2d, self).__init__(
             num_features, eps, momentum, affine, track_running_stats
         )
@@ -97,25 +98,25 @@ class CategoricalConditionalBatchNorm2d(ConditionalBatchNorm2d):
 
         self._initialize()
 
-    def _initialize(self):
+    def _initialize(self):  # noqa: ANN202
         init.ones_(self.weights.weight.data)
         init.zeros_(self.biases.weight.data)
 
-    def forward(self, input, c, **kwargs):
+    def forward(self, input, c, **kwargs):  # noqa: ANN001, ANN003, ANN201, ARG002, D102
         weight = self.weights(c)
         bias = self.biases(c)
 
         return super(CategoricalConditionalBatchNorm2d, self).forward(input, weight, bias)
 
-def _upsample(x):
+def _upsample(x):  # noqa: ANN001, ANN202
     h, w = x.size()[2:]
-    return F.interpolate(x, size=(h * 2, w * 2), mode='bilinear')
+    return F.interpolate(x, size=(h * 2, w * 2), mode="bilinear")
 
 
-class Block(nn.Module):
+class Block(nn.Module):  # noqa: D101
 
-    def __init__(self, in_ch, out_ch, h_ch=None, ksize=3, pad=1,
-                 activation=F.relu, upsample=False, num_classes=0):
+    def __init__(self, in_ch, out_ch, h_ch=None, ksize=3, pad=1,  # noqa: ANN001, ANN204
+                 activation=F.relu, upsample=False, num_classes=0):  # noqa: ANN001
         super(Block, self).__init__()
 
         self.activation = activation
@@ -139,26 +140,25 @@ class Block(nn.Module):
         if self.learnable_sc:
             self.c_sc = nn.Conv2d(in_ch, out_ch, 1)
 
-    def _initialize(self):
+    def _initialize(self):  # noqa: ANN202
         init.xavier_uniform_(self.c1.weight.tensor, gain=math.sqrt(2))
         init.xavier_uniform_(self.c2.weight.tensor, gain=math.sqrt(2))
         if self.learnable_sc:
             init.xavier_uniform_(self.c_sc.weight.tensor, gain=1)
 
-    def forward(self, x, y=None, z=None, **kwargs):
+    def forward(self, x, y=None, z=None, **kwargs):  # noqa: ANN001, ANN003, ANN201, ARG002, D102
         return self.shortcut(x) + self.residual(x, y, z)
 
-    def shortcut(self, x, **kwargs):
+    def shortcut(self, x, **kwargs):  # noqa: ANN001, ANN003, ANN201, ARG002, D102
         if self.learnable_sc:
             if self.upsample:
                 h = _upsample(x)
             h = self.c_sc(h)
-            return h
-        else:
-            return x
+            return h  # noqa: RET504
+        return x
 
-    def residual(self, x, y=None, z=None, **kwargs):
-        if y is not None:
+    def residual(self, x, y=None, z=None, **kwargs):  # noqa: ANN001, ANN003, ANN201, ARG002, D102
+        if y is not None:  # noqa: SIM108
             h = self.b1(x, y, **kwargs)
         else:
             h = self.b1(x)
@@ -166,7 +166,7 @@ class Block(nn.Module):
         if self.upsample:
             h = _upsample(h)
         h = self.c1(h)
-        if y is not None:
+        if y is not None:  # noqa: SIM108
             h = self.b2(h, y, **kwargs)
         else:
             h = self.b2(h)

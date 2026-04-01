@@ -5,24 +5,51 @@ import torch.nn.functional as F  # noqa: N812
 AVAILABLE_LOSSES = ["hinge", "dcgan"]
 
 
-def max_margin_loss(out: torch.Tensor, iden: torch.Tensor) -> torch.Tensor:
-    """Compute the max margin loss.
+# def max_margin_loss(out: torch.Tensor, iden: torch.Tensor) -> torch.Tensor:
+#     """Compute the max margin loss.
 
-    Args:
-        out (torch.Tensor): The output tensor.
-        iden (torch.Tensor): The identity tensor.
+#     Args:
+#         out (torch.Tensor): The output tensor.
+#         iden (torch.Tensor): The identity tensor.
 
-    Returns:
-    -------
-        torch.Tensor: The computed loss.
+#     Returns:
+#     -------
+#         torch.Tensor: The computed loss.
 
-    """
-    real = out.gather(1, iden.unsqueeze(1)).squeeze(1)
-    tmp1 = torch.argsort(out, dim=1)[:, -2:]
-    new_y = torch.where(tmp1[:, -1] == iden, tmp1[:, -2], tmp1[:, -1])
-    margin = out.gather(1, new_y.unsqueeze(1)).squeeze(1)
+#     """
+#     real = out.gather(1, iden.unsqueeze(1)).squeeze(1)  # noqa: ERA001
+#     tmp1 = torch.argsort(out, dim=1)[:, -2:]  # noqa: ERA001
+#     new_y = torch.where(tmp1[:, -1] == iden, tmp1[:, -2], tmp1[:, -1])  # noqa: ERA001
+#     margin = out.gather(1, new_y.unsqueeze(1)).squeeze(1)  # noqa: ERA001
 
-    return (-1 * real).mean() + margin.mean()
+#     return (-1 * real).mean() + margin.mean()  # noqa: ERA001
+
+def max_margin_loss(out: torch.Tensor,
+                    iden: torch.Tensor,
+                    reduction: str = "mean") -> torch.Tensor:
+    """Max-margin loss:
+      loss_i = - score(true_class)_i + score(best_other_class)_i.
+
+    reduction: "mean" (default), "sum", or "none".
+    """  # noqa: D205
+    # score of the true class for each sample
+    real = out.gather(1, iden.view(-1, 1)).squeeze(1)  # [B]
+
+    # indices of top-2 classes per sample
+    top2_idx = out.topk(2, dim=1).indices  # [B,2]
+    # pick the best non-true class
+    best_other_idx = torch.where(top2_idx[:, 0] == iden, top2_idx[:, 1], top2_idx[:, 0])
+    other = out.gather(1, best_other_idx.view(-1, 1)).squeeze(1)  # [B]
+
+    loss_vec = -real + other  # [B]
+
+    if reduction == "none":
+        return loss_vec
+    if reduction == "sum":
+        return loss_vec.sum()
+    # "mean"
+    return loss_vec.mean()
+
 
 
 def cross_entropy_loss(out: torch.Tensor, iden: torch.Tensor) -> torch.Tensor:

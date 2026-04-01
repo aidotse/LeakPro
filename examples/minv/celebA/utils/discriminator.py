@@ -1,15 +1,16 @@
-"""Discriminator class from LetheSec/PLG-MI-Attack repository"""
+"""Discriminator class from LetheSec/PLG-MI-Attack repository"""  # noqa: D400, D415
 
 import math
+
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.nn import init
-from torch.nn import utils
+import torch.nn.functional as F  # noqa: N812
+from torch import nn
+from torch.nn import init, utils
 
-class SNResNetProjectionDiscriminator(nn.Module):
 
-    def __init__(self, num_features=64, num_classes=0, activation=F.relu):
+class SNResNetProjectionDiscriminator(nn.Module):  # noqa: D101
+
+    def __init__(self, num_features=64, num_classes=0, activation=F.relu):  # noqa: ANN001, ANN204
         super(SNResNetProjectionDiscriminator, self).__init__()
         self.num_features = num_features
         self.num_classes = num_classes
@@ -31,13 +32,13 @@ class SNResNetProjectionDiscriminator(nn.Module):
 
         self._initialize()
 
-    def _initialize(self):
+    def _initialize(self):  # noqa: ANN202
         init.xavier_uniform_(self.l6.weight.data)
-        optional_l_y = getattr(self, 'l_y', None)
+        optional_l_y = getattr(self, "l_y", None)
         if optional_l_y is not None:
             init.xavier_uniform_(optional_l_y.weight.data)
 
-    def forward(self, x, y=None):
+    def forward(self, x, y=None):  # noqa: ANN001, ANN201, D102
         h = x
         h = self.block1(h)
         h = self.block2(h)
@@ -53,17 +54,17 @@ class SNResNetProjectionDiscriminator(nn.Module):
         return output
 
 
-class Block(nn.Module):
+class Block(nn.Module):  # noqa: D101
 
-    def __init__(self, in_ch, out_ch, h_ch=None, ksize=3, pad=1,
-                 activation=F.relu, downsample=False):
+    def __init__(self, in_ch, out_ch, h_ch=None, ksize=3, pad=1,  # noqa: ANN001, ANN204
+                 activation=F.relu, downsample=False):  # noqa: ANN001
         super(Block, self).__init__()
 
         self.activation = activation
         self.downsample = downsample
 
         self.learnable_sc = (in_ch != out_ch) or downsample
-        if h_ch is None:
+        if h_ch is None:  # noqa: SIM108
             h_ch = in_ch
         else:
             h_ch = out_ch
@@ -75,23 +76,23 @@ class Block(nn.Module):
 
         self._initialize()
 
-    def _initialize(self):
+    def _initialize(self):  # noqa: ANN202
         init.xavier_uniform_(self.c1.weight.data, math.sqrt(2))
         init.xavier_uniform_(self.c2.weight.data, math.sqrt(2))
         if self.learnable_sc:
             init.xavier_uniform_(self.c_sc.weight.data)
 
-    def forward(self, x):
+    def forward(self, x):  # noqa: ANN001, ANN201, D102
         return self.shortcut(x) + self.residual(x)
 
-    def shortcut(self, x):
+    def shortcut(self, x):  # noqa: ANN001, ANN201, D102
         if self.learnable_sc:
             x = self.c_sc(x)
         if self.downsample:
             return F.avg_pool2d(x, 2)
         return x
 
-    def residual(self, x):
+    def residual(self, x):  # noqa: ANN001, ANN201, D102
         h = self.c1(self.activation(x))
         h = self.c2(self.activation(h))
         if self.downsample:
@@ -99,9 +100,9 @@ class Block(nn.Module):
         return h
 
 
-class OptimizedBlock(nn.Module):
+class OptimizedBlock(nn.Module):  # noqa: D101
 
-    def __init__(self, in_ch, out_ch, ksize=3, pad=1, activation=F.relu):
+    def __init__(self, in_ch, out_ch, ksize=3, pad=1, activation=F.relu):  # noqa: ANN001, ANN204
         super(OptimizedBlock, self).__init__()
         self.activation = activation
 
@@ -111,17 +112,17 @@ class OptimizedBlock(nn.Module):
 
         self._initialize()
 
-    def _initialize(self):
+    def _initialize(self):  # noqa: ANN202
         init.xavier_uniform_(self.c1.weight.data, math.sqrt(2))
         init.xavier_uniform_(self.c2.weight.data, math.sqrt(2))
         init.xavier_uniform_(self.c_sc.weight.data)
 
-    def forward(self, x):
+    def forward(self, x):  # noqa: ANN001, ANN201, D102
         return self.shortcut(x) + self.residual(x)
 
-    def shortcut(self, x):
+    def shortcut(self, x):  # noqa: ANN001, ANN201, D102
         return self.c_sc(F.avg_pool2d(x, 2))
 
-    def residual(self, x):
+    def residual(self, x):  # noqa: ANN001, ANN201, D102
         h = self.activation(self.c1(x))
         return F.avg_pool2d(self.c2(h), 2)
