@@ -17,12 +17,12 @@ AVAILABLE_LOSSES = ["hinge", "dcgan"]
 #         torch.Tensor: The computed loss.
 
 #     """
-#     real = out.gather(1, iden.unsqueeze(1)).squeeze(1)
-#     tmp1 = torch.argsort(out, dim=1)[:, -2:]
-#     new_y = torch.where(tmp1[:, -1] == iden, tmp1[:, -2], tmp1[:, -1])
-#     margin = out.gather(1, new_y.unsqueeze(1)).squeeze(1)
+#     real = out.gather(1, iden.unsqueeze(1)).squeeze(1)  # noqa: ERA001
+#     tmp1 = torch.argsort(out, dim=1)[:, -2:]  # noqa: ERA001
+#     new_y = torch.where(tmp1[:, -1] == iden, tmp1[:, -2], tmp1[:, -1])  # noqa: ERA001
+#     margin = out.gather(1, new_y.unsqueeze(1)).squeeze(1)  # noqa: ERA001
 
-#     return (-1 * real).mean() + margin.mean()
+#     return (-1 * real).mean() + margin.mean()  # noqa: ERA001
 
 def max_margin_loss(out: torch.Tensor,
                     iden: torch.Tensor,
@@ -45,10 +45,10 @@ def max_margin_loss(out: torch.Tensor,
 
     if reduction == "none":
         return loss_vec
-    elif reduction == "sum":
+    if reduction == "sum":
         return loss_vec.sum()
-    else:  # "mean"
-        return loss_vec.mean()
+    # "mean"
+    return loss_vec.mean()
 
 
 

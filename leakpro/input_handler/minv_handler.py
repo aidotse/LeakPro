@@ -6,7 +6,6 @@ import joblib
 import pandas as pd
 import torch
 from pydantic import BaseModel
-from pytorch_tabular import TabularModel
 from torch import nn
 from torch.utils.data import DataLoader
 

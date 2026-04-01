@@ -1,7 +1,9 @@
 """Implementation of the PLGMI attack."""
+import os
 from typing import Any, Dict, Optional
 
 import cudf
+import joblib
 import numpy as np
 import optuna
 import pandas as pd
@@ -20,11 +22,9 @@ from leakpro.input_handler.modality_extensions.tabular_metrics import TabularMet
 from leakpro.metrics.attack_result import MinvResult
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
-import joblib
-import os, yaml
 
 
-# TODO: Move this to a separate file (GanHandler?)
+# TODO: Move this to a separate file (GanHandler?)  # noqa: ERA001
 class GANConfig(BaseModel):
     """Configuration for GAN."""
 
@@ -86,11 +86,8 @@ class AttackPLGMI(AbstractMINV):
         """
         logger.info("Configuring PLG-MI attack")
         self.configs = self.Config() if configs is None else self.Config(**configs)
-<<<<<<< Updated upstream
-=======
         self.attack_id = 1 # Workaround for now - required by attack scheduler
         self.use_reference_model = True
->>>>>>> Stashed changes
 
         # Call the parent class constructor
         super().__init__(handler)
@@ -133,7 +130,7 @@ class AttackPLGMI(AbstractMINV):
 
     def top_n_selection(self:Self) -> DataLoader:  # noqa: C901, PLR0912
         """"Top n selection of pseudo labels."""
-        # TODO: This does not scale well. Consider creating a class for the dataloader and implementing the __getitem__ method.
+        # TODO: This does not scale well. Consider creating a class for the dataloader and implementing the __getitem__ method.  # noqa: E501, ERA001
         logger.info("Performing top-n selection for pseudo labels")
         self.target_model.eval()
         self.target_model.to(self.device)
@@ -186,12 +183,12 @@ class AttackPLGMI(AbstractMINV):
         if self.data_format == "dataloader":
             for i in range(self.num_classes):
                 for index, _ in top_n_pseudo_map[i]:
-                    # Append the image and pseudo label (index i) to the pseudo data
+                    # Append the image and pseudo label (index i) to the pseudo data  # noqa: ERA001
                     pseudo_data.append((self.public_dataloader.dataset[index][0], i))
         elif self.data_format == "dataframe":
             for i in range(self.num_classes):
                 for index, _ in top_n_pseudo_map[i]:
-                    # Append the image and pseudo label (index i) to the pseudo data
+                    # Append the image and pseudo label (index i) to the pseudo data  # noqa: ERA001
                     # Name the column with i is "pseudo_label"
                     pseudo_entry = public_data.iloc[index].copy()
                     pseudo_entry["pseudo_label"] = i
@@ -204,9 +201,9 @@ class AttackPLGMI(AbstractMINV):
             logger.info(f"Number of unique classes in pseudo data: {pseudo_data['pseudo_label'].nunique()}")
         logger.info("Created pseudo dataloader")
 
-        # pseudo_data is now a list of tuples (entry, pseudo_label)
+        # pseudo_data is now a list of tuples (entry, pseudo_label)  # noqa: ERA001
         # We want to set the default device to the sampler in the returned dataloader
-        # to be on device, does not apply when using CTGAN
+        # to be on device, does not apply when using CTGAN  # noqa: ERA001
         return DataLoader(pseudo_data, batch_size=self.batch_size, shuffle=True, generator=torch.Generator(device=self.device))
 
 
@@ -237,12 +234,12 @@ class AttackPLGMI(AbstractMINV):
         else:
             raise ValueError("Data format not supported")
 
-        # TODO: Change structure of how we load data, handler or model_handler should do this, not gan_handler
+        # TODO: Change structure of how we load data, handler or model_handler should do this, not gan_handler  # noqa: ERA001
         # Get public dataloader
         self.public_dataloader = self.handler.get_public_dataloader(self.configs.batch_size)
 
         # Train the GAN
-        # self.gan_handler.trained_bool = True
+        # self.gan_handler.trained_bool = True  # noqa: ERA001
         if not self.gan_handler.trained_bool:
             logger.info("GAN not trained, getting psuedo labels")
             # Top-n-selection to get pseudo labels
@@ -273,7 +270,7 @@ class AttackPLGMI(AbstractMINV):
             self.gan_handler.trained_bool = True
         else:
             logger.info("GAN already trained, loading from file")
-            from ctgan import CTGAN  # or your CustomCTGAN if you're using that
+            from ctgan import CTGAN  # or your CustomCTGAN if you're using that  # noqa: PLC0415
             ctgan = CTGAN.load("ctgan.pkl")
             ctgan.eval()
             self.generator = ctgan  # Replace uninitialized generator
@@ -288,21 +285,17 @@ class AttackPLGMI(AbstractMINV):
         """Run the attack."""
         logger.info("Running the PLG-MI attack")
         # Define image metrics class
-        # if getattr(self, "reference_model", None) is None:
-        #     self.load_reference_model(model_folder="./reference")
+        # if getattr(self, "reference_model", None) is None:  # noqa: ERA001
+        #     self.load_reference_model(model_folder="./reference")  # noqa: ERA001
 
         self.evaluation_model = self.target_model # TODO: Change to evaluation model
         reconstruction_configs = self.handler.configs.audit.reconstruction
 
         num_audited_classes = reconstruction_configs.num_audited_classes
 
-<<<<<<< Updated upstream
-        # Get random labels
-        labels = torch.randint(0, self.num_classes, (num_audited_classes,)).to(self.device)
-=======
 
         # Number of unique categories seen by the generator during training
-        # If the pseudo_labeling did not find all classes, we get num_unique_categories < num_classes
+        # If the pseudo_labeling did not find all classes, we get num_unique_categories < num_classes  # noqa: ERA001
         num_unique_categories = (self.generator._data_sampler._n_categories
                                  - self.generator._data_sampler._discrete_column_cond_st[-1])
 
@@ -313,22 +306,17 @@ class AttackPLGMI(AbstractMINV):
                 num_unique_categories,
                 self.num_classes,
             )
-            # Get random labels
-            #labels = torch.randint(0, num_unique_categories, (num_audited_classes,)).to(self.device)
             labels = torch.arange(num_unique_categories).to(self.device)
 
         else:
-            # Get random labels
-            #labels = torch.randint(0, self.num_classes, (num_audited_classes,)).to(self.device)
             labels = torch.arange(num_audited_classes).to(self.device)
 
->>>>>>> Stashed changes
         # Get range of labels from 0 to num_audited_classes
-        #labels = torch.arange(num_audited_classes).to(self.device)
+        #labels = torch.arange(num_audited_classes).to(self.device)  # noqa: ERA001
 
-        # random_z = torch.randn(num_audited_classes, self.generator.dim_z, device=self.device)
+        # random_z = torch.randn(num_audited_classes, self.generator.dim_z, device=self.device)  # noqa: ERA001
 
-        # Optimize z, TODO: Optimize in batches
+        # Optimize z, TODO: Optimize in batches  # noqa: ERA001
 
         if self.data_format == "dataloader":
 
@@ -340,15 +328,15 @@ class AttackPLGMI(AbstractMINV):
                                         reconstruction_configs,
                                         labels=labels,
                                         z=opt_z)
-            # TODO: Implement a class with a .save function.
+            # TODO: Implement a class with a .save function.  # noqa: ERA001
 
         elif self.data_format == "dataframe":
             # Accuracy of the target model on the random labels
-            # initial_metrics = TabularMetrics(self.handler, self.gan_handler,
-            #                             reconstruction_configs,
-            #                             labels=labels,
-            #                             z=random_z)
-            # logger.info("INITIAL ACCURACY:", initial_metrics.results)
+            # initial_metrics = TabularMetrics(self.handler, self.gan_handler,  # noqa: ERA001
+            #                             reconstruction_configs,  # noqa: ERA001
+            #                             labels=labels,  # noqa: ERA001
+            #                             z=random_z)  # noqa: ERA001
+            # logger.info("INITIAL ACCURACY:", initial_metrics.results)  # noqa: ERA001
 
             # generate samples from the generator
             if self.handler.configs.target.model_type == "xgboost":
@@ -364,7 +352,7 @@ class AttackPLGMI(AbstractMINV):
                                         z=opt_z)
 
         return metrics
-        # return metrics
+        # return metrics  # noqa: ERA001
 
     def optimize_z_grad_original(self:Self,
                    y: torch.tensor,
@@ -418,8 +406,8 @@ class AttackPLGMI(AbstractMINV):
             fake = self.generator(z, y)
 
             if self.handler.configs.target.model_type == "pytorch_tabular":
-                #y = fake["pseudo_label"].values
-                #y = torch.tensor(y, dtype=torch.long).to(self.device)
+                #y = fake["pseudo_label"].values  # noqa: ERA001
+                #y = torch.tensor(y, dtype=torch.long).to(self.device)  # noqa: ERA001
                 fake = fake.drop(columns=["pseudo_label"])
 
             out1 = self.target_model(aug_list(fake))
@@ -452,23 +440,23 @@ class AttackPLGMI(AbstractMINV):
 
         return best_z
 
-    def optimize_z_grad_per_sample(self, y, iter_times=30, augment: bool = True):
-        """
-        For each label y[i], run 20 restarts and keep the best 10 (by final loss).
+    def optimize_z_grad_per_sample(self, y, iter_times=30, augment: bool = True):  # noqa: ANN001, ANN201, ARG002, C901, PLR0915
+        """For each label y[i], run 20 restarts and keep the best 10 (by final loss).
         SIDE EFFECTS (no change to signature or returns):
         - saves per-class loss-vs-iteration plots (mean ± std) of the kept top-k restarts
         - saves per-class CSVs of those curves
-        - saves per-class mean/variance of final top-k losses
+        - saves per-class mean/variance of final top-k losses.
 
         RETURNS (unchanged):
         z_topk   : [num_samples, 10, dim_z]
         loss_topk: [num_samples, 10]
-        """
-        import os
-        import numpy as np
-        import pandas as pd
-        import matplotlib.pyplot as plt
-        import torch
+        """  # noqa: D205
+        import os  # noqa: PLC0415
+
+        import matplotlib.pyplot as plt  # noqa: PLC0415
+        import numpy as np  # noqa: PLC0415
+        import pandas as pd  # noqa: PLC0415
+        import torch  # noqa: PLC0415
 
         # --- hyperparams for the restart strategy ---
         restarts  = 1
@@ -489,8 +477,8 @@ class AttackPLGMI(AbstractMINV):
         gen.eval()
         gen.to(self.device)
 
-        # Helper: forward to logits for a single sample (batch size 1)
-        def _forward_logits(z1, yi1):
+        # Helper: forward to logits for a single sample (batch size 1)  # noqa: ERA001
+        def _forward_logits(z1, yi1):  # noqa: ANN001, ANN202
             if self.handler.configs.target.model_type == "pytorch_tabular":
                 # differentiable tabular path
                 fakeact, _ = gen.forward_fakeact_with_labels(z1, yi1.view(1))
@@ -504,11 +492,9 @@ class AttackPLGMI(AbstractMINV):
 
                 assert batch, "No continuous or categorical features were produced for this batch."
                 out = mdl(batch)
-                logits = out["logits"] if isinstance(out, dict) else out
-                return logits
-            else:
-                imgs = gen(z1, yi1.view(1))
-                return mdl(imgs)
+                return out["logits"] if isinstance(out, dict) else out
+            imgs = gen(z1, yi1.view(1))
+            return mdl(imgs)
 
         z_topk_list    = []
         loss_topk_list = []
@@ -527,35 +513,35 @@ class AttackPLGMI(AbstractMINV):
                 trace = np.zeros(iter_times, dtype=np.float32)
 
                 for it in range(iter_times):
-                    # forward (with grad) -> loss_before
+                    # forward (with grad) -> loss_before  # noqa: ERA001
                     logits = _forward_logits(z, yi)
-                    # inv_loss = gan_losses.max_margin_loss(logits, yi.view(1))
+                    # inv_loss = gan_losses.max_margin_loss(logits, yi.view(1))  # noqa: ERA001
                     temp = 2
                     inv_loss = torch.nn.functional.cross_entropy(logits / temp, yi.view(1))
 
                     # step
                     opt.zero_grad(set_to_none=True)
                     inv_loss.backward()
-                    grad_norm = z.grad.norm().item() if z.grad is not None else 0.0
+                    z.grad.norm().item() if z.grad is not None else 0.0
                     opt.step()
 
-                    # recompute loss AFTER the update (no grad) to plot meaningful progress
+                    # recompute loss AFTER the update (no grad) to plot meaningful progress  # noqa: ERA001
                     with torch.no_grad():
                         logits_after = _forward_logits(z, yi)
-                        # loss_after = gan_losses.max_margin_loss(logits_after, yi.view(1)).item()
+                        # loss_after = gan_losses.max_margin_loss(logits_after, yi.view(1)).item()  # noqa: ERA001
                         loss_after = torch.nn.functional.cross_entropy(logits_after/ temp, yi.view(1)).item()
 
                     # record post-step loss
                     trace[it] = float(loss_after)
 
-                    # track the best within this restart by current (post-step) loss
+                    # track the best within this restart by current (post-step) loss  # noqa: ERA001
                     if loss_after < best_loss_r:
                         best_loss_r = loss_after
                         best_z_r    = z.detach().clone()
 
                     # optional lightweight logging
                     if (it % 20) == 0:
-                        print(f"[it {it}] loss -> {loss_after:.3f}  ||grad_z||={grad_norm:.3f}")
+                        pass
 
                 candidates.append((best_loss_r, best_z_r, trace))
 
@@ -573,14 +559,14 @@ class AttackPLGMI(AbstractMINV):
         z_topk   = torch.stack(z_topk_list, dim=0)    # [N, keep_topk, dim_z]
         loss_topk = torch.stack(loss_topk_list, dim=0)  # [N, keep_topk]
 
-        # ---------- SAVE per-class plots & stats (side effects only) ----------
+        # ---------- SAVE per-class plots & stats (side effects only) ----------  # noqa: ERA001
         out_dir = os.path.join(os.getcwd(), "z_opt_plots")
         os.makedirs(out_dir, exist_ok=True)
 
-        # 1) Loss-vs-iteration curves: mean ± std over kept traces
+        # 1) Loss-vs-iteration curves: mean ± std over kept traces  # noqa: ERA001
         rows_curves = []
         for cls, traces in per_class_traces.items():
-            T = np.stack(traces, axis=0)   # [n_traces, iter_times]
+            T = np.stack(traces, axis=0)   # [n_traces, iter_times]  # noqa: N806
             mean = T.mean(axis=0)
             std  = T.std(axis=0, ddof=0)
             iters = np.arange(1, mean.size + 1)
@@ -589,7 +575,7 @@ class AttackPLGMI(AbstractMINV):
             plt.figure(figsize=(6, 4))
             plt.plot(iters, mean, label=f"class {cls} mean")
             plt.fill_between(iters, mean - std, mean + std, alpha=0.3)
-            plt.xlabel("iteration"); plt.ylabel("loss")
+            plt.xlabel("iteration"); plt.ylabel("loss")  # noqa: E702
             plt.title(f"Loss vs. iteration (top-{keep_topk} restarts kept, class {cls}, n_traces={T.shape[0]})")
             plt.tight_layout()
             plt.savefig(os.path.join(out_dir, f"loss_curve_class_{cls}.png"), dpi=200)
@@ -614,16 +600,16 @@ class AttackPLGMI(AbstractMINV):
             os.path.join(out_dir, "loss_curve_class_summary.csv"), index=False
         )
 
-        # 2) Final top-k loss stats per class (mean/var of kept final losses)
+        # 2) Final top-k loss stats per class (mean/var of kept final losses)  # noqa: ERA001
         y_cpu  = y_all.detach().cpu().numpy()
-        L_cpu  = loss_topk.detach().cpu().numpy()   # [N, keep_topk]
+        L_cpu  = loss_topk.detach().cpu().numpy()   # [N, keep_topk]  # noqa: N806
         classes = np.unique(y_cpu)
         rows_stats = []
         for cls in classes:
             mask = (y_cpu == cls)
             if not mask.any():
                 continue
-            L_cls = L_cpu[mask].reshape(-1)  # flatten all kept losses for this class
+            L_cls = L_cpu[mask].reshape(-1)  # flatten all kept losses for this class  # noqa: N806
             rows_stats.append({
                 "class": int(cls),
                 "n_samples_in_class": int(mask.sum()),
@@ -636,7 +622,7 @@ class AttackPLGMI(AbstractMINV):
             os.path.join(out_dir, "topk_final_loss_stats_by_class.csv"), index=False
         )
 
-        # ---------- RETURN (unchanged) ----------
+        # ---------- RETURN (unchanged) ----------  # noqa: ERA001
         return z_topk, loss_topk
 
 
@@ -681,7 +667,7 @@ class AttackPLGMI(AbstractMINV):
                 return x
 
         logger.info("Optimizing z for the PLG-MI attack")
-        # inside optimize_z_grad(...)
+        # inside optimize_z_grad(...)  # noqa: ERA001
         z = torch.randn(bs, self.generator.dim_z, device=self.device, requires_grad=True)
         optimizer = torch.optim.Adam([z], lr=self.configs.z_optimization_lr)
         min_loss = float("inf")
@@ -690,17 +676,17 @@ class AttackPLGMI(AbstractMINV):
         mdl = self.target_model.model if hasattr(self.target_model, "model") else self.target_model
         mdl = mdl.to(self.device).eval()
 
-        for i in range(iter_times):
+        for _i in range(iter_times):
             if self.handler.configs.target.model_type == "pytorch_tabular":
                 # ---- differentiable tabular path ----
                 fakeact, _ = self.generator.forward_fakeact_with_labels(z, y)     # <<< NEW
                 x_cont, x_cat, _ = self.generator._pack_for_gandalf(fakeact)      # uses your torch invertor
                 batch = {}
-                if x_cont is not None: batch["continuous"]  = x_cont.float()
-                if x_cat  is not None: batch["categorical"] = x_cat.long()
+                if x_cont is not None: batch["continuous"]  = x_cont.float()  # noqa: E701
+                if x_cat  is not None: batch["categorical"] = x_cat.long()  # noqa: E701
                 out1 = mdl(batch)["logits"]
             else:
-                # ---- image (original) path ----
+                # ---- image (original) path ----  # noqa: ERA001
                 fake = self.generator(z, y)                   # image tensor path only
                 out1 = self.target_model(aug_list(fake))
 
@@ -759,59 +745,57 @@ class AttackPLGMI(AbstractMINV):
         z = torch.randn(bs, self.generator.dim_z, device=self.device)
         z = torch.nn.Parameter(z)
         optimizer = torch.optim.Adam([z], lr=self.configs.z_optimization_lr)
-        min_loss = 1e6
 
-        for i in range(iter_times):
-            # z = torch.randn(bs, self.generator.dim_z, device=self.device)
-            # z.requires_grad = True
+        for _i in range(iter_times):
+            # z = torch.randn(bs, self.generator.dim_z, device=self.device)  # noqa: ERA001
+            # z.requires_grad = True  # noqa: ERA001
             # Generate fake images
             fake = self.generator(z, y)
 
             if self.handler.configs.target.model_type == "pytorch_tabular":
-                #y = fake["pseudo_label"].values
-                #y = torch.tensor(y, dtype=torch.long).to(self.device)
+                #y = fake["pseudo_label"].values  # noqa: ERA001
+                #y = torch.tensor(y, dtype=torch.long).to(self.device)  # noqa: ERA001
                 fake = fake.drop(columns=["pseudo_label"])
 
             out1 = self.target_model(aug_list(fake))
-            #out2 = self.target_model(aug_list(fake))
+            #out2 = self.target_model(aug_list(fake))  # noqa: ERA001
 
-            # if z.grad is not None:
-            #     z.grad.data.zero_()
+            # if z.grad is not None:  # noqa: ERA001
+            #     z.grad.data.zero_()  # noqa: ERA001
 
             # TODO: Change it latter
             # Load a refrence model
-            # if True:
+            # if True:  # noqa: ERA001
                 # Compute inversion loss
-                # inv_loss = self.compute_total_loss(fake,
-                                                # y,
-                                                # out1)
-                # logger.info(f"Using Ref model loss")
-            # else:
+                # inv_loss = self.compute_total_loss(fake,  # noqa: ERA001
+                                                # y,  # noqa: ERA001
+                                                # out1)  # noqa: ERA001
+                # logger.info(f"Using Ref model loss")  # noqa: ERA001
+            # else:  # noqa: ERA001
                 # inv_loss = F.cross_entropy(out1, y) #+ F.cross_entropy(out2, y)  # noqa: ERA001
             inv_loss = gan_losses.max_margin_loss(out1, y)
 
 
 
-            # if inv_loss < min_loss:
-            #     min_loss = inv_loss
+            # if inv_loss < min_loss:  # noqa: ERA001
+            #     min_loss = inv_loss  # noqa: ERA001
             #     # Save the best z
-            #     best_z = z.clone()
+            #     best_z = z.clone()  # noqa: ERA001
 
             # Update the latent vector z
-            print("Before backward:", z.grad)
             optimizer.zero_grad()
             inv_loss.backward()
             optimizer.step()
 
-            # print("After backward:", z.grad)
-            inv_loss_val = inv_loss.item()
+            # print("After backward:", z.grad)  # noqa: ERA001
+            inv_loss.item()
 
-            # if (i + 1) % self.log_interval == 0:
-            #     with torch.no_grad():
-            #         eval_prob = self.evaluation_model(fake)
-            #         eval_iden = torch.argmax(eval_prob, dim=1).view(-1)
-            #         acc = y.eq(eval_iden.long()).sum().item() * 1.0 / bs
-            #         logger.info("Iteration:{}\tInv Loss:{:.2f}\tAttack Acc:{:.2f}".format(i + 1, inv_loss_val, acc))
+            # if (i + 1) % self.log_interval == 0:  # noqa: ERA001
+            #     with torch.no_grad():  # noqa: ERA001
+            #         eval_prob = self.evaluation_model(fake)  # noqa: ERA001
+            #         eval_iden = torch.argmax(eval_prob, dim=1).view(-1)  # noqa: ERA001
+            #         acc = y.eq(eval_iden.long()).sum().item() * 1.0 / bs  # noqa: ERA001
+            #         logger.info("Iteration:{}\tInv Loss:{:.2f}\tAttack Acc:{:.2f}".format(i + 1, inv_loss_val, acc))  # noqa: E501, ERA001
 
         return z
 
@@ -862,7 +846,7 @@ class AttackPLGMI(AbstractMINV):
         # Convert the dictionary values to a NumPy array
         z_numpy = np.array(list(study.best_params.values()))
 
-        # Reshape the array to match the required shape (bs, self.generator.dim_z)
+        # Reshape the array to match the required shape (bs, self.generator.dim_z)  # noqa: ERA001
         z_numpy = z_numpy.reshape(bs, self.generator.dim_z)
 
         # Convert the NumPy array to a PyTorch tensor
@@ -870,21 +854,20 @@ class AttackPLGMI(AbstractMINV):
 
 
 
-    def load_reference_model(self, model_folder: str = "./reference") -> None:
-        """
-        Loads a TreeGrad (TGDClassifier) + preprocessing saved as:
+    def load_reference_model(self, model_folder: str = "./reference") -> None:  # noqa: C901
+        """Loads a TreeGrad (TGDClassifier) + preprocessing saved as:
         model_folder/
             ├─ model.ckpt            (joblib dict with {"model": tgd_model, ...})
             ├─ custom_params.sav     (joblib: {"ohe","num_cols","cat_cols","feature_order","target_col"})
             └─ config.yml            (optional)
-        Sets: self.reference_model  (callable like a torch model returning torch logits)
-        """
+        Sets: self.reference_model  (callable like a torch model returning torch logits).
+        """  # noqa: D205
         if model_folder is None or not os.path.isdir(model_folder):
             raise FileNotFoundError(f"Model folder not found: {model_folder}")
 
         bundle = joblib.load(os.path.join(model_folder, "model.ckpt"))   # {"model": tgd_model, ...}
         meta   = joblib.load(os.path.join(model_folder, "custom_params.sav"))
-        # cfg = yaml.safe_load(open(os.path.join(model_folder, "config.yml"))) if os.path.exists(os.path.join(model_folder,"config.yml")) else {}
+        # cfg = yaml.safe_load(open(os.path.join(model_folder, "config.yml"))) if os.path.exists(os.path.join(model_folder,"config.yml")) else {}  # noqa: E501, ERA001
 
         tgd_model = bundle["model"]
         ohe        = meta["ohe"]
@@ -893,7 +876,7 @@ class AttackPLGMI(AbstractMINV):
         feat_order = meta["feature_order"]
 
         class _RefModel(torch.nn.Module):
-            def __init__(self, model, ohe, num_cols, cat_cols, feat_order, device):
+            def __init__(self, model, ohe, num_cols, cat_cols, feat_order, device) -> None:  # noqa: ANN001
                 super().__init__()
                 self.model = model
                 self.ohe = ohe
@@ -902,23 +885,23 @@ class AttackPLGMI(AbstractMINV):
                 self.feature_order = feat_order
                 self.device = torch.device(device)
 
-            def to(self, device):
-                self.device = torch.device(device); return self
+            def to(self, device):  # noqa: ANN001, ANN202
+                self.device = torch.device(device); return self  # noqa: E702
 
-            def eval(self): return self  # no-op
+            def eval(self): return self  # no-op  # noqa: ANN202
 
             @torch.no_grad()
-            def __call__(self, entry) -> torch.Tensor:
-                # Expect a pandas.DataFrame with original feature columns (tabular PLGMI uses this)
+            def __call__(self, entry) -> torch.Tensor:  # noqa: ANN001
+                # Expect a pandas.DataFrame with original feature columns (tabular PLGMI uses this)  # noqa: ERA001
                 if isinstance(entry, pd.DataFrame):
                     cols = [c for c in self.feature_order if c in entry.columns]
-                    X_df = entry[cols].copy()
-                    X_cat = self.ohe.transform(X_df[self.cat_cols]) if self.cat_cols else np.empty((len(X_df), 0))
-                    X_num = X_df[self.num_cols].to_numpy(dtype=float)    if self.num_cols else np.empty((len(X_df), 0))
-                    X_np  = np.hstack([X_cat, X_num]).astype("float32", copy=False)
+                    X_df = entry[cols].copy()  # noqa: N806
+                    X_cat = self.ohe.transform(X_df[self.cat_cols]) if self.cat_cols else np.empty((len(X_df), 0))  # noqa: N806
+                    X_num = X_df[self.num_cols].to_numpy(dtype=float)    if self.num_cols else np.empty((len(X_df), 0))  # noqa: N806
+                    X_np  = np.hstack([X_cat, X_num]).astype("float32", copy=False)  # noqa: N806
                 elif isinstance(entry, torch.Tensor):
-                    # If you ever pass a preprocessed numeric tensor (OHE+num), allow it:
-                    X_np = entry.detach().cpu().numpy()
+                    # If you ever pass a preprocessed numeric tensor (OHE+num), allow it:  # noqa: ERA001
+                    X_np = entry.detach().cpu().numpy()  # noqa: N806
                 else:
                     raise TypeError("reference_model expects pandas.DataFrame or preprocessed torch.Tensor")
 
@@ -926,12 +909,11 @@ class AttackPLGMI(AbstractMINV):
                     prob = self.model.predict_proba(X_np)
                     logits = np.log(np.clip(prob, 1e-12, 1.0))
                     return torch.tensor(logits, dtype=torch.float32, device=self.device)
-                elif hasattr(self.model, "decision_function"):
+                if hasattr(self.model, "decision_function"):
                     dec = self.model.decision_function(X_np)
-                    if dec.ndim == 1: dec = np.vstack([-dec, dec]).T
+                    if dec.ndim == 1: dec = np.vstack([-dec, dec]).T  # noqa: E701
                     return torch.tensor(dec, dtype=torch.float32, device=self.device)
-                else:
-                    raise RuntimeError("Reference model lacks predict_proba/decision_function.")
+                raise RuntimeError("Reference model lacks predict_proba/decision_function.")
 
         self.reference_model = _RefModel(tgd_model, ohe, num_cols, cat_cols, feat_order, self.device).to(self.device).eval()
         logger.info(f"Loaded reference model from {model_folder}")
@@ -939,25 +921,24 @@ class AttackPLGMI(AbstractMINV):
 
 
 
-    def compute_total_loss(
+    def compute_total_loss(  # noqa: ANN201, D102
             self,
             x: torch.Tensor,               # generated samples; if you need R-gradient, x must require_grad=True
             y: torch.Tensor,               # target class indices [B]
-            logits_T: torch.Tensor,        # target model logits on x  (T(x))
-            # beta: float = 1.0,             # weight on reference margin
+            logits_T: torch.Tensor,        # target model logits on x  (T(x))  # noqa: N803
+            # beta: float = 1.0,             # weight on reference margin  # noqa: ERA001
             ):
-        # 1) Target inversion loss (max-margin on T)
+        # 1) Target inversion loss (max-margin on T)  # noqa: ERA001
         l_inv = gan_losses.max_margin_loss(logits_T, y)  # scalar
 
 
         ref_logits = self.reference_model(x)
-        l_ref_max_margin = gan_losses.max_margin_loss(ref_logits, y) 
-        # if l is positive, it means the correct class logit is smaller than some other class logit by at least margin
-        l_total = l_inv -  l_ref_max_margin
+        l_ref_max_margin = gan_losses.max_margin_loss(ref_logits, y)
+        # if l is positive, it means the correct class logit is smaller than some other class logit by at least margin  # noqa: E501, ERA001
+        return l_inv -  l_ref_max_margin
 
-        return l_total
 
-def fixed_margin_loss(out, y, neg):
+def fixed_margin_loss(out, y, neg):  # noqa: ANN001, ANN201, D103
     real = out.gather(1, y[:,None]).squeeze(1)
     negv = out.gather(1, torch.tensor([neg], device=out.device).repeat(len(y))[:,None]).squeeze(1)
     return (-real + negv).mean()
