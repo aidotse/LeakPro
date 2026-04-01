@@ -10,3 +10,9 @@ saved_models/*
 iframe_figures/*
 *.csv
 audit_*.yaml
+
+# Closed data and trained models
+none/
+reference/
+*.ckpt
+*.sav
