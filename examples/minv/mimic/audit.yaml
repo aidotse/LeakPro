@@ -3,10 +3,10 @@ audit:  # Configurations for auditing
   random_seed: 1234  # Integer specifying the random seed
   data_modality: "image" #image, tabular
   attack_list:
-    - attack: plgmi
+    plgmi:
       top_n: 100 # Integer number indicating how many pseudo-labels to select
       n_dis: 5 # Integer number for indicating the number of discriminator updates per generator update
-      n_iter: 2500 # Integer number for indicating the iterations for training the GAN
+      n_iter: 5000 # Integer number for indicating the iterations for training the GAN
       batch_size: 100 # Integer number for indicating batch size for training the GAN
       gen_lr: 0.1 # Float number for indicating learning rate for training the generator
       dis_lr: 0.1 # Float number for indicating learning rate for training the discriminator
@@ -17,13 +17,9 @@ audit:  # Configurations for auditing
       dim_z: &dim_z 256 # Integer number for indicating the dimension of the latent space
       alpha: 1 # Float number for indicating the weight of the gradient penalty
       log_interval: 10 # Integer number for indicating the interval for logging the information
-<<<<<<< Updated upstream
-      z_optimization_iter: 10 # Integer number for indicating the iterations for optimizing the latent code
-=======
       z_optimization_iter: 50 # Integer number for indicating the iterations for optimizing the latent code
->>>>>>> Stashed changes
       z_optimization_lr: 0.1 # Float number for indicating the learning rate for optimizing the latent code
-      num_classes: &n_cls 20
+      num_classes: &n_cls 35
       data_format : "dataframe"
       generator:
         module_path: "./utils/CTGAN_extended.py"
@@ -43,14 +39,8 @@ audit:  # Configurations for auditing
   reconstruction:
     batch_size: 4000 # Integer number for indicating batch size in reconstruction
     num_class_samples: 1000 # Number of samples to generate for each class
-    num_audited_classes: 20 # Number of classes to audit
-    eval_model:
-      module_path: "./utils/tabular_wrapper.py"
-      model_class: "TabularWrapper"
-      # Data paths
-      eval_folder: "./target"
+    num_audited_classes: 35 # Number of classes to audit
     metrics:
-      #gower_distance:
       accuracy:
       gower_distance:
       quality_metrics:
