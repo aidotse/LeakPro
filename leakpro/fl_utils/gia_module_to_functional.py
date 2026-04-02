@@ -19,7 +19,7 @@ class MetaModule(nn.Module):
     def __init__(self: Self, net: nn.Module, device: Optional[torch.device] = None) -> None:
 
         if device is None:
-            device = device("cuda" if cuda.is_available() else "cpu")
+            device = torch.device("cuda" if cuda.is_available() else "cpu")
         super().__init__()
         self.net = net.to(device)
 
