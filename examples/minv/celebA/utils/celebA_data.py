@@ -117,14 +117,16 @@ def get_celebA_train_test_loader(train_config):
     test_size = int(test_fraction * dataset_size)
 
     # Use sklearn's train_test_split to split into train and test indices
-    selected_index = np.random.choice(np.arange(dataset_size), train_size + test_size, replace=False)
-    train_indices, test_indices = train_test_split(selected_index, test_size=test_size)
+    seed = int(train_config.get("run", {}).get("random_seed", np.random.randint(100_000_000)))
+    rng = np.random.default_rng(seed)
+    selected_index = rng.choice(np.arange(dataset_size), train_size + test_size, replace=False)
+    train_indices, test_indices = train_test_split(selected_index, test_size=test_size, random_state=seed)
 
     train_subset = Subset(population_dataset, train_indices)
     test_subset = Subset(population_dataset, test_indices)
 
-    train_loader = DataLoader(train_subset, batch_size =batch_size, shuffle=True)
-    test_loader = DataLoader(test_subset, batch_size= batch_size, shuffle=True)
+    train_loader = DataLoader(train_subset, batch_size=batch_size, shuffle=True)
+    test_loader = DataLoader(test_subset, batch_size=batch_size, shuffle=False)
 
 
     return train_loader, test_loader
@@ -145,6 +147,5 @@ def get_celebA_publicloader(train_config):
             population_dataset = pickle.load(file)
             print(f"Load data from {data_dir}")
 
-    return DataLoader(population_dataset, batch_size =batch_size, shuffle=False)
-
+    return DataLoader(population_dataset, batch_size=batch_size, shuffle=False)
 

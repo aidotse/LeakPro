@@ -12,7 +12,7 @@ from torchvision.models import ResNet18_Weights, ResNet50_Weights, ResNet152_Wei
 from tqdm import tqdm
 
 from leakpro.schemas import MIAMetaDataSchema, EvalOutput
-from leakpro.utils.conversion import _loss_to_config, _optimizer_to_config, _dataloader_to_config
+from leakpro.utils.conversion import loss_to_config, optimizer_to_config, dataloader_to_config
 
 
 class BaseCNN(nn.Module):
@@ -69,13 +69,18 @@ def create_trained_model_and_metadata(model, train_loader, test_loader, train_co
     lr = train_config["train"]["learning_rate"]
     epochs = train_config["train"]["epochs"]
     weight_decay = train_config["train"]["weight_decay"]
+    optimizer_name = str(train_config["train"].get("optimizer", "adam")).lower()
+    momentum = float(train_config["train"].get("momentum", 0.9))
 
     device_name = device("cuda" if cuda.is_available() else "cpu")
     model.to(device_name)
     model.train()
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    if optimizer_name == "sgd":
+        optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay)
+    else:
+        optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     train_losses, train_accuracies = [], []
     test_losses, test_accuracies = [], []
 
@@ -134,13 +139,13 @@ def create_trained_model_and_metadata(model, train_loader, test_loader, train_co
         test_indices=test_loader.dataset.indices,
         num_train=len(train_loader.dataset.indices),
         init_params=init_params,
-        optimizer=_optimizer_to_config(optimizer),
-        criterion=_loss_to_config(criterion),
-        data_loader=_dataloader_to_config(train_loader),
+        optimizer=optimizer_to_config(optimizer),
+        criterion=loss_to_config(criterion),
+        data_loader=dataloader_to_config(train_loader),
         epochs=epochs,
         train_result=train_result,
         test_result=test_result,
-        dataset="mimiciii"
+        dataset=str(train_config.get("data", {}).get("dataset", "celebA"))
     )
 
     with open(os.path.join(train_config["run"]["log_dir"], "model_metadata.pkl"), "wb") as f:
