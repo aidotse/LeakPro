@@ -3,6 +3,7 @@
 import importlib.util
 import inspect
 import os
+import sys
 
 from torch import nn, optim
 
@@ -13,9 +14,12 @@ def import_module_from_file(filepath:str) -> ModuleType:
     """Import a module from a given file path."""
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"File {filepath} not found")
-    module_name = filepath.rsplit("/", maxsplit=1)[-1].split(".")[0]
+    module_name = filepath.split("/")[-1].split(".")[0]
     spec = importlib.util.spec_from_file_location(module_name, filepath)
     module = importlib.util.module_from_spec(spec)
+    # Add the module to sys.modules
+    sys.modules[module_name] = module
+    # Execute the module
     spec.loader.exec_module(module)
     return module
 

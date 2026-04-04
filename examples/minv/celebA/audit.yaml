@@ -1,7 +1,7 @@
 
 audit:  # Configurations for auditing
   random_seed: 1234  # Integer specifying the random seed
-  data_modality: "image" #image, tabular
+  data_modality: "image"
   attack_list:
     - attack: plgmi
       top_n: 30 # Integer number for indicating the top n classes to select
@@ -13,7 +13,7 @@ audit:  # Configurations for auditing
       dis_lr: 0.0002 # Float number for indicating learning rate for training the discriminator
       gen_beta1: 0.0 # Float number for indicating beta1 for Adam optimizer
       gen_beta2: 0.9 # Float number for indicating beta2 for Adam optimizer
-      dis_beta1: 0.0 # Float number for indicating beta1 for Adam optimizer
+      dis_beta1: 0.1 # Float number for indicating beta1 for Adam optimizer
       dis_beta2: 0.9 # Float number for indicating beta2 for Adam optimizer
       dim_z: &dim_z 128 # Integer number for indicating the dimension of the latent space
       alpha: 0.2 # Float number for indicating the weight of the gradient penalty
@@ -32,7 +32,7 @@ audit:  # Configurations for auditing
         model_class: "SNResNetProjectionDiscriminator"
         checkpoint_path: #"dis.pth"
   reconstruction:
-    batch_size: 32 # Integer number for indicating batch size for training the GAN
+    batch_size: 32 # Integer number for indicating batch size in reconstruction
     num_class_samples: 1 # Number of samples to generate for each class
     num_audited_classes: 200 # Number of classes to audit
     eval_model:

@@ -92,7 +92,8 @@ class TargetConfig(BaseModel):
     data_path: str = Field(..., description="Path to dataset file")
     dpsgd_path: Optional[str] = Field(default=None, description="Path to the DP-SGD dictionary file (optional)")
     # TODO: Change data_path description to be more descriptive, i.e path to target (or private) dataset.
-
+    model_type: Optional[Literal["torch", "xgboost", "pytorch_tabular"]] = \
+        Field("torch", description="Type of model: torch, xgboost, pytorch_tabular")
     # MINV-specific field - optional
     public_data_path: Optional[str] = Field(None, description="Path to the public dataset used for model inversion")
 
@@ -206,10 +207,8 @@ class OptunaConfig(BaseModel):
 
     seed: int = Field(default=1234,
                       description="Random seed for reproducibility")
-    n_trials: int = Field(default=100,
+    n_trials: int = Field(default=50,
                           description="Number of trials to find the optimal hyperparameters")
-    check_interval: int = Field(default=3000,
-                          description="Interval of steps between checks")
     direction: Literal["maximize", "minimize"] = Field("maximize",
                                                        description="Direction of the optimization, minimize or maximize")
     pruner: optuna.pruners.BasePruner = Field(default=optuna.pruners.MedianPruner(n_warmup_steps=5),

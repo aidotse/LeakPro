@@ -14,12 +14,13 @@ from .generator_handler import GeneratorHandler
 class GANHandler(GeneratorHandler):
     """Handler for training and managing GANs."""
 
-    def __init__(self: Self, handler: MINVHandler, configs: dict) -> None:
+    def __init__(self: Self, handler: MINVHandler, configs: dict, use_discriminator: bool = True) -> None:
         """Initialize the GANHandler class."""
         logger.info("Initializing GANHandler...")
 
         super().__init__(handler, configs=configs, caller="gan_handler")
-        self._setup_discriminator_configs(configs.discriminator)
+        if use_discriminator:
+            self._setup_discriminator_configs(configs.discriminator)
 
     def _setup_discriminator_configs(self: Self, configs : dict) -> None:
         """Load discriminator-specific configurations (e.g., discriminator path, params)."""
@@ -88,3 +89,4 @@ class GANHandler(GeneratorHandler):
     def save_discriminator(self, discriminator: Module, path: str) -> None:
         """Save the discriminator model."""
         torch.save(discriminator.state_dict(), path)
+

@@ -1,4 +1,4 @@
-import os
+import os  # noqa: D100
 import sys
 
 """
@@ -12,8 +12,9 @@ It requires that:
 project_root = os.path.abspath(os.path.join(os.getcwd(), "../../.."))
 sys.path.insert(0,project_root)
 
-from leakpro import LeakPro
-from examples.minv.celebA.celebA_plgmi_handler import CelebA_InputHandler
+from examples.minv.celebA.celebA_plgmi_handler import CelebA_InputHandler  # noqa: E402
+from leakpro import LeakPro  # noqa: E402
+
 config_path = "audit.yaml"
 
 # Initialize the LeakPro object

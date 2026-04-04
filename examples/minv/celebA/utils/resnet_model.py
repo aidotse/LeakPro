@@ -1,55 +1,53 @@
-"""
-This file contains the implementation of ResNet18, ResNet152, and VGG16 models 
+"""This file contains the implementation of ResNet18, ResNet152, and VGG16 models
 for image classification.
-"""
+"""  # noqa: D205, D404
 
 import os
 import pickle
 
 from torch import cuda, device, nn, no_grad, optim, save
-from torchvision.models import resnet18, resnet50, resnet152
-from torchvision.models import ResNet18_Weights, ResNet50_Weights, ResNet152_Weights
+from torchvision.models import ResNet18_Weights, ResNet50_Weights, ResNet152_Weights, resnet18, resnet50, resnet152
 from tqdm import tqdm
 
-from leakpro.schemas import MIAMetaDataSchema, EvalOutput
-from leakpro.utils.conversion import _loss_to_config, _optimizer_to_config, _dataloader_to_config
+from leakpro.schemas import EvalOutput, MIAMetaDataSchema
+from leakpro.utils.conversion import _dataloader_to_config, _loss_to_config, _optimizer_to_config
 
 
-class BaseCNN(nn.Module):
-    def __init__(self, num_classes):
+class BaseCNN(nn.Module):  # noqa: D101
+    def __init__(self, num_classes):  # noqa: ANN001, ANN204
         super().__init__()
         self.num_classes = num_classes
         # Keep track of initialization parameters for metadata generation
         self.init_params = {"num_classes": num_classes}
 
-    def forward(self, x):
+    def forward(self, x):  # noqa: ANN001, ANN201, D102
         return self.model(x)
 
 
-class ResNet18(BaseCNN):
-    def __init__(self, num_classes):
+class ResNet18(BaseCNN):  # noqa: D101
+    def __init__(self, num_classes):  # noqa: ANN001, ANN204
         super().__init__(num_classes)
         self.model = resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
         # Replace the final fully-connected layer to match the desired number of classes
         self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
 
 
-class ResNet50(BaseCNN):
-    def __init__(self, num_classes):
+class ResNet50(BaseCNN):  # noqa: D101
+    def __init__(self, num_classes):  # noqa: ANN001, ANN204
         super().__init__(num_classes)
         self.model = resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
         # Replace the final fully-connected layer to match the desired number of classes
         self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
 
-class ResNet152(BaseCNN):
-    def __init__(self, num_classes):
+class ResNet152(BaseCNN):  # noqa: D101
+    def __init__(self, num_classes):  # noqa: ANN001, ANN204
         super().__init__(num_classes)
         self.model = resnet152(weights=ResNet152_Weights.IMAGENET1K_V2)
         # Replace the final fully-connected layer to match the desired number of classes
         self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
 
 
-def evaluate(model, loader, criterion, device):
+def evaluate(model, loader, criterion, device):  # noqa: ANN001, ANN201, D103
     model.eval()
     loss, acc = 0, 0
     with no_grad():
@@ -65,7 +63,7 @@ def evaluate(model, loader, criterion, device):
     return loss, acc
 
 
-def create_trained_model_and_metadata(model, train_loader, test_loader, train_config):
+def create_trained_model_and_metadata(model, train_loader, test_loader, train_config):  # noqa: ANN001, ANN201, D103
     lr = train_config["train"]["learning_rate"]
     epochs = train_config["train"]["epochs"]
     weight_decay = train_config["train"]["weight_decay"]
@@ -79,7 +77,7 @@ def create_trained_model_and_metadata(model, train_loader, test_loader, train_co
     train_losses, train_accuracies = [], []
     test_losses, test_accuracies = [], []
 
-    for e in tqdm(range(epochs), desc="Training Progress"):
+    for e in tqdm(range(epochs), desc="Training Progress"):  # noqa: B007
         model.train()
         train_acc, train_loss = 0.0, 0.0
 
@@ -116,19 +114,19 @@ def create_trained_model_and_metadata(model, train_loader, test_loader, train_co
 
     # Create metadata and store it
     init_params = dict(model.init_params)
-    
+
     train_result = EvalOutput(
         accuracy=train_accuracies[-1],
         loss=train_losses[-1],
         extra={"accuracy_history": train_accuracies, "loss_history": train_losses}
     )
-    
+
     test_result = EvalOutput(
         accuracy=test_accuracies[-1],
         loss=test_losses[-1],
         extra={"accuracy_history": test_accuracies, "loss_history": test_losses}
     )
-    
+
     meta_data = MIAMetaDataSchema(
         train_indices=train_loader.dataset.indices,
         test_indices=test_loader.dataset.indices,
