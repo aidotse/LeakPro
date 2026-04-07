@@ -1,11 +1,11 @@
 """TabularExtension class for handling tabular data with one-hot encoding and decoding."""
 
-from leakpro.input_handler.modality_extensions.modality_extension import AbstractModalityExtension
 from numpy import ndarray
 from torch import Tensor, argmax, cat, tensor
 from torch.nn.functional import one_hot
 
 from leakpro.input_handler.mia_handler import MIAHandler
+from leakpro.input_handler.modality_extensions.modality_extension import AbstractModalityExtension
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
