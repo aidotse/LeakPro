@@ -20,6 +20,7 @@ from torch.utils.data import DataLoader
 from leakpro import LeakPro
 from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.reporting.mia_result import MIAResult
 from leakpro.schemas import EvalOutput, TrainingOutput
 
 N_SAMPLES = 72
@@ -32,6 +33,9 @@ if N_TRAIN + N_TEST >= N_SAMPLES:
 TRAIN_INDICES = list(range(0, N_TRAIN))
 TEST_INDICES = list(range(N_TRAIN, N_TRAIN + N_TEST))
 UNUSED_INDICES = list(range(N_TRAIN + N_TEST, N_SAMPLES))
+# RMIA samples z-points from the full population and indexes cached target logits
+# by those population indices. The E2E target split covers the full tiny
+# population to keep population indices aligned with cached logits.
 RMIA_N_TRAIN = N_SAMPLES // 2
 RMIA_TRAIN_INDICES = list(range(0, RMIA_N_TRAIN))
 RMIA_TEST_INDICES = list(range(RMIA_N_TRAIN, N_SAMPLES))
@@ -523,8 +527,10 @@ def _create_timeseries_e2e_config(run_dir: Path, attack_name: str) -> Path:
 
 ALL_MIA_ATTACKS = list(AttackFactoryMIA.attack_classes.keys())
 DISABLED_ATTACKS: set[str] = set()
-PATCHED_ATTACK_BLOCKERS = {
-}
+# Only add entries here for attacks that cannot run a real E2E path yet.
+# Keys are attack names and values are non-empty blocker reasons, e.g.
+# {"seqmia": "requires a patch because ..."}.
+PATCHED_ATTACK_BLOCKERS: dict[str, str] = {}
 PATCHED_ATTACKS: set[str] = set(PATCHED_ATTACK_BLOCKERS.keys())
 
 ENABLED_MIA_ATTACKS = [attack_name for attack_name in ALL_MIA_ATTACKS if attack_name not in DISABLED_ATTACKS]
@@ -594,6 +600,10 @@ def test_all_attacks_end_to_end(attack_name: str, monkeypatch: pytest.MonkeyPatc
             assert len(results) == 1
             result = results[0]
             assert result is not None
+            assert isinstance(result, MIAResult)
+            assert hasattr(result, "id")
+            assert isinstance(result.id, str)
+            assert result.id
 
             output_dir = Path(leakpro.handler.configs.audit.output_dir)
             result_file = output_dir / "results" / result.id / "result.txt"
