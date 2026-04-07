@@ -35,6 +35,7 @@ class AttackDTS(AbstractMIA):
         clf_val_fraction: float = Field(default=0.2, ge=0.05, le=0.5, description="Fraction of the MI classifier data set to use as validation for early stopping") 
         clf_early_stopping_patience: int = Field(default=2, ge=0, description="The maximum allowed number of epochs without validation loss improvement when training MI classifier")
         clf_fit_verbose: Literal[0, 1] = Field(default=0, description="The amount of information to print when training the MI classifier")
+        individual_mia: bool = Field(default=False, description="Run individual-level MIA.")
 
         @model_validator(mode="after")
         def check_num_shadow_models_if_online(self) -> Self:
@@ -243,6 +244,21 @@ class AttackDTS(AbstractMIA):
         # Split the score array into two parts based on membership: in (training) and out (non-training)
         self.in_member_signals = score[self.in_members].reshape(-1,1)  # Scores for known training data members
         self.out_member_signals = score[self.out_members].reshape(-1,1)  # Scores for non-training data members
+
+        if self.individual_mia:
+            samples_per_individual = self.handler.population.samples_per_individual
+            in_num_individuals = len(self.in_member_signals) // samples_per_individual
+            out_num_individuals = len(self.out_member_signals) // samples_per_individual
+            num_individuals = in_num_individuals + out_num_individuals
+            logger.info(f"Running individual-level MI on {num_individuals} individuals "
+                        f"with {samples_per_individual} samples per individual.")
+            self.in_member_signals = (self.in_member_signals
+                                      .reshape((in_num_individuals, samples_per_individual))
+                                      .mean(axis=1, keepdims=True))
+            self.out_member_signals = (self.out_member_signals
+                                       .reshape((out_num_individuals, samples_per_individual))
+                                       .mean(axis=1, keepdims=True))
+            self.audit_data_indices = np.arange(num_individuals)
 
         # Prepare true labels array, marking 1 for training data and 0 for non-training data
         true_labels = np.concatenate(
