@@ -33,6 +33,7 @@ if N_TRAIN + N_TEST >= N_SAMPLES:
 TRAIN_INDICES = list(range(0, N_TRAIN))
 TEST_INDICES = list(range(N_TRAIN, N_TRAIN + N_TEST))
 UNUSED_INDICES = list(range(N_TRAIN + N_TEST, N_SAMPLES))
+
 # RMIA samples z-points from the full population and indexes cached target logits
 # by those population indices. The E2E target split covers the full tiny
 # population to keep population indices aligned with cached logits.
@@ -527,20 +528,11 @@ def _create_timeseries_e2e_config(run_dir: Path, attack_name: str) -> Path:
 
 ALL_MIA_ATTACKS = list(AttackFactoryMIA.attack_classes.keys())
 DISABLED_ATTACKS: set[str] = set()
-# Only add entries here for attacks that cannot run a real E2E path yet.
-# Keys are attack names and values are non-empty blocker reasons, e.g.
-# {"seqmia": "requires a patch because ..."}.
-PATCHED_ATTACK_BLOCKERS: dict[str, str] = {}
-PATCHED_ATTACKS: set[str] = set(PATCHED_ATTACK_BLOCKERS.keys())
 
 ENABLED_MIA_ATTACKS = [attack_name for attack_name in ALL_MIA_ATTACKS if attack_name not in DISABLED_ATTACKS]
-E2E_MODE_BY_ATTACK = {
-    attack_name: ("patched" if attack_name in PATCHED_ATTACKS else "real")
-    for attack_name in ENABLED_MIA_ATTACKS
-}
 
 ATTACK_PARAMETERS = [
-    pytest.param(attack_name, id=f"{attack_name}-{E2E_MODE_BY_ATTACK[attack_name]}")
+    pytest.param(attack_name, id=f"{attack_name}-real")
     for attack_name in ENABLED_MIA_ATTACKS
 ]
 
@@ -549,7 +541,6 @@ def test_attack_factory_attack_list_is_covered() -> None:
     """Ensure this test suite follows the current factory attack list."""
     assert ALL_MIA_ATTACKS == list(AttackFactoryMIA.attack_classes.keys())
     assert set(ENABLED_MIA_ATTACKS).union(DISABLED_ATTACKS) == set(ALL_MIA_ATTACKS)
-    assert PATCHED_ATTACKS.issubset(set(ENABLED_MIA_ATTACKS))
 
 
 def test_target_split_keeps_aux_population() -> None:
@@ -562,20 +553,10 @@ def test_target_split_keeps_aux_population() -> None:
     assert len(RMIA_TRAIN_INDICES) + len(RMIA_TEST_INDICES) == N_SAMPLES
 
 
-def test_attack_e2e_modes_are_explicit() -> None:
-    """Ensure each enabled attack is labeled as real or patched E2E."""
-    assert set(E2E_MODE_BY_ATTACK.keys()) == set(ENABLED_MIA_ATTACKS)
-    assert set(E2E_MODE_BY_ATTACK.values()).issubset({"real", "patched"})
-    assert "real" in set(E2E_MODE_BY_ATTACK.values())
-    assert set(PATCHED_ATTACK_BLOCKERS.keys()) == PATCHED_ATTACKS
-    assert all(len(reason) > 0 for reason in PATCHED_ATTACK_BLOCKERS.values())
-
-
 @pytest.mark.parametrize("attack_name", ATTACK_PARAMETERS)
 def test_all_attacks_end_to_end(attack_name: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """Run a minimal real E2E flow for each MIA attack in AttackFactoryMIA."""
     _set_seed()
-    run_mode = E2E_MODE_BY_ATTACK[attack_name]
     optuna_metadata_snapshot = _snapshot_optuna_metadata()
     temp_root = None
     try:
@@ -607,17 +588,7 @@ def test_all_attacks_end_to_end(attack_name: str, monkeypatch: pytest.MonkeyPatc
 
             output_dir = Path(leakpro.handler.configs.audit.output_dir)
             result_file = output_dir / "results" / result.id / "result.txt"
-            mode_file = output_dir / "results" / result.id / "e2e_mode.txt"
-            blocker_file = output_dir / "results" / result.id / "e2e_blocker.txt"
-            with open(mode_file, "w") as file:
-                file.write(run_mode)
-            if run_mode == "patched":
-                with open(blocker_file, "w") as file:
-                    file.write(PATCHED_ATTACK_BLOCKERS[attack_name])
             assert result_file.exists()
-            assert mode_file.exists()
-            if run_mode == "patched":
-                assert blocker_file.exists()
             assert (output_dir / "data_objects").exists()
 
         assert temp_root is not None
