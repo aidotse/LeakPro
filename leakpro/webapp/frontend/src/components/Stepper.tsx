@@ -2,7 +2,7 @@ import React from "react";
 
 export const STEPS = [
   { label: "Dataset",  icon: "database" },
-  { label: "Setup",    icon: "code" },
+  { label: "Architecture", icon: "architecture" },
   { label: "Models",   icon: "psychology" },
   { label: "Attacks",  icon: "tune" },
   { label: "Run",      icon: "rocket_launch" },

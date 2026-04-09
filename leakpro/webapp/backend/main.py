@@ -203,6 +203,17 @@ async def upload_weights(job_id: str, model_name: str, file: UploadFile) -> dict
     return {"ok": True, "path": str(dest)}
 
 
+@app.post("/jobs/{job_id}/upload/model-metadata")
+async def upload_model_metadata(job_id: str, model_name: str, file: UploadFile) -> dict:
+    _get_job(job_id)
+    model_dir = _job_dir(job_id) / "models" / model_name
+    model_dir.mkdir(exist_ok=True)
+    dest = model_dir / "model_metadata.pkl"
+    with open(dest, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    return {"ok": True, "path": str(dest)}
+
+
 @app.post("/jobs/{job_id}/weights-path")
 async def set_weights_path(job_id: str, body: dict) -> dict:
     _get_job(job_id)

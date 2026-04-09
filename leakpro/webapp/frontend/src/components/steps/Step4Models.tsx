@@ -107,10 +107,13 @@ function UploadModelForm({ jobId, onAdded, existingNames }: {
   jobId: string; onAdded: (m: ModelEntry) => void; existingNames: string[];
 }) {
   const [name, setName] = useState("uploaded_model");
-  const [file, setFile] = useState<File | null>(null);
+  const [weightsFile, setWeightsFile] = useState<File | null>(null);
+  const [metaFile, setMetaFile] = useState<File | null>(null);
   const [checking, setChecking] = useState(false);
   const [result, setResult] = useState<CompatResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const bothUploaded = !!(weightsFile && metaFile);
 
   const doCheck = async () => {
     setChecking(true);
@@ -140,15 +143,24 @@ function UploadModelForm({ jobId, onAdded, existingNames }: {
       </div>
 
       <ServerOrUpload
-        label="Model weights (.pt / .pth)"
-        hint="Saved PyTorch model weights"
+        label="Model weights (.pkl / .pt / .pth)"
+        hint="State dict saved with torch.save(model.state_dict(), f)"
         icon="save"
-        accept=".pt,.pth"
-        onFile={async (f) => { setFile(f); setResult(null); await api.uploadWeights(jobId, name, f); }}
-        onPath={async (p) => { setFile(new File([], p.split("/").pop() ?? "model.pt")); setResult(null); await api.setWeightsPath(jobId, name, p); }}
+        accept=".pkl,.pt,.pth"
+        onFile={async (f) => { setWeightsFile(f); setResult(null); await api.uploadWeights(jobId, name, f); }}
+        onPath={async (p) => { setWeightsFile(new File([], p.split("/").pop() ?? "model.pkl")); setResult(null); await api.setWeightsPath(jobId, name, p); }}
       />
 
-      {file && !result && (
+      <ServerOrUpload
+        label="Model metadata (.pkl)"
+        hint="Output of LeakPro.make_mia_metadata() — required for audit"
+        icon="description"
+        accept=".pkl"
+        onFile={async (f) => { setMetaFile(f); setResult(null); await api.uploadModelMetadata(jobId, name, f); }}
+        onPath={async (_p) => { /* server-path for metadata not yet supported */ }}
+      />
+
+      {bothUploaded && !result && (
         <button
           onClick={doCheck}
           disabled={checking}
@@ -156,6 +168,12 @@ function UploadModelForm({ jobId, onAdded, existingNames }: {
         >
           {checking ? "Checking…" : "Check Compatibility"}
         </button>
+      )}
+
+      {!bothUploaded && (weightsFile || metaFile) && (
+        <p className="text-xs text-slate-400">
+          {!weightsFile ? "Upload model weights to continue." : "Upload model metadata to continue."}
+        </p>
       )}
 
       {result && <CompatCard result={result} />}

@@ -127,20 +127,22 @@ function UploadForm({ jobId, onDone }: { jobId: string; onDone: (m: DataMeta) =>
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [meta, setMeta] = useState<DataMeta | null>(null);
 
   const handleFile = useCallback(async (f: File) => {
     setFile(f);
     setError(null);
+    setMeta(null);
     setLoading(true);
     try {
-      const meta = await api.uploadData(jobId, f);
-      onDone(meta);
+      const result = await api.uploadData(jobId, f);
+      setMeta(result);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  }, [jobId, onDone]);
+  }, [jobId]);
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -150,6 +152,7 @@ function UploadForm({ jobId, onDone }: { jobId: string; onDone: (m: DataMeta) =>
   }, [handleFile]);
 
   return (
+    <div className="flex flex-col gap-6">
     <label
       onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
       onDragLeave={() => setDragging(false)}
@@ -187,6 +190,28 @@ function UploadForm({ jobId, onDone }: { jobId: string; onDone: (m: DataMeta) =>
       {loading && <p className="mt-4 text-sm text-slate-500 animate-pulse">Analysing dataset…</p>}
       {error && <p className="mt-4 text-sm text-red-500">{error}</p>}
     </label>
+
+    {meta && (
+      <div className="flex flex-col gap-4 p-5 rounded-xl border border-green-500/30 bg-green-500/5">
+        <div className="flex items-center gap-2 text-green-600 dark:text-green-400 font-bold">
+          <span className="material-symbols-outlined">check_circle</span>
+          Dataset analysed
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <MetaField label="Type"    value={meta.data_type} />
+          <MetaField label="Shape"   value={`[${meta.shape.join(", ")}]`} />
+          <MetaField label="Samples" value={meta.n_samples.toLocaleString()} />
+          <MetaField label="Dtype"   value={meta.dtype} />
+        </div>
+        <button
+          onClick={() => onDone(meta)}
+          className="self-end px-8 py-2.5 rounded-lg bg-primary text-white font-bold hover:bg-primary/90 transition-colors flex items-center gap-2 shadow-lg shadow-primary/20"
+        >
+          Continue <span className="material-symbols-outlined text-base">arrow_forward</span>
+        </button>
+      </div>
+    )}
+  </div>
   );
 }
 

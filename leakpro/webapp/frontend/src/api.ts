@@ -56,6 +56,8 @@ export const api = {
     upload(`/jobs/${id}/upload/weights`, file, { model_name: modelName }),
   setWeightsPath: (id: string, modelName: string, path: string) =>
     post(`/jobs/${id}/weights-path`, { model_name: modelName, path }),
+  uploadModelMetadata: (id: string, modelName: string, file: File) =>
+    upload(`/jobs/${id}/upload/model-metadata`, file, { model_name: modelName }),
   checkCompat: (id: string, modelName: string) =>
     post<CompatResult>(`/jobs/${id}/check?model_name=${encodeURIComponent(modelName)}`),
   trainModel: (id: string, params: TrainParams) => post(`/jobs/${id}/train`, params),

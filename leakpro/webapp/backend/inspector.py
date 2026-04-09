@@ -189,7 +189,9 @@ def _find_array(obj: Any, _depth: int = 0) -> Any:
 
 
 def _guess_type(shape: list[int]) -> str:
-    if len(shape) == 3 and shape[0] in {1, 3, 4}:
+    if len(shape) == 3 and shape[0] in {1, 3, 4}:      # channel-first (C, H, W)
+        return "image"
+    if len(shape) == 3 and shape[-1] in {1, 3, 4}:     # channel-last (H, W, C)
         return "image"
     if len(shape) == 2 and shape[0] in {1, 3, 4}:
         return "image"
