@@ -44,6 +44,10 @@ export const api = {
   setHandlerConfig: (id: string, config: HandlerConfig) =>
     post(`/jobs/${id}/handler-config`, config),
 
+  // Step 1 (dataset handler)
+  uploadDatasetHandler: (id: string, file: File) =>
+    upload(`/jobs/${id}/upload/dataset-handler`, file),
+
   // Step 3
   uploadArch: (id: string, file: File) => upload(`/jobs/${id}/upload/arch`, file),
   setArchPath: (id: string, path: string) => post(`/jobs/${id}/arch-path`, { path }),
@@ -58,6 +62,10 @@ export const api = {
     post(`/jobs/${id}/weights-path`, { model_name: modelName, path }),
   uploadModelMetadata: (id: string, modelName: string, file: File) =>
     upload(`/jobs/${id}/upload/model-metadata`, file, { model_name: modelName }),
+  setMetadataPath: (id: string, modelName: string, path: string) =>
+    post(`/jobs/${id}/model-metadata-path`, { model_name: modelName, path }),
+  validateModelMetadata: (id: string, modelName: string) =>
+    post<MetaValidationResult>(`/jobs/${id}/validate/model-metadata?model_name=${encodeURIComponent(modelName)}`),
   checkCompat: (id: string, modelName: string) =>
     post<CompatResult>(`/jobs/${id}/check?model_name=${encodeURIComponent(modelName)}`),
   trainModel: (id: string, params: TrainParams) => post(`/jobs/${id}/train`, params),
@@ -107,6 +115,14 @@ export interface CompatResult {
   input_shape?: number[];
   output_shape?: number[];
   param_count?: number;
+  error?: string;
+  sample_outputs?: Array<{ sample: number; top1_class: number; confidence: number; true_label: number | null }>;
+}
+
+export interface MetaValidationResult {
+  ok: boolean;
+  present_fields: string[];
+  missing_fields: string[];
   error?: string;
 }
 

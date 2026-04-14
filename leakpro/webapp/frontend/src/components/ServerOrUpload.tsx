@@ -7,9 +7,10 @@ interface Props {
   icon: string;
   onFile: (file: File) => Promise<void>;
   onPath: (path: string) => Promise<void>;
+  onDone?: () => void;
 }
 
-export default function ServerOrUpload({ label, hint, accept, icon, onFile, onPath }: Props) {
+export default function ServerOrUpload({ label, hint, accept, icon, onFile, onPath, onDone }: Props) {
   const [mode, setMode] = useState<"server" | "upload">("server");
   const [path, setPath] = useState("");
   const [done, setDone] = useState<string | null>(null);
@@ -22,6 +23,7 @@ export default function ServerOrUpload({ label, hint, accept, icon, onFile, onPa
     try {
       await onPath(path.trim());
       setDone(path.split("/").pop() ?? path);
+      onDone?.();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally { setLoading(false); }
@@ -32,6 +34,7 @@ export default function ServerOrUpload({ label, hint, accept, icon, onFile, onPa
     try {
       await onFile(f);
       setDone(f.name);
+      onDone?.();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally { setLoading(false); }

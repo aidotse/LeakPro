@@ -102,6 +102,7 @@ class CompatResult(BaseModel):
     output_shape: list[int] | None = None
     param_count: int | None = None
     error: str | None = None
+    sample_outputs: list[dict] | None = None
 
 
 # ---------------------------------------------------------------------------

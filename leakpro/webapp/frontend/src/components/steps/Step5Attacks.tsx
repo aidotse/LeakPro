@@ -25,37 +25,82 @@ interface ParamDef {
 const ATTACK_DEFS: Record<string, { label: string; desc: string; params: ParamDef[] }> = {
   rmia: {
     label: "RMIA",
-    desc: "Relative membership inference via likelihood ratio",
+    desc: "Relative membership inference via likelihood ratio test against shadow models",
     params: [
-      { key: "num_shadow_models", label: "Shadow models", type: "number", default: 64, min: 1, max: 256 },
-      { key: "temperature",       label: "Temperature",   type: "number", default: 2.0, min: 0.1, max: 10, step: 0.1 },
-      { key: "offline",           label: "Offline mode",  type: "boolean", default: false },
+      { key: "num_shadow_models",      label: "Shadow models",       type: "number",  default: 1,   min: 1, max: 256 },
+      { key: "temperature",            label: "Temperature",         type: "number",  default: 2.0, min: 0.1, max: 10, step: 0.1 },
+      { key: "training_data_fraction", label: "Train data fraction", type: "number",  default: 0.5, min: 0.1, max: 1.0, step: 0.05 },
+      { key: "online",                 label: "Online mode",         type: "boolean", default: false },
     ],
   },
   lira: {
     label: "LiRA",
-    desc: "Likelihood ratio attack using shadow models",
+    desc: "Likelihood ratio attack — fits Gaussians over shadow model outputs",
     params: [
-      { key: "num_shadow_models", label: "Shadow models", type: "number", default: 64, min: 1, max: 256 },
-      { key: "online",            label: "Online mode",   type: "boolean", default: true },
+      { key: "num_shadow_models",      label: "Shadow models",       type: "number",  default: 1,   min: 2, max: 256 },
+      { key: "training_data_fraction", label: "Train data fraction", type: "number",  default: 0.5, min: 0.1, max: 1.0, step: 0.05 },
+      { key: "online",                 label: "Online mode",         type: "boolean", default: false },
     ],
   },
-  loss: {
-    label: "Loss-based",
-    desc: "Threshold on per-sample cross-entropy loss",
-    params: [],
+  base: {
+    label: "BASE",
+    desc: "Loss-based attack using LogSumExp approximation over shadow model losses",
+    params: [
+      { key: "num_shadow_models",      label: "Shadow models",       type: "number",  default: 1,   min: 1, max: 256 },
+      { key: "temperature",            label: "Temperature",         type: "number",  default: 2.0, min: 0.1, max: 10, step: 0.1 },
+      { key: "training_data_fraction", label: "Train data fraction", type: "number",  default: 0.5, min: 0.1, max: 1.0, step: 0.05 },
+      { key: "online",                 label: "Online mode",         type: "boolean", default: false },
+    ],
   },
   population: {
     label: "Population",
-    desc: "Calibrated using population statistics",
+    desc: "Calibrates membership signal against a reference population",
+    params: [],
+  },
+  qmia: {
+    label: "QMIA",
+    desc: "Quantile regression attack — trains a regressor to predict the membership threshold",
     params: [
-      { key: "num_population_samples", label: "Population samples", type: "number", default: 1000, min: 100, max: 10000 },
+      { key: "training_data_fraction", label: "Train data fraction", type: "number", default: 0.5, min: 0.1, max: 1.0, step: 0.05 },
+      { key: "epochs",                 label: "Regressor epochs",    type: "number", default: 100, min: 10, max: 500 },
     ],
   },
-  gradient: {
-    label: "Gradient",
-    desc: "Gradient norm as a membership signal",
-    params: [],
+  ramia: {
+    label: "RaMIA",
+    desc: "Range membership inference — augmentation-based attack",
+    params: [
+      { key: "num_shadow_models",      label: "Shadow models",       type: "number",  default: 2,  min: 2, max: 256 },
+      { key: "training_data_fraction", label: "Train data fraction", type: "number",  default: 0.5, min: 0.1, max: 1.0, step: 0.05 },
+      { key: "num_transforms",         label: "Augmentations",       type: "number",  default: 10, min: 1, max: 100 },
+      { key: "online",                 label: "Online mode",         type: "boolean", default: false },
+    ],
+  },
+  yoqo: {
+    label: "YOQO",
+    desc: "You Only Query Once — optimizes a surrogate point per sample",
+    params: [
+      { key: "num_shadow_models",      label: "Shadow models",       type: "number",  default: 1,    min: 1, max: 256 },
+      { key: "training_data_fraction", label: "Train data fraction", type: "number",  default: 0.01, min: 0.001, max: 1.0, step: 0.005 },
+      { key: "online",                 label: "Online mode",         type: "boolean", default: false },
+    ],
+  },
+  loss_traj: {
+    label: "Loss Trajectory",
+    desc: "Trains a classifier on the loss trajectory across shadow model checkpoints",
+    params: [
+      { key: "distillation_data_fraction", label: "Distillation fraction", type: "number", default: 0.5, min: 0.1, max: 0.9, step: 0.05 },
+      { key: "number_of_traj",             label: "Trajectories",          type: "number", default: 1,   min: 1, max: 10 },
+      { key: "temperature",                label: "Temperature",            type: "number", default: 2.0, min: 0.1, max: 10, step: 0.1 },
+    ],
+  },
+  multi_signal_lira: {
+    label: "MS-LiRA",
+    desc: "Multi-signal LiRA — extends LiRA to multiple extracted signals",
+    params: [
+      { key: "num_shadow_models",      label: "Shadow models",       type: "number",  default: 1,   min: 2, max: 256 },
+      { key: "training_data_fraction", label: "Train data fraction", type: "number",  default: 0.5, min: 0.1, max: 1.0, step: 0.05 },
+      { key: "online",                 label: "Online mode",         type: "boolean", default: false },
+    ],
   },
 };
 
@@ -85,7 +130,7 @@ function makeInstance(attack: string, existingCount: number): AttackInstance {
 // ---------------------------------------------------------------------------
 export default function Step5Attacks({ jobId, models, onDone }: Props) {
   const [instances, setInstances] = useState<PerModelInstances>(() =>
-    Object.fromEntries(models.map((m) => [m.name, [makeInstance("rmia", 0), makeInstance("loss", 0)]]))
+    Object.fromEntries(models.map((m) => [m.name, [makeInstance("rmia", 0)]]))
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);

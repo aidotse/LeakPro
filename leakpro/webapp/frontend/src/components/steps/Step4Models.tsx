@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import Plot from "react-plotly.js";
 import type Plotly from "plotly.js";
-import { api, CompatResult, TrainParams } from "../../api";
+import { api, CompatResult, MetaValidationResult, TrainParams } from "../../api";
 import ServerOrUpload from "../ServerOrUpload";
 
 export interface ModelEntry {
@@ -27,6 +27,9 @@ export default function Step4Models({ jobId, onDone }: Props) {
 
   const addModel = (m: ModelEntry) =>
     setModels((prev) => [...prev.filter((x) => x.name !== m.name), m]);
+
+  const updateModel = (name: string, patch: Partial<ModelEntry>) =>
+    setModels((prev) => prev.map((m) => m.name === name ? { ...m, ...patch } : m));
 
   const canProceed = models.length > 0 && models.every((m) => m.status === "ready");
 
@@ -54,7 +57,7 @@ export default function Step4Models({ jobId, onDone }: Props) {
         </button>
         {showUpload && (
           <div className="p-6">
-            <UploadModelForm jobId={jobId} onAdded={addModel} existingNames={models.map((m) => m.name)} />
+            <UploadModelForm jobId={jobId} onAdded={addModel} onUpdated={updateModel} existingNames={models.map((m) => m.name)} />
           </div>
         )}
       </div>
@@ -101,83 +104,206 @@ export default function Step4Models({ jobId, onDone }: Props) {
 }
 
 // ---------------------------------------------------------------------------
-// Upload sub-form
+// Upload sub-form — two independent validation buttons, supports multiple models
 // ---------------------------------------------------------------------------
-function UploadModelForm({ jobId, onAdded, existingNames }: {
-  jobId: string; onAdded: (m: ModelEntry) => void; existingNames: string[];
+function UploadModelForm({ jobId, onAdded, onUpdated, existingNames }: {
+  jobId: string;
+  onAdded: (m: ModelEntry) => void;
+  onUpdated: (name: string, patch: Partial<ModelEntry>) => void;
+  existingNames: string[];
 }) {
-  const [name, setName] = useState("uploaded_model");
-  const [weightsFile, setWeightsFile] = useState<File | null>(null);
-  const [metaFile, setMetaFile] = useState<File | null>(null);
+  const nextName = () => {
+    const base = "uploaded_model";
+    const taken = new Set(existingNames);
+    if (!taken.has(base)) return base;
+    let n = 2;
+    while (taken.has(`${base}_${n}`)) n++;
+    return `${base}_${n}`;
+  };
+
+  const [name, setName] = useState(nextName);
+  // Track upload completion via onDone callback (more reliable than async state in onFile)
+  const [weightsUploaded, setWeightsUploaded] = useState(false);
+  const [metaUploaded, setMetaUploaded] = useState(false);
+  // Model validation (weights check + inference)
   const [checking, setChecking] = useState(false);
   const [result, setResult] = useState<CompatResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [checkError, setCheckError] = useState<string | null>(null);
+  const [addedToList, setAddedToList] = useState(false);
+  // Metadata validation (field presence check)
+  const [metaValidating, setMetaValidating] = useState(false);
+  const [metaValidation, setMetaValidation] = useState<MetaValidationResult | null>(null);
 
-  const bothUploaded = !!(weightsFile && metaFile);
+  const reset = () => {
+    setWeightsUploaded(false);
+    setMetaUploaded(false);
+    setChecking(false);
+    setResult(null);
+    setCheckError(null);
+    setAddedToList(false);
+    setMetaValidating(false);
+    setMetaValidation(null);
+    setMetaError(null);
+    setName(nextName());
+  };
 
-  const doCheck = async () => {
+  const doValidateModel = async () => {
     setChecking(true);
-    setError(null);
+    setCheckError(null);
+    setResult(null);
+    // Register immediately in the audit list so it shows up right away
+    if (!addedToList) {
+      onAdded({ name, source: "uploaded", status: "error" });
+    }
     try {
       const r = await api.checkCompat(jobId, name);
       setResult(r);
       if (r.ok) {
-        onAdded({ name, source: "uploaded", compat: r, status: "ready" });
+        onUpdated(name, { compat: r, status: "ready" });
+        setAddedToList(true);
+      } else {
+        onUpdated(name, { status: "error" });
       }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setCheckError(e instanceof Error ? e.message : String(e));
+      onUpdated(name, { status: "error" });
     } finally {
       setChecking(false);
     }
   };
 
+  const [metaError, setMetaError] = useState<string | null>(null);
+
+  const doValidateMeta = async () => {
+    setMetaValidating(true);
+    setMetaError(null);
+    try {
+      const v = await api.validateModelMetadata(jobId, name);
+      setMetaValidation(v);
+    } catch (e: unknown) {
+      setMetaError(e instanceof Error ? e.message : String(e));
+    } finally { setMetaValidating(false); }
+  };
+
+  // Lock the name once any file is uploaded so upload and validate always match
+  const nameLocked = weightsUploaded || metaUploaded;
+
   return (
     <div className="flex flex-col gap-4">
+      {/* Model name — locked once a file is uploaded */}
       <div>
         <label className="text-xs font-semibold text-slate-500 mb-1 block">Model name</label>
         <input
           value={name}
-          onChange={(e) => setName(e.target.value)}
-          className="w-full rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm px-3 py-2"
+          disabled={nameLocked}
+          onChange={(e) => { setName(e.target.value); setResult(null); setCheckError(null); }}
+          className="w-full rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm px-3 py-2 disabled:opacity-60 disabled:cursor-not-allowed"
         />
       </div>
 
-      <ServerOrUpload
-        label="Model weights (.pkl / .pt / .pth)"
-        hint="State dict saved with torch.save(model.state_dict(), f)"
-        icon="save"
-        accept=".pkl,.pt,.pth"
-        onFile={async (f) => { setWeightsFile(f); setResult(null); await api.uploadWeights(jobId, name, f); }}
-        onPath={async (p) => { setWeightsFile(new File([], p.split("/").pop() ?? "model.pkl")); setResult(null); await api.setWeightsPath(jobId, name, p); }}
-      />
+      {/* ── Model weights ─────────────────────────────────────── */}
+      {!result?.ok && (
+        <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-4 space-y-3">
+          <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Model weights</p>
+          <ServerOrUpload
+            label="Weights file (.pkl / .pt / .pth)"
+            hint="Saved with torch.save(model.state_dict(), path)"
+            icon="save"
+            accept=".pkl,.pt,.pth"
+            onFile={async (f) => { setResult(null); setCheckError(null); await api.uploadWeights(jobId, name, f); }}
+            onPath={async (p) => { setResult(null); setCheckError(null); await api.setWeightsPath(jobId, name, p); }}
+            onDone={() => setWeightsUploaded(true)}
+          />
+          {weightsUploaded && (
+            <button
+              onClick={doValidateModel}
+              disabled={checking}
+              className="flex items-center gap-2 px-5 py-2 rounded-lg bg-primary text-white font-bold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50"
+            >
+              {checking
+                ? <><span className="material-symbols-outlined text-base animate-spin">sync</span> Validating…</>
+                : result
+                  ? <><span className="material-symbols-outlined text-base">refresh</span> Retry Validation</>
+                  : <><span className="material-symbols-outlined text-base">speed</span> Validate Model</>}
+            </button>
+          )}
+          {result && <CompatCard result={result} />}
+          {checkError && <p className="text-sm text-red-500 font-mono text-xs whitespace-pre-wrap">{checkError}</p>}
+        </div>
+      )}
 
-      <ServerOrUpload
-        label="Model metadata (.pkl)"
-        hint="Output of LeakPro.make_mia_metadata() — required for audit"
-        icon="description"
-        accept=".pkl"
-        onFile={async (f) => { setMetaFile(f); setResult(null); await api.uploadModelMetadata(jobId, name, f); }}
-        onPath={async (_p) => { /* server-path for metadata not yet supported */ }}
-      />
+      {/* Success banner — shown after model validates */}
+      {result?.ok && (
+        <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-3 flex items-center gap-3">
+          <span className="material-symbols-outlined text-green-500">check_circle</span>
+          <span className="text-sm font-semibold text-green-700 dark:text-green-400 flex-1">
+            <strong>{name}</strong> validated and added to the audit list.
+          </span>
+        </div>
+      )}
 
-      {bothUploaded && !result && (
-        <button
-          onClick={doCheck}
-          disabled={checking}
-          className="self-start px-6 py-2 rounded-lg bg-primary text-white font-bold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50"
-        >
-          {checking ? "Checking…" : "Check Compatibility"}
+      {/* ── Model metadata — always visible once uploaded, survives model validation ── */}
+      <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-4 space-y-3">
+        <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Model metadata</p>
+        <ServerOrUpload
+          label="Metadata file (.pkl)"
+          hint="Contains train/test indices, optimizer, criterion, and training results"
+          icon="description"
+          accept=".pkl"
+          onFile={async (f) => { setMetaValidation(null); await api.uploadModelMetadata(jobId, name, f); }}
+          onPath={async (p) => { setMetaValidation(null); await api.setMetadataPath(jobId, name, p); }}
+          onDone={() => setMetaUploaded(true)}
+        />
+        {metaUploaded && (
+          <button
+            onClick={doValidateMeta}
+            disabled={metaValidating}
+            className="flex items-center gap-2 px-5 py-2 rounded-lg border border-primary text-primary font-bold text-sm hover:bg-primary/5 transition-colors disabled:opacity-50"
+          >
+            {metaValidating
+              ? <><span className="material-symbols-outlined text-base animate-spin">sync</span> Validating…</>
+              : metaValidation
+                ? <><span className="material-symbols-outlined text-base">refresh</span> Re-validate Metadata</>
+                : <><span className="material-symbols-outlined text-base">fact_check</span> Validate Metadata</>}
+          </button>
+        )}
+        {metaValidation && <MetaValidationCard result={metaValidation} />}
+        {metaError && <p className="text-xs text-red-500 font-mono whitespace-pre-wrap">{metaError}</p>}
+      </div>
+
+      {/* Add another model — shown after success */}
+      {result?.ok && (
+        <button onClick={reset} className="flex items-center gap-1.5 text-primary text-sm font-bold hover:underline self-start">
+          <span className="material-symbols-outlined text-base">add_circle</span>
+          Add another model
         </button>
       )}
+    </div>
+  );
+}
 
-      {!bothUploaded && (weightsFile || metaFile) && (
-        <p className="text-xs text-slate-400">
-          {!weightsFile ? "Upload model weights to continue." : "Upload model metadata to continue."}
-        </p>
-      )}
-
-      {result && <CompatCard result={result} />}
-      {error && <p className="text-sm text-red-500">{error}</p>}
+function MetaValidationCard({ result }: { result: MetaValidationResult }) {
+  if (result.ok) {
+    return (
+      <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-3 flex items-start gap-2">
+        <span className="material-symbols-outlined text-green-500 text-base mt-0.5">check_circle</span>
+        <div>
+          <p className="text-sm font-semibold text-green-700 dark:text-green-400">Metadata valid — all required fields present</p>
+          <p className="text-xs text-slate-500 mt-0.5">{result.present_fields.join(", ")}</p>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 flex items-start gap-2">
+      <span className="material-symbols-outlined text-amber-500 text-base mt-0.5">warning</span>
+      <div>
+        <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">Metadata incomplete</p>
+        {result.missing_fields.length > 0 && (
+          <p className="text-xs text-slate-500 mt-0.5">Missing: <span className="font-mono">{result.missing_fields.join(", ")}</span></p>
+        )}
+        {result.error && <pre className="text-xs text-red-500 mt-1 whitespace-pre-wrap">{result.error.slice(0, 300)}</pre>}
+      </div>
     </div>
   );
 }
@@ -340,7 +466,7 @@ function TrainMetricsChart({ metrics }: { metrics: TrainMetrics }) {
     margin: { t: 30, r: 20, b: 40, l: 45 },
     height: 180,
     legend: { orientation: "h", y: -0.25, font: { size: 11, color: fontColor } },
-    xaxis: { title: "Epoch", gridcolor: gridColor, color: fontColor, tickfont: { size: 10 } },
+    xaxis: { title: { text: "Epoch" }, gridcolor: gridColor, color: fontColor, tickfont: { size: 10 } },
     yaxis: { gridcolor: gridColor, color: fontColor, tickfont: { size: 10 } },
     font: { family: "Inter, sans-serif" },
   };
@@ -461,16 +587,50 @@ function NumberField({ label, value, min, max, step = 1, onChange }: {
 function CompatCard({ result }: { result: CompatResult }) {
   if (result.ok) {
     return (
-      <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-4 space-y-2">
+      <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-4 space-y-3">
         <div className="flex items-center gap-2 text-green-600 dark:text-green-400 font-bold">
           <span className="material-symbols-outlined">check_circle</span>
-          Compatibility check passed
+          Model compatible
         </div>
+
+        {/* Shape + param info */}
         <div className="grid grid-cols-3 gap-3 text-sm">
-          <div><span className="text-slate-500">Input: </span><span className="font-mono">[{result.input_shape?.join(", ")}]</span></div>
-          <div><span className="text-slate-500">Output: </span><span className="font-mono">[{result.output_shape?.join(", ")}]</span></div>
-          <div><span className="text-slate-500">Params: </span><span className="font-mono">{result.param_count?.toLocaleString()}</span></div>
+          <div><span className="text-slate-500">Input shape: </span><span className="font-mono font-semibold">[{result.input_shape?.join(", ")}]</span></div>
+          <div><span className="text-slate-500">Output shape: </span><span className="font-mono font-semibold">[{result.output_shape?.join(", ")}]</span></div>
+          <div><span className="text-slate-500">Parameters: </span><span className="font-mono font-semibold">{result.param_count?.toLocaleString()}</span></div>
         </div>
+
+        {/* Inference test results */}
+        {result.sample_outputs && result.sample_outputs.length > 0 && (
+          <div className="rounded-md border border-green-500/20 bg-white/60 dark:bg-slate-900/60 p-3 space-y-2">
+            <p className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+              <span className="material-symbols-outlined text-sm text-primary">psychology</span>
+              Inference test — real data samples
+            </p>
+            {result.sample_outputs.map((s) => {
+              const match = s.true_label !== null && s.top1_class === s.true_label;
+              const hasLabel = s.true_label !== null;
+              return (
+                <div key={s.sample} className="flex items-center gap-2 text-sm">
+                  <span className="text-slate-400 text-xs w-16 shrink-0">Sample {s.sample + 1}</span>
+                  <span className="text-slate-600 dark:text-slate-300">
+                    predicted class <span className="font-bold font-mono">{s.top1_class}</span>
+                    {" "}
+                    <span className="text-slate-400">({(s.confidence * 100).toFixed(1)}% confidence)</span>
+                  </span>
+                  {hasLabel && (
+                    <>
+                      <span className="text-slate-400 text-xs">· true: {s.true_label}</span>
+                      <span className={`text-xs font-bold ${match ? "text-green-500" : "text-red-400"}`}>
+                        {match ? "✓" : "✗"}
+                      </span>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   }

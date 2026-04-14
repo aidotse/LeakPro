@@ -7,7 +7,12 @@ import ServerOrUpload from "../ServerOrUpload";
 // Code templates (inlined for download / preview)
 // ---------------------------------------------------------------------------
 
-const HANDLER_TEMPLATE = `"""Training handler for LeakPro — adapt this file to your dataset."""
+const HANDLER_TEMPLATE = `"""
+Training handler for LeakPro — defines the training loop for your model.
+
+Data loading and normalisation belong in dataset_handler.py (uploaded in Step 1).
+This file only needs to implement train() and eval().
+"""
 
 import torch
 from torch import cuda, device, optim, no_grad
@@ -20,7 +25,7 @@ from leakpro.schemas import TrainingOutput, EvalOutput
 
 
 class MyInputHandler(AbstractInputHandler):
-    """Implement train() and eval() for your dataset."""
+    """Implement train() and eval() for your model architecture."""
 
     def train(
         self,
@@ -106,58 +111,32 @@ class MyInputHandler(AbstractInputHandler):
             extra={"accuracy_history": accuracy_history, "loss_history": loss_history},
         )
         return TrainingOutput(model=model, metrics=results)
+
+    def eval(self, loader, model, criterion) -> EvalOutput:
+        """Model evaluation procedure."""
+        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        model.to(gpu_or_cpu)
+        model.eval()
+        loss, acc, total_samples = 0, 0, 0
+        with no_grad():
+            for data, target in loader:
+                data, target = data.to(gpu_or_cpu), target.to(gpu_or_cpu)
+                target = target.view(-1)
+                output = model(data)
+                loss += criterion(output, target).item() * target.size(0)
+                pred = output.argmax(dim=1)
+                acc += pred.eq(target).sum().item()
+                total_samples += target.size(0)
+        return EvalOutput(accuracy=float(acc) / total_samples, loss=loss / total_samples)
 `;
 
 const ARCH_TEMPLATE = `"""Model architecture for LeakPro — define your nn.Module subclass here."""
 
 import torch.nn as nn
 import torch.nn.functional as F
-from torch import add
 
 
-class BasicBlock(nn.Module):
-    def __init__(self, in_planes, out_planes, stride, dropRate=0.0):
-        super(BasicBlock, self).__init__()
-        self.bn1 = nn.BatchNorm2d(in_planes)
-        self.relu1 = nn.ReLU(inplace=True)
-        self.conv1 = nn.Conv2d(in_planes, out_planes, kernel_size=3,
-                               stride=stride, padding=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(out_planes)
-        self.relu2 = nn.ReLU(inplace=True)
-        self.conv2 = nn.Conv2d(out_planes, out_planes, kernel_size=3,
-                               stride=1, padding=1, bias=False)
-        self.droprate = dropRate
-        self.equalInOut = (in_planes == out_planes)
-        self.convShortcut = (not self.equalInOut) and nn.Conv2d(
-            in_planes, out_planes, kernel_size=1, stride=stride, padding=0, bias=False) or None
-
-    def forward(self, x):
-        if not self.equalInOut:
-            x = self.relu1(self.bn1(x))
-        else:
-            out = self.relu1(self.bn1(x))
-        out = self.relu2(self.bn2(self.conv1(out if self.equalInOut else x)))
-        if self.droprate > 0:
-            out = F.dropout(out, p=self.droprate, training=self.training)
-        out = self.conv2(out)
-        return add(x if self.equalInOut else self.convShortcut(x), out)
-
-
-class NetworkBlock(nn.Module):
-    def __init__(self, nb_layers, in_planes, out_planes, block, stride, dropRate=0.0):
-        super(NetworkBlock, self).__init__()
-        self.layer = self._make_layer(block, in_planes, out_planes, nb_layers, stride, dropRate)
-
-    def _make_layer(self, block, in_planes, out_planes, nb_layers, stride, dropRate):
-        layers = []
-        for i in range(int(nb_layers)):
-            layers.append(block(
-                i == 0 and in_planes or out_planes, out_planes,
-                i == 0 and stride or 1, dropRate))
-        return nn.Sequential(*layers)
-
-    def forward(self, x):
-        return self.layer(x)
+# Define any helper classes above if needed (e.g. BasicBlock, NetworkBlock)
 
 
 class WideResNet(nn.Module):
@@ -166,11 +145,11 @@ class WideResNet(nn.Module):
         nChannels = [16, 16 * widen_factor, 32 * widen_factor, 64 * widen_factor]
         assert (depth - 4) % 6 == 0
         n = (depth - 4) / 6
-        block = BasicBlock
+        # ... instantiate your layer blocks here (e.g. BasicBlock, NetworkBlock)
         self.conv1 = nn.Conv2d(3, nChannels[0], kernel_size=3, stride=1, padding=1, bias=False)
-        self.block1 = NetworkBlock(n, nChannels[0], nChannels[1], block, 1, dropRate)
-        self.block2 = NetworkBlock(n, nChannels[1], nChannels[2], block, 2, dropRate)
-        self.block3 = NetworkBlock(n, nChannels[2], nChannels[3], block, 2, dropRate)
+        self.block1 = None  # replace with your block: NetworkBlock(n, nChannels[0], nChannels[1], ...)
+        self.block2 = None  # replace with your block: NetworkBlock(n, nChannels[1], nChannels[2], ...)
+        self.block3 = None  # replace with your block: NetworkBlock(n, nChannels[2], nChannels[3], ...)
         self.bn1 = nn.BatchNorm2d(nChannels[3])
         self.relu = nn.ReLU(inplace=True)
         self.fc = nn.Linear(nChannels[3], num_classes)
@@ -488,7 +467,9 @@ function downloadFile(content: string, filename: string) {
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
+  document.body.appendChild(a);
   a.click();
+  document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
 

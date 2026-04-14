@@ -1,5 +1,217 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
+import ReactDOM from "react-dom";
 import { api, DataMeta } from "../../api";
+
+// ---------------------------------------------------------------------------
+// dataset_handler.py template
+// ---------------------------------------------------------------------------
+const DATASET_HANDLER_TEMPLATE = `"""
+dataset_handler.py — define how LeakPro loads and normalises YOUR data.
+Upload this file in Step 1 (Dataset).
+"""
+import numpy as np
+import torch
+from leakpro import AbstractInputHandler
+
+
+class UserDataset(AbstractInputHandler.UserDataset):
+    """
+    Wraps your dataset for use in LeakPro.
+
+    Requirements:
+      - Must be indexable: dataset[i] returns (input_tensor, label)
+      - data: float32 Tensor in [0, 1], shape (N, C, H, W) for images
+              or (N, features) for tabular
+      - targets: integer class labels, shape (N,)
+    """
+    def __init__(self, data, targets, **kwargs):
+        # Convert numpy arrays to float32 tensors in [0, 1]
+        if isinstance(data, np.ndarray):
+            if data.dtype == np.uint8:
+                data = data.astype(np.float32) / 255.0   # uint8 -> float [0,1]
+            else:
+                data = data.astype(np.float32)
+            # Channel-last (N,H,W,C) -> channel-first (N,C,H,W) for images
+            if data.ndim == 4 and data.shape[-1] in (1, 3, 4) and data.shape[1] > 4:
+                data = data.transpose(0, 3, 1, 2)
+            data = torch.from_numpy(data)
+        if isinstance(targets, np.ndarray):
+            targets = torch.from_numpy(targets).long()
+
+        assert data.max() <= 1.0 and data.min() >= 0.0, "Data must be in [0, 1] after conversion"
+
+        self.data = data.float()
+        self.targets = targets
+
+        # Per-channel normalisation stats (computed from your data)
+        if data.ndim == 4:
+            self.mean = self.data.mean(dim=(0, 2, 3)).view(-1, 1, 1)
+            self.std  = self.data.std(dim=(0, 2, 3)).view(-1, 1, 1).clamp(min=1e-7)
+        else:
+            self.mean = self.data.mean(dim=0)
+            self.std  = self.data.std(dim=0).clamp(min=1e-7)
+
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+    def _normalize(self, x):
+        return (x - self.mean) / self.std
+
+    def __getitem__(self, index):
+        # Must be indexable — returns (normalised_input, label)
+        return self._normalize(self.data[index]), self.targets[index]
+
+    def __len__(self):
+        return len(self.targets)
+`;
+
+function downloadTemplate() {
+  const blob = new Blob([DATASET_HANDLER_TEMPLATE], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "dataset_handler.py";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ---------------------------------------------------------------------------
+// Code preview modal (same pattern as Step3Setup)
+// ---------------------------------------------------------------------------
+function CodeModal({ onClose }: { onClose: () => void }) {
+  return ReactDOM.createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+          <h3 className="font-bold text-lg">Example: Data Handler</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors">
+            <span className="material-symbols-outlined">close</span>
+          </button>
+        </div>
+        <p className="px-6 pt-4 text-sm text-slate-500 dark:text-slate-400">
+          Your <code>dataset_handler.py</code> must define a <code>UserDataset</code> class that is
+          <strong> indexable</strong> — <code>dataset[i]</code> must return a <code>(input, label)</code> pair.
+          Data must be a float32 tensor in [0, 1]. Adapt the normalisation and channel order to match your data format.
+        </p>
+        <pre className="overflow-auto px-6 py-4 font-mono text-xs text-slate-300 bg-slate-950 mx-6 my-4 rounded-xl max-h-[55vh] leading-relaxed">
+          {DATASET_HANDLER_TEMPLATE}
+        </pre>
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-slate-800">
+          <button
+            onClick={downloadTemplate}
+            className="flex items-center gap-2 px-5 py-2 rounded-lg border border-slate-300 dark:border-slate-700 text-sm font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+          >
+            <span className="material-symbols-outlined text-base">download</span>
+            Download template
+          </button>
+          <button
+            onClick={onClose}
+            className="px-5 py-2 rounded-lg bg-primary text-white text-sm font-bold hover:bg-primary/90 transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DatasetHandlerUpload — shown after dataset is validated, required to continue
+// ---------------------------------------------------------------------------
+function DatasetHandlerUpload({ jobId, onUploaded }: { jobId: string; onUploaded: (uploaded: boolean) => void }) {
+  const [handlerFile, setHandlerFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showModal, setShowModal] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleFile = async (f: File) => {
+    setUploading(true);
+    setError(null);
+    try {
+      await api.uploadDatasetHandler(jobId, f);
+      setHandlerFile(f);
+      onUploaded(true);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const remove = () => {
+    setHandlerFile(null);
+    onUploaded(false);
+    if (inputRef.current) inputRef.current.value = "";
+  };
+
+  return (
+    <div className="flex flex-col gap-3 p-5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+      {showModal && <CodeModal onClose={() => setShowModal(false)} />}
+
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="font-bold text-sm">Data Handler</p>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Define how LeakPro wraps your data for training and auditing. Must define a{" "}
+            <code className="text-xs bg-slate-200 dark:bg-slate-700 px-1 rounded">UserDataset</code> class
+            that is <strong>indexable</strong> — <code className="text-xs bg-slate-200 dark:bg-slate-700 px-1 rounded">dataset[i]</code> returns
+            an <code className="text-xs bg-slate-200 dark:bg-slate-700 px-1 rounded">(input, label)</code> pair.
+            Adapt normalisation and format to your data type (images, tabular, time series, etc.).
+          </p>
+        </div>
+        <button
+          onClick={() => setShowModal(true)}
+          className="shrink-0 flex items-center gap-1 text-xs text-primary font-semibold hover:underline"
+        >
+          <span className="material-symbols-outlined text-sm">code</span>
+          View example
+        </button>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".py"
+          className="hidden"
+          onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
+        />
+        {handlerFile ? (
+          <div className="flex items-center gap-2 flex-1 px-4 py-2 rounded-lg border border-green-500/40 bg-green-500/5 text-green-600 dark:text-green-400 text-sm font-semibold">
+            <span className="material-symbols-outlined text-base">check_circle</span>
+            {handlerFile.name}
+          </div>
+        ) : (
+          <button
+            onClick={() => inputRef.current?.click()}
+            disabled={uploading}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 text-sm text-slate-500 hover:border-primary hover:text-primary transition-colors disabled:opacity-50"
+          >
+            <span className="material-symbols-outlined text-base">upload_file</span>
+            {uploading ? "Uploading…" : "Upload dataset_handler.py"}
+          </button>
+        )}
+        {handlerFile && (
+          <button onClick={remove} className="text-xs text-slate-400 hover:text-red-500 transition-colors">
+            Remove
+          </button>
+        )}
+      </div>
+      {error && <p className="text-xs text-red-500">{error}</p>}
+    </div>
+  );
+}
 
 interface Props {
   jobId: string;
@@ -45,6 +257,7 @@ function ServerPathForm({ jobId, onDone }: { jobId: string; onDone: (m: DataMeta
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [meta, setMeta] = useState<DataMeta | null>(null);
+  const [handlerUploaded, setHandlerUploaded] = useState(false);
 
   const validate = async () => {
     if (!path.trim()) return;
@@ -96,24 +309,30 @@ function ServerPathForm({ jobId, onDone }: { jobId: string; onDone: (m: DataMeta
       )}
 
       {meta && (
-        <div className="flex flex-col gap-4 p-5 rounded-xl border border-green-500/30 bg-green-500/5">
-          <div className="flex items-center gap-2 text-green-600 dark:text-green-400 font-bold">
-            <span className="material-symbols-outlined">check_circle</span>
-            Dataset found and analysed
+        <>
+          <div className="flex flex-col gap-4 p-5 rounded-xl border border-green-500/30 bg-green-500/5">
+            <div className="flex items-center gap-2 text-green-600 dark:text-green-400 font-bold">
+              <span className="material-symbols-outlined">check_circle</span>
+              Dataset found and analysed
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <MetaField label="Type"    value={meta.data_type} />
+              <MetaField label="Shape"   value={`[${meta.shape.join(", ")}]`} />
+              <MetaField label="Samples" value={meta.n_samples.toLocaleString()} />
+              <MetaField label="Dtype"   value={meta.dtype} />
+            </div>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <MetaField label="Type"    value={meta.data_type} />
-            <MetaField label="Shape"   value={`[${meta.shape.join(", ")}]`} />
-            <MetaField label="Samples" value={meta.n_samples.toLocaleString()} />
-            <MetaField label="Dtype"   value={meta.dtype} />
+          <DatasetHandlerUpload jobId={jobId} onUploaded={setHandlerUploaded} />
+          <div className="flex justify-end">
+            <button
+              onClick={() => onDone(meta)}
+              disabled={!handlerUploaded}
+              className="px-8 py-2.5 rounded-lg bg-primary text-white font-bold hover:bg-primary/90 transition-colors flex items-center gap-2 shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Continue <span className="material-symbols-outlined text-base">arrow_forward</span>
+            </button>
           </div>
-          <button
-            onClick={() => onDone(meta)}
-            className="self-end px-8 py-2.5 rounded-lg bg-primary text-white font-bold hover:bg-primary/90 transition-colors flex items-center gap-2 shadow-lg shadow-primary/20"
-          >
-            Continue <span className="material-symbols-outlined text-base">arrow_forward</span>
-          </button>
-        </div>
+        </>
       )}
     </div>
   );
@@ -128,6 +347,7 @@ function UploadForm({ jobId, onDone }: { jobId: string; onDone: (m: DataMeta) =>
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [meta, setMeta] = useState<DataMeta | null>(null);
+  const [handlerUploaded, setHandlerUploaded] = useState(false);
 
   const handleFile = useCallback(async (f: File) => {
     setFile(f);
@@ -192,24 +412,30 @@ function UploadForm({ jobId, onDone }: { jobId: string; onDone: (m: DataMeta) =>
     </label>
 
     {meta && (
-      <div className="flex flex-col gap-4 p-5 rounded-xl border border-green-500/30 bg-green-500/5">
-        <div className="flex items-center gap-2 text-green-600 dark:text-green-400 font-bold">
-          <span className="material-symbols-outlined">check_circle</span>
-          Dataset analysed
+      <>
+        <div className="flex flex-col gap-4 p-5 rounded-xl border border-green-500/30 bg-green-500/5">
+          <div className="flex items-center gap-2 text-green-600 dark:text-green-400 font-bold">
+            <span className="material-symbols-outlined">check_circle</span>
+            Dataset analysed
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <MetaField label="Type"    value={meta.data_type} />
+            <MetaField label="Shape"   value={`[${meta.shape.join(", ")}]`} />
+            <MetaField label="Samples" value={meta.n_samples.toLocaleString()} />
+            <MetaField label="Dtype"   value={meta.dtype} />
+          </div>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <MetaField label="Type"    value={meta.data_type} />
-          <MetaField label="Shape"   value={`[${meta.shape.join(", ")}]`} />
-          <MetaField label="Samples" value={meta.n_samples.toLocaleString()} />
-          <MetaField label="Dtype"   value={meta.dtype} />
+        <DatasetHandlerUpload jobId={jobId} onUploaded={setHandlerUploaded} />
+        <div className="flex justify-end">
+          <button
+            onClick={() => onDone(meta)}
+            disabled={!handlerUploaded}
+            className="px-8 py-2.5 rounded-lg bg-primary text-white font-bold hover:bg-primary/90 transition-colors flex items-center gap-2 shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Continue <span className="material-symbols-outlined text-base">arrow_forward</span>
+          </button>
         </div>
-        <button
-          onClick={() => onDone(meta)}
-          className="self-end px-8 py-2.5 rounded-lg bg-primary text-white font-bold hover:bg-primary/90 transition-colors flex items-center gap-2 shadow-lg shadow-primary/20"
-        >
-          Continue <span className="material-symbols-outlined text-base">arrow_forward</span>
-        </button>
-      </div>
+      </>
     )}
   </div>
   );
