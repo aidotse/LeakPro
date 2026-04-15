@@ -185,14 +185,22 @@ def run_audit_job(
                     _dspec = _ilu.spec_from_file_location("_dataset_handler", dataset_handler_py)
                     _dmod = _ilu.module_from_spec(_dspec)
                     _dspec.loader.exec_module(_dmod)
+                    import inspect as _inspect_ds
+                    def _is_concrete_user_dataset(cls: type) -> bool:
+                        return (
+                            isinstance(cls, type)
+                            and not _inspect_ds.isabstract(cls)
+                            and cls.__name__ == "UserDataset"
+                        )
                     _user_dataset_cls = getattr(_dmod, "UserDataset", None)
-                    if _user_dataset_cls is None:
+                    if _user_dataset_cls is None or not _is_concrete_user_dataset(_user_dataset_cls):
+                        _user_dataset_cls = None
                         # UserDataset may be a nested class inside a handler class
                         for _attr_name in dir(_dmod):
                             _obj = getattr(_dmod, _attr_name, None)
                             if isinstance(_obj, type):
                                 _nested = getattr(_obj, "UserDataset", None)
-                                if _nested is not None and isinstance(_nested, type):
+                                if _nested is not None and _is_concrete_user_dataset(_nested):
                                     _user_dataset_cls = _nested
                                     break
                     if _user_dataset_cls is not None:
