@@ -66,6 +66,17 @@ def setup_logger(name: str = "leakpro_log", level: int = logging.INFO) -> loggin
         console_handler.setFormatter(log_format)
         logger.addHandler(console_handler)
 
+    # Add filter to suppress train/test indices from logs
+    class SuppressIndicesFilter(logging.Filter):
+        def filter(self, record):
+            msg = record.getMessage()
+            if "train_indices" in msg or "test_indices" in msg:
+                return False
+            return True
+
+    logger.addFilter(SuppressIndicesFilter())
+ 
+
     return logger
 
 def add_file_handler(logger: logging.Logger, log_file_path: str) -> None:

@@ -6,6 +6,7 @@ import numpy as np
 import optuna
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from torch.nn import Module
+from transformers import data
 
 ArrayOrScalar = Union[np.ndarray, np.integer, int, list]
 
