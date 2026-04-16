@@ -1,9 +1,10 @@
 """Module contains the function to setup the logger for the current run."""
+
 import logging
 import os
 
 
-def setup_logger(name: str, save_file: bool=True, save_path:str=None) -> logging.Logger:
+def setup_logger(name: str, save_file: bool = True, save_path: str = None) -> logging.Logger:
     """Generate the logger for the current run.
 
     Args:
@@ -68,16 +69,14 @@ def setup_logger(name: str = "leakpro_log", level: int = logging.INFO) -> loggin
 
     # Add filter to suppress train/test indices from logs
     class SuppressIndicesFilter(logging.Filter):
-        def filter(self, record):
+        def filter(self, record: logging.LogRecord) -> bool:
             msg = record.getMessage()
-            if "train_indices" in msg or "test_indices" in msg:
-                return False
-            return True
-
+            return "train_indices" not in msg and "test_indices" not in msg
+            
     logger.addFilter(SuppressIndicesFilter())
- 
 
     return logger
+
 
 def add_file_handler(logger: logging.Logger, log_file_path: str) -> None:
     """Adds a file handler to the logger for logging to a specified file.
@@ -96,5 +95,6 @@ def add_file_handler(logger: logging.Logger, log_file_path: str) -> None:
 
     # Add file handler to logger
     logger.addHandler(file_handler)
+
 
 logger = setup_logger(name="leakpro")
