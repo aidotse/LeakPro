@@ -72,7 +72,7 @@ def setup_logger(name: str = "leakpro_log", level: int = logging.INFO) -> loggin
         def filter(self, record: logging.LogRecord) -> bool:
             msg = record.getMessage()
             return "train_indices" not in msg and "test_indices" not in msg
-            
+
     logger.addFilter(SuppressIndicesFilter())
 
     return logger
