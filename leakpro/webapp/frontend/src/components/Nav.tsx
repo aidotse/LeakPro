@@ -10,10 +10,8 @@ export default function Nav({ onToggleDark, dark }: NavProps) {
     <header className="border-b border-slate-200 dark:border-slate-800 bg-background-light dark:bg-background-dark px-6 py-4 shrink-0">
       <div className="max-w-6xl mx-auto flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="bg-primary p-1.5 rounded-lg flex items-center justify-center">
-            <span className="material-symbols-outlined text-white text-xl">security</span>
-          </div>
-          <h1 className="text-lg font-bold tracking-tight">Privacy Audit Tool</h1>
+          <img src="/logo.jpg" alt="LeakPro" className="h-10 w-10 rounded-lg object-contain" />
+          <h1 className="text-lg font-bold tracking-tight">LeakPro</h1>
         </div>
         <div className="flex items-center gap-4">
           <button

@@ -39,7 +39,7 @@ export default function RocChart({ results }: Props) {
     const out: Plotly.Data[] = [
       {
         x: [1e-5, 1], y: [1e-5, 1], mode: "lines",
-        line: { dash: "dash", color: "#64748b", width: 1 },
+        line: { dash: "dash", color: "#94a3b8", width: 1.5 },
         name: "Random (AUC=0.5)", showlegend: true,
       } as Plotly.Data,
     ];
@@ -53,7 +53,7 @@ export default function RocChart({ results }: Props) {
         const name = `${model.model_name} / ${atk.attack_name} (AUC=${atk.roc_auc?.toFixed(3)})`;
         out.push({
           x: atk.fpr, y: atk.tpr, mode: "lines",
-          line: { color: col, width: 2, dash: DASHES[ai % DASHES.length] },
+          line: { color: col, width: 3, dash: DASHES[ai % DASHES.length] },
           name, text: atk.fpr.map((f, i) =>
             `FPR: ${f.toFixed(5)}<br>TPR: ${atk.tpr![i].toFixed(5)}`
           ),
@@ -140,8 +140,8 @@ export default function RocChart({ results }: Props) {
         layout={{
           paper_bgcolor: "transparent",
           plot_bgcolor: "transparent",
-          xaxis: { type: "log", range: [-5, 0], title: "False Positive Rate", gridcolor: "#334155" },
-          yaxis: { type: "log", range: [-5, 0], title: "True Positive Rate", gridcolor: "#334155" },
+          xaxis: { type: "log", range: [-5, 0], title: { text: "False Positive Rate (FPR)" }, gridcolor: "#e2e8f0", gridwidth: 1, zerolinecolor: "#94a3b8" },
+          yaxis: { type: "log", range: [-5, 0], title: { text: "True Positive Rate (TPR)" }, gridcolor: "#e2e8f0", gridwidth: 1, zerolinecolor: "#94a3b8" },
           legend: { orientation: "h", y: -0.2 },
           margin: { t: 20, r: 20, b: 80, l: 60 },
           font: { family: "Inter, sans-serif", color: "#94a3b8" },

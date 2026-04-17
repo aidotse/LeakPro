@@ -27,7 +27,7 @@ const ATTACK_DEFS: Record<string, { label: string; desc: string; params: ParamDe
     label: "RMIA",
     desc: "Relative membership inference via likelihood ratio test against shadow models",
     params: [
-      { key: "num_shadow_models",      label: "Shadow models",       type: "number",  default: 1,   min: 1, max: 256 },
+      { key: "num_shadow_models",      label: "Shadow models",       type: "number",  default: 2,   min: 1, max: 256 },
       { key: "temperature",            label: "Temperature",         type: "number",  default: 2.0, min: 0.1, max: 10, step: 0.1 },
       { key: "training_data_fraction", label: "Train data fraction", type: "number",  default: 0.5, min: 0.1, max: 1.0, step: 0.05 },
       { key: "online",                 label: "Online mode",         type: "boolean", default: false },
@@ -37,7 +37,7 @@ const ATTACK_DEFS: Record<string, { label: string; desc: string; params: ParamDe
     label: "LiRA",
     desc: "Likelihood ratio attack — fits Gaussians over shadow model outputs",
     params: [
-      { key: "num_shadow_models",      label: "Shadow models",       type: "number",  default: 1,   min: 2, max: 256 },
+      { key: "num_shadow_models",      label: "Shadow models",       type: "number",  default: 2,   min: 2, max: 256 },
       { key: "training_data_fraction", label: "Train data fraction", type: "number",  default: 0.5, min: 0.1, max: 1.0, step: 0.05 },
       { key: "online",                 label: "Online mode",         type: "boolean", default: false },
     ],
@@ -46,7 +46,7 @@ const ATTACK_DEFS: Record<string, { label: string; desc: string; params: ParamDe
     label: "BASE",
     desc: "Loss-based attack using LogSumExp approximation over shadow model losses",
     params: [
-      { key: "num_shadow_models",      label: "Shadow models",       type: "number",  default: 1,   min: 1, max: 256 },
+      { key: "num_shadow_models",      label: "Shadow models",       type: "number",  default: 2,   min: 1, max: 256 },
       { key: "temperature",            label: "Temperature",         type: "number",  default: 2.0, min: 0.1, max: 10, step: 0.1 },
       { key: "training_data_fraction", label: "Train data fraction", type: "number",  default: 0.5, min: 0.1, max: 1.0, step: 0.05 },
       { key: "online",                 label: "Online mode",         type: "boolean", default: false },
