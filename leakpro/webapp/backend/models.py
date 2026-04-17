@@ -79,6 +79,7 @@ class TrainParams(BaseModel):
     target_epsilon: float | None = None
     target_delta: float | None = None
     max_grad_norm: float | None = None
+    virtual_batch_size: int | None = None
 
 
 class ModelInfo(BaseModel):
@@ -133,10 +134,21 @@ class AttackResult(BaseModel):
     true_labels: list[int] | None = None
 
 
+class JobListItem(BaseModel):
+    job_id: str
+    status: str
+    created_at: str
+    model_names: list[str] = []
+
+
 class ModelResult(BaseModel):
     model_name: str
     source: str
     dpsgd: bool
     target_epsilon: float | None = None
     test_accuracy: float | None = None
+    train_accuracy: float | None = None
+    model_class: str | None = None   # e.g. "ResNet18_DPsgd"
+    job_id: str | None = None        # originating job, used for sample image URLs
+    train_meta: dict | None = None   # epochs, lr, batch_size, optimizer, data info
     attacks: list[AttackResult] = []

@@ -33,6 +33,7 @@ async function upload<T>(path: string, file: File, extra?: Record<string, string
 
 export const api = {
   createJob: () => post<{ job_id: string; status: string; created_at: string }>("/jobs"),
+  listJobs: () => get<JobListItem[]>("/jobs"),
   getStatus: (id: string) => get<{ job_id: string; status: string; error?: string }>(`/jobs/${id}/status`),
 
   // Step 1
@@ -138,6 +139,7 @@ export interface TrainParams {
   target_epsilon?: number;
   target_delta?: number;
   max_grad_norm?: number;
+  virtual_batch_size?: number;
 }
 
 export interface AttackParams {
@@ -160,11 +162,38 @@ export interface AttackResult {
   true_labels?: number[];
 }
 
+export interface JobListItem {
+  job_id: string;
+  status: string;
+  created_at: string;
+  model_names: string[];
+}
+
+export interface TrainMeta {
+  epochs?: number;
+  learning_rate?: number;
+  batch_size?: number;
+  optimizer?: string;
+  f_train?: number;
+  f_test?: number;
+  target_delta?: number;
+  max_grad_norm?: number;
+  virtual_batch_size?: number;
+  data_type?: string;
+  data_shape?: number[];
+  n_classes?: number;
+  n_samples?: number;
+}
+
 export interface ModelResult {
   model_name: string;
   source: string;
   dpsgd: boolean;
   target_epsilon?: number;
+  train_accuracy?: number;
   test_accuracy?: number;
+  model_class?: string;
+  job_id?: string;
+  train_meta?: TrainMeta;
   attacks: AttackResult[];
 }

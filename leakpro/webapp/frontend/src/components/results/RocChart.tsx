@@ -2,12 +2,38 @@ import React, { useMemo, useState } from "react";
 import Plot from "react-plotly.js";
 import { ModelResult } from "../../api";
 
-const COLOURS = ["#193ce6", "#e61919", "#19e66b", "#e6a819", "#ae19e6"];
+const COLOURS = [
+  "#4e79a7","#f28e2b","#e15759","#76b7b2","#59a14f",
+  "#edc948","#b07aa1","#ff9da7","#9c755f","#bab0ac",
+];
+const DASHES: Array<"solid"|"dash"|"dot"|"dashdot"|"longdash"> = ["solid","dash","dot","dashdot","longdash"];
+
+type AttackMode = "all" | "best";
 
 interface Props { results: ModelResult[] }
 
 export default function RocChart({ results }: Props) {
   const [selected, setSelected] = useState<string[]>(results.map((m) => m.model_name));
+  const [attackMode, setAttackMode] = useState<AttackMode>("all");
+
+  // For each model, determine which attack indices to display
+  const visibleAttacks = useMemo(() => {
+    const map: Record<string, number[]> = {};
+    results.forEach((model) => {
+      if (attackMode === "best") {
+        // Find the index of the attack with the highest AUC
+        let bestIdx = 0;
+        let bestAuc = -Infinity;
+        model.attacks.forEach((atk, i) => {
+          if ((atk.roc_auc ?? -Infinity) > bestAuc) { bestAuc = atk.roc_auc ?? -Infinity; bestIdx = i; }
+        });
+        map[model.model_name] = [bestIdx];
+      } else {
+        map[model.model_name] = model.attacks.map((_, i) => i);
+      }
+    });
+    return map;
+  }, [results, attackMode]);
 
   const traces = useMemo(() => {
     const out: Plotly.Data[] = [
@@ -20,20 +46,14 @@ export default function RocChart({ results }: Props) {
     results.forEach((model, mi) => {
       if (!selected.includes(model.model_name)) return;
       const col = COLOURS[mi % COLOURS.length];
-      model.attacks.forEach((atk) => {
+      const allowedIdx = visibleAttacks[model.model_name] ?? [];
+      model.attacks.forEach((atk, ai) => {
+        if (!allowedIdx.includes(ai)) return;
         if (!atk.fpr || !atk.tpr) return;
         const name = `${model.model_name} / ${atk.attack_name} (AUC=${atk.roc_auc?.toFixed(3)})`;
-        // Fill area
-        out.push({
-          x: atk.fpr, y: atk.tpr, mode: "lines", fill: "tozeroy",
-          fillcolor: col.replace(")", ", 0.08)").replace("rgb", "rgba"),
-          line: { color: "transparent", width: 0 },
-          showlegend: false, hoverinfo: "skip",
-        } as Plotly.Data);
-        // Line
         out.push({
           x: atk.fpr, y: atk.tpr, mode: "lines",
-          line: { color: col, width: 2 },
+          line: { color: col, width: 2, dash: DASHES[ai % DASHES.length] },
           name, text: atk.fpr.map((f, i) =>
             `FPR: ${f.toFixed(5)}<br>TPR: ${atk.tpr![i].toFixed(5)}`
           ),
@@ -42,12 +62,34 @@ export default function RocChart({ results }: Props) {
       });
     });
     return out;
-  }, [results, selected]);
+  }, [results, selected, visibleAttacks]);
+
+  const downloadCSV = () => {
+    const rows = ["model,attack,auc,tpr_at_10pct_fpr,tpr_at_1pct_fpr,tpr_at_0.1pct_fpr,tpr_at_0pct_fpr"];
+    results.forEach((m) =>
+      m.attacks.forEach((a) => {
+        rows.push([
+          m.model_name, a.attack_name,
+          a.roc_auc?.toFixed(6) ?? "",
+          (a.tpr_at_fpr["TPR@10%FPR"] ?? ""),
+          (a.tpr_at_fpr["TPR@1%FPR"] ?? ""),
+          (a.tpr_at_fpr["TPR@0.1%FPR"] ?? ""),
+          (a.tpr_at_fpr["TPR@0%FPR"] ?? ""),
+        ].join(","));
+      })
+    );
+    const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url;
+    a.download = "leakpro_roc_table.csv"; a.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Model filter */}
-      <div className="flex flex-wrap gap-2">
+      {/* Controls row */}
+      <div className="flex flex-wrap items-center gap-3">
+        {/* Model filter */}
         {results.map((m, i) => {
           const on = selected.includes(m.model_name);
           return (
@@ -65,6 +107,32 @@ export default function RocChart({ results }: Props) {
             </button>
           );
         })}
+
+        {/* Divider */}
+        <span className="text-slate-300 dark:text-slate-700">|</span>
+
+        {/* Attack mode filter */}
+        {(["all", "best"] as AttackMode[]).map((mode) => (
+          <button
+            key={mode}
+            onClick={() => setAttackMode(mode)}
+            className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-colors
+              ${attackMode === mode
+                ? "bg-slate-700 text-white border-transparent"
+                : "border-slate-300 dark:border-slate-700 text-slate-500"}`}
+          >
+            {mode === "all" ? "All attacks" : "Best per model"}
+          </button>
+        ))}
+
+        {/* Download CSV */}
+        <button
+          onClick={downloadCSV}
+          className="ml-auto flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-500 text-xs font-bold hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+        >
+          <span className="material-symbols-outlined text-sm">download</span>
+          CSV
+        </button>
       </div>
 
       <Plot
@@ -78,7 +146,13 @@ export default function RocChart({ results }: Props) {
           margin: { t: 20, r: 20, b: 80, l: 60 },
           font: { family: "Inter, sans-serif", color: "#94a3b8" },
         }}
-        config={{ displayModeBar: false, responsive: true }}
+        config={{
+          responsive: true,
+          displayModeBar: true,
+          displaylogo: false,
+          modeBarButtons: [["toImage"]],
+          toImageButtonOptions: { format: "png", filename: "leakpro_roc_curves", width: 1200, height: 600, scale: 2 },
+        }}
         style={{ width: "100%", height: 480 }}
         useResizeHandler
       />

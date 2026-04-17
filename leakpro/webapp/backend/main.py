@@ -235,6 +235,21 @@ app.add_middleware(
 # Job lifecycle
 # ---------------------------------------------------------------------------
 
+@app.get("/jobs")
+async def list_jobs() -> list[dict]:
+    """Return all known jobs — used for cross-session result comparison."""
+    out = []
+    for jid, job in _jobs.items():
+        out.append({
+            "job_id": jid,
+            "status": job.get("status", "unknown"),
+            "created_at": job.get("created_at", ""),
+            "model_names": [m["name"] for m in job.get("models", [])],
+        })
+    out.sort(key=lambda x: x["created_at"], reverse=True)
+    return out
+
+
 @app.post("/jobs", response_model=JobSummary)
 async def create_job() -> JobSummary:
     job_id = uuid.uuid4().hex
@@ -533,7 +548,8 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
             if str(leakpro_root) not in _sys.path:
                 _sys.path.insert(0, str(leakpro_root))
 
-            target_folder = _job_dir(job_id) / "models" / params.name
+            job_dir = _job_dir(job_id)
+            target_folder = job_dir / "models" / params.name
             target_folder.mkdir(parents=True, exist_ok=True)
 
             model_entry = {
@@ -561,8 +577,13 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
 
             # Load handler class (skip abstract base classes)
             import inspect
-            handler_path = cifar_dir / "cifar_handler.py"
-            spec = importlib.util.spec_from_file_location("cifar_handler", handler_path)
+            if params.dpsgd:
+                handler_path = cifar_dir / "cifar_handler_dpsgd.py"
+                _handler_mod_name = "cifar_handler_dpsgd"
+            else:
+                handler_path = cifar_dir / "cifar_handler.py"
+                _handler_mod_name = "cifar_handler"
+            spec = importlib.util.spec_from_file_location(_handler_mod_name, handler_path)
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)
             HandlerCls = next(
@@ -655,13 +676,75 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
             test_loader = DataLoader(test_subset,  batch_size=params.batch_size, shuffle=False, num_workers=0)
 
             # Load model architecture
-            from target_model_class import ResNet18  # noqa: PLC0415
-            model = ResNet18()
+            _using_preset = job.get("arch_config", {}).get("preset") in ("cifar_image", "cifar_wrn")
+            if _using_preset and params.dpsgd:
+                from target_model_class import ResNet18_DPsgd  # noqa: PLC0415
+                model = ResNet18_DPsgd(num_classes=10, dpsgd=True)
+            elif _using_preset:
+                from target_model_class import ResNet18  # noqa: PLC0415
+                model = ResNet18()
+            else:
+                # Custom uploaded arch.py
+                import importlib.util as _ilu2
+                import inspect as _inspect2
+                import torch.nn as _nn2
+
+                # Register job_dir on sys.path so pickle can reimport the module by name
+                if str(job_dir) not in _sys.path:
+                    _sys.path.insert(0, str(job_dir))
+
+                # Load under a stable importable name and register in sys.modules
+                _arch_mod_name = "target_model_class"
+                if _arch_mod_name in _sys.modules:
+                    del _sys.modules[_arch_mod_name]  # avoid stale cache between models
+                _arch_spec = _ilu2.spec_from_file_location(_arch_mod_name, job_dir / "arch.py")
+                _arch_mod = _ilu2.module_from_spec(_arch_spec)
+                _sys.modules[_arch_mod_name] = _arch_mod  # register before exec so relative imports work
+                _arch_spec.loader.exec_module(_arch_mod)
+
+                _arch_cls = next(
+                    v for v in vars(_arch_mod).values()
+                    if isinstance(v, type) and issubclass(v, _nn2.Module) and v is not _nn2.Module
+                )
+
+                if params.dpsgd:
+                    _sig = _inspect2.signature(_arch_cls.__init__)
+                    if "dpsgd" in _sig.parameters:
+                        model = _arch_cls(dpsgd=True)
+                        log_q.put(f"[train] Instantiated {_arch_cls.__name__}(dpsgd=True) — ModuleValidator handled internally")
+                    else:
+                        model = _arch_cls()
+                        from opacus.validators import ModuleValidator as _MV  # noqa: PLC0415
+                        model = _MV.fix(model)
+                        log_q.put(f"[train] Applied ModuleValidator.fix() to {_arch_cls.__name__} for DP-SGD compatibility")
+                else:
+                    model = _arch_cls()
+
             criterion = nn.CrossEntropyLoss()
             if params.optimizer == "sgd":
                 optimizer = optim.SGD(model.parameters(), lr=params.learning_rate, momentum=0.9, weight_decay=5e-4)
             else:
                 optimizer = optim.Adam(model.parameters(), lr=params.learning_rate)
+
+            # Build dpsgd_dic.pkl if training with DP-SGD
+            _dpsgd_path = None
+            _vbs = params.virtual_batch_size or 16
+            if params.dpsgd:
+                import pickle as _pkl
+                _dpsgd_meta = {
+                    "target_epsilon":    params.target_epsilon or 10.0,
+                    "target_delta":      params.target_delta if params.target_delta is not None else 1e-5,
+                    "sample_rate":       1.0 / len(loader),
+                    "epochs":            params.epochs,
+                    "epsilon_tolerance": 0.01,
+                    "accountant":        "prv",
+                    "eps_error":         0.01,
+                    "max_grad_norm":     params.max_grad_norm or 1.0,
+                }
+                _dpsgd_path = target_folder / "dpsgd_dic.pkl"
+                with open(_dpsgd_path, "wb") as _f:
+                    _pkl.dump(_dpsgd_meta, _f)
+                log_q.put(f"[train] DP-SGD config saved (ε={_dpsgd_meta['target_epsilon']}, δ={_dpsgd_meta['target_delta']}, max_grad_norm={_dpsgd_meta['max_grad_norm']})")
 
             # Monkey-patch tqdm to emit __PROGRESS__ markers
             _orig_tqdm = None
@@ -684,7 +767,15 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                 pass
 
             handler = HandlerCls()
-            result = handler.train(loader, model, criterion, optimizer, epochs=params.epochs)
+            if params.dpsgd and _dpsgd_path is not None:
+                result = handler.train(
+                    loader, model, criterion, optimizer,
+                    epochs=params.epochs,
+                    dpsgd_metadata_path=str(_dpsgd_path),
+                    virtual_batch_size=_vbs,
+                )
+            else:
+                result = handler.train(loader, model, criterion, optimizer, epochs=params.epochs)
 
             # Restore tqdm
             if _orig_tqdm:
@@ -716,15 +807,21 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
             except Exception as _meta_err:  # noqa: BLE001
                 import traceback as _tb
                 log_q.put(f"[train] WARNING: could not save model_metadata.pkl: {_meta_err}\n{_tb.format_exc()}")
+            train_acc = None
             test_acc = None
             loss_history: list = []
             acc_history: list = []
             if result.metrics:
-                test_acc = float(result.metrics.accuracy)
+                train_acc = float(result.metrics.accuracy)
                 extra = result.metrics.extra or {}
                 loss_history = [float(x) for x in extra.get("loss_history", [])]
                 acc_history = [float(x) for x in extra.get("accuracy_history", [])]
+            try:
+                test_acc = float(test_eval.accuracy)
+            except Exception:
+                pass
             model_entry["status"] = "ready"
+            model_entry["train_accuracy"] = train_acc
             model_entry["test_accuracy"] = test_acc
             _save_job(job_id)
             log_q.put(f"[train] Done: {params.name}  accuracy={test_acc:.4f}" if test_acc else f"[train] Done: {params.name}")
@@ -788,7 +885,7 @@ async def start_audit(job_id: str) -> dict:
     if job["status"] == JobStatus.running:
         raise HTTPException(status_code=409, detail="Audit already running")
     log_q = _log_queues[job_id]
-    _executor.submit(run_audit_job, job_id, _job_dir(job_id), job, log_q)
+    _executor.submit(run_audit_job, job_id, _job_dir(job_id), job, log_q, _save_job)
     return {"ok": True}
 
 
@@ -801,7 +898,52 @@ async def get_results(job_id: str) -> dict:
     job = _get_job(job_id)
     if job["status"] != JobStatus.done:
         raise HTTPException(status_code=425, detail=f"Job status: {job['status']}")
-    return {"job_id": job_id, "results": job.get("results", [])}
+    results = job.get("results", [])
+    # Tag each result with its originating job_id so the frontend can fetch
+    # sample images from the correct dataset even in cross-session comparisons.
+    for r in results:
+        r["job_id"] = job_id
+    return {"job_id": job_id, "results": results}
+
+
+@app.get("/jobs/{job_id}/sample_image/{index}")
+async def get_sample_image(job_id: str, index: int):
+    """Return a single sample image from the job's dataset as PNG."""
+    import io
+    import joblib
+    import numpy as np
+    from PIL import Image
+    from fastapi.responses import Response
+
+    job = _get_job(job_id)
+    data_path = job.get("data_path")
+    if not data_path or not Path(data_path).exists():
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    dataset = joblib.load(data_path)
+
+    try:
+        img = dataset.data[index]
+        import torch
+        if isinstance(img, torch.Tensor):
+            img = img.numpy()
+    except Exception:
+        try:
+            img = dataset.x[index]
+        except Exception:
+            raise HTTPException(status_code=404, detail=f"Cannot read sample at index {index}")
+
+    if img.dtype != np.uint8:
+        img = (np.array(img, dtype=np.float32) * 255).clip(0, 255).astype(np.uint8)
+    # C×H×W → H×W×C
+    if img.ndim == 3 and img.shape[0] in (1, 3, 4) and img.shape[1] > 4:
+        img = img.transpose(1, 2, 0)
+    if img.ndim == 3 and img.shape[2] == 1:
+        img = img[:, :, 0]
+
+    buf = io.BytesIO()
+    Image.fromarray(img).save(buf, format="PNG")
+    return Response(content=buf.getvalue(), media_type="image/png")
 
 
 # ---------------------------------------------------------------------------

@@ -87,7 +87,11 @@ export default function Histograms({ results }: Props) {
               margin: { t: 20, r: 20, b: 80, l: 60 },
               font: { family: "Inter, sans-serif", color: "#94a3b8" },
             }}
-            config={{ displayModeBar: false, responsive: true }}
+            config={{
+              responsive: true, displayModeBar: true, displaylogo: false,
+              modeBarButtons: [["toImage"]],
+              toImageButtonOptions: { format: "png", filename: "leakpro_histogram", width: 1000, height: 500, scale: 2 },
+            }}
             style={{ width: "100%", height: 380 }}
             useResizeHandler
           />

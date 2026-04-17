@@ -13,7 +13,7 @@ import { api, ArchConfig, DataMeta } from "./api";
 type Step = 0 | 1 | 2 | 3 | 4 | 5;
 
 export default function App() {
-  const [dark, setDark] = useState(true);
+  const [dark, setDark] = useState(false);
   const [step, setStep] = useState<Step>(0);
   const [jobId, setJobId] = useState<string | null>(null);
   const [dataMeta, setDataMeta] = useState<DataMeta | null>(null);

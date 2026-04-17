@@ -555,10 +555,11 @@ function TrainCard({ params, onChange, onRemove }: {
       </label>
 
       {params.dpsgd && (
-        <div className="grid grid-cols-3 gap-3 pl-4 border-l-2 border-primary/30">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pl-4 border-l-2 border-primary/30">
           <NumberField label="Target ε" value={params.target_epsilon ?? 10} min={0.1} max={100} step={0.1} onChange={(v) => onChange({ target_epsilon: v })} />
           <NumberField label="Target δ" value={params.target_delta ?? 1e-5} min={1e-7} max={0.1} step={1e-6} onChange={(v) => onChange({ target_delta: v })} />
           <NumberField label="Max Grad Norm" value={params.max_grad_norm ?? 1.0} min={0.01} max={10} step={0.01} onChange={(v) => onChange({ max_grad_norm: v })} />
+          <NumberField label="Virtual Batch Size" value={params.virtual_batch_size ?? 16} min={1} max={512} step={1} onChange={(v) => onChange({ virtual_batch_size: v })} />
         </div>
       )}
     </div>

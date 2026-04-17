@@ -72,6 +72,7 @@ def run_audit_job(
     job_dir: Path,
     job_state: dict[str, Any],
     log_q: queue.Queue,
+    save_job: Any = None,
 ) -> None:
     """Runs inside a ThreadPoolExecutor thread. Updates job_state in-place."""
     leakpro_logger = logging.getLogger("leakpro")
@@ -133,9 +134,11 @@ def run_audit_job(
             config["target"]["data_path"] = job_state.get("data_path") or str(cifar_dir / "data/cifar10.pkl")
             config["audit"]["output_dir"] = str(job_dir / "leakpro_output" / model_name)
 
-            # module_path: use the job's arch.py (written for presets or uploaded)
+            # module_path: only use job's arch.py for custom-uploaded arches (preset is None).
+            # If a preset was used for training, arch.py may be a leftover from a previous
+            # upload and won't match the model that was actually trained.
             arch_py = job_dir / "arch.py"
-            if arch_py.exists():
+            if arch_py.exists() and not preset:
                 config["target"]["module_path"] = str(arch_py)
                 # Detect the model class name from arch.py
                 import importlib.util as _ilu
@@ -164,8 +167,11 @@ def run_audit_job(
                         pass
                     config["target"]["model_class"] = chosen.__name__
             else:
-                # Fall back to the example file (absolute path)
+                # Preset training (or no arch.py): use bundled cifar target_model_class.py
                 config["target"]["module_path"] = str(cifar_dir / "target_model_class.py")
+                # Pick the right class based on whether DP-SGD was used
+                _model_spec_dpsgd = model_spec.get("dpsgd", False)
+                config["target"]["model_class"] = "ResNet18_DPsgd" if _model_spec_dpsgd else "ResNet18"
 
             if attack_list:
                 config["audit"]["attack_list"] = attack_list
@@ -258,12 +264,53 @@ def run_audit_job(
                 lp = LeakPro(handler_cls, str(temp_yaml))
                 results = lp.run_audit(create_pdf=False)
 
+                # Detect model class name for display in results
+                _preset_class_map = {"cifar_image": "ResNet18", "cifar_wrn": "WideResNet"}
+                _model_class: str | None = _preset_class_map.get(preset)  # type: ignore[arg-type]
+                if _model_class is None and (job_dir / "arch.py").exists():
+                    try:
+                        import importlib.util as _ilu3
+                        import torch.nn as _nn3
+                        _s3 = _ilu3.spec_from_file_location("_mc_probe", job_dir / "arch.py")
+                        _m3 = _ilu3.module_from_spec(_s3)
+                        _s3.loader.exec_module(_m3)
+                        _mc3 = next((v for v in vars(_m3).values()
+                                     if isinstance(v, type) and issubclass(v, _nn3.Module)
+                                     and v is not _nn3.Module), None)
+                        _model_class = _mc3.__name__ if _mc3 else None
+                    except Exception:
+                        pass
+                if model_spec.get("dpsgd") and _model_class == "ResNet18":
+                    _model_class = "ResNet18_DPsgd"
+
+                _tp = model_spec.get("train_params") or {}
+                _hc = job_state.get("handler_config") or {}
+                _dm = job_state.get("data_meta") or {}
+                _train_meta: dict | None = {
+                    "epochs":             _tp.get("epochs"),
+                    "learning_rate":      _tp.get("learning_rate"),
+                    "batch_size":         _tp.get("batch_size"),
+                    "optimizer":          _tp.get("optimizer"),
+                    "f_train":            _tp.get("f_train"),
+                    "f_test":             _tp.get("f_test"),
+                    "target_delta":       _tp.get("target_delta"),
+                    "max_grad_norm":      _tp.get("max_grad_norm"),
+                    "virtual_batch_size": _tp.get("virtual_batch_size"),
+                    "data_type":          _hc.get("data_type"),
+                    "data_shape":         _hc.get("shape"),
+                    "n_classes":          _hc.get("n_classes"),
+                    "n_samples":          _dm.get("n_samples"),
+                } if (_tp or _hc or _dm) else None
+
                 model_results = {
                     "model_name": model_name,
                     "source": model_spec.get("source", "trained"),
                     "dpsgd": model_spec.get("dpsgd", False),
                     "target_epsilon": model_spec.get("target_epsilon"),
+                    "train_accuracy": model_spec.get("train_accuracy"),
                     "test_accuracy": model_spec.get("test_accuracy"),
+                    "model_class": _model_class,
+                    "train_meta": _train_meta,
                     "attacks": [_serialise_result(r) for r in results],
                 }
                 all_results.append(model_results)
@@ -274,12 +321,16 @@ def run_audit_job(
 
         job_state["results"] = all_results
         job_state["status"] = "done"
+        if save_job:
+            save_job(job_id)
         log_q.put("[worker] All audits complete.")
 
     except Exception as e:  # noqa: BLE001
         import traceback
         job_state["status"] = "failed"
         job_state["error"] = str(e)
+        if save_job:
+            save_job(job_id)
         log_q.put(f"[worker] FAILED: {e}\n{traceback.format_exc()}")
     finally:
         leakpro_logger.removeHandler(handler)
