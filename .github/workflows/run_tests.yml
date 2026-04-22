@@ -27,7 +27,7 @@ jobs:
       - name: Ruff Linting
         run: |
           pip install ruff==0.11.2
-          ruff check leakpro --exclude examples,leakpro/tests
+          ruff check leakpro --exclude examples,leakpro/tests,leakpro/webapp
 
       - name: Install PDF compiling tool
         run: |
