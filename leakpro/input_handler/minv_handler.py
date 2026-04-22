@@ -3,6 +3,7 @@
 import inspect
 
 import joblib
+import pandas as pd
 import torch
 from pydantic import BaseModel
 from torch import nn
@@ -24,6 +25,7 @@ class MINVHandler:
         self._load_trained_target_model()
         self._load_public_data()
         self._load_private_data()
+
         self._load_criterion()
 
     def _load_public_data(self) -> None:
@@ -66,7 +68,14 @@ class MINVHandler:
 
     def _load_target_metadata(self:Self) -> None:
         """Get the target model metadata from the trained model metadata file."""
+        # Access configs, read model_type
         target_model_metadata_path = self.configs.target.target_folder
+        model_type = self.configs.target.model_type
+
+        if model_type == "pytorch_tabular":
+            logger.info("Model type is pytorch_tabular, skipping loading metadata.")
+            return
+
         if target_model_metadata_path is None:
             raise ValueError("Trained model metadata path not found in configs.")
         try:
@@ -89,18 +98,32 @@ class MINVHandler:
 
     def _load_trained_target_model(self:Self) -> None:
         """Get the trained target model."""
+        model_type = self.configs.target.model_type
         model_path = self.configs.target.target_folder
         if model_path is None:
             raise ValueError("Trained model path not found in configs.")
         self.model_path = f"{model_path}/target_model.pkl"
-        init_params = self.target_model_metadata.init_params
+        # This handles if target model is torch or not...
+        # TODO: CLEANUP
         try:
-            with open(self.model_path, "rb") as f:
-                self.target_model = self.target_model_blueprint(**init_params)
-                self.target_model.load_state_dict(torch.load(f))
+            if model_type == "pytorch_tabular":
+            # if model_type == "treegrad":
+                # Loads model from path instead of file
+                self.target_model = self.target_model_blueprint.load_model(model_path)
+            else:
+                with open(self.model_path, "rb") as f:
+                    if model_type == "torch":
+                        init_params = self.target_model_metadata.init_params
+                        self.target_model = self.target_model_blueprint(**init_params)
+                        self.target_model.load_state_dict(torch.load(f))
+                    elif model_type == "xgboost":
+                        self.target_model = joblib.load(f)
+                    else:
+                        raise ValueError(f"Model type {model_type} not supported.")
             logger.info(f"Loaded target model from {model_path}")
         except FileNotFoundError as e:
             raise FileNotFoundError(f"Could not find the trained target model at {model_path}") from e
+
 
     def get_public_dataloader(self:Self, batch_size: int) -> DataLoader:
         """Return the public dataset dataloader."""
@@ -113,10 +136,19 @@ class MINVHandler:
     def get_num_classes(self:Self) -> int:
         """Return the number of classes in the target model."""
         # TODO: Implement this to work with different types of datasets (where the label is not always called y)
+
+        # if self.private_dataset is pd dataframe then:
+        if isinstance(self.private_dataset, pd.DataFrame):
+            return self.private_dataset["identity"].unique().shape[0]
+        # if self.private_dataset is a torch dataset then
         return self.private_dataset.y.unique().shape[0]
 
     def _load_criterion(self:Self) -> None:
         """Get the criterion for the target model."""
+
+        if self.configs.target.model_type == "pytorch_tabular":
+            # If the model is pytorch_tabular, we don't need to load the criterion
+            return
 
         criterion_config = self.target_model_metadata.criterion
         if not isinstance(criterion_config, LossConfig):

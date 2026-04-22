@@ -40,9 +40,13 @@ class GeneratorHandler():
     def load_generator(self) -> Module:
         """Instantiate and return a generator model."""
         logger.info("Getting generator model with init params: %s", self.gen_init_params)
+
         self.generator = self.generator_blueprint(**self.gen_init_params)
         if self.generator_checkpoint and os.path.exists(self.generator_checkpoint):
-            self.generator.load_state_dict(torch.load(self.generator_checkpoint))
+            if self.generator_class == "CustomCTGAN":
+                self.generator = self.generator_blueprint.load(self.generator_checkpoint)
+            else:
+                self.generator.load_state_dict(torch.load(self.generator_checkpoint))
             logger.info(f"Loaded generator model from {self.generator_checkpoint}")
             self.trained_bool = True
         return self.generator

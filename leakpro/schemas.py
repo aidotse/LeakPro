@@ -91,6 +91,8 @@ class TargetConfig(BaseModel):
     target_folder: str = Field(..., description="Directory where target model data is stored")
     data_path: str = Field(..., description="Path to dataset file")
     dpsgd_path: Optional[str] = Field(default=None, description="Path to the DP-SGD dictionary file (optional)")
+    model_type: Optional[Literal["torch", "xgboost", "pytorch_tabular"]] = \
+        Field("torch", description="Type of model: torch, xgboost, pytorch_tabular")
     # TODO: Change data_path description to be more descriptive, i.e path to target (or private) dataset.
 
     # MINV-specific field - optional
