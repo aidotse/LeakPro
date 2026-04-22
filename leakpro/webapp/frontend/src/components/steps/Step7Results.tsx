@@ -4,12 +4,14 @@ import Summary from "../results/Summary";
 import RocChart from "../results/RocChart";
 import Histograms from "../results/Histograms";
 import Records from "../results/Records";
+import Venn from "../results/Venn";
 
 const TABS = [
   { id: "summary",    label: "Summary",    icon: "dashboard" },
   { id: "roc",        label: "ROC Curves", icon: "show_chart" },
   { id: "histograms", label: "Histograms", icon: "bar_chart" },
   { id: "records",    label: "Records",    icon: "manage_search" },
+  { id: "venn",       label: "Overlap",    icon: "workspaces" },
 ];
 
 interface Props {
@@ -207,6 +209,7 @@ export default function Step7Results({ jobId, onRestart }: Props) {
         {tab === "roc"        && <RocChart   results={allResults} />}
         {tab === "histograms" && <Histograms results={allResults} />}
         {tab === "records"    && <Records    results={allResults} jobId={jobId} />}
+        {tab === "venn"       && <Venn       results={allResults} />}
       </div>
     </div>
   );
