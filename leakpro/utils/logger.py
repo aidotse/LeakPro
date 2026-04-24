@@ -4,45 +4,6 @@ import logging
 import os
 
 
-def setup_logger(name: str, save_file: bool = True, save_path: str = None) -> logging.Logger:
-    """Generate the logger for the current run.
-
-    Args:
-    ----
-        name (str): Logging file name.
-        save_file (bool): Flag about whether to save to file.
-        save_path (str): Path to save the log file.
-
-    Returns:
-    -------
-        logging.Logger: Logger object for the current run.
-
-    """
-    my_logger = logging.getLogger(name)
-    my_logger.setLevel(logging.INFO)
-    log_format = logging.Formatter("%(asctime)s %(levelname)-8s %(message)s")
-
-    # Console handler for output to the console
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(log_format)
-    my_logger.addHandler(console_handler)
-
-    if save_file:
-        if save_path is None:
-            raise ValueError("save_path cannot be None if save_file is True.")
-
-        # Create the directory if it doesn't exist
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        filename = f"{save_path}.log"
-        log_handler = logging.FileHandler(filename, mode="w")
-        log_handler.setLevel(logging.INFO)
-        log_handler.setFormatter(log_format)
-        my_logger.addHandler(log_handler)
-
-    return my_logger
-
-
 def setup_logger(name: str = "leakpro_log", level: int = logging.INFO) -> logging.Logger:
     """Sets up a common logger with a console handler initially.
 
@@ -66,14 +27,6 @@ def setup_logger(name: str = "leakpro_log", level: int = logging.INFO) -> loggin
         console_handler.setLevel(logging.INFO)
         console_handler.setFormatter(log_format)
         logger.addHandler(console_handler)
-
-    # Add filter to suppress train/test indices from logs
-    class SuppressIndicesFilter(logging.Filter):
-        def filter(self, record: logging.LogRecord) -> bool:
-            msg = record.getMessage()
-            return "train_indices" not in msg and "test_indices" not in msg
-
-    logger.addFilter(SuppressIndicesFilter())
 
     return logger
 
