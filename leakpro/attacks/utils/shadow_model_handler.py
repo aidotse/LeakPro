@@ -218,11 +218,18 @@ class ShadowModelHandler(ModelHandler):
 
             ShadowModelHandler().cache_logits(PytorchModel(shadow_model, criterion), name=f"sm_{indx}")
 
-            logger.info(f"Metadata for shadow model {indx}:\n{meta_data}")
+            #logger.info(f"Metadata for shadow model {indx}:\n{meta_data}")
             with open(f"{self.storage_path}/{self.metadata_storage_name}_{indx}.pkl", "wb") as f:
                 pickle.dump(meta_data, f)
 
+            meta_dic = meta_data.model_dump()
+            filtered_meta_data = {
+                    k: v for k, v in meta_dic.items()
+                    if k != "train_indices"
+            }
+
             logger.info(f"Metadata for shadow model {indx} stored in {self.storage_path}")
+            
         return filtered_indices + indices_to_use
 
     def _load_shadow_model(self:Self, index:int) -> Module:
