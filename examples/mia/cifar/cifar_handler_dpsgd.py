@@ -231,7 +231,7 @@ def train_loop(dataloader, model, criterion, optimizer, device, epoch, epochs):
         train_acc += pred.eq(labels.view_as(pred)).sum().item()
         train_loss += loss.item()
     
-    return train_acc, train_loss
+    return train_loss, train_acc
 
 def dpsgd(
         model: torch.nn.Module = None,
