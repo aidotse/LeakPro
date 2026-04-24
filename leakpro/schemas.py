@@ -9,6 +9,7 @@ from torch.nn import Module
 
 ArrayOrScalar = Union[np.ndarray, np.integer, int, list]
 
+
 class OptimizerConfig(BaseModel):
     """Schema for optimizer parameters."""
 
@@ -38,11 +39,13 @@ class LossConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields
 
+
 class DataLoaderConfig(BaseModel):
     """Schema for loss function parameters."""
 
     params: Dict[str, Any]
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields
+
 
 class EvalModelConfig(BaseModel):
     """Schema for evaluation model parameters."""
@@ -50,6 +53,7 @@ class EvalModelConfig(BaseModel):
     model_class: str = Field(..., description="Class name of the model")
     module_path: str = Field(..., description="Path to the model module")
     eval_folder: str = Field(..., description="Directory where evaluation model data is stored")
+
 
 class ReconstructionConfig(BaseModel):
     """Configuration for reconstruction attacks."""
@@ -62,14 +66,19 @@ class ReconstructionConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields
 
+
 class AuditConfig(BaseModel):
     """Configuration for the audit process."""
 
     random_seed: int = Field(default=42, description="Random seed for reproducibility")
-    attack_type: Literal["mia", "gia", "minv", "synthetic"] = Field(..., description="Type of attack: must be one of ['mia', 'gia', 'minv', 'synthetic]")  # noqa: E501
+    attack_type: Literal["mia", "gia", "minv", "synthetic"] = Field(
+        ..., description="Type of attack: must be one of ['mia', 'gia', 'minv', 'synthetic]"
+    )  # noqa: E501
     attack_list: List[Dict[str, Any]] = Field(..., min_length=1, description="Must have at least one attack")
     hyper_param_search: bool = Field(default=False, description="Whether to perform hyperparameter search")
-    data_modality: Literal["image", "tabular", "text", "graph", "timeseries"] = Field(..., description="Type of data modality: must be one of ['image', 'tabular', 'text', 'graph', 'timeseries']")  # noqa: E501
+    data_modality: Literal["image", "tabular", "text", "graph", "timeseries"] = Field(
+        ..., description="Type of data modality: must be one of ['image', 'tabular', 'text', 'graph', 'timeseries']"
+    )  # noqa: E501
     output_dir: str = Field(..., description="Output directory for audit results")
 
     reconstruction: Optional[ReconstructionConfig] = Field(None, description="Reconstruction attack configuration")
@@ -82,6 +91,7 @@ class AuditConfig(BaseModel):
         return v.lower() if isinstance(v, str) else v
 
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields
+
 
 class TargetConfig(BaseModel):
     """Configuration for the target model."""
@@ -98,6 +108,7 @@ class TargetConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields
 
+
 class ShadowModelConfig(BaseModel):
     """Configuration for the Shadow models."""
 
@@ -110,6 +121,7 @@ class ShadowModelConfig(BaseModel):
     epochs: Optional[int] = Field(..., ge=1, description="Number of training epochs")
 
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields
+
 
 class DistillationModelConfig(BaseModel):
     """Configuration for the distillation models."""
@@ -146,7 +158,7 @@ class TrainingOutput(BaseModel):
     # Validate that the model is an instance of torch.nn.Module
     @field_validator("model", mode="before")
     @classmethod
-    def validate_model(cls, v:Module) -> Module:
+    def validate_model(cls, v: Module) -> Module:
         """Validate that the model is an instance of torch.nn.Module."""
         if not isinstance(v, Module):
             raise ValueError("model must be an instance of torch.nn.Module")
@@ -172,6 +184,7 @@ class MIAMetaDataSchema(BaseModel):
 
     model_config = ConfigDict(from_attributes=True, extra="forbid")  # Prevent extra fields
 
+
 class ShadowModelTrainingSchema(BaseModel):
     """Schema for Shadow model metadata storage."""
 
@@ -189,6 +202,7 @@ class ShadowModelTrainingSchema(BaseModel):
 
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields
 
+
 class DistillationModelTrainingSchema(BaseModel):
     """Schema for metadata storage for distillation."""
 
@@ -201,22 +215,24 @@ class DistillationModelTrainingSchema(BaseModel):
 
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields
 
+
 class OptunaConfig(BaseModel):
     """Configuration for the Optuna hyperparameter search."""
 
-    seed: int = Field(default=1234,
-                      description="Random seed for reproducibility")
-    n_trials: int = Field(default=100,
-                          description="Number of trials to find the optimal hyperparameters")
-    check_interval: int = Field(default=3000,
-                          description="Interval of steps between checks")
-    direction: Literal["maximize", "minimize"] = Field("maximize",
-                                                       description="Direction of the optimization, minimize or maximize")
-    pruner: optuna.pruners.BasePruner = Field(default=optuna.pruners.MedianPruner(n_warmup_steps=5),
-                                              description="Number of steps before pruning of experiments will be available")
+    seed: int = Field(default=1234, description="Random seed for reproducibility")
+    n_trials: int = Field(default=100, description="Number of trials to find the optimal hyperparameters")
+    check_interval: int = Field(default=3000, description="Interval of steps between checks")
+    direction: Literal["maximize", "minimize"] = Field(
+        "maximize", description="Direction of the optimization, minimize or maximize"
+    )
+    pruner: optuna.pruners.BasePruner = Field(
+        default=optuna.pruners.MedianPruner(n_warmup_steps=5),
+        description="Number of steps before pruning of experiments will be available",
+    )
     objective: Callable[[Any], float] = Field(lambda x: x, description="Objective function to optimize")
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # Prevent extra fields
+
 
 class MIAResultSchema(BaseModel):
     """Schema for the MIA attack results."""
