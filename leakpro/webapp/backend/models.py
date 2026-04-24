@@ -139,6 +139,7 @@ class JobListItem(BaseModel):
     status: str
     created_at: str
     model_names: list[str] = []
+    attacks_per_model: dict[str, list[str]] = {}
 
 
 class ModelResult(BaseModel):

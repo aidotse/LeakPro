@@ -19,6 +19,7 @@ export default function App() {
   const [dataMeta, setDataMeta] = useState<DataMeta | null>(null);
   const [archConfig, setArchConfig] = useState<ArchConfig | null>(null);
   const [models, setModels] = useState<ModelEntry[]>([]);
+  const [goCompare, setGoCompare] = useState(false);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
@@ -29,6 +30,7 @@ export default function App() {
   }, []);
 
   const restart = () => {
+    setGoCompare(false);
     api.createJob().then((j) => {
       setJobId(j.job_id);
       setStep(0);
@@ -89,7 +91,7 @@ export default function App() {
             <Step6Run jobId={jobId} models={models} onDone={() => setStep(5)} />
           )}
           {step === 5 && (
-            <Step7Results jobId={jobId} onRestart={restart} />
+            <Step7Results jobId={jobId} onRestart={restart} autoOpenCompare={goCompare} />
           )}
         </div>
 
@@ -99,15 +101,24 @@ export default function App() {
               <span className="material-symbols-outlined text-sm">lock</span>
               Your data is processed locally and never leaves your secure environment.
             </div>
-            {step > 0 && (
+            <div className="flex items-center gap-2">
               <button
-                onClick={() => setStep((s) => (s - 1) as Step)}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-700 text-sm font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                onClick={() => { setGoCompare(true); setStep(5); }}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-primary/50 text-primary text-sm font-bold hover:bg-primary/5 transition-colors"
               >
-                <span className="material-symbols-outlined text-base">arrow_back</span>
-                Back
+                <span className="material-symbols-outlined text-base">history</span>
+                Previous Results
               </button>
-            )}
+              {step > 0 && (
+                <button
+                  onClick={() => setStep((s) => (s - 1) as Step)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-700 text-sm font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <span className="material-symbols-outlined text-base">arrow_back</span>
+                  Back
+                </button>
+              )}
+            </div>
           </div>
         )}
       </main>

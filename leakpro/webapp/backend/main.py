@@ -240,11 +240,17 @@ async def list_jobs() -> list[dict]:
     """Return all known jobs — used for cross-session result comparison."""
     out = []
     for jid, job in _jobs.items():
+        models = job.get("models", [])
+        attacks_per_model = {
+            m["name"]: [a.get("attack", "") for a in m.get("attacks", [])]
+            for m in models
+        }
         out.append({
             "job_id": jid,
             "status": job.get("status", "unknown"),
             "created_at": job.get("created_at", ""),
-            "model_names": [m["name"] for m in job.get("models", [])],
+            "model_names": [m["name"] for m in models],
+            "attacks_per_model": attacks_per_model,
         })
     out.sort(key=lambda x: x["created_at"], reverse=True)
     return out
@@ -811,15 +817,21 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
             test_acc = None
             loss_history: list = []
             acc_history: list = []
+            val_loss_history: list = []
+            val_acc_history: list = []
             if result.metrics:
                 train_acc = float(result.metrics.accuracy)
                 extra = result.metrics.extra or {}
                 loss_history = [float(x) for x in extra.get("loss_history", [])]
                 acc_history = [float(x) for x in extra.get("accuracy_history", [])]
+                val_loss_history = [float(x) for x in extra.get("val_loss_history", [])]
+                val_acc_history = [float(x) for x in extra.get("val_acc_history", [])]
             try:
                 test_acc = float(test_eval.accuracy)
+                test_loss = float(test_eval.loss) if test_eval.loss is not None else None
             except Exception:
-                pass
+                test_acc = None
+                test_loss = None
             model_entry["status"] = "ready"
             model_entry["train_accuracy"] = train_acc
             model_entry["test_accuracy"] = test_acc
@@ -830,6 +842,10 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                 "model": params.name,
                 "loss_history": loss_history,
                 "accuracy_history": acc_history,
+                "val_loss_history": val_loss_history,
+                "val_acc_history": val_acc_history,
+                "test_acc_final": test_acc,
+                "test_loss_final": test_loss,
             }))
 
         except Exception as e:  # noqa: BLE001

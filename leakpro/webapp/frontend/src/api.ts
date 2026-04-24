@@ -167,6 +167,7 @@ export interface JobListItem {
   status: string;
   created_at: string;
   model_names: string[];
+  attacks_per_model?: Record<string, string[]>;
 }
 
 export interface TrainMeta {

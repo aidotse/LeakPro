@@ -47,7 +47,9 @@ class CifarInputHandler(AbstractInputHandler):
 
         accuracy_history = []
         loss_history = []
-        
+        val_loss_history = []
+        val_acc_history = []
+
         best_val_loss = float("inf")
         best_model_state = None
         patience_counter = 0
@@ -88,15 +90,18 @@ class CifarInputHandler(AbstractInputHandler):
             loss_history.append(avg_train_loss)
             
             model.eval()
-            val_loss, val_samples = 0, 0
+            val_loss, val_acc, val_samples = 0, 0, 0
             with torch.no_grad():
                 for inputs, labels in val_loader:
                     inputs, labels = inputs.to(gpu_or_cpu), labels.to(gpu_or_cpu)
                     outputs = model(inputs)
                     loss = criterion(outputs, labels)
                     val_loss += loss.item() * labels.size(0)
+                    val_acc += outputs.argmax(dim=1).eq(labels).sum().item()
                     val_samples += labels.size(0)
             avg_val_loss = val_loss / val_samples
+            val_loss_history.append(avg_val_loss)
+            val_acc_history.append(val_acc / val_samples)
             print(f"Validation loss at epoch {epoch+1}: {avg_val_loss:.4f}")
 
             if avg_val_loss < best_val_loss:
@@ -114,7 +119,8 @@ class CifarInputHandler(AbstractInputHandler):
 
         results = EvalOutput(accuracy = train_accuracy,
                              loss = avg_train_loss,
-                             extra = {"accuracy_history": accuracy_history, "loss_history": loss_history})
+                             extra = {"accuracy_history": accuracy_history, "loss_history": loss_history,
+                                      "val_loss_history": val_loss_history, "val_acc_history": val_acc_history})
         return TrainingOutput(model = model, metrics=results)
 
     def eval(self, loader, model, criterion):

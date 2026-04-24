@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Plot from "react-plotly.js";
 import { ModelResult } from "../../api";
+import MetaPanel from "./MetaPanel";
 
 const COLOURS = [
   "#4e79a7","#f28e2b","#e15759","#76b7b2","#59a14f",
@@ -15,6 +16,7 @@ interface Props { results: ModelResult[] }
 export default function RocChart({ results }: Props) {
   const [selected, setSelected] = useState<string[]>(results.map((m) => m.model_name));
   const [attackMode, setAttackMode] = useState<AttackMode>("all");
+  const [openInfoKey, setOpenInfoKey] = useState<string | null>(null);
 
   // For each model, determine which attack indices to display
   const visibleAttacks = useMemo(() => {
@@ -169,17 +171,39 @@ export default function RocChart({ results }: Props) {
           </thead>
           <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
             {results.flatMap((m) =>
-              m.attacks.map((a) => (
-                <tr key={`${m.model_name}-${a.attack_name}`} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/50">
-                  <td className="px-3 py-2 font-semibold">{m.model_name}</td>
-                  <td className="px-3 py-2">{a.attack_name}</td>
-                  <td className="px-3 py-2 font-mono">{a.roc_auc?.toFixed(4) ?? "—"}</td>
-                  <td className="px-3 py-2 font-mono">{fmt(a.tpr_at_fpr["TPR@10%FPR"])}</td>
-                  <td className="px-3 py-2 font-mono">{fmt(a.tpr_at_fpr["TPR@1%FPR"])}</td>
-                  <td className="px-3 py-2 font-mono">{fmt(a.tpr_at_fpr["TPR@0.1%FPR"])}</td>
-                  <td className="px-3 py-2 font-mono">{fmt(a.tpr_at_fpr["TPR@0%FPR"])}</td>
-                </tr>
-              ))
+              m.attacks.map((a, ai) => {
+                const infoOpen = openInfoKey === m.model_name;
+                const isLastAttack = ai === m.attacks.length - 1;
+                return [
+                  <tr key={`${m.model_name}-${a.attack_name}`} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/50">
+                    <td className="px-3 py-2 font-semibold">
+                      <div className="flex items-center gap-1">
+                        {m.model_name}
+                        {ai === 0 && (
+                          <button
+                            onClick={() => setOpenInfoKey((prev) => prev === m.model_name ? null : m.model_name)}
+                            title="Show model info"
+                            className={`material-symbols-outlined text-base transition-colors ${infoOpen ? "text-primary" : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"}`}
+                          >info</button>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2">{a.attack_name}</td>
+                    <td className="px-3 py-2 font-mono">{a.roc_auc?.toFixed(4) ?? "—"}</td>
+                    <td className="px-3 py-2 font-mono">{fmt(a.tpr_at_fpr["TPR@10%FPR"])}</td>
+                    <td className="px-3 py-2 font-mono">{fmt(a.tpr_at_fpr["TPR@1%FPR"])}</td>
+                    <td className="px-3 py-2 font-mono">{fmt(a.tpr_at_fpr["TPR@0.1%FPR"])}</td>
+                    <td className="px-3 py-2 font-mono">{fmt(a.tpr_at_fpr["TPR@0%FPR"])}</td>
+                  </tr>,
+                  infoOpen && isLastAttack ? (
+                    <tr key={`${m.model_name}-info`} className="bg-slate-50 dark:bg-slate-900/60">
+                      <td colSpan={7} className="px-6 py-4">
+                        <MetaPanel r={m} />
+                      </td>
+                    </tr>
+                  ) : null,
+                ];
+              })
             )}
           </tbody>
         </table>

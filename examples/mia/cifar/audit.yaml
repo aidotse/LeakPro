@@ -6,26 +6,26 @@ audit:  # Configurations for auditing
       online: False
       num_shadow_models: 2
       training_data_fraction: 0.5   
-# BASE
-    - attack: base
-      online: False
-      num_shadow_models: 2
-      training_data_fraction: 0.5  
-# BASE but through RaMIA
-    - attack: ramia
-      num_transforms: 0
-      n_ops: 0
-      augment_strength: "easy"
-# 1 transform
-    - attack: ramia
-      num_transforms: 1
-      n_ops: 1
-      augment_strength: "strong"
-# 8 transform      
-    - attack: ramia
-      num_transforms: 8
-      n_ops: 1
-      augment_strength: "strong"
+# # BASE
+#     - attack: base
+#       online: False
+#       num_shadow_models: 2
+#       training_data_fraction: 0.5  
+# # BASE but through RaMIA
+#     - attack: ramia
+#       num_transforms: 0
+#       n_ops: 0
+#       augment_strength: "easy"
+# # 1 transform
+#     - attack: ramia
+#       num_transforms: 1
+#       n_ops: 1
+#       augment_strength: "strong"
+# # 8 transform      
+#     - attack: ramia
+#       num_transforms: 8
+#       n_ops: 1
+#       augment_strength: "strong"
       
 
   output_dir: "./cifar10/leakpro_output"

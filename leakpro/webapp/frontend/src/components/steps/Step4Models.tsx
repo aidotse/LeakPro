@@ -315,6 +315,10 @@ interface TrainMetrics {
   model: string;
   loss_history: number[];
   accuracy_history: number[];
+  val_loss_history?: number[];
+  val_acc_history?: number[];
+  test_loss_final?: number | null;
+  test_acc_final?: number | null;
 }
 
 function TrainModelForm({ jobId, onAdded, existingCount }: {
@@ -464,12 +468,40 @@ function TrainMetricsChart({ metrics }: { metrics: TrainMetrics }) {
     paper_bgcolor: "transparent",
     plot_bgcolor: "transparent",
     margin: { t: 30, r: 20, b: 40, l: 45 },
-    height: 180,
-    legend: { orientation: "h", y: -0.25, font: { size: 11, color: fontColor } },
+    height: 200,
+    legend: { orientation: "h", y: -0.3, font: { size: 11, color: fontColor } },
     xaxis: { title: { text: "Epoch" }, gridcolor: gridColor, color: fontColor, tickfont: { size: 10 } },
     yaxis: { gridcolor: gridColor, color: fontColor, tickfont: { size: 10 } },
     font: { family: "Inter, sans-serif" },
   };
+
+  // Build loss traces
+  const lossData: Plotly.Data[] = [
+    { x: epochs, y: metrics.loss_history, type: "scatter", mode: "lines+markers",
+      name: "Train", line: { color: "#193ce6", width: 2 }, marker: { size: 4 } } as Plotly.Data,
+  ];
+  if (metrics.val_loss_history?.length) {
+    const valEpochs = metrics.val_loss_history.map((_, i) => i + 1);
+    lossData.push({ x: valEpochs, y: metrics.val_loss_history, type: "scatter", mode: "lines+markers",
+      name: "Val", line: { color: "#f28e2b", width: 2, dash: "dash" }, marker: { size: 4 } } as Plotly.Data);
+  } else if (metrics.test_loss_final != null) {
+    lossData.push({ x: [epochs.length], y: [metrics.test_loss_final], type: "scatter", mode: "markers",
+      name: "Test (final)", marker: { color: "#f28e2b", size: 10, symbol: "star" } } as Plotly.Data);
+  }
+
+  // Build accuracy traces
+  const accData: Plotly.Data[] = [
+    { x: epochs, y: metrics.accuracy_history.map((v) => v * 100), type: "scatter", mode: "lines+markers",
+      name: "Train", line: { color: "#22c55e", width: 2 }, marker: { size: 4 } } as Plotly.Data,
+  ];
+  if (metrics.val_acc_history?.length) {
+    const valEpochs = metrics.val_acc_history.map((_, i) => i + 1);
+    accData.push({ x: valEpochs, y: metrics.val_acc_history.map((v) => v * 100), type: "scatter", mode: "lines+markers",
+      name: "Val", line: { color: "#e15759", width: 2, dash: "dash" }, marker: { size: 4 } } as Plotly.Data);
+  } else if (metrics.test_acc_final != null) {
+    accData.push({ x: [epochs.length], y: [metrics.test_acc_final * 100], type: "scatter", mode: "markers",
+      name: "Test (final)", marker: { color: "#e15759", size: 10, symbol: "star" } } as Plotly.Data);
+  }
 
   return (
     <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
@@ -479,15 +511,13 @@ function TrainMetricsChart({ metrics }: { metrics: TrainMetrics }) {
       </div>
       <div className="grid grid-cols-2 divide-x divide-slate-200 dark:divide-slate-800 bg-white dark:bg-slate-950">
         <Plot
-          data={[{ x: epochs, y: metrics.loss_history, type: "scatter", mode: "lines+markers",
-            name: "Train loss", line: { color: "#193ce6", width: 2 }, marker: { size: 4 } }]}
+          data={lossData}
           layout={{ ...layout, title: { text: "Loss", font: { size: 12, color: fontColor } } }}
           config={{ displayModeBar: false, responsive: true }}
           style={{ width: "100%" }}
         />
         <Plot
-          data={[{ x: epochs, y: metrics.accuracy_history.map((v) => v * 100), type: "scatter", mode: "lines+markers",
-            name: "Train accuracy", line: { color: "#22c55e", width: 2 }, marker: { size: 4 } }]}
+          data={accData}
           layout={{ ...layout, title: { text: "Accuracy (%)", font: { size: 12, color: fontColor } },
             yaxis: { ...layout.yaxis, range: [0, 100] } }}
           config={{ displayModeBar: false, responsive: true }}

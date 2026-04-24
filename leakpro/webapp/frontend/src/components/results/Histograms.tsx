@@ -140,7 +140,7 @@ function Selector({ label, value, options, onChange }: {
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm px-3 py-2"
+        className="rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm px-3 py-2 min-w-[10rem] pr-8"
       >
         {options.map((o) => <option key={o} value={o}>{o}</option>)}
       </select>
