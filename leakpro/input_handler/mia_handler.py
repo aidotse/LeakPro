@@ -271,12 +271,12 @@ class MIAHandler:
 
     def get_target_model_metadata(self:Self) -> dict:
         """Get the metadata of the target model."""
-        return self._target_model_metadata
+        return self.target_model_metadata
 
 
     def set_target_model_metadata(self:Self, metadata:dict) -> None:
         """Set the metadata of the target model."""
-        self._target_model_metadata = metadata
+        self.target_model_metadata = metadata
 
     def set_population_size(self:Self, size:int) -> None:
         """Set the size of the population."""
