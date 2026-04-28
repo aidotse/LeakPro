@@ -69,7 +69,8 @@ class Signal(ABC):
             logits = model.get_logits(data)
             model_logits.extend(logits)
         model_logits = np.array(model_logits)
-        return model_logits, data_loader.dataset.targets
+        model_targets = np.array(data_loader.dataset.targets)
+        return model_logits, model_targets
 
 class ModelLogits(Signal):
     """Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a Dataset.
