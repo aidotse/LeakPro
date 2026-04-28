@@ -189,4 +189,16 @@ LeakPro draws inspiration from other works including
 - [Giomi, M. et al., *A Unified Framework for Quantifying Privacy Risk in Synthetic Data, arXiv, 2022*](https://github.com/statice/anonymeter)
 
 ## Funding  
-LeakPro is funded by Sweden's innovation agency, Vinnova, under grant 2023-03000. The project is a collaboration between AI Sweden, RISE, Scaleout AB, Syndata AB, AstraZeneca AB, Sahlgrenska University Hopsital, and Region Halland, with the goal of advancing privacy-preserving machine learning and responsible AI deployment.  
+LeakPro is funded by Sweden's innovation agency, Vinnova, under grant 2023-03000. The project is a collaboration between AI Sweden, RISE, Scaleout AB, Syndata AB, AstraZeneca AB, Sahlgrenska University Hopsital, and Region Halland, with the goal of advancing privacy-preserving machine learning and responsible AI deployment.
+
+## License
+
+This project is licensed under the **Apache License 2.0**. 
+
+Copyright 2023-2026 **AI Sweden**.
+
+### Third-Party Licenses
+This project includes third-party software, including:
+* **Anonymeter**: Licensed under the Clear BSD License (Copyright © 2022 Anonos IP LLC).
+
+For full legal texts and attributions, please refer to the [LICENSE](LICENSE) and [NOTICE](NOTICE) files.
