@@ -28,8 +28,8 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
         criterion: torch.nn.Module,
         optimizer: optim.Optimizer,
         epochs: int,
-        dpsgd_metadata_path: str = "./target_dpsgd/dpsgd_dic.pkl",
-        virtual_batch_size: int = 16,
+        dpsgd_metadata_path: str = "./target/dpsgd_dic.pkl",
+        virtual_batch_size: int = 64,
     ) -> TrainingOutput:
         """
         Train a DP-SGD compliant model.
@@ -47,8 +47,8 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
             TrainingOutput: Contains the trained model and training metrics, including accuracy and loss history.
         """
 
-        # Get targeted batch_size from the dataloader
-        batch_size = dataloader.batch_size
+        # Get targeted batch_size from the dataloader, making sure it does not exceed the dataloader's batch size
+        virtual_batch_size = min(dataloader.batch_size, virtual_batch_size)
         
         # Get dpsgd flag from the model
         RUN_DPSGD = model.dpsgd
@@ -229,7 +229,7 @@ def train_loop(dataloader, model, criterion, optimizer, device, epoch, epochs):
 
         # Accumulate performance of shadow model
         train_acc += pred.eq(labels.view_as(pred)).sum().item()
-        train_loss += loss.item()
+        train_loss += loss.item()*labels.size(0)
     
     return train_loss, train_acc
 
