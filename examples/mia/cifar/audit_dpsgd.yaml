@@ -3,8 +3,14 @@ audit:  # Configurations for auditing
   attack_list:
     - attack: lira
       online: True
-      num_shadow_models: 2
-      training_data_fraction: 0.1
+      num_shadow_models: 16
+      var_calculation: "fixed"
+      training_data_fraction: 0.5
+    - attack: rmia
+      online: True
+      num_shadow_models: 16
+      training_data_fraction: 0.5
+
 
   output_dir: "./leakpro_output"
   attack_type: "mia" #mia, gia
@@ -14,7 +20,7 @@ target:
   # Target model path
   module_path: "./target_model_class.py"
   model_class: "ResNet18_DPsgd" 
-  target_folder: "./target_dpsgd"
+  target_folder: "./target"
   # Data paths
   data_path: "./data/cifar10.pkl"
 
