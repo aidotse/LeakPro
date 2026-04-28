@@ -94,14 +94,20 @@ class InceptionTime(nn.Module):
             use_bottleneck: bool = True,
             bottleneck_size: int = 32,
             depth: int = 6,
-            kernel_sizes: list[int] = None
+            kernel_sizes: list[int] = None,
+            max_kernel_size: int = None
         ) -> None:
         super().__init__()
 
         self.use_residual = use_residual
 
-        if kernel_sizes is None:
+        if kernel_sizes is None and max_kernel_size is None:
             kernel_sizes = default_kernel_sizes(seq_len)
+        elif kernel_sizes is None and max_kernel_size is not None:
+            kernel_sizes = [
+                k if k % 2 == 1 else k - 1  # Ensure odd kernel sizes for performance (not in original InceptionTime)
+                for k in [max_kernel_size // (2 ** i) for i in range(3)]
+            ]
 
         num_inception_module_convs = len(kernel_sizes) + 1
         num_channels_after_concat = num_filters * num_inception_module_convs

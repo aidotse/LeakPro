@@ -2,13 +2,14 @@
 
 from abc import ABC, abstractmethod
 
+import numpy as np
 from torch.nn import Module
 from torch.nn.modules.loss import _Loss
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader, Dataset
 
 from leakpro.schemas import EvalOutput, TrainingOutput
-from leakpro.utils.import_helper import Any, Dict, Self
+from leakpro.utils.import_helper import Any, Dict, List, Self
 
 
 class AbstractInputHandler(ABC):
@@ -44,6 +45,29 @@ class AbstractInputHandler(ABC):
     ) -> EvalOutput:
         """Procedure to train a model on data from the population."""
         pass
+
+    def sample_shadow_indices(
+        self: Self,
+        shadow_population: List[int],
+        data_fraction: float
+    ) -> np.ndarray:
+        """Sample indices for shadow model training.
+
+        May be overridden in Handler implementation to perform custom sampling;
+        see for example sampling by individual in time series handlers.
+
+        Args:
+        ----
+            shadow_population: List of available indices in the shadow population.
+            data_fraction: Fraction of data to sample.
+
+        Returns:
+        -------
+            Array of sampled indices.
+
+        """
+        data_size = int(len(shadow_population) * data_fraction)
+        return np.random.choice(shadow_population, data_size, replace=False)
 
     class UserDataset(Dataset, ABC):
         """Parent class for user-defined datasets."""

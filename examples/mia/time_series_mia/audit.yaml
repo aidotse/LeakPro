@@ -1,0 +1,137 @@
+audit: # Configurations for auditing
+  random_seed: 42 # Integer specifying the random seed
+  attack_list: 
+
+    # # DTS Inception
+    # - attack: dts
+    #   num_shadow_models: 2
+    #   online: False
+    #   clf_model: LSTM # InceptionTime, LSTM
+    #   clf_model_kwargs:
+      
+    #     # InceptionTime kwargs
+    #     # kernel_sizes: [20, 15, 10]  # will overide max_kernel_size
+    #     # max_kernel_size: 15
+    #     # If neither kernel_sizes or max_kernel_size is set kernel_sizes will be set based on seq_length:
+    #     # [2, 4, 8] if seq_length < 81 else [10, 20, 40]
+        
+    #     # LSTM kwargs
+    #     hidden_size: 128
+      
+    #   clf_batch_size: 512
+    #   clf_max_epochs: 5
+
+    # MS-lira
+    # - attack: multi_signal_lira
+    #   signal_names: ["MSELoss", "MAELoss", "RescaledSMAPELoss", "TrendLoss", "SeasonalityLoss", "TS2VecLoss"]
+    #   num_shadow_models: 64
+    #   online: True
+
+    # # LIRA
+    # - attack: lira
+    #   signal: msm  # mse, mae, smape, rescaled_smape, seasonality, trend, ts2vec, dtw, msm
+    #   num_shadow_models: 2
+    #   online: True  # True, False
+    #   individual_mia: False  # True, False
+      
+    # RMIA
+    - attack: rmia
+      gamma: 1.0
+      signal: mse  # mse, mae, smape, rescaled_smape, seasonality, trend, ts2vec, dtw, msm
+      num_shadow_models: 2
+      attack_data_fraction: 0.01
+      online: True  # True, False
+      
+    # - attack: rmia
+    #   gamma: 1.0
+    #   signal_name: MAELoss
+    #   num_shadow_models: 64
+    #   attack_data_fraction: 0.01
+    #   online: True
+      
+    # - attack: rmia
+    #   gamma: 1.0
+    #   signal_name: SMAPELoss
+    #   num_shadow_models: 64
+    #   attack_data_fraction: 0.01
+    #   online: True
+      
+    # - attack: rmia
+    #   gamma: 1.0
+    #   signal_name: TrendLoss
+    #   num_shadow_models: 64
+    #   attack_data_fraction: 0.01
+    #   online: True
+
+    # - attack: rmia
+    #   gamma: 1.0
+    #   signal_name: SeasonalityLoss
+    #   num_shadow_models: 64
+    #   attack_data_fraction: 0.01
+    #   online: True
+
+    # - attack: rmia
+    #   gamma: 1.0
+    #   signal_name: TS2VecLoss
+    #   num_shadow_models: 64
+    #   attack_data_fraction: 0.01
+    #   online: True
+
+    # # RMIA OFFLINE
+    # - attack: rmia
+    #   gamma: 1.0
+    #   signal_name: MSELoss
+    #   num_shadow_models: 64
+    #   attack_data_fraction: 0.01
+    #   online: False
+      
+    # - attack: rmia
+    #   gamma: 1.0
+    #   signal_name: MAELoss
+    #   num_shadow_models: 64
+    #   attack_data_fraction: 0.01
+    #   online: False
+      
+    # - attack: rmia
+    #   gamma: 1.0
+    #   signal_name: SMAPELoss
+    #   num_shadow_models: 64
+    #   attack_data_fraction: 0.01
+    #   online: False
+      
+    # - attack: rmia
+    #   gamma: 1.0
+    #   signal_name: TrendLoss
+    #   num_shadow_models: 64
+    #   attack_data_fraction: 0.01
+    #   online: False
+
+    # - attack: rmia
+    #   gamma: 1.0
+    #   signal_name: SeasonalityLoss
+    #   num_shadow_models: 64
+    #   attack_data_fraction: 0.01
+    #   online: False
+
+    # - attack: rmia
+    #   gamma: 1.0
+    #   signal_name: TS2VecLoss
+    #   num_shadow_models: 64
+    #   attack_data_fraction: 0.01
+    #   online: False
+
+  output_dir: "./leakpro_output"
+  attack_type: "mia" #mia, gia
+  data_modality: "timeseries" #image, tabular, timeseries
+
+target:
+  # Target model path
+  module_path: "./utils/models/NHiTS.py"
+  model_class: "NHiTS"
+  # Data paths
+  target_folder: "./target"
+  data_path: "data/ELD.pkl"
+
+shadow_model:
+
+distillation_model:

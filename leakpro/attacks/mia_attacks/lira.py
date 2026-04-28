@@ -11,6 +11,7 @@ from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.reporting.mia_result import MIAResult
+import leakpro.signals.functional as signals 
 from leakpro.utils.import_helper import Self
 
 
@@ -24,6 +25,7 @@ class AttackLiRA(AbstractMIA):
         training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow models")  # noqa: E501
         online: bool = Field(default=False, description="Online vs offline attack")
         var_calculation: Literal["carlini", "individual_carlini", "fixed"] = Field(default="carlini", description="Variance estimation method to use [carlini, individual_carlini, fixed]")  # noqa: E501
+        signal: str = Field(default="ModelRescaledLogits", description="What signal to use.")
 
         @model_validator(mode="after")
         def check_num_shadow_models_if_online(self) -> Self:
@@ -63,7 +65,8 @@ class AttackLiRA(AbstractMIA):
         for key, value in self.configs.model_dump().items():
             setattr(self, key, value)
 
-        self.shadow_models = []
+        self.shadow_models = []  # TODO: Remove self.shadow_models? Is self.shadow_models ever used? Parent classes does not requier self.shadow_models to exist?
+        self.signal = getattr(signals, self.configs.signal)
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
@@ -87,35 +90,6 @@ class AttackLiRA(AbstractMIA):
             "detailed": detailed_str,
         }
 
-    def rescale_logits(self:Self, logits: np.ndarray, true_label:np.ndarray) -> np.ndarray:
-        """Rescale the logits to a range of [0, 1].
-
-        Args:
-            logits (np.ndarray): The logits to be rescaled.
-            true_label (np.ndarray): The true labels for the logits.
-
-        Returns:
-            np.ndarray: The rescaled logits.
-
-        """
-        if logits.shape[1] == 1:
-            def sigmoid(z:np.ndarray) -> np.ndarray:
-                return 1/(1 + np.exp(-z))
-            positive_class_prob = sigmoid(logits).reshape(-1, 1)
-            predictions = np.concatenate([1 - positive_class_prob, positive_class_prob], axis=1)
-        else:
-            predictions = logits - np.max(logits, axis=1, keepdims=True)
-            predictions = np.exp(predictions)
-            predictions = predictions/np.sum(predictions,axis=1, keepdims=True)
-
-        count = predictions.shape[0]
-        y_true = predictions[np.arange(count), true_label]
-        predictions[np.arange(count), true_label] = 0
-
-        y_wrong = np.sum(predictions, axis=1)
-        output_signals = np.log(y_true+1e-45) - np.log(y_wrong+1e-45)
-        return output_signals  # noqa: RET504
-
     def prepare_attack(self:Self)->None:
         """Prepares data to obtain metric on the target model and dataset, using signals computed on the auxiliary model/dataset.
 
@@ -137,17 +111,22 @@ class AttackLiRA(AbstractMIA):
                                                                               online = self.online)
 
         self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)
-
         self.out_indices = ~ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"]).T
 
-        true_labels = self.handler.get_labels(self.audit_dataset["data"])
-        self.target_logits = ShadowModelHandler().load_logits(name="target")
+        true_labels = self.handler.get_labels(self.audit_dataset["data"]).squeeze()
+        self.target_model_logits = self.signal(
+            ShadowModelHandler().load_logits(name="target"),
+            true_labels
+        )
         self.shadow_models_logits = []
         for indx in self.shadow_model_indices:
-            self.shadow_models_logits.append(ShadowModelHandler().load_logits(indx=indx))
-
-        self.shadow_models_logits = np.array([self.rescale_logits(x, true_labels) for x in self.shadow_models_logits])
-        self.target_logits = self.rescale_logits(self.target_logits, true_labels)
+            self.shadow_models_logits.append(
+                self.signal(
+                    ShadowModelHandler().load_logits(indx=indx),
+                    true_labels
+                ).T
+            )
+        self.shadow_models_logits = np.array(self.shadow_models_logits)
 
     def get_std(self:Self, logits: list, mask: list, is_in: bool, var_calculation: str) -> np.ndarray:
         """A function to define what method to use for calculating variance for LiRA."""
@@ -216,18 +195,18 @@ class AttackLiRA(AbstractMIA):
             out_std = self.get_std(sm_logits, out_mask, False, self.var_calculation)
 
             # Get the logit from the target model for the current sample
-            target_logit = self.target_logits[i]
+            target_model_logit = self.target_model_logits[i]
 
             # Calculate the log probability density function value
             if self.online:
                 in_mean = np.mean(sm_logits[~out_mask])
                 in_std = self.get_std(sm_logits, ~out_mask, True, self.var_calculation)
 
-                pr_in = norm.logpdf(target_logit, in_mean, in_std + 1e-30)
-                pr_out = norm.logpdf(target_logit, out_mean, out_std + 1e-30)
+                pr_in = norm.logpdf(target_model_logit, in_mean, in_std + 1e-30)
+                pr_out = norm.logpdf(target_model_logit, out_mean, out_std + 1e-30)
             else:
                 pr_in = 0
-                pr_out = -norm.logcdf(target_logit, out_mean, out_std + 1e-30)
+                pr_out = -norm.logcdf(target_model_logit, out_mean, out_std + 1e-30)
 
             score[i] = (pr_in - pr_out)  # Append the calculated probability density value to the score list
             if np.isnan(score[i]):

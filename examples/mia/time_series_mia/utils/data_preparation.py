@@ -7,8 +7,10 @@ from torch.utils.data import DataLoader, Dataset, TensorDataset, Subset
 from sklearn.model_selection import train_test_split
 from mne.io import read_raw_edf
 from leakpro.utils.logger import logger
+from leakpro import AbstractInputHandler
 
-class IndividualizedDataset(Dataset):
+
+class IndividualizedDataset(AbstractInputHandler.UserDataset):
     def __init__(self, data:tensor, targets:tensor, individual_indices:list[tuple[int,int]], scaler, stride, val_set=None, num_val_individuals=0):
         self.data = data
         self.targets = targets

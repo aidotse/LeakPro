@@ -12,7 +12,14 @@ from tqdm import tqdm
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.signals.signal_extractor import Model
 from leakpro.signals.utils.get_TS2Vec import get_ts2vec_model
+from leakpro.signals.utils.msm import mv_msm_distance
 from leakpro.utils.import_helper import List, Optional, Self, Tuple
+
+try:
+    from sktime.distances import dtw_distance
+    HAS_SKTIME = True
+except ImportError:
+    HAS_SKTIME = False
 
 
 class Signal(ABC):
@@ -62,7 +69,8 @@ class Signal(ABC):
             logits = model.get_logits(data)
             model_logits.extend(logits)
         model_logits = np.array(model_logits)
-        return model_logits, data_loader.dataset.targets
+        model_targets = np.array(data_loader.dataset.targets)
+        return model_logits, model_targets
 
 class ModelLogits(Signal):
     """Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a Dataset.
@@ -545,6 +553,102 @@ class TS2Vec(Signal):
 
         return results
 
+class DTW(Signal):
+    """Used to represent any type of signal that can be obtained from a Model and/or a Dataset.
+
+    This particular class is used to get the Dynamic Time Warping distance
+    between a time-series model output and the target series.
+
+    Note: Requires the `sktime` package to be installed.
+    """
+
+    def __call__(
+        self:Self,
+        models: List[Model],
+        handler: AbstractInputHandler,
+        indices: np.ndarray,
+    ) -> List[np.ndarray]:
+        """Built-in call method.
+
+        Args:
+        ----
+            models: List of models that can be queried.
+            handler: The input handler object.
+            indices: List of indices in population dataset that can be queried from handler.
+
+        Returns:
+        -------
+            The signal value.
+
+        """
+        if not HAS_SKTIME:
+            raise ImportError(
+                "DTW signal requires the 'sktime' package. "
+                "Install it with: pip install sktime"
+            )
+
+        data_loader = handler.get_dataloader(indices, shuffle=False)
+        assert self._is_shuffling(data_loader) is False, "DataLoader must not shuffle data to maintain order of indices"
+
+        results = []
+        for m, model in enumerate(models):
+            model_dtw_distance = []
+
+            for data, target in tqdm(data_loader, desc=f"Getting DTW distance for model {m+1}/{len(models)}"):
+                output = model.get_logits(data)
+                batch_dtw_distances = np.array(list(map(dtw_distance, target.numpy(), output)))
+                model_dtw_distance.extend(batch_dtw_distances)
+
+            model_dtw_distance = np.array(model_dtw_distance)
+            results.append(model_dtw_distance)
+
+        return results
+
+
+class MSM(Signal):
+    """Used to represent any type of signal that can be obtained from a Model and/or a Dataset.
+
+    This particular class is used to get the Move-Split-Merge distance
+    between a time-series model output and the target series.
+    """
+
+    def __call__(
+        self:Self,
+        models: List[Model],
+        handler: AbstractInputHandler,
+        indices: np.ndarray,
+    ) -> List[np.ndarray]:
+        """Built-in call method.
+
+        Args:
+        ----
+            models: List of models that can be queried.
+            handler: The input handler object.
+            indices: List of indices in population dataset that can be queried from handler.
+
+        Returns:
+        -------
+            The signal value.
+
+        """
+        data_loader = handler.get_dataloader(indices, shuffle=False)
+        assert self._is_shuffling(data_loader) is False, "DataLoader must not shuffle data to maintain order of indices"
+
+        results = []
+        for m, model in enumerate(models):
+            model_msm_distance = []
+
+            for data, target in tqdm(data_loader, desc=f"Getting MSM distance for model {m+1}/{len(models)}"):
+                output = model.get_logits(data)
+                batch_msm_distances = np.array(list(map(mv_msm_distance, target.numpy(), output)))
+                model_msm_distance.extend(batch_msm_distances)
+
+            model_msm_distance = np.array(model_msm_distance)
+            results.append(model_msm_distance)
+
+        return results
+
+
 SIGNAL_REGISTRY = {
     "ModelLogits": ModelLogits,
     "ModelRescaledLogits": ModelRescaledLogits,
@@ -557,6 +661,8 @@ SIGNAL_REGISTRY = {
     "SMAPE": SMAPE,
     "RescaledSMAPE": RescaledSMAPE,
     "TS2Vec": TS2Vec,
+    "DTW": DTW,
+    "MSM": MSM,
 }
 
 def create_signal_instance(signal_name: str) -> Signal:
