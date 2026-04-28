@@ -2,46 +2,24 @@ audit: # Configurations for auditing
   random_seed: 42 # Integer specifying the random seed
   attack_list: 
 
-    # DTS Inception
-    - attack: dts
-      num_shadow_models: 64
-      online: True
-      clf_model: "InceptionTime"
-      clf_model_kwargs:
-        # kernel_sizes: [20, 15, 10]  # will overide max_kernel_size
-        max_kernel_size: 15
-        # If neither kernel_sizes or max_kernel_size is set kernel_sizes will be set based on seq_length:
-        # [2, 4, 8] if seq_length < 81 else [10, 20, 40]
-      clf_batch_size: 512
-      clf_max_epochs: 64
-
+    # # DTS Inception
     # - attack: dts
-    #   num_shadow_models: 64
+    #   num_shadow_models: 2
     #   online: False
-    #   clf_model: "InceptionTime"
+    #   clf_model: LSTM # InceptionTime, LSTM
     #   clf_model_kwargs:
-    #     max_kernel_size: 15
-    #   clf_batch_size: 512
-    #   clf_max_epochs: 64
-
-    # DTS LSTM
-    # - attack: dts
-    #   num_shadow_models: 64
-    #   online: True
-    #   clf_model: LSTM
-    #   clf_model_kwargs:
+      
+    #     # InceptionTime kwargs
+    #     # kernel_sizes: [20, 15, 10]  # will overide max_kernel_size
+    #     # max_kernel_size: 15
+    #     # If neither kernel_sizes or max_kernel_size is set kernel_sizes will be set based on seq_length:
+    #     # [2, 4, 8] if seq_length < 81 else [10, 20, 40]
+        
+    #     # LSTM kwargs
     #     hidden_size: 128
+      
     #   clf_batch_size: 512
-    #   clf_max_epochs: 64
-
-    # - attack: dts
-    #   num_shadow_models: 64
-    #   online: False
-    #   clf_model: LSTM
-    #   clf_model_kwargs:
-    #     hidden_size: 128
-    #   clf_batch_size: 512
-    #   clf_max_epochs: 64
+    #   clf_max_epochs: 5
 
     # MS-lira
     # - attack: multi_signal_lira
@@ -49,90 +27,20 @@ audit: # Configurations for auditing
     #   num_shadow_models: 64
     #   online: True
 
-    # - attack: multi_signal_lira
-    #   signal_names: ["MSELoss", "MAELoss", "RescaledSMAPELoss", "TrendLoss", "SeasonalityLoss", "TS2VecLoss"]
-    #   num_shadow_models: 64
-    #   online: False
-
-    # # LIRA ONLINE
+    # # LIRA
     # - attack: lira
-    #   signal_name: MSELoss
-    #   num_shadow_models: 64
-    #   online: True
+    #   signal: msm  # mse, mae, smape, rescaled_smape, seasonality, trend, ts2vec, dtw, msm
+    #   num_shadow_models: 2
+    #   online: True  # True, False
+    #   individual_mia: False  # True, False
       
-    # - attack: lira
-    #   signal_name: MAELoss
-    #   num_shadow_models: 64
-    #   online: True
-      
-    # - attack: lira
-    #   signal_name: SMAPELoss
-    #   num_shadow_models: 64
-    #   online: True
-      
-    # - attack: lira
-    #   signal_name: RescaledSMAPELoss
-    #   num_shadow_models: 64
-    #   online: True
-      
-    # - attack: lira
-    #   signal_name: TrendLoss
-    #   num_shadow_models: 64
-    #   online: True
-    
-    # - attack: lira
-    #   signal_name: SeasonalityLoss
-    #   num_shadow_models: 64
-    #   online: True
-    
-    # - attack: lira
-    #   signal_name: TS2VecLoss
-    #   num_shadow_models: 64
-    #   online: True
-    
-    # # LIRA OFFLINE
-    # - attack: lira
-    #   signal_name: MSELoss
-    #   num_shadow_models: 64
-    #   online: False
-    
-    # - attack: lira
-    #   signal_name: MAELoss
-    #   num_shadow_models: 64
-    #   online: False
-      
-    # - attack: lira
-    #   signal_name: SMAPELoss
-    #   num_shadow_models: 64
-    #   online: False
-      
-    # - attack: lira
-    #   signal_name: RescaledSMAPELoss
-    #   num_shadow_models: 64
-    #   online: False
-      
-    # - attack: lira
-    #   signal_name: TrendLoss
-    #   num_shadow_models: 64
-    #   online: False
-    
-    # - attack: lira
-    #   signal_name: SeasonalityLoss
-    #   num_shadow_models: 64
-    #   online: False
-  
-    # - attack: lira
-    #   signal_name: TS2VecLoss
-    #   num_shadow_models: 64
-    #   online: False
-
-    # # RMIA ONLINE
-    # - attack: rmia
-    #   gamma: 1.0
-    #   signal_name: MSELoss
-    #   num_shadow_models: 64
-    #   attack_data_fraction: 0.01
-    #   online: True
+    # RMIA
+    - attack: rmia
+      gamma: 1.0
+      signal: mse  # mse, mae, smape, rescaled_smape, seasonality, trend, ts2vec, dtw, msm
+      num_shadow_models: 2
+      attack_data_fraction: 0.01
+      online: True  # True, False
       
     # - attack: rmia
     #   gamma: 1.0
@@ -211,63 +119,6 @@ audit: # Configurations for auditing
     #   num_shadow_models: 64
     #   attack_data_fraction: 0.01
     #   online: False
-
-    # # Ensemble (Audit mode)
-    # - attack: ensemble
-    #   signal_names: ["MSELoss"]
-    #   audit: True
-    #   num_instances: 5
-    #   num_runs: 3
-    #   subset_size: 50
-    #   num_pairs: 9
-      
-    # - attack: ensemble
-    #   signal_names: ["MAELoss"]
-    #   audit: True
-    #   num_instances: 5
-    #   num_runs: 3
-    #   subset_size: 50
-    #   num_pairs: 9
-      
-    # - attack: ensemble
-    #   signal_names: ["SMAPELoss"]
-    #   audit: True
-    #   num_instances: 5
-    #   num_runs: 3
-    #   subset_size: 50
-    #   num_pairs: 9
-      
-    # - attack: ensemble
-    #   signal_names: ["RescaledSMAPELoss"]
-    #   audit: True
-    #   num_instances: 5
-    #   num_runs: 3
-    #   subset_size: 50
-    #   num_pairs: 9
-      
-    # - attack: ensemble
-    #   signal_names: ["TrendLoss"]
-    #   audit: True
-    #   num_instances: 5
-    #   num_runs: 3
-    #   subset_size: 50
-    #   num_pairs: 9
-
-    # - attack: ensemble
-    #   signal_names: ["SeasonalityLoss"]
-    #   audit: True
-    #   num_instances: 5
-    #   num_runs: 3
-    #   subset_size: 50
-    #   num_pairs: 9
-      
-    # - attack: ensemble
-    #   signal_names: ["TS2VecLoss"]
-    #   audit: True
-    #   num_instances: 5
-    #   num_runs: 3
-    #   subset_size: 50
-    #   num_pairs: 9
 
   output_dir: "./leakpro_output"
   attack_type: "mia" #mia, gia
