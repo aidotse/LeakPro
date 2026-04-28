@@ -3,7 +3,7 @@
 # Copyright (c) 2019 Google Inc., OpenAI and Pennsylvania State University
 # See https://github.com/cleverhans-lab/cleverhans?tab=MIT-1-ov-file
 #
-"""TODO: add docstring"""
+"""TODO: add docstring."""
 
 import builtins
 
