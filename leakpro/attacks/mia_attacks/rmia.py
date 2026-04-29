@@ -157,7 +157,7 @@ class AttackRMIA(AbstractMIA):
             self._prepare_shadow_models()
 
             self.ground_truth_indices = self.handler.get_labels(self.audit_dataset["data"])
-            self.logits_theta = ShadowModelHandler().load_logits(name="target")
+            self.logits_theta = ShadowModelHandler().load_logits(name=f"target_{ShadowModelHandler().target_model_hash}")
             self.logits_shadow_models = []
             for indx in self.shadow_model_indices:
                 self.logits_shadow_models.append(ShadowModelHandler().load_logits(indx=indx))

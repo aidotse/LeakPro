@@ -156,7 +156,7 @@ class AttackLiRA(AbstractMIA):
         self.out_indices = ~ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"]).T
 
         true_labels = self.handler.get_labels(self.audit_dataset["data"])
-        self.target_logits = ShadowModelHandler().load_logits(name="target")
+        self.target_logits = ShadowModelHandler().load_logits(name=f"target_{ShadowModelHandler().target_model_hash}")
         self.shadow_models_logits = []
         for indx in self.shadow_model_indices:
             self.shadow_models_logits.append(ShadowModelHandler().load_logits(indx=indx))

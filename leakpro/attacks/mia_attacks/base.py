@@ -178,7 +178,7 @@ class AttackBASE(AbstractMIA):
         # Load the logits for the target model and shadow models
         ground_truth_indices = self.handler.get_labels(self.audit_dataset["data"])
         n_audit_points = len(self.audit_dataset["data"])
-        logits_target = ShadowModelHandler().load_logits(name="target")
+        logits_target = ShadowModelHandler().load_logits(name=f"target_{ShadowModelHandler().target_model_hash}")
         logits_shadow_models = []
         for indx in self.shadow_model_indices:
             logits_shadow_models.append(ShadowModelHandler().load_logits(indx=indx))
