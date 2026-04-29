@@ -1,6 +1,10 @@
+#
 # This file is part of celevrhans and is released under MIT License.  # noqa: D100
 # Copyright (c) 2019 Google Inc., OpenAI and Pennsylvania State University
-# See https://github.com/cleverhans-lab/cleverhans?tab=MIT-1-ov-file#readme for details.
+# See https://github.com/cleverhans-lab/cleverhans?tab=MIT-1-ov-file
+#
+"""TODO: add docstring."""
+
 import builtins
 
 import numpy as np
