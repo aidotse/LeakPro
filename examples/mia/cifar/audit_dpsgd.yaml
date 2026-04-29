@@ -20,7 +20,7 @@ target:
   # Target model path
   module_path: "./target_model_class.py"
   model_class: "ResNet18_DPsgd" 
-  target_folder: "./target"
+  target_folder: "./target_dpsgd"
   # Data paths
   data_path: "./data/cifar10.pkl"
 

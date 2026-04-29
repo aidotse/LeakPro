@@ -28,7 +28,7 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
         criterion: torch.nn.Module,
         optimizer: optim.Optimizer,
         epochs: int,
-        dpsgd_metadata_path: str = "./target/dpsgd_dic.pkl",
+        dpsgd_metadata_path: str = "./target_dpsgd/dpsgd_dic.pkl",
         virtual_batch_size: int = 64,
     ) -> TrainingOutput:
         """
