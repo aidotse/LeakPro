@@ -28,7 +28,7 @@ def import_module_from_file(filepath:str) -> ModuleType:
     """Import a module from a given file path."""
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"File {filepath} not found")
-    module_name = filepath.rsplit("/", maxsplit=1)[-1].split(".")[0]
+    module_name = filepath.rsplit("/", maxsplit=1)[-1].split(".", maxsplit=1)[0]
     spec = importlib.util.spec_from_file_location(module_name, filepath)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
