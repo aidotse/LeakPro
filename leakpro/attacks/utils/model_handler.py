@@ -33,7 +33,7 @@ from leakpro.signals.signal import ModelLogits
 from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import Any, Self, Tuple, Union
 from leakpro.utils.logger import logger
-from leakpro.utils.save_load import hash_indices, hash_model
+from leakpro.utils.save_load import hash_config, hash_indices, hash_model
 
 
 class ModelHandler():
@@ -77,6 +77,17 @@ class ModelHandler():
 
         # Create the hash for the data split (train/test indices)
         self.population_hash = hash_indices(self.handler.train_indices, self.handler.test_indices)
+
+        # Create the hash for the shadow model training config (everything that determines how shadow models are trained)
+        self.training_config_hash = hash_config({
+            "model_class": self.model_class,
+            "init_params": self.init_params,
+            "optimizer": self.optimizer_class.__name__,
+            "optimizer_config": self.optimizer_config,
+            "criterion": self.criterion_class.__name__,
+            "loss_config": self.loss_config,
+            "epochs": self.epochs,
+        })
 
         # Folder to store intermediate results
         self.attack_cache_folder_path = "leakpro_output/attack_cache"

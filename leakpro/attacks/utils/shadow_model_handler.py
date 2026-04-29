@@ -197,9 +197,18 @@ class ShadowModelHandler(ModelHandler):
             metadata = self._load_shadow_metadata(i)
             if not isinstance(metadata, ShadowModelTrainingSchema):
                 raise TypeError("Shadow Model metadata is not of the correct type")
-            if self._metadata_training_signature(metadata) == expected_signature \
-                    and metadata.population_hash == self.population_hash:
+            sig_match = self._metadata_training_signature(metadata) == expected_signature
+            pop_match = getattr(metadata, "population_hash", None) == self.population_hash
+            if sig_match and pop_match:
+                logger.debug(f"Shadow model {i} accepted — all fields match")
                 filtered_indices.append(i)
+            else:
+                reason = []
+                if not sig_match:
+                    reason.append("training signature")
+                if not pop_match:
+                    reason.append("population_hash")
+                logger.debug(f"Shadow model {i} skipped — mismatched fields: {', '.join(reason)}")
 
         return all_indices, filtered_indices
 
@@ -269,9 +278,11 @@ class ShadowModelHandler(ModelHandler):
         n_existing_models = len(filtered_indices)
 
         if n_existing_models >= num_models:
-            logger.info("Number of existing models exceeds or equals the number of models to create")
+            logger.info(f"Reusing {num_models} cached shadow model(s) — population_hash and training_config_hash match")
             # sort the filtered indices
             return np.sort(filtered_indices)[:num_models]
+
+        logger.info(f"Reusing {n_existing_models} cached shadow model(s), training {num_models - n_existing_models} new one(s)")
 
         indices_to_use = []
         next_index = max(all_indices) + 1 if all_indices else 0
@@ -333,7 +344,8 @@ class ShadowModelHandler(ModelHandler):
                 model_class = self.model_class,
                 model_module_path = self.model_path,
                 target_model_hash= self.target_model_hash,
-                population_hash = self.population_hash
+                population_hash = self.population_hash,
+                training_config_hash = self.training_config_hash
             )
 
             ShadowModelHandler().cache_logits(PytorchModel(shadow_model, criterion), name=f"sm_{indx}_{self.population_hash}")
