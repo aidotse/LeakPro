@@ -197,7 +197,8 @@ class ShadowModelHandler(ModelHandler):
             metadata = self._load_shadow_metadata(i)
             if not isinstance(metadata, ShadowModelTrainingSchema):
                 raise TypeError("Shadow Model metadata is not of the correct type")
-            if self._metadata_training_signature(metadata) == expected_signature:
+            if self._metadata_training_signature(metadata) == expected_signature \
+                    and metadata.population_hash == self.population_hash:
                 filtered_indices.append(i)
 
         return all_indices, filtered_indices
@@ -331,10 +332,11 @@ class ShadowModelHandler(ModelHandler):
                 online = online,
                 model_class = self.model_class,
                 model_module_path = self.model_path,
-                target_model_hash= self.target_model_hash
+                target_model_hash= self.target_model_hash,
+                population_hash = self.population_hash
             )
 
-            ShadowModelHandler().cache_logits(PytorchModel(shadow_model, criterion), name=f"sm_{indx}")
+            ShadowModelHandler().cache_logits(PytorchModel(shadow_model, criterion), name=f"sm_{indx}_{self.population_hash}")
 
             with open(f"{self.storage_path}/{self.metadata_storage_name}_{indx}.pkl", "wb") as f:
                 pickle.dump(meta_data, f)
@@ -415,7 +417,7 @@ class ShadowModelHandler(ModelHandler):
         """Load model logits."""
 
         if name is None and indx is not None:
-            name = f"sm_{indx}"
+            name = f"sm_{indx}_{self.population_hash}"
 
         # check if the name is already in the cache
         cache_file = f"{self.attack_cache_folder_path}/{name}_logits.npy"
