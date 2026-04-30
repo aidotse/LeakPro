@@ -1,11 +1,11 @@
 audit:  # Configurations for auditing
   random_seed: 1236  # Integer specifying the random seed
   attack_list:
-# # RMIA
-#     - attack: rmia
-#       online: False
-#       num_shadow_models: 2
-#       training_data_fraction: 0.5
+# RMIA
+    - attack: rmia
+      online: True
+      num_shadow_models: 16
+      training_data_fraction: 0.5
 # # BASE
 #     - attack: base
 #       online: False
@@ -35,9 +35,15 @@ audit:  # Configurations for auditing
     #   online: True
     #   step_size: 0.01
       # max_perturbation_size: 0.314
-    - attack: seqmia
-      number_of_traj: 50
-      mia_classifier_epochs: 1000
+    # - attack: seqmia
+    #   number_of_traj: 50
+    #   mia_classifier_epochs: 1000
+    - attack: lira
+      online: True
+      num_shadow_models: 16
+      var_calculation: "fixed"
+      training_data_fraction: 0.5
+
 
   output_dir: "./cifar10/leakpro_output"
   attack_type: "mia" #mia, gia
