@@ -56,7 +56,7 @@ Our [example portfolio](https://github.com/aidotse/LeakPro/tree/readme/examples)
       <strong>Length-of-stay Prediction</strong><br>
       <img src="./resources/los.png" alt="LOS" style="width:150px; height:150px;">
       <br>
-      <a href="examples/mia/LOS/length-of-stay.md">length-of-stay.md</a>
+      <a href="examples/length-of-stay.md">length-of-stay.md</a>
       <div style="text-align: left;">
         MIA: ✅<br>
         MInvA: ❌<br>
@@ -68,7 +68,7 @@ Our [example portfolio](https://github.com/aidotse/LeakPro/tree/readme/examples)
       <strong>Text Masking</strong><br>
       <img src="./resources/NER.png" alt="NER" style="width:150px; height:150px;">
       <br>
-      <a href="examples/mia/text-masking.md">text-masking.md</a>
+      <a href="examples/text-masking.md">text-masking.md</a>
       <div style="text-align: left;">
         MIA: ✅<br>
         MInvA: ❌<br>
@@ -82,7 +82,7 @@ Our [example portfolio](https://github.com/aidotse/LeakPro/tree/readme/examples)
       <strong>Camera Surveillance</strong><br>
       <img src="./resources/surveillance.png" alt="Surveillance" style="width:150px; height:150px;">
       <br>
-      <a href="examples/mia/surveillance.md">surveillance.md</a>
+      <a href="examples/surveillance.md">surveillance.md</a>
       <div style="text-align: left;">
         MIA: ✅<br>
         MInvA: ❌<br>
@@ -94,7 +94,7 @@ Our [example portfolio](https://github.com/aidotse/LeakPro/tree/readme/examples)
       <strong>Molecule Property Prediction</strong><br>
       <img src="./resources/graph.png" alt="Graph" style="width:150px; height:150px;">
       <br>
-      <a href="examples/mia/molecule-property.md">molecule-property.md</a>
+      <a href="examples/molecule-property.md">molecule-property.md</a>
       <div style="text-align: left;">
         MIA: ✅<br>
         MInvA: ❌<br>
