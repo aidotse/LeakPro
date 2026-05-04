@@ -29,13 +29,21 @@ from leakpro.utils.import_helper import Any, Dict, Self
 class AbstractInputHandler(ABC):
     """Parent class for user inputs."""
 
-    def __init_subclass__(cls: type, **kwargs:dict) -> None:
-        """Enforces that all subclasses must define a nested class named 'UserDataset'."""
+    def __init_subclass__(cls, role: str = "full", **kwargs: dict) -> None:
+        """Enforces structural requirements on subclasses.
+
+        Args:
+            role: "full" (default) — must provide UserDataset + train + eval.
+                  "data"           — must provide UserDataset only (no train/eval).
+                  "model"          — must provide train + eval only (no UserDataset).
+            **kwargs: Passed through to the parent __init_subclass__.
+
+        """
         super().__init_subclass__(**kwargs)
 
-        # Check if 'UserDataset' is defined in the subclass
-        if not hasattr(cls, "UserDataset") or not issubclass(cls.UserDataset, Dataset):
-            raise TypeError(f"Class {cls.__name__} must define a nested class named 'UserDataset'.")
+        needs_dataset = role in ("full", "data")
+        if needs_dataset and (not hasattr(cls, "UserDataset") or not issubclass(cls.UserDataset, Dataset)):
+            raise TypeError(f"Class {cls.__name__} must define a 'UserDataset' (Dataset subclass).")
 
 
     @abstractmethod
