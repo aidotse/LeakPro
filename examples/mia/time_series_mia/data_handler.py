@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Module containing the class to handle the user input for the Georgia 12-Lead ECG or TUH-EEG dataset."""
 
 import copy

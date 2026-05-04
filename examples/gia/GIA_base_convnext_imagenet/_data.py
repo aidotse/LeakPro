@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Module with functions for preparing the dataset for training the target models."""
 import torchvision
 from leakpro.fl_utils.data_utils import get_meanstd
