@@ -1,23 +1,42 @@
 LeakPro
 Copyright 2023-2026 Lindholmen Science Park AB
 
-This product includes software developed at
-Lindholmen Science Park AB
+This product includes software developed at Lindholmen Science Park AB
 
-=========================================================================
-==  Third-party Dependency Notices                                     ==
-=========================================================================
+===============================================================================
+==  Third-party Dependency Notices                                           ==
+===============================================================================
 
 1. anonymeter
    Located in: leakpro/synthetic_data_attacks/anonymeter directory
-   Copyright (c) 2022 Anonos IP LLC (IP Owner)
+   Copyright (c) 2022 Anonos IP LLC (IP Owner).
    Licensed under The Clear BSD License.
 
-=========================================================================
-==  Media and Asset Attributions                                       ==
-=========================================================================
+2. HopSkipJumpDistance
+   Located in: leakpro/signals/utils/HopSkipJumpDistance.py
+   Copyright (c) 2019 Google Inc., OpenAI and Pennsylvania State University.
+   Licensed under MIT License.
 
-The following icons are used under the Flaticon Free License (https://www.flaticon.com/legal):
+3. YOLO (GIA examples)
+   The 'examples/gia/coco_yolo_1_image' directory contains implementations of 
+   YOLO. Licensed under the GNU Affero General Public License v3.0 (AGPL-3.0).
+   Note: This attribution applies only to the contents of the examples folder.
+
+===============================================================================
+==  Scientific Acknowledgments                                               ==
+===============================================================================
+
+1. This product includes an implementation of the BCJR decoder based on 
+   the research of G. Liva, E. Paolini and M. Chiani: 
+   "Optimum Detection of Defective Elements in Non-Adaptive Group Testing" 
+   (2021).
+
+===============================================================================
+==  Media and Asset Attributions                                             ==
+===============================================================================
+
+The following icons are used under the Flaticon Free License 
+(https://www.flaticon.com/legal):
 
 1. Hospital
    Author: Freepik
@@ -77,4 +96,4 @@ The following icons are used under the Flaticon Free License (https://www.flatic
      Author: Freepik
      Source: https://www.flaticon.com/free-icons/tick
    
--------------------------------------------------------------------------
+-------------------------------------------------------------------------------
