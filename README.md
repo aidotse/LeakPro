@@ -197,10 +197,6 @@ This project is licensed under the **Apache License 2.0**.
 
 Copyright 2023-2026 **AI Sweden**.
 
-### Third-Party Licenses
-This project includes third-party software, including:
-* **Anonymeter**: Licensed under the Clear BSD License (Copyright © 2022 Anonos IP LLC).
-
 For full legal texts and attributions, please refer to the [LICENSE](LICENSE) and [NOTICE](NOTICE) files.
 
 ## Attributions
