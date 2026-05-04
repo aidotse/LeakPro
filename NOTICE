@@ -17,10 +17,20 @@ This product includes software developed at Lindholmen Science Park AB
    Copyright (c) 2019 Google Inc., OpenAI and Pennsylvania State University.
    Licensed under MIT License.
 
-3. YOLO (GIA examples)
+3. YOLO
    The 'examples/gia/coco_yolo_1_image' directory contains implementations of 
    YOLO. Licensed under the GNU Affero General Public License v3.0 (AGPL-3.0).
    Note: This attribution applies only to the contents of the examples folder.
+
+4. MIMIC Extract
+   Located in: examples/mia/LOS/mimiciii_prepration/MIMIC_Extract
+   Copyright (c) 2019 MLforHealth.
+   Licensed under MIT License.
+   
+5. MIMIC Code
+   Located in: examples/mia/LOS/mimiciii_prepration/mimic-code
+   Copyright (c) 2019 MIT Laboratory for Computational Physiology.
+   Licensed under MIT License.
 
 ===============================================================================
 ==  Scientific Acknowledgments                                               ==
