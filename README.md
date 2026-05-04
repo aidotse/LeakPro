@@ -56,7 +56,7 @@ Our [example portfolio](https://github.com/aidotse/LeakPro/tree/readme/examples)
       <strong>Length-of-stay Prediction</strong><br>
       <img src="./resources/los.png" alt="LOS" style="width:150px; height:150px;">
       <br>
-      <a href="length-of-stay.md">length-of-stay.md</a>
+      <a href="examples/use-cases/length-of-stay.md">length-of-stay.md</a>
       <div style="text-align: left;">
         MIA: ✅<br>
         MInvA: ❌<br>
@@ -68,7 +68,7 @@ Our [example portfolio](https://github.com/aidotse/LeakPro/tree/readme/examples)
       <strong>Text Masking</strong><br>
       <img src="./resources/NER.png" alt="NER" style="width:150px; height:150px;">
       <br>
-      <a href="text-masking.md">text-masking.md</a>
+      <a href="examples/use-cases/text-masking.md">text-masking.md</a>
       <div style="text-align: left;">
         MIA: ✅<br>
         MInvA: ❌<br>
@@ -82,7 +82,7 @@ Our [example portfolio](https://github.com/aidotse/LeakPro/tree/readme/examples)
       <strong>Camera Surveillance</strong><br>
       <img src="./resources/surveillance.png" alt="Surveillance" style="width:150px; height:150px;">
       <br>
-      <a href="surveillance.md">surveillance.md</a>
+      <a href="examples/use-cases/surveillance.md">surveillance.md</a>
       <div style="text-align: left;">
         MIA: ✅<br>
         MInvA: ❌<br>
@@ -94,7 +94,7 @@ Our [example portfolio](https://github.com/aidotse/LeakPro/tree/readme/examples)
       <strong>Molecule Property Prediction</strong><br>
       <img src="./resources/graph.png" alt="Graph" style="width:150px; height:150px;">
       <br>
-      <a href="molecule-property.md">molecule-property.md</a>
+      <a href="examples/use-cases/molecule-property.md">molecule-property.md</a>
       <div style="text-align: left;">
         MIA: ✅<br>
         MInvA: ❌<br>
@@ -182,6 +182,9 @@ LeakPro has contributed to the research community by enabling empirical studies 
 - [Krüger et al., *Publishing Neural Networks in Drug Discovery Might Compromise Training Data Privacy*, J. Cheminf, 2025](https://arxiv.org/abs/2410.16975)  
 - [Brännvall et al., *Targeted Obfuscation for Machine Learning*, arXiv, 2024](https://arxiv.org/abs/2501.11525)
 - [Reimer A., *Privacy Risks in Text Masking Models for Anonymization*, MSc Thesis, Chalmers University of Technology, 2025](https://odr.chalmers.se/server/api/core/bitstreams/3c2efd19-5440-43f7-a25f-051313f99c60/content)
+- [Lassila et al., *Practical Bayes-Optimal Membership Inference Attacks*, NeurIPS, 2025](https://neurips.cc/virtual/2025/loc/san-diego/poster/118144)
+- [Valadi et al., *From Research to Reality: Feasibility of Gradient Inversion Attacks in Federated Learning*, arXiv, 2025](https://arxiv.org/abs/2508.19819v2)
+- [Johansson et al., *Privacy Risks in Time Series Forecasting: User-and Record-Level Membership Inference*, arXiv, 2025](https://arxiv.org/abs/2509.04169)
 
 ## Credits
 LeakPro draws inspiration from other works including
