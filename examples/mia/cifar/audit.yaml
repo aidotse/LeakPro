@@ -4,7 +4,7 @@ audit:  # Configurations for auditing
 # RMIA
     - attack: rmia
       online: True
-      num_shadow_models: 4
+      num_shadow_models: 16
       training_data_fraction: 0.5
 # # BASE
 #     - attack: base
@@ -38,11 +38,11 @@ audit:  # Configurations for auditing
     # - attack: seqmia
     #   number_of_traj: 50
     #   mia_classifier_epochs: 1000
-    # - attack: lira
-    #   online: True
-    #   num_shadow_models: 16
-    #   var_calculation: "fixed"
-    #   training_data_fraction: 0.5
+    - attack: lira
+      online: True
+      num_shadow_models: 16
+      var_calculation: "fixed"
+      training_data_fraction: 0.5
 
 
   output_dir: "./cifar10/leakpro_output"
