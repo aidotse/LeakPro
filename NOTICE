@@ -1,16 +1,80 @@
 LeakPro
-Copyright 2023-2026 AI Sweden
+Copyright 2023-2026 Lindholmen Science Park AB
 
 This product includes software developed at
-AI Sweden
+Lindholmen Science Park AB
 
 =========================================================================
 ==  Third-party Dependency Notices                                     ==
 =========================================================================
 
 1. anonymeter
-    Located in: leakpro/synthetic_data_attacks/anonymeter directory
-    Copyright (c) 2022 Anonos IP LLC (IP Owner)
-    Licensed under The Clear BSD License.
+   Located in: leakpro/synthetic_data_attacks/anonymeter directory
+   Copyright (c) 2022 Anonos IP LLC (IP Owner)
+   Licensed under The Clear BSD License.
 
+=========================================================================
+==  Media and Asset Attributions                                       ==
+=========================================================================
+
+The following icons are used under the Flaticon Free License (https://www.flaticon.com/legal):
+
+1. Hospital
+   Author: Freepik
+   Source: https://www.flaticon.com/free-icons/hospital
+   Location: resources/los.png
+
+2. Hospital bed
+   Author: vectorsmarket15
+   Source: https://www.flaticon.com/free-icons/page
+   Location: resources/los.png
+
+3. Documents
+   Author: Freepik
+   Source: https://www.flaticon.com/free-icons/hospital
+   Location: resources/NER.png
+
+4. Camera
+   Author: dreamicons
+   Source: https://www.flaticon.com/free-icons/camera
+   Location: resources/surveillance.png
+
+5. Molecule
+   Author: Freepik
+   Source: https://www.flaticon.com/free-icons/molecule
+   Location: resources/graph.png
+
+6. Mia flow
+   Location: resources/mia_flow.png
+   * Loop icon
+     Author: Pixel
+     Source: https://www.flaticon.com/free-icons/loop
+   * Setting icon
+     Author: Freepik
+     Source: https://www.flaticon.com/free-icons/setting
+   * Neural network icon
+     Author: Freepik
+     Source: https://www.flaticon.com/free-icons/neural-network
+   * Code icon
+     Author: Freepik
+     Source: https://www.flaticon.com/free-icons/code
+   * Toolbox icon
+     Author: Freepik
+     Source: https://www.flaticon.com/free-icons/toolbox
+   * Hammer icon
+     Author: Freepik
+     Source: https://www.flaticon.com/free-icons/hammer
+   * Bar chart icon
+     Author: Freepik
+     Source: https://www.flaticon.com/free-icons/bar-chart
+   * Funnel icon
+     Author: Freepik
+     Source: https://www.flaticon.com/free-icons/funnel
+   * Pdf icon
+     Author: Freepik
+     Source: https://www.flaticon.com/free-icons/pdf
+   * Tick icon
+     Author: Freepik
+     Source: https://www.flaticon.com/free-icons/tick
+   
 -------------------------------------------------------------------------

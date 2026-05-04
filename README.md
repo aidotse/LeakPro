@@ -202,3 +202,12 @@ This project includes third-party software, including:
 * **Anonymeter**: Licensed under the Clear BSD License (Copyright © 2022 Anonos IP LLC).
 
 For full legal texts and attributions, please refer to the [LICENSE](LICENSE) and [NOTICE](NOTICE) files.
+
+## Attributions
+
+### Images
+* [Hospital icons created by Freepik - Flaticon](https://www.flaticon.com/free-icons/hospital)
+* [Hospital bed icons created by vectorsmarket15 - Flaticon](https://www.flaticon.com/free-icons/hospital-bed)
+* [Document icons created by Freepik - Flaticon](https://www.flaticon.com/free-icons/document)
+* [Camera icons created by dreamicons - Flaticon](https://www.flaticon.com/free-icons/camera)
+* [Molecule icons created by Freepik - Flaticon](https://www.flaticon.com/free-icons/molecule)
