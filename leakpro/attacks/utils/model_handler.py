@@ -16,7 +16,7 @@ from leakpro.input_handler.user_imports import (
 )
 from leakpro.signals.signal import ModelLogits
 from leakpro.signals.signal_extractor import PytorchModel
-from leakpro.utils.import_helper import Self, Tuple, Union
+from leakpro.utils.import_helper import Any, Self, Tuple, Union
 from leakpro.utils.logger import logger
 from leakpro.utils.save_load import hash_model
 
@@ -83,24 +83,43 @@ class ModelHandler():
             return target_setup.optimizer.name, target_setup.criterion.name
 
         # Allow partial shadow model config by inheriting from the target setup.
-        self.model_path = caller_configs.module_path or self.handler.configs.target.module_path
-        self.model_class = caller_configs.model_class or self.handler.configs.target.model_class
+        self.model_path = self._get_config_value(caller_configs, "module_path") or self.handler.configs.target.module_path
+        self.model_class = self._get_config_value(caller_configs, "model_class") or self.handler.configs.target.model_class
         try:
             self.model_blueprint = self._import_model_from_path(self.model_path, self.model_class)
         except Exception as e:
             raise ValueError(f"Failed to create model blueprint from {self.model_class} in {self.model_path}") from e
 
         # Inherit defaults from target and apply caller overrides when present.
-        self.init_params = (target_setup.init_params or {}).copy()
-        self.init_params.update(caller_configs.init_params or {})
-        optimizer_cfg = caller_configs.optimizer or target_setup.optimizer
-        criterion_cfg = caller_configs.criterion or target_setup.criterion
+        caller_init_params = self._get_config_value(caller_configs, "init_params")
+        target_init_params = (target_setup.init_params or {}).copy()
+        if caller_init_params is None:
+            self.init_params = target_init_params
+        elif caller_init_params:
+            self.init_params = target_init_params
+            self.init_params.update(caller_init_params)
+        else:
+            self.init_params = {}
+        optimizer_cfg = self._get_config_value(caller_configs, "optimizer") or target_setup.optimizer
+        criterion_cfg = self._get_config_value(caller_configs, "criterion") or target_setup.criterion
         self.optimizer_config = (optimizer_cfg.params or {}).copy()
         self.loss_config = (criterion_cfg.params or {}).copy()
-        self.epochs = caller_configs.epochs if caller_configs.epochs is not None else target_setup.epochs
+        caller_epochs = self._get_config_value(caller_configs, "epochs")
+        self.epochs = caller_epochs if caller_epochs is not None else target_setup.epochs
         target_batch_size = target_setup.data_loader.params.get("batch_size")
-        self.batch_size = caller_configs.batch_size if caller_configs.batch_size is not None else target_batch_size
+        caller_batch_size = self._get_config_value(caller_configs, "batch_size")
+        self.batch_size = caller_batch_size if caller_batch_size is not None else target_batch_size
         return optimizer_cfg.name, criterion_cfg.name
+
+    def _get_config_value(self:Self, configs:Any, field_name:str) -> Any:
+        """Read config values safely from Pydantic models, DotMaps, and dictionaries."""
+        if configs is None:
+            return None
+        if isinstance(configs, dict):
+            return configs.get(field_name)
+        if hasattr(configs, "get"):
+            return configs.get(field_name, None)
+        return getattr(configs, field_name, None)
 
 
     def cache_logits(self:Self, model:Union[Module, list[Module]], name:str) -> None:
@@ -143,10 +162,11 @@ class ModelHandler():
             optimizer_name (str): The name of the optimizer.
 
         """
+        optimizer_name = optimizer_name.lower()
         try:
             return get_optimizer_mapping()[optimizer_name]
         except Exception as e:
-            raise ValueError(f"Failed to create optimizer from {self.optimizer_config['name']}") from e
+            raise ValueError(f"Failed to create optimizer from {optimizer_name}") from e
 
     def _get_criterion_class(self:Self, criterion_name:str)->None:
         """Get the criterion class based on the criterion name.
@@ -156,10 +176,11 @@ class ModelHandler():
             criterion_name (str): The name of the criterion.
 
         """
+        criterion_name = criterion_name.lower()
         try:
             return get_criterion_mapping()[criterion_name]
         except Exception as e:
-            raise ValueError(f"Failed to create criterion from {self.criterion_config['name']}") from e
+            raise ValueError(f"Failed to create criterion from {criterion_name}") from e
 
     def _get_model_criterion_optimizer(self:Self) -> Tuple[Module, Module, Module]:
         """Get the model, criterion, and optimizer from the handler or config."""

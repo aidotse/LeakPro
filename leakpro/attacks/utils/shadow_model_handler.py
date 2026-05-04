@@ -180,7 +180,8 @@ class ShadowModelHandler(ModelHandler):
         filtered_indices = []
         for i in all_indices:
             metadata = self._load_shadow_metadata(i)
-            assert isinstance(metadata, ShadowModelTrainingSchema), "Shadow Model metadata is not of the correct type"
+            if not isinstance(metadata, ShadowModelTrainingSchema):
+                raise TypeError("Shadow Model metadata is not of the correct type")
             if self._metadata_training_signature(metadata) == expected_signature:
                 filtered_indices.append(i)
 
@@ -263,7 +264,9 @@ class ShadowModelHandler(ModelHandler):
             next_index += 1
 
         A = self.construct_balanced_assignments(len(shadow_population), num_models)  # noqa: N806
-        assert np.all(np.sum(A,axis=1) == len(shadow_population)//2)
+        expected_size = len(shadow_population) // 2
+        if not np.all(np.sum(A, axis=1) == expected_size):
+            raise ValueError("Balanced shadow assignments must contain half of the shadow population per model")
         shadow_population = np.array(shadow_population)
         for i, indx in enumerate(indices_to_use):
             # Get dataloader
@@ -278,7 +281,8 @@ class ShadowModelHandler(ModelHandler):
             training_results = self.handler.train(data_loader, model, criterion, optimizer, self.epochs)
 
             # Read out results
-            assert isinstance(training_results, TrainingOutput)
+            if not isinstance(training_results, TrainingOutput):
+                raise TypeError("Shadow model training must return TrainingOutput")
             shadow_model = training_results.model
 
             # Evaluate shadow model on remaining aux data
@@ -306,7 +310,7 @@ class ShadowModelHandler(ModelHandler):
                 criterion = self.criterion_name,
                 criterion_params = self.loss_config,
                 epochs = self.epochs,
-                batch_size = data_loader.batch_size,
+                batch_size = self.batch_size,
                 train_result = training_results.metrics,
                 test_result = test_result,
                 online = online,

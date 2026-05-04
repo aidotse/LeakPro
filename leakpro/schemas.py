@@ -101,9 +101,15 @@ class TargetConfig(BaseModel):
 class ShadowModelConfig(BaseModel):
     """Configuration for the Shadow models."""
 
-    model_class: Optional[str] = Field(default=None, description="Class name of the shadow model")
-    module_path: Optional[str] = Field(default=None, description="Path to the shadow model module")
-    init_params: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Model initialization parameters")
+    model_class: Optional[str] = Field(
+        default=None,
+        description="Class name of the shadow model. Defaults to the target model class.",
+    )
+    module_path: Optional[str] = Field(
+        default=None,
+        description="Path to the shadow model module. Defaults to the target model module path.",
+    )
+    init_params: Optional[Dict[str, Any]] = Field(default=None, description="Model initialization parameters")
     optimizer: Optional[OptimizerConfig] = Field(default=None, description="Optimizer configuration")
     criterion: Optional[LossConfig] = Field(default=None, description="Loss function configuration")
     batch_size: Optional[int] = Field(default=None, ge=1, description="Batch size used during training")

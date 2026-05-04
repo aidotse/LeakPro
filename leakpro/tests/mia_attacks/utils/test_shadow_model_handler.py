@@ -6,7 +6,7 @@ import numpy as np
 from pytest import raises
 
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
-from leakpro.schemas import EvalOutput, OptimizerConfig, ShadowModelConfig, ShadowModelTrainingSchema, TrainingOutput
+from leakpro.schemas import EvalOutput, LossConfig, OptimizerConfig, ShadowModelConfig, ShadowModelTrainingSchema, TrainingOutput
 from leakpro.tests.constants import get_shadow_model_config
 from leakpro.tests.input_handler.image_input_handler import ImageInputHandler
 
@@ -112,6 +112,29 @@ def test_shadow_model_partial_inheritance_from_target(image_handler: ImageInputH
     assert sm.epochs == image_handler.target_model_metadata.epochs
 
 
+def test_shadow_model_init_params_distinguish_missing_partial_and_empty(image_handler: ImageInputHandler) -> None:
+    """Missing, partial, and empty init_params should have distinct inheritance behavior."""
+    image_handler.target_model_metadata.init_params = {"width": 16, "dpsgd": True}
+
+    image_handler.configs.shadow_model = ShadowModelConfig()
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+    sm = ShadowModelHandler(image_handler)
+    assert sm.init_params == {"width": 16, "dpsgd": True}
+
+    image_handler.configs.shadow_model = ShadowModelConfig(init_params={"dpsgd": False})
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+    sm = ShadowModelHandler(image_handler)
+    assert sm.init_params == {"width": 16, "dpsgd": False}
+
+    image_handler.configs.shadow_model = ShadowModelConfig(init_params={})
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+    sm = ShadowModelHandler(image_handler)
+    assert sm.init_params == {}
+
+
 def test_shadow_model_partial_override_optimizer_only(image_handler: ImageInputHandler) -> None:
     """Provided optimizer should override while other fields still inherit."""
     image_handler.configs.shadow_model = ShadowModelConfig(
@@ -127,6 +150,46 @@ def test_shadow_model_partial_override_optimizer_only(image_handler: ImageInputH
     assert sm.optimizer_config["lr"] == 0.002
     assert sm.loss_config == image_handler.target_model_metadata.criterion.params
     assert sm.epochs == image_handler.target_model_metadata.epochs
+
+
+def test_shadow_model_model_class_without_module_path_uses_target_module(image_handler: ImageInputHandler) -> None:
+    """model_class without module_path should resolve against the target module path."""
+    image_handler.configs.shadow_model = ShadowModelConfig(model_class="ConvNet_Dummy")
+
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+
+    expected_path = image_handler.configs.target.module_path
+    with raises(ValueError) as excinfo:
+        ShadowModelHandler(image_handler)
+
+    assert str(excinfo.value) == f"Failed to create model blueprint from ConvNet_Dummy in {expected_path}"
+
+
+def test_shadow_model_invalid_optimizer_error_uses_optimizer_name(image_handler: ImageInputHandler) -> None:
+    """Invalid optimizer errors should not depend on optimizer params containing a name key."""
+    image_handler.configs.shadow_model = ShadowModelConfig(optimizer=OptimizerConfig(name="not_an_optimizer"))
+
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+
+    with raises(ValueError) as excinfo:
+        ShadowModelHandler(image_handler)
+
+    assert str(excinfo.value) == "Failed to create optimizer from not_an_optimizer"
+
+
+def test_shadow_model_invalid_criterion_error_uses_criterion_name(image_handler: ImageInputHandler) -> None:
+    """Invalid criterion errors should not reference a nonexistent criterion_config attribute."""
+    image_handler.configs.shadow_model = ShadowModelConfig(criterion=LossConfig(name="not_a_loss"))
+
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+
+    with raises(ValueError) as excinfo:
+        ShadowModelHandler(image_handler)
+
+    assert str(excinfo.value) == "Failed to create criterion from not_a_loss"
 
 
 def test_shadow_model_filter_requires_full_config_match(image_handler: ImageInputHandler, tmp_path) -> None:
