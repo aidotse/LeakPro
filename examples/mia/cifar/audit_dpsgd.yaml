@@ -1,10 +1,16 @@
 audit:  # Configurations for auditing
   random_seed: 1236  # Integer specifying the random seed
   attack_list:
-    - attack: lira
+    # - attack: lira
+    #   online: True
+    #   num_shadow_models: 16
+    #   var_calculation: "fixed"
+    #   training_data_fraction: 0.5
+    - attack: rmia
       online: True
-      num_shadow_models: 2
-      training_data_fraction: 0.1
+      num_shadow_models: 4
+      training_data_fraction: 0.5
+
 
   output_dir: "./leakpro_output"
   attack_type: "mia" #mia, gia
