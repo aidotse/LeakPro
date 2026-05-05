@@ -215,7 +215,6 @@ class ShadowModelTrainingSchema(BaseModel):
     model_module_path: Optional[str] = Field(default=None, description="Path to the model module")
     target_model_hash: str = Field(..., description="Hash of target model")
     population_hash: Optional[str] = Field(default=None, description="Hash of train/test index split used as shadow population")
-    training_config_hash: Optional[str] = Field(default=None, description="Hash of shadow model training config")
 
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields
 

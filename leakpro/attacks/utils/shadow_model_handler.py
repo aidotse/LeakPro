@@ -278,7 +278,7 @@ class ShadowModelHandler(ModelHandler):
         n_existing_models = len(filtered_indices)
 
         if n_existing_models >= num_models:
-            logger.info(f"Reusing {num_models} cached shadow model(s) — population_hash and training_config_hash match")
+            logger.info(f"Reusing {num_models} cached shadow model(s) — population_hash and training signature match")
             # sort the filtered indices
             return np.sort(filtered_indices)[:num_models]
 
@@ -344,8 +344,7 @@ class ShadowModelHandler(ModelHandler):
                 model_class = self.model_class,
                 model_module_path = self.model_path,
                 target_model_hash= self.target_model_hash,
-                population_hash = self.population_hash,
-                training_config_hash = self.training_config_hash
+                population_hash = self.population_hash
             )
 
             ShadowModelHandler().cache_logits(PytorchModel(shadow_model, criterion), name=f"sm_{indx}_{self.population_hash}")

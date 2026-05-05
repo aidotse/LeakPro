@@ -236,6 +236,7 @@ def test_shadow_model_filter_requires_full_config_match(image_handler: ImageInpu
         "model_class": sm.model_class,
         "model_module_path": sm.model_path,
         "target_model_hash": sm.target_model_hash,
+        "population_hash": sm.population_hash,
     }
     matching_metadata = ShadowModelTrainingSchema(**metadata_kwargs)
     stale_metadata = ShadowModelTrainingSchema(
