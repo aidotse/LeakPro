@@ -20,34 +20,36 @@ from leakpro.schemas import TrainingOutput, EvalOutput
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
+
+def _resolve_dpsgd_metadata_path(configs, explicit_path: str | None = None) -> str:
+    """Resolve the DP-SGD metadata path from arg or target config.
+
+    Resolution order:
+    1. Explicit function argument.
+    2. `target.dpsgd_path` from config.
+    3. `target.target_folder/dpsgd_dic.pkl` fallback.
+    """
+    if explicit_path:
+        return explicit_path
+
+    target_cfg = getattr(configs, "target", None)
+    if target_cfg is not None:
+        target_path = getattr(target_cfg, "dpsgd_path", None)
+        if target_path:
+            return target_path
+
+        target_folder = getattr(target_cfg, "target_folder", None)
+        if target_folder:
+            return str(Path(target_folder) / "dpsgd_dic.pkl")
+
+    raise FileNotFoundError(
+        "DP-SGD is enabled, but no DP-SGD metadata path could be resolved. "
+        "Set `target.dpsgd_path`, or place `dpsgd_dic.pkl` inside `target.target_folder`."
+    )
+
+
 class CelebAInputHandlerDPsgd(AbstractInputHandler):
     """Input handler for CelebA-HQ image classification experiments."""
-
-    def _resolve_dpsgd_metadata_path(self: Self, explicit_path: str | None = None) -> str:
-        """Resolve the DP-SGD metadata path from arg or target config.
-
-        Resolution order:
-        1. Explicit function argument.
-        2. `target.dpsgd_path` from config.
-        3. `target.target_folder/dpsgd_dic.pkl` fallback.
-        """
-        if explicit_path:
-            return explicit_path
-
-        target_cfg = getattr(getattr(self, "configs", None), "target", None)
-        if target_cfg is not None:
-            target_path = getattr(target_cfg, "dpsgd_path", None)
-            if target_path:
-                return target_path
-
-            target_folder = getattr(target_cfg, "target_folder", None)
-            if target_folder:
-                return str(Path(target_folder) / "dpsgd_dic.pkl")
-
-        raise FileNotFoundError(
-            "DP-SGD is enabled, but no DP-SGD metadata path could be resolved. "
-            "Set `target.dpsgd_path`, or place `dpsgd_dic.pkl` inside `target.target_folder`."
-        )
 
     def train(
         self: Self,
@@ -85,7 +87,7 @@ class CelebAInputHandlerDPsgd(AbstractInputHandler):
         run_dpsgd = bool(model.dpsgd)
 
         if run_dpsgd:
-            dpsgd_metadata_path = self._resolve_dpsgd_metadata_path(dpsgd_metadata_path)
+            dpsgd_metadata_path = _resolve_dpsgd_metadata_path(getattr(self, "configs", None), dpsgd_metadata_path)
             # Check if the model is compatible with DP-SGD
             errors = ModuleValidator.validate(model, strict=False)
             if len(errors) > 0:

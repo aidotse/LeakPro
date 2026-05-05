@@ -1,0 +1,16 @@
+LeakPro
+Copyright 2023-2026 AI Sweden
+
+This product includes software developed at
+AI Sweden
+
+=========================================================================
+==  Third-party Dependency Notices                                     ==
+=========================================================================
+
+1. anonymeter
+    Located in: leakpro/synthetic_data_attacks/anonymeter directory
+    Copyright (c) 2022 Anonos IP LLC (IP Owner)
+    Licensed under The Clear BSD License.
+
+-------------------------------------------------------------------------

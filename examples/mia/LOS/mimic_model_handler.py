@@ -20,27 +20,28 @@ from mimic_data_handler import MIMICUserDataset
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 
+def _resolve_dpsgd_metadata_path(configs, explicit_path: Optional[str] = None) -> str:
+    """Resolve the DP-SGD metadata path from arg or target config."""
+    if explicit_path:
+        return explicit_path
+
+    target_cfg = getattr(configs, "target", None)
+    if target_cfg is not None:
+        target_path = getattr(target_cfg, "dpsgd_path", None)
+        if target_path:
+            return target_path
+
+    raise FileNotFoundError(
+        "DP-SGD is enabled, but no DP-SGD metadata path could be resolved. "
+        "Set `target.dpsgd_path` in the config, or pass `dpsgd_metadata_path` explicitly."
+    )
+
+
 class BaseMIMICHandler(AbstractInputHandler):
     UserDataset = MIMICUserDataset
 
     def __init__(self) -> None:
         super().__init__()
-
-    def _resolve_dpsgd_metadata_path(self, explicit_path: Optional[str] = None) -> str:
-        """Resolve the DP-SGD metadata path from arg or target config."""
-        if explicit_path:
-            return explicit_path
-
-        target_cfg = getattr(getattr(self, "configs", None), "target", None)
-        if target_cfg is not None:
-            target_path = getattr(target_cfg, "dpsgd_path", None)
-            if target_path:
-                return target_path
-
-        raise FileNotFoundError(
-            "DP-SGD is enabled, but no DP-SGD metadata path could be resolved. "
-            "Set `target.dpsgd_path` in the config, or pass `dpsgd_metadata_path` explicitly."
-        )
 
     def get_criterion(self) -> nn.Module:
         return BCEWithLogitsLoss()
@@ -138,11 +139,11 @@ class GRUHandler(BaseMIMICHandler):
 
         resolved_dpsgd_path = None
         if dpsgd_metadata_path is not None:
-            resolved_dpsgd_path = self._resolve_dpsgd_metadata_path(dpsgd_metadata_path)
+            resolved_dpsgd_path = _resolve_dpsgd_metadata_path(getattr(self, "configs", None), dpsgd_metadata_path)
         else:
             target_cfg = getattr(getattr(self, "configs", None), "target", None)
             if target_cfg is not None and getattr(target_cfg, "dpsgd_path", None):
-                resolved_dpsgd_path = self._resolve_dpsgd_metadata_path()
+                resolved_dpsgd_path = _resolve_dpsgd_metadata_path(getattr(self, "configs", None))
 
         if resolved_dpsgd_path is not None:
             print("Training with DP-SGD...")

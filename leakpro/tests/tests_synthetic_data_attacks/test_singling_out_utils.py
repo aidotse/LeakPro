@@ -1,3 +1,18 @@
+#
+# Copyright 2023-2026 AI Sweden
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
 """Tests for singling_out_utils module."""
 import os
 
@@ -6,6 +21,7 @@ import pytest
 
 import leakpro.synthetic_data_attacks.singling_out_utils as sou
 from leakpro.synthetic_data_attacks import utils as u
+from leakpro.synthetic_data_attacks.anonymeter.evaluators.singling_out_evaluator import UniqueSinglingOutQueries
 from leakpro.tests.tests_synthetic_data_attacks.anonymeter_tests.fixtures import get_adult
 
 
@@ -60,13 +76,6 @@ def test_singling_out_risk_evaluation() -> None:
             ori = ori,
             syn = syn,
             n_cols = 0
-        )
-    #Case n_cols==2
-    with pytest.raises(ValueError, match="Parameter `n_cols` must be different than 2."):
-        sou.singling_out_risk_evaluation(
-            ori = ori,
-            syn = syn,
-            n_cols = 2
         )
     #Case n_cols positive int
     sin_out_res = sou.singling_out_risk_evaluation(
@@ -132,3 +141,37 @@ def test_singling_out_risk_evaluation() -> None:
         #Remove results file
         os.remove(file_path)
         assert not os.path.exists(file_path)
+
+def test_singling_out_risk_evaluation_ret_queries() -> None:
+    """Assert results for singling_out_risk_evaluation with ret_queries flag."""
+    #Prepare test variables
+    ori = get_adult(return_ori=True, n_samples=10)
+    syn = get_adult(return_ori=False, n_samples=10)
+    #Case ret_queries=False (default)
+    sin_out_res = sou.singling_out_risk_evaluation(
+        ori = ori,
+        syn = syn,
+        n_cols = 1,
+        n_attacks = 2,
+        ret_queries = False
+    )
+    assert isinstance(sin_out_res, sou.SinglingOutResults)
+    #Case ret_queries=True with specific n_cols
+    result, queries = sou.singling_out_risk_evaluation(
+        ori = ori,
+        syn = syn,
+        n_cols = 1,
+        n_attacks = 2,
+        ret_queries = True
+    )
+    assert isinstance(result, sou.SinglingOutResults)
+    assert isinstance(queries, UniqueSinglingOutQueries)
+    #Case ret_queries=True with full evaluation (n_cols=None)
+    result_full, queries_full = sou.singling_out_risk_evaluation(
+        ori = ori,
+        syn = syn,
+        n_attacks = 2,
+        ret_queries = True
+    )
+    assert isinstance(result_full, sou.SinglingOutResults)
+    assert isinstance(queries_full, list)
