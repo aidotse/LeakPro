@@ -18,7 +18,7 @@ This product includes software developed at Lindholmen Science Park AB
    Licensed under MIT License.
 
 3. YOLO
-   The 'examples/gia/coco_yolo_1_image' directory contains implementations of 
+   The 'examples/gia/coco_yolo_1_image/' directory contains implementations of 
    YOLO. Licensed under the GNU Affero General Public License v3.0 (AGPL-3.0).
    Note: This attribution applies only to the contents of the examples folder.
 
@@ -41,6 +41,13 @@ This product includes software developed at Lindholmen Science Park AB
    interpretable time series forecasting."
    RESTRICTION: This specific component is licensed for NON-COMMERCIAL USE ONLY. 
    Any commercial use requires an explicit license from Element AI Inc.
+
+7. TS2Vec
+   Located in: leakpro/signals/utils/get_TS2Vec.py (imported as dependency)
+   Copyright (c) 2022 Zhihan Yue et al.
+   Licensed under MIT License.
+   Source: https://github.com/yuezhihan/ts2vec
+   Note: Package metadata does not declare a license; license identified from upstream source.
 
 ===============================================================================
 ==  Scientific Acknowledgments                                               ==
