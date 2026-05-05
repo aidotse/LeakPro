@@ -22,7 +22,16 @@ class TabularExtension(AbstractModalityExtension):
         super().__init__(handler)
         logger.info("Tabular extension initialized.")
 
-        x,y = next(iter(self.handler.get_dataloader(0)))
+        print(type(self.public_dataset))
+
+        dataloader = self.handler.get_public_dataloader(10)
+        iter_dataloader = iter(dataloader)
+        print(type(dataloader.dataset))
+        print(getattr(dataloader.dataset, "columns", None))
+        
+        next_dataloader = next(iter_dataloader)
+        x,y = next_dataloader
+        # x,y = next(iter(self.handler.get_public_dataloader(10)))
         if not isinstance(x, (Tensor, ndarray)) or not isinstance(y, (Tensor,ndarray)):
             raise ValueError("Data must be a tensor or nparray.")
 

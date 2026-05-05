@@ -2,7 +2,7 @@ audit:
   random_seed: 1234
   data_modality: tabular
   attack_list:
-    plgmi:
+    - plgmi:
       top_n: 100 # Integer number indicating how many pseudo-labels to select
       n_dis: 5 # Integer number for indicating the number of discriminator updates per generator update
       n_iter: 5000 # Integer number for indicating the iterations for training the GAN
@@ -49,5 +49,5 @@ target:
   model_class: TabularWrapper
   model_type: pytorch_tabular
   target_folder: ./target
-  data_path: ./data2/private_df.pkl
-  public_data_path: ./data2/public_df.pkl
+  data_path: ./data/private_df.pkl
+  public_data_path: ./data/public_df.pkl

@@ -23,8 +23,8 @@ continuous_col_names = ["length_of_stay", "num_procedures", "num_medications", "
        "BMI (kg/m2)", "Height", "Height (Inches)", "Weight", "Weight (Lbs)",
        "eGFR", "systolic", "diastolic"]
 
-audit_file = "audit_id_0.yaml"
-data_file = "/private_df_id_0.pkl"
+audit_file = "audit.yaml" #"audit_id_0.yaml"
+data_file = "/private_df.pkl" #"/private_df_id_0.pkl"
 
 # Load the config.yaml file
 with open("train_config.yaml", "r") as file:
@@ -35,7 +35,7 @@ with open(audit_file, "r") as file:
 
 # Access the first attack in the attack_list
 plgmi_attack = next(
-    attack for attack in audit_config["audit"]["attack_list"] if attack["attack"] == "plgmi"
+    audit_config["audit"]["attack_list"][attack] for attack in audit_config["audit"]["attack_list"] if attack == "plgmi"
 )
 
 # Extract num_classes
@@ -55,7 +55,8 @@ continuous_col_names = [col for col in continuous_col_names if col in df.columns
 # Categorical column names are all columns that are not continuous
 categorical_col_names = [col for col in df.columns if col not in continuous_col_names]
 # Remove the target column
-categorical_col_names.remove("identity")
+if "identity" in categorical_col_names:
+    categorical_col_names.remove("identity")
 
 # Ensure df_train contains at least one sample for every class
 df_train_min = df.groupby("identity").head(1)
@@ -79,18 +80,48 @@ df_test = df_test.reset_index(drop=True)
 # Prints
 
 
+# data_config = DataConfig(
+#     target=["identity"],
+#     continuous_cols=continuous_col_names,
+#     categorical_cols=categorical_col_names,
+#     normalize_continuous_features=False,
+# )
+
+# trainer_config = TrainerConfig(
+#     auto_lr_find=False,
+#     batch_size=256,
+#     max_epochs=150,
+#     early_stopping="train_loss_0",
+# )
+
+# import os
+# os.environ["OMP_NUM_THREADS"] = "8"
+# os.environ["MKL_NUM_THREADS"] = "8"
+
+# import torch
+# torch.set_num_threads(8)
+# torch.set_num_interop_threads(2)
+
 data_config = DataConfig(
     target=["identity"],
     continuous_cols=continuous_col_names,
     categorical_cols=categorical_col_names,
     normalize_continuous_features=False,
+    num_workers=16,
+    pin_memory=True,
+    dataloader_kwargs={
+        "persistent_workers": True,
+        "prefetch_factor": 8,
+    },
 )
 
 trainer_config = TrainerConfig(
     auto_lr_find=False,
     batch_size=256,
-    max_epochs=150,
+    max_epochs=100, #150,
     early_stopping="train_loss_0",
+    accelerator="gpu",
+    devices=1,
 )
 
 optimizer_config = OptimizerConfig()
@@ -107,7 +138,7 @@ task="classification",
 gflu_stages=32,
 gflu_dropout=0.01,
 embedding_dropout=0.1,
-learning_rate=1e-3,
+learning_rate=1e-4,
 )
 
 tabular_model = TabularModel(

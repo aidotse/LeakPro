@@ -20,7 +20,9 @@ from leakpro.utils.conversion import dataloader_to_config, get_model_init_params
 from leakpro.utils.import_helper import Any, Self
 from leakpro.utils.logger import add_file_handler, logger
 
-modality_extensions = {"tabular": None,
+from leakpro.input_handler.modality_extensions.tabular_extension import TabularExtension
+
+modality_extensions = {"tabular": TabularExtension,
                        "image":ImageAugmentor,
                        "text":None,
                        "graph":None,
