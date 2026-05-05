@@ -103,7 +103,10 @@ class ShadowModelConfig(BaseModel):
 
     model_class: Optional[str] = Field(
         default=None,
-        description="Class name of the shadow model. Defaults to the target model class.",
+        description=(
+            "Class name of the shadow model. Defaults to the target model class. "
+            "If set without module_path, the class is imported from the target model module path."
+        ),
     )
     module_path: Optional[str] = Field(
         default=None,
