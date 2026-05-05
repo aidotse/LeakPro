@@ -32,6 +32,16 @@ This product includes software developed at Lindholmen Science Park AB
    Copyright (c) 2019 MIT Laboratory for Computational Physiology.
    Licensed under MIT License.
 
+6. N-BEATS Implementation (Element AI)
+   Location in: examples/mia/time_series_mia/utils/models/NBeats.py
+   Copyright © 2020 Element AI Inc. All rights reserved.
+   License under Creative Commons Attribution-NonCommercial 4.0 International 
+   (CC BY-NC 4.0).
+   Based on Oreshkin et al., "N-BEATS: Neural basis expansion analysis for 
+   interpretable time series forecasting."
+   RESTRICTION: This specific component is licensed for NON-COMMERCIAL USE ONLY. 
+   Any commercial use requires an explicit license from Element AI Inc.
+
 ===============================================================================
 ==  Scientific Acknowledgments                                               ==
 ===============================================================================
