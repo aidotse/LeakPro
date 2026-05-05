@@ -1,23 +1,63 @@
+#
+# Copyright 2023-2026 AI Sweden
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
 """Module containing helper functions for handling input files and modules."""
 
 import importlib.util
 import inspect
 import os
+import sys
 
 from torch import nn, optim
 
 from leakpro.utils.import_helper import Callable, ModuleType
 
 
-def import_module_from_file(filepath:str) -> ModuleType:
+def import_module_from_file(filepath: str) -> ModuleType:
     """Import a module from a given file path."""
+    filepath = os.path.abspath(filepath)
+
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"File {filepath} not found")
-    module_name = filepath.split("/")[-1].split(".")[0]
+
+    module_name = os.path.splitext(os.path.basename(filepath))[0]
+
+    existing = sys.modules.get(module_name)
+    if existing is not None and os.path.abspath(getattr(existing, "__file__", "")) == filepath:
+        return existing
+
     spec = importlib.util.spec_from_file_location(module_name, filepath)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not create import spec for {filepath}")
+
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+
+    previous = sys.modules.get(module_name)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        if previous is not None:
+            sys.modules[module_name] = previous
+        else:
+            sys.modules.pop(module_name, None)
+        raise
+
     return module
+
+
 
 def get_class_from_module(module:ModuleType, class_name:str) -> Callable:
     """Get the specified class from a module."""

@@ -1,3 +1,18 @@
+#
+# Copyright 2023-2026 AI Sweden
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
 """Geiping, Jonas, et al. "Inverting gradients-how easy is it to break privacy in federated learning?."."""
 import os
 from collections.abc import Generator
@@ -35,11 +50,11 @@ class InvertingConfig:
     # iterations for the attack steps
     at_iterations: int = 8000
     # MetaOptimizer, see MetaSGD for implementation
-    optimizer: object = field(default_factory=lambda: MetaSGD())
+    optimizer: object = field(default_factory=MetaSGD)
     # Client loss function
-    criterion: object = field(default_factory=lambda: CrossEntropyLoss())
+    criterion: object = field(default_factory=CrossEntropyLoss)
     # Data modality extension
-    data_extension: object = field(default_factory=lambda: GiaImageExtension())
+    data_extension: object = field(default_factory=GiaImageExtension)
     # Number of epochs for the client attack
     epochs: int = 1
     # if to use median pool 2d on images, can improve attack on high higher resolution (100+)
