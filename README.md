@@ -195,7 +195,7 @@ LeakPro is funded by Sweden's innovation agency, Vinnova, under grant 2023-03000
 
 This project is licensed under the **Apache License 2.0**. 
 
-Copyright 2023-2026 **AI Sweden**.
+Copyright 2023-2026 **Lindholmen Science Park AB**.
 
 For full legal texts and attributions, please refer to the [LICENSE](LICENSE) and [NOTICE](NOTICE) files.
 
