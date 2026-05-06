@@ -7,21 +7,46 @@
 import importlib.util
 import inspect
 import os
+import sys
 
 from torch import nn, optim
 
 from leakpro.utils.import_helper import Callable, ModuleType
 
 
-def import_module_from_file(filepath:str) -> ModuleType:
+def import_module_from_file(filepath: str) -> ModuleType:
     """Import a module from a given file path."""
+    filepath = os.path.abspath(filepath)
+
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"File {filepath} not found")
-    module_name = filepath.rsplit("/", maxsplit=1)[-1].split(".", maxsplit=1)[0]
+
+    module_name = os.path.splitext(os.path.basename(filepath))[0]
+
+    existing = sys.modules.get(module_name)
+    if existing is not None and os.path.abspath(getattr(existing, "__file__", "")) == filepath:
+        return existing
+
     spec = importlib.util.spec_from_file_location(module_name, filepath)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not create import spec for {filepath}")
+
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+
+    previous = sys.modules.get(module_name)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        if previous is not None:
+            sys.modules[module_name] = previous
+        else:
+            sys.modules.pop(module_name, None)
+        raise
+
     return module
+
+
 
 def get_class_from_module(module:ModuleType, class_name:str) -> Callable:
     """Get the specified class from a module."""
