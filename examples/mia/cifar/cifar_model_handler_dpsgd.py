@@ -8,6 +8,7 @@ Usage:
 
 import os
 import pickle
+from pathlib import Path
 
 import torch
 from torch import cuda, no_grad, optim
@@ -24,6 +25,47 @@ from leakpro.schemas import EvalOutput, TrainingOutput
 from leakpro.utils.logger import logger
 
 
+def _resolve_dpsgd_metadata_path(configs, explicit_path: str | None = None) -> str:
+    """Resolve the DP-SGD metadata path from argument or target config.
+
+    Resolution order:
+    1. Explicit function argument.
+    2. `target.dpsgd_path` from config.
+    3. `target.target_folder/dpsgd_dic.pkl` fallback.
+    """
+    if explicit_path:
+        return explicit_path
+
+    target_cfg = getattr(configs, "target", None)
+    if target_cfg is not None:
+        target_path = getattr(target_cfg, "dpsgd_path", None)
+        if target_path:
+            return target_path
+        target_folder = getattr(target_cfg, "target_folder", None)
+        if target_folder:
+            return str(Path(target_folder) / "dpsgd_dic.pkl")
+
+    raise FileNotFoundError(
+        "DP-SGD is enabled but no DP-SGD metadata path could be resolved. "
+        "Set `target.dpsgd_path` in audit.yaml, or place `dpsgd_dic.pkl` inside `target.target_folder`."
+    )
+
+
+def _rebuild_optimizer(optimizer: optim.Optimizer, model: torch.nn.Module) -> optim.Optimizer:
+    """Recreate optimizer with the same hyperparameters for a new model parameter set."""
+    opt_cls = optimizer.__class__
+    opt_cfg = {k: v for group in optimizer.param_groups
+               for k, v in group.items() if k != "params"}
+    return opt_cls(model.parameters(), **opt_cfg)
+
+
+def _disable_inplace_activations(model: torch.nn.Module) -> None:
+    """Disable in-place activations that can break Opacus backward hooks."""
+    for module in model.modules():
+        if hasattr(module, "inplace") and isinstance(module.inplace, bool):
+            module.inplace = False
+
+
 class CifarModelHandlerDPsgd(AbstractInputHandler, role="model"):
     """DP-SGD training handler for CIFAR. No dataset logic."""
 
@@ -34,44 +76,53 @@ class CifarModelHandlerDPsgd(AbstractInputHandler, role="model"):
         criterion: torch.nn.Module = None,
         optimizer: optim.Optimizer = None,
         epochs: int = None,
-        dpsgd_metadata_path: str = "./target_dpsgd/dpsgd_dic.pkl",
+        dpsgd_metadata_path: str | None = None,
         virtual_batch_size: int = 16,
     ) -> TrainingOutput:
         if epochs is None:
             raise ValueError("epochs not found in configs")
+        if optimizer is None:
+            raise ValueError("Optimizer must be provided for training")
+        if criterion is None:
+            raise ValueError("Criterion must be provided for training")
+        if not hasattr(model, "dpsgd"):
+            raise ValueError("Model is missing required 'dpsgd' attribute")
 
         dev = torch.device("cuda" if cuda.is_available() else "cpu")
-        RUN_DPSGD = getattr(model, "dpsgd", True)
+        run_dpsgd = bool(model.dpsgd)
+        virtual_batch_size = min(dataloader.batch_size, virtual_batch_size)
 
-        if RUN_DPSGD:
+        if run_dpsgd:
+            dpsgd_metadata_path = _resolve_dpsgd_metadata_path(
+                getattr(self, "configs", None), dpsgd_metadata_path)
+
             errors = ModuleValidator.validate(model, strict=False)
             if errors:
                 logger.info("Model has DP incompatibilities — applying ModuleValidator.fix()")
                 model = ModuleValidator.fix(model)
-                opt_cls = optimizer.__class__
-                opt_cfg = {k: v for group in optimizer.param_groups
-                           for k, v in group.items() if k != "params"}
-                optimizer = opt_cls(model.parameters(), **opt_cfg)
+                optimizer = _rebuild_optimizer(optimizer, model)
 
+            _disable_inplace_activations(model)
             model, optimizer, dataloader, _ = _setup_dpsgd(
                 model, optimizer, dataloader, dpsgd_metadata_path)
 
         model.to(dev)
+        model.train()
         accuracy_history, loss_history = [], []
 
-        if RUN_DPSGD:
+        if run_dpsgd:
             with BatchMemoryManager(data_loader=dataloader,
                                     max_physical_batch_size=virtual_batch_size,
                                     optimizer=optimizer) as mem_loader:
                 for epoch in range(epochs):
-                    train_acc, train_loss = _train_loop(
+                    train_loss, train_acc = _train_loop(
                         mem_loader, model, criterion, optimizer, dev, epoch + 1, epochs)
                     n = len(mem_loader.dataset)
                     accuracy_history.append(train_acc / n)
                     loss_history.append(train_loss / n)
         else:
             for epoch in range(epochs):
-                train_acc, train_loss = _train_loop(
+                train_loss, train_acc = _train_loop(
                     dataloader, model, criterion, optimizer, dev, epoch + 1, epochs)
                 n = len(dataloader.dataset)
                 accuracy_history.append(train_acc / n)
@@ -106,11 +157,11 @@ class CifarModelHandlerDPsgd(AbstractInputHandler, role="model"):
 
 
 def _train_loop(dataloader, model, criterion, optimizer, dev, epoch, epochs):
-    train_loss, train_acc = 0, 0
+    model.train()
+    train_loss, train_acc = 0.0, 0.0
     for inputs, labels in tqdm(dataloader, desc=f"Epoch {epoch}/{epochs}"):
-        labels = labels.long()
+        labels = labels.long().view(-1)
         inputs, labels = inputs.to(dev, non_blocking=True), labels.to(dev, non_blocking=True)
-        model.zero_grad()
         optimizer.zero_grad()
         outputs = model(inputs)
         loss = criterion(outputs, labels)
@@ -118,17 +169,20 @@ def _train_loop(dataloader, model, criterion, optimizer, dev, epoch, epochs):
         loss.backward()
         optimizer.step()
         train_acc += pred.eq(labels.view_as(pred)).sum().item()
-        train_loss += loss.item()
-    return train_acc, train_loss
+        train_loss += loss.item() * labels.size(0)
+    return train_loss, train_acc
 
 
 def _setup_dpsgd(model, optimizer, dataloader, dpsgd_path):
+    if not bool(getattr(model, "dpsgd", False)):
+        return model, optimizer, dataloader, None
+
     sample_rate = 1 / len(dataloader)
     if not os.path.exists(dpsgd_path):
         raise FileNotFoundError(f"DP-SGD config not found: {dpsgd_path}")
     with open(dpsgd_path, "rb") as f:
         cfg = pickle.load(f)
-    logger.info(f"DP-SGD config: {cfg}")
+    logger.info(f"DP-SGD config loaded from {dpsgd_path}: {cfg}")
     try:
         noise_multiplier = get_noise_multiplier(
             target_epsilon=cfg["target_epsilon"],
