@@ -18,6 +18,134 @@ from fastapi import FastAPI, HTTPException, UploadFile, WebSocket, WebSocketDisc
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from leakpro.schemas import EvalOutput, TrainingOutput
+
+# ---------------------------------------------------------------------------
+# Default train / eval — used when no custom handler.py is uploaded
+# ---------------------------------------------------------------------------
+
+def _default_train(loader, model, criterion, optimizer, epochs,
+                   dpsgd_metadata_path=None, virtual_batch_size=16):
+    """Built-in training loop. Pass dpsgd_metadata_path to activate DP-SGD."""
+    import os, pickle
+    import torch
+    from tqdm import tqdm
+
+    dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    if dpsgd_metadata_path:
+        from opacus import PrivacyEngine
+        from opacus.accountants.utils import get_noise_multiplier
+        from opacus.utils.batch_memory_manager import BatchMemoryManager
+        from opacus.validators import ModuleValidator
+
+        errors = ModuleValidator.validate(model, strict=False)
+        if errors:
+            model = ModuleValidator.fix(model)
+            opt_cls = optimizer.__class__
+            opt_cfg = {k: v for group in optimizer.param_groups
+                       for k, v in group.items() if k != "params"}
+            optimizer = opt_cls(model.parameters(), **opt_cfg)
+
+        for module in model.modules():
+            if hasattr(module, "inplace") and isinstance(module.inplace, bool):
+                module.inplace = False
+
+        if not os.path.exists(dpsgd_metadata_path):
+            raise FileNotFoundError(f"DP-SGD config not found: {dpsgd_metadata_path}")
+        with open(dpsgd_metadata_path, "rb") as f:
+            cfg = pickle.load(f)
+
+        sample_rate = 1 / len(loader)
+        noise_multiplier = get_noise_multiplier(
+            target_epsilon=cfg["target_epsilon"],
+            target_delta=cfg["target_delta"],
+            sample_rate=sample_rate,
+            epochs=cfg["epochs"],
+            epsilon_tolerance=cfg["epsilon_tolerance"],
+            accountant="prv",
+            eps_error=cfg["eps_error"],
+        )
+        privacy_engine = PrivacyEngine(accountant="prv")
+        model, optimizer, loader = privacy_engine.make_private(
+            module=model, optimizer=optimizer, data_loader=loader,
+            noise_multiplier=noise_multiplier, max_grad_norm=cfg["max_grad_norm"],
+        )
+
+        model.to(dev)
+        accuracy_history, loss_history = [], []
+        with BatchMemoryManager(data_loader=loader,
+                                max_physical_batch_size=virtual_batch_size,
+                                optimizer=optimizer) as mem_loader:
+            for epoch in range(epochs):
+                model.train()
+                train_loss, train_acc = 0.0, 0.0
+                for inputs, labels in tqdm(mem_loader, desc=f"Epoch {epoch+1}/{epochs}"):
+                    labels = labels.long().view(-1)
+                    inputs, labels = inputs.to(dev), labels.to(dev)
+                    optimizer.zero_grad()
+                    outputs = model(inputs)
+                    loss = criterion(outputs, labels)
+                    loss.backward()
+                    optimizer.step()
+                    train_acc += outputs.argmax(1).eq(labels).sum().item()
+                    train_loss += loss.item() * labels.size(0)
+                n = len(mem_loader.dataset)
+                accuracy_history.append(train_acc / n)
+                loss_history.append(train_loss / n)
+
+        model.to("cpu")
+        if hasattr(model, "_module"):
+            model = model._module
+
+    else:
+        model.to(dev)
+        accuracy_history, loss_history = [], []
+        for epoch in range(epochs):
+            model.train()
+            train_loss, train_acc, total = 0.0, 0.0, 0
+            for inputs, labels in tqdm(loader, desc=f"Epoch {epoch+1}/{epochs}"):
+                labels = labels.long().view(-1)
+                inputs, labels = inputs.to(dev), labels.to(dev)
+                optimizer.zero_grad()
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+                loss.backward()
+                optimizer.step()
+                train_acc += outputs.argmax(1).eq(labels).sum().item()
+                train_loss += loss.item() * labels.size(0)
+                total += labels.size(0)
+            accuracy_history.append(train_acc / total)
+            loss_history.append(train_loss / total)
+        model.to("cpu")
+
+    metrics = EvalOutput(
+        accuracy=accuracy_history[-1] if accuracy_history else 0.0,
+        loss=loss_history[-1] if loss_history else 0.0,
+        extra={"accuracy_history": accuracy_history, "loss_history": loss_history},
+    )
+    return TrainingOutput(model=model, metrics=metrics)
+
+
+def _default_eval(loader, model, criterion):
+    """Built-in eval loop."""
+    import torch
+    dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(dev)
+    model.eval()
+    loss, acc, total = 0.0, 0.0, 0
+    with torch.no_grad():
+        for data, target in loader:
+            target = target.long().view(-1).to(dev)
+            data = data.to(dev)
+            output = model(data)
+            loss += criterion(output, target).item() * target.size(0)
+            acc += output.argmax(1).eq(target).sum().item()
+            total += target.size(0)
+    model.to("cpu")
+    return EvalOutput(accuracy=acc / total if total else 0.0, loss=loss / total if total else 0.0)
+
+
 # ---------------------------------------------------------------------------
 # Preset architecture files written to disk when a preset is selected
 # ---------------------------------------------------------------------------
@@ -581,24 +709,7 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
             from torch.utils.data import DataLoader
             import importlib.util
 
-            # Load handler class (skip abstract base classes)
             import inspect
-            if params.dpsgd:
-                handler_path = cifar_dir / "cifar_handler_dpsgd.py"
-                _handler_mod_name = "cifar_handler_dpsgd"
-            else:
-                handler_path = cifar_dir / "cifar_handler.py"
-                _handler_mod_name = "cifar_handler"
-            spec = importlib.util.spec_from_file_location(_handler_mod_name, handler_path)
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-            HandlerCls = next(
-                obj for name in dir(mod)
-                if isinstance(obj := getattr(mod, name), type)
-                and hasattr(obj, "train")
-                and not inspect.isabstract(obj)
-                and name != "object"
-            )
 
             # Load dataset, apply f_train fraction
             data_path = Path(job.get("data_path", ""))
@@ -681,16 +792,8 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
             loader      = DataLoader(train_subset, batch_size=params.batch_size, shuffle=True,  num_workers=0)
             test_loader = DataLoader(test_subset,  batch_size=params.batch_size, shuffle=False, num_workers=0)
 
-            # Load model architecture
-            _using_preset = job.get("arch_config", {}).get("preset") in ("cifar_image", "cifar_wrn")
-            if _using_preset and params.dpsgd:
-                from target_model_class import ResNet18_DPsgd  # noqa: PLC0415
-                model = ResNet18_DPsgd(num_classes=10, dpsgd=True)
-            elif _using_preset:
-                from target_model_class import ResNet18  # noqa: PLC0415
-                model = ResNet18()
-            else:
-                # Custom uploaded arch.py
+            # Load model architecture from arch.py (preset writes it there; custom uploads it)
+            if True:
                 import importlib.util as _ilu2
                 import inspect as _inspect2
                 import torch.nn as _nn2
@@ -713,18 +816,34 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                     if isinstance(v, type) and issubclass(v, _nn2.Module) and v is not _nn2.Module
                 )
 
+                # Detect num_classes from dataset labels
+                _all_labels = []
+                for _, _lbl in DataLoader(train_subset, batch_size=512, shuffle=False, num_workers=0):
+                    _all_labels.append(_lbl.view(-1))
+                _num_classes_data = int(torch.cat(_all_labels).max().item()) + 1
+                log_q.put(f"[train] Detected {_num_classes_data} classes from dataset labels")
+
+                # Instantiate model, passing num_classes if the constructor accepts it
+                def _make_model(cls, num_classes, dpsgd=False):
+                    sig = _inspect2.signature(cls.__init__)
+                    kwargs = {}
+                    if "num_classes" in sig.parameters:
+                        kwargs["num_classes"] = num_classes
+                    if dpsgd and "dpsgd" in sig.parameters:
+                        kwargs["dpsgd"] = True
+                    return cls(**kwargs)
+
                 if params.dpsgd:
-                    _sig = _inspect2.signature(_arch_cls.__init__)
-                    if "dpsgd" in _sig.parameters:
-                        model = _arch_cls(dpsgd=True)
-                        log_q.put(f"[train] Instantiated {_arch_cls.__name__}(dpsgd=True) — ModuleValidator handled internally")
-                    else:
-                        model = _arch_cls()
+                    model = _make_model(_arch_cls, _num_classes_data, dpsgd=True)
+                    if not hasattr(model, "dpsgd") or not model.dpsgd:
                         from opacus.validators import ModuleValidator as _MV  # noqa: PLC0415
                         model = _MV.fix(model)
-                        log_q.put(f"[train] Applied ModuleValidator.fix() to {_arch_cls.__name__} for DP-SGD compatibility")
+                        log_q.put(f"[train] Applied ModuleValidator.fix() to {_arch_cls.__name__} for DP-SGD")
+                    else:
+                        log_q.put(f"[train] Instantiated {_arch_cls.__name__}(dpsgd=True, num_classes={_num_classes_data})")
                 else:
-                    model = _arch_cls()
+                    model = _make_model(_arch_cls, _num_classes_data)
+                log_q.put(f"[train] Model: {_arch_cls.__name__}(num_classes={_num_classes_data})")
 
             criterion = nn.CrossEntropyLoss()
             if params.optimizer == "sgd":
@@ -772,16 +891,30 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
             except ImportError:
                 pass
 
-            handler = HandlerCls()
-            if params.dpsgd and _dpsgd_path is not None:
-                result = handler.train(
-                    loader, model, criterion, optimizer,
-                    epochs=params.epochs,
-                    dpsgd_metadata_path=str(_dpsgd_path),
+            _custom_handler_path = job_dir / "handler.py"
+            if _custom_handler_path.exists():
+                _hspec = importlib.util.spec_from_file_location("_custom_handler", _custom_handler_path)
+                _hmod = importlib.util.module_from_spec(_hspec)
+                _hspec.loader.exec_module(_hmod)
+                _HandlerCls = next(
+                    obj for name in dir(_hmod)
+                    if isinstance(obj := getattr(_hmod, name), type)
+                    and hasattr(obj, "train") and not inspect.isabstract(obj)
+                    and name != "object"
+                )
+                _handler = _HandlerCls()
+                _dpsgd_kwargs = ({"dpsgd_metadata_path": str(_dpsgd_path), "virtual_batch_size": _vbs}
+                                 if _dpsgd_path else {})
+                result = _handler.train(loader, model, criterion, optimizer,
+                                        epochs=params.epochs, **_dpsgd_kwargs)
+                test_eval = _handler.eval(test_loader, result.model, criterion)
+            else:
+                result = _default_train(
+                    loader, model, criterion, optimizer, epochs=params.epochs,
+                    dpsgd_metadata_path=str(_dpsgd_path) if _dpsgd_path else None,
                     virtual_batch_size=_vbs,
                 )
-            else:
-                result = handler.train(loader, model, criterion, optimizer, epochs=params.epochs)
+                test_eval = _default_eval(test_loader, result.model, criterion)
 
             # Restore tqdm
             if _orig_tqdm:
@@ -793,7 +926,6 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
 
             # Evaluate on test set and save MIA metadata
             try:
-                test_eval = handler.eval(test_loader, result.model, criterion)
                 from leakpro import LeakPro  # noqa: PLC0415
                 import pickle as _pickle
                 metadata = LeakPro.make_mia_metadata(
