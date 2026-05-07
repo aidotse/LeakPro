@@ -467,9 +467,9 @@ function TrainMetricsChart({ metrics }: { metrics: TrainMetrics }) {
   const layout: Partial<Plotly.Layout> = {
     paper_bgcolor: "transparent",
     plot_bgcolor: "transparent",
-    margin: { t: 30, r: 20, b: 40, l: 45 },
+    margin: { t: 30, r: 20, b: 70, l: 45 },
     height: 200,
-    legend: { orientation: "h", y: -0.3, font: { size: 11, color: fontColor } },
+    legend: { orientation: "h", y: -0.55, font: { size: 11, color: fontColor } },
     xaxis: { title: { text: "Epoch" }, gridcolor: gridColor, color: fontColor, tickfont: { size: 10 } },
     yaxis: { gridcolor: gridColor, color: fontColor, tickfont: { size: 10 } },
     font: { family: "Inter, sans-serif" },

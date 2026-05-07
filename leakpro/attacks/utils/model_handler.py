@@ -7,7 +7,7 @@ import numpy as np
 from torch import load
 from torch.nn import Module
 
-from leakpro.input_handler.mia_handler import MIAHandler
+from leakpro.input_handler.mia_handler import MIAHandler, _fix_bn_inplace
 from leakpro.input_handler.user_imports import (
     get_class_from_module,
     get_criterion_mapping,
@@ -190,8 +190,14 @@ class ModelHandler():
         # Then load the weights and insert them into the model
         try:
             with open(model_path, "rb") as f:
-                model.load_state_dict(load(f))
-                logger.info(f"Loaded model from {model_path}")
+                state_dict = load(f)
+            try:
+                model.load_state_dict(state_dict)
+            except RuntimeError:
+                _fix_bn_inplace(model)
+                model.load_state_dict(state_dict)
+                logger.info(f"Applied BN→GN fix when loading {model_path}")
+            logger.info(f"Loaded model from {model_path}")
             return model, criterion
         except FileNotFoundError as e:
             raise ValueError(f"Model file not found at {model_path}") from e

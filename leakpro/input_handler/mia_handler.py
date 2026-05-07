@@ -17,6 +17,18 @@ from leakpro.utils.import_helper import Any, Self, Tuple
 from leakpro.utils.logger import logger
 
 
+def _fix_bn_inplace(model: torch.nn.Module) -> None:
+    """Replace BatchNorm layers with GroupNorm in-place (no clone/pickle needed)."""
+    for name, module in list(model.named_children()):
+        if isinstance(module, (torch.nn.BatchNorm1d, torch.nn.BatchNorm2d, torch.nn.BatchNorm3d)):
+            num_groups = min(32, module.num_features)
+            gn = torch.nn.GroupNorm(num_groups, module.num_features,
+                                    eps=module.eps, affine=module.affine)
+            setattr(model, name, gn)
+        else:
+            _fix_bn_inplace(module)
+
+
 class MIAHandler:
     """Parent class for user inputs."""
 
@@ -108,8 +120,16 @@ class MIAHandler:
         init_params = self.target_model_metadata.init_params
         try:
             with open(self.model_path, "rb") as f:
-                self.target_model = self.target_model_blueprint(**init_params)
-                self.target_model.load_state_dict(torch.load(f))
+                state_dict = torch.load(f)
+            self.target_model = self.target_model_blueprint(**init_params)
+            try:
+                self.target_model.load_state_dict(state_dict)
+            except RuntimeError:
+                # State dict may come from a DP-SGD run where BatchNorm was replaced by GroupNorm.
+                # Use in-place BN→GN replacement to avoid pickle-based clone in ModuleValidator.fix().
+                _fix_bn_inplace(self.target_model)
+                self.target_model.load_state_dict(state_dict)
+                logger.info("Applied BN→GN fix to match DP-SGD state dict")
             logger.info(f"Loaded target model from {model_path}")
         except FileNotFoundError as e:
             raise FileNotFoundError(f"Could not find the trained target model at {model_path}") from e
@@ -235,6 +255,9 @@ class MIAHandler:
         init_params = self.target_model_metadata.init_params
         try:
             model_replica = self.target_model_blueprint(**init_params)
+            # If the target model uses GroupNorm (DP-SGD trained), replicas must match
+            if any(isinstance(m, torch.nn.GroupNorm) for m in self.target_model.modules()):
+                _fix_bn_inplace(model_replica)
             return model_replica, self.get_criterion(), self.get_optimizer(model_replica)
         except Exception as e:
             raise ValueError("Failed to create an instance of the target model.") from e

@@ -29,38 +29,106 @@ class _QueueHandler(logging.Handler):
 
 
 # ---------------------------------------------------------------------------
-# Preset handler classes
+# Default handler — used when no custom handler.py is uploaded
 # ---------------------------------------------------------------------------
 
-_PRESET_HANDLERS: dict[str, str] = {
-    "cifar_image": "examples/mia/cifar/cifar_handler.py",
-    "cifar_image_dpsgd": "examples/mia/cifar/cifar_handler_dpsgd.py",
-}
-
 _LEAKPRO_ROOT = Path(__file__).parents[3]  # /home/.../LeakPro
+
+# Deferred import so worker can be imported without torch being on the path
+def _build_default_handler():
+    import torch
+    from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+    from leakpro.schemas import EvalOutput, TrainingOutput
+    from tqdm import tqdm
+
+    class _DefaultWebappHandler(AbstractInputHandler):
+        class UserDataset(AbstractInputHandler.UserDataset):
+            def __init__(self, data, targets, **kwargs):
+                self.data = data if isinstance(data, torch.Tensor) else torch.tensor(data).float()
+                self.targets = targets if isinstance(targets, torch.Tensor) else torch.tensor(targets).long()
+            def __len__(self): return len(self.targets)
+            def __getitem__(self, idx): return self.data[idx], self.targets[idx]
+
+        def train(self, dataloader, model, criterion, optimizer, epochs=None, **kwargs):
+            if epochs is None:
+                raise ValueError("epochs must be provided")
+            dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            model.to(dev)
+            accuracy_history, loss_history = [], []
+            for epoch in range(epochs):
+                model.train()
+                train_loss, train_acc, total = 0.0, 0.0, 0
+                for inputs, labels in tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}"):
+                    labels = labels.long().view(-1)
+                    inputs, labels = inputs.to(dev), labels.to(dev)
+                    optimizer.zero_grad()
+                    outputs = model(inputs)
+                    loss = criterion(outputs, labels)
+                    loss.backward()
+                    optimizer.step()
+                    train_acc += outputs.argmax(1).eq(labels).sum().item()
+                    train_loss += loss.item() * labels.size(0)
+                    total += labels.size(0)
+                accuracy_history.append(train_acc / total)
+                loss_history.append(train_loss / total)
+            model.to("cpu")
+            metrics = EvalOutput(
+                accuracy=accuracy_history[-1], loss=loss_history[-1],
+                extra={"accuracy_history": accuracy_history, "loss_history": loss_history},
+            )
+            return TrainingOutput(model=model, metrics=metrics)
+
+        def eval(self, loader, model, criterion, device=None):
+            dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            model.to(dev)
+            model.eval()
+            loss, acc, total = 0.0, 0.0, 0
+            with torch.no_grad():
+                for data, target in loader:
+                    target = target.long().view(-1).to(dev)
+                    data = data.to(dev)
+                    output = model(data)
+                    loss += criterion(output, target).item() * target.size(0)
+                    acc += output.argmax(1).eq(target).sum().item()
+                    total += target.size(0)
+            model.to("cpu")
+            return EvalOutput(
+                accuracy=acc / total if total else 0.0,
+                loss=loss / total if total else 0.0,
+            )
+
+    return _DefaultWebappHandler
 
 
 def _get_handler_cls(job_dir: Path, preset: str | None):
     """Return the handler class to pass to LeakPro."""
     import importlib.util
-
-    if preset and preset in _PRESET_HANDLERS:
-        handler_path = _LEAKPRO_ROOT / _PRESET_HANDLERS[preset]
-    else:
-        handler_path = job_dir / "handler.py"
-
-    spec = importlib.util.spec_from_file_location("user_handler", handler_path)
-    mod = importlib.util.module_from_spec(spec)
-    sys.path.insert(0, str(handler_path.parent))
-    spec.loader.exec_module(mod)
-
     import inspect
-    # Return first concrete class that has a 'train' method
-    for name in dir(mod):
-        obj = getattr(mod, name)
-        if isinstance(obj, type) and hasattr(obj, "train") and not inspect.isabstract(obj) and name != "object":
-            return obj
-    raise ValueError(f"No handler class found in {handler_path}")
+
+    DefaultHandler = _build_default_handler()
+
+    handler_py = job_dir / "handler.py"
+    if not handler_py.exists():
+        return DefaultHandler
+
+    # Custom handler.py has train/eval but no UserDataset — graft UserDataset from default
+    spec = importlib.util.spec_from_file_location("_custom_handler", handler_py)
+    mod = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, str(handler_py.parent))
+    spec.loader.exec_module(mod)
+    custom_cls = next(
+        (obj for name in dir(mod)
+         if isinstance(obj := getattr(mod, name), type)
+         and hasattr(obj, "train") and not inspect.isabstract(obj) and name != "object"),
+        None,
+    )
+    if custom_cls is None:
+        return DefaultHandler
+
+    return type("_CombinedHandler", (DefaultHandler,), {
+        "train": custom_cls.train,
+        "eval":  custom_cls.eval,
+    })
 
 
 # ---------------------------------------------------------------------------
@@ -123,38 +191,41 @@ def run_audit_job(
                 })
                 continue
 
-            # Build audit YAML
-            cifar_dir = _LEAKPRO_ROOT / "examples/mia/cifar"
-            base_yaml = cifar_dir / "audit.yaml"
-            with open(base_yaml) as f:
-                config = yaml.safe_load(f)
-
-            # Replace all relative paths with absolute paths
-            config["target"]["target_folder"] = target_folder
-            config["target"]["data_path"] = job_state.get("data_path") or str(cifar_dir / "data/cifar10.pkl")
-            config["audit"]["output_dir"] = str(job_dir / "leakpro_output" / model_name)
-
-            # module_path: only use job's arch.py for custom-uploaded arches (preset is None).
-            # If a preset was used for training, arch.py may be a leftover from a previous
-            # upload and won't match the model that was actually trained.
+            # Build audit YAML inline — no dependency on examples/mia/cifar/
             arch_py = job_dir / "arch.py"
-            if arch_py.exists() and not preset:
-                config["target"]["module_path"] = str(arch_py)
-                # Detect the model class name from arch.py
+            config = {
+                "audit": {
+                    "random_seed": 1236,
+                    "attack_list": [],
+                    "output_dir": str(job_dir / "leakpro_output" / model_name),
+                    "attack_type": "mia",
+                    "data_modality": "image",
+                },
+                "target": {
+                    "module_path": str(arch_py),
+                    "model_class": None,
+                    "target_folder": target_folder,
+                    "data_path": job_state.get("data_path") or "",
+                },
+                "shadow_model": None,
+                "distillation_model": None,
+            }
+
+            # Detect model class from arch.py using init_params matching
+            if arch_py.exists():
                 import importlib.util as _ilu
-                _spec = _ilu.spec_from_file_location("_arch_probe", arch_py)
-                _mod = _ilu.module_from_spec(_spec)
-                _spec.loader.exec_module(_mod)
                 import torch.nn as _nn
                 import inspect as _inspect
                 import joblib as _joblib
+                _spec = _ilu.spec_from_file_location("_arch_probe", arch_py)
+                _mod = _ilu.module_from_spec(_spec)
+                _spec.loader.exec_module(_mod)
                 _candidates = [
                     v for v in vars(_mod).values()
                     if isinstance(v, type) and issubclass(v, _nn.Module) and v is not _nn.Module
                 ]
                 if _candidates:
-                    # Try to match the class whose __init__ accepts the init_params from metadata
-                    chosen = _candidates[-1]
+                    chosen = _candidates[0]
                     try:
                         _meta = _joblib.load(target_folder_path / "model_metadata.pkl")
                         _init_keys = set(_meta.init_params.keys())
@@ -166,12 +237,6 @@ def run_audit_job(
                     except Exception:
                         pass
                     config["target"]["model_class"] = chosen.__name__
-            else:
-                # Preset training (or no arch.py): use bundled cifar target_model_class.py
-                config["target"]["module_path"] = str(cifar_dir / "target_model_class.py")
-                # Pick the right class based on whether DP-SGD was used
-                _model_spec_dpsgd = model_spec.get("dpsgd", False)
-                config["target"]["model_class"] = "ResNet18_DPsgd" if _model_spec_dpsgd else "ResNet18"
 
             if attack_list:
                 config["audit"]["attack_list"] = attack_list
@@ -216,6 +281,30 @@ def run_audit_job(
                 # Add leakpro root to path if needed
                 if str(_LEAKPRO_ROOT) not in sys.path:
                     sys.path.insert(0, str(_LEAKPRO_ROOT))
+
+                # Register dataset_handler.py under its original module name so joblib can
+                # deserialise population pickles that reference the original class path.
+                # Original name is inferred from the handler class name:
+                #   CelebADataHandler → celebA_data_handler
+                #   CifarDataHandler  → cifar_data_handler
+                _dh_path = job_dir / "dataset_handler.py"
+                if _dh_path.exists():
+                    import importlib.util as _ilu_dh
+                    _dh_spec = _ilu_dh.spec_from_file_location("dataset_handler", _dh_path)
+                    _dh_mod = _ilu_dh.module_from_spec(_dh_spec)
+                    _dh_spec.loader.exec_module(_dh_mod)
+                    sys.modules["dataset_handler"] = _dh_mod
+                    for _attr in dir(_dh_mod):
+                        _obj = getattr(_dh_mod, _attr, None)
+                        if (isinstance(_obj, type)
+                                and hasattr(_obj, "UserDataset")
+                                and _attr not in ("AbstractInputHandler", "object")):
+                            _orig = _attr.replace("DataHandler", "_data_handler") \
+                                        .replace("InputHandler", "_input_handler")
+                            _orig = _orig[0].lower() + _orig[1:]
+                            if _orig not in sys.modules:
+                                sys.modules[_orig] = _dh_mod
+                                log_q.put(f"[worker] Registered dataset_handler.py as '{_orig}' for pickle deserialization")
 
                 # Stub out leakpro.dataset so joblib can deserialise old GeneralDataset pickles.
                 # MIAHandler._load_population accesses .data and .targets; the old class stored
