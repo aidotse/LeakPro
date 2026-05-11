@@ -185,13 +185,13 @@ const PRESETS: Array<{
     id: "cifar_image",
     label: "Image (CIFAR-style)",
     icon: "image",
-    desc: "WideResNet architecture with standard image augmentation. Works for 3-channel images (32×32 or larger).",
+    desc: "Pretrained ResNet-18 (ImageNet weights) fine-tuned for your dataset. Works for any 3-channel images — num_classes detected automatically.",
     types: ["image"],
     details: {
-      architecture: "WideResNet (depth=28, widen_factor=2) — ~36M params, 3 residual blocks",
-      optimizer: "SGD (momentum=0.9, weight_decay=5e-4)",
-      learning_rate: "0.1",
-      scheduler: "CosineAnnealingLR",
+      architecture: "ResNet-18 (pretrained ImageNet) — ~11M params, fine-tuned final layer",
+      optimizer: "Adam (default) or SGD",
+      learning_rate: "0.001",
+      scheduler: "none",
     },
   },
   {

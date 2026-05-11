@@ -150,107 +150,26 @@ def _default_eval(loader, model, criterion):
 # Preset architecture files written to disk when a preset is selected
 # ---------------------------------------------------------------------------
 
-_PRESET_ARCH_CIFAR = '''\
-"""Preset architecture for CIFAR image classification (ResNet-18 and WideResNet)."""
+_PRESET_ARCH_IMAGE = '''\
+"""Preset architecture — pretrained ResNet-18 (ImageNet weights), fine-tuned for any image dataset."""
 import torch.nn as nn
-import torch.nn.functional as F
-from torch import add
-import torchvision.models as models
+from torchvision.models import ResNet18_Weights, resnet18
 
 
 class ResNet18(nn.Module):
     def __init__(self, num_classes=10):
         super().__init__()
         self.num_classes = num_classes
-        self.model = models.resnet18(pretrained=False)
+        self.model = resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
         self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
 
     def forward(self, x):
         return self.model(x)
-
-
-class BasicBlock(nn.Module):
-    def __init__(self, in_planes, out_planes, stride, dropRate=0.0):
-        super().__init__()
-        self.bn1 = nn.BatchNorm2d(in_planes)
-        self.relu1 = nn.ReLU(inplace=True)
-        self.conv1 = nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride, padding=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(out_planes)
-        self.relu2 = nn.ReLU(inplace=True)
-        self.conv2 = nn.Conv2d(out_planes, out_planes, kernel_size=3, stride=1, padding=1, bias=False)
-        self.droprate = dropRate
-        self.equalInOut = (in_planes == out_planes)
-        self.convShortcut = (not self.equalInOut) and nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, padding=0, bias=False) or None
-
-    def forward(self, x):
-        if not self.equalInOut:
-            x = self.relu1(self.bn1(x))
-        else:
-            out = self.relu1(self.bn1(x))
-        out = self.relu2(self.bn2(self.conv1(out if self.equalInOut else x)))
-        if self.droprate > 0:
-            out = F.dropout(out, p=self.droprate, training=self.training)
-        out = self.conv2(out)
-        return add(x if self.equalInOut else self.convShortcut(x), out)
-
-
-class NetworkBlock(nn.Module):
-    def __init__(self, nb_layers, in_planes, out_planes, block, stride, dropRate=0.0):
-        super().__init__()
-        self.layer = self._make_layer(block, in_planes, out_planes, nb_layers, stride, dropRate)
-
-    def _make_layer(self, block, in_planes, out_planes, nb_layers, stride, dropRate):
-        layers = []
-        for i in range(int(nb_layers)):
-            layers.append(block(i == 0 and in_planes or out_planes, out_planes, i == 0 and stride or 1, dropRate))
-        return nn.Sequential(*layers)
-
-    def forward(self, x):
-        return self.layer(x)
-
-
-class WideResNet(nn.Module):
-    def __init__(self, depth, num_classes, widen_factor=1, dropRate=0.0):
-        super().__init__()
-        self.depth = depth
-        self.num_classes = num_classes
-        self.widen_factor = widen_factor
-        self.dropRate = dropRate
-        nChannels = [16, 16 * widen_factor, 32 * widen_factor, 64 * widen_factor]
-        assert (depth - 4) % 6 == 0
-        n = (depth - 4) / 6
-        self.conv1 = nn.Conv2d(3, nChannels[0], kernel_size=3, stride=1, padding=1, bias=False)
-        self.block1 = NetworkBlock(n, nChannels[0], nChannels[1], BasicBlock, 1, dropRate)
-        self.block2 = NetworkBlock(n, nChannels[1], nChannels[2], BasicBlock, 2, dropRate)
-        self.block3 = NetworkBlock(n, nChannels[2], nChannels[3], BasicBlock, 2, dropRate)
-        self.bn1 = nn.BatchNorm2d(nChannels[3])
-        self.relu = nn.ReLU(inplace=True)
-        self.fc = nn.Linear(nChannels[3], num_classes)
-        self.nChannels = nChannels[3]
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
-            elif isinstance(m, nn.BatchNorm2d):
-                m.weight.data.fill_(1)
-                m.bias.data.zero_()
-            elif isinstance(m, nn.Linear):
-                m.bias.data.zero_()
-                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
-
-    def forward(self, x):
-        out = self.conv1(x)
-        out = self.block1(out)
-        out = self.block2(out)
-        out = self.block3(out)
-        out = self.relu(self.bn1(out))
-        out = F.avg_pool2d(out, 8)
-        out = out.view(-1, self.nChannels)
-        return self.fc(out)
 '''
 
 _PRESET_ARCHS: dict[str, str] = {
-    "cifar_wrn": _PRESET_ARCH_CIFAR,
-    "cifar_image": _PRESET_ARCH_CIFAR,
+    "cifar_wrn":   _PRESET_ARCH_IMAGE,
+    "cifar_image": _PRESET_ARCH_IMAGE,
 }
 
 from .checker import run_check
@@ -753,9 +672,10 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                             f"Cannot extract data array from {type(raw).__name__}. "
                             f"Available keys: {list(attrs.keys())}"
                         )
-                    x = torch.from_numpy(np.array(data_arr, dtype="float32"))
-                    # Normalize uint8 [0,255] → float [0,1]
-                    if x.max() > 1.0:
+                    _raw_np = np.array(data_arr)
+                    x = torch.from_numpy(_raw_np.astype("float32"))
+                    # Only normalize if data is raw uint8 pixels — already-normalized floats must not be touched
+                    if _raw_np.dtype == np.uint8 or (_raw_np.dtype != np.float32 and _raw_np.dtype != np.float64 and x.max() > 1.0):
                         x = x / 255.0
                     # Channel-last (N,H,W,C) → channel-first (N,C,H,W)
                     if x.ndim == 4 and x.shape[-1] in (1, 3, 4) and x.shape[1] > 4:
@@ -843,7 +763,12 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                         log_q.put(f"[train] Instantiated {_arch_cls.__name__}(dpsgd=True, num_classes={_num_classes_data})")
                 else:
                     model = _make_model(_arch_cls, _num_classes_data)
-                log_q.put(f"[train] Model: {_arch_cls.__name__}(num_classes={_num_classes_data})")
+                # Check if arch uses pretrained weights
+                _arch_src = (job_dir / "arch.py").read_text()
+                _pretrained = "ResNet18_Weights" in _arch_src or ("pretrained" in _arch_src and "False" not in _arch_src.split("pretrained")[-1].split("\n")[0])
+                log_q.put(f"[train] Model: {_arch_cls.__name__}(num_classes={_num_classes_data}, pretrained={'yes' if _pretrained else 'no'})")
+                if params.dpsgd:
+                    log_q.put(f"[train] DP-SGD: epsilon={params.target_epsilon}, delta={params.target_delta}, max_grad_norm={params.max_grad_norm}, virtual_batch_size={params.virtual_batch_size or 16}")
 
             criterion = nn.CrossEntropyLoss()
             if params.optimizer == "sgd":

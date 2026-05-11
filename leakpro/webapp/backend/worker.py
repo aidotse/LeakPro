@@ -354,7 +354,7 @@ def run_audit_job(
                 results = lp.run_audit(create_pdf=False)
 
                 # Detect model class name for display in results
-                _preset_class_map = {"cifar_image": "ResNet18", "cifar_wrn": "WideResNet"}
+                _preset_class_map = {"cifar_image": "ResNet18", "cifar_wrn": "ResNet18"}
                 _model_class: str | None = _preset_class_map.get(preset)  # type: ignore[arg-type]
                 if _model_class is None and (job_dir / "arch.py").exists():
                     try:
@@ -370,7 +370,7 @@ def run_audit_job(
                     except Exception:
                         pass
                 if model_spec.get("dpsgd") and _model_class == "ResNet18":
-                    _model_class = "ResNet18_DPsgd"
+                    _model_class = "ResNet18 (DP-SGD)"
 
                 _tp = model_spec.get("train_params") or {}
                 _hc = job_state.get("handler_config") or {}
