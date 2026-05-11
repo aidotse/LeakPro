@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Module with function to modify TAB dataset to be used with synthetic text PII scanner."""
 import json
 from typing import Any, Callable, Dict, List

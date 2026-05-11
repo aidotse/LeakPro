@@ -198,10 +198,15 @@ LeakPro is funded by Sweden's innovation agency, Vinnova, under grant 2023-03000
 
 This project is licensed under the **Apache License 2.0**. 
 
-Copyright 2023-2026 **AI Sweden**.
-
-### Third-Party Licenses
-This project includes third-party software, including:
-* **Anonymeter**: Licensed under the Clear BSD License (Copyright © 2022 Anonos IP LLC).
+Copyright 2023-2026 **Lindholmen Science Park AB**.
 
 For full legal texts and attributions, please refer to the [LICENSE](LICENSE) and [NOTICE](NOTICE) files.
+
+## Attributions
+
+### Images
+* [Hospital icons created by Freepik - Flaticon](https://www.flaticon.com/free-icons/hospital)
+* [Hospital bed icons created by vectorsmarket15 - Flaticon](https://www.flaticon.com/free-icons/hospital-bed)
+* [Document icons created by Freepik - Flaticon](https://www.flaticon.com/free-icons/document)
+* [Camera icons created by dreamicons - Flaticon](https://www.flaticon.com/free-icons/camera)
+* [Molecule icons created by Freepik - Flaticon](https://www.flaticon.com/free-icons/molecule)
