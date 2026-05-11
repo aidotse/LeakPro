@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """A module that implements the HopSkipJump attack for membership inference."""
 
 from typing import Literal, Union

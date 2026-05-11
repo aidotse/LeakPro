@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Training simulator component for gradient inversion attacks.
 
 This module provides different strategies for simulating client-side training

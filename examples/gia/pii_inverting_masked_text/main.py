@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Inverting on a single document."""
 from data_.pii_data import get_pii_dataset
 from data_.data_extension import GiaNERExtension

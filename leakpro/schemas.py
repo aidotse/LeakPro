@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Module that contains the schema definitions for the input handler."""
 
 from typing import Annotated, Any, Callable, Dict, List, Literal, Optional, Union
@@ -90,7 +94,7 @@ class TargetConfig(BaseModel):
     model_class: str = Field(..., description="Class name of the model")
     target_folder: str = Field(..., description="Directory where target model data is stored")
     data_path: str = Field(..., description="Path to dataset file")
-    dpsgd_path: Optional[str] = Field(default=None, description="Path to the DP-SGD dictionary file (optional)")
+    dpsgd_path: Optional[str] = Field(default=None, description="Path to DP-SGD metadata file")
     # TODO: Change data_path description to be more descriptive, i.e path to target (or private) dataset.
 
     # MINV-specific field - optional
@@ -101,13 +105,22 @@ class TargetConfig(BaseModel):
 class ShadowModelConfig(BaseModel):
     """Configuration for the Shadow models."""
 
-    model_class: Optional[str] = None
-    module_path: Optional[str] = None
+    model_class: Optional[str] = Field(
+        default=None,
+        description=(
+            "Class name of the shadow model. Defaults to the target model class. "
+            "If set without module_path, the class is imported from the target model module path."
+        ),
+    )
+    module_path: Optional[str] = Field(
+        default=None,
+        description="Path to the shadow model module. Defaults to the target model module path.",
+    )
     init_params: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Model initialization parameters")
-    optimizer: Optional[OptimizerConfig] = Field(..., description="Optimizer configuration")
-    criterion: Optional[LossConfig] = Field(..., description="Loss function configuration")
-    batch_size: Optional[int] = Field(..., ge=1, description="Batch size used during training")
-    epochs: Optional[int] = Field(..., ge=1, description="Number of training epochs")
+    optimizer: Optional[OptimizerConfig] = Field(default=None, description="Optimizer configuration")
+    criterion: Optional[LossConfig] = Field(default=None, description="Loss function configuration")
+    batch_size: Optional[int] = Field(default=None, ge=1, description="Batch size used during training")
+    epochs: Optional[int] = Field(default=None, ge=1, description="Number of training epochs")
     sampling_method: str = Field(
         default="balanced",
         description="Method for sampling shadow model training data: 'balanced' or 'random'"
@@ -183,12 +196,16 @@ class ShadowModelTrainingSchema(BaseModel):
     train_indices: List[int] = Field(..., description="Indices of training samples")
     num_train: int = Field(..., ge=0, description="Number of training samples")
     optimizer: str = Field(..., description="Optimizer name")
+    optimizer_params: Dict[str, Any] = Field(default_factory=dict, description="Optimizer parameters")
     criterion: str = Field(..., description="Criterion (loss function) name")
+    criterion_params: Dict[str, Any] = Field(default_factory=dict, description="Criterion parameters")
     epochs: int = Field(..., ge=1, description="Number of training epochs")
+    batch_size: Optional[int] = Field(default=None, ge=1, description="Batch size used during training")
     train_result: EvalOutput = Field(..., description="Evaluation output for the training set")
     test_result: EvalOutput = Field(..., description="Evaluation output for the test set")
     online: bool = Field(..., description="Online vs. offline training")
     model_class: str = Field(..., description="Model class name")
+    model_module_path: Optional[str] = Field(default=None, description="Path to the model module")
     target_model_hash: str = Field(..., description="Hash of target model")
 
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields

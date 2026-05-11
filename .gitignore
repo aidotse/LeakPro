@@ -160,7 +160,7 @@ cython_debug/
 #.idea/
 
 # Visual Studio Code
-.vscode
+.vscode/
 
 # mac generated files
 .DS_Store

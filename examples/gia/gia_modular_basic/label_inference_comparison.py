@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Example: Comparing Label Inference Strategies for Multi-Epoch FedAvg
 
 This example compares different label inference strategies:

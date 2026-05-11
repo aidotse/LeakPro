@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 import os, pickle, joblib, torch, random, numpy as np, pandas as pd
 
 from scipy.io import loadmat
