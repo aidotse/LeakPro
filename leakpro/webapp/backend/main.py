@@ -605,6 +605,17 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
             target_folder = job_dir / "models" / params.name
             target_folder.mkdir(parents=True, exist_ok=True)
 
+            # Save training log to file
+            _train_log_path = target_folder / "train.log"
+            _train_log_file = open(_train_log_path, "w")
+            _orig_log_q_put = log_q.put
+            def _log_and_save(msg):
+                _orig_log_q_put(msg)
+                if not msg.startswith("__"):
+                    _train_log_file.write(msg + "\n")
+                    _train_log_file.flush()
+            log_q.put = _log_and_save
+
             model_entry = {
                 "name": params.name,
                 "source": "trained",
@@ -916,6 +927,8 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
             log_q.put(f"[train] FAILED {params.name}: {e}\n{traceback.format_exc()}")
         finally:
             _sys.stdout = old_stdout
+            log_q.put = _orig_log_q_put
+            _train_log_file.close()
             log_q.put("__TRAIN_DONE__")
 
     _executor.submit(_train)

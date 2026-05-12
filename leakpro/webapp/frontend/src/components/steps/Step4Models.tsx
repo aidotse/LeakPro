@@ -434,6 +434,12 @@ function TrainModelForm({ jobId, onAdded, existingCount }: {
 
       {/* Live log stream */}
       {(logs.length > 0 || training) && (
+        <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
+          <span className="material-symbols-outlined text-sm">save</span>
+          Log saved to <code className="font-mono">models/{"<model_name>"}/train.log</code> inside your job folder.
+        </p>
+      )}
+      {(logs.length > 0 || training) && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
           <div className="px-4 py-2 bg-slate-100 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 text-xs font-mono text-slate-500 flex items-center gap-2">
             <span className={`size-2 rounded-full ${training ? "bg-green-400 animate-pulse" : "bg-slate-400"}`} />
