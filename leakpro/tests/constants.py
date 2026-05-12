@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 from dotmap import DotMap
 
 STORAGE_PATH = "./leakpro/tests/tmp"

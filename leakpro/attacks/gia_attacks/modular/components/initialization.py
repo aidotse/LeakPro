@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Initialization strategies for gradient inversion attacks.
 
 Initialization strategies create the starting point for reconstruction optimization.

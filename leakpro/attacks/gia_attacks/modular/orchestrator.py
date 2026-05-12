@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Orchestrator for modular gradient inversion attacks.
 
 The orchestrator coordinates all components of a gradient inversion attack:

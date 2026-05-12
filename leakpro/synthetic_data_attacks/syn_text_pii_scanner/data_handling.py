@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Module containing LabelSet, EncodedDoc, NERDataset and CollatorWPadding classes to handle text data used in synthetic text PII scanner.""" # noqa: E501
 import itertools
 from dataclasses import dataclass

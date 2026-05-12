@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Module containing the functions to compute the threshold for the hypothesis test.
 
 This module is originally from the privacy meter package.
