@@ -58,12 +58,25 @@ class MIAHandler:
 
     def _load_population(self:Self) -> None:
         """Default implementation of the population loading."""
+        import pickle
+
+        class _SafeUnpickler(pickle.Unpickler):
+            def find_class(self, module, name):
+                try:
+                    return super().find_class(module, name)
+                except (ImportError, AttributeError):
+                    return type(name, (), {})
+
         try:
             with open(self.configs.target.data_path, "rb") as file:
+                try:
+                    self.population = joblib.load(file)
+                except Exception:
+                    file.seek(0)
+                    self.population = _SafeUnpickler(file).load()
+                    logger.info("Loaded population via safe unpickler (missing module stub)")
 
-                self.population = joblib.load(file)
                 self.population_size = len(self.population)
-
                 if not self._is_indexable(self.population):
                     raise ValueError("Population dataset is not indexable.")
                 logger.info(f"Loaded population dataset from {self.configs.target.data_path}")

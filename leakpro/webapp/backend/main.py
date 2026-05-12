@@ -765,7 +765,10 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                     model = _make_model(_arch_cls, _num_classes_data)
                 # Check if arch uses pretrained weights
                 _arch_src = (job_dir / "arch.py").read_text()
-                _pretrained = "ResNet18_Weights" in _arch_src or ("pretrained" in _arch_src and "False" not in _arch_src.split("pretrained")[-1].split("\n")[0])
+                _pretrained = (
+                    ("ResNet18_Weights" in _arch_src and "weights=None" not in _arch_src) or
+                    ("pretrained=True" in _arch_src)
+                )
                 log_q.put(f"[train] Model: {_arch_cls.__name__}(num_classes={_num_classes_data}, pretrained={'yes' if _pretrained else 'no'})")
                 if params.dpsgd:
                     log_q.put(f"[train] DP-SGD: epsilon={params.target_epsilon}, delta={params.target_delta}, max_grad_norm={params.max_grad_norm}, virtual_batch_size={params.virtual_batch_size or 16}")
