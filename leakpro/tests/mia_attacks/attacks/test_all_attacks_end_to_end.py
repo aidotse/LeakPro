@@ -577,7 +577,6 @@ def test_all_attacks_end_to_end(attack_name: str, monkeypatch: pytest.MonkeyPatc
     """Run a minimal real E2E flow for each MIA attack in AttackFactoryMIA."""
     _set_seed()
     optuna_metadata_snapshot = _snapshot_optuna_metadata()
-    temp_root = None
     try:
         with tempfile.TemporaryDirectory(prefix=f"mia_e2e_{attack_name}_") as temp_dir:
             temp_root = Path(temp_dir)
@@ -610,7 +609,6 @@ def test_all_attacks_end_to_end(attack_name: str, monkeypatch: pytest.MonkeyPatc
             assert result_file.exists()
             assert (output_dir / "data_objects").exists()
 
-        assert temp_root is not None
         assert not temp_root.exists()
     finally:
         _restore_optuna_metadata(optuna_metadata_snapshot)
