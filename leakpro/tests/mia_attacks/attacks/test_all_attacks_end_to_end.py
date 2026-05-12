@@ -526,21 +526,40 @@ def _create_timeseries_e2e_config(run_dir: Path, attack_name: str) -> Path:
     return _create_audit_yaml(run_dir, attack_name, "timeseries", "TinyTimeSeriesTargetModel", data_path, target_dir)
 
 
-ALL_MIA_ATTACKS = list(AttackFactoryMIA.attack_classes.keys())
-DISABLED_ATTACKS: set[str] = set()
-
-ENABLED_MIA_ATTACKS = [attack_name for attack_name in ALL_MIA_ATTACKS if attack_name not in DISABLED_ATTACKS]
+E2E_TESTED_MIA_ATTACKS = (
+    "population",
+    "rmia",
+    "qmia",
+    "loss_traj",
+    "seqmia",
+    "lira",
+    "HSJ",
+    "yoqo",
+    "base",
+    "ramia",
+    "multi_signal_lira",
+    "dts",
+    "oslo",
+)
 
 ATTACK_PARAMETERS = [
     pytest.param(attack_name, id=f"{attack_name}-real")
-    for attack_name in ENABLED_MIA_ATTACKS
+    for attack_name in E2E_TESTED_MIA_ATTACKS
 ]
 
 
 def test_attack_factory_attack_list_is_covered() -> None:
-    """Ensure this test suite follows the current factory attack list."""
-    assert ALL_MIA_ATTACKS == list(AttackFactoryMIA.attack_classes.keys())
-    assert set(ENABLED_MIA_ATTACKS).union(DISABLED_ATTACKS) == set(ALL_MIA_ATTACKS)
+    """Ensure every factory-registered MIA attack has explicit E2E coverage."""
+    factory_attack_names = set(AttackFactoryMIA.attack_classes)
+    tested_attack_names = set(E2E_TESTED_MIA_ATTACKS)
+
+    assert len(tested_attack_names) == len(E2E_TESTED_MIA_ATTACKS), "Duplicate MIA attack names in E2E coverage list."
+
+    missing_attack_names = factory_attack_names - tested_attack_names
+    stale_attack_names = tested_attack_names - factory_attack_names
+
+    assert not missing_attack_names, f"MIA attacks missing from E2E coverage: {sorted(missing_attack_names)}"
+    assert not stale_attack_names, f"E2E coverage lists unknown MIA attacks: {sorted(stale_attack_names)}"
 
 
 def test_target_split_keeps_aux_population() -> None:
