@@ -183,12 +183,12 @@ const PRESETS: Array<{
 }> = [
   {
     id: "cifar_image",
-    label: "Image (CIFAR-style)",
+    label: "Image",
     icon: "image",
-    desc: "Pretrained ResNet-18 (ImageNet weights) fine-tuned for your dataset. Works for any 3-channel images — num_classes detected automatically.",
+    desc: "ResNet-18 trained from scratch on your dataset. Works for any 3-channel images — num_classes detected automatically. Upload your own arch.py to use pretrained weights.",
     types: ["image"],
     details: {
-      architecture: "ResNet-18 (pretrained ImageNet) — ~11M params, fine-tuned final layer",
+      architecture: "ResNet-18 (random init) — ~11M params",
       optimizer: "Adam (default) or SGD",
       learning_rate: "0.001",
       scheduler: "none",

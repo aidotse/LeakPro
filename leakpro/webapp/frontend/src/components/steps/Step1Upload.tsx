@@ -6,8 +6,27 @@ import { api, DataMeta } from "../../api";
 // dataset_handler.py template
 // ---------------------------------------------------------------------------
 const DATASET_HANDLER_TEMPLATE = `"""
-dataset_handler.py — define how LeakPro loads and normalises YOUR data.
-Upload this file in Step 1 (Dataset).
+dataset_handler.py — tell LeakPro how to load and normalise YOUR data.
+
+Upload this file in Step 1 (Dataset). The only requirement is that you define
+a class called UserDataset that inherits from AbstractInputHandler.UserDataset.
+
+HOW TO ADAPT THIS FILE
+───────────────────────
+  IMAGE data (e.g. CIFAR, CelebA):
+    - data shape : (N, C, H, W), float32
+    - If your .pkl stores raw uint8 pixels [0-255], divide by 255 first (see below).
+    - If your .pkl already stores ImageNet-normalised tensors (values ~[-2, 2]),
+      skip the assert and the _normalize step — just return self.data[index] directly.
+
+  TABULAR data (e.g. health records, structured CSV):
+    - data shape : (N, num_features), float32
+    - No channel reordering needed.
+    - Per-feature normalisation (mean/std) is still recommended.
+
+  TIME-SERIES / GRAPH / TEXT:
+    - Flatten or embed to (N, features) or (N, C, L) as appropriate.
+    - Adjust or remove the assert and normalisation to match your format.
 """
 import numpy as np
 import torch
@@ -18,39 +37,48 @@ class UserDataset(AbstractInputHandler.UserDataset):
     """
     Wraps your dataset for use in LeakPro.
 
-    Requirements:
-      - Must be indexable: dataset[i] returns (input_tensor, label)
-      - data: float32 Tensor in [0, 1], shape (N, C, H, W) for images
-              or (N, features) for tabular
-      - targets: integer class labels, shape (N,)
+    __init__ receives (data, targets, **kwargs) whenever LeakPro creates
+    a subset of your population — kwargs carries any extra attributes you
+    set on the original dataset (e.g. mean, std, augment flags).
     """
+
     def __init__(self, data, targets, **kwargs):
-        # Convert numpy arrays to float32 tensors in [0, 1]
+        # ── 1. Convert numpy → torch ──────────────────────────────────────
         if isinstance(data, np.ndarray):
             if data.dtype == np.uint8:
-                data = data.astype(np.float32) / 255.0   # uint8 -> float [0,1]
+                data = data.astype(np.float32) / 255.0      # raw pixels → [0, 1]
             else:
                 data = data.astype(np.float32)
-            # Channel-last (N,H,W,C) -> channel-first (N,C,H,W) for images
+            # IMAGE ONLY: channel-last (N,H,W,C) → channel-first (N,C,H,W)
             if data.ndim == 4 and data.shape[-1] in (1, 3, 4) and data.shape[1] > 4:
                 data = data.transpose(0, 3, 1, 2)
             data = torch.from_numpy(data)
         if isinstance(targets, np.ndarray):
             targets = torch.from_numpy(targets).long()
 
-        assert data.max() <= 1.0 and data.min() >= 0.0, "Data must be in [0, 1] after conversion"
+        # ── 2. Sanity check (remove if data is already normalised) ────────
+        # NOTE: skip this assert if your data is pre-normalised (e.g. ImageNet
+        #       normalisation gives values outside [0, 1]).
+        assert data.max() <= 1.0 and data.min() >= 0.0, (
+            "Data must be in [0, 1] after conversion. "
+            "If your data is already normalised (e.g. ImageNet stats), "
+            "remove this assert and return self.data[index] directly in __getitem__."
+        )
 
         self.data = data.float()
         self.targets = targets
 
-        # Per-channel normalisation stats (computed from your data)
+        # ── 3. Compute normalisation stats from this split ────────────────
+        # IMAGE (N,C,H,W): per-channel mean/std
         if data.ndim == 4:
             self.mean = self.data.mean(dim=(0, 2, 3)).view(-1, 1, 1)
             self.std  = self.data.std(dim=(0, 2, 3)).view(-1, 1, 1).clamp(min=1e-7)
+        # TABULAR / TIME-SERIES (N, features) or (N, C, L): per-feature mean/std
         else:
             self.mean = self.data.mean(dim=0)
             self.std  = self.data.std(dim=0).clamp(min=1e-7)
 
+        # Pass through any extra kwargs (e.g. pre-computed mean/std from parent split)
         for key, value in kwargs.items():
             setattr(self, key, value)
 
@@ -58,7 +86,6 @@ class UserDataset(AbstractInputHandler.UserDataset):
         return (x - self.mean) / self.std
 
     def __getitem__(self, index):
-        # Must be indexable — returns (normalised_input, label)
         return self._normalize(self.data[index]), self.targets[index]
 
     def __len__(self):

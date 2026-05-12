@@ -8,6 +8,7 @@ export default defineConfig({
     proxy: {
       "/jobs": {
         target: "http://localhost:8000",
+        changeOrigin: true,
         ws: true,
       },
     },

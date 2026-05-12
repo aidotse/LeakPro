@@ -151,16 +151,16 @@ def _default_eval(loader, model, criterion):
 # ---------------------------------------------------------------------------
 
 _PRESET_ARCH_IMAGE = '''\
-"""Preset architecture — pretrained ResNet-18 (ImageNet weights), fine-tuned for any image dataset."""
+"""Preset architecture — ResNet-18 trained from scratch for any image dataset."""
 import torch.nn as nn
-from torchvision.models import ResNet18_Weights, resnet18
+import torchvision.models as models
 
 
 class ResNet18(nn.Module):
     def __init__(self, num_classes=10):
         super().__init__()
         self.num_classes = num_classes
-        self.model = resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
+        self.model = models.resnet18(weights=None)
         self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
 
     def forward(self, x):
