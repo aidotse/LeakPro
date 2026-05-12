@@ -6,6 +6,8 @@ Usage:
     leakpro = LeakPro(CifarDataHandler, config_path, model_handler=CifarModelHandler)
 """
 
+import copy
+
 import torch
 from torch import cuda, device, no_grad, optim
 from torch.utils.data import DataLoader
@@ -35,7 +37,11 @@ class CifarModelHandler(AbstractInputHandler, role="model"):
         train_subset, val_subset = torch.utils.data.random_split(dataset, [train_size, val_size])
 
         if hasattr(dataset, "augment"):
-            val_subset.dataset.augment = None
+            val_dataset = copy.copy(dataset)
+            val_dataset.augment = None
+            if hasattr(val_dataset, "erase_post_norm"):
+                val_dataset.erase_post_norm = None
+            val_subset = torch.utils.data.Subset(val_dataset, val_subset.indices)
 
         train_loader = DataLoader(train_subset, batch_size=dataloader.batch_size,
                                   shuffle=True, num_workers=dataloader.num_workers)
