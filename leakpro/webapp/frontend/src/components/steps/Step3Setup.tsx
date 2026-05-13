@@ -198,13 +198,13 @@ const PRESETS: Array<{
     id: "tabular_mlp",
     label: "Tabular (MLP)",
     icon: "table_rows",
-    desc: "Multi-layer perceptron for tabular / CSV data with numeric features.",
+    desc: "MLP for tabular data. num_features and num_classes are detected automatically. Uses BCE loss for binary tasks, CrossEntropy for multi-class.",
     types: ["tabular"],
     details: {
-      architecture: "MLP — 3 hidden layers [256 → 128 → 64] + ReLU + Dropout(0.3)",
-      optimizer: "Adam",
-      learning_rate: "1e-3",
-      scheduler: "None",
+      architecture: "MLP — 256 → 128 → 64 + ReLU + Dropout(0.3), auto BCE/CrossEntropy",
+      optimizer: "Adam (default) or SGD",
+      learning_rate: "0.001",
+      scheduler: "none",
     },
   },
   {
