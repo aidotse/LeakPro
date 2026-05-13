@@ -25,7 +25,7 @@ from leakpro.schemas import EvalOutput, TrainingOutput
 # ---------------------------------------------------------------------------
 
 def _default_train(loader, model, criterion, optimizer, epochs,
-                   dpsgd_metadata_path=None, virtual_batch_size=16):
+                   dpsgd_metadata_path=None, virtual_batch_size=16, binary=False):
     """Built-in training loop. Pass dpsgd_metadata_path to activate DP-SGD."""
     import os, pickle
     import torch
@@ -108,14 +108,16 @@ def _default_train(loader, model, criterion, optimizer, epochs,
                 model.train()
                 train_loss, train_acc = 0.0, 0.0
                 for inputs, labels in tqdm(mem_loader, desc=f"Epoch {epoch+1}/{epochs}"):
-                    labels = labels.long().view(-1)
+                    labels = labels.float().view(-1) if binary else labels.long().view(-1)
                     inputs, labels = inputs.to(dev), labels.to(dev)
                     optimizer.zero_grad()
                     outputs = model(inputs)
+                    if binary: outputs = outputs.squeeze(1)
                     loss = criterion(outputs, labels)
                     loss.backward()
                     optimizer.step()
-                    train_acc += outputs.argmax(1).eq(labels).sum().item()
+                    preds = (outputs.sigmoid() > 0.5).float() if binary else outputs.argmax(1).float()
+                    train_acc += preds.eq(labels).sum().item()
                     train_loss += loss.item() * labels.size(0)
                 n = len(mem_loader.dataset)
                 accuracy_history.append(train_acc / n)
@@ -132,14 +134,16 @@ def _default_train(loader, model, criterion, optimizer, epochs,
             model.train()
             train_loss, train_acc, total = 0.0, 0.0, 0
             for inputs, labels in tqdm(loader, desc=f"Epoch {epoch+1}/{epochs}"):
-                labels = labels.long().view(-1)
+                labels = labels.float().view(-1) if binary else labels.long().view(-1)
                 inputs, labels = inputs.to(dev), labels.to(dev)
                 optimizer.zero_grad()
                 outputs = model(inputs)
+                if binary: outputs = outputs.squeeze(1)
                 loss = criterion(outputs, labels)
                 loss.backward()
                 optimizer.step()
-                train_acc += outputs.argmax(1).eq(labels).sum().item()
+                preds = (outputs.sigmoid() > 0.5).float() if binary else outputs.argmax(1).float()
+                train_acc += preds.eq(labels).sum().item()
                 train_loss += loss.item() * labels.size(0)
                 total += labels.size(0)
             accuracy_history.append(train_acc / total)
@@ -154,7 +158,7 @@ def _default_train(loader, model, criterion, optimizer, epochs,
     return TrainingOutput(model=model, metrics=metrics)
 
 
-def _default_eval(loader, model, criterion):
+def _default_eval(loader, model, criterion, binary=False):
     """Built-in eval loop."""
     import torch
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -163,11 +167,13 @@ def _default_eval(loader, model, criterion):
     loss, acc, total = 0.0, 0.0, 0
     with torch.no_grad():
         for data, target in loader:
-            target = target.long().view(-1).to(dev)
+            target = target.float().view(-1).to(dev) if binary else target.long().view(-1).to(dev)
             data = data.to(dev)
             output = model(data)
+            if binary: output = output.squeeze(1)
             loss += criterion(output, target).item() * target.size(0)
-            acc += output.argmax(1).eq(target).sum().item()
+            preds = (output.sigmoid() > 0.5).float() if binary else output.argmax(1).float()
+            acc += preds.eq(target).sum().item()
             total += target.size(0)
     model.to("cpu")
     return EvalOutput(accuracy=acc / total if total else 0.0, loss=loss / total if total else 0.0)
@@ -194,9 +200,32 @@ class ResNet18(nn.Module):
         return self.model(x)
 '''
 
+_PRESET_ARCH_TABULAR = '''\
+"""Preset MLP for tabular data. num_features and num_classes are auto-detected."""
+import torch.nn as nn
+
+
+class MLP(nn.Module):
+    def __init__(self, num_features=10, num_classes=2):
+        super().__init__()
+        self.num_features = num_features
+        self.num_classes = num_classes
+        out = 1 if num_classes == 2 else num_classes
+        self.net = nn.Sequential(
+            nn.Linear(num_features, 256), nn.ReLU(), nn.Dropout(0.3),
+            nn.Linear(256, 128), nn.ReLU(), nn.Dropout(0.3),
+            nn.Linear(128, 64),  nn.ReLU(), nn.Dropout(0.3),
+            nn.Linear(64, out),
+        )
+
+    def forward(self, x):
+        return self.net(x)
+'''
+
 _PRESET_ARCHS: dict[str, str] = {
     "cifar_wrn":   _PRESET_ARCH_IMAGE,
     "cifar_image": _PRESET_ARCH_IMAGE,
+    "tabular_mlp": _PRESET_ARCH_TABULAR,
 }
 
 from .checker import run_check
@@ -832,18 +861,24 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                 _num_classes_data = int(torch.cat(_all_labels).max().item()) + 1
                 log_q.put(f"[train] Detected {_num_classes_data} classes from dataset labels")
 
-                # Instantiate model, passing num_classes if the constructor accepts it
-                def _make_model(cls, num_classes, dpsgd=False):
+                # Detect num_features for tabular models
+                _sample_x = train_subset[0][0]
+                _num_features_data = int(_sample_x.shape[0]) if _sample_x.ndim == 1 else None
+
+                # Instantiate model, passing num_classes and num_features if accepted
+                def _make_model(cls, num_classes, num_features=None, dpsgd=False):
                     sig = _inspect2.signature(cls.__init__)
                     kwargs = {}
                     if "num_classes" in sig.parameters:
                         kwargs["num_classes"] = num_classes
+                    if num_features is not None and "num_features" in sig.parameters:
+                        kwargs["num_features"] = num_features
                     if dpsgd and "dpsgd" in sig.parameters:
                         kwargs["dpsgd"] = True
                     return cls(**kwargs)
 
                 if params.dpsgd:
-                    model = _make_model(_arch_cls, _num_classes_data, dpsgd=True)
+                    model = _make_model(_arch_cls, _num_classes_data, _num_features_data, dpsgd=True)
                     if not hasattr(model, "dpsgd") or not model.dpsgd:
                         from opacus.validators import ModuleValidator as _MV  # noqa: PLC0415
                         model = _MV.fix(model)
@@ -851,18 +886,22 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                     else:
                         log_q.put(f"[train] Instantiated {_arch_cls.__name__}(dpsgd=True, num_classes={_num_classes_data})")
                 else:
-                    model = _make_model(_arch_cls, _num_classes_data)
+                    model = _make_model(_arch_cls, _num_classes_data, _num_features_data)
                 # Check if arch uses pretrained weights
                 _arch_src = (job_dir / "arch.py").read_text()
                 _pretrained = (
                     ("ResNet18_Weights" in _arch_src and "weights=None" not in _arch_src) or
                     ("pretrained=True" in _arch_src)
                 )
-                log_q.put(f"[train] Model: {_arch_cls.__name__}(num_classes={_num_classes_data}, pretrained={'yes' if _pretrained else 'no'})")
+                _feat_info = f", num_features={_num_features_data}" if _num_features_data else ""
+                log_q.put(f"[train] Model: {_arch_cls.__name__}(num_classes={_num_classes_data}{_feat_info}, pretrained={'yes' if _pretrained else 'no'})")
                 if params.dpsgd:
                     log_q.put(f"[train] DP-SGD: epsilon={params.target_epsilon}, delta={params.target_delta}, max_grad_norm={params.max_grad_norm}, virtual_batch_size={params.virtual_batch_size or 16}")
 
-            criterion = nn.CrossEntropyLoss()
+            # Auto-detect loss: BCE for binary (2 classes), CrossEntropy otherwise
+            _is_binary = (_num_classes_data == 2)
+            criterion = nn.BCEWithLogitsLoss() if _is_binary else nn.CrossEntropyLoss()
+            log_q.put(f"[train] Loss: {'BCEWithLogitsLoss (binary)' if _is_binary else 'CrossEntropyLoss'}")
             if params.optimizer == "sgd":
                 optimizer = optim.SGD(model.parameters(), lr=params.learning_rate, momentum=0.9, weight_decay=5e-4)
             else:
@@ -930,8 +969,9 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                     loader, model, criterion, optimizer, epochs=params.epochs,
                     dpsgd_metadata_path=str(_dpsgd_path) if _dpsgd_path else None,
                     virtual_batch_size=_vbs,
+                    binary=_is_binary,
                 )
-                test_eval = _default_eval(test_loader, result.model, criterion)
+                test_eval = _default_eval(test_loader, result.model, criterion, binary=_is_binary)
 
             # Restore tqdm
             if _orig_tqdm:
