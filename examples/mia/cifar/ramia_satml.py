@@ -11,7 +11,8 @@ import pickle
 from torch import save, optim, nn
 from target_model_class import WideResNet
 from leakpro import LeakPro
-from cifar_handler import CifarInputHandler
+from cifar_data_handler import CifarDataHandler
+from cifar_model_handler import CifarModelHandler
 import pickle
 import matplotlib.pyplot as plt
 import csv
@@ -44,7 +45,7 @@ def prepare_cifar_data(dataset_name):
     data = cat([train_data.clone().detach(), test_data.clone().detach()], dim=0)
     targets = cat([tensor(trainset.targets), tensor(testset.targets)], dim=0)
     # Create UserDataset object
-    population_dataset = CifarInputHandler.UserDataset(data, targets)
+    population_dataset = CifarDataHandler.UserDataset(data, targets)
 
     assert len(population_dataset) == 60000, "Population dataset should have 60000 samples"
 
@@ -73,8 +74,8 @@ def get_datasets(train_config, data, targets, seed=0):
     selected_index = np.random.choice(np.arange(dataset_size), train_size + test_size, replace=False)
     train_indices, test_indices = train_test_split(selected_index, test_size=test_size)
 
-    train_subset = CifarInputHandler.UserDataset(data[train_indices], targets[train_indices])
-    test_subset = CifarInputHandler.UserDataset(data[test_indices], targets[test_indices], **train_subset.return_params())
+    train_subset = CifarDataHandler.UserDataset(data[train_indices], targets[train_indices])
+    test_subset = CifarDataHandler.UserDataset(data[test_indices], targets[test_indices], **train_subset.return_params())
 
     train_loader = DataLoader(train_subset, batch_size = batch_size, shuffle = True)
     test_loader = DataLoader(test_subset, batch_size = batch_size, shuffle = False)
@@ -114,14 +115,14 @@ def train_target_model(train_config, train_loader, test_loader, train_indices, t
     optimizer = optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay, momentum=momentum, nesterov=nesterov)
 
     # train target model
-    train_result = CifarInputHandler().train(dataloader=train_loader,
+    train_result = CifarModelHandler().train(dataloader=train_loader,
                                 model=model,
                                 criterion=criterion,
                                 optimizer=optimizer,
                                 epochs=epochs)
 
     # Evaluate on test set
-    test_result = CifarInputHandler().eval(test_loader, model, criterion)
+    test_result = CifarModelHandler().eval(test_loader, model, criterion)
 
     # Store the model and metadata
     model = train_result.model
@@ -175,7 +176,7 @@ if __name__ == "__main__":
         # mia_results["target"]["test_acc"].append(meta_data.test_result.accuracy)
 
         # Create a new instance of LeakPro
-        leakpro = LeakPro(CifarInputHandler, audit_path)
+        leakpro = LeakPro(CifarDataHandler, audit_path, model_handler=CifarModelHandler)
 
         # Run the audit 
         result = leakpro.run_audit(create_pdf=False, use_optuna=False)
