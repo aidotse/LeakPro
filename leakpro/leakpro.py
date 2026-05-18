@@ -1,17 +1,6 @@
 #
-# Copyright 2023-2026 AI Sweden
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
 #
 """Main class for LeakPro."""
 
@@ -44,17 +33,23 @@ modality_extensions = {"tabular": None,
 class LeakPro:
     """Main class for LeakPro."""
 
-    def __init__(self:Self, user_input_handler:AbstractInputHandler, configs_path:str) -> None:
+    def __init__(self:Self, user_input_handler:AbstractInputHandler, configs_path:str,
+                 model_handler:AbstractInputHandler = None) -> None:
         """Initialize LeakPro.
 
         Args:
         ----
-            user_input_handler (AbstractInputHandler): The user-defined input handler
-            configs_path (str): The path to the configuration file
+            user_input_handler (AbstractInputHandler): Data handler — provides UserDataset.
+                When model_handler is None, also provides train() and eval().
+            configs_path (str): The path to the configuration file.
+            model_handler (AbstractInputHandler, optional): Model handler — provides train()
+                and eval(). If None, user_input_handler is used for everything.
 
         """
 
         assert issubclass(user_input_handler, AbstractInputHandler), "handler must be a subclass of AbstractInputHandler"
+        if model_handler is not None:
+            assert issubclass(model_handler, AbstractInputHandler), "model_handler must be a subclass of AbstractInputHandler"
 
         # Read configs from path and ensure it adheres to the schema
         try:
@@ -73,21 +68,35 @@ class LeakPro:
         add_file_handler(logger, log_path)
 
         # Initialize handler and attack scheduler
-        self.handler = self.setup_handler(user_input_handler, configs)
+        self.handler = self.setup_handler(user_input_handler, configs, model_handler)
         self.attack_scheduler = AttackScheduler(self.handler, output_dir=configs.audit.output_dir)
 
-    def setup_handler(self:Self, user_input_handler:AbstractInputHandler, configs:dict) -> None:
+    def setup_handler(self:Self, user_input_handler:AbstractInputHandler, configs:dict,
+                      model_handler:AbstractInputHandler = None) -> None:
         """Prepare the handler using dynamic composition to merge the user-input handler and modality extension.
 
         Args:
         ----
-            user_input_handler (AbstractInputHandler): The user-defined input handler
-            configs (dict): The configuration object
+            user_input_handler (AbstractInputHandler): Data handler providing UserDataset.
+            configs (dict): The configuration object.
+            model_handler (AbstractInputHandler, optional): Model handler providing train/eval.
+                Falls back to user_input_handler when None.
 
         """
+        # Resolve which handler provides train/eval
+        training_handler = model_handler if model_handler is not None else user_input_handler
+
+        # Guard against data-only handlers being silently used for training
+        source = "model_handler" if model_handler is not None else "user_input_handler"
+        for method in ("train", "eval"):
+            if getattr(training_handler, method, None) is getattr(AbstractInputHandler, method, None):
+                raise ValueError(
+                    f"{source} must implement {method}(). "
+                    "Use role='model' and override train()/eval(), or pass a model_handler."
+                )
 
         if configs.audit.attack_type == "mia":
-            handler = MIAHandler(configs, user_input_handler)
+            handler = MIAHandler(configs, user_input_handler, training_handler)
 
         elif configs.audit.attack_type == "minv":
             handler = MINVHandler(configs)
@@ -99,12 +108,12 @@ class LeakPro:
         else:
             raise ValueError(f"Unknown attack type: {configs.audit.attack_type}")
 
-        # Attach methods to Handler explicitly defined in AbstractInputHandler from user_input_handler
+        # Attach methods defined in AbstractInputHandler from the training handler
         for name, _ in inspect.getmembers(AbstractInputHandler, predicate=inspect.isfunction):
-            if hasattr(user_input_handler, name) and not name.startswith("__"):
-                attr = getattr(user_input_handler, name)
+            if hasattr(training_handler, name) and not name.startswith("__"):
+                attr = getattr(training_handler, name)
                 if callable(attr):
-                    attr = types.MethodType(attr, handler) # ensure to properly bind methods to handler
+                    attr = types.MethodType(attr, handler)
                 setattr(handler, name, attr)
 
         # Load extension class and initiate it using the handler (allows for two-way communication)

@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 import os, sys, yaml, numpy as np, matplotlib.pyplot as plt, torch, pandas as pd
 
 project_root = os.path.abspath(os.path.join(os.getcwd(), "../../.."))

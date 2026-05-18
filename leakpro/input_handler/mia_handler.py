@@ -1,17 +1,6 @@
 #
-# Copyright 2023-2026 AI Sweden
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
 #
 """Parent class for user inputs."""
 
@@ -35,7 +24,8 @@ from leakpro.utils.logger import logger
 class MIAHandler:
     """Parent class for user inputs."""
 
-    def __init__(self:Self, configs: dict, user_input_handler:AbstractInputHandler) -> None:
+    def __init__(self:Self, configs: dict, user_input_handler:AbstractInputHandler,
+                 training_handler:AbstractInputHandler = None) -> None:
         self.configs = configs
         self._load_model_class()
         self._load_target_metadata()
@@ -44,15 +34,18 @@ class MIAHandler:
         self._load_criterion()
         self._load_dataloader_params()
 
-        # Attach methods to Handler explicitly defined in AbstractInputHandler from user_input_handler
+        # training_handler provides train() and eval(); falls back to user_input_handler
+        _training = training_handler if training_handler is not None else user_input_handler
+
+        # Attach methods defined in AbstractInputHandler from the training handler
         for name, _ in inspect.getmembers(AbstractInputHandler, predicate=inspect.isfunction):
-            if hasattr(user_input_handler, name) and not name.startswith("__"):
-                attr = getattr(user_input_handler, name)
+            if hasattr(_training, name) and not name.startswith("__"):
+                attr = getattr(_training, name)
                 if callable(attr):
-                    attr = types.MethodType(attr, self) # ensure to properly bind methods to handler
+                    attr = types.MethodType(attr, self)
                 setattr(self, name, attr)
 
-        # Save the Data-creation class to allow for creation of datasets with the same properties
+        # UserDataset always comes from the data handler (user_input_handler)
         self.UserDataset = user_input_handler.UserDataset
 
     def _load_population(self:Self) -> None:
