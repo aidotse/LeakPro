@@ -1,3 +1,8 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
+
 """Helpers to train with 16-bit precision."""
 
 from collections.abc import Iterable
