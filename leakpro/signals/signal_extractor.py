@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Module containing the Model class, an interface to query a model without any assumption on how it is implemented."""
 
 from abc import ABC, abstractmethod

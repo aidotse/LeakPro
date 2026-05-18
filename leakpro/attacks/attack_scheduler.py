@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Module that contains the AttackScheduler class, which is responsible for creating and executing attacks."""
 
 from pathlib import Path

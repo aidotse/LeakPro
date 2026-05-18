@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Federated Learning client simulator for gradient inversion attack evaluation.
 
 This module provides a clear separation between client-side and server-side operations

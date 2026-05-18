@@ -1,3 +1,4 @@
+#
 # This source code is provided for the purposes of scientific reproducibility
 # under the following limited license from Element AI Inc. The code is an
 # implementation of the N-BEATS model (Oreshkin et al., N-BEATS: Neural basis
@@ -11,7 +12,7 @@
 # materials are the property of Element AI Inc. and may be subject to patent
 # protection. No license to patents is granted hereunder (whether express or
 # implied). Copyright © 2020 Element AI Inc. All rights reserved.
-
+# 
 """
 N-BEATS Model.
 """

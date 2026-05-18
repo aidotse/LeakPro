@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Loss functions for GANs. Copied from https://github.com/LetheSec/PLG-MI-Attack."""
 import torch
 import torch.nn.functional as F  # noqa: N812

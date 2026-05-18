@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 import numpy as np
 
 from leakpro.attacks.mia_attacks.rmia import AttackRMIA
