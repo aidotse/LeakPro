@@ -1,5 +1,7 @@
 """Helpers to train with 16-bit precision."""
 
+from collections.abc import Iterable
+
 import numpy as np
 import torch as th
 from torch import nn
@@ -80,14 +82,14 @@ def unflatten_master_params(param_group: list, master_param: th.Tensor) -> list[
     return _unflatten_dense_tensors(master_param, [param for (_, param) in param_group])
 
 
-def get_param_groups_and_shapes(named_model_params, params: list[int] | None = None) -> list:
+def get_param_groups_and_shapes(
+    named_model_params: Iterable[tuple[str, nn.Parameter]],
+    params: list[int] | None = None,
+) -> list:
     """From named model parameters, get parameter groups and their shapes."""
     model_params = list(named_model_params)
 
-    if params is not None:
-        named_model_params = [model_params[i] for i in params]
-    else:
-        named_model_params = model_params
+    named_model_params = [model_params[i] for i in params] if params is not None else model_params
 
     scalar_vector_named_params = (
         [(n, p) for (n, p) in named_model_params if p.ndim <= 1],
@@ -215,14 +217,15 @@ class MixedPrecisionTrainer:
         self.loggs = {}
         self.caller = caller
 
-        self.model_params = list(self.model.parameters())
+        named_params = list(self.model.named_parameters())
+        self.model_params = [param for _, param in named_params]
         if layers is None:
             self.master_params = self.model_params
+            self.master_param_names = [name for name, _ in named_params]
             logger.info("Start training on All Layers")
             params = None
         else:
             params = []
-            named_params = list(self.model.named_parameters())
             for i, x in enumerate(named_params):
                 permission = any(layer in x[0] for layer in layers[0]) and all(
                     layer not in x[0] for layer in layers[1]
@@ -234,6 +237,7 @@ class MixedPrecisionTrainer:
                 raise ValueError("No parameters matched the requested fine-tuning layers.")
 
             self.master_params = [self.model_params[i] for i in params]
+            self.master_param_names = [named_params[i][0] for i in params]
             logger.info(f"Start Fine-tuning on {len(params)} Layers")
 
         self.param_groups_and_shapes = None
@@ -308,21 +312,34 @@ class MixedPrecisionTrainer:
                     grad_norm += th.norm(p.grad, p=2, dtype=th.float32).item() ** 2
         return np.sqrt(grad_norm) / grad_scale, np.sqrt(param_norm)
 
-def master_params_to_state_dict(self, master_params: list[nn.Parameter]) -> dict:
-    """Convert master parameters to a state dictionary."""
-    if self.use_fp16 and len(master_params) != len(self.param_groups_and_shapes):
-        raise ValueError(
-            f"Expected {len(self.param_groups_and_shapes)} fp16 master param groups, "
-            f"got {len(master_params)} tensors."
-        )
+    def master_params_to_state_dict(self, master_params: list[nn.Parameter]) -> dict:
+        """Convert this trainer's master parameters to a full model state dictionary."""
+        if self.use_fp16:
+            if len(master_params) != len(self.param_groups_and_shapes):
+                raise ValueError(
+                    f"Expected {len(self.param_groups_and_shapes)} fp16 master param groups, "
+                    f"got {len(master_params)} tensors."
+                )
+            return master_params_to_state_dict(
+                self.model, self.param_groups_and_shapes, master_params, self.use_fp16
+            )
 
-    return master_params_to_state_dict(
-        self.model, self.param_groups_and_shapes, master_params, self.use_fp16
-    )
+        if len(master_params) != len(self.master_param_names):
+            raise ValueError(
+                f"Expected {len(self.master_param_names)} master parameters, "
+                f"got {len(master_params)} tensors."
+            )
+
+        state_dict = self.model.state_dict()
+        for name, param in zip(self.master_param_names, master_params):
+            state_dict[name] = param.detach().clone()
+        return state_dict
 
     def state_dict_to_master_params(self, state_dict: dict) -> list[nn.Parameter]:
-        """Convert a state dictionary to master parameters."""
-        return state_dict_to_master_params(self.model, state_dict, self.use_fp16)
+        """Convert a state dictionary to this trainer's master parameters."""
+        if self.use_fp16:
+            return state_dict_to_master_params(self.model, state_dict, self.use_fp16)
+        return [state_dict[name] for name in self.master_param_names]
 
 
 def check_overflow(value: float) -> bool:

@@ -1,5 +1,6 @@
 """Configuration setup for Diff-MI attack."""
 
+import gc
 import os
 from typing import Optional, Union
 
@@ -12,6 +13,15 @@ from tqdm import tqdm
 
 from leakpro.utils.logger import logger
 from leakpro.utils.save_load import hash_model
+
+
+def clear_cuda_cache(device: Union[torch.device, str, None] = None) -> None:
+    """Release cached CUDA blocks after temporary GPU-heavy Diff-MI stages."""
+    if device is not None and torch.device(device).type != "cuda":
+        return
+    if torch.cuda.is_available():
+        gc.collect()
+        torch.cuda.empty_cache()
 
 
 class PreTrainConfig(BaseModel):
@@ -214,7 +224,7 @@ def get_p_reg(
 
     # Check if p_reg already exists
     if os.path.exists(os.path.join(args.save_path, f"p_reg_{hash}.pt")):
-        p_reg = torch.load(os.path.join(args.save_path, f"p_reg_{hash}.pt"))
+        p_reg = torch.load(os.path.join(args.save_path, f"p_reg_{hash}.pt"), map_location="cpu")
         logger.info(f"Loaded p_reg from {os.path.join(args.save_path, f'p_reg_{hash}.pt')}")
         return p_reg.to(device=device)
 
@@ -222,23 +232,28 @@ def get_p_reg(
     logger.info(f"p_reg file not found at {os.path.join(args.save_path, f'p_reg_{hash}.pt')}, computing p_reg.")
     model.to(device)
     model.eval()
-    all_fea = []
+    cpu_model_res = []
+    cpu_all_fea = []
     with torch.no_grad():
-        for batch_idx, (data, _) in enumerate(dataloader):
-            data  = data.to(device, non_blocking=True)
+        for data, _ in dataloader:
+            data = data.to(device, non_blocking=True)
             fea, res = model(data)
-            if batch_idx == 0:
-                model_res = res
-                all_fea = fea
-            else:
-                model_res = torch.cat((model_res, res))
-                all_fea = torch.cat((all_fea, fea))
+            cpu_model_res.append(res.detach().cpu())
+            cpu_all_fea.append(fea.detach().cpu())
+            del data, fea, res
 
+    if not cpu_model_res or not cpu_all_fea:
+        raise ValueError("Cannot compute p_reg from an empty dataloader.")
+
+    model_res = torch.cat(cpu_model_res, dim=0)
+    all_fea = torch.cat(cpu_all_fea, dim=0)
     mu, var = top_k_p_reg(model_res, all_fea, n_classes=model.num_classes, top_n=args.preprocessing.top_k)
     p_reg = reparameterize(mu, var)
     torch.save(p_reg, os.path.join(args.save_path, f"p_reg_{hash}.pt"))
     logger.info(f"Saved p_reg to {os.path.join(args.save_path, f'p_reg_{hash}.pt')}")
-    return p_reg
+    del cpu_model_res, cpu_all_fea, model_res, all_fea, mu, var
+    clear_cuda_cache(device)
+    return p_reg.to(device=device)
 
 class PseudoDataset(Dataset):
     """Dataset for pseudo-labeled data."""
@@ -289,35 +304,17 @@ def _compute_pseudo_data(
     num_classes: int,
     top_n: int,
 ) -> tuple[np.ndarray, np.ndarray]:
-    def _flush_batches(
-        cpu_probs: list[torch.Tensor],
-        cpu_images: list[torch.Tensor],
-        probs: list[torch.Tensor],
-        images: list[torch.Tensor],
-    ) -> None:
-        if not probs:
-            return
-        cpu_probs.append(torch.cat(probs, dim=0).cpu())
-        cpu_images.append(torch.cat(images, dim=0).cpu())
-        probs.clear()
-        images.clear()
-
     target_model.to(device)
     cpu_probs: list[torch.Tensor] = []
     cpu_images: list[torch.Tensor] = []
-    batch_probs: list[torch.Tensor] = []
-    batch_images: list[torch.Tensor] = []
 
     with torch.no_grad():
-        for i, (images, _) in tqdm(enumerate(dataloader), total=len(dataloader)):
+        for images, _ in tqdm(dataloader, total=len(dataloader)):
             images = images.to(device=device, non_blocking=True)
             _, prob = target_model(images)
-            batch_probs.append(prob)
-            batch_images.append(images)
-
-            if i % 100 == 0 and i > 0:
-                _flush_batches(cpu_probs, cpu_images, batch_probs, batch_images)
-        _flush_batches(cpu_probs, cpu_images, batch_probs, batch_images)
+            cpu_probs.append(prob.detach().cpu())
+            cpu_images.append(images.detach().cpu())
+            del images, prob
 
         if not cpu_probs or not cpu_images:
             raise ValueError("Public dataloader is empty; cannot create pseudo-labeled dataset.")
@@ -333,6 +330,8 @@ def _compute_pseudo_data(
             label_list.append(np.full((top_n_select,), class_idx, dtype=np.int32))
         pseudo_data = np.asarray(torch.cat(data_list, dim=0), dtype=np.float32)
         pseudo_labels = np.concatenate(label_list, axis=0)
+    del cpu_probs, cpu_images, cpu_all_probs, cpu_all_images, data_list, label_list
+    clear_cuda_cache(device)
     return pseudo_data, pseudo_labels
 
 
@@ -429,48 +428,24 @@ def extract_features(
     else:
         model.to(device)
 
-        # Initialize variables to store all probabilities and images
-        cpu_all_feats = None
-        cpu_all_labels = None
-        all_feats = None
-        all_labels = None
+        cpu_feats = []
+        cpu_labels = []
 
         with torch.no_grad():
-            for i, (images, labels) in tqdm(enumerate(dataloader), total=len(dataloader)):
+            for images, labels in tqdm(dataloader, total=len(dataloader)):
                 images = images.to(device=device, non_blocking=True)
                 feats, _ = model(images)
+                cpu_feats.append(feats.detach().cpu())
+                cpu_labels.append(labels.detach().cpu())
+                del images, feats
 
-                if i == 0 or all_feats is None:
-                    all_feats = feats
-                    all_labels = labels
-                else:
-                    all_feats = torch.cat((all_feats, feats), dim=0)
-                    all_labels = torch.cat((all_labels, labels), dim=0)
-
-                # Save memory by offloading to CPU every 100 batches
-                if i % 100 == 0 and i > 0:
-                    if cpu_all_labels is None:
-                        cpu_all_feats = all_feats.cpu()
-                        cpu_all_labels = all_labels.cpu()
-                    else:
-                        cpu_all_feats =  torch.cat((cpu_all_feats, all_feats.cpu()), dim=0)
-                        cpu_all_labels =  torch.cat((cpu_all_labels, all_labels.cpu()), dim=0)
-                    all_feats = None
-                    all_labels = None
-
-            # Handle the last batch if it exists
-            if all_feats is not None:
-                if cpu_all_feats is None:
-                    cpu_all_feats = all_feats.cpu()
-                    cpu_all_labels = all_labels.cpu()
-                else:
-                    cpu_all_feats = torch.cat((cpu_all_feats, all_feats.cpu()), dim=0)
-                    cpu_all_labels = torch.cat((cpu_all_labels, all_labels.cpu()), dim=0)
-            if cpu_all_feats is None or cpu_all_labels is None:
+            if not cpu_feats or not cpu_labels:
                 raise ValueError("Private dataloader is empty; cannot extract features.")
 
-        priv_features = np.asarray(cpu_all_feats, dtype=np.float32)
-        idents = np.asarray(cpu_all_labels, dtype=np.int32)
+        priv_features = np.asarray(torch.cat(cpu_feats, dim=0), dtype=np.float32)
+        idents = np.asarray(torch.cat(cpu_labels, dim=0), dtype=np.int32)
+        del cpu_feats, cpu_labels
+        clear_cuda_cache(device)
         # Save the private features for future use
         os.makedirs(save_dir, exist_ok=True)
         with open(os.path.join(save_dir, f"private_features_{model_hash}.pkl"), "wb") as file:

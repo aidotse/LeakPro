@@ -2,8 +2,9 @@
 
 import copy
 import functools
+import json
 import os
-from typing import Iterator, Optional
+from typing import Any, Iterator, Optional
 
 import blobfile as bf
 import kornia
@@ -23,6 +24,67 @@ from .fp16_util import MixedPrecisionTrainer
 from .losses import p_reg_loss, topk_loss
 from .nn import update_ema
 from .resample import LossAwareSampler, UniformSampler
+
+
+def pretrain_completion_path(save_path: str, save_name: str) -> str:
+    """Return the sidecar path that marks a completed pretraining run."""
+    return bf.join(save_path, f"{save_name}.complete.json")
+
+
+def load_pretrain_completion(save_path: str, save_name: str) -> Optional[dict[str, Any]]:
+    """Load pretraining completion metadata if it exists and is valid JSON."""
+    marker_path = pretrain_completion_path(save_path, save_name)
+    if not bf.exists(marker_path):
+        return None
+    try:
+        with bf.BlobFile(marker_path, "r") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        logger.warning(f"Ignoring invalid pretraining completion marker at {marker_path}")
+        return None
+
+
+def is_pretrain_complete(save_path: str, save_name: str, max_steps: Optional[int]) -> bool:
+    """Return true only when the checkpoint has a matching completion marker."""
+    metadata = load_pretrain_completion(save_path, save_name)
+    if metadata is None or not metadata.get("completed"):
+        return False
+    marker_max_steps = metadata.get("max_steps")
+    if marker_max_steps != max_steps:
+        return False
+    if max_steps is None:
+        return True
+    return int(metadata.get("completed_steps", -1)) >= max_steps
+
+
+def finetune_completion_path(save_path: str, save_name: str) -> str:
+    """Return the sidecar path that marks a completed fine-tuning run."""
+    return bf.join(save_path, f"{save_name}.complete.json")
+
+
+def load_finetune_completion(save_path: str, save_name: str) -> Optional[dict[str, Any]]:
+    """Load fine-tuning completion metadata if it exists and is valid JSON."""
+    marker_path = finetune_completion_path(save_path, save_name)
+    if not bf.exists(marker_path):
+        return None
+    try:
+        with bf.BlobFile(marker_path, "r") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        logger.warning(f"Ignoring invalid fine-tuning completion marker at {marker_path}")
+        return None
+
+
+def is_finetune_complete(save_path: str, save_name: str, epochs: int, threshold: float) -> bool:
+    """Return true only when the fine-tune checkpoint completed normally."""
+    metadata = load_finetune_completion(save_path, save_name)
+    if metadata is None or not metadata.get("completed"):
+        return False
+    if metadata.get("epochs") != epochs or metadata.get("threshold") != threshold:
+        return False
+    completed_epochs = int(metadata.get("completed_epochs", -1))
+    best_mean_acc = float(metadata.get("best_mean_acc", float("-inf")))
+    return completed_epochs >= epochs or best_mean_acc >= threshold
 
 
 class PreTrain:
@@ -186,6 +248,7 @@ class PreTrain:
 
     def run(self) -> None:
         """Run the pre-training loop."""
+        self._remove_completion_marker()
 
         while (
             not self.lr_anneal_steps
@@ -211,6 +274,38 @@ class PreTrain:
         # Save the last checkpoint if it wasn't already saved.
         if (self.step - 1) % self.save_interval != 0:
             self.save()
+        if self._has_completed_training():
+            self._write_completion_marker()
+
+    def _completed_steps(self) -> int:
+        """Return the number of completed pretraining steps including resumed steps."""
+        return self.step + self.resume_step
+
+    def _has_completed_training(self) -> bool:
+        """Return true when this pretraining run reached the configured max steps."""
+        return self.max_steps is None or self._completed_steps() >= self.max_steps
+
+    def _remove_completion_marker(self) -> None:
+        """Remove stale completion metadata before a new pretraining run starts."""
+        marker_path = pretrain_completion_path(self.save_path, self.save_name)
+        if dist_util.get_rank() == 0 and bf.exists(marker_path):
+            bf.remove(marker_path)
+        dist_util.barrier()
+
+    def _write_completion_marker(self) -> None:
+        """Write metadata proving this pretraining checkpoint completed."""
+        if dist_util.get_rank() == 0:
+            marker_path = pretrain_completion_path(self.save_path, self.save_name)
+            metadata = {
+                "completed": True,
+                "completed_steps": self._completed_steps(),
+                "max_steps": self.max_steps,
+                "save_name": self.save_name,
+            }
+            with bf.BlobFile(marker_path, "w") as f:
+                json.dump(metadata, f)
+            logger.info(f"Pretraining completion marker saved to {marker_path}")
+        dist_util.barrier()
 
     def run_step(self, batch: th.Tensor, cond: dict[str, th.Tensor]) -> None:
         """Run a single step of training."""
@@ -443,7 +538,7 @@ class FineTune:
             )
         dist_util.sync_params(self.model.parameters())
 
-    def run(self, guidance_scale: float = 3.0, aug_times: int = 2) -> None:
+    def run(self, guidance_scale: float = 3.0, aug_times: int = 2) -> None:  # noqa: PLR0915
         """Run the fine-tuning loop.
 
         Args:
@@ -457,7 +552,8 @@ class FineTune:
 
         """
 
-        self.best_mean_acc = 0.0
+        self._remove_completion_marker()
+        self.best_mean_acc = -float("inf")
         acc_mean = 0.0
         epoch_idx = 0
         if self.num_classes < 2:
@@ -552,7 +648,38 @@ class FineTune:
                     self.save()
             epoch_idx += 1
 
+        if not hasattr(self, "state_dict"):
+            self.state_dict = self.mp_trainer_cls.master_params_to_state_dict(
+                self.mp_trainer_cls.master_params
+            )
+            self.save()
+        self.completed_epochs = epoch_idx
+        self._write_completion_marker()
         logger.info(f"Training completed with best mean acc: {self.best_mean_acc:.2%}")
+
+    def _remove_completion_marker(self) -> None:
+        """Remove stale completion metadata before a new fine-tuning run starts."""
+        marker_path = finetune_completion_path(self.save_path, self.save_name)
+        if dist_util.get_rank() == 0 and bf.exists(marker_path):
+            bf.remove(marker_path)
+        dist_util.barrier()
+
+    def _write_completion_marker(self) -> None:
+        """Write metadata proving this fine-tuning checkpoint completed."""
+        if dist_util.get_rank() == 0:
+            marker_path = finetune_completion_path(self.save_path, self.save_name)
+            metadata = {
+                "best_mean_acc": float(self.best_mean_acc),
+                "completed": True,
+                "completed_epochs": self.completed_epochs,
+                "epochs": self.epochs,
+                "save_name": self.save_name,
+                "threshold": self.threshold,
+            }
+            with bf.BlobFile(marker_path, "w") as f:
+                json.dump(metadata, f)
+            logger.info(f"Fine-tuning completion marker saved to {marker_path}")
+        dist_util.barrier()
 
     def save(self) -> None:
         """Save the fine-tuned diffusion model."""

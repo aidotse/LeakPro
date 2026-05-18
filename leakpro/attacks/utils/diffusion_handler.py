@@ -6,8 +6,8 @@ from torch.nn import Module
 
 from leakpro.attacks.utils.diff_mi.resample import create_named_schedule_sampler
 from leakpro.attacks.utils.diff_mi.script_util import create_gaussian_diffusion, create_model, diffusion_defaults, model_defaults
-from leakpro.attacks.utils.diff_mi.setup import DiffMiConfig, args_to_dict
-from leakpro.attacks.utils.diff_mi.train_util import FineTune, PreTrain
+from leakpro.attacks.utils.diff_mi.setup import DiffMiConfig, args_to_dict, clear_cuda_cache
+from leakpro.attacks.utils.diff_mi.train_util import FineTune, PreTrain, is_finetune_complete, is_pretrain_complete
 from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.input_handler.user_imports import get_class_from_module, import_module_from_file
 from leakpro.utils.import_helper import Self
@@ -16,6 +16,9 @@ from leakpro.utils.logger import logger
 
 class DiffMiHandler():
     """Handler for Diffusion models from Diff-MI."""
+
+    _BUILT_IN_MODEL_CLASSES = {"UNet", "UNetModel", None}
+    _BUILT_IN_DIFFUSION_CLASSES = {"SpacedDiffusion", None}
 
     def __init__(self: Self,
                  handler: MINVHandler = None,
@@ -80,23 +83,36 @@ class DiffMiHandler():
         gaussian_diffusion_params = args_to_dict(_configs_, diffusion_defaults().keys())
 
         if self.diffusion_path and self.diffusion_model_class and self.gaussian_diffusion_class:
-            self.diffusion_model_blueprint = self._import_model_from_path(self.diffusion_path, self.diffusion_model_class)
-            self.gaussian_diffusion_blueprint = self._import_model_from_path(self.diffusion_path, self.gaussian_diffusion_class)
-            logger.info(f"Imported Diffusion model {self.diffusion_model_class}")
-            logger.info(f"Imported Gaussian diffusion {self.gaussian_diffusion_class}")
+            try:
+                self.diffusion_model_blueprint = self._import_model_from_path(self.diffusion_path, self.diffusion_model_class)
+                self.gaussian_diffusion_blueprint = self._import_model_from_path(
+                    self.diffusion_path,
+                    self.gaussian_diffusion_class,
+                )
+            except FileNotFoundError:
+                if not self._uses_builtin_diffmi_components():
+                    raise
+                logger.warning(
+                    "Diffusion module_path could not be resolved. Using LeakPro's built-in "
+                    "Diff-MI UNet and SpacedDiffusion implementations instead."
+                )
+                self._init_builtin_diffmi_model(diffusion_model_params, gaussian_diffusion_params)
+            except Exception as e:
+                raise ValueError(
+                    "Failed to import custom diffusion components from "
+                    f"{self.diffusion_path}."
+                ) from e
+            else:
+                logger.info(f"Imported Diffusion model {self.diffusion_model_class}")
+                logger.info(f"Imported Gaussian diffusion {self.gaussian_diffusion_class}")
 
-            self.diffusion_model = self.diffusion_model_blueprint(**diffusion_model_params)
-            self.diffusion = self.gaussian_diffusion_blueprint(**gaussian_diffusion_params)
+                self.diffusion_model = self.diffusion_model_blueprint(**diffusion_model_params)
+                self.diffusion = self.gaussian_diffusion_blueprint(**gaussian_diffusion_params)
 
-        elif not self.diffusion_path and self.diffusion_model_class in {"UNet", "UNetModel", None}:
+        elif self._uses_builtin_diffmi_components():
             logger.info("Using default Diffusion UNet model from Diff-MI.")
+            self._init_builtin_diffmi_model(diffusion_model_params, gaussian_diffusion_params)
 
-            self.diffusion_model = create_model(
-                **diffusion_model_params
-            )
-            self.diffusion = create_gaussian_diffusion(
-                **gaussian_diffusion_params
-            )
         else:
             logger.warning("Diffusion path or class is not set or is invalid.")
             logger.info(f"Diffusion path: {self.diffusion_path}")
@@ -109,6 +125,22 @@ class DiffMiHandler():
             self.diffusion = create_gaussian_diffusion(
                 **gaussian_diffusion_params
             )
+
+    def _init_builtin_diffmi_model(self: Self, diffusion_model_params: dict, gaussian_diffusion_params: dict) -> None:
+        """Initialize LeakPro's built-in Diff-MI model and diffusion objects."""
+        self.diffusion_model = create_model(
+            **diffusion_model_params
+        )
+        self.diffusion = create_gaussian_diffusion(
+            **gaussian_diffusion_params
+        )
+
+    def _uses_builtin_diffmi_components(self: Self) -> bool:
+        """Return true when the config names LeakPro's built-in Diff-MI components."""
+        return (
+            self.diffusion_model_class in self._BUILT_IN_MODEL_CLASSES
+            and self.gaussian_diffusion_class in self._BUILT_IN_DIFFUSION_CLASSES
+        )
 
     def get_finetuned(self) -> Module:
         """Return the fine-tuned diffusion model.
@@ -126,21 +158,41 @@ class DiffMiHandler():
         self._init_model(_configs_ = self.configs.finetune)
 
         fine_tune_path = f"{self.configs.save_path}/{self.configs.finetune.save_name}.pt"
+        finetune_complete = self._is_finetune_complete()
 
-        if os.path.exists(fine_tune_path):
-
-            logger.info(f"Loading fine-tuned diffusion model from {fine_tune_path}")
+        if os.path.exists(fine_tune_path) and finetune_complete:
+            logger.info(f"Loading completed fine-tuned diffusion model from {fine_tune_path}")
             self.diffusion_model.load_state_dict(self._safe_torch_load(fine_tune_path))
         else:
-            logger.warning("Fine-tuned path not found or doesn't exist")
+            if os.path.exists(fine_tune_path):
+                logger.warning(
+                    "Fine-tuned checkpoint exists but is missing a valid completion marker; "
+                    "running fine-tuning again."
+                )
+            else:
+                logger.warning("Fine-tuned path not found or doesn't exist")
             logger.info("Loading Pre-trained model to fine-tune...")
             self.get_pretrained()
             self.fine_tune()
+            if not self._is_finetune_complete():
+                raise RuntimeError(
+                    "Fine-tuning did not complete normally; refusing to use the checkpoint."
+                )
             self.diffusion_model.load_state_dict(self._safe_torch_load(fine_tune_path))
 
         if self.configs.finetune.use_fp16:
             self.diffusion_model.convert_to_fp16()
         return self.diffusion_model
+
+
+    def _is_finetune_complete(self: Self) -> bool:
+        """Return true when the saved fine-tune checkpoint completed normally."""
+        return is_finetune_complete(
+            self.configs.save_path,
+            self.configs.finetune.save_name,
+            self.configs.finetune.epochs,
+            self.configs.finetune.threshold,
+        )
 
 
     def get_pretrained(self) -> Module:
@@ -159,31 +211,55 @@ class DiffMiHandler():
         self._init_model(_configs_ = self.configs.pretrain)
 
         pre_trained_path = f"{self.configs.save_path}/{self.configs.pretrain.save_name}.pt"
+        pretrain_complete = self._is_pretrain_complete()
 
-        if os.path.exists(pre_trained_path):
-            logger.info(f"Loading pre-trained diffusion model from {pre_trained_path}")
+        if os.path.exists(pre_trained_path) and pretrain_complete:
+            logger.info(f"Loading completed pre-trained diffusion model from {pre_trained_path}")
             self.diffusion_model.load_state_dict(self._safe_torch_load(pre_trained_path))
         else:
-            logger.warning("Pre-trained path not found or doesn't exist")
+            if os.path.exists(pre_trained_path):
+                logger.warning(
+                    "Pre-trained checkpoint exists but is missing a valid completion marker; "
+                    "retraining pretraining from scratch."
+                )
+            else:
+                logger.warning("Pre-trained path not found or doesn't exist")
             self.pre_train()
+            if not self._is_pretrain_complete():
+                raise RuntimeError(
+                    "Pretraining did not reach the configured max_steps; refusing to use the checkpoint."
+                )
             self.diffusion_model.load_state_dict(self._safe_torch_load(pre_trained_path))
 
         if self.configs.pretrain.use_fp16:
             self.diffusion_model.convert_to_fp16()
         return self.diffusion_model
 
+    def _is_pretrain_complete(self: Self) -> bool:
+        """Return true when the saved pretrain checkpoint reached max_steps."""
+        return is_pretrain_complete(
+            self.configs.save_path,
+            self.configs.pretrain.save_name,
+            self.configs.pretrain.max_steps,
+        )
+
     def pre_train(self) -> None:
         """Pre-train the diffusion model."""
         logger.info("Pre-training diffusion model...")
         schedule_sampler = create_named_schedule_sampler(self.configs.pretrain.schedule_sampler, self.diffusion)
-        PreTrain(
+        trainer = PreTrain(
             model=self.diffusion_model,
             diffusion=self.diffusion,
             data=self.pseudo_dataloader,
             args=self.configs.pretrain,
             save_path=self.configs.save_path,
             schedule_sampler=schedule_sampler,
-        ).run()
+        )
+        try:
+            trainer.run()
+        finally:
+            del trainer, schedule_sampler
+            clear_cuda_cache()
 
 
     def fine_tune(self) -> None:
@@ -199,9 +275,8 @@ class DiffMiHandler():
 
         """
         logger.info("Fine-tuning diffusion model...")
-        # Diffusion-specific fine-tuning logic would be implemented here.
         schedule_sampler = create_named_schedule_sampler(self.configs.finetune.schedule_sampler, self.diffusion)
-        FineTune(
+        trainer = FineTune(
             target=self.target_model,
             model=self.diffusion_model,
             diffusion=self.diffusion,
@@ -209,7 +284,12 @@ class DiffMiHandler():
             p_reg=self.p_reg,
             save_path=self.configs.save_path,
             schedule_sampler=schedule_sampler,
-        ).run()
+        )
+        try:
+            trainer.run()
+        finally:
+            del trainer, schedule_sampler
+            clear_cuda_cache()
 
     def _import_model_from_path(self:Self, module_path:str, model_class:str)->None:
         """Import the model from the given path.
@@ -220,12 +300,8 @@ class DiffMiHandler():
             model_class (str): The name of the model class.
 
         """
-        try:
-            module = import_module_from_file(module_path)
-            return get_class_from_module(module, model_class)
-        except Exception as e:
-            logger.error(f"Failed to create model blueprint from {model_class} in {module_path}")
-            logger.error(f"{e}")
+        module = import_module_from_file(module_path)
+        return get_class_from_module(module, model_class)
 
     def sample_from_diffusion_model(self,
                                 batch_size: int = None,

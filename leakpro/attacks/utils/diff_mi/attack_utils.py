@@ -126,7 +126,9 @@ def iterative_reconstruction(
         loss = 1 * functional.mse_loss(epsilon_pred, epsilon)
 
         opt.zero_grad()
+        diff_net.zero_grad(set_to_none=True)
         loss.backward()
+        diff_net.zero_grad(set_to_none=True)
 
         with torch.no_grad():
             grad_norm = torch.linalg.norm(model.img.grad)
@@ -224,12 +226,13 @@ def calc_acc(
     if hasattr(classifier, "resize") and callable(getattr(classifier, "resize", None)):
         data = classifier.resize(data)
     output, img_dataset = [], TensorDataset(data)
-    for x in torch.utils.data.DataLoader(img_dataset, batch_size=bs, shuffle=False):
-        output.append(classifier(x[0])[-1])
-    output = torch.cat(output)
-    topk_val = min(5, int(output.shape[1]))
-    top1_count = torch.eq(torch.topk(output, k=1)[1], labels.view(-1,1)).float()
-    top5_count = torch.eq(torch.topk(output, k=topk_val)[1], labels.view(-1,1)).float()
+    with torch.inference_mode():
+        for x in torch.utils.data.DataLoader(img_dataset, batch_size=bs, shuffle=False):
+            output.append(classifier(x[0])[-1].detach())
+        output = torch.cat(output)
+        topk_val = min(5, int(output.shape[1]))
+        top1_count = torch.eq(torch.topk(output, k=1)[1], labels.view(-1,1)).float()
+        top5_count = torch.eq(torch.topk(output, k=topk_val)[1], labels.view(-1,1)).float()
     if enable_print:
         logger.info(
             f"Acculating accuracy: top1_acc - {top1_count.mean().item():.2%}, "
@@ -332,7 +335,7 @@ def save_tensor(
 
     return label_paths
 
-def calc_lpips(
+def calc_lpips(  # noqa: C901
     private_data: torch.utils.data.DataLoader,
     fakes: torch.Tensor,
     fake_targets: torch.Tensor,
@@ -509,8 +512,8 @@ def calc_mse(
 ) -> tuple[float, dict[int, float], list[float], list[torch.Tensor], list[torch.Tensor]]:
     """Calculate mean squared error between real and fake data grouped by labels.
 
-    For each label, computes the full pairwise MSE matrix between real and fake samples, 
-    stores the average pairwise MSE for that label and for each real sample, stores the 
+    For each label, computes the full pairwise MSE matrix between real and fake samples,
+    stores the average pairwise MSE for that label and for each real sample, stores the
     minimum-MSE fake sample and that minimum value
 
     Args:

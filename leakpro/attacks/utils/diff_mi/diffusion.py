@@ -7,6 +7,32 @@ import numpy as np
 import torch
 from torch import nn
 
+from leakpro.attacks.utils.diff_mi.script_util import create_gaussian_diffusion, create_model
+
+
+class UNet:
+    """Factory-compatible alias for Diff-MI's built-in UNet model."""
+
+    def __new__(cls, **kwargs: object) -> object:
+        """Create the built-in Diff-MI UNet model using script_util defaults."""
+        return create_model(**kwargs)
+
+
+class UNetModel:
+    """Factory-compatible alias for Diff-MI's built-in UNetModel name."""
+
+    def __new__(cls, **kwargs: object) -> object:
+        """Create the built-in Diff-MI UNet model using script_util defaults."""
+        return create_model(**kwargs)
+
+
+class SpacedDiffusion:
+    """Factory-compatible alias for Diff-MI's built-in spaced diffusion process."""
+
+    def __new__(cls, **kwargs: object) -> object:
+        """Create the built-in Diff-MI spaced diffusion process using script_util defaults."""
+        return create_gaussian_diffusion(**kwargs)
+
 
 def make_ddim_sampling_parameters(
     alphacums: np.ndarray,

@@ -19,7 +19,13 @@ from leakpro.attacks.utils.diff_mi.attack_utils import (
     iterative_reconstruction,
     save_tensor,
 )
-from leakpro.attacks.utils.diff_mi.setup import DiffMiConfig, extract_features, get_p_reg, top_n_pseudo_label_dataset
+from leakpro.attacks.utils.diff_mi.setup import (
+    DiffMiConfig,
+    clear_cuda_cache,
+    extract_features,
+    get_p_reg,
+    top_n_pseudo_label_dataset,
+)
 from leakpro.attacks.utils.diffusion_handler import DiffMiHandler
 from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.reporting.minva_result import MinvResult
@@ -201,9 +207,7 @@ class AttackDiffMi(AbstractMINV):
 
         self.p_reg = get_p_reg(self.public_dataloader, self.target_model, self.device, args=self.config)
         logger.info("Done computing p_reg.")
-
-        self.pgd_model = get_pgd(self.target_model)
-        logger.info("PGD model for reconstruction set.")
+        clear_cuda_cache(self.device)
 
         if self.config.do_fine_tune:
             self.diff_handler.target_model = self.target_model
@@ -212,6 +216,27 @@ class AttackDiffMi(AbstractMINV):
             self.diffusion_model = self.diff_handler.get_finetuned().to(device=self.device)
         else:
             self.diffusion_model = self.diff_handler.get_pretrained().to(device=self.device)
+
+        clear_cuda_cache(self.device)
+        self.pgd_model = get_pgd(self.target_model)
+        logger.info("PGD model for reconstruction set.")
+        self._freeze_model(self.target_model)
+        self._freeze_model(self.evaluation_model)
+        self._prepare_diffusion_model_for_guidance()
+        self._freeze_model(self.pgd_model)
+
+    def _prepare_diffusion_model_for_guidance(self: Self) -> None:
+        """Prepare the diffusion model for image-gradient reconstruction."""
+        self.diffusion_model.eval()
+        for param in self.diffusion_model.parameters():
+            param.requires_grad_(True)
+        self.diffusion_model.zero_grad(set_to_none=True)
+
+    def _freeze_model(self: Self, model: torch.nn.Module) -> None:
+        """Disable parameter gradients for models used only as reconstruction guides."""
+        model.eval()
+        for param in model.parameters():
+            param.requires_grad_(False)
 
     def reconstruct(self, label_num: int, repeat_n: int) -> torch.Tensor:
         """Reconstruct samples for randomly sampled labels."""
@@ -245,12 +270,18 @@ class AttackDiffMi(AbstractMINV):
                 data_width=self.data_width,
             ).clamp(0, 1).to(device=self.device)
 
-            translated = self.pgd_model(recon, target=classes, **self.config.diffmiattack.pgdconfig.__dict__)[-1].clamp(0,1)
+            translated = (
+                self.pgd_model(recon, target=classes, **self.config.diffmiattack.pgdconfig.__dict__)[-1]
+                .clamp(0, 1)
+                .detach()
+            )
             _, _, idx = calc_acc(self.evaluation_model, translated, classes, with_success=True)
 
             recon_list.append(translated)
             success_list.append(translated[idx])
-            success_label_list.append(classes[idx])
+            success_label_list.append(classes[idx].detach())
+            del recon, translated, idx, classes
+            clear_cuda_cache(self.device)
 
         recon = (
             torch.cat(recon_list)
@@ -280,17 +311,20 @@ class AttackDiffMi(AbstractMINV):
 
         logger.info("Running reconstruction... ")
 
+        result_id = f"diffmi-{self.hashes['attackhash'][:8]}"
+        result_path = f"{self.output_dir}/results/{result_id}"
+
         acc1, acc5, var1, var5 = calc_acc_std(recon_list, labels, self.evaluation_model, effective_label_num)
         logger.info(f"Final Top1: {acc1:.2%} ± {var1:.2%}, Top5: {acc5:.2%} ± {var5:.2%}")
 
         # Save Reconstructed Images
         logger.info(f"Saved {self.config.diffmiattack.repeat_n}x{effective_label_num} generated images.")
 
-        recon_path = f"{self.output_dir}/results/Diff-Mi/all_recreated"
+        recon_path = f"{result_path}/all_recreated"
         save_tensor(recon_list, labels, recon_path, file_extension=".png")
         logger.info(f"All recreated images saved at: {recon_path}")
 
-        success_path = f"{self.output_dir}/results/Diff-Mi/success_recreated"
+        success_path = f"{result_path}/success_recreated"
         save_tensor(success_list, success_label_list, success_path, file_extension=".png")
         logger.info(f"Successful recreated images saved at: {success_path}")
 
@@ -344,7 +378,7 @@ class AttackDiffMi(AbstractMINV):
 
         return MinvResult.from_metrics(
             result_name="Diff-Mi Attack Result",
-            result_id=self.hashes["attackhash"][:8],
+            result_id=result_id,
             config=self.config,
             metrics={
                 "top1_accuracy": acc1,
