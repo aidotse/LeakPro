@@ -126,9 +126,7 @@ def iterative_reconstruction(
         loss = 1 * functional.mse_loss(epsilon_pred, epsilon)
 
         opt.zero_grad()
-        diff_net.zero_grad(set_to_none=True)
         loss.backward()
-        diff_net.zero_grad(set_to_none=True)
 
         with torch.no_grad():
             grad_norm = torch.linalg.norm(model.img.grad)
