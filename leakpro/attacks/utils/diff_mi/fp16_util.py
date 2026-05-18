@@ -22,14 +22,12 @@ def convert_module_to_f16(layer: nn.Module) -> None:
         if layer.bias is not None:
             layer.bias.data = layer.bias.data.half()
 
-
 def convert_module_to_f32(layer: nn.Module) -> None:
     """Convert primitive modules to float32, undoing convert_module_to_f16()."""
     if isinstance(layer, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
         layer.weight.data = layer.weight.data.float()
         if layer.bias is not None:
             layer.bias.data = layer.bias.data.float()
-
 
 def make_master_params(param_groups_and_shapes: list) -> list[nn.Parameter]:
     """Copy model parameters into a (differently-shaped) list of full-precision parameters."""
@@ -50,7 +48,6 @@ def make_master_params(param_groups_and_shapes: list) -> list[nn.Parameter]:
 
     return master_params
 
-
 def model_grads_to_master_grads(
     param_groups_and_shapes: list, master_params: list[nn.Parameter]
 ) -> None:
@@ -68,7 +65,6 @@ def model_grads_to_master_grads(
         else:
             master_param.grad.detach().copy_(flat_grad)
 
-
 def master_params_to_model_params(
     param_groups_and_shapes: list, master_params: list[nn.Parameter]
 ) -> None:
@@ -80,7 +76,6 @@ def master_params_to_model_params(
             param_group, unflatten_master_params(param_group, master_param.view(-1))
         ):
             param.detach().copy_(unflat_master_param)
-
 
 def unflatten_master_params(param_group: list, master_param: th.Tensor) -> list[nn.Parameter]:
     """Unflatten a master parameter tensor into the shapes of the given param_group."""
@@ -116,7 +111,6 @@ def get_param_groups_and_shapes(
 
     return param_groups
 
-
 def master_params_to_state_dict(
     model: nn.Module,
     param_groups_and_shapes: list,
@@ -142,7 +136,6 @@ def master_params_to_state_dict(
 
     return state_dict
 
-
 def state_dict_to_master_params(
     model: nn.Module, state_dict: dict, use_fp16: bool
 ) -> list[nn.Parameter]:
@@ -157,12 +150,10 @@ def state_dict_to_master_params(
         master_params = [state_dict[name] for name, _ in model.named_parameters()]
     return master_params
 
-
 def zero_master_grads(master_params: list[nn.Parameter]) -> None:
     """Zero out the gradients of the master parameters."""
     for param in master_params:
         param.grad = None
-
 
 def zero_grad(model_params: list[nn.Parameter]) -> None:
     """Zero out the gradients of the model parameters."""
@@ -170,7 +161,6 @@ def zero_grad(model_params: list[nn.Parameter]) -> None:
         if param.grad is not None:
             param.grad.detach_()
             param.grad.zero_()
-
 
 def param_grad_or_zeros(param: nn.Parameter) -> th.Tensor:
     """Return the gradient of the parameter, or zeros if it is None."""
@@ -213,9 +203,7 @@ class MixedPrecisionTrainer:
 
         Returns:
             None
-
         """
-
         self.model = model
         self.use_fp16 = use_fp16
         self.fp16_scale_growth = fp16_scale_growth

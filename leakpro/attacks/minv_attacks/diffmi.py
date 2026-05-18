@@ -459,6 +459,10 @@ class AttackDiffMi(AbstractMINV):
                 "lpips_alex": value_a,
                 "lpips_vgg": value_v,
                 "mse": avg_mse,
+                "mse_per_label": mse_per_label,
+                "mse_arr": mse_arr,
+                "mse_min_fake": mse_min_fake,
+                "mse_min_real": mse_min_real,
                 "fid": fid_value,
                 },
             )
