@@ -113,19 +113,12 @@ class AttackConfig(BaseModel):
     """Configuration for DiffMi attack phase."""
 
     pgdconfig: Optional[PGDConfig] = Field(default_factory=PGDConfig)
-    label_num: int = Field(300, description="First N labels for the attack.")
-    repeat_n: int = Field(5, description="Number of times to repeat the attack.")
     steps: int = Field(30, description="Number of sampling steps.")
     w: float = Field(3.0, description="Guidance scale.")
     ddim_step: int = Field(100, description="DDIM steps.")
-    batch_size: int = Field(8, description="Batch size for sampling.")
     aug_times: int = Field(4, description="Number of augmentations per label.")
     k: int = Field(20, description="Top K for p_reg.")
     alpha: float = Field(1.0, description="Weight for p_reg loss.")
-    calc_knn: bool = Field(True, description="Whether to calculate KNN accuracy.")
-    calc_lpips: bool = Field(True, description="Whether to calculate LPIPS.")
-    calc_mse: bool = Field(True, description="Whether to calculate MSE.")
-    calc_fid: bool = Field(True, description="Whether to calculate FID.")
 
 
 class DiffMiConfig(BaseModel):

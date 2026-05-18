@@ -319,7 +319,7 @@ class DiffMiHandler():
         """
         if batch_size is None:
             if self.configs.diffmiattack is not None:
-                batch_size = self.configs.diffmiattack.batch_size
+                batch_size = getattr(self.configs.diffmiattack, "batch_size", self.configs.pretrain.batch_size)
             else:
                 batch_size = self.configs.pretrain.batch_size
         if batch_size <= 0:

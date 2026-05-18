@@ -102,6 +102,49 @@ class MINVHandler:
         except FileNotFoundError as e:
             raise FileNotFoundError(f"Could not find the trained target model at {model_path}") from e
 
+    def load_model_from_config(
+        self: Self,
+        module_path: str,
+        model_class: str,
+        model_folder: str,
+        role: str = "model",
+    ) -> nn.Module:
+        """Load a trained model and metadata from an explicit model config."""
+        if model_class is None:
+            raise ValueError(f"{role} model_class not found in configs.")
+        if module_path is None:
+            raise ValueError(f"{role} module_path not found in configs.")
+        if model_folder is None:
+            raise ValueError(f"{role} model folder not found in configs.")
+
+        try:
+            model_module = import_module_from_file(module_path)
+            model_blueprint = get_class_from_module(model_module, model_class)
+            logger.info(f"{role.capitalize()} model blueprint created from {model_class} in {module_path}.")
+        except Exception as e:
+            raise ValueError(f"Failed to create the {role} model blueprint from {model_class} in {module_path}") from e
+
+        metadata_path = f"{model_folder}/model_metadata.pkl"
+        try:
+            with open(metadata_path, "rb") as f:
+                model_metadata = joblib.load(f)
+        except FileNotFoundError as e:
+            raise FileNotFoundError(f"Could not find the {role} model metadata at {metadata_path}") from e
+
+        if not isinstance(model_metadata, BaseModel):
+            model_metadata = MIAMetaDataSchema(**model_metadata)
+
+        model_path = f"{model_folder}/target_model.pkl"
+        try:
+            with open(model_path, "rb") as f:
+                model = model_blueprint(**model_metadata.init_params)
+                model.load_state_dict(self._safe_torch_load(f))
+        except FileNotFoundError as e:
+            raise FileNotFoundError(f"Could not find the trained {role} model at {model_path}") from e
+
+        logger.info(f"Loaded {role} model from {model_folder}")
+        return model
+
     def get_public_dataloader(self:Self, batch_size: int) -> DataLoader:
         """Return the public dataset dataloader."""
         return DataLoader(self.public_dataset, batch_size = batch_size, shuffle=False)

@@ -1,9 +1,12 @@
 """Implementation of the Diff-Mi attack."""
 import os
+from copy import deepcopy
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import numpy as np
 import torch
+import yaml
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -26,9 +29,11 @@ from leakpro.attacks.utils.diff_mi.setup import (
     get_p_reg,
     top_n_pseudo_label_dataset,
 )
+from leakpro.attacks.utils.diff_mi.train_util import is_finetune_complete, is_pretrain_complete
 from leakpro.attacks.utils.diffusion_handler import DiffMiHandler
 from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.reporting.minva_result import MinvResult
+from leakpro.schemas import ReconstructionConfig
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 from leakpro.utils.save_load import hash_config
@@ -36,6 +41,8 @@ from leakpro.utils.save_load import hash_config
 
 class AttackDiffMi(AbstractMINV):
     """Class that implements the DiffMi attack."""
+
+    SUPPORTED_RECONSTRUCTION_METRICS = {"accuracy", "knn", "lpips", "mse", "fid", "save_images"}
 
     def __init__(self: Self, handler: MINVHandler, configs: Optional[Dict[str, Any]] = None) -> None:
         """Initialize the Diff-Mi attack.
@@ -50,12 +57,14 @@ class AttackDiffMi(AbstractMINV):
 
         if handler is None:
             raise ValueError("handler must be provided")
+        self.handler = handler
         self.output_dir = handler.configs.audit.output_dir if handler.configs.audit.output_dir else "./leakpro_output/"
         self._configs_ = ["preprocessing", "pretrain", "finetune", "diffusion"]
         self._setup_paths_()
 
         configs = self._validate_configs(configs)
         self.config = DiffMiConfig(**configs)
+        self._setup_reconstruction_config()
 
         if self.config.pretrain.save_name is None:
             self.config.pretrain.save_name = "pretrain"
@@ -94,6 +103,9 @@ class AttackDiffMi(AbstractMINV):
         """Hash the configuration parameters."""
         hashes: Dict[str, Any] = {}
         configs = self.config.model_dump()
+        reconstruction_config = self.handler.configs.audit.reconstruction
+        if reconstruction_config is not None:
+            configs["reconstruction"] = reconstruction_config.model_dump()
 
         hashes["attackhash"] = hash_config(configs)
         logger.info("Attack configuration hashed")
@@ -130,6 +142,50 @@ class AttackDiffMi(AbstractMINV):
         else:
             self.storage_path = "./leakpro_output/attack_objects/diffusion_models"
 
+    def _setup_reconstruction_config(self: Self) -> None:
+        """Initialize Diff-MI reconstruction options from the shared audit config."""
+        reconstruction_config = self.handler.configs.audit.reconstruction or ReconstructionConfig()
+        self._apply_reconstruction_config(reconstruction_config)
+
+    def _apply_reconstruction_config(self: Self, reconstruction_config: ReconstructionConfig) -> None:
+        """Apply shared audit.reconstruction settings to Diff-MI runtime options."""
+        self.reconstruction_batch_size = reconstruction_config.batch_size
+        self.reconstruction_label_num = reconstruction_config.num_audited_classes
+        self.reconstruction_repeat_n = reconstruction_config.num_class_samples
+
+        metrics = reconstruction_config.metrics or {"accuracy": None}
+        unknown_metrics = set(metrics) - self.SUPPORTED_RECONSTRUCTION_METRICS
+        if unknown_metrics:
+            supported = ", ".join(sorted(self.SUPPORTED_RECONSTRUCTION_METRICS))
+            unknown = ", ".join(sorted(unknown_metrics))
+            raise ValueError(f"Unsupported Diff-MI reconstruction metrics: {unknown}. Supported metrics: {supported}.")
+
+        self.enabled_metrics = set(metrics)
+        self.save_reconstruction_images = "save_images" in self.enabled_metrics
+        self.save_image_count = None
+        self.save_image_dir = None
+        save_images_config = metrics.get("save_images")
+        if isinstance(save_images_config, dict):
+            self.save_image_count = save_images_config.get("n_images")
+            self.save_image_dir = save_images_config.get("save_dir")
+
+        logger.info("Applied audit.reconstruction settings to Diff-MI runtime options.")
+
+    def _load_evaluation_model(self: Self) -> torch.nn.Module:
+        """Load the configured reconstruction evaluation model, or fall back to the target model."""
+        reconstruction_config = self.handler.configs.audit.reconstruction
+        eval_config = getattr(reconstruction_config, "eval_model", None) if reconstruction_config else None
+        if eval_config is None:
+            logger.info("No reconstruction eval_model configured; using target model for Diff-MI evaluation.")
+            return self.target_model
+
+        return self.handler.load_model_from_config(
+            module_path=eval_config.module_path,
+            model_class=eval_config.model_class,
+            model_folder=eval_config.eval_folder,
+            role="evaluation",
+        ).to(device=self.device)
+
     def description(self:Self) -> dict:
         """Return the description of the attack."""
 
@@ -154,12 +210,12 @@ class AttackDiffMi(AbstractMINV):
     def prepare_attack(self:Self) -> None:
         """Prepare the attack."""
 
-        # GET TARGET MODEL and EVALUATION MODEL (same as target model for now)
+        # GET TARGET MODEL and EVALUATION MODEL
         self.target_model = self.handler.target_model.to(device=self.device)
         logger.info("Target model set.")
 
         # EVALUATION MODEL
-        self.evaluation_model = self.handler.target_model.to(device=self.device)
+        self.evaluation_model = self._load_evaluation_model()
         logger.info("Evaluation model set.")
 
         # Private DATASET
@@ -167,12 +223,12 @@ class AttackDiffMi(AbstractMINV):
         logger.info("Loading private dataloader finished.")
 
         self.private_features, self.private_idents = extract_features(
-            self.target_model,
+            self.evaluation_model,
             self.private_dataloader,
             self.device,
             save_dir=self.config.save_path or self.storage_path,
         )
-        logger.info("Extracted private features from target model.")
+        logger.info("Extracted private features from evaluation model.")
 
         # PUBLIC DATASET
         self.public_dataloader = self.handler.get_public_dataloader(batch_size=self.config.pretrain.batch_size)
@@ -252,7 +308,7 @@ class AttackDiffMi(AbstractMINV):
                 f"using {effective_label_num}."
             )
         labels = torch.cat([torch.randperm(effective_label_num) for _ in range(repeat_n)]).to(self.device)
-        label_dataset = DataLoader(labels, batch_size=self.config.diffmiattack.batch_size, shuffle=False)
+        label_dataset = DataLoader(labels, batch_size=self.reconstruction_batch_size, shuffle=False)
 
         for _, classes in tqdm(enumerate(label_dataset), total=len(label_dataset)):
             classes = classes.to(self.device)
@@ -305,8 +361,8 @@ class AttackDiffMi(AbstractMINV):
         logger.info("Running the Diff-Mi attack")
 
         recon_list, success_list, success_label_list, labels, effective_label_num = self.reconstruct(
-                                                            label_num=self.config.diffmiattack.label_num,
-                                                            repeat_n=self.config.diffmiattack.repeat_n
+                                                            label_num=self.reconstruction_label_num,
+                                                            repeat_n=self.reconstruction_repeat_n
                                                             )
 
         logger.info("Running reconstruction... ")
@@ -314,19 +370,29 @@ class AttackDiffMi(AbstractMINV):
         result_id = f"diffmi-{self.hashes['attackhash'][:8]}"
         result_path = f"{self.output_dir}/results/{result_id}"
 
-        acc1, acc5, var1, var5 = calc_acc_std(recon_list, labels, self.evaluation_model, effective_label_num)
-        logger.info(f"Final Top1: {acc1:.2%} ± {var1:.2%}, Top5: {acc5:.2%} ± {var5:.2%}")
+        acc1, acc5, var1, var5 = np.nan, np.nan, np.nan, np.nan
+        if "accuracy" in self.enabled_metrics:
+            acc1, acc5, var1, var5 = calc_acc_std(recon_list, labels, self.evaluation_model, effective_label_num)
+            logger.info(f"Final Top1: {acc1:.2%} ± {var1:.2%}, Top5: {acc5:.2%} ± {var5:.2%}")
 
         # Save Reconstructed Images
-        logger.info(f"Saved {self.config.diffmiattack.repeat_n}x{effective_label_num} generated images.")
+        if self.save_reconstruction_images:
+            save_count = self.save_image_count
+            recon_to_save = recon_list[:save_count] if save_count else recon_list
+            labels_to_save = labels[:save_count] if save_count else labels
+            success_to_save = success_list[:save_count] if save_count else success_list
+            success_labels_to_save = success_label_list[:save_count] if save_count else success_label_list
 
-        recon_path = f"{result_path}/all_recreated"
-        save_tensor(recon_list, labels, recon_path, file_extension=".png")
-        logger.info(f"All recreated images saved at: {recon_path}")
+            logger.info(f"Saved {recon_to_save.shape[0]} generated images.")
 
-        success_path = f"{result_path}/success_recreated"
-        save_tensor(success_list, success_label_list, success_path, file_extension=".png")
-        logger.info(f"Successful recreated images saved at: {success_path}")
+            image_result_path = self.save_image_dir or result_path
+            recon_path = f"{image_result_path}/all_recreated"
+            save_tensor(recon_to_save, labels_to_save, recon_path, file_extension=".png")
+            logger.info(f"All recreated images saved at: {recon_path}")
+
+            success_path = f"{image_result_path}/success_recreated"
+            save_tensor(success_to_save, success_labels_to_save, success_path, file_extension=".png")
+            logger.info(f"Successful recreated images saved at: {success_path}")
 
         # Calculate additional metrics
         knn, knn_arr = np.nan, []
@@ -334,7 +400,7 @@ class AttackDiffMi(AbstractMINV):
         avg_mse, mse_per_label, mse_arr, mse_min_fake, mse_min_real = np.nan, [], [], [], []
         fid_value = np.nan
 
-        if self.config.diffmiattack.calc_knn and success_list.shape[0] > 0:
+        if "knn" in self.enabled_metrics and success_list.shape[0] > 0:
             logger.info("Calculating KNN Distance...")
             knn, knn_arr = calc_knn(success_list, success_label_list,
                      private_feats=self.private_features,
@@ -344,10 +410,10 @@ class AttackDiffMi(AbstractMINV):
                      dims=(self.data_height, self.data_width)
                      )
             logger.info(f"KNN Dist computed on {success_list.shape[0]} attack samples: {knn:.2f}")
-        elif self.config.diffmiattack.calc_knn:
+        elif "knn" in self.enabled_metrics:
             logger.warning("Skipping KNN calculation because no successful reconstructions were produced.")
 
-        if self.config.diffmiattack.calc_lpips and success_list.shape[0] > 0:
+        if "lpips" in self.enabled_metrics and success_list.shape[0] > 0:
             logger.info("Calculating LPIPS...")
             value_a, value_v = calc_lpips(
                 private_data=self.private_dataloader,
@@ -356,10 +422,10 @@ class AttackDiffMi(AbstractMINV):
                 device=self.device,
             )
             logger.info(f"LPIPS Alex: {value_a:.4f}, VGG: {value_v:.4f}")
-        elif self.config.diffmiattack.calc_lpips:
+        elif "lpips" in self.enabled_metrics:
             logger.warning("Skipping LPIPS calculation because no successful reconstructions were produced.")
 
-        if self.config.diffmiattack.calc_mse and success_list.shape[0] > 0:
+        if "mse" in self.enabled_metrics and success_list.shape[0] > 0:
             logger.info("Calculating MSE...")
             avg_mse, mse_per_label, mse_arr, mse_min_fake, mse_min_real = calc_mse(
                 private_data=self.private_dataloader,
@@ -368,10 +434,10 @@ class AttackDiffMi(AbstractMINV):
                 device=self.device,
             )
             logger.info(f"Average MSE: {avg_mse:.4f}")
-        elif self.config.diffmiattack.calc_mse:
+        elif "mse" in self.enabled_metrics:
             logger.warning("Skipping MSE calculation because no successful reconstructions were produced.")
 
-        if self.config.diffmiattack.calc_fid:
+        if "fid" in self.enabled_metrics:
             logger.info("Calculating FID...")
             fid_value = calc_pytorch_fid(recon_list, self.private_dataloader, device=self.device)
             logger.info(f"FID score: {fid_value:.2f}")
@@ -392,55 +458,133 @@ class AttackDiffMi(AbstractMINV):
                 },
             )
 
-    def get_attack_state(self: Self) -> Dict[str, Any]:
-        """Return the attack state with all initialized instance variables.
-
-        Returns
-        -------
-            Dict[str, Any]: Dictionary containing all initialized attack state variables.
-
-        """
-        state = {
-            "config": self.config,
-            "hashes": self.hashes,
-            "output_dir": self.output_dir,
-            "storage_path": self.storage_path,
-            "device": self.device,
-            "diff_handler": self.diff_handler,
-        }
-        optional_attrs = (
-            "target_model",
-            "evaluation_model",
-            "diffusion_model",
-            "private_dataloader",
-            "public_dataloader",
-            "pseudo_dataloader",
-            "private_features",
-            "private_idents",
-            "p_reg",
-            "pgd_model",
-        )
-        for attr_name in optional_attrs:
-            if hasattr(self, attr_name):
-                state[attr_name] = getattr(self, attr_name)
-
-        return state
-
     @classmethod
-    def get_generator(cls, handler: MINVHandler, configs: dict) -> "AttackDiffMi":
-        """Get the attack.
+    def get_generator(
+        cls,
+        handler: Optional[MINVHandler] = None,
+        configs: Optional[Dict[str, Any] | DiffMiConfig] = None,
+        config_path: Optional[str | os.PathLike[str]] = None,
+        diffusion_steps: Optional[int] = None,
+    ) -> DiffMiHandler:
+        """Return a Diff-MI diffusion handler loaded from a completed checkpoint.
 
         Args:
         ----
-            handler (MINVHandler): The input handler object.
-            configs (dict): Configuration parameters for the attack.
+            handler: Optional input handler to attach to the diffusion handler.
+            configs: Diff-MI attack config, either as a raw audit entry or a DiffMiConfig.
+            config_path: Optional path to an audit.yaml file. Used to resolve config and checkpoint paths.
+            diffusion_steps: Optional number of diffusion sampling steps to use after loading the config.
 
         Returns:
         -------
-            AttackDiffMi: The Diff-Mi attack object.
+            DiffMiHandler: Handler that can sample with ``sample_from_diffusion_model``.
 
         """
-        assert isinstance(handler, MINVHandler), "Handler must be an instance of MINVHandler"
-        assert isinstance(configs, dict), "Configs must be a dictionary"
+        diffmi_config = cls._resolve_generator_config(handler, configs, config_path)
+        if diffusion_steps is not None:
+            diffmi_config.pretrain.diffusion_steps = diffusion_steps
+            diffmi_config.finetune.diffusion_steps = diffusion_steps
+        diff_handler = DiffMiHandler(handler=handler, configs=diffmi_config)
+        if diffmi_config.do_fine_tune:
+            diff_handler.get_finetuned()
+        else:
+            diff_handler.get_pretrained()
+        return diff_handler
 
-        return AttackDiffMi(handler, configs)
+    @classmethod
+    def _resolve_generator_config(
+        cls,
+        handler: Optional[MINVHandler],
+        configs: Optional[Dict[str, Any] | DiffMiConfig],
+        config_path: Optional[str | os.PathLike[str]],
+    ) -> DiffMiConfig:
+        """Resolve a Diff-MI config suitable for standalone sampling."""
+        if configs is None:
+            if config_path is None:
+                raise ValueError("Either configs or config_path must be provided to load a Diff-MI generator.")
+            return cls._resolve_generator_config_from_audit(Path(config_path))
+
+        if isinstance(configs, DiffMiConfig):
+            diffmi_cfg = deepcopy(configs.model_dump())
+        else:
+            diffmi_cfg = deepcopy(configs)
+            diffmi_cfg.pop("attack", None)
+
+        if not diffmi_cfg.get("save_path"):
+            if handler is None:
+                raise ValueError("save_path must be configured when loading a generator without a handler.")
+            output_dir = handler.configs.audit.output_dir or "./leakpro_output"
+            diffmi_cfg["save_path"] = str(Path(output_dir) / "attack_objects" / "diffusion_models")
+
+        save_path = Path(diffmi_cfg["save_path"])
+        cls._select_completed_generator_checkpoint(diffmi_cfg, save_path)
+        return DiffMiConfig(**diffmi_cfg)
+
+    @classmethod
+    def _resolve_generator_config_from_audit(cls, config_path: Path) -> DiffMiConfig:
+        """Resolve Diff-MI generator config from an audit.yaml file."""
+        with config_path.open("r") as f:
+            full_config = yaml.safe_load(f)
+
+        diffmi_cfg = next(
+            (entry for entry in full_config["audit"]["attack_list"] if entry.get("attack") == "diffmi"),
+            None,
+        )
+        if diffmi_cfg is None:
+            raise ValueError(f"No Diff-MI attack entry found in {config_path}.")
+
+        diffmi_cfg = deepcopy(diffmi_cfg)
+        diffmi_cfg.pop("attack", None)
+
+        output_dir = Path(full_config["audit"].get("output_dir", "./leakpro_output"))
+        if not output_dir.is_absolute():
+            output_dir = (config_path.parent / output_dir).resolve()
+
+        save_path = Path(diffmi_cfg.get("save_path") or output_dir / "attack_objects" / "diffusion_models")
+        if not save_path.is_absolute():
+            save_path = (config_path.parent / save_path).resolve()
+        diffmi_cfg["save_path"] = str(save_path)
+
+        cls._select_completed_generator_checkpoint(diffmi_cfg, save_path)
+        return DiffMiConfig(**diffmi_cfg)
+
+    @staticmethod
+    def _select_completed_generator_checkpoint(diffmi_cfg: Dict[str, Any], save_path: Path) -> None:
+        """Select the newest completed fine-tune or pretrain checkpoint for sampling."""
+        if not save_path.exists():
+            raise FileNotFoundError(f"No Diff-MI checkpoint directory found at {save_path}.")
+
+        config = DiffMiConfig(**diffmi_cfg)
+        pretrain_save_name = config.pretrain.save_name or "pretrain"
+        finetune_save_name = config.finetune.save_name or "finetune"
+
+        finetune_matches = sorted(
+            (
+                path
+                for path in save_path.glob(f"{finetune_save_name}*.pt")
+                if is_finetune_complete(
+                    str(save_path),
+                    path.stem,
+                    config.finetune.epochs,
+                    config.finetune.threshold,
+                )
+            ),
+            key=lambda path: path.stat().st_mtime,
+        )
+        pretrain_matches = sorted(
+            (
+                path
+                for path in save_path.glob(f"{pretrain_save_name}*.pt")
+                if is_pretrain_complete(str(save_path), path.stem, config.pretrain.max_steps)
+            ),
+            key=lambda path: path.stat().st_mtime,
+        )
+
+        if finetune_matches:
+            diffmi_cfg["do_fine_tune"] = True
+            diffmi_cfg.setdefault("finetune", {})["save_name"] = finetune_matches[-1].stem
+        elif pretrain_matches:
+            diffmi_cfg["do_fine_tune"] = False
+            diffmi_cfg.setdefault("pretrain", {})["save_name"] = pretrain_matches[-1].stem
+        else:
+            raise FileNotFoundError(f"No completed Diff-MI checkpoints found in {save_path}.")
