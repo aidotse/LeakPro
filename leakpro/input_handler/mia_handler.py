@@ -76,7 +76,15 @@ class MIAHandler:
                     self.population = _SafeUnpickler(file).load()
                     logger.info("Loaded population via safe unpickler (missing module stub)")
 
-                self.population_size = len(self.population)
+                try:
+                    self.population_size = len(self.population)
+                except TypeError as e:
+                    raise TypeError(
+                        f"The population file at '{self.configs.target.data_path}' is not compatible with the "
+                        f"current dataset handler. This usually means the .pkl was created with an older or "
+                        f"different handler class. Please regenerate the population file using your current "
+                        f"dataset_handler.py and re-upload it. Original error: {e}"
+                    ) from e
                 if not self._is_indexable(self.population):
                     raise ValueError("Population dataset is not indexable.")
                 logger.info(f"Loaded population dataset from {self.configs.target.data_path}")
