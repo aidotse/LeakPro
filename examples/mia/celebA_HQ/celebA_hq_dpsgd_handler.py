@@ -21,6 +21,76 @@ from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 
+_MISSING = object()
+
+
+def _get_config_value(config, key: str, default=_MISSING):
+    """Read a config value from either a dict-like or attribute-based config."""
+    if isinstance(config, dict):
+        if key in config:
+            return config[key]
+    elif config is not None and hasattr(config, key):
+        return getattr(config, key)
+
+    if default is not _MISSING:
+        return default
+
+    raise ValueError(f"Missing training config value: {key}")
+
+
+def _resolve_train_config(configs, explicit_train_config: dict | None = None):
+    """Resolve the training config from an explicit dict or handler configs."""
+    if explicit_train_config is not None:
+        return explicit_train_config.get("train", explicit_train_config)
+
+    train_cfg = getattr(configs, "train", None)
+    if train_cfg is not None:
+        return train_cfg
+
+    raise ValueError(
+        "Optimizer was not provided and no training config could be resolved. "
+        "Pass `train_config`, or initialize the handler with configs containing a `train` section."
+    )
+
+
+def _resolve_epochs(epochs: int | None, configs=None, train_config: dict | None = None) -> int:
+    """Resolve epochs from the explicit argument or the training config."""
+    if epochs is not None:
+        return epochs
+
+    resolved_train_config = _resolve_train_config(configs, train_config)
+    return int(_get_config_value(resolved_train_config, "epochs"))
+
+
+def _build_optimizer(
+    model: torch.nn.Module,
+    optimizer: optim.Optimizer | None = None,
+    configs=None,
+    train_config: dict | None = None,
+) -> optim.Optimizer:
+    """Build an optimizer from config when one is not supplied explicitly."""
+    if optimizer is not None:
+        return optimizer
+
+    resolved_train_config = _resolve_train_config(configs, train_config)
+    optimizer_name = str(_get_config_value(resolved_train_config, "optimizer", "sgd")).lower()
+    learning_rate = float(_get_config_value(resolved_train_config, "learning_rate"))
+    weight_decay = float(_get_config_value(resolved_train_config, "weight_decay", 0.0))
+    momentum = float(_get_config_value(resolved_train_config, "momentum", 0.0))
+
+    if optimizer_name == "adam":
+        return optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+    if optimizer_name == "sgd":
+        return optim.SGD(
+            model.parameters(),
+            lr=learning_rate,
+            momentum=momentum,
+            weight_decay=weight_decay,
+        )
+
+    raise ValueError(f"Unsupported optimizer: {optimizer_name}")
+
+
 def _resolve_dpsgd_metadata_path(configs, explicit_path: str | None = None) -> str:
     """Resolve the DP-SGD metadata path from arg or target config.
 
@@ -56,8 +126,9 @@ class CelebAInputHandlerDPsgd(AbstractInputHandler):
         dataloader: DataLoader,
         model: torch.nn.Module,
         criterion: torch.nn.Module,
-        optimizer: optim.Optimizer,
-        epochs: int,
+        optimizer: optim.Optimizer | None = None,
+        epochs: int | None = None,
+        train_config: dict | None = None,
         dpsgd_metadata_path: str | None = None,
         virtual_batch_size: int = 16,
     ) -> TrainingOutput:
@@ -77,17 +148,25 @@ class CelebAInputHandlerDPsgd(AbstractInputHandler):
             TrainingOutput: Contains the trained model and training metrics, including accuracy and loss history.
         """
         
-        if optimizer is None:
-            raise ValueError("Optimizer must be provided for training")
         if criterion is None:
             raise ValueError("Criterion must be provided for training")
         if not hasattr(model, "dpsgd"):
             raise ValueError("Model is missing required 'dpsgd' attribute")
 
+        configs = getattr(self, "configs", None)
+        epochs = _resolve_epochs(epochs, configs=configs, train_config=train_config)
+        optimizer = _build_optimizer(
+            model=model,
+            optimizer=optimizer,
+            configs=configs,
+            train_config=train_config,
+        )
+        self.optimizer = optimizer
+
         run_dpsgd = bool(model.dpsgd)
 
         if run_dpsgd:
-            dpsgd_metadata_path = _resolve_dpsgd_metadata_path(getattr(self, "configs", None), dpsgd_metadata_path)
+            dpsgd_metadata_path = _resolve_dpsgd_metadata_path(configs, dpsgd_metadata_path)
             # Check if the model is compatible with DP-SGD
             errors = ModuleValidator.validate(model, strict=False)
             if len(errors) > 0:
@@ -98,20 +177,17 @@ class CelebAInputHandlerDPsgd(AbstractInputHandler):
 
                 # Re-instantiate optimizer with equivalent settings for the fixed model.
                 optimizer = _rebuild_optimizer(optimizer, model)
+                self.optimizer = optimizer
                 logger.info(f"Model fixed and {optimizer.__class__.__name__} re-instantiated.")
 
-        # Convert model/optimizer/dataloader to DP-compatible variants when enabled.
-        _disable_inplace_activations(model)
-        model, optimizer, dataloader, _ = dpsgd(
-            model,
-            optimizer,
-            dataloader,
-            dpsgd_path=dpsgd_metadata_path,
-        )
-
-        # read hyperparams for training (the parameters for the dataloader are defined in get_dataloader):
-        if epochs is None:
-            raise ValueError("epochs not found in configs")
+            # Convert model/optimizer/dataloader to DP-compatible variants only on the DP-SGD path.
+            _disable_inplace_activations(model)
+            model, optimizer, dataloader, _ = dpsgd(
+                model,
+                optimizer,
+                dataloader,
+                dpsgd_path=dpsgd_metadata_path,
+            )
 
         # prepare training
         device = torch.device("cuda" if cuda.is_available() else "cpu")
@@ -120,6 +196,8 @@ class CelebAInputHandlerDPsgd(AbstractInputHandler):
 
         accuracy_history = []
         loss_history = []
+
+        self.training_optimizer = optimizer
 
         if run_dpsgd:
             logger.info("Training with DP-SGD")
@@ -321,7 +399,6 @@ def dpsgd(
 
     logger.info("Training with DP-SGD")
 
-    sample_rate = 1/len(dataloader)
     # Check if the file exists
     if os.path.exists(dpsgd_path):
         # Open and read the pickle file
@@ -334,14 +411,14 @@ def dpsgd(
     try:
         noise_multiplier = get_noise_multiplier(target_epsilon = privacy_engine_dict["target_epsilon"],
                                         target_delta = privacy_engine_dict["target_delta"],
-                                        sample_rate = sample_rate ,
+                                        sample_rate = privacy_engine_dict["sample_rate"],
                                         epochs = privacy_engine_dict["epochs"],
                                         epsilon_tolerance = privacy_engine_dict["epsilon_tolerance"],
-                                        accountant = "prv",
+                                        accountant = privacy_engine_dict["accountant"],
                                         eps_error = privacy_engine_dict["eps_error"],)
     except Exception as e:
         raise ValueError(
-            f"Failed to compute noise multiplier using the 'prv' accountant. "
+            f"Failed to compute noise multiplier using the '{privacy_engine_dict['accountant']}' accountant. "
             f"This may be due to a large target_epsilon ({privacy_engine_dict['target_epsilon']}). "
             f"Consider reducing epsilon or switching to a different accountant (e.g., 'rdp'). "
             f"Original error: {e}")
@@ -351,7 +428,7 @@ def dpsgd(
         noise_multiplier = 0.0
 
     # make the model private
-    privacy_engine = PrivacyEngine(accountant = "prv")
+    privacy_engine = PrivacyEngine(accountant = privacy_engine_dict["accountant"])
     priv_model, priv_optimizer, priv_dataloader = privacy_engine.make_private(
         module=model,
         optimizer=optimizer,
