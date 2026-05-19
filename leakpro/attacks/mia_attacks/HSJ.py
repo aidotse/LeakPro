@@ -1,17 +1,6 @@
 #
-# Copyright 2023-2026 AI Sweden
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
 #
 """A module that implements the HopSkipJump attack for membership inference."""
 
@@ -31,7 +20,7 @@ from leakpro.utils.logger import logger
 class AttackHopSkipJump(AbstractMIA):  # noqa: D101
 
     class AttackConfig(BaseModel):
-        """Configuration for the RMIA attack."""
+        """Configuration for the HSJ attack."""
 
         attack_data_fraction: float = Field(default=0.1, ge = 0.0, le=1.0, description="Fraction of the data to use for the attack") # noqa: E501
         norm: Union[int, float] = Field(default=2, description="The norm to use for the attack. Must be one of [1, 2, np.inf]")
@@ -42,6 +31,7 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
         constraint: Literal[1,2] = Field(default=2, description="The constraint value must be 1 or 2")
         batch_size: int = Field(default=64, ge=1, description="The batch size")
         epsilon_threshold: float = Field(default=1e-6, ge=0.0, le=0.001, description="The epsilon threshold")
+        verbose: bool = Field(default=True, description="Whether to print verbose output during the attack")
 
         @field_validator("norm", mode="before")
         @classmethod
@@ -105,7 +95,6 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
 
         self.y_target = None
         self.image_target = None
-        self.verbose = configs.get("verbose", True) if configs is not None else True
         self.stepsize_search = "geometric_progression"
 
     def description(self:Self) -> dict:
@@ -141,17 +130,18 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
         in_member_indices = self.audit_dataset["in_members"]
         out_member_indices = self.audit_dataset["out_members"]
 
-        audit_in_member_indicies = np.random.choice(in_member_indices,
+        self.audit_in_member_indicies = np.random.choice(in_member_indices,
                                               int(len(in_member_indices) * self.attack_data_fraction),
                                                 replace=False)
 
-        audit_out_member_indicies = np.random.choice(out_member_indices,
+        self.audit_out_member_indicies = np.random.choice(out_member_indices,
                                                 int(len(out_member_indices) * self.attack_data_fraction),
                                                 replace=False)
-        audit_indices = np.concatenate((audit_in_member_indicies, audit_out_member_indicies))
+        audit_indices = np.concatenate((self.audit_in_member_indicies, self.audit_out_member_indicies))
+
         assert len(audit_indices) >= self.batch_size , "The batch size must be greater than the number of audit indices"
 
-        self.attack_dataloader = self.handler.get_dataloader(audit_indices, batch_size=self.batch_size)
+        self.attack_dataloader = self.handler.get_dataloader(audit_indices, batch_size=self.batch_size, shuffle=False)
 
 
 
@@ -188,11 +178,10 @@ class AttackHopSkipJump(AbstractMIA):  # noqa: D101
 
         # set true labels for being in the training dataset
         true_labels = np.concatenate(
-            [np.ones(len(self.audit_dataset["in_members"])), np.zeros(len(self.audit_dataset["out_members"]))]
+            [np.ones(len(self.audit_in_member_indicies)), np.zeros(len(self.audit_out_member_indicies))]
         )
 
-        return MIAResult(
-            true_membership=true_labels,
-            signal_values= perturbation_distances,
-            result_name="HopSkipJump",
-        )
+        return MIAResult.from_full_scores(true_membership=true_labels,
+                                          signal_values=perturbation_distances,
+                                          result_name="HopSkipJump",
+                                          metadata=self.configs.model_dump())
