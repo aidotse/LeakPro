@@ -183,12 +183,11 @@ class MLP(nn.Module):
         super().__init__()
         self.num_features = num_features
         self.num_classes = num_classes
-        out = 1 if num_classes == 2 else num_classes
         self.net = nn.Sequential(
             nn.Linear(num_features, 256), nn.ReLU(), nn.Dropout(0.3),
             nn.Linear(256, 128), nn.ReLU(), nn.Dropout(0.3),
             nn.Linear(128, 64),  nn.ReLU(), nn.Dropout(0.3),
-            nn.Linear(64, out),
+            nn.Linear(64, num_classes),
         )
 
     def forward(self, x):
@@ -820,10 +819,9 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                 if params.dpsgd:
                     log_q.put(f"[train] DP-SGD: epsilon={params.target_epsilon}, delta={params.target_delta}, max_grad_norm={params.max_grad_norm}, virtual_batch_size={params.virtual_batch_size or 16}")
 
-            # Auto-detect loss: BCE for binary (2 classes), CrossEntropy otherwise
-            _is_binary = (_num_classes_data == 2)
-            criterion = nn.BCEWithLogitsLoss() if _is_binary else nn.CrossEntropyLoss()
-            log_q.put(f"[train] Loss: {'BCEWithLogitsLoss (binary)' if _is_binary else 'CrossEntropyLoss'}")
+            criterion = nn.CrossEntropyLoss()
+            _is_binary = False
+            log_q.put(f"[train] Loss: CrossEntropyLoss")
             if params.optimizer == "sgd":
                 optimizer = optim.SGD(model.parameters(), lr=params.learning_rate, momentum=0.9, weight_decay=5e-4)
             else:
@@ -1033,6 +1031,27 @@ async def get_results(job_id: str) -> dict:
     for r in results:
         r["job_id"] = job_id
     return {"job_id": job_id, "results": results}
+
+
+@app.get("/jobs/{job_id}/sample_data/{index}")
+async def get_sample_data(job_id: str, index: int):
+    """Return tabular feature values for a single sample as JSON."""
+    import joblib, torch
+    job = _get_job(job_id)
+    data_path = job.get("data_path")
+    if not data_path or not Path(data_path).exists():
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    try:
+        dataset = joblib.load(data_path)
+        row = dataset.data[index]
+        if isinstance(row, torch.Tensor):
+            row = row.tolist()
+        label = dataset.targets[index]
+        if isinstance(label, torch.Tensor):
+            label = label.item()
+        return {"index": index, "label": int(label), "features": row}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/jobs/{job_id}/sample_image/{index}")
