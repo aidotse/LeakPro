@@ -156,7 +156,7 @@ function CodeModal({ onClose }: { onClose: () => void }) {
 // DatasetHandlerUpload — shown after dataset is validated, required to continue
 // ---------------------------------------------------------------------------
 function DatasetHandlerUpload({ jobId, onUploaded }: { jobId: string; onUploaded: (uploaded: boolean) => void }) {
-  const [mode, setMode] = useState<"upload" | "path">("upload");
+  const [mode, setMode] = useState<"upload" | "path">("path");
   const [handlerFile, setHandlerFile] = useState<File | null>(null);
   const [serverPath, setServerPath] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -214,14 +214,12 @@ function DatasetHandlerUpload({ jobId, onUploaded }: { jobId: string; onUploaded
         </button>
       </div>
 
-      {/* Mode toggle */}
-      <div className="flex gap-2 text-xs">
-        {(["upload", "path"] as const).map((m) => (
-          <button key={m} onClick={() => { setMode(m); remove(); }}
-            className={`px-3 py-1 rounded-full border font-semibold transition-colors ${mode === m ? "bg-primary text-white border-primary" : "border-slate-300 dark:border-slate-700 text-slate-500 hover:border-primary hover:text-primary"}`}>
-            {m === "upload" ? "Upload file" : "Server path"}
-          </button>
-        ))}
+      {/* Mode toggle — same style as dataset toggle above */}
+      <div className="flex gap-2">
+        <ModeButton active={mode === "path"} onClick={() => { setMode("path"); remove(); }}
+          icon="dns" label="Server path" />
+        <ModeButton active={mode === "upload"} onClick={() => { setMode("upload"); remove(); }}
+          icon="upload_file" label="Upload file" />
       </div>
 
       {done ? (
