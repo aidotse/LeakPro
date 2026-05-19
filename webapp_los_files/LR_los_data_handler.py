@@ -29,7 +29,7 @@ class UserDataset(AbstractInputHandler.UserDataset):
             targets = torch.from_numpy(targets.astype(np.float32))
 
         self.data = data.float()
-        self.targets = targets.float().view(-1)
+        self.targets = targets.long().view(-1)
 
         # Identity stubs so LeakPro subsets inherit them without re-scaling
         self.mean = 0.0
