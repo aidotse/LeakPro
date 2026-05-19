@@ -51,7 +51,11 @@ dev = [
   "transformers", # federated example
   "requests",
   "pip-licenses",
-  "licenseheaders"
+  "licenseheaders",
+  "blobfile", 
+  "lpips", 
+  "robustness", 
+  "mpi4py"
 ]
 
 [project.urls]
