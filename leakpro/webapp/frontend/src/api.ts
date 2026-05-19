@@ -48,6 +48,8 @@ export const api = {
   // Step 1 (dataset handler)
   uploadDatasetHandler: (id: string, file: File) =>
     upload(`/jobs/${id}/upload/dataset-handler`, file),
+  setDatasetHandlerPath: (id: string, path: string) =>
+    post(`/jobs/${id}/dataset-handler-path`, { path }),
 
   // Step 3
   uploadArch: (id: string, file: File) => upload(`/jobs/${id}/upload/arch`, file),

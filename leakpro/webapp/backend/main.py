@@ -372,6 +372,20 @@ async def upload_dataset_handler(job_id: str, file: UploadFile) -> dict:
     return {"ok": True, "filename": file.filename}
 
 
+@app.post("/jobs/{job_id}/dataset-handler-path")
+async def set_dataset_handler_path(job_id: str, body: dict) -> dict:
+    """Use a dataset_handler.py already on the server by absolute path."""
+    _get_job(job_id)
+    path = Path(body.get("path", ""))
+    if not path.exists():
+        raise HTTPException(status_code=400, detail=f"Path does not exist: {path}")
+    if not path.suffix == ".py":
+        raise HTTPException(status_code=400, detail="Path must point to a .py file")
+    dest = _job_dir(job_id) / "dataset_handler.py"
+    shutil.copy2(path, dest)
+    return {"ok": True, "filename": path.name}
+
+
 # ---------------------------------------------------------------------------
 # Step 2 — Confirm format
 # ---------------------------------------------------------------------------

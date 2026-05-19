@@ -156,28 +156,40 @@ function CodeModal({ onClose }: { onClose: () => void }) {
 // DatasetHandlerUpload — shown after dataset is validated, required to continue
 // ---------------------------------------------------------------------------
 function DatasetHandlerUpload({ jobId, onUploaded }: { jobId: string; onUploaded: (uploaded: boolean) => void }) {
+  const [mode, setMode] = useState<"upload" | "path">("upload");
   const [handlerFile, setHandlerFile] = useState<File | null>(null);
+  const [serverPath, setServerPath] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [done, setDone] = useState(false);
+  const [doneName, setDoneName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = async (f: File) => {
-    setUploading(true);
-    setError(null);
+    setUploading(true); setError(null);
     try {
       await api.uploadDatasetHandler(jobId, f);
-      setHandlerFile(f);
+      setHandlerFile(f); setDone(true); setDoneName(f.name); onUploaded(true);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setUploading(false); }
+  };
+
+  const handlePath = async () => {
+    if (!serverPath.trim()) return;
+    setUploading(true); setError(null);
+    try {
+      await api.setDatasetHandlerPath(jobId, serverPath.trim());
+      setDone(true); setDoneName(serverPath.trim().split("/").pop() ?? "dataset_handler.py");
       onUploaded(true);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setUploading(false);
-    }
+    } finally { setUploading(false); }
   };
 
   const remove = () => {
-    setHandlerFile(null);
+    setHandlerFile(null); setServerPath(""); setDone(false); setDoneName("");
     onUploaded(false);
     if (inputRef.current) inputRef.current.value = "";
   };
@@ -194,47 +206,52 @@ function DatasetHandlerUpload({ jobId, onUploaded }: { jobId: string; onUploaded
             <code className="text-xs bg-slate-200 dark:bg-slate-700 px-1 rounded">UserDataset</code> class
             that is <strong>indexable</strong> — <code className="text-xs bg-slate-200 dark:bg-slate-700 px-1 rounded">dataset[i]</code> returns
             an <code className="text-xs bg-slate-200 dark:bg-slate-700 px-1 rounded">(input, label)</code> pair.
-            Adapt normalisation and format to your data type (images, tabular, time series, etc.).
           </p>
         </div>
-        <button
-          onClick={() => setShowModal(true)}
-          className="shrink-0 flex items-center gap-1 text-xs text-primary font-semibold hover:underline"
-        >
+        <button onClick={() => setShowModal(true)} className="shrink-0 flex items-center gap-1 text-xs text-primary font-semibold hover:underline">
           <span className="material-symbols-outlined text-sm">code</span>
           View example
         </button>
       </div>
 
-      <div className="flex items-center gap-3">
-        <input
-          ref={inputRef}
-          type="file"
-          accept=".py"
-          className="hidden"
-          onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
-        />
-        {handlerFile ? (
-          <div className="flex items-center gap-2 flex-1 px-4 py-2 rounded-lg border border-green-500/40 bg-green-500/5 text-green-600 dark:text-green-400 text-sm font-semibold">
-            <span className="material-symbols-outlined text-base">check_circle</span>
-            {handlerFile.name}
-          </div>
-        ) : (
-          <button
-            onClick={() => inputRef.current?.click()}
-            disabled={uploading}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 text-sm text-slate-500 hover:border-primary hover:text-primary transition-colors disabled:opacity-50"
-          >
+      {/* Mode toggle */}
+      <div className="flex gap-2 text-xs">
+        {(["upload", "path"] as const).map((m) => (
+          <button key={m} onClick={() => { setMode(m); remove(); }}
+            className={`px-3 py-1 rounded-full border font-semibold transition-colors ${mode === m ? "bg-primary text-white border-primary" : "border-slate-300 dark:border-slate-700 text-slate-500 hover:border-primary hover:text-primary"}`}>
+            {m === "upload" ? "Upload file" : "Server path"}
+          </button>
+        ))}
+      </div>
+
+      {done ? (
+        <div className="flex items-center gap-2 flex-1 px-4 py-2 rounded-lg border border-green-500/40 bg-green-500/5 text-green-600 dark:text-green-400 text-sm font-semibold">
+          <span className="material-symbols-outlined text-base">check_circle</span>
+          {doneName}
+          <button onClick={remove} className="ml-auto text-xs text-slate-400 hover:text-red-500 transition-colors">Remove</button>
+        </div>
+      ) : mode === "upload" ? (
+        <div className="flex items-center gap-3">
+          <input ref={inputRef} type="file" accept=".py" className="hidden"
+            onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])} />
+          <button onClick={() => inputRef.current?.click()} disabled={uploading}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 text-sm text-slate-500 hover:border-primary hover:text-primary transition-colors disabled:opacity-50">
             <span className="material-symbols-outlined text-base">upload_file</span>
             {uploading ? "Uploading…" : "Upload dataset_handler.py"}
           </button>
-        )}
-        {handlerFile && (
-          <button onClick={remove} className="text-xs text-slate-400 hover:text-red-500 transition-colors">
-            Remove
+        </div>
+      ) : (
+        <div className="flex gap-2">
+          <input type="text" value={serverPath} onChange={(e) => setServerPath(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handlePath()}
+            placeholder="/home/user/my_data_handler.py"
+            className="flex-1 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm font-mono bg-white dark:bg-slate-800 outline-none focus:border-primary" />
+          <button onClick={handlePath} disabled={!serverPath.trim() || uploading}
+            className="px-4 py-2 rounded-lg bg-primary text-white font-bold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50">
+            {uploading ? "Loading…" : "Use"}
           </button>
-        )}
-      </div>
+        </div>
+      )}
       {error && <p className="text-xs text-red-500">{error}</p>}
     </div>
   );
