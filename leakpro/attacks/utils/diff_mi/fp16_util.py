@@ -203,6 +203,7 @@ class MixedPrecisionTrainer:
 
         Returns:
             None
+
         """
         self.model = model
         self.use_fp16 = use_fp16

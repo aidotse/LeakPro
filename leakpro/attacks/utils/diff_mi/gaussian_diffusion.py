@@ -3,8 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-"""This code started out as a PyTorch port of Ho et al's diffusion models:
-https://github.com/hojonathanho/diffusion/blob/1e0dceb3b3495bbe19116a5e1b3596cd0706c543/diffusion_tf/diffusion_utils_2.py
+"""PyTorch diffusion utilities adapted from Ho et al. diffusion models.
+
+Source: https://github.com/hojonathanho/diffusion/blob/1e0dceb3b3495bbe19116a5e1b3596cd0706c543/diffusion_tf/diffusion_utils_2.py
 
 Docstrings have been added, as well as DDIM sampling and a new collection of beta schedules.
 """
@@ -15,6 +16,7 @@ from collections.abc import Callable, Generator
 
 import numpy as np
 import torch as th
+from tqdm.auto import tqdm
 
 from .losses import discretized_gaussian_log_likelihood, normal_kl
 from .nn import mean_flat
@@ -525,8 +527,6 @@ class GaussianDiffusion:
         indices = list(range(self.num_timesteps))[::-1]
 
         if progress:
-            from tqdm.auto import tqdm
-
             indices = tqdm(indices)
 
         for i in indices:
@@ -677,9 +677,6 @@ class GaussianDiffusion:
             indices = list(range(self.num_timesteps))[::-1]
 
             if progress:
-                # Lazy import so that we don't depend on tqdm.
-                from tqdm.auto import tqdm
-
                 indices = tqdm(indices)
 
             for i in indices:
