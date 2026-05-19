@@ -8,7 +8,7 @@ Install extra dependencies into your LeakPro conda environment:
 
 ```bash
 conda activate <your_env>
-pip install fastapi uvicorn opacus
+pip install fastapi "uvicorn[standard]" python-multipart opacus
 cd leakpro/webapp/frontend && npm install
 ```
 
