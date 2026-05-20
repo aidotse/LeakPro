@@ -71,7 +71,7 @@ class CelebA_InputHandler(AbstractInputHandler):
         return TrainingOutput(**output)
     
     
-    def evaluate(self, dataloader: DataLoader, model: torch.nn.Module, criterion: torch.nn.Module) -> dict:
+    def eval(self, dataloader: DataLoader, model: torch.nn.Module, criterion: torch.nn.Module) -> dict:
         """Evaluate the model."""
         gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
         model.to(gpu_or_cpu)
