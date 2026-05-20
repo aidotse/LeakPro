@@ -30,8 +30,7 @@ dependencies = [
 mia = ["torch", "torchvision", "optuna", "opacus"]
 synthetic = ["numba", "pydantic", "transformers", "sentence-transformers"]
 federated = ["torch", "torchvision", "torchmetrics", "pytorch-ignite", "optuna", "albumentations"]
-minv = ["torch", "torchvision", "optuna", "kornia"]
-
+minv = ["torch", "torchvision", "optuna", "kornia", "blobfile", "lpips", "robustness", "mpi4py"]
 dev = [
   "pytest",
   "pytest-cov",
@@ -52,7 +51,11 @@ dev = [
   "transformers", # federated example
   "requests",
   "pip-licenses",
-  "licenseheaders"
+  "licenseheaders",
+  "blobfile", 
+  "lpips", 
+  "robustness", 
+  "mpi4py"
 ]
 
 [project.urls]
