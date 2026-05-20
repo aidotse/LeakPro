@@ -38,16 +38,15 @@ def hash_model(model: Module) -> str:
     return hasher.hexdigest()
 
 def hash_indices(train_indices: np.ndarray, test_indices: np.ndarray) -> str:
-    """Generate a SHA-256 hash of the train/test index split, preserving order.
+    """Generate a SHA-256 hash of the train/test index split.
 
-    Order-sensitive: different orderings of the same indices produce different hashes.
-    This ensures logit caches (which are positional arrays) are never reused when
-    the row order changes.
+    Order-independent: the same set of indices produces the same hash regardless
+    of ordering, so splits can be compared across runs that may shuffle differently.
     """
     hasher = hashlib.sha256()
-    hasher.update(np.asarray(train_indices).tobytes())
+    hasher.update(np.sort(np.asarray(train_indices)).tobytes())
     hasher.update(b"|")
-    hasher.update(np.asarray(test_indices).tobytes())
+    hasher.update(np.sort(np.asarray(test_indices)).tobytes())
     return hasher.hexdigest()
 
 def hash_attack(config:dict, target_model:Module) -> str:

@@ -153,7 +153,7 @@ class ShadowModelHandler(ModelHandler):
             self._freeze_value(metadata.init_params),
         )
 
-    def _filter(self:Self, data_size:int) -> tuple[list[int], list[int]]:
+    def _filter(self:Self, data_size:int, online:bool=False) -> tuple[list[int], list[int]]:
         """Find cached shadow models compatible with the current configuration.
 
         Args:
@@ -178,15 +178,15 @@ class ShadowModelHandler(ModelHandler):
         # Extract the index of the metadata
         all_indices = [int(re.search(r"\d+", f).group()) for f in files]
 
-        filter_checks = [data_size, self.model_class, self.population_hash]
-        check_names = ["data_size", "model_class", "population_hash"]
+        filter_checks = [data_size, self.model_class, self.population_hash, online]
+        check_names = ["data_size", "model_class", "population_hash", "online"]
 
         # Filter out indices to only keep the ones that passes the checks
         filtered_indices = []
         for i in all_indices:
             metadata = self._load_shadow_metadata(i)
             assert isinstance(metadata, ShadowModelTrainingSchema), "Shadow Model metadata is not of the correct type"
-            meta_check_values = [metadata.num_train, metadata.model_class, getattr(metadata, "population_hash", None)]
+            meta_check_values = [metadata.num_train, metadata.model_class, getattr(metadata, "population_hash", None), metadata.online]
             mismatches = [name for name, a, b in zip(check_names, filter_checks, meta_check_values) if a != b]
             if mismatches:
                 logger.debug(f"Shadow model {i} skipped — mismatched: {', '.join(mismatches)}")
