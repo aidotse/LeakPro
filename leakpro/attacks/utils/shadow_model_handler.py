@@ -170,29 +170,21 @@ class ShadowModelHandler(ModelHandler):
             signature matches the current effective training configuration.
 
         """
-        # Get the metadata for the shadow models
         entries = os.listdir(self.storage_path)
         pattern = re.compile(rf"^{self.metadata_storage_name}_\d+\.pkl$")
         files = [f for f in entries if pattern.match(f)]
-
-        # Extract the index of the metadata
         all_indices = [int(re.search(r"\d+", f).group()) for f in files]
 
-        filter_checks = [data_size, self.model_class, self.population_hash, online]
-        check_names = ["data_size", "model_class", "population_hash", "online"]
+        current_sig = self._current_training_signature(data_size, online)
 
-        # Filter out indices to only keep the ones that passes the checks
         filtered_indices = []
         for i in all_indices:
             metadata = self._load_shadow_metadata(i)
             assert isinstance(metadata, ShadowModelTrainingSchema), "Shadow Model metadata is not of the correct type"
-            meta_check_values = [
-                metadata.num_train, metadata.model_class,
-                getattr(metadata, "population_hash", None), metadata.online,
-            ]
-            mismatches = [name for name, a, b in zip(check_names, filter_checks, meta_check_values) if a != b]
-            if mismatches:
-                logger.debug(f"Shadow model {i} skipped — mismatched: {', '.join(mismatches)}")
+            if getattr(metadata, "population_hash", None) != self.population_hash:
+                logger.debug(f"Shadow model {i} skipped — population_hash mismatch")
+            elif self._metadata_training_signature(metadata) != current_sig:
+                logger.debug(f"Shadow model {i} skipped — training signature mismatch")
             else:
                 logger.debug(f"Shadow model {i} accepted")
                 filtered_indices.append(i)
