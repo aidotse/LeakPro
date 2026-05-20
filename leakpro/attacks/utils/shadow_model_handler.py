@@ -186,7 +186,10 @@ class ShadowModelHandler(ModelHandler):
         for i in all_indices:
             metadata = self._load_shadow_metadata(i)
             assert isinstance(metadata, ShadowModelTrainingSchema), "Shadow Model metadata is not of the correct type"
-            meta_check_values = [metadata.num_train, metadata.model_class, getattr(metadata, "population_hash", None), metadata.online]
+            meta_check_values = [
+                metadata.num_train, metadata.model_class,
+                getattr(metadata, "population_hash", None), metadata.online,
+            ]
             mismatches = [name for name, a, b in zip(check_names, filter_checks, meta_check_values) if a != b]
             if mismatches:
                 logger.debug(f"Shadow model {i} skipped — mismatched: {', '.join(mismatches)}")
