@@ -8,7 +8,7 @@ train:
   optimizer: SGD
   learning_rate: 0.01
   momentum: 0.9        # (if using SGD)
-  weight_decay: 0.000
+  weight_decay: 0.0005
   nesterov: True
 
 data: # Configuration for data

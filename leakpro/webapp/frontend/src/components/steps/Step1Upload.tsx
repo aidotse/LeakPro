@@ -328,7 +328,7 @@ function ServerPathForm({ jobId, onDone }: { jobId: string; onDone: (m: DataMeta
               value={path}
               onChange={(e) => { setPath(e.target.value); setMeta(null); setError(null); }}
               onKeyDown={(e) => e.key === "Enter" && validate()}
-              placeholder="/home/fazeleh/data/cifar_train.pkl"
+              placeholder="/absolute/path/to/data.pkl"
               className="flex-1 bg-transparent outline-none text-sm font-mono"
             />
           </div>

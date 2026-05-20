@@ -330,10 +330,16 @@ function TrainModelForm({ jobId, onAdded, existingCount }: {
   const [progress, setProgress] = useState<{ epoch: number; total: number; model: string } | null>(null);
   const [metrics, setMetrics] = useState<TrainMetrics[]>([]);
   const logEndRef = React.useRef<HTMLDivElement>(null);
+  const wsRef = React.useRef<WebSocket | null>(null);
 
   React.useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [logs]);
+
+  // Close WebSocket on unmount to avoid dangling connections when navigating back
+  React.useEffect(() => {
+    return () => { wsRef.current?.close(); };
+  }, []);
 
   const addCard = () => setCards((prev) => [...prev, defaultParams(prev.length + existingCount + metrics.length)]);
   const removeCard = (i: number) => setCards((prev) => prev.filter((_, j) => j !== i));
@@ -350,6 +356,7 @@ function TrainModelForm({ jobId, onAdded, existingCount }: {
 
     const wsUrl = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/jobs/${jobId}/logs`;
     const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
 
     ws.onmessage = (e) => {
       const msg: string = e.data;

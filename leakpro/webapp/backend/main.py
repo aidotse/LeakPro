@@ -554,8 +554,8 @@ async def check_compat(job_id: str, model_name: str) -> CompatResult:
     if len(data_shape) == 3 and data_shape[-1] in (1, 3, 4) and data_shape[0] > 4:
         data_shape = [data_shape[2], data_shape[0], data_shape[1]]
 
-    if not arch_path.exists():
-        raise HTTPException(status_code=400, detail="No architecture file uploaded yet")
+    if not arch_path.exists() or arch_path.stat().st_size == 0:
+        raise HTTPException(status_code=400, detail="No architecture file found. Please upload arch.py or provide a server path before validating.")
 
     data_path_str = job.get("data_path")
     result = run_check(
@@ -756,10 +756,16 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                 _sys.modules[_arch_mod_name] = _arch_mod  # register before exec so relative imports work
                 _arch_spec.loader.exec_module(_arch_mod)
 
-                _arch_cls = next(
-                    v for v in vars(_arch_mod).values()
-                    if isinstance(v, type) and issubclass(v, _nn2.Module) and v is not _nn2.Module
-                )
+                try:
+                    _arch_cls = next(
+                        v for v in vars(_arch_mod).values()
+                        if isinstance(v, type) and issubclass(v, _nn2.Module) and v is not _nn2.Module
+                    )
+                except StopIteration:
+                    raise ValueError(
+                        "No nn.Module subclass found in arch.py. "
+                        "Make sure your arch.py defines a class that inherits from torch.nn.Module."
+                    )
 
                 # Detect num_classes from dataset labels
                 _all_labels = []

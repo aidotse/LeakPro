@@ -2,10 +2,19 @@
 audit:  # Configurations for auditing
   random_seed: 1234  # Integer specifying the random seed
   attack_list:
-    - attack: base
-      online: False
-      num_shadow_models: 8
-      training_data_fraction: 0.5  
+    - attack: rmia
+      online: True
+      num_shadow_models: 4
+      training_data_fraction: 0.5
+    # - attack: lira
+    #   online: True
+    #   num_shadow_models: 4
+    #   var_calculation: "fixed"
+    #   training_data_fraction: 0.5
+    # - attack: base
+    #   online: False
+    #   num_shadow_models: 4
+    #   training_data_fraction: 0.5
 
   output_dir: "./celeba/leakpro_output"
   attack_type: "mia" #mia, gia

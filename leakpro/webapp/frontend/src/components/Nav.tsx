@@ -23,12 +23,6 @@ export default function Nav({ onToggleDark, dark }: NavProps) {
               {dark ? "light_mode" : "dark_mode"}
             </span>
           </button>
-          <button className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors">
-            <span className="material-symbols-outlined text-slate-600 dark:text-slate-400">help_outline</span>
-          </button>
-          <button className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors">
-            <span className="material-symbols-outlined text-slate-600 dark:text-slate-400">settings</span>
-          </button>
           <div className="h-8 w-8 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-xs border border-primary/30">
             LP
           </div>
