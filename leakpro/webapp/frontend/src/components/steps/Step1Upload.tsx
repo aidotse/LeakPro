@@ -258,11 +258,12 @@ function DatasetHandlerUpload({ jobId, onUploaded }: { jobId: string; onUploaded
 interface Props {
   jobId: string;
   onDone: (meta: DataMeta) => void;
+  initialMeta?: DataMeta | null;
 }
 
 type Mode = "server" | "upload";
 
-export default function Step1Upload({ jobId, onDone }: Props) {
+export default function Step1Upload({ jobId, onDone, initialMeta }: Props) {
   const [mode, setMode] = useState<Mode>("server");
 
   return (
@@ -284,8 +285,8 @@ export default function Step1Upload({ jobId, onDone }: Props) {
       </div>
 
       {mode === "server"
-        ? <ServerPathForm jobId={jobId} onDone={onDone} />
-        : <UploadForm jobId={jobId} onDone={onDone} />
+        ? <ServerPathForm jobId={jobId} onDone={onDone} initialMeta={initialMeta} />
+        : <UploadForm jobId={jobId} onDone={onDone} initialMeta={initialMeta} />
       }
     </div>
   );
@@ -294,12 +295,12 @@ export default function Step1Upload({ jobId, onDone }: Props) {
 // ---------------------------------------------------------------------------
 // Server path form
 // ---------------------------------------------------------------------------
-function ServerPathForm({ jobId, onDone }: { jobId: string; onDone: (m: DataMeta) => void }) {
+function ServerPathForm({ jobId, onDone, initialMeta }: { jobId: string; onDone: (m: DataMeta) => void; initialMeta?: DataMeta | null }) {
   const [path, setPath] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [meta, setMeta] = useState<DataMeta | null>(null);
-  const [handlerUploaded, setHandlerUploaded] = useState(false);
+  const [meta, setMeta] = useState<DataMeta | null>(initialMeta ?? null);
+  const [handlerUploaded, setHandlerUploaded] = useState(!!initialMeta);
 
   const validate = async () => {
     if (!path.trim()) return;
@@ -383,13 +384,13 @@ function ServerPathForm({ jobId, onDone }: { jobId: string; onDone: (m: DataMeta
 // ---------------------------------------------------------------------------
 // Upload form (original drag-drop)
 // ---------------------------------------------------------------------------
-function UploadForm({ jobId, onDone }: { jobId: string; onDone: (m: DataMeta) => void }) {
+function UploadForm({ jobId, onDone, initialMeta }: { jobId: string; onDone: (m: DataMeta) => void; initialMeta?: DataMeta | null }) {
   const [dragging, setDragging] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [meta, setMeta] = useState<DataMeta | null>(null);
-  const [handlerUploaded, setHandlerUploaded] = useState(false);
+  const [meta, setMeta] = useState<DataMeta | null>(initialMeta ?? null);
+  const [handlerUploaded, setHandlerUploaded] = useState(!!initialMeta);
 
   const handleFile = useCallback(async (f: File) => {
     setFile(f);

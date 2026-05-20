@@ -72,17 +72,18 @@ export default function App() {
 
         <div className="flex flex-col gap-8">
           {step === 0 && (
-            <Step1Upload jobId={jobId} onDone={handleDataDone} />
+            <Step1Upload jobId={jobId} onDone={handleDataDone} initialMeta={dataMeta} />
           )}
           {step === 1 && dataMeta && (
             <Step3Setup
               jobId={jobId}
               handlerConfig={{ data_type: dataMeta.data_type, shape: dataMeta.shape, n_classes: dataMeta.n_classes ?? 10 }}
               onDone={(arch) => { setArchConfig(arch); setStep(2); }}
+              initialArch={archConfig}
             />
           )}
           {step === 2 && (
-            <Step4Models jobId={jobId} onDone={(m) => { setModels(m); setStep(3); }} />
+            <Step4Models jobId={jobId} onDone={(m) => { setModels(m); setStep(3); }} initialModels={models} />
           )}
           {step === 3 && (
             <Step5Attacks jobId={jobId} models={models} onDone={() => setStep(4)} />

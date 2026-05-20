@@ -230,12 +230,15 @@ interface Props {
   jobId: string;
   handlerConfig: HandlerConfig;
   onDone: (arch: ArchConfig) => void;
+  initialArch?: ArchConfig | null;
 }
 
-export default function Step3Setup({ jobId, handlerConfig, onDone }: Props) {
-  const [mode, setMode] = useState<"preset" | "upload">("preset");
+export default function Step3Setup({ jobId, handlerConfig, onDone, initialArch }: Props) {
+  const [mode, setMode] = useState<"preset" | "upload">(
+    initialArch && !initialArch.preset ? "upload" : "preset"
+  );
   const [selectedPreset, setSelectedPreset] = useState<string | null>(
-    PRESETS.find((p) => p.types.includes(handlerConfig.data_type))?.id ?? null
+    initialArch?.preset ?? PRESETS.find((p) => p.types.includes(handlerConfig.data_type))?.id ?? null
   );
   const [archFile, setArchFile] = useState<File | null>(null);
   const [handlerFile, setHandlerFile] = useState<File | null>(null);

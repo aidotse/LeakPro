@@ -18,10 +18,11 @@ export interface ModelEntry {
 interface Props {
   jobId: string;
   onDone: (models: ModelEntry[]) => void;
+  initialModels?: ModelEntry[];
 }
 
-export default function Step4Models({ jobId, onDone }: Props) {
-  const [models, setModels] = useState<ModelEntry[]>([]);
+export default function Step4Models({ jobId, onDone, initialModels }: Props) {
+  const [models, setModels] = useState<ModelEntry[]>(initialModels ?? []);
   const [showUpload, setShowUpload] = useState(false);
   const [showTrain, setShowTrain] = useState(false);
 
@@ -76,7 +77,7 @@ export default function Step4Models({ jobId, onDone }: Props) {
         </button>
         {showTrain && (
           <div className="p-6">
-            <TrainModelForm jobId={jobId} onAdded={addModel} existingCount={models.filter(m => m.source === "trained").length} />
+            <TrainModelForm jobId={jobId} onAdded={addModel} existingCount={models.filter(m => m.source === "trained").length} initialModels={models.filter(m => m.source === "trained")} />
           </div>
         )}
       </div>
@@ -321,14 +322,20 @@ interface TrainMetrics {
   test_acc_final?: number | null;
 }
 
-function TrainModelForm({ jobId, onAdded, existingCount }: {
-  jobId: string; onAdded: (m: ModelEntry) => void; existingCount: number;
+function TrainModelForm({ jobId, onAdded, existingCount, initialModels }: {
+  jobId: string; onAdded: (m: ModelEntry) => void; existingCount: number; initialModels?: ModelEntry[];
 }) {
   const [cards, setCards] = useState([defaultParams(existingCount)]);
   const [logs, setLogs] = useState<string[]>([]);
   const [training, setTraining] = useState(false);
   const [progress, setProgress] = useState<{ epoch: number; total: number; model: string } | null>(null);
-  const [metrics, setMetrics] = useState<TrainMetrics[]>([]);
+  // Restore metrics from previously trained models when navigating back
+  const [metrics, setMetrics] = useState<TrainMetrics[]>(
+    (initialModels ?? []).filter(m => m.train_accuracy != null).map(m => ({
+      model: m.name, train_acc: m.train_accuracy ?? 0, test_acc: m.test_accuracy ?? 0,
+      loss_history: [], acc_history: [], val_loss_history: [], val_acc_history: [],
+    }))
+  );
   const logEndRef = React.useRef<HTMLDivElement>(null);
   const wsRef = React.useRef<WebSocket | null>(null);
 
