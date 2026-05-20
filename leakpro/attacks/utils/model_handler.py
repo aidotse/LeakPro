@@ -61,10 +61,10 @@ class ModelHandler():
         else:
             raise ValueError("Storage path not provided")
 
-        # Create the hash for the target model
+        # Create the hash for the target model weights
         self.target_model_hash = hash_model(self.handler.target_model)
 
-        # Create the hash for the data split (train/test indices)
+        # Create the hash for the data split — order-sensitive so logit row order is always valid
         self.population_hash = hash_indices(self.handler.train_indices, self.handler.test_indices)
 
         # Folder to store intermediate results
@@ -127,6 +127,7 @@ class ModelHandler():
         if hasattr(configs, "get"):
             return configs.get(field_name, None)
         return getattr(configs, field_name, None)
+
 
 
     def cache_logits(self:Self, model:Union[Module, list[Module]], name:str) -> None:

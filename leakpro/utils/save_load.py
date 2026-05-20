@@ -38,15 +38,16 @@ def hash_model(model: Module) -> str:
     return hasher.hexdigest()
 
 def hash_indices(train_indices: np.ndarray, test_indices: np.ndarray) -> str:
-    """Generate a SHA-256 hash of the train/test index split.
+    """Generate a SHA-256 hash of the train/test index split, preserving order.
 
-    Captures whether the population (which data points are in vs. out) has changed.
-    Hashes train and test separately so different splits of the same pool are distinct.
+    Order-sensitive: different orderings of the same indices produce different hashes.
+    This ensures logit caches (which are positional arrays) are never reused when
+    the row order changes.
     """
     hasher = hashlib.sha256()
-    hasher.update(np.sort(train_indices).tobytes())
+    hasher.update(np.asarray(train_indices).tobytes())
     hasher.update(b"|")
-    hasher.update(np.sort(test_indices).tobytes())
+    hasher.update(np.asarray(test_indices).tobytes())
     return hasher.hexdigest()
 
 def hash_attack(config:dict, target_model:Module) -> str:

@@ -153,7 +153,7 @@ class ShadowModelHandler(ModelHandler):
             self._freeze_value(metadata.init_params),
         )
 
-    def _filter(self:Self, data_size:int, online:bool) -> tuple[list[int], list[int]]:
+    def _filter(self:Self, data_size:int) -> tuple[list[int], list[int]]:
         """Find cached shadow models compatible with the current configuration.
 
         Args:
@@ -178,26 +178,21 @@ class ShadowModelHandler(ModelHandler):
         # Extract the index of the metadata
         all_indices = [int(re.search(r"\d+", f).group()) for f in files]
 
-        expected_signature = self._current_training_signature(data_size, online)
+        filter_checks = [data_size, self.model_class, self.population_hash]
+        check_names = ["data_size", "model_class", "population_hash"]
 
         # Filter out indices to only keep the ones that passes the checks
         filtered_indices = []
         for i in all_indices:
             metadata = self._load_shadow_metadata(i)
-            if not isinstance(metadata, ShadowModelTrainingSchema):
-                raise TypeError("Shadow Model metadata is not of the correct type")
-            sig_match = self._metadata_training_signature(metadata) == expected_signature
-            pop_match = getattr(metadata, "population_hash", None) == self.population_hash
-            if sig_match and pop_match:
-                logger.debug(f"Shadow model {i} accepted — all fields match")
-                filtered_indices.append(i)
+            assert isinstance(metadata, ShadowModelTrainingSchema), "Shadow Model metadata is not of the correct type"
+            meta_check_values = [metadata.num_train, metadata.model_class, getattr(metadata, "population_hash", None)]
+            mismatches = [name for name, a, b in zip(check_names, filter_checks, meta_check_values) if a != b]
+            if mismatches:
+                logger.debug(f"Shadow model {i} skipped — mismatched: {', '.join(mismatches)}")
             else:
-                reason = []
-                if not sig_match:
-                    reason.append("training signature")
-                if not pop_match:
-                    reason.append("population_hash")
-                logger.debug(f"Shadow model {i} skipped — mismatched fields: {', '.join(reason)}")
+                logger.debug(f"Shadow model {i} accepted")
+                filtered_indices.append(i)
 
         return all_indices, filtered_indices
 
@@ -261,7 +256,7 @@ class ShadowModelHandler(ModelHandler):
 
         # Get the size of the dataset
         data_size = int(len(shadow_population)*training_fraction)
-        all_indices, filtered_indices = self._filter(data_size, online)
+        all_indices, filtered_indices = self._filter(data_size)
 
         # Create a list of indices to use for the new shadow models
         n_existing_models = len(filtered_indices)
