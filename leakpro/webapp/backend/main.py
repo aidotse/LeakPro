@@ -1127,7 +1127,9 @@ async def get_sample_data(job_id: str, index: int):
         label = dataset.targets[index]
         if isinstance(label, torch.Tensor):
             label = label.item()
-        return {"index": index, "label": int(label), "features": row}
+        feature_names = getattr(dataset, "feature_names", None)
+        return {"index": index, "label": int(label), "features": row,
+                "feature_names": feature_names}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
