@@ -153,7 +153,7 @@ class ShadowModelHandler(ModelHandler):
             self._freeze_value(metadata.init_params),
         )
 
-    def _filter(self:Self, data_size:int, online:bool) -> tuple[list[int], list[int]]:
+    def _filter(self:Self, data_size:int, online:bool=False) -> tuple[list[int], list[int]]:
         """Find cached shadow models compatible with the current configuration.
 
         Args:
@@ -170,23 +170,23 @@ class ShadowModelHandler(ModelHandler):
             signature matches the current effective training configuration.
 
         """
-        # Get the metadata for the shadow models
         entries = os.listdir(self.storage_path)
         pattern = re.compile(rf"^{self.metadata_storage_name}_\d+\.pkl$")
         files = [f for f in entries if pattern.match(f)]
-
-        # Extract the index of the metadata
         all_indices = [int(re.search(r"\d+", f).group()) for f in files]
 
-        expected_signature = self._current_training_signature(data_size, online)
+        current_sig = self._current_training_signature(data_size, online)
 
-        # Filter out indices to only keep the ones that passes the checks
         filtered_indices = []
         for i in all_indices:
             metadata = self._load_shadow_metadata(i)
-            if not isinstance(metadata, ShadowModelTrainingSchema):
-                raise TypeError("Shadow Model metadata is not of the correct type")
-            if self._metadata_training_signature(metadata) == expected_signature:
+            assert isinstance(metadata, ShadowModelTrainingSchema), "Shadow Model metadata is not of the correct type"
+            if getattr(metadata, "population_hash", None) != self.population_hash:
+                logger.debug(f"Shadow model {i} skipped — population_hash mismatch")
+            elif self._metadata_training_signature(metadata) != current_sig:
+                logger.debug(f"Shadow model {i} skipped — training signature mismatch")
+            else:
+                logger.debug(f"Shadow model {i} accepted")
                 filtered_indices.append(i)
 
         return all_indices, filtered_indices
@@ -251,15 +251,17 @@ class ShadowModelHandler(ModelHandler):
 
         # Get the size of the dataset
         data_size = int(len(shadow_population)*training_fraction)
-        all_indices, filtered_indices = self._filter(data_size, online)
+        all_indices, filtered_indices = self._filter(data_size)
 
         # Create a list of indices to use for the new shadow models
         n_existing_models = len(filtered_indices)
 
         if n_existing_models >= num_models:
-            logger.info("Number of existing models exceeds or equals the number of models to create")
+            logger.info(f"Reusing {num_models} cached shadow model(s) — population_hash and training signature match")
             # sort the filtered indices
             return np.sort(filtered_indices)[:num_models]
+
+        logger.info(f"Reusing {n_existing_models} cached shadow model(s), training {num_models - n_existing_models} new one(s)")
 
         indices_to_use = []
         next_index = max(all_indices) + 1 if all_indices else 0
@@ -320,10 +322,11 @@ class ShadowModelHandler(ModelHandler):
                 online = online,
                 model_class = self.model_class,
                 model_module_path = self.model_path,
-                target_model_hash= self.target_model_hash
+                target_model_hash= self.target_model_hash,
+                population_hash = self.population_hash
             )
 
-            ShadowModelHandler().cache_logits(PytorchModel(shadow_model, criterion), name=f"sm_{indx}")
+            ShadowModelHandler().cache_logits(PytorchModel(shadow_model, criterion), name=f"sm_{indx}_{self.population_hash}")
 
             with open(f"{self.storage_path}/{self.metadata_storage_name}_{indx}.pkl", "wb") as f:
                 pickle.dump(meta_data, f)
@@ -404,7 +407,7 @@ class ShadowModelHandler(ModelHandler):
         """Load model logits."""
 
         if name is None and indx is not None:
-            name = f"sm_{indx}"
+            name = f"sm_{indx}_{self.population_hash}"
 
         # check if the name is already in the cache
         cache_file = f"{self.attack_cache_folder_path}/{name}_logits.npy"

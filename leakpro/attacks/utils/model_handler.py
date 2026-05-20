@@ -22,7 +22,7 @@ from leakpro.signals.signal import ModelLogits
 from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import Any, Self, Tuple, Union
 from leakpro.utils.logger import logger
-from leakpro.utils.save_load import hash_model
+from leakpro.utils.save_load import hash_indices, hash_model
 
 
 class ModelHandler():
@@ -61,15 +61,18 @@ class ModelHandler():
         else:
             raise ValueError("Storage path not provided")
 
-        # Create the hash for the target model
+        # Create the hash for the target model weights
         self.target_model_hash = hash_model(self.handler.target_model)
+
+        # Create the hash for the data split — order-sensitive so logit row order is always valid
+        self.population_hash = hash_indices(self.handler.train_indices, self.handler.test_indices)
 
         # Folder to store intermediate results
         self.attack_cache_folder_path = "leakpro_output/attack_cache"
         os.makedirs(self.attack_cache_folder_path, exist_ok=True)
 
         criterion = self.handler.get_criterion()
-        self.cache_logits(PytorchModel(self.handler.target_model, criterion), name="target")
+        self.cache_logits(PytorchModel(self.handler.target_model, criterion), name=f"target_{self.target_model_hash}")
 
     def _load_model_setup(self:Self, caller_configs) -> Tuple[str, str]:  # noqa: ANN001
         """Load the effective model, optimizer, and criterion setup."""
@@ -124,6 +127,7 @@ class ModelHandler():
         if hasattr(configs, "get"):
             return configs.get(field_name, None)
         return getattr(configs, field_name, None)
+
 
 
     def cache_logits(self:Self, model:Union[Module, list[Module]], name:str) -> None:
