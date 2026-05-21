@@ -17,10 +17,13 @@ cd leakpro/webapp/frontend && npm install
 **Backend** (from repo root):
 ```bash
 uvicorn leakpro.webapp.backend.main:app --reload --port 8000
+# To use a different port:
+uvicorn leakpro.webapp.backend.main:app --reload --port 8001
 ```
 
 **Frontend** (from `leakpro/webapp/frontend/`):
 ```bash
+npm install   # only needed once
 npm run dev
 # To use a different backend port:
 BACKEND_PORT=8001 npm run dev
