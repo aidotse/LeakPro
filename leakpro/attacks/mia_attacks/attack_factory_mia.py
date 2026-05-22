@@ -19,6 +19,7 @@ from leakpro.attacks.mia_attacks.ramia import AttackRaMIA
 from leakpro.attacks.mia_attacks.rmia import AttackRMIA
 from leakpro.attacks.mia_attacks.seq_mia import AttackSeqMIA
 from leakpro.attacks.mia_attacks.yoqo import AttackYOQO
+from leakpro.attacks.mia_attacks.merger_merger_sota_ensamble_online import AttackMergerSotaEnsembleOnline
 from leakpro.attacks.utils.distillation_model_handler import DistillationModelHandler
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
@@ -40,6 +41,7 @@ class AttackFactoryMIA:
         "base": AttackBASE,
         "ramia": AttackRaMIA,
         "multi_signal_lira": AttackMSLiRA,
+        "merger_merger_sota_ensamble_online": AttackMergerSotaEnsembleOnline,
         "dts": AttackDTS,
         "oslo": AttackOSLO,
     }
