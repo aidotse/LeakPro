@@ -8,12 +8,13 @@ interface Props {
   onFile: (file: File) => Promise<void>;
   onPath: (path: string) => Promise<void>;
   onDone?: () => void;
+  initialDone?: string;
 }
 
-export default function ServerOrUpload({ label, hint, accept, icon, onFile, onPath, onDone }: Props) {
+export default function ServerOrUpload({ label, hint, accept, icon, onFile, onPath, onDone, initialDone }: Props) {
   const [mode, setMode] = useState<"server" | "upload">("server");
   const [path, setPath] = useState("");
-  const [done, setDone] = useState<string | null>(null);
+  const [done, setDone] = useState<string | null>(initialDone ?? null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

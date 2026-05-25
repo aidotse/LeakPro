@@ -329,13 +329,7 @@ function TrainModelForm({ jobId, onAdded, existingCount, initialModels }: {
   const [logs, setLogs] = useState<string[]>([]);
   const [training, setTraining] = useState(false);
   const [progress, setProgress] = useState<{ epoch: number; total: number; model: string } | null>(null);
-  // Restore metrics from previously trained models when navigating back
-  const [metrics, setMetrics] = useState<TrainMetrics[]>(
-    (initialModels ?? []).filter(m => m.train_accuracy != null).map(m => ({
-      model: m.name, train_acc: m.train_accuracy ?? 0, test_acc: m.test_accuracy ?? 0,
-      loss_history: [], acc_history: [], val_loss_history: [], val_acc_history: [],
-    }))
-  );
+  const [metrics, setMetrics] = useState<TrainMetrics[]>([]);
   const logEndRef = React.useRef<HTMLDivElement>(null);
   const wsRef = React.useRef<WebSocket | null>(null);
 
@@ -397,12 +391,19 @@ function TrainModelForm({ jobId, onAdded, existingCount, initialModels }: {
     };
 
     ws.onclose = () => { setTraining(false); setProgress(null); };
+    ws.onerror = () => { ws.close(); };
 
-    for (const params of toTrain) {
-      // Mark only this batch as "training" — don't touch already-ready models
-      onAdded({ name: params.name, source: "trained", status: "training",
-        dpsgd: params.dpsgd, targetEpsilon: params.target_epsilon, trainParams: params });
-      await api.trainModel(jobId, params);
+    try {
+      for (const params of toTrain) {
+        // Mark only this batch as "training" — don't touch already-ready models
+        onAdded({ name: params.name, source: "trained", status: "training",
+          dpsgd: params.dpsgd, targetEpsilon: params.target_epsilon, trainParams: params });
+        await api.trainModel(jobId, params);
+      }
+    } catch (e) {
+      ws.close();
+      setTraining(false);
+      setProgress(null);
     }
   };
 

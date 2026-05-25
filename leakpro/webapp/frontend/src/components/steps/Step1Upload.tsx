@@ -155,13 +155,13 @@ function CodeModal({ onClose }: { onClose: () => void }) {
 // ---------------------------------------------------------------------------
 // DatasetHandlerUpload — shown after dataset is validated, required to continue
 // ---------------------------------------------------------------------------
-function DatasetHandlerUpload({ jobId, onUploaded }: { jobId: string; onUploaded: (uploaded: boolean) => void }) {
+function DatasetHandlerUpload({ jobId, onUploaded, initialDone }: { jobId: string; onUploaded: (uploaded: boolean) => void; initialDone?: boolean }) {
   const [mode, setMode] = useState<"upload" | "path">("path");
   const [handlerFile, setHandlerFile] = useState<File | null>(null);
   const [serverPath, setServerPath] = useState("");
   const [uploading, setUploading] = useState(false);
-  const [done, setDone] = useState(false);
-  const [doneName, setDoneName] = useState("");
+  const [done, setDone] = useState(initialDone ?? false);
+  const [doneName, setDoneName] = useState(initialDone ? "dataset_handler.py" : "");
   const [error, setError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -365,7 +365,7 @@ function ServerPathForm({ jobId, onDone, initialMeta }: { jobId: string; onDone:
               <MetaField label="Dtype"   value={meta.dtype} />
             </div>
           </div>
-          <DatasetHandlerUpload jobId={jobId} onUploaded={setHandlerUploaded} />
+          <DatasetHandlerUpload jobId={jobId} onUploaded={setHandlerUploaded} initialDone={!!initialMeta} />
           <div className="flex justify-end">
             <button
               onClick={() => onDone(meta)}
@@ -468,7 +468,7 @@ function UploadForm({ jobId, onDone, initialMeta }: { jobId: string; onDone: (m:
             <MetaField label="Dtype"   value={meta.dtype} />
           </div>
         </div>
-        <DatasetHandlerUpload jobId={jobId} onUploaded={setHandlerUploaded} />
+        <DatasetHandlerUpload jobId={jobId} onUploaded={setHandlerUploaded} initialDone={!!initialMeta} />
         <div className="flex justify-end">
           <button
             onClick={() => onDone(meta)}

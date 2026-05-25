@@ -247,7 +247,8 @@ export default function Step3Setup({ jobId, handlerConfig, onDone, initialArch }
   const [expandedPreset, setExpandedPreset] = useState<string | null>(null);
   const [modal, setModal] = useState<"arch" | "handler" | null>(null);
 
-  const canProceed = mode === "preset" ? !!selectedPreset : !!(archFile && handlerFile);
+  const hasRestoredFiles = !!(initialArch?.arch_filename && initialArch?.handler_filename);
+  const canProceed = mode === "preset" ? !!selectedPreset : !!(archFile && handlerFile) || hasRestoredFiles;
 
   const proceed = async () => {
     setLoading(true);
@@ -257,8 +258,8 @@ export default function Step3Setup({ jobId, handlerConfig, onDone, initialArch }
       // only send the arch config here.
       const config: ArchConfig = {
         preset: mode === "preset" ? selectedPreset! : undefined,
-        arch_filename: archFile?.name,
-        handler_filename: handlerFile?.name,
+        arch_filename: archFile?.name ?? initialArch?.arch_filename,
+        handler_filename: handlerFile?.name ?? initialArch?.handler_filename,
       };
       await api.setArchConfig(jobId, config);
       onDone(config);
@@ -383,6 +384,7 @@ export default function Step3Setup({ jobId, handlerConfig, onDone, initialArch }
               hint="Python file defining your nn.Module subclass"
               icon="code"
               accept=".py"
+              initialDone={initialArch?.arch_filename}
               onFile={async (f) => { await api.uploadArch(jobId, f); setArchFile(f); }}
               onPath={async (p) => { await api.setArchPath(jobId, p); setArchFile(new File([], p.split("/").pop() ?? "arch.py")); }}
             />
@@ -406,6 +408,7 @@ export default function Step3Setup({ jobId, handlerConfig, onDone, initialArch }
               hint="Python file with your training handler class"
               icon="settings"
               accept=".py"
+              initialDone={initialArch?.handler_filename}
               onFile={async (f) => { await api.uploadHandler(jobId, f); setHandlerFile(f); }}
               onPath={async (p) => { await api.setHandlerPath(jobId, p); setHandlerFile(new File([], p.split("/").pop() ?? "handler.py")); }}
             />
