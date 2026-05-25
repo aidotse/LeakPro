@@ -40,7 +40,6 @@ The modular framework decomposes gradient inversion attacks into **composable bu
                      │   ├── ClipConstraint
                      │   └── NoConstraint
                      └── TrainingSimulator
-                         ├── DirectGradientComputation
                          └── MultiEpochTrainingSimulation
 ```
 
@@ -135,8 +134,7 @@ Simulate client-side training to compute gradients or parameter updates:
 
 | Simulator | Description | Use Case |
 |-----------|-------------|----------|
-| `DirectGradientComputation` | Single forward/backward pass | Most attacks (DLG, iDLG, Geiping) |
-| `MultiEpochTrainingSimulation` | Simulate multi-epoch training | Realistic FL scenarios |
+| `MultiEpochTrainingSimulation` | Simulate single or multi-epoch training | All attacks (DLG, iDLG, Geiping, FedAvg scenarios). Use `epochs=1, compute_mode="gradients"` for basic gradient-based attacks, or `epochs>1, compute_mode="updates"` for FedAvg scenarios |
 
 **Usage:**
 ```python

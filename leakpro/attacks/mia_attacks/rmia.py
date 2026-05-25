@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Implementation of the RMIA attack."""
 import numpy as np
 from pydantic import BaseModel, Field, model_validator

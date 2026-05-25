@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Parent class for user inputs."""
 
 from abc import ABC, abstractmethod
@@ -33,7 +37,7 @@ class AbstractInputHandler(ABC):
 
     @abstractmethod
     def train(
-        self,
+        self: Self,
         dataloader: DataLoader,
         model: Module,
         criterion: _Loss,
@@ -44,7 +48,7 @@ class AbstractInputHandler(ABC):
 
     @abstractmethod
     def eval(
-        self,
+        self: Self,
         dataloader: DataLoader,
         model: Module,
         criterion: _Loss,
@@ -57,7 +61,7 @@ class AbstractInputHandler(ABC):
         """Parent class for user-defined datasets."""
 
         @abstractmethod
-        def __init__(self, data: Any, targets: Any, **kwargs: dict) -> None:
+        def __init__(self: Self, data: Any, targets: Any, **kwargs: dict) -> None:
             """Abstract base class for datasets. Must be implemented in subclasses."""
             pass
 
@@ -65,10 +69,10 @@ class AbstractInputHandler(ABC):
             """Returns required parameters dynamically."""
             return {k: v for k, v in vars(self).items() if k not in {"data", "targets"}}
 
-        def __len__(self) -> int:
+        def __len__(self: Self) -> int:
             """Return the length of the dataset."""
             return len(self.targets)
 
-        def __getitem__(self, index:int) -> Any:
+        def __getitem__(self: Self, index:int) -> Any:
             """Return a sample from the dataset."""
             return self.data[index], self.targets[index]

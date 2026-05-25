@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Module with utility functions and classes used in synthetic text PII scanner."""
 import json
 from typing import Any, Dict, List, Optional, Tuple, Union

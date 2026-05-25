@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Module for handling shadow models."""
 
 import os
@@ -13,7 +17,7 @@ from leakpro.attacks.utils.model_handler import ModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.schemas import ShadowModelTrainingSchema, TrainingOutput
 from leakpro.signals.signal_extractor import PytorchModel
-from leakpro.utils.import_helper import Self, Tuple
+from leakpro.utils.import_helper import Any, Dict, List, Self, Tuple, Union
 from leakpro.utils.logger import logger
 
 
@@ -67,7 +71,105 @@ class ShadowModelHandler(ModelHandler):
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    def _filter(self:Self, data_size:int)->list[int]:
+    def _freeze_value(self:Self, value: Union[List, Dict, Any]) -> Union[tuple, Any]:
+        """Convert nested config values to a stable, comparable structure.
+
+        Args:
+        ----
+            value: Arbitrary config value taken from shadow-model settings or metadata.
+
+        Returns:
+        -------
+            A recursively normalized representation that can be compared safely
+            when deciding whether cached shadow models were trained with the
+            same effective configuration.
+
+        """
+        if isinstance(value, dict):
+            return tuple((key, self._freeze_value(val)) for key, val in sorted(value.items()))
+        if isinstance(value, list):
+            return tuple(self._freeze_value(item) for item in value)
+        return value
+
+    def _current_training_signature(self:Self, data_size:int, online:bool) -> tuple:
+        """Build the effective training signature for the current shadow setup.
+
+        Args:
+        ----
+            data_size (int): Number of samples that will be used to train a
+                shadow model.
+            online (bool): Whether the shadow models are created in online mode.
+
+        Returns:
+        -------
+            tuple: Normalized description of the active shadow-model training
+            configuration, including architecture, optimizer, criterion,
+            initialization parameters, batch size, and target-model identity.
+
+        """
+        return (
+            data_size,
+            self.model_class,
+            self.model_path,
+            self.target_model_hash,
+            self.optimizer_name,
+            self._freeze_value(self.optimizer_config),
+            self.criterion_name,
+            self._freeze_value(self.loss_config),
+            self.epochs,
+            self.batch_size,
+            online,
+            self._freeze_value(self.init_params),
+        )
+
+    def _metadata_training_signature(self:Self, metadata: ShadowModelTrainingSchema) -> tuple:
+        """Build a normalized training signature from stored shadow metadata.
+
+        Args:
+        ----
+            metadata (ShadowModelTrainingSchema): Metadata loaded for a cached
+                shadow model.
+
+        Returns:
+        -------
+            tuple: Normalized representation of the stored training setup. If
+            older metadata files do not contain newly added fields, they will
+            naturally fail to match the current signature and therefore be
+            retrained instead of being silently reused.
+
+        """
+        return (
+            metadata.num_train,
+            metadata.model_class,
+            getattr(metadata, "model_module_path", None),
+            metadata.target_model_hash,
+            metadata.optimizer.lower(),
+            self._freeze_value(getattr(metadata, "optimizer_params", None)),
+            metadata.criterion.lower(),
+            self._freeze_value(getattr(metadata, "criterion_params", None)),
+            metadata.epochs,
+            getattr(metadata, "batch_size", None),
+            metadata.online,
+            self._freeze_value(metadata.init_params),
+        )
+
+    def _filter(self:Self, data_size:int, online:bool) -> tuple[list[int], list[int]]:
+        """Find cached shadow models compatible with the current configuration.
+
+        Args:
+        ----
+            data_size (int): Number of samples that should be used for each
+                shadow-model training run.
+            online (bool): Whether the requested shadow models are for online
+                or offline use.
+
+        Returns:
+        -------
+            tuple[list[int], list[int]]: Two lists packed in a tuple-like return value:
+            all discovered metadata indices and the subset whose stored
+            signature matches the current effective training configuration.
+
+        """
         # Get the metadata for the shadow models
         entries = os.listdir(self.storage_path)
         pattern = re.compile(rf"^{self.metadata_storage_name}_\d+\.pkl$")
@@ -76,28 +178,26 @@ class ShadowModelHandler(ModelHandler):
         # Extract the index of the metadata
         all_indices = [int(re.search(r"\d+", f).group()) for f in files]
 
-        # Setup checks
-        # TODO: we use the same shadow models for all targets!
-        filter_checks = [data_size, self.model_class]
+        expected_signature = self._current_training_signature(data_size, online)
 
         # Filter out indices to only keep the ones that passes the checks
         filtered_indices = []
         for i in all_indices:
             metadata = self._load_shadow_metadata(i)
-            assert isinstance(metadata, ShadowModelTrainingSchema), "Shadow Model metadata is not of the correct type"
-            meta_check_values = [metadata.num_train, metadata.model_class]
-            if all(a == b for a, b in zip(filter_checks, meta_check_values)):
+            if not isinstance(metadata, ShadowModelTrainingSchema):
+                raise TypeError("Shadow Model metadata is not of the correct type")
+            if self._metadata_training_signature(metadata) == expected_signature:
                 filtered_indices.append(i)
 
         return all_indices, filtered_indices
 
     def construct_balanced_assignments(self, m: int, n: int, seed: int = None) -> np.ndarray:
-        """Assigns each of m data points to exactly n/2 out of n datasets by partitioning.
+        """Assigns each of m data points to approximately n/2 out of n datasets by partitioning.
 
         Args:
         ----
             m (int): The number of data points.
-            n (int): The number of datasets (must be even).
+            n (int): The number of datasets.
             seed (int, optional): Random seed for reproducibility. Defaults to None.
 
         Returns:
@@ -105,18 +205,22 @@ class ShadowModelHandler(ModelHandler):
             A (np.ndarray): binary matrix of shape (n, m) where A[i,j] = 1 if data point j is in dataset i.
 
         """
-        assert n % 2 == 0, "n must be even"
         if seed is not None:
             np.random.seed(seed)
 
         A = np.zeros((n, m), dtype=np.uint8)  # noqa: N806
         all_indices = np.arange(m)
 
-        for i in range(0, n, 2):
+        for i in range(0, n - 1, 2):
             permuted = np.random.permutation(all_indices)
             half = m // 2
             A[i, permuted[:half]] = 1       # First half to dataset i
             A[i+1, permuted[half:]] = 1     # Second half to dataset i+1
+
+        if n % 2 == 1:
+            permuted = np.random.permutation(all_indices)
+            half = m // 2
+            A[n - 1, permuted[:half]] = 1   # Last dataset gets half for odd n
 
         return A
 
@@ -147,7 +251,7 @@ class ShadowModelHandler(ModelHandler):
 
         # Get the size of the dataset
         data_size = int(len(shadow_population)*training_fraction)
-        all_indices, filtered_indices = self._filter(data_size)
+        all_indices, filtered_indices = self._filter(data_size, online)
 
         # Create a list of indices to use for the new shadow models
         n_existing_models = len(filtered_indices)
@@ -164,13 +268,14 @@ class ShadowModelHandler(ModelHandler):
             next_index += 1
 
         A = self.construct_balanced_assignments(len(shadow_population), num_models)  # noqa: N806
-        assert np.all(np.sum(A,axis=0) == num_models//2)
-        assert np.all(np.sum(A,axis=1) == len(shadow_population)//2)
+        expected_size = len(shadow_population) // 2
+        if not np.all(np.sum(A, axis=1) == expected_size):
+            raise ValueError("Balanced shadow assignments must contain half of the shadow population per model")
         shadow_population = np.array(shadow_population)
         for i, indx in enumerate(indices_to_use):
             # Get dataloader
             data_indices = shadow_population[np.where(A[i,:] == 1)]
-            data_loader = self.handler.get_dataloader(data_indices, params=None)
+            data_loader = self.handler.get_dataloader(data_indices, params=None, batch_size=self.batch_size)
 
             # Get shadow model blueprint
             model, criterion, optimizer = self._get_model_criterion_optimizer()
@@ -180,7 +285,8 @@ class ShadowModelHandler(ModelHandler):
             training_results = self.handler.train(data_loader, model, criterion, optimizer, self.epochs)
 
             # Read out results
-            assert isinstance(training_results, TrainingOutput)
+            if not isinstance(training_results, TrainingOutput):
+                raise TypeError("Shadow model training must return TrainingOutput")
             shadow_model = training_results.model
 
             # Evaluate shadow model on remaining aux data
@@ -203,23 +309,34 @@ class ShadowModelHandler(ModelHandler):
                 init_params=self.init_params,
                 train_indices = data_indices,
                 num_train = len(data_indices),
-                optimizer = optimizer.__class__.__name__,
-                criterion = criterion.__class__.__name__,
+                optimizer = self.optimizer_name,
+                optimizer_params = self.optimizer_config,
+                criterion = self.criterion_name,
+                criterion_params = self.loss_config,
                 epochs = self.epochs,
+                batch_size = self.batch_size,
                 train_result = training_results.metrics,
                 test_result = test_result,
                 online = online,
                 model_class = self.model_class,
+                model_module_path = self.model_path,
                 target_model_hash= self.target_model_hash
             )
 
             ShadowModelHandler().cache_logits(PytorchModel(shadow_model, criterion), name=f"sm_{indx}")
 
-            logger.info(f"Metadata for shadow model {indx}:\n{meta_data}")
             with open(f"{self.storage_path}/{self.metadata_storage_name}_{indx}.pkl", "wb") as f:
                 pickle.dump(meta_data, f)
 
+            meta_dic = meta_data.model_dump()
+            filtered_meta_data = {
+                    k: v for k, v in meta_dic.items()
+                    if k != "train_indices"
+            }
+
+            logger.info(f"Metadata for shadow model {indx}: {filtered_meta_data}")
             logger.info(f"Metadata for shadow model {indx} stored in {self.storage_path}")
+
         return filtered_indices + indices_to_use
 
     def _load_shadow_model(self:Self, index:int) -> Module:

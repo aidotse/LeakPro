@@ -1,0 +1,126 @@
+LeakPro
+Copyright 2023-2026 Lindholmen Science Park AB
+
+This product includes software developed at Lindholmen Science Park AB
+
+===============================================================================
+==  Third-party Dependency Notices                                           ==
+===============================================================================
+
+1. anonymeter
+   Located in: leakpro/synthetic_data_attacks/anonymeter directory
+   Copyright (c) 2022 Anonos IP LLC (IP Owner).
+   Licensed under The Clear BSD License.
+
+2. HopSkipJumpDistance
+   Located in: leakpro/signals/utils/HopSkipJumpDistance.py
+   Copyright (c) 2019 Google Inc., OpenAI and Pennsylvania State University.
+   Licensed under MIT License.
+
+3. YOLO
+   The 'examples/gia/coco_yolo_1_image/' directory contains implementations of 
+   YOLO. Licensed under the GNU Affero General Public License v3.0 (AGPL-3.0).
+   Note: This attribution applies only to the contents of the examples folder.
+
+4. MIMIC Extract
+   Located in: examples/mia/LOS/mimiciii_prepration/MIMIC_Extract
+   Copyright (c) 2019 MLforHealth.
+   Licensed under MIT License.
+   
+5. MIMIC Code
+   Located in: examples/mia/LOS/mimiciii_prepration/mimic-code
+   Copyright (c) 2019 MIT Laboratory for Computational Physiology.
+   Licensed under MIT License.
+
+6. N-BEATS Implementation (Element AI)
+   Location in: examples/mia/time_series_mia/utils/models/NBeats.py
+   Copyright © 2020 Element AI Inc. All rights reserved.
+   License under Creative Commons Attribution-NonCommercial 4.0 International 
+   (CC BY-NC 4.0).
+   Based on Oreshkin et al., "N-BEATS: Neural basis expansion analysis for 
+   interpretable time series forecasting."
+   RESTRICTION: This specific component is licensed for NON-COMMERCIAL USE ONLY. 
+   Any commercial use requires an explicit license from Element AI Inc.
+
+7. TS2Vec
+   Located in: leakpro/signals/utils/get_TS2Vec.py (imported as dependency)
+   Copyright (c) 2022 Zhihan Yue et al.
+   Licensed under MIT License.
+   Source: https://github.com/yuezhihan/ts2vec
+   Note: Package metadata does not declare a license; license identified from upstream source.
+
+===============================================================================
+==  Scientific Acknowledgments                                               ==
+===============================================================================
+
+1. This product includes an implementation of the BCJR decoder based on 
+   the research of G. Liva, E. Paolini and M. Chiani: 
+   "Optimum Detection of Defective Elements in Non-Adaptive Group Testing" 
+   (2021).
+
+===============================================================================
+==  Media and Asset Attributions                                             ==
+===============================================================================
+
+The following icons are used under the Flaticon Free License 
+(https://www.flaticon.com/legal):
+
+1. Hospital
+   Author: Freepik
+   Source: https://www.flaticon.com/free-icons/hospital
+   Location: resources/los.png
+
+2. Hospital bed
+   Author: vectorsmarket15
+   Source: https://www.flaticon.com/free-icons/page
+   Location: resources/los.png
+
+3. Documents
+   Author: Freepik
+   Source: https://www.flaticon.com/free-icons/hospital
+   Location: resources/NER.png
+
+4. Camera
+   Author: dreamicons
+   Source: https://www.flaticon.com/free-icons/camera
+   Location: resources/surveillance.png
+
+5. Molecule
+   Author: Freepik
+   Source: https://www.flaticon.com/free-icons/molecule
+   Location: resources/graph.png
+
+6. Mia flow
+   Location: resources/mia_flow.png
+   * Loop icon
+     Author: Pixel
+     Source: https://www.flaticon.com/free-icons/loop
+   * Setting icon
+     Author: Freepik
+     Source: https://www.flaticon.com/free-icons/setting
+   * Neural network icon
+     Author: Freepik
+     Source: https://www.flaticon.com/free-icons/neural-network
+   * Code icon
+     Author: Freepik
+     Source: https://www.flaticon.com/free-icons/code
+   * Toolbox icon
+     Author: Freepik
+     Source: https://www.flaticon.com/free-icons/toolbox
+   * Hammer icon
+     Author: Freepik
+     Source: https://www.flaticon.com/free-icons/hammer
+   * Bar chart icon
+     Author: Freepik
+     Source: https://www.flaticon.com/free-icons/bar-chart
+   * Funnel icon
+     Author: Freepik
+     Source: https://www.flaticon.com/free-icons/funnel
+   * Pdf icon
+     Author: Freepik
+     Source: https://www.flaticon.com/free-icons/pdf
+   * Tick icon
+     Author: Freepik
+     Source: https://www.flaticon.com/free-icons/tick
+   
+-------------------------------------------------------------------------------

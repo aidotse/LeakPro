@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Huang, Yangisibo, et al. "Evaluating Gradient Inversion Attacks and Defenses in Federated Learning."."""
 
 import os
@@ -34,11 +38,11 @@ class HuangConfig:
     # iterations for the attack steps
     at_iterations: int = 10000
     # MetaOptimizer, see MetaSGD for implementation
-    optimizer: object = field(default_factory=lambda: MetaSGD())
+    optimizer: object = field(default_factory=MetaSGD)
     # Client loss function
     criterion: object = field(default_factory=lambda: CrossEntropyLoss(reduction="mean"))
     # Data modality extension
-    data_extension: GiaDataModalityExtension = field(default_factory=lambda: GiaImageExtension())
+    data_extension: GiaDataModalityExtension = field(default_factory=GiaImageExtension)
     # Number of epochs for the client attack
     epochs: int = 1
     # if to use median pool 2d on images, can improve attack on high higher resolution (100+)

@@ -56,7 +56,7 @@ Our [example portfolio](https://github.com/aidotse/LeakPro/tree/readme/examples)
       <strong>Length-of-stay Prediction</strong><br>
       <img src="./resources/los.png" alt="LOS" style="width:150px; height:150px;">
       <br>
-      <a href="length-of-stay.md">length-of-stay.md</a>
+      <a href="examples/use-cases/length-of-stay.md">length-of-stay.md</a>
       <div style="text-align: left;">
         MIA: ✅<br>
         MInvA: ❌<br>
@@ -68,7 +68,7 @@ Our [example portfolio](https://github.com/aidotse/LeakPro/tree/readme/examples)
       <strong>Text Masking</strong><br>
       <img src="./resources/NER.png" alt="NER" style="width:150px; height:150px;">
       <br>
-      <a href="text-masking.md">text-masking.md</a>
+      <a href="examples/use-cases/text-masking.md">text-masking.md</a>
       <div style="text-align: left;">
         MIA: ✅<br>
         MInvA: ❌<br>
@@ -82,7 +82,7 @@ Our [example portfolio](https://github.com/aidotse/LeakPro/tree/readme/examples)
       <strong>Camera Surveillance</strong><br>
       <img src="./resources/surveillance.png" alt="Surveillance" style="width:150px; height:150px;">
       <br>
-      <a href="surveillance.md">surveillance.md</a>
+      <a href="examples/use-cases/surveillance.md">surveillance.md</a>
       <div style="text-align: left;">
         MIA: ✅<br>
         MInvA: ❌<br>
@@ -94,7 +94,7 @@ Our [example portfolio](https://github.com/aidotse/LeakPro/tree/readme/examples)
       <strong>Molecule Property Prediction</strong><br>
       <img src="./resources/graph.png" alt="Graph" style="width:150px; height:150px;">
       <br>
-      <a href="molecule-property.md">molecule-property.md</a>
+      <a href="examples/use-cases/molecule-property.md">molecule-property.md</a>
       <div style="text-align: left;">
         MIA: ✅<br>
         MInvA: ❌<br>
@@ -147,12 +147,23 @@ For full documentation see the **[LeakPro Wiki](https://github.com/aidotse/LeakP
 - [Running MIA Attacks — audit.yaml config reference for all MIA attacks](https://github.com/aidotse/LeakPro/wiki/Running-MIA-Attacks)
 
 ## To Contribute
+
+### External contributors
+1. **Fork the repository** by clicking "Fork" on the GitHub page
+2. **Clone your fork, create a branch, and make your changes:**
+`git clone https://github.com/<your-username>/LeakPro.git`
+`git checkout -b my-feature-branch`
+3. **Push to your fork:**
+`git push origin my-feature-branch`
+4. **Open a Pull Request** from your fork to `aidotse/LeakPro:main` and request a review — a maintainer will review and merge it
+
+### Core team
 0. **Ensure local repo is up-to-date:**
 `git fetch origin`
 2. **Create feature branch**
  `git checkout -b my-feature-branch`
 3. **Make changes and commit:**
-`git add . ` 
+`git add . `
 `git commit -m "Added new feature" `
 4. **Ensure the local main is up to date:**
 `git checkout main`
@@ -161,9 +172,8 @@ For full documentation see the **[LeakPro Wiki](https://github.com/aidotse/LeakP
 `git checkout my-feature-branch`
 `git merge main`
 6. **Resolve conflicts, add and commit.**
-7. **Push your update to the remore repository**
+7. **Push your branch and open a Pull Request — PRs require at least one approval from another team member before merging**
 `git push origin my-feature-branch`
-8. **Open pull request**
 
 
 ## Research Outputs  
@@ -172,6 +182,9 @@ LeakPro has contributed to the research community by enabling empirical studies 
 - [Krüger et al., *Publishing Neural Networks in Drug Discovery Might Compromise Training Data Privacy*, J. Cheminf, 2025](https://arxiv.org/abs/2410.16975)  
 - [Brännvall et al., *Targeted Obfuscation for Machine Learning*, arXiv, 2024](https://arxiv.org/abs/2501.11525)
 - [Reimer A., *Privacy Risks in Text Masking Models for Anonymization*, MSc Thesis, Chalmers University of Technology, 2025](https://odr.chalmers.se/server/api/core/bitstreams/3c2efd19-5440-43f7-a25f-051313f99c60/content)
+- [Lassila et al., *Practical Bayes-Optimal Membership Inference Attacks*, NeurIPS, 2025](https://neurips.cc/virtual/2025/loc/san-diego/poster/118144)
+- [Valadi et al., *From Research to Reality: Feasibility of Gradient Inversion Attacks in Federated Learning*, arXiv, 2025](https://arxiv.org/abs/2508.19819v2)
+- [Johansson et al., *Privacy Risks in Time Series Forecasting: User-and Record-Level Membership Inference*, arXiv, 2025](https://arxiv.org/abs/2509.04169)
 
 ## Credits
 LeakPro draws inspiration from other works including
@@ -179,4 +192,21 @@ LeakPro draws inspiration from other works including
 - [Giomi, M. et al., *A Unified Framework for Quantifying Privacy Risk in Synthetic Data, arXiv, 2022*](https://github.com/statice/anonymeter)
 
 ## Funding  
-LeakPro is funded by Sweden's innovation agency, Vinnova, under grant 2023-03000. The project is a collaboration between AI Sweden, RISE, Scaleout AB, Syndata AB, AstraZeneca AB, Sahlgrenska University Hopsital, and Region Halland, with the goal of advancing privacy-preserving machine learning and responsible AI deployment.  
+LeakPro is funded by Sweden's innovation agency, Vinnova, under grant 2023-03000. The project is a collaboration between AI Sweden, RISE, Scaleout AB, Syndata AB, AstraZeneca AB, Sahlgrenska University Hopsital, and Region Halland, with the goal of advancing privacy-preserving machine learning and responsible AI deployment.
+
+## License
+
+This project is licensed under the **Apache License 2.0**. 
+
+Copyright 2023-2026 **Lindholmen Science Park AB**.
+
+For full legal texts and attributions, please refer to the [LICENSE](LICENSE) and [NOTICE](NOTICE) files.
+
+## Attributions
+
+### Images
+* [Hospital icons created by Freepik - Flaticon](https://www.flaticon.com/free-icons/hospital)
+* [Hospital bed icons created by vectorsmarket15 - Flaticon](https://www.flaticon.com/free-icons/hospital-bed)
+* [Document icons created by Freepik - Flaticon](https://www.flaticon.com/free-icons/document)
+* [Camera icons created by dreamicons - Flaticon](https://www.flaticon.com/free-icons/camera)
+* [Molecule icons created by Freepik - Flaticon](https://www.flaticon.com/free-icons/molecule)

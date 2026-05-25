@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Main class for LeakPro."""
 
 import inspect
@@ -81,6 +85,15 @@ class LeakPro:
         """
         # Resolve which handler provides train/eval
         training_handler = model_handler if model_handler is not None else user_input_handler
+
+        # Guard against data-only handlers being silently used for training
+        source = "model_handler" if model_handler is not None else "user_input_handler"
+        for method in ("train", "eval"):
+            if getattr(training_handler, method, None) is getattr(AbstractInputHandler, method, None):
+                raise ValueError(
+                    f"{source} must implement {method}(). "
+                    "Use role='model' and override train()/eval(), or pass a model_handler."
+                )
 
         if configs.audit.attack_type == "mia":
             handler = MIAHandler(configs, user_input_handler, training_handler)
