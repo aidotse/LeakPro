@@ -69,7 +69,25 @@ class MIAHandler:
                 try:
                     return super().find_class(module, name)
                 except (ImportError, AttributeError):
-                    return type(name, (), {})
+                    # Return a stub that behaves like a dataset so that old
+                    # pickles (created with a renamed/removed handler class)
+                    # can still be loaded and inspected via their __dict__.
+                    class _DatasetStub:
+                        def __len__(self):
+                            d = object.__getattribute__(self, "__dict__")
+                            for k in ("data", "x", "X", "targets", "y", "Y"):
+                                if k in d:
+                                    return len(d[k])
+                            return 0
+                        def __getitem__(self, idx):
+                            d = object.__getattribute__(self, "__dict__")
+                            data = d.get("data", d.get("x", d.get("X")))
+                            targets = d.get("targets", d.get("y", d.get("Y")))
+                            return (data[idx] if data is not None else None,
+                                    targets[idx] if targets is not None else None)
+                    _DatasetStub.__name__ = name
+                    _DatasetStub.__qualname__ = name
+                    return _DatasetStub
 
         try:
             with open(self.configs.target.data_path, "rb") as file:
