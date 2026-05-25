@@ -253,10 +253,8 @@ export default function Step3Setup({ jobId, handlerConfig, onDone, initialArch }
     setLoading(true);
     setError(null);
     try {
-      if (mode === "upload" && archFile && handlerFile) {
-        await api.uploadArch(jobId, archFile);
-        await api.uploadHandler(jobId, handlerFile);
-      }
+      // Files are already uploaded/copied eagerly by onFile/onPath callbacks;
+      // only send the arch config here.
       const config: ArchConfig = {
         preset: mode === "preset" ? selectedPreset! : undefined,
         arch_filename: archFile?.name,
