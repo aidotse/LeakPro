@@ -51,6 +51,33 @@ def _default_train(loader, model, criterion, optimizer, epochs,
             if hasattr(module, "inplace") and isinstance(module.inplace, bool):
                 module.inplace = False
 
+        # ModuleValidator.fix() replaces BatchNorm but leaves ResNet's skip-connection
+        # `out += identity` in-place, which Opacus's backward hooks forbid.
+        # Patch every BasicBlock/Bottleneck to use `out = out + identity` instead.
+        try:
+            import types as _types
+            from torchvision.models.resnet import BasicBlock as _BB, Bottleneck as _BN
+            def _bb_fwd(self, x):
+                identity = x
+                out = self.conv1(x); out = self.bn1(out); out = self.relu(out)
+                out = self.conv2(out); out = self.bn2(out)
+                if self.downsample is not None: identity = self.downsample(x)
+                return self.relu(out + identity)
+            def _bn_fwd(self, x):
+                identity = x
+                out = self.conv1(x); out = self.bn1(out); out = self.relu(out)
+                out = self.conv2(out); out = self.bn2(out); out = self.relu(out)
+                out = self.conv3(out); out = self.bn3(out)
+                if self.downsample is not None: identity = self.downsample(x)
+                return self.relu(out + identity)
+            for _m in model.modules():
+                if isinstance(_m, _BB):
+                    _m.forward = _types.MethodType(_bb_fwd, _m)
+                elif isinstance(_m, _BN):
+                    _m.forward = _types.MethodType(_bn_fwd, _m)
+        except ImportError:
+            pass
+
         if not os.path.exists(dpsgd_metadata_path):
             raise FileNotFoundError(f"DP-SGD config not found: {dpsgd_metadata_path}")
         with open(dpsgd_metadata_path, "rb") as f:
