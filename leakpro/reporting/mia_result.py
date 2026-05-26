@@ -239,10 +239,10 @@ class MIAResult:
         self.tpr = np.where(self.tp + self.fn != 0, self.tp / (self.tp + self.fn), 0.0)
 
         if np.sum(np.diff(self.fpr) < 0) > 0 or np.sum(np.diff(self.tpr) < 0) > 0:
-            logger.warning("FPR or TPR values are not monotonically increasing. ROC AUC may be inaccurate.")
-            self.roc_auc = None
-            self.fixed_fpr_table = None
-            return
+            logger.warning("FPR or TPR values are not monotonically increasing. Sorting by FPR before computing AUC.")
+            sort_idx = np.argsort(self.fpr)
+            self.fpr = self.fpr[sort_idx]
+            self.tpr = self.tpr[sort_idx]
 
         self.roc_auc = auc(self.fpr, self.tpr)
         self.fixed_fpr_table = self._get_result_fixed_fpr([0.0, 0.0001, 0.001, 0.01, 0.1])

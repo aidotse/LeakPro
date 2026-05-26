@@ -154,16 +154,22 @@ class AttackRMIA(AbstractMIA):
         # collect the softmax output of the correct class
         n_attack_points = self.z_data_sample_fraction * len(self.handler.population) # points to compute p(z)
 
+        # Logit cache rows are positional (0..N-1 matching train_indices + test_indices order).
+        # z_indices are raw population indices, so map them to row positions before indexing.
+        all_cached_indices = np.concatenate((self.handler.train_indices, self.handler.test_indices))
+        logit_row = {int(idx): i for i, idx in enumerate(all_cached_indices)}
+
         # pick random indices sampled from the attack data
         z_indices = np.random.choice(self.attack_data_indices, size=int(n_attack_points), replace=False)
         z_labels = self.handler.get_labels(z_indices)
+        z_rows = np.array([logit_row[int(idx)] for idx in z_indices])
 
-        p_z_given_theta = softmax_logits(self.logits_theta, self.temperature)[z_indices,z_labels]  # noqa: E501
+        p_z_given_theta = softmax_logits(self.logits_theta, self.temperature)[z_rows, z_labels]
         p_z_given_theta = np.atleast_2d(p_z_given_theta)
 
         # collect the softmax output of the correct class for each shadow model
         sm_logits_shadow_models = [softmax_logits(x, self.temperature) for x in self.logits_shadow_models]
-        p_z_given_shadow_models = np.array([x[z_indices,z_labels] for x in sm_logits_shadow_models])  # noqa: E501
+        p_z_given_shadow_models = np.array([x[z_rows, z_labels] for x in sm_logits_shadow_models])
 
         # evaluate the marginal p(z)
         if self.online is True:

@@ -81,6 +81,7 @@ exclude = [
   "./tests",
   "./leakpro/tests",
   "./examples",
+  "./leakpro/webapp",
 ]
 
 lint.ignore = [
