@@ -331,7 +331,7 @@ class DiffMiHandler():
             raise ValueError("batch_size must be a positive integer.")
 
         if not hasattr(self, "diffusion_model") or not hasattr(self, "diffusion"):
-            model = self.get_finetuned() if self.configs.do_fine_tune else self.get_pretrained()
+            model = self._load_sampling_model()
         else:
             model = self.diffusion_model
 
@@ -369,6 +369,34 @@ class DiffMiHandler():
             )
 
         return ((samples + 1) / 2).clamp(0, 1), labels
+
+    def _load_sampling_model(self: Self) -> Module:
+        """Load an existing checkpoint for standalone sampling without starting training."""
+        if self.configs.do_fine_tune:
+            fine_tune_path = f"{self.configs.save_path}/{self.configs.finetune.save_name}.pt"
+            if os.path.exists(fine_tune_path) and self._is_finetune_complete():
+                return self.get_finetuned()
+
+            logger.warning(
+                "No completed fine-tuned diffusion checkpoint was found; "
+                "trying the completed pre-trained checkpoint for sampling instead."
+            )
+
+        pre_trained_path = f"{self.configs.save_path}/{self.configs.pretrain.save_name}.pt"
+        if os.path.exists(pre_trained_path) and self._is_pretrain_complete():
+            self.configs.do_fine_tune = False
+            return self.get_pretrained()
+
+        if self.configs.do_fine_tune:
+            raise FileNotFoundError(
+                "No completed Diff-MI checkpoint is available for sampling. "
+                f"Missing completed fine-tuned checkpoint at {fine_tune_path} and "
+                f"completed pre-trained checkpoint at {pre_trained_path}."
+            )
+        raise FileNotFoundError(
+            "No completed pre-trained Diff-MI checkpoint is available for sampling at "
+            f"{pre_trained_path}."
+        )
 
     def save_diffusion_model(self, diffusion_model: Module, path: str) -> None:
         """Save the diffusion model.

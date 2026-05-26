@@ -10,7 +10,7 @@ import torch.nn.functional as F
 import torchvision
 
 class VGG16(nn.Module):
-    def __init__(self, num_classes,  return_feature=True):
+    def __init__(self, num_classes,  return_feature=False):
         super(VGG16, self).__init__()
 
         self.init_params = {"num_classes": num_classes,

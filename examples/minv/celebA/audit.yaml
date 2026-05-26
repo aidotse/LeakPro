@@ -63,7 +63,7 @@ audit:  # Configurations for auditing
     eval_model:
       module_path: ./models.py 
       model_class: VGG16  # Class name of the model
-      eval_folder: "./target/vgg16" # Path to the model checkpoint
+      eval_folder: "./target/" # Path to the model checkpoint
     metrics:
       accuracy:
       knn:
@@ -80,6 +80,6 @@ target:
   module_path: ./models.py 
   model_class: VGG16 
   # Data paths
-  target_folder: "./target/vgg16"
+  target_folder: "./target/"
   data_path: "./data/celebA_private_data.pkl"
   public_data_path: "./data/celebA_public_data.pkl"

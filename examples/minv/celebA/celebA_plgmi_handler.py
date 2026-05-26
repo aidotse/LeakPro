@@ -132,7 +132,6 @@ class CelebA_InputHandler(AbstractInputHandler):
                 log_interval: Log interval.
                 sample_from_generator: Function to sample from the generator.
         """
-        torch.set_default_device(device)
         torch.backends.cudnn.benchmark = True
         gen_losses = []
         dis_losses = []

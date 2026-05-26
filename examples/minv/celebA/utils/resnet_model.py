@@ -20,37 +20,57 @@ from leakpro.utils.conversion import loss_to_config, optimizer_to_config, datalo
 
 
 class BaseCNN(nn.Module):
-    def __init__(self, num_classes):
+    def __init__(self, num_classes, return_feature=False):
         super().__init__()
         self.num_classes = num_classes
-        # Keep track of initialization parameters for metadata generation
-        self.init_params = {"num_classes": num_classes}
+        self.return_feature = return_feature
+        # Keep track of initialization parameters for metadata generation.
+        self.init_params = {"num_classes": num_classes, "return_feature": return_feature}
 
-    def forward(self, x):
-        return self.model(x)
+    def forward(self, x, **kwargs):
+        if not self.return_feature:
+            return self.model(x)
+
+        feature = None
+
+        def capture_fc_input(_module, inputs, _output):
+            nonlocal feature
+            feature = inputs[0]
+
+        hook = self.model.fc.register_forward_hook(capture_fc_input)
+        try:
+            res = self.model(x)
+        finally:
+            hook.remove()
+
+        return [feature, res]
 
 
 class ResNet18(BaseCNN):
-    def __init__(self, num_classes):
-        super().__init__(num_classes)
+    def __init__(self, num_classes, return_feature=False):
+        super().__init__(num_classes, return_feature=return_feature)
         self.model = resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
         # Replace the final fully-connected layer to match the desired number of classes
-        self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
+        self.feat_dim = self.model.fc.in_features
+        self.model.fc = nn.Linear(self.feat_dim, num_classes)
 
 
 class ResNet50(BaseCNN):
-    def __init__(self, num_classes):
-        super().__init__(num_classes)
+    def __init__(self, num_classes, return_feature=False):
+        super().__init__(num_classes, return_feature=return_feature)
         self.model = resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
         # Replace the final fully-connected layer to match the desired number of classes
-        self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
+        self.feat_dim = self.model.fc.in_features
+        self.model.fc = nn.Linear(self.feat_dim, num_classes)
+
 
 class ResNet152(BaseCNN):
-    def __init__(self, num_classes):
-        super().__init__(num_classes)
+    def __init__(self, num_classes, return_feature=False):
+        super().__init__(num_classes, return_feature=return_feature)
         self.model = resnet152(weights=ResNet152_Weights.IMAGENET1K_V2)
         # Replace the final fully-connected layer to match the desired number of classes
-        self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
+        self.feat_dim = self.model.fc.in_features
+        self.model.fc = nn.Linear(self.feat_dim, num_classes)
 
 
 def evaluate(model, loader, criterion, device):

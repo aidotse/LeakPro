@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 """ImageMetrics class for computing image metrics."""
+import json
 import os
 
 import joblib
@@ -18,6 +19,7 @@ from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.input_handler.user_imports import get_class_from_module, import_module_from_file
 from leakpro.schemas import MIAMetaDataSchema
 from leakpro.utils.logger import logger
+from leakpro.utils.save_load import hash_config
 
 
 class ImageMetrics:
@@ -211,7 +213,7 @@ class ImageMetrics:
 
         # Image transformation for evaluation model input
         transform = transforms.Compose([
-            transforms.Resize((112, 112)),
+            transforms.Resize((64, 64)),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
         ])
@@ -330,14 +332,15 @@ class ImageMetrics:
 
 
     def save_images(self) -> None:
-        """Save generated images to disk."""
+        """Generate images and defer writing until the result directory is known."""
         self.generator.eval()
         self.generator.to(self.device)
 
-        n_images = self.configs.metrics["save_images"]["n_images"]
-        save_path = self.configs.metrics["save_images"]["save_dir"]
-
-        generated_images = []
+        save_config = self.configs.metrics["save_images"]
+        n_images = save_config["n_images"]
+        configured_save_dir = save_config.get("save_dir", "img")
+        self.image_save_subdir = os.path.basename(os.path.normpath(configured_save_dir)) or "img"
+        self.generated_images = []
 
         i = 0
         labels = set()
@@ -351,17 +354,65 @@ class ImageMetrics:
                 generated_sample = self.generator_handler.sample_from_generator(batch_size=1,
                                                                                 label=label_i,
                                                                                 z=z_i)
-                # Save the generated image
-                generated_images.append((generated_sample[0], label_i.item(), i))
+                self.generated_images.append((generated_sample[0], label_i.item(), i))
                 i += 1
                 labels.add(label_i.item())
 
-        logger.info(f"Generated {len(generated_images)} images from labels {labels}.")
+        logger.info(f"Generated {len(self.generated_images)} images from labels {labels}.")
+
+    def _write_generated_images(self, save_path: str) -> None:
+        """Write generated images to a directory."""
         os.makedirs(save_path, exist_ok=True)
-        for img, label, i in generated_images:
+        for img, label, i in getattr(self, "generated_images", []):
             img = img.squeeze(0)
             img = self.tensor_to_pil(img)
-
             img.save(f"{save_path}/label_{label}_image_{i}.png")
 
-        pass
+    def _create_dir(self, path: str) -> None:
+        if not os.path.exists(path):
+            os.makedirs(path)
+
+    def save(self, attack_obj: object, output_dir: str) -> None:
+        """Save computed image metrics to the standard LeakPro result locations."""
+        def json_fallback(obj):
+            if isinstance(obj, torch.Tensor):
+                return obj.detach().cpu().tolist()
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            if isinstance(obj, (np.integer, np.floating)):
+                return obj.item()
+            raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
+        def json_ready(obj):
+            return json.loads(json.dumps(obj, default=json_fallback))
+
+        attack_name = attack_obj.__class__.__name__.replace("Attack", "").lower()
+        config = self.configs.model_dump() if hasattr(self.configs, "model_dump") else self.configs
+        result_hash = hash_config({
+            "attack": attack_name,
+            "config": json_ready(config),
+            "metrics": json_ready(self.results),
+        })[:8]
+        result_id = f"minv-{attack_name}-{result_hash}"
+        save_path = f"{output_dir}/results/{result_id}"
+        data_obj_storage = f"{output_dir}/data_objects/"
+        self._create_dir(save_path)
+        self._create_dir(data_obj_storage)
+
+        result = {
+            "name": f"{attack_name.upper()} Image Metrics",
+            "id": result_id,
+            "config": json_ready(config),
+            "metrics": json_ready(self.results),
+        }
+
+        with open(f"{data_obj_storage}{result_id}.json", "w") as f:
+            json.dump(result, f)
+
+        with open(f"{save_path}/result.txt", "w") as f:
+            f.write(str(result))
+
+        if hasattr(self, "generated_images"):
+            image_dir = f"{save_path}/{getattr(self, 'image_save_subdir', 'img')}"
+            self._write_generated_images(image_dir)
+

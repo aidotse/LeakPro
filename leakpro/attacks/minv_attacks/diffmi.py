@@ -176,20 +176,27 @@ class AttackDiffMi(AbstractMINV):
 
         logger.info("Applied audit.reconstruction settings to Diff-MI runtime options.")
 
+    def _set_feature_output(self: Self, model: torch.nn.Module) -> torch.nn.Module:
+        """Make compatible models return features and logits for Diff-MI."""
+        if hasattr(model, "return_feature"):
+            model.return_feature = True
+        return model
+
     def _load_evaluation_model(self: Self) -> torch.nn.Module:
         """Load the configured reconstruction evaluation model, or fall back to the target model."""
         reconstruction_config = self.handler.configs.audit.reconstruction
         eval_config = getattr(reconstruction_config, "eval_model", None) if reconstruction_config else None
         if eval_config is None:
             logger.info("No reconstruction eval_model configured; using target model for Diff-MI evaluation.")
-            return self.target_model
+            return self._set_feature_output(self.target_model)
 
-        return self.handler.load_model_from_config(
+        evaluation_model = self.handler.load_model_from_config(
             module_path=eval_config.module_path,
             model_class=eval_config.model_class,
             model_folder=eval_config.eval_folder,
             role="evaluation",
         ).to(device=self.device)
+        return self._set_feature_output(evaluation_model)
 
     def description(self:Self) -> dict:
         """Return the description of the attack."""
@@ -215,8 +222,11 @@ class AttackDiffMi(AbstractMINV):
     def prepare_attack(self:Self) -> None:
         """Prepare the attack."""
 
-        # GET TARGET MODEL and EVALUATION MODEL
-        self.target_model = self.handler.target_model.to(device=self.device)
+        # DataLoader samplers use CPU generators by default; avoid leaked CUDA defaults from earlier attacks.
+        torch.set_default_device("cpu")
+
+        # GET TARGET MODEL
+        self.target_model = self._set_feature_output(self.handler.target_model.to(device=self.device))
         logger.info("Target model set.")
 
         # EVALUATION MODEL
