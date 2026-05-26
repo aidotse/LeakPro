@@ -251,7 +251,7 @@ class ShadowModelHandler(ModelHandler):
 
         # Get the size of the dataset
         data_size = int(len(shadow_population)*training_fraction)
-        all_indices, filtered_indices = self._filter(data_size)
+        all_indices, filtered_indices = self._filter(data_size, online)
 
         # Create a list of indices to use for the new shadow models
         n_existing_models = len(filtered_indices)
