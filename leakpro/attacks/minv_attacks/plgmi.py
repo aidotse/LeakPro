@@ -17,6 +17,7 @@ from leakpro.attacks.utils.gan_handler import GANHandler
 from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.input_handler.modality_extensions.image_metrics import ImageMetrics
 from leakpro.reporting.minva_result import MinvResult
+from leakpro.utils.device import get_device, mark_step
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
@@ -90,7 +91,7 @@ class AttackPLGMI(AbstractMINV):
         for key, value in self.configs.model_dump().items():
             setattr(self, key, value)
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = get_device()
 
         self.num_classes = self.handler.get_num_classes()
 
@@ -307,6 +308,7 @@ class AttackPLGMI(AbstractMINV):
             optimizer.zero_grad()
             inv_loss.backward()
             optimizer.step()
+            mark_step(self.device)
 
             inv_loss_val = inv_loss.item()
 

@@ -17,6 +17,7 @@ from leakpro.attacks.utils.generator_handler import GeneratorHandler
 from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.input_handler.user_imports import get_class_from_module, import_module_from_file
 from leakpro.schemas import MIAMetaDataSchema
+from leakpro.utils.device import get_device
 from leakpro.utils.logger import logger
 
 
@@ -67,7 +68,7 @@ class ImageMetrics:
         self.batch_size = configs.batch_size
         self.num_class_samples = configs.num_class_samples
         self.num_audited_classes = configs.num_audited_classes
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = get_device()
 
     def load_evaluation_model(self) -> None:
         """Load the evaluation model."""

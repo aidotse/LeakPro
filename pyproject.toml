@@ -31,6 +31,11 @@ mia = ["torch", "torchvision", "optuna", "opacus"]
 synthetic = ["numba", "pydantic", "transformers", "sentence-transformers"]
 federated = ["torch", "torchvision", "torchmetrics", "pytorch-ignite", "optuna", "albumentations"]
 minv = ["torch", "torchvision", "optuna", "kornia"]
+# Habana Gaudi (HPU) extras. `habana-torch-plugin` itself must be pulled from
+# Habana's index (see docs.habana.ai); we list `lightning-habana` here as it
+# resolves cleanly from PyPI. Run `python -m leakpro.utils.hardware_setup
+# --install` after installing the Habana SDK to pull these in.
+hpu = ["lightning-habana"]
 
 dev = [
   "pytest",
@@ -38,8 +43,13 @@ dev = [
   "pytest-mock",
   "coverage-badge",
   "ruff",
-  "torch >= 2.6.0",  # from mia & federated
-  "torchvision",  # from mia & federated
+  # Pinned to 2.10.x because the currently shipping Habana plugin
+  # (habana-torch-plugin 1.24.0.1007) hard-asserts torch's major.minor in
+  # habana_frameworks.torch.required_version. Bumping the upper bound is safe
+  # only when the Habana plugin is bumped to match. CUDA/CPU users can
+  # override with their own torch wheel before `pip install -e .[dev]`.
+  "torch>=2.10,<2.11",  # from mia & federated
+  "torchvision>=0.25,<0.26",  # matches torch 2.10 series
   "torchmetrics",  # from federated
   "numba",  # from synthetic
   "transformers",  # from synthetic

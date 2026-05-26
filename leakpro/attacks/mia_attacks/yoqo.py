@@ -15,6 +15,7 @@ from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.reporting.mia_result import MIAResult
+from leakpro.utils.device import get_device, mark_step
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
@@ -238,6 +239,7 @@ class AttackYOQO(AbstractMIA):
                 break
             loss.backward()
             optim.step()
+            mark_step(x0.device)
             optim.zero_grad()
 
         return (x0 + dx)
@@ -260,7 +262,7 @@ class AttackYOQO(AbstractMIA):
 
         predictions = []
 
-        device_name = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device_name = get_device()
 
         for model in self.shadow_models:
             model.model_obj.eval()

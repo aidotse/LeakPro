@@ -15,6 +15,7 @@ from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.reporting.mia_result import MIAResult
+from leakpro.utils.device import get_device, mark_step
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
@@ -172,6 +173,7 @@ class AttackOSLO(AbstractMIA):
                 loss = self._optimization_objective(x0, dx, y)
                 loss.backward()
                 optim.step()
+                mark_step(x0.device)
 
                 with torch.no_grad():
                     norm = k * self.max_perturbation_size / self.num_sub_procedures / (torch.linalg.vector_norm(dx) + 1e-30)
@@ -208,7 +210,7 @@ class AttackOSLO(AbstractMIA):
         in_members = set(self.audit_dataset["data"][self.audit_dataset["in_members"]].tolist())
         true_labels = np.array([i in in_members for i in self.audit_data_indices])
 
-        device_name = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device_name = get_device()
 
         self.target_model.model_obj.to(device_name)
         self.target_model.model_obj.eval()

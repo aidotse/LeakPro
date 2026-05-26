@@ -22,6 +22,7 @@ from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.reporting.mia_result import MIAResult
 from leakpro.schemas import EvalOutput, TrainingOutput
+from leakpro.utils.device import get_device, mark_step
 
 N_SAMPLES = 72
 TRAIN_FRACTION = 0.45
@@ -85,7 +86,7 @@ class TinyImageInputHandler(AbstractInputHandler):
     ) -> TrainingOutput:
         if epochs is None:
             epochs = 1
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = get_device()
         model.to(device)
         model.train()
         total_loss = 0.0
@@ -100,6 +101,7 @@ class TinyImageInputHandler(AbstractInputHandler):
                 loss = criterion(output, target)
                 loss.backward()
                 optimizer.step()
+                mark_step(device)
                 total_loss += loss.item() * len(target)
                 total_correct += (output.argmax(dim=1) == target).sum().item()
                 total_samples += len(target)
@@ -108,7 +110,7 @@ class TinyImageInputHandler(AbstractInputHandler):
         return TrainingOutput(model=model, metrics=metrics)
 
     def eval(self, dataloader: DataLoader, model: nn.Module, criterion: nn.Module) -> EvalOutput:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = get_device()
         model.to(device)
         model.eval()
         total_loss = 0.0
@@ -170,7 +172,7 @@ class TinyTimeSeriesInputHandler(AbstractInputHandler):
     ) -> TrainingOutput:
         if epochs is None:
             epochs = 1
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = get_device()
         model.to(device)
         model.train()
         total_loss = 0.0
@@ -184,6 +186,7 @@ class TinyTimeSeriesInputHandler(AbstractInputHandler):
                 loss = criterion(output, target)
                 loss.backward()
                 optimizer.step()
+                mark_step(device)
                 total_loss += loss.item() * len(target)
                 total_samples += len(target)
         model.to("cpu")
@@ -191,7 +194,7 @@ class TinyTimeSeriesInputHandler(AbstractInputHandler):
         return TrainingOutput(model=model, metrics=metrics)
 
     def eval(self, dataloader: DataLoader, model: nn.Module, criterion: nn.Module) -> EvalOutput:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = get_device()
         model.to(device)
         model.eval()
         total_loss = 0.0

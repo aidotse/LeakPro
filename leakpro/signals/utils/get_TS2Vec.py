@@ -10,10 +10,11 @@ import re
 
 import numpy as np
 import torch
-from torch import cuda, is_tensor, os
+from torch import is_tensor, os
 from ts2vec import TS2Vec
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.utils.device import get_device
 from leakpro.utils.logger import logger
 
 
@@ -43,8 +44,16 @@ def get_ts2vec_model(
     if not os.path.exists(ts2vec_dir):
         os.makedirs(ts2vec_dir)
 
-    device = "cuda:0" if cuda.is_available() else "cpu"
-    torch.backends.cudnn.deterministic = False
+    _detected = get_device()
+    if _detected.type == "cuda":
+        device = "cuda:0"
+        torch.backends.cudnn.deterministic = False
+    elif _detected.type == "hpu":
+        # TS2Vec upstream does not support HPU; fall back to CPU for this model.
+        logger.warning("TS2Vec does not support HPU; falling back to CPU for representation fitting.")
+        device = "cpu"
+    else:
+        device = "cpu"
 
     # Init TS2Vec
     model_loaded = False
