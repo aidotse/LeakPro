@@ -374,7 +374,7 @@ class ImageMetrics:
 
     def save(self, attack_obj: object, output_dir: str) -> None:
         """Save computed image metrics to the standard LeakPro result locations."""
-        def json_fallback(obj):
+        def json_fallback(obj: object) -> object:
             if isinstance(obj, torch.Tensor):
                 return obj.detach().cpu().tolist()
             if isinstance(obj, np.ndarray):
@@ -383,7 +383,7 @@ class ImageMetrics:
                 return obj.item()
             raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
-        def json_ready(obj):
+        def json_ready(obj: object) -> object:
             return json.loads(json.dumps(obj, default=json_fallback))
 
         attack_name = attack_obj.__class__.__name__.replace("Attack", "").lower()
