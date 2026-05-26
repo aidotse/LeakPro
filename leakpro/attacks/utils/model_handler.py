@@ -132,20 +132,47 @@ class ModelHandler():
 
     def cache_logits(self:Self, model:Union[Module, list[Module]], name:str) -> None:
         """Cache the target model logits."""
-
-        # check if the name is already in the cache
         cache_file = f"{self.attack_cache_folder_path}/{name}_logits.npy"
-        if os.path.exists(cache_file):
+        indices_file = f"{self.attack_cache_folder_path}/{name}_indices.npy"
+
+        # Require BOTH files to exist. If only logits exist (old cache without companion),
+        # treat as miss so both are rewritten with a correct index record.
+        if os.path.exists(cache_file) and os.path.exists(indices_file):
             logger.info(f"Logits already cached at {cache_file}")
             return
 
-        # run data through the model, collect the logits, and store them
         if not isinstance(model, list):
             model = [model]
         data_indices = np.concatenate((self.handler.train_indices, self.handler.test_indices))
         logits = np.array(ModelLogits()(model, self.handler, data_indices)).squeeze()
         np.save(cache_file, logits)
+        np.save(indices_file, data_indices)
         logger.info(f"Saved logits to {cache_file}")
+
+    def load_logits(self:Self, name:str) -> np.ndarray:
+        """Load cached logits, reordering rows if index order has changed since caching."""
+        cache_file = f"{self.attack_cache_folder_path}/{name}_logits.npy"
+        indices_file = f"{self.attack_cache_folder_path}/{name}_indices.npy"
+
+        if not os.path.exists(cache_file) or not os.path.exists(indices_file):
+            return None  # Cache miss — caller must recompute
+
+        cached_indices = np.load(indices_file)
+        current_indices = np.concatenate((self.handler.train_indices, self.handler.test_indices))
+        logits = np.load(cache_file)
+
+        if np.array_equal(cached_indices, current_indices):
+            logger.info(f"Loaded logits from {cache_file}")
+            return logits
+
+        # Same set of samples, different order — reorder rows to match current run.
+        cached_pos = {int(idx): row for row, idx in enumerate(cached_indices)}
+        try:
+            reorder = np.array([cached_pos[int(idx)] for idx in current_indices])
+        except KeyError:
+            return None  # Different sample set — treat as miss
+        logger.info(f"Loaded and reordered logits from {cache_file}")
+        return logits[reorder]
 
     def _import_model_from_path(self:Self, module_path:str, model_class:str)->None:
         """Import the model from the given path.

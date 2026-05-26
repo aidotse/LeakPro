@@ -404,20 +404,26 @@ class ShadowModelHandler(ModelHandler):
         return metadata
 
     def load_logits(self:Self, name:str=None, indx:int=None) -> np.ndarray:
-        """Load model logits."""
-
+        """Load model logits, realigning rows to current index order if needed."""
         if name is None and indx is not None:
             name = f"sm_{indx}_{self.population_hash}"
 
-        # check if the name is already in the cache
-        cache_file = f"{self.attack_cache_folder_path}/{name}_logits.npy"
-        if not os.path.exists(cache_file):
-            logger.info(f"Logits not cached at {cache_file}, caching now")
-            self.cache_logits(self._load_shadow_model(indx), name=name)
+        logits = super().load_logits(name)
+        if logits is not None:
+            return logits
 
-        # load the logits
-        logits = np.load(cache_file)
-        logger.info(f"Loaded logits from {cache_file}")
+        # Cache miss — recompute.
+        logger.info(f"Cache miss for logits '{name}' — recomputing")
+        if indx is not None:
+            self.cache_logits(self._load_shadow_model(indx), name=name)
+        else:
+            # Target model logits: re-cache using target model.
+            criterion = self.handler.get_criterion()
+            self.cache_logits(PytorchModel(self.handler.target_model, criterion), name=name)
+
+        logits = super().load_logits(name)
+        if logits is None:
+            raise RuntimeError(f"Logits for '{name}' could not be loaded after recomputation.")
         return logits
 
     def get_in_indices_mask(self:Self, shadow_model_indices:list[int], dataset_indices:np.ndarray) -> np.ndarray:
