@@ -8,10 +8,11 @@ from abc import ABC, abstractmethod
 from copy import deepcopy
 
 import numpy as np
-from torch import IntTensor, Tensor, cat, cuda, exp, flatten, log, max, nn, no_grad, sigmoid, sum, tensor
+from torch import IntTensor, Tensor, cat, exp, flatten, log, max, nn, no_grad, sigmoid, sum, tensor
 from torch.utils.data import DataLoader
 
 from leakpro.signals.utils.HopSkipJumpDistance import HopSkipJumpDistance
+from leakpro.utils.device import get_device
 from leakpro.utils.import_helper import Callable, List, Optional, Self, Tuple
 
 
@@ -142,7 +143,7 @@ class PytorchModel(Model):
 
         """
 
-        device = "cuda:0" if cuda.is_available() else "cpu"
+        device = get_device()
         self.model_obj.to(device)
         self.model_obj.eval()
 
@@ -267,7 +268,7 @@ class PytorchModel(Model):
 
             """
 
-            device = "cuda:0" if cuda.is_available() else "cpu"
+            device = get_device()
             self.model_obj.to(device)
             self.model_obj.eval()
             with no_grad():

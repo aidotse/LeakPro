@@ -13,8 +13,6 @@ from torch import (
     amax,
     cat,
     clamp,
-    cuda,
-    device,
     float32,
     long,
     max,
@@ -36,6 +34,7 @@ from torch.nn import Module
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from leakpro.utils.device import get_device
 from leakpro.utils.import_helper import List, Self, Tuple
 from leakpro.utils.logger import logger
 
@@ -132,7 +131,7 @@ class HopSkipJumpDistance:
         self.verbose = verbose
         self.clip_min = -1
         self.clip_max = 1
-        self.device = device("cuda" if cuda.is_available() else "cpu")
+        self.device = get_device()
         self.image_shape = self.data_loader.dataset[0][0].shape
         self.batch_shape = (self.batch_size, self.image_shape[0], self.image_shape[1], self.image_shape[2])
         d = int(np.prod(self.image_shape))

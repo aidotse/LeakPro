@@ -8,13 +8,14 @@ from collections import OrderedDict
 from typing import Optional
 
 import torch
-from torch import Tensor, cuda
+from torch import Tensor
 from torch.autograd import grad
 from torch.nn import Module
 from torch.utils.data import DataLoader
 
 from leakpro.fl_utils.gia_module_to_functional import MetaModule
 from leakpro.fl_utils.gia_optimizers import MetaOptimizer
+from leakpro.utils.device import get_device, mark_step
 
 
 def train(
@@ -37,7 +38,7 @@ def train(
     Training does not update the original model, but returns a norm of what the update would have been.
     """
     if device is None:
-        device = torch.device("cuda" if cuda.is_available() else "cpu")
+        device = get_device()
     model.to(device)
     patched_model = MetaModule(model, device=device)
     outputs = None
@@ -50,6 +51,7 @@ def train(
             outputs = patched_model(inputs, patched_model.parameters)
             loss = criterion(outputs, labels)  # .sum()
             patched_model.parameters = optimizer.step(loss, patched_model.parameters)
+            mark_step(device)
     model_delta = OrderedDict(
         (name, param - param_origin)
         for ((name, param), (name_origin, param_origin)) in zip(
@@ -81,7 +83,7 @@ def train_nostep(
     Training does not update the original model, but returns a norm of what the update would have been.
     """
     if device is None:
-        device = torch.device("cuda" if cuda.is_available() else "cpu")
+        device = get_device()
     model.to(device)
     outputs = None
     for _ in range(epochs):
@@ -117,7 +119,7 @@ def trainyolo(
     Training does not update the original model, but returns a norm of what the update would have been.
     """
     if device is None:
-        device = torch.device("cuda" if cuda.is_available() else "cpu")
+        device = get_device()
     model.to(device)
     patched_model = MetaModule(model)
     outputs = None
@@ -130,6 +132,7 @@ def trainyolo(
             outputs = patched_model(inputs, patched_model.parameters)
             loss = criterion(outputs, labels).sum()
             patched_model.parameters = optimizer.step(loss, patched_model.parameters)
+            mark_step(device)
     model_delta = OrderedDict(
         (name, param - param_origin)
         for ((name, param), (name_origin, param_origin)) in zip(

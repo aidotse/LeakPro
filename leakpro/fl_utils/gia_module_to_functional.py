@@ -8,9 +8,10 @@ from collections import OrderedDict
 from typing import Optional
 
 import torch
-from torch import cuda, nn
+from torch import nn
 from torch.func import functional_call
 
+from leakpro.utils.device import get_device
 from leakpro.utils.import_helper import Any, Dict, Self
 
 
@@ -23,7 +24,7 @@ class MetaModule(nn.Module):
     def __init__(self: Self, net: nn.Module, device: Optional[torch.device] = None) -> None:
 
         if device is None:
-            device = torch.device("cuda" if cuda.is_available() else "cpu")
+            device = get_device()
         super().__init__()
         self.net = net.to(device)
 

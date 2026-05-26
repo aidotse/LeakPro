@@ -10,7 +10,7 @@ import pickle
 import numpy as np
 import torch.nn.functional as F  # noqa: N812
 from pydantic import BaseModel, Field
-from torch import cuda, device, load, nn, no_grad, optim, save, tensor
+from torch import load, nn, no_grad, optim, save, tensor
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
@@ -20,6 +20,7 @@ from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.reporting.mia_result import MIAResult
 from leakpro.signals.signal import ModelLogits
+from leakpro.utils.device import get_device, mark_step
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
@@ -232,7 +233,7 @@ class AttackLossTrajectory(AbstractMIA):
                         dataset_name: str,
                         ) -> dict:
         logger.info(f"Preparing MIA {dataset_name}: {len(data_indices)} points")
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         data_loader = self.get_dataloader(data_indices, batch_size=self.train_mia_batch_size)
 
         teacher_model_loss = np.array([])
@@ -296,7 +297,7 @@ class AttackLossTrajectory(AbstractMIA):
         """
         attack_model = self.mia_classifer
         if not os.path.exists(f"{self.storage_dir}/trajectory_mia_model.pkl"):
-            gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+            gpu_or_cpu = get_device()
             attack_optimizer = optim.SGD(attack_model.parameters(),
                                             lr=0.01, momentum=0.9, weight_decay=0.0001)
             attack_model = attack_model.to(gpu_or_cpu)
@@ -341,7 +342,7 @@ class AttackLossTrajectory(AbstractMIA):
         train_loss = 0
         num_correct = 0
         mia_train_loader = self.mia_train_data_loader
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         for _ in  tqdm(range(self.mia_classifier_epochs), total=self.mia_classifier_epochs):
             for _batch_idx, (data, label) in enumerate(mia_train_loader):
                 data = data.to(gpu_or_cpu) # noqa: PLW2901
@@ -354,6 +355,7 @@ class AttackLossTrajectory(AbstractMIA):
                 loss.backward()
 
                 attack_optimizer.step()
+                mark_step(gpu_or_cpu)
                 train_loss += loss.item()
                 pred_label = pred.max(1, keepdim=True)[1]
                 num_correct += pred_label.eq(label).sum().item()
@@ -381,7 +383,7 @@ class AttackLossTrajectory(AbstractMIA):
 
         """
         logger.info("Running the MIA attack")
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         attack_model.to(gpu_or_cpu)
         attack_model.eval()
         test_loss = 0

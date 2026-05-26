@@ -10,6 +10,7 @@ from torch.nn import Module
 
 from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.input_handler.user_imports import get_class_from_module, import_module_from_file
+from leakpro.utils.device import get_device
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
@@ -28,7 +29,7 @@ class GeneratorHandler():
     def _setup_generator_configs(self: Self, configs: dict) -> None:
         """Load generator-specific configurations (e.g., generator path, params)."""
         logger.info("Setting up generator configurations")
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = get_device()
         self.generator_path = configs.module_path
         self.generator_class = configs.model_class
         self.gen_init_params = configs.init_params
