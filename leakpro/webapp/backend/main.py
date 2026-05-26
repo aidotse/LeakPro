@@ -794,9 +794,10 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                         "Make sure your arch.py defines a class that inherits from torch.nn.Module."
                     )
 
-                # Detect num_classes from dataset labels
+                # Detect num_classes from the FULL population so labels seen only
+                # in the test/audit split don't produce out-of-bounds model outputs.
                 _all_labels = []
-                for _, _lbl in DataLoader(train_subset, batch_size=512, shuffle=False, num_workers=0):
+                for _, _lbl in DataLoader(dataset, batch_size=512, shuffle=False, num_workers=0):
                     _all_labels.append(_lbl.view(-1))
                 _num_classes_data = int(torch.cat(_all_labels).max().item()) + 1
                 log_q.put(f"[train] Detected {_num_classes_data} classes from dataset labels")
