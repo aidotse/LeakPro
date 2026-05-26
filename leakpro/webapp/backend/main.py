@@ -626,6 +626,19 @@ async def check_compat(job_id: str, model_name: str) -> CompatResult:
 
 
 # ---------------------------------------------------------------------------
+# Step 4A-delete — Remove a model from job state
+# ---------------------------------------------------------------------------
+
+@app.delete("/jobs/{job_id}/models/{model_name}")
+async def remove_model(job_id: str, model_name: str) -> dict:
+    """Remove a model entry from the job state."""
+    job = _get_job(job_id)
+    job["models"] = [m for m in job.get("models", []) if m["name"] != model_name]
+    _save_job(job_id)
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
 # Step 4B — Train a model
 # ---------------------------------------------------------------------------
 

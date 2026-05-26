@@ -71,6 +71,8 @@ export const api = {
     post<MetaValidationResult>(`/jobs/${id}/validate/model-metadata?model_name=${encodeURIComponent(modelName)}`),
   checkCompat: (id: string, modelName: string) =>
     post<CompatResult>(`/jobs/${id}/check?model_name=${encodeURIComponent(modelName)}`),
+  removeModel: (id: string, modelName: string) =>
+    fetch(`/jobs/${id}/models/${encodeURIComponent(modelName)}`, { method: "DELETE" }).then((r) => r.json()),
   trainModel: (id: string, params: TrainParams) => post(`/jobs/${id}/train`, params),
 
   // Step 5

@@ -86,7 +86,7 @@ export default function Step4Models({ jobId, onDone, initialModels }: Props) {
       {models.length > 0 && (
         <div className="flex flex-col gap-3">
           <h3 className="font-bold text-sm uppercase tracking-wider text-slate-500">Models ready for audit</h3>
-          {models.map((m) => <ModelCard key={m.name} model={m} onRemove={() => setModels(prev => prev.filter(x => x.name !== m.name))} />)}
+          {models.map((m) => <ModelCard key={m.name} model={m} onRemove={() => { api.removeModel(jobId, m.name); setModels(prev => prev.filter(x => x.name !== m.name)); }} />)}
         </div>
       )}
 
