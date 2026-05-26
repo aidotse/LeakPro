@@ -52,11 +52,6 @@ const ATTACK_DEFS: Record<string, { label: string; desc: string; params: ParamDe
       { key: "online",                 label: "Online mode",         type: "boolean", default: false },
     ],
   },
-  population: {
-    label: "Population",
-    desc: "Calibrates membership signal against a reference population",
-    params: [],
-  },
   qmia: {
     label: "QMIA",
     desc: "Quantile regression attack — trains a regressor to predict the membership threshold",
@@ -72,15 +67,6 @@ const ATTACK_DEFS: Record<string, { label: string; desc: string; params: ParamDe
       { key: "num_shadow_models",      label: "Shadow models",       type: "number",  default: 2,  min: 2, max: 256 },
       { key: "training_data_fraction", label: "Train data fraction", type: "number",  default: 0.5, min: 0.1, max: 1.0, step: 0.05 },
       { key: "num_transforms",         label: "Augmentations",       type: "number",  default: 10, min: 1, max: 100 },
-      { key: "online",                 label: "Online mode",         type: "boolean", default: false },
-    ],
-  },
-  yoqo: {
-    label: "YOQO",
-    desc: "You Only Query Once — optimizes a surrogate point per sample",
-    params: [
-      { key: "num_shadow_models",      label: "Shadow models",       type: "number",  default: 2,    min: 1, max: 256 },
-      { key: "training_data_fraction", label: "Train data fraction", type: "number",  default: 0.01, min: 0.001, max: 1.0, step: 0.005 },
       { key: "online",                 label: "Online mode",         type: "boolean", default: false },
     ],
   },
