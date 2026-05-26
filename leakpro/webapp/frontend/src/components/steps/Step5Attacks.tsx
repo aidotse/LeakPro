@@ -60,16 +60,6 @@ const ATTACK_DEFS: Record<string, { label: string; desc: string; params: ParamDe
       { key: "epochs",                 label: "Regressor epochs",    type: "number", default: 100, min: 10, max: 500 },
     ],
   },
-  ramia: {
-    label: "RaMIA",
-    desc: "Range membership inference — augmentation-based attack",
-    params: [
-      { key: "num_shadow_models",      label: "Shadow models",       type: "number",  default: 2,  min: 2, max: 256 },
-      { key: "training_data_fraction", label: "Train data fraction", type: "number",  default: 0.5, min: 0.1, max: 1.0, step: 0.05 },
-      { key: "num_transforms",         label: "Augmentations",       type: "number",  default: 10, min: 1, max: 100 },
-      { key: "online",                 label: "Online mode",         type: "boolean", default: false },
-    ],
-  },
   loss_traj: {
     label: "Loss Trajectory",
     desc: "Trains a classifier on the loss trajectory across shadow model checkpoints",
