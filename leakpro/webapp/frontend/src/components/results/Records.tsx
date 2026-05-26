@@ -12,7 +12,7 @@ export default function Records({ results, jobId }: Props) {
   const modelName = model?.model_name ?? "";
   const attacks = model?.attacks.filter((a) => a.signal_values && a.true_labels) ?? [];
   const [attackName, setAttackName] = useState(attacks[0]?.attack_name ?? "");
-  const [topN, setTopN] = useState(20);
+  const [topN, setTopN] = useState(5);
 
   const attack = attacks.find((a) => a.attack_name === attackName) ?? attacks[0];
 
@@ -82,14 +82,10 @@ export default function Records({ results, jobId }: Props) {
             </thead>
             <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
               {topRecords.map((r) => (
-                <tr key={r.rank} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/50">
+                <tr key={`${attackName}-${selectedKey}-${r.rank}`} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/50">
                   <td className="px-4 py-2.5 font-bold text-slate-400">#{r.rank}</td>
                   <td className="px-4 py-2.5">
-                    <img
-                      src={`/jobs/${model?.job_id ?? jobId}/sample_image/${r.index}`}
-                      alt=""
-                      className="w-16 h-16 object-contain rounded border border-slate-200 dark:border-slate-700"
-                    />
+                    <ImgWithLoader src={`/jobs/${model?.job_id ?? jobId}/sample_image/${r.index}`} />
                   </td>
                   <td className="px-4 py-2.5 font-mono">{r.index}</td>
                   <td className="px-4 py-2.5">
@@ -116,6 +112,24 @@ export default function Records({ results, jobId }: Props) {
       ) : (
         <p className="text-slate-500 text-sm">No records available for this attack.</p>
       )}
+    </div>
+  );
+}
+
+function ImgWithLoader({ src }: { src: string }) {
+  const [loaded, setLoaded] = useState(false);
+  return (
+    <div className="w-16 h-16 relative">
+      {!loaded && (
+        <div className="absolute inset-0 rounded border border-slate-200 dark:border-slate-700 bg-slate-200 dark:bg-slate-700 animate-pulse" />
+      )}
+      <img
+        src={src}
+        alt=""
+        className={`w-16 h-16 object-contain rounded border border-slate-200 dark:border-slate-700 transition-opacity duration-200 ${loaded ? "opacity-100" : "opacity-0"}`}
+        onLoad={() => setLoaded(true)}
+        onError={() => setLoaded(true)}
+      />
     </div>
   );
 }

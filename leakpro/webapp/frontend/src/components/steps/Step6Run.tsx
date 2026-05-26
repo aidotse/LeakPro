@@ -6,9 +6,10 @@ interface Props {
   jobId: string;
   models: ModelEntry[];
   onDone: () => void;
+  onRestart: () => void;
 }
 
-export default function Step6Run({ jobId, models, onDone }: Props) {
+export default function Step6Run({ jobId, models, onDone, onRestart }: Props) {
   const [status, setStatus] = useState<"idle" | "running" | "done" | "failed">("idle");
   const [logs, setLogs] = useState<string[]>([]);
   const [elapsed, setElapsed] = useState(0);
@@ -113,9 +114,18 @@ export default function Step6Run({ jobId, models, onDone }: Props) {
 
       {/* Failed */}
       {status === "failed" && (
-        <div className="flex items-center gap-3 text-red-500 font-bold">
-          <span className="material-symbols-outlined">error</span>
-          Audit failed. Check logs below.
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-3 text-red-500 font-bold">
+            <span className="material-symbols-outlined">error</span>
+            Audit failed. Check logs below.
+          </div>
+          <button
+            onClick={onRestart}
+            className="self-start flex items-center gap-2 px-5 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-sm font-bold hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+          >
+            <span className="material-symbols-outlined text-base">restart_alt</span>
+            Start Over
+          </button>
         </div>
       )}
 

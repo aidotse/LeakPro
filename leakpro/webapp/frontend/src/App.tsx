@@ -89,7 +89,7 @@ export default function App() {
             <Step5Attacks jobId={jobId} models={models} onDone={() => setStep(4)} />
           )}
           {step === 4 && (
-            <Step6Run jobId={jobId} models={models} onDone={() => setStep(5)} />
+            <Step6Run jobId={jobId} models={models} onDone={() => setStep(5)} onRestart={restart} />
           )}
           {step === 5 && (
             <Step7Results jobId={jobId} onRestart={restart} autoOpenCompare={goCompare} />

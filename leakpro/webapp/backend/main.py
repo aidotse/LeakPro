@@ -595,12 +595,29 @@ async def check_compat(job_id: str, model_name: str) -> CompatResult:
     job_models = job.setdefault("models", [])
     existing = next((m for m in job_models if m["name"] == model_name), None)
     if existing is None:
+        _train_acc, _test_acc = None, None
+        try:
+            import joblib as _jl
+            _meta = _jl.load(job_dir / "models" / model_name / "model_metadata.pkl")
+            _attrs = _meta.__dict__ if hasattr(_meta, "__dict__") else (_meta if isinstance(_meta, dict) else {})
+            _tr = _attrs.get("train_result")
+            _te = _attrs.get("test_result")
+            if _tr is not None:
+                _v = getattr(_tr, "accuracy", None) or (_tr.get("accuracy") if isinstance(_tr, dict) else None)
+                _train_acc = float(_v) if _v is not None else None
+            if _te is not None:
+                _v = getattr(_te, "accuracy", None) or (_te.get("accuracy") if isinstance(_te, dict) else None)
+                _test_acc = float(_v) if _v is not None else None
+        except Exception:
+            pass
         job_models.append({
             "name": model_name,
             "source": "uploaded",
             "target_folder": str(job_dir / "models" / model_name),
             "status": "ready" if result.ok else "error",
             "dpsgd": False,
+            "train_accuracy": _train_acc,
+            "test_accuracy": _test_acc,
         })
     elif result.ok:
         existing["status"] = "ready"
