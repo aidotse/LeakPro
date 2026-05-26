@@ -7,31 +7,31 @@
     "react/jsx-dev-runtime": {
       "src": "../../node_modules/react/jsx-dev-runtime.js",
       "file": "react_jsx-dev-runtime.js",
-      "fileHash": "f5a8a069",
+      "fileHash": "5852be6a",
       "needsInterop": true
     },
     "react": {
       "src": "../../node_modules/react/index.js",
       "file": "react.js",
-      "fileHash": "b694490f",
+      "fileHash": "117d4b92",
       "needsInterop": true
     },
     "react-dom/client": {
       "src": "../../node_modules/react-dom/client.js",
       "file": "react-dom_client.js",
-      "fileHash": "a3ee4471",
+      "fileHash": "2fa4fa5e",
       "needsInterop": true
     },
     "react-dom": {
       "src": "../../node_modules/react-dom/index.js",
       "file": "react-dom.js",
-      "fileHash": "fc792ce6",
+      "fileHash": "b1c6e549",
       "needsInterop": true
     },
     "react-plotly.js": {
       "src": "../../node_modules/react-plotly.js/react-plotly.js",
       "file": "react-plotly__js.js",
-      "fileHash": "34c4a3da",
+      "fileHash": "b9c3a931",
       "needsInterop": true
     }
   },

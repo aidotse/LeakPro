@@ -79,7 +79,7 @@ const ATTACK_DEFS: Record<string, { label: string; desc: string; params: ParamDe
     label: "YOQO",
     desc: "You Only Query Once — optimizes a surrogate point per sample",
     params: [
-      { key: "num_shadow_models",      label: "Shadow models",       type: "number",  default: 1,    min: 1, max: 256 },
+      { key: "num_shadow_models",      label: "Shadow models",       type: "number",  default: 2,    min: 1, max: 256 },
       { key: "training_data_fraction", label: "Train data fraction", type: "number",  default: 0.01, min: 0.001, max: 1.0, step: 0.005 },
       { key: "online",                 label: "Online mode",         type: "boolean", default: false },
     ],
@@ -97,7 +97,7 @@ const ATTACK_DEFS: Record<string, { label: string; desc: string; params: ParamDe
     label: "MS-LiRA",
     desc: "Multi-signal LiRA — extends LiRA to multiple extracted signals",
     params: [
-      { key: "num_shadow_models",      label: "Shadow models",       type: "number",  default: 1,   min: 2, max: 256 },
+      { key: "num_shadow_models",      label: "Shadow models",       type: "number",  default: 2,   min: 2, max: 256 },
       { key: "training_data_fraction", label: "Train data fraction", type: "number",  default: 0.5, min: 0.1, max: 1.0, step: 0.05 },
       { key: "online",                 label: "Online mode",         type: "boolean", default: false },
     ],
