@@ -13,6 +13,7 @@ from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.schemas import EvalOutput, LossConfig, OptimizerConfig, ShadowModelConfig, ShadowModelTrainingSchema, TrainingOutput
 from leakpro.tests.constants import get_shadow_model_config
 from leakpro.tests.input_handler.image_input_handler import ImageInputHandler
+from leakpro.utils.save_load import hash_indices
 
 def test_shadow_model_handler_singleton(image_handler:ImageInputHandler) -> None:
     """Test that only one instance gets created."""
@@ -225,6 +226,7 @@ def test_shadow_model_filter_requires_full_config_match(image_handler: ImageInpu
         "model_class": sm.model_class,
         "model_module_path": sm.model_path,
         "target_model_hash": sm.target_model_hash,
+        "population_hash": sm.population_hash,
     }
     matching_metadata = ShadowModelTrainingSchema(**metadata_kwargs)
     stale_metadata = ShadowModelTrainingSchema(
@@ -276,3 +278,55 @@ def test_shadow_model_creation_uses_shadow_batch_size(
     sm.create_shadow_models(num_models=1, shadow_population=image_handler.test_indices, training_fraction=0.5, online=False)
 
     assert observed["batch_size"] == shadow_config.batch_size
+
+
+def test_hash_indices_same_split_produces_same_hash() -> None:
+    """hash_indices must be stable and order-independent."""
+    train = np.array([3, 1, 2])
+    test = np.array([5, 4])
+    h1 = hash_indices(train, test)
+    h2 = hash_indices(np.array([1, 2, 3]), np.array([4, 5]))
+    assert h1 == h2
+
+
+def test_hash_indices_different_split_produces_different_hash() -> None:
+    """Different train/test splits must not collide."""
+    h1 = hash_indices(np.array([1, 2, 3]), np.array([4, 5]))
+    h2 = hash_indices(np.array([1, 2, 4]), np.array([3, 5]))
+    assert h1 != h2
+
+
+def test_filter_rejects_shadow_models_from_different_population(image_handler: ImageInputHandler, tmp_path) -> None:
+    """Shadow models trained on a different population must not be reused."""
+    image_handler.configs.shadow_model = ShadowModelConfig(**get_shadow_model_config())
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+    sm = ShadowModelHandler(image_handler)
+    sm.storage_path = str(tmp_path)
+
+    metadata_kwargs = {
+        "init_params": sm.init_params,
+        "train_indices": [0, 1, 2, 3, 4],
+        "num_train": 5,
+        "optimizer": sm.optimizer_name,
+        "optimizer_params": sm.optimizer_config,
+        "criterion": sm.criterion_name,
+        "criterion_params": sm.loss_config,
+        "epochs": sm.epochs,
+        "batch_size": sm.batch_size,
+        "train_result": EvalOutput(accuracy=0.0, loss=0.0),
+        "test_result": EvalOutput(accuracy=0.0, loss=0.0),
+        "online": False,
+        "model_class": sm.model_class,
+        "model_module_path": sm.model_path,
+        "target_model_hash": sm.target_model_hash,
+        "population_hash": "stale_hash_from_old_split",
+    }
+    stale_metadata = ShadowModelTrainingSchema(**metadata_kwargs)
+    with open(tmp_path / "metadata_0.pkl", "wb") as f:
+        pickle.dump(stale_metadata, f)
+
+    all_indices, filtered_indices = sm._filter(data_size=5, online=False)
+
+    assert all_indices == [0]
+    assert filtered_indices == []
