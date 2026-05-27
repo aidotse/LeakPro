@@ -91,14 +91,13 @@ class ShadowModelHandler(ModelHandler):
             return tuple(self._freeze_value(item) for item in value)
         return value
 
-    def _current_training_signature(self:Self, data_size:int, online:bool) -> tuple:
+    def _current_training_signature(self:Self, data_size:int) -> tuple:
         """Build the effective training signature for the current shadow setup.
 
         Args:
         ----
             data_size (int): Number of samples that will be used to train a
                 shadow model.
-            online (bool): Whether the shadow models are created in online mode.
 
         Returns:
         -------
@@ -118,7 +117,6 @@ class ShadowModelHandler(ModelHandler):
             self._freeze_value(self.loss_config),
             self.epochs,
             self.batch_size,
-            online,
             self._freeze_value(self.init_params),
         )
 
@@ -149,19 +147,16 @@ class ShadowModelHandler(ModelHandler):
             self._freeze_value(getattr(metadata, "criterion_params", None)),
             metadata.epochs,
             getattr(metadata, "batch_size", None),
-            metadata.online,
             self._freeze_value(metadata.init_params),
         )
 
-    def _filter(self:Self, data_size:int, online:bool=False) -> tuple[list[int], list[int]]:
+    def _filter(self:Self, data_size:int) -> tuple[list[int], list[int]]:
         """Find cached shadow models compatible with the current configuration.
 
         Args:
         ----
             data_size (int): Number of samples that should be used for each
                 shadow-model training run.
-            online (bool): Whether the requested shadow models are for online
-                or offline use.
 
         Returns:
         -------
@@ -175,7 +170,7 @@ class ShadowModelHandler(ModelHandler):
         files = [f for f in entries if pattern.match(f)]
         all_indices = [int(re.search(r"\d+", f).group()) for f in files]
 
-        current_sig = self._current_training_signature(data_size, online)
+        current_sig = self._current_training_signature(data_size)
 
         filtered_indices = []
         for i in all_indices:
@@ -230,7 +225,6 @@ class ShadowModelHandler(ModelHandler):
         num_models:int,
         shadow_population: list,
         training_fraction:float=0.1,
-        online:bool=False
     ) -> list[int]:
         """Create and train shadow models based on the blueprint.
 
@@ -239,7 +233,6 @@ class ShadowModelHandler(ModelHandler):
             num_models (int): The number of shadow models to create.
             shadow_population (list): The indices in population eligible for training the shadow models.
             training_fraction (float): The fraction of the shadow population to use for training of a shadow model.
-            online (bool): Whether the shadow models are created using an online or offline dataset.
 
         Returns:
         -------
@@ -251,7 +244,7 @@ class ShadowModelHandler(ModelHandler):
 
         # Get the size of the dataset
         data_size = int(len(shadow_population)*training_fraction)
-        all_indices, filtered_indices = self._filter(data_size, online)
+        all_indices, filtered_indices = self._filter(data_size)
 
         # Create a list of indices to use for the new shadow models
         n_existing_models = len(filtered_indices)
@@ -319,7 +312,6 @@ class ShadowModelHandler(ModelHandler):
                 batch_size = self.batch_size,
                 train_result = training_results.metrics,
                 test_result = test_result,
-                online = online,
                 model_class = self.model_class,
                 model_module_path = self.model_path,
                 target_model_hash= self.target_model_hash,
