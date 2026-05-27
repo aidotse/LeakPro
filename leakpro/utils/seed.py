@@ -22,7 +22,7 @@ def seed_everything(seed: int) -> None:
         torch.backends.cudnn.benchmark = False
     elif device.type == "hpu":
         try:
-            import habana_frameworks.torch.hpu as hthpu  # type: ignore[import-not-found]
+            import habana_frameworks.torch.hpu as hthpu  # type: ignore[import-not-found]  # noqa: PLC0415
             if hasattr(hthpu, "manual_seed_all"):
                 hthpu.manual_seed_all(seed)
             elif hasattr(hthpu, "random") and hasattr(hthpu.random, "manual_seed_all"):

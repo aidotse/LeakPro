@@ -73,7 +73,7 @@ def _find_habana_required_torch() -> Optional[Tuple[str, Path]]:
 def _torch_status() -> Tuple[Optional[str], Optional[str]]:
     """Return ``(version, import_error)`` describing the local torch install."""
     try:
-        import torch  # type: ignore[import-not-found]
+        import torch  # type: ignore[import-not-found]  # noqa: PLC0415
 
         return getattr(torch, "__version__", "?"), None
     except Exception as exc:  # noqa: BLE001 - torch failures show up in many flavors
@@ -148,7 +148,7 @@ def detect_profile() -> PlatformProfile:
 
     if torch_err is None:
         try:
-            from leakpro.utils.device import get_device  # local import to avoid hard torch dep at module load
+            from leakpro.utils.device import get_device  # noqa: PLC0415 - keep torch dep out of module load
 
             device = get_device()
         except Exception as exc:  # noqa: BLE001
