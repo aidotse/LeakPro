@@ -14,7 +14,7 @@ import os as _os
 from typing import Any as _Any
 
 
-def __getattr__(name: str) -> _Any:
+def __getattr__(name: str) -> _Any:    # noqa: ANN401
     """Lazily import the public API on first access."""
     if name == "AbstractInputHandler":
         from .input_handler.abstract_input_handler import AbstractInputHandler
@@ -57,5 +57,5 @@ if _os.environ.get("LEAKPRO_QUIET_DEVICE_BANNER") != "1":
                 "Run `python -m leakpro.utils.hardware_setup` for diagnostics.",
                 _banner_err,
             )
-        except Exception:  # noqa: BLE001 - nothing else we can do
+        except Exception:  # noqa: BLE001 - S110
             pass
