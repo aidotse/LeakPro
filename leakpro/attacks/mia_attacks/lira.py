@@ -95,10 +95,12 @@ class AttackLiRA(AbstractMIA):
         """Rescale the logits to a range of [0, 1].
 
         Args:
+        ----
             logits (np.ndarray): The logits to be rescaled.
             true_label (np.ndarray): The true labels for the logits.
 
         Returns:
+        -------
             np.ndarray: The rescaled logits.
 
         """
