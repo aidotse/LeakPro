@@ -897,9 +897,13 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                 if params.dpsgd:
                     log_q.put(f"[train] DP-SGD: epsilon={params.target_epsilon}, delta={params.target_delta}, max_grad_norm={params.max_grad_norm}, virtual_batch_size={params.virtual_batch_size or 16}")
 
-            criterion = nn.CrossEntropyLoss()
-            _is_binary = False
-            log_q.put(f"[train] Loss: CrossEntropyLoss")
+            _is_binary = (_num_classes_data == 2)
+            if _is_binary:
+                criterion = nn.BCEWithLogitsLoss()
+                log_q.put("[train] Loss: BCEWithLogitsLoss (binary, 2 classes)")
+            else:
+                criterion = nn.CrossEntropyLoss()
+                log_q.put(f"[train] Loss: CrossEntropyLoss ({_num_classes_data} classes)")
             if params.optimizer == "sgd":
                 optimizer = optim.SGD(model.parameters(), lr=params.learning_rate, momentum=0.9, weight_decay=5e-4)
             else:

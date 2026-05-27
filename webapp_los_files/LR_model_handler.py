@@ -14,10 +14,11 @@ from torch import cuda, device, no_grad, optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from leakpro import AbstractInputHandler
 from leakpro.schemas import EvalOutput, TrainingOutput
 
 
-class LRModelHandler:
+class LRModelHandler(AbstractInputHandler, role="model"):
     """Training handler for binary LOS classification with LR."""
 
     def train(
