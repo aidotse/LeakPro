@@ -154,15 +154,16 @@ class AttackRMIA(AbstractMIA):
         # Sample z from test_indices only — these are known non-members (per RMIA paper, z must be
         # drawn from outside the target model's training set) and always present in the logit cache.
         # Logit rows are ordered as [train_indices | test_indices], so test rows start at offset n_train.
+        test_indices = np.asarray(self.handler.test_indices)
         n_train = len(self.handler.train_indices)
-        n_test = len(self.handler.test_indices)
+        n_test = len(test_indices)
         n_attack_points = int(self.z_data_sample_fraction * (n_train + n_test))
         n_z = min(n_attack_points, n_test)
 
         # Sample row positions within the test block (no global index mapping needed)
         z_local = np.random.choice(n_test, size=n_z, replace=False)
         z_rows = n_train + z_local  # absolute row in logits_theta
-        z_indices = self.handler.test_indices[z_local]
+        z_indices = test_indices[z_local]
         z_labels = self.handler.get_labels(z_indices)
 
         p_z_given_theta = softmax_logits(self.logits_theta, self.temperature)[z_rows, z_labels]
