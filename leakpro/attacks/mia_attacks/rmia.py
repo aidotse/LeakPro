@@ -151,18 +151,19 @@ class AttackRMIA(AbstractMIA):
             for indx in self.shadow_model_indices:
                 self.logits_shadow_models.append(ShadowModelHandler().load_logits(indx=indx))
 
-        # collect the softmax output of the correct class
-        n_attack_points = self.z_data_sample_fraction * len(self.handler.population) # points to compute p(z)
+        # Sample z from test_indices only — these are known non-members (per RMIA paper, z must be
+        # drawn from outside the target model's training set) and always present in the logit cache.
+        # Logit rows are ordered as [train_indices | test_indices], so test rows start at offset n_train.
+        n_train = len(self.handler.train_indices)
+        n_test = len(self.handler.test_indices)
+        n_attack_points = int(self.z_data_sample_fraction * (n_train + n_test))
+        n_z = min(n_attack_points, n_test)
 
-        # Logit cache rows are positional (0..N-1 matching train_indices + test_indices order).
-        # z_indices are raw population indices, so map them to row positions before indexing.
-        all_cached_indices = np.concatenate((self.handler.train_indices, self.handler.test_indices))
-        logit_row = {int(idx): i for i, idx in enumerate(all_cached_indices)}
-
-        # pick random indices sampled from the attack data
-        z_indices = np.random.choice(self.attack_data_indices, size=int(n_attack_points), replace=False)
+        # Sample row positions within the test block (no global index mapping needed)
+        z_local = np.random.choice(n_test, size=n_z, replace=False)
+        z_rows = n_train + z_local  # absolute row in logits_theta
+        z_indices = self.handler.test_indices[z_local]
         z_labels = self.handler.get_labels(z_indices)
-        z_rows = np.array([logit_row[int(idx)] for idx in z_indices])
 
         p_z_given_theta = softmax_logits(self.logits_theta, self.temperature)[z_rows, z_labels]
         p_z_given_theta = np.atleast_2d(p_z_given_theta)
