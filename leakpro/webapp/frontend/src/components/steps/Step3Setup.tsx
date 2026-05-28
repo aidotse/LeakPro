@@ -183,12 +183,25 @@ const PRESETS: Array<{
 }> = [
   {
     id: "cifar_image",
-    label: "Image",
+    label: "Image (scratch)",
     icon: "image",
-    desc: "ResNet-18 trained from scratch on your dataset. Works for any 3-channel images — num_classes detected automatically. Upload your own arch.py to use pretrained weights.",
+    desc: "ResNet-18 trained from scratch on your dataset. Works for any 3-channel images — num_classes detected automatically. Best when you have plenty of data (500+ samples/class).",
     types: ["image"],
     details: {
-      architecture: "ResNet-18 (random init) — ~11M params",
+      architecture: "ResNet-18 (random init) — ~11M trainable params",
+      optimizer: "Adam (default) or SGD",
+      learning_rate: "0.001",
+      scheduler: "none",
+    },
+  },
+  {
+    id: "image_pretrained",
+    label: "Image (pretrained)",
+    icon: "auto_awesome",
+    desc: "ResNet-18 pretrained on ImageNet — backbone fully frozen, only Dropout(0.3) + FC layer trains (~160K params). Label smoothing 0.1 applied. Best for small datasets and DP-SGD.",
+    types: ["image"],
+    details: {
+      architecture: "ResNet-18 (ImageNet weights, frozen) — ~160K trainable params",
       optimizer: "Adam (default) or SGD",
       learning_rate: "0.001",
       scheduler: "none",
