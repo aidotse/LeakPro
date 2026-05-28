@@ -27,7 +27,7 @@ class AttackMSLiRA(AbstractMIA):
         """Configuration for the MSLiRA attack."""
 
         signal_names: list[str] = Field(default=["ModelRescaledLogits"], description="What signals to use.")
-        num_shadow_models: int = Field(default=1, ge=1, description="Number of shadow models")
+        num_shadow_models: int = Field(default=2, ge=1, description="Number of shadow models")
         training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow models")  # noqa: E501
         online: bool = Field(default=False, description="Online vs offline attack")
         var_calculation: Literal["carlini", "individual_carlini", "fixed"] = Field(default="carlini", description="Variance estimation method to use [carlini, individual_carlini, fixed]")  # noqa: E501

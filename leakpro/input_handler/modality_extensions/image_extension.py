@@ -73,9 +73,12 @@ def _to_pil_from_normalized(x: Tensor,
     assert x.ndim == 3, f"Expected CHW single image, got {tuple(x.shape)}"
     C, H, W = x.shape  # noqa: N806
     dev = x.device
-    m = mean.detach().to(dtype=x.dtype, device=dev)[:C].view(C, 1, 1)
-    s = std.detach().to(dtype=x.dtype, device=dev)[:C].view(C, 1, 1)
-    un = (x * s + m).clamp(0, 1).cpu()   # <-- clamp to [0,1]
+    if mean is not None and std is not None:
+        m = mean.detach().to(dtype=x.dtype, device=dev)[:C].view(C, 1, 1)
+        s = std.detach().to(dtype=x.dtype, device=dev)[:C].view(C, 1, 1)
+        un = (x * s + m).clamp(0, 1).cpu()
+    else:
+        un = x.clamp(0, 1).cpu()
     if C == 1 and force_rgb:
         un = un.expand(3, H, W)
     return F.to_pil_image(un)

@@ -7,6 +7,7 @@
 import hashlib
 import json
 
+import numpy as np
 from torch.nn import Module
 
 
@@ -34,6 +35,18 @@ def hash_model(model: Module) -> str:
         tensor_bytes = state_dict[key].detach().cpu().numpy().tobytes()
         hasher.update(tensor_bytes)
 
+    return hasher.hexdigest()
+
+def hash_indices(train_indices: np.ndarray, test_indices: np.ndarray) -> str:
+    """Generate a SHA-256 hash of the train/test index split.
+
+    Order-independent: the same set of indices produces the same hash regardless
+    of ordering, so splits can be compared across runs that may shuffle differently.
+    """
+    hasher = hashlib.sha256()
+    hasher.update(np.sort(np.asarray(train_indices)).tobytes())
+    hasher.update(b"|")
+    hasher.update(np.sort(np.asarray(test_indices)).tobytes())
     return hasher.hexdigest()
 
 def hash_attack(config:dict, target_model:Module) -> str:
