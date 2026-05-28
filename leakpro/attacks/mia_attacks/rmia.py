@@ -190,7 +190,6 @@ class AttackRMIA(AbstractMIA):
         n_z = int(self.z_data_sample_fraction * len(self.attack_data_indices))
         z_indices = np.random.choice(self.attack_data_indices, size=n_z, replace=False)
         z_labels = self.handler.get_labels(z_indices)
-        z_rows = np.array([logit_row[int(idx)] for idx in z_indices])
 
         # cached_mask is True for z-points present in the logit cache (train+test).
         # Auxiliary population points not in the cache are computed on-the-fly.
