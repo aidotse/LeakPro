@@ -133,9 +133,10 @@ class AttackRMIA(AbstractMIA):
             logits[cached_mask] = logits_cached[rows]
 
         if (~cached_mask).any():
-            criterion = self.handler.get_criterion()
+            # Shadow models are already PytorchModel wrappers; target model is a raw nn.Module.
+            model_wrapped = model if isinstance(model, PytorchModel) else PytorchModel(model, self.handler.get_criterion())
             unc = np.array(ModelLogits()(
-                [PytorchModel(model, criterion)],
+                [model_wrapped],
                 self.handler,
                 z_indices[~cached_mask],
             )).squeeze()
