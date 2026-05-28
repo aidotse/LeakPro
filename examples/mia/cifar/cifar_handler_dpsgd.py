@@ -104,13 +104,13 @@ class CifarInputHandlerDPsgd(AbstractInputHandler):
                 optimizer = _rebuild_optimizer(optimizer, model)
                 logger.info(f"Model fixed and {optimizer.__class__.__name__} re-instantiated.")
 
-        _disable_inplace_activations(model)
-        model, optimizer, dataloader, _ = dpsgd(
-            model,
-            optimizer,
-            dataloader,
-            dpsgd_path=dpsgd_metadata_path,
-        )
+            _disable_inplace_activations(model)
+            model, optimizer, dataloader, _ = dpsgd(
+                model,
+                optimizer,
+                dataloader,
+                dpsgd_path=dpsgd_metadata_path,
+            )
 
         # read hyperparams for training (the parameters for the dataloader are defined in get_dataloader):
         if epochs is None:
@@ -293,7 +293,6 @@ def dpsgd(
 
     logger.info("Training with DP-SGD")
 
-    sample_rate = 1/len(dataloader)
     # Check if the file exists
     if os.path.exists(dpsgd_path):
         # Open and read the pickle file
@@ -306,20 +305,20 @@ def dpsgd(
     try:
         noise_multiplier = get_noise_multiplier(target_epsilon = privacy_engine_dict["target_epsilon"],
                                         target_delta = privacy_engine_dict["target_delta"],
-                                        sample_rate = sample_rate ,
+                                        sample_rate = privacy_engine_dict["sample_rate"],
                                         epochs = privacy_engine_dict["epochs"],
                                         epsilon_tolerance = privacy_engine_dict["epsilon_tolerance"],
-                                        accountant = "prv",
+                                        accountant = privacy_engine_dict["accountant"],
                                         eps_error = privacy_engine_dict["eps_error"],)
     except Exception as e:
         raise ValueError(
-            f"Failed to compute noise multiplier using the 'prv' accountant. "
+            f"Failed to compute noise multiplier using the '{privacy_engine_dict['accountant']}' accountant. "
             f"This may be due to a large target_epsilon ({privacy_engine_dict['target_epsilon']}). "
             f"Consider reducing epsilon or switching to a different accountant (e.g., 'rdp'). "
             f"Original error: {e}")
 
     # make the model private
-    privacy_engine = PrivacyEngine(accountant = "prv")
+    privacy_engine = PrivacyEngine(accountant = privacy_engine_dict["accountant"])
     priv_model, priv_optimizer, priv_dataloader = privacy_engine.make_private(
         module=model,
         optimizer=optimizer,
