@@ -14,37 +14,32 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from leakpro.attacks.gia_attacks.modular.core.label_types import (
+    BinaryMultilabelType,
+    ClassificationLabelType,
+    LabelType,
+)
+
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
 if TYPE_CHECKING:
     from leakpro.fl_utils.fl_client_simulator import ClientObservations
+    from leakpro.attacks.gia_attacks.modular.core.state import RunContext
 
 
 @dataclass
 class ComponentMetadata:
-    """Metadata describing a component's capabilities and requirements.
+    """Metadata describing a component's capability requirements.
 
     Attributes:
         name: Unique identifier for this component
-        display_name: Human-readable name
-        description: Detailed description of what this component does
         required_capabilities: Dict of capability_name -> required (True/False)
-        paper_reference: Optional citation for the paper this implements
-
     """
 
     name: str
-    display_name: str = ""
-    description: str = ""
     required_capabilities: dict[str, bool] = field(default_factory=dict)
-    paper_reference: str = ""
-
-    def __post_init__(self) -> None:
-        """Set display_name to name if not provided."""
-        if not self.display_name:
-            self.display_name = self.name
 
 
 class Component(ABC):
@@ -74,10 +69,15 @@ class LabelInferenceResult:
     """Result from label inference strategy.
 
     Attributes:
-        labels: Inferred labels (hard or soft)
-        confidence: Optional confidence scores per class
-        method: Name of the method used
-        metadata: Additional method-specific information
+        labels:     Inferred labels tensor (no epoch prefix).
+        confidence: Optional confidence / probability matrix.
+        method:     Name of the inference method used.
+        metadata:   Additional method-specific information.
+        label_type: Describes the label space and how to manipulate the tensor
+                    (e.g. epoch-dim add/strip, confidence conversion).
+                    Defaults to :class:`~leakpro.attacks.gia_attacks.modular.
+                    core.label_types.ClassificationLabelType` for backward
+                    compatibility.
 
     """
 
@@ -85,6 +85,7 @@ class LabelInferenceResult:
     confidence: torch.Tensor | None = None
     method: str = "unknown"
     metadata: dict[str, Any] = field(default_factory=dict)
+    label_type: LabelType = field(default_factory=ClassificationLabelType)
 
 
 class LabelInferenceStrategy(Component):
@@ -95,20 +96,12 @@ class LabelInferenceStrategy(Component):
     """
 
     @abstractmethod
-    def infer_labels(
-        self,
-        gradients: list[torch.Tensor],
-        model: nn.Module,
-        num_samples: int,
-        true_labels: torch.Tensor | None = None,
-    ) -> LabelInferenceResult:
-        """Infer labels from gradients.
+    def infer(self, ctx: "RunContext") -> LabelInferenceResult:
+        """Infer labels from run context.
 
         Args:
-            gradients: List of gradient tensors
-            model: Target model
-            num_samples: Number of samples in the batch
-            true_labels: Optional ground-truth labels (for OracleLabels strategy)
+            ctx: Run context with target_model and client_observations
+                 (gradients, labels, input_shape, training_settings).
 
         Returns:
             LabelInferenceResult with inferred labels
@@ -223,7 +216,11 @@ class OptimizationState:
     """State maintained during optimization.
 
     Attributes:
-        reconstruction: Current reconstruction
+        reconstruction: Current reconstruction in data space [E, N, G, C, H, W]
+        optimizable_tensor: Parameters being optimized (may differ from reconstruction)
+                           - For pixel-based: same as reconstruction
+                           - For latent-based: latent codes [E, N, G, latent_dim]
+                           - For feature-based: intermediate features [E, N, G, ...]
         labels: Current labels (may be optimized, optional)
         iteration: Current iteration number
         loss: Current loss value
@@ -233,6 +230,7 @@ class OptimizationState:
     """
 
     reconstruction: torch.Tensor
+    optimizable_tensor: torch.Tensor | None = None  # None means same as reconstruction
     labels: torch.Tensor | None = None
     iteration: int = 0
     loss: float = float("inf")
@@ -240,51 +238,16 @@ class OptimizationState:
     converged: bool = False
 
 
-class OptimizationStrategy(Component):
-    """Base class for optimization strategies.
-
-    Optimization strategies define how to iteratively refine the reconstruction.
-    Returns final OptimizationState after optimization completes.
-    """
-
-    @abstractmethod
-    def optimize(
-        self,
-        reconstruction: torch.Tensor,
-        labels: LabelInferenceResult,
-        target_model: nn.Module,
-        client_observations: ClientObservations,
-        proxy_dataloader: DataLoader | None = None,
-    ) -> OptimizationState:
-        """Run optimization and return final state.
-
-        Args:
-            reconstruction: Initial reconstruction tensor
-            labels: Label inference result from label inference stage
-            target_model: Target model
-            client_observations: Observations from client including gradients and BN stats
-            proxy_dataloader: Optional proxy data for BN estimation strategies
-
-        Returns:
-            Final OptimizationState after optimization
-
-        """
-        pass
-
-
 __all__ = [
-    # Core
     "ComponentMetadata",
     "Component",
-    # Label Inference
+    "LabelType",
+    "ClassificationLabelType",
+    "BinaryMultilabelType",
     "LabelInferenceResult",
     "LabelInferenceStrategy",
-    # Initialization
     "InitializationResult",
     "InitializationStrategy",
-    # Seed Aggregation
     "AggregationStrategy",
-    # Optimization
     "OptimizationState",
-    "OptimizationStrategy",
 ]

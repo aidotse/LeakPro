@@ -17,17 +17,25 @@ Strategies:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import torch
 from torch import nn
 from torch.nn.functional import one_hot, softmax
 
+from leakpro.attacks.gia_attacks.modular.config.registry import register
 from leakpro.attacks.gia_attacks.modular.core.component_base import (
     ComponentMetadata,
     LabelInferenceResult,
     LabelInferenceStrategy,
 )
+from leakpro.attacks.gia_attacks.modular.core.label_types import LabelType
+
+if TYPE_CHECKING:
+    from leakpro.attacks.gia_attacks.modular.core.state import RunContext
 
 
+@register("label_inference.idlg")
 class IDLGLabelInference(LabelInferenceStrategy):
     """Improved Deep Leakage from Gradients (iDLG) label inference.
 
@@ -46,37 +54,31 @@ class IDLGLabelInference(LabelInferenceStrategy):
         """Get metadata for iDLG label inference strategy."""
         return ComponentMetadata(
             name="idlg",
-            display_name="iDLG Label Inference",
-            description="Analytical label inference using gradient signs (iDLG)",
             required_capabilities={"has_gradients": True},
-            paper_reference="Zhao et al., iDLG, 2020",
         )
 
-    def infer_labels(
-        self,
-        gradients: list[torch.Tensor],
-        model: nn.Module,
-        num_samples: int,
-        true_labels: torch.Tensor | None = None,
-        is_update: bool = False,
-    ) -> LabelInferenceResult:
+    def infer(self, ctx: "RunContext") -> LabelInferenceResult:
         """Infer labels from last layer bias gradient.
 
         Args:
-            gradients: List of gradient tensors (ordered as model.parameters())
-            model: Target model (not used but kept for interface consistency)
-            num_samples: Number of samples in batch
-            true_labels: Not used by this strategy
-            is_update: If True, gradients are actually parameter updates (Δθ), which have opposite sign
+            ctx: Run context with target_model and client_observations.
 
         Returns:
             LabelInferenceResult with inferred labels
 
         """
+        obs = ctx.client_observations
+        gradients = [
+            obs.gradients[name]
+            for name, _ in ctx.target_model.named_parameters()
+            if name in obs.gradients
+        ]
+        num_samples = obs.input_shape[0]
+        is_update = (
+            obs.training_settings is not None
+            and obs.training_settings.compute_mode == "updates"
+        )
 
-        _ = (model, true_labels)  # Unused parameters, but kept for interface consistency
-
-        # Find the last bias gradient (1D tensor)
         last_bias_grad = None
         last_weight_grad = None
 
@@ -90,9 +92,7 @@ class IDLGLabelInference(LabelInferenceStrategy):
                 if last_bias_grad is not None:
                     break
 
-        # If no bias gradient, try to use weight gradient
         if last_bias_grad is None and last_weight_grad is not None:
-            # Sum weight gradients along input dimension to get per-class gradients
             last_bias_grad = last_weight_grad.sum(dim=1)
 
         if last_bias_grad is None:
@@ -101,22 +101,18 @@ class IDLGLabelInference(LabelInferenceStrategy):
                 "iDLG requires gradients from the final layer."
             )
 
-        # If these are updates instead of gradients, flip the sign
-        # Updates: Δθ = -lr * ∇L, so we need to negate to get gradient direction
+        # Updates: Δθ = -lr * ∇L, so negate to get gradient direction
         if is_update:
             last_bias_grad = -last_bias_grad
 
         # For cross-entropy with softmax: grad_b = softmax - one_hot
         # Negative positions indicate true labels
         if num_samples == 1:
-            # Single sample: most negative position is the label
             label = torch.argmin(last_bias_grad).unsqueeze(0)
             confidence = softmax(-last_bias_grad, dim=0).unsqueeze(0)
         else:
-            # Batch: take top num_samples most negative positions
             sorted_indices = torch.argsort(last_bias_grad)
             label = sorted_indices[:num_samples]
-            # Confidence based on negative gradient magnitude
             confidence = softmax(
                 -last_bias_grad.unsqueeze(0).expand(num_samples, -1), dim=-1
             )
@@ -129,6 +125,7 @@ class IDLGLabelInference(LabelInferenceStrategy):
         )
 
 
+@register("label_inference.joint")
 class JointLabelOptimization(LabelInferenceStrategy):
     """Optimize labels jointly with reconstruction (DLG style).
 
@@ -152,43 +149,42 @@ class JointLabelOptimization(LabelInferenceStrategy):
         """Get metadata for joint label optimization strategy."""
         return ComponentMetadata(
             name="joint_optimization",
-            display_name="Joint Label Optimization",
-            description="Initialize soft labels for joint optimization with reconstruction",
             required_capabilities={"has_gradients": True},
         )
 
-    def infer_labels(
-        self,
-        gradients: list[torch.Tensor],
-        model: nn.Module,
-        num_samples: int,
-        true_labels: torch.Tensor | None = None,
-        is_update: bool = False,
-    ) -> LabelInferenceResult:
+    def infer(self, ctx: "RunContext") -> LabelInferenceResult:
         """Initialize soft labels for optimization."""
-        device = gradients[0].device
+        obs = ctx.client_observations
+        model = ctx.target_model
+        num_samples = obs.input_shape[0]
+        gradients = [
+            obs.gradients[name]
+            for name, _ in model.named_parameters()
+            if name in obs.gradients
+        ]
+        device = gradients[0].device if gradients else torch.device("cpu")
 
-        _ = (true_labels, is_update)  # Not used
+        num_classes = self.num_classes
+        for m in reversed(list(model.modules())):
+            if hasattr(m, "out_features"):
+                num_classes = m.out_features
+                break
 
         if self.init_strategy == "idlg_warm":
-            # Warm-start using iDLG
             idlg = IDLGLabelInference()
             try:
-                idlg_result = idlg.infer_labels(gradients, model, num_samples)
-                # Convert hard labels to soft (one-hot)
-                soft_labels = one_hot(idlg_result.labels, self.num_classes).float()
+                idlg_result = idlg.infer(ctx)
+                soft_labels = one_hot(idlg_result.labels, num_classes).float()
             except (ValueError, RuntimeError):
-                # Fallback to uniform if iDLG fails
-                soft_labels = torch.ones(num_samples, self.num_classes, device=device) / self.num_classes
+                soft_labels = torch.ones(num_samples, num_classes, device=device) / num_classes
         elif self.init_strategy == "uniform":
-            soft_labels = torch.ones(num_samples, self.num_classes, device=device) / self.num_classes
+            soft_labels = torch.ones(num_samples, num_classes, device=device) / num_classes
         elif self.init_strategy == "random":
-            soft_labels = torch.randn(num_samples, self.num_classes, device=device)
+            soft_labels = torch.randn(num_samples, num_classes, device=device)
             soft_labels = softmax(soft_labels, dim=-1)
         else:
-            soft_labels = torch.ones(num_samples, self.num_classes, device=device) / self.num_classes
+            soft_labels = torch.ones(num_samples, num_classes, device=device) / num_classes
 
-        # Get hard labels for initial reconstruction
         hard_labels = torch.argmax(soft_labels, dim=-1)
 
         return LabelInferenceResult(
@@ -199,6 +195,7 @@ class JointLabelOptimization(LabelInferenceStrategy):
         )
 
 
+@register("label_inference.oracle")
 class OracleLabels(LabelInferenceStrategy):
     """Use ground-truth labels (for debugging/upper bound analysis).
 
@@ -213,41 +210,32 @@ class OracleLabels(LabelInferenceStrategy):
         """Get metadata for oracle label inference strategy."""
         return ComponentMetadata(
             name="oracle",
-            display_name="Oracle Labels (Ground Truth)",
-            description="Use ground-truth labels - not a real attack",
             required_capabilities={},  # No requirements - uses provided labels
         )
 
-    def infer_labels(
-        self,
-        gradients: list[torch.Tensor],
-        model: nn.Module,
-        num_samples: int,
-        true_labels: torch.Tensor | None = None,
-        is_update: bool = False,
-    ) -> LabelInferenceResult:
+    def infer(self, ctx: "RunContext") -> LabelInferenceResult:
         """Return provided ground-truth labels."""
-        _ = (gradients, model, num_samples, is_update)  # Unused parameters
+        true_labels = ctx.client_observations.labels
         if true_labels is None:
             raise ValueError(
-                "OracleLabels requires 'true_labels' parameter"
+                "OracleLabels requires labels in client_observations"
             )
 
         if not isinstance(true_labels, torch.Tensor):
-            true_labels = torch.tensor(true_labels, dtype=torch.long)
+            true_labels = torch.tensor(true_labels)
 
-        # Create uniform confidence (we know labels are correct)
-        # Infer num_classes from the labels themselves
-        num_classes = int(true_labels.max().item()) + 1
-        confidence = one_hot(true_labels, num_classes).float()
+        label_type = LabelType.auto_detect(true_labels)
+        confidence = label_type.to_confidence(true_labels)
 
         return LabelInferenceResult(
             labels=true_labels,
             confidence=confidence,
             method="oracle",
+            label_type=label_type,
             metadata={"ground_truth": True},
         )
 
+@register("label_inference.geng")
 class GengLabelInference(LabelInferenceStrategy):
     """Geng et al. label inference for single-step gradient attacks (FedSGD).
 
@@ -283,53 +271,29 @@ class GengLabelInference(LabelInferenceStrategy):
         """Get metadata for Geng label inference."""
         return ComponentMetadata(
             name="geng",
-            display_name="Geng Zero-Shot Label Inference",
-            description="Analytical label inference for FedSGD using network statistics",
             required_capabilities={"has_gradients": True},
-            paper_reference="Geng et al., Towards General Deep Leakage in Federated Learning",
         )
 
-    def infer_labels(
-        self,
-        gradients: list[torch.Tensor],
-        model: nn.Module,
-        num_samples: int,
-        true_labels: torch.Tensor | None = None,
-        is_update: bool = False,
-    ) -> LabelInferenceResult:
+    def infer(self, ctx: "RunContext") -> LabelInferenceResult:
         """Infer label counts using Geng's analytical method.
 
-        This delegates to DimitrovLabelInference with epochs=1, which is
+        Delegates to DimitrovLabelInference with epochs=1, which is
         mathematically equivalent to Geng's formula.
 
         Args:
-            gradients: List of gradient tensors
-            model: Target model
-            num_samples: Number of samples in batch (K)
-            true_labels: Not used by this strategy
-            is_update: If True, gradients are actually parameter updates (Δθ)
+            ctx: Run context with target_model and client_observations.
 
         Returns:
             LabelInferenceResult with inferred labels
 
         """
-        # Set batch_size to num_samples so k_batches=1, total_steps=1
-        self._dimitrov.batch_size = num_samples
-
-        result = self._dimitrov.infer_labels(
-            gradients=gradients,
-            model=model,
-            num_samples=num_samples,
-            true_labels=true_labels,
-            is_update=is_update,
-        )
-
-        # Update method name in result
+        self._dimitrov.batch_size = ctx.client_observations.input_shape[0]
+        result = self._dimitrov.infer(ctx)
         result.method = "geng"
-
         return result
 
 
+@register("label_inference.dimitrov")
 class DimitrovLabelInference(LabelInferenceStrategy):
     """Dimitrov label inference for multi-epoch FedAvg attacks.
 
@@ -379,10 +343,7 @@ class DimitrovLabelInference(LabelInferenceStrategy):
         """Get metadata for Dimitrov label inference."""
         return ComponentMetadata(
             name="dimitrov",
-            display_name="Dimitrov Label Inference",
-            description="Analytical label inference for multi-epoch FedAvg using interpolated statistics",
             required_capabilities={"has_gradients": True, "has_local_hyperparameters": True},
-            paper_reference="Dimitrov et al., Data Leakage in Federated Averaging, TMLR 2022",
         )
 
     def _calc_label_stats(
@@ -448,8 +409,7 @@ class DimitrovLabelInference(LabelInferenceStrategy):
         if last_relu is not None:
             handle.remove()
 
-        # Compute statistics
-        ps = softmax_probs.mean(dim=0)  # Mean softmax probs across samples
+        ps = softmax_probs.mean(dim=0)
 
         output_sum = last_relu_outputs[0].sum(dim=-1).mean() if last_relu_outputs else outputs.abs().sum(dim=-1).mean()
 
@@ -689,70 +649,60 @@ class DimitrovLabelInference(LabelInferenceStrategy):
             confidence[i, label] = 1.0
         return confidence
 
-    def infer_labels(
-        self,
-        gradients: list[torch.Tensor],
-        model: nn.Module,
-        num_samples: int,
-        true_labels: torch.Tensor | None = None,
-        is_update: bool = False,
-    ) -> LabelInferenceResult:
+    def infer(self, ctx: "RunContext") -> LabelInferenceResult:
         """Infer label counts using Dimitrov's analytical method.
 
         Args:
-            gradients: List of gradient tensors from FedAvg update
-            model: Target model
-            num_samples: Number of samples in batch (K)
-            true_labels: Not used by this strategy
-            is_update: If True, gradients are actually parameter updates (Δθ)
+            ctx: Run context with target_model and client_observations.
 
         Returns:
             LabelInferenceResult with inferred labels
 
         """
-        _ = true_labels  # Unused
+        obs = ctx.client_observations
+        model = ctx.target_model
+        num_samples = obs.input_shape[0]
+        gradients = [
+            obs.gradients[name]
+            for name, _ in model.named_parameters()
+            if name in obs.gradients
+        ]
+        is_update = (
+            obs.training_settings is not None
+            and obs.training_settings.compute_mode == "updates"
+        )
 
-        # Convert updates to gradients if needed
         if is_update:
             gradients = [-g for g in gradients]
 
         device = gradients[0].device
 
-        # Get input shape and extract weight gradient sum
-        input_shape = self._infer_input_shape(model)
+        # Use actual input shape from observations (C, H, W); fall back to model inference
+        input_shape = obs.input_shape[1:] if len(obs.input_shape) > 1 else self._infer_input_shape(model)
         weight_grad_sum = self._extract_weight_gradient_sum(gradients)
 
-        # Get server parameters (before update)
         server_params = {name: param.data.clone() for name, param in model.named_parameters()}
-
-        # Compute client parameters (after update)
         client_params = self._compute_client_params(gradients, model, server_params)
 
-        # Calculate statistics at start and end
         ps_start, output_sum_start = self._calc_label_stats(model, server_params, input_shape, device)
         ps_end, output_sum_end = self._calc_label_stats(model, client_params, input_shape, device)
 
-        # Total training steps
         k_batches = (num_samples + self.batch_size - 1) // self.batch_size
         total_steps = k_batches * self.epochs
 
-        # Interpolate statistics based on strategy
         raw_counts = self._compute_label_counts_by_strategy(
             ps_start, output_sum_start, ps_end, output_sum_end,
             weight_grad_sum, total_steps, num_samples, device
         )
 
-        # Round to integer counts
         label_counts = self._round_label_counts(raw_counts, num_samples)
 
-        # Convert counts to label sequence
         labels = []
         for label_idx, count in enumerate(label_counts):
             labels.extend([label_idx] * int(count.item()))
 
         labels_tensor = torch.tensor(labels[:num_samples], dtype=torch.long, device=device)
 
-        # Create confidence based on counts
         num_classes = len(label_counts)
         confidence = self._create_confidence_matrix(labels_tensor, num_samples, num_classes, device)
 

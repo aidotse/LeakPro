@@ -127,6 +127,7 @@ class MultiEpochTrainingSimulation(TrainingSimulator):
             model_mode: str = "train",
             shuffle_mode: str = "attack",
             epoch_handling_strategy: "EpochHandlingStrategy | None" = None,
+            meta_learning_rate: float = 0.01,
         ) -> None:
         """Initialize training simulator.
 
@@ -142,6 +143,7 @@ class MultiEpochTrainingSimulation(TrainingSimulator):
                 - "client": Realistic client simulation with batch shuffling
             epoch_handling_strategy: Strategy for how to handle reconstruction data across epochs.
                 Controls whether we use separate images per epoch, repeat same images, etc.
+            meta_learning_rate: Learning rate for the inner meta-optimizer (MetaSGD or MetaAdam).
 
         """
         self.epochs = epochs
@@ -151,15 +153,16 @@ class MultiEpochTrainingSimulation(TrainingSimulator):
         self.model_mode = model_mode
         self.shuffle_mode = shuffle_mode
         self.epoch_handling_strategy = epoch_handling_strategy
+        self.meta_learning_rate = meta_learning_rate
 
         if shuffle_mode not in ["attack", "client"]:
             raise ValueError(f"Unknown shuffle mode: {shuffle_mode}. Must be 'attack' or 'client'")
 
-        # Initialize meta-optimizer
+        # Initialize meta-optimizer using the configurable learning rate
         if optimizer_type == "sgd":
-            self.meta_optimizer = MetaSGD(lr=0.01)
+            self.meta_optimizer = MetaSGD(lr=meta_learning_rate)
         elif optimizer_type == "adam":
-            self.meta_optimizer = MetaAdam(lr=0.001)
+            self.meta_optimizer = MetaAdam(lr=meta_learning_rate)
         else:
             raise ValueError(f"Unknown optimizer_type: {optimizer_type}")
 
@@ -168,9 +171,7 @@ class MultiEpochTrainingSimulation(TrainingSimulator):
         hyper_parameters_required = self.epochs > 1
         return ComponentMetadata(
             name="MultiEpochTrainingSimulation",
-            display_name="Multi-Epoch Training Simulation",
             required_capabilities={"has_local_hyperparameters": hyper_parameters_required},
-            description=f"Simulate {self.epochs}-epoch client training with {self.optimizer_type}",
         )
 
     def _validate_gradient_mode(self) -> None:
@@ -207,10 +208,26 @@ class MultiEpochTrainingSimulation(TrainingSimulator):
             For multi-seed (G > 1), returns dict with 'seed_results' key containing list of dicts.
 
         """
-        if self.model_mode == "eval":
-            model.eval()
-        else:
-            model.train()
+        # Save and restore model training state so RunContext's target model
+        # remains immutable from the caller's perspective.
+        original_training = model.training
+        try:
+            if self.model_mode == "eval":
+                model.eval()
+            else:
+                model.train()
+            return self._simulate_training_inner(model, input_data, labels, loss_fn)
+        finally:
+            model.train(original_training)
+
+    def _simulate_training_inner(
+        self,
+        model: nn.Module,
+        input_data: torch.Tensor,
+        labels: torch.Tensor,
+        loss_fn: nn.Module,
+    ) -> Dict[str, torch.Tensor] | Dict[str, list[torch.Tensor]]:
+        """Inner simulate_training implementation (model mode already set by caller)."""
         # Detect mode from input shape
         is_client_data = (input_data.ndim == 4)
 

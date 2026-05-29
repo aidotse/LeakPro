@@ -15,23 +15,27 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List
 
 import torch
 from torch import nn, optim
-from torch.utils.data import DataLoader
 
+from leakpro.attacks.gia_attacks.modular.components.gradient_inversion_base import GradientInversionBase
 from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.constraints import (
     ConstraintStrategy,
-    NoConstraint,
+    FeatureSpaceConstraint,
 )
 from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.label_strategies import (
     FixedLabels,
     LabelStrategy,
 )
-from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.loss_components import (
-    BNStatisticsRegularization,
-    LossComponent,
+if TYPE_CHECKING:
+    from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.loss_components import (
+        LossComponent,
+    )
+from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.optimizer_utils import (
+    compute_loss_components,
+    log_progress,
 )
 from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.step_strategies import (
     StandardStepStrategy,
@@ -40,37 +44,49 @@ from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks
 from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.training_simulator import (
     TrainingSimulator,
 )
+from leakpro.attacks.gia_attacks.modular.components.representation_strategies import (
+    RepresentationStrategy,
+    UnfrozenGANRepresentation,
+)
+from leakpro.attacks.gia_attacks.modular.config.registry import build_component
+from leakpro.attacks.gia_attacks.modular.config.spec import ComponentSpec
 from leakpro.attacks.gia_attacks.modular.core.component_base import (
     AggregationStrategy,
     Component,
     ComponentMetadata,
     LabelInferenceResult,
     OptimizationState,
-    OptimizationStrategy,
 )
-from leakpro.fl_utils.fl_client_simulator import ClientObservations
+from leakpro.attacks.gia_attacks.modular.core.state import RunContext
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class InternalOptimizerState:
-    """Internal state maintained during ComposableOptimizer optimization."""
+    """Internal state maintained during ComposableOptimizer optimization.
 
-    client_observations: ClientObservations
-    reconstruction: torch.Tensor
+    Fields:
+        optimizable_tensor: The tensor being optimized (latent codes if using
+                           representation, data otherwise)
+        best_optimizable_tensor: Best optimizable tensor found so far
+        labels: Current labels
+        optimizable_params: Additional optimizable parameters (e.g., soft labels)
+    """
+
+    optimizable_tensor: torch.Tensor  # What we optimize (latent or data)
     labels: torch.Tensor
-    optimizable_params: List[torch.Tensor]
+    optimizable_params: List[torch.Tensor]  # Additional params like soft labels
     optimizer: optim.Optimizer
     scheduler: Any | None
     iteration: int
     best_loss: float
-    best_reconstruction: torch.Tensor | None
+    best_optimizable_tensor: torch.Tensor | None  # Best params in optimization space
     best_labels: torch.Tensor | None
     aux_data: Dict[str, Any]  # For storing intermediate results
 
 
-class ComposableOptimizer(OptimizationStrategy):
+class ComposableOptimizer(GradientInversionBase):
     """Composable optimization strategy built from reusable building blocks.
 
     Args:
@@ -78,10 +94,11 @@ class ComposableOptimizer(OptimizationStrategy):
         constraint: Constraint strategy to apply after each step
         label_strategy: How to handle labels during optimization
         step_strategy: How to execute optimization steps
+        representation: Strategy for transforming params to pixels (None = pixel space)
         learning_rate: Base learning rate
         max_iterations: Number of optimization iterations
-        optimizer_type: Type of optimizer ("adam", "sgd", "lbfgs")
-        scheduler_type: Type of scheduler ("cosine", "step", "exponential", None)
+        optimizer_type: ComponentSpec selecting the optimizer (e.g. ``ComponentSpec(type="optimizer.adam")``); None → Adam
+        scheduler_type: ComponentSpec selecting the LR scheduler; None → no scheduler
         patience: Early stopping patience (iterations without improvement)
 
     """
@@ -92,34 +109,60 @@ class ComposableOptimizer(OptimizationStrategy):
         constraint: ConstraintStrategy | None = None,
         label_strategy: LabelStrategy | None = None,
         step_strategy: StepStrategy | None = None,
+        representation: RepresentationStrategy | None = None,
         learning_rate: float = 0.1,
         label_learning_rate: float | None = None,
         max_iterations: int = 300,
-        optimizer_type: str = "adam",
-        scheduler_type: str | None = None,
+        optimizer_type: ComponentSpec | None = None,
+        scheduler_type: ComponentSpec | None = None,
         patience: int = 10000,
         log_interval: int = None,
         training_simulator: TrainingSimulator | None = None,
         loss_fn: nn.Module | None = None,
         seed_aggregation: AggregationStrategy | None = None,
         epoch_aggregation: AggregationStrategy | None = None,
+        freeze_input: bool = False,
+        return_best: bool = True,
+        verbose: bool = False,
     ) -> None:
-        self.loss_components = loss_components
-        self.constraint = constraint or NoConstraint()
+        # Delegate shared fields to GradientInversionBase
+        super().__init__(loss_components, loss_fn, seed_aggregation, epoch_aggregation, log_interval)
+        self.constraint = constraint  # None = no constraint
         self.label_strategy = label_strategy or FixedLabels()
         self.step_strategy = step_strategy or StandardStepStrategy()
+        self.representation = representation
         self.learning_rate = learning_rate
         self.label_learning_rate = label_learning_rate if label_learning_rate is not None else learning_rate
         self.max_iterations = max_iterations
         self.optimizer_type = optimizer_type
         self.scheduler_type = scheduler_type
-        self.loss_fn = loss_fn or nn.CrossEntropyLoss()
         self.patience = patience
-        self.log_interval = log_interval
         self._training_simulator = training_simulator
-        self.seed_aggregation = seed_aggregation
-        self.epoch_aggregation = epoch_aggregation
-        super().__init__()
+        self.freeze_input = freeze_input
+        self.return_best = return_best  # If True, return best reconstruction; if False, return last
+        self.verbose = verbose
+
+    def _compute_reconstruction(
+        self,
+        optimizable_tensor: torch.Tensor,
+        labels: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Compute data-space reconstruction from optimizable parameters.
+        
+        Args:
+            optimizable_tensor: Tensor being optimized (latent codes or data)
+            labels: Optional labels for conditional generation
+            
+        Returns:
+            reconstruction: Always in data space [E, N, G, C, H, W]
+
+        """
+        if self.representation is not None:
+            # Transform from parameter space (e.g., latent) to data space
+            reconstruction = self.representation.forward(optimizable_tensor, labels=labels)
+            return reconstruction
+        # Already in data space (identity)
+        return optimizable_tensor
 
     @property
     def training_simulator(self) -> TrainingSimulator | None:
@@ -155,10 +198,13 @@ class ComposableOptimizer(OptimizationStrategy):
             comp_reqs = self._get_component_requirements(self._training_simulator)
             all_requirements.update(comp_reqs)
 
+        # Check representation strategy
+        if self.representation is not None:
+            comp_reqs = self._get_component_requirements(self.representation)
+            all_requirements.update(comp_reqs)
+
         return ComponentMetadata(
             name="composable",
-            display_name="Composable Optimizer",
-            description="Flexible optimization built from composable building blocks",
             required_capabilities=all_requirements,
         )
 
@@ -181,44 +227,65 @@ class ComposableOptimizer(OptimizationStrategy):
         requirements = metadata.required_capabilities.copy()
 
         # Special case: BNStatisticsRegularization needs to check its strategy
+        from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.loss_components import (  # noqa: PLC0415
+            BNStatisticsRegularization,
+        )
         if isinstance(component, BNStatisticsRegularization):
             strategy_reqs = component.get_strategy_requirements()
             requirements.update(strategy_reqs)
 
         return requirements
 
-    def optimize(
+    def _run_core_loop(
         self,
-        reconstruction: torch.Tensor,
+        x_init: torch.Tensor,
         labels: LabelInferenceResult,
-        target_model: nn.Module,
-        client_observations: ClientObservations,
-        proxy_dataloader: DataLoader | None = None,
+        target_grads: list[torch.Tensor],
+        ctx: RunContext,
+        *,
+        stage_idx: int = 0,
+        callbacks: list | None = None,
     ) -> OptimizationState:
-        """Run optimization using composed building blocks."""
-        observed_gradients = client_observations.gradients
-        data_mean = client_observations.data_mean
-        data_std = client_observations.data_std
+        """Core Adam/LBFGS optimization loop.
 
-        # Convert observed_gradients dict to list matching model.parameters()
-        # Detach target gradients - they should not require gradients themselves
-        target_gradients = [
-            observed_gradients[name].detach()
-            for name, _ in target_model.named_parameters()
-            if name in observed_gradients
-        ]
+        Called by :meth:`GradientInversionBase.optimize` after the shared
+        scaffold (gradient extraction, BN setup, normalization propagation)
+        has been executed.
 
-        # Setup BN regularization components if present
-        self._setup_bn_components(target_model, reconstruction, client_observations, proxy_dataloader)
-
+        Returns an :class:`OptimizationState` with ``reconstruction`` in
+        ``[E, N, G, C, H, W]`` (pre-aggregation).  The base class applies
+        seed/epoch aggregation and dimension stripping.
+        """
         # Setup optimization state
-        state = self._setup_optimization(
-            reconstruction, labels, client_observations
-        )
+        state = self._setup_optimization(x_init, labels)
 
-        log_interval = self.log_interval if self.log_interval is not None else max(1, self.max_iterations // 10)
-        logger.debug(f"Starting optimization: max_iters={self.max_iterations}, "
-                     f"log_interval={log_interval}, patience={self.patience}")
+        # Use the configured log_interval (default from constructor)
+        log_interval = self.log_interval or 100
+
+        # Default loss value in case max_iterations == 0 (e.g. GIAS stage-2 skipped)
+        total_loss_value: float = float("nan")
+
+        # ── Attack-boundary fingerprint (what the LeakPro attack actually received) ──
+        if self.verbose:
+            g0 = target_grads[0] if target_grads else None
+            gnorms = [g.norm().item() for g in target_grads] if target_grads else []
+            if g0 is not None:
+                logger.info(
+                    "[debug \u25b6 leakpro]  grads [%d layers]  "
+                    "g[0] norm=%.6f mean=%.3e std=%.3e  "
+                    "all: min=%.4f max=%.4f mean=%.4f",
+                    len(gnorms), g0.norm().item(), g0.mean().item(), g0.std().item(),
+                    min(gnorms), max(gnorms), sum(gnorms) / len(gnorms),
+                )
+            logger.info(
+                "[debug \u25b6 leakpro]  x_init shape=%s  mean=%.6f  std=%.6f",
+                list(x_init.shape), x_init.mean().item(), x_init.std().item(),
+            )
+            for lc in self.loss_components:
+                logger.info(
+                    "[debug \u25b6 leakpro]  loss   %s: weight=%.2e",
+                    type(lc).__name__, lc.weight,
+                )
 
         # Main optimization loop
         for iteration in range(self.max_iterations):
@@ -226,13 +293,16 @@ class ComposableOptimizer(OptimizationStrategy):
 
             # Define closures for step strategy
             def compute_loss_fn() -> tuple[torch.Tensor, dict[str, float]]:
-                return self._compute_loss(state, target_model, target_gradients, self.loss_fn)
+                return self._compute_loss(state, target_grads, ctx)
 
             def apply_constraints_fn(s: InternalOptimizerState) -> None:
-                with torch.no_grad():
-                    s.reconstruction.data = self.constraint.apply(
-                        s.reconstruction.data, data_mean, data_std
-                    )
+                if self.constraint is None:
+                    return
+                if self.representation is None or isinstance(self.constraint, FeatureSpaceConstraint):
+                    with torch.no_grad():
+                        s.optimizable_tensor.data = self.constraint.apply(
+                            s.optimizable_tensor.data, ctx
+                        )
 
             # Execute optimization step using strategy
             total_loss_value, losses = \
@@ -244,165 +314,227 @@ class ComposableOptimizer(OptimizationStrategy):
             )
 
             if should_stop:
-                logger.info(f"  Early stopping at iteration {iteration}")
                 break
 
-            # Logging
             if iteration % log_interval == 0 or iteration == self.max_iterations - 1:
-                self._log_progress(state, total_loss_value, losses)
+                current_lr = state.optimizer.param_groups[0]["lr"] if state.optimizer is not None else 0.0
+                self._log_progress(state, total_loss_value, losses, current_lr)
+                self._fire_step_callbacks(
+                    iteration, total_loss_value, losses,
+                    stage_idx=stage_idx, callbacks=callbacks, ctx=ctx,
+                )
 
-        # Return final best reconstruction
-        if state.best_reconstruction is not None:
-            final_reconstruction = state.best_reconstruction
+        # Get best or last optimizable tensor based on return_best setting
+        if self.return_best and state.best_optimizable_tensor is not None:
+            # Return best reconstruction (lowest loss across all iterations)
+            best_optimizable_tensor = state.best_optimizable_tensor
             final_labels = state.best_labels if state.best_labels is not None else labels
             final_loss = state.best_loss
         else:
-            final_reconstruction = state.reconstruction.detach()
+            # Return last reconstruction (final iteration)
+            best_optimizable_tensor = state.optimizable_tensor.detach()
             final_labels = self.label_strategy.get_labels_for_forward(
                 state.optimizable_params, state.labels
             )
             final_loss = total_loss_value
 
+        # Transform to data space for final output
+        # (If using representation: latent -> data; otherwise: already in data space)
+        with torch.no_grad():
+            final_reconstruction = self._compute_reconstruction(
+                best_optimizable_tensor,
+                labels=final_labels,
+            )
+        # final_reconstruction is [E, N, G, C, H, W] — the base class will apply
+        # seed/epoch aggregation and strip to [N, C, H, W].
 
-        # Apply seed aggregation
-        if self.seed_aggregation is not None:
-            logger.info(f"  Applying seed aggregation: {self.seed_aggregation.get_metadata().name}")
-            final_reconstruction = self.seed_aggregation.compute_consensus(final_reconstruction)
+        # Compute per-seed gradient matching losses for best seed selection.
+        #
+        # IMPORTANT: when G > 1, best_optimizable_tensor is saved at the iteration
+        # where the *average* loss across all seeds was minimum — NOT at each seed's
+        # individual best moment.  Scoring seeds at this shared average-minimum
+        # snapshot can make the selected seed's result WORSE than what a single-seed
+        # run (G=1) would achieve, because the single-seed run returns its personal
+        # best state while multi-seed compares seeds at a moment that may not be
+        # optimal for any of them individually.
+        #
+        # The original GIFD paper runs each restart independently and scores the
+        # FINAL state of each restart (choose_optimal / _score_trial).  We match
+        # that approach: for G > 1 use the final iteration state so that each seed
+        # is scored at the end of its own independent optimisation trajectory.
+        per_seed_losses = None
+        if final_reconstruction.shape[2] > 1:  # G > 1 (multiple seeds)
+            # Use final optimisation state — each seed has evolved independently
+            # for max_iterations steps; score them on their final result.
+            final_state_tensor = state.optimizable_tensor.detach()
+            with torch.no_grad():
+                final_state_reconstruction = self._compute_reconstruction(
+                    final_state_tensor,
+                    labels=final_labels,
+                )
+            # Replace the reconstruction with the final-state version so that
+            # BestSeedAggregation picks a seed AND returns its final-state image.
+            final_reconstruction = final_state_reconstruction
 
-        # Apply epoch aggregation: [E, N, 1, C, H, W] → [1, N, 1, C, H, W]
-        if self.epoch_aggregation is not None:
-            logger.info(f"  Applying epoch aggregation: {self.epoch_aggregation.get_metadata().name}")
-            final_reconstruction = self.epoch_aggregation.compute_consensus(final_reconstruction)
+            from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.loss_components import (  # noqa: PLC0415
+                GradientMatchingLoss,
+            )
+            for loss_comp in self.loss_components:
+                if isinstance(loss_comp, GradientMatchingLoss):
+                    try:
+                        per_seed_losses = loss_comp.compute_per_seed_losses(
+                            final_state_reconstruction, final_labels, target_grads, ctx
+                        )
+                        # Validate shape
+                        E, N, G = final_reconstruction.shape[:3]
+                        if per_seed_losses.shape != (E, N, G):
+                            logger.warning(
+                                f"Per-seed losses shape mismatch: expected [{E}, {N}, {G}], "
+                                f"got {list(per_seed_losses.shape)}. Setting to None."
+                            )
+                            per_seed_losses = None
+                    except Exception as e:
+                        logger.warning(f"Failed to compute per-seed losses: {e}. Best seed selection disabled.")
+                        per_seed_losses = None
+                    break
 
-        # Squeeze epoch and seed dimensions
-        final_reconstruction = final_reconstruction.squeeze(0).squeeze(1)
+        # Best optimizable tensor in parameter space (e.g., latent codes for GAN).
+        # Strip E and G dims here since the base class passes this through unchanged.
+        # For G > 1 we switched to the final-state tensor above; use that.
+        source_tensor = state.optimizable_tensor.detach() if final_reconstruction.shape[2] > 1 else best_optimizable_tensor
+        if self.representation is not None:
+            final_optimizable = source_tensor[0, :, 0]  # [E, N, G, param_dim] → [N, param_dim]
+        else:
+            final_optimizable = None
 
+        # Keep final_labels in [E, N] form — the base class will strip to [N].
+        # (final_labels is already [1, N] from _setup_optimization's unsqueeze)
 
         return OptimizationState(
-            reconstruction=final_reconstruction,
-            labels=final_labels,
+            reconstruction=final_reconstruction,   # [E, N, G, C, H, W] pre-aggregation
+            optimizable_tensor=final_optimizable,  # [N, param_dim] or None (already stripped)
+            labels=final_labels,                   # [E, N] — base class strips to [N]
             loss=final_loss,
             iteration=state.iteration,
             converged=(state.aux_data.get("stagnant_iterations", 0) < self.patience),
             metrics={
                 "best_loss": state.best_loss,
+                "per_seed_losses": per_seed_losses,  # [E, N, G] or None
                 **state.aux_data.get("best_losses", {}),
             },
         )
-
-    def _setup_bn_components(
-        self,
-        model: nn.Module,
-        reconstruction: torch.Tensor,
-        client_observations: ClientObservations,
-        proxy_dataloader: DataLoader | None = None,
-    ) -> None:
-        """Setup BN regularization components if present.
-
-        Looks for BNStatisticsRegularization in loss_components and
-        calls setup() with the model and client observations.
-        Uses the optimizer's canonical training_simulator.
-
-        Args:
-            model: Target model
-            reconstruction: Current reconstruction
-            client_observations: ClientObservations containing BN statistics
-            proxy_dataloader: Optional server-side dataloader for ProxyBNStatisticsStrategy
-
-        """
-        for component in self.loss_components:
-            if isinstance(component, BNStatisticsRegularization):
-                strategy_name = component.strategy.get_metadata().name
-                logger.info(f"  Setting up {component.name} with strategy: {strategy_name}")
-                component.setup(
-                    model=model,
-                    reconstruction=reconstruction,
-                    client_observations=client_observations,
-                    training_simulator=self._training_simulator,
-                    proxy_dataloader=proxy_dataloader,
-                )
 
     def _setup_optimization(
         self,
         reconstruction: torch.Tensor,
         labels: LabelInferenceResult,
-        client_observations: ClientObservations,
     ) -> InternalOptimizerState:
         """Setup optimization state and parameters."""
 
         effective_labels, label_params = self.label_strategy.setup(labels)
 
-        # Log label strategy
-        strategy_name = self.label_strategy.__class__.__name__
+        # Label strategy setup complete
+
+        # Ensure data is in the correct format for the optimization space.
+        # Two cases:
+        #   1. Representation (e.g., GAN): input is in parameter space [E, N, G, latent_dim] (4D).
+        #      The representation.forward() will map it to data space [E, N, G, C, H, W] for losses.
+        #   2. No representation (pixel space): input should be 6D [E, N, G, C, H, W].
+        #      If 4D [N, C, H, W] (e.g., from a previous stage transition), reshape to 6D.
+        if self.representation is not None:
+            # Parameter space: trust the shape as-is (e.g., [E, N, G, latent_dim] for GAN)
+            pass
+        elif reconstruction.ndim == 4:
+            # Pixel space with 4D input: add epoch (E=1) and seed (G=1) dimensions
+            reconstruction = reconstruction.unsqueeze(0).unsqueeze(2)  # [N, C, H, W] -> [1, N, 1, C, H, W]
+
+        # Ensure labels have an epoch dimension as the first dim.
+        #
+        # After the orchestrator's _reshape_labels_for_epochs the labels on
+        # `LabelInferenceResult` already carry the epoch prefix (e.g. [1, N]
+        # or [E, N] for classification, [1, N, K] for multi-label).
+        # `FixedLabels.setup()` returns those tensors as-is, so no further
+        # unsqueeze is required for the normal path.
+        #
+        # The exception is `JointLabelOptimizationStrategy`, which creates a
+        # fresh *bare* soft-label tensor [N, C] from `labels.confidence`.
+        # That tensor has no epoch prefix and must be unsqueeze'd here.
+        #
+        # Fallback: if the orchestrator has no epoch_handling_strategy the
+        # labels may still be bare; label_type.bare_ndim tells us whether that
+        # is the case.
+        label_type = labels.label_type
         if label_params:
-            soft_labels = label_params[0]
-            predicted_labels = torch.argmax(soft_labels, dim=1)
-            probabilities = torch.softmax(soft_labels, dim=1)
-            confidences = torch.max(probabilities, dim=1)[0]
-            logger.info(
-                f"  Label Strategy: {strategy_name} (joint optimization)\n"
-                f"    Initial predictions: {predicted_labels.cpu().tolist()} "
-                f"with confidence: {[f'{c:.3f}' for c in confidences.cpu().tolist()]}"
-            )
-        else:
-            logger.info(f"  Label Strategy: {strategy_name} (fixed labels: {effective_labels.cpu().tolist()})")
+            # JointLabelOptimization: effective_labels is bare soft labels [N, C]
+            effective_labels = effective_labels.unsqueeze(0)  # → [1, N, C]
+        elif effective_labels.ndim == label_type.bare_ndim:
+            # Labels arrived without epoch dim (no epoch_handling_strategy in orchestrator).
+            effective_labels = label_type.add_epoch_dim(effective_labels)
 
         # Parameters to optimize
         if not reconstruction.is_leaf:
             reconstruction = reconstruction.detach().clone()
-        reconstruction.requires_grad = True
 
-        # Create optimizer with separate parameter groups for image and labels
-        if label_params:
-            # Use separate learning rates for image and label parameters
-            param_groups = [
-                {"params": [reconstruction], "lr": self.learning_rate},
-                {"params": label_params, "lr": self.label_learning_rate}
-            ]
-            logger.info(f"  Using separate learning rates: image_lr={self.learning_rate}, label_lr={self.label_learning_rate}")
+        # Initialise feature-space constraints with the initial value of the
+        # optimisable tensor.  This must be done *before* requires_grad is set
+        # so that the stored initial point is a clean detached copy.
+        if isinstance(self.constraint, FeatureSpaceConstraint):
+            self.constraint.set_initial_point(reconstruction.detach().clone())
+
+        if self.freeze_input:
+            # freeze_input mode (e.g. GIAS stage 2): keep the input tensor fixed
+            # and only optimise the representation's internal parameters (generator weights).
+            reconstruction.requires_grad = False
+
+            if not isinstance(self.representation, UnfrozenGANRepresentation):
+                raise ValueError(
+                    "freeze_input=True requires an UnfrozenGANRepresentation so there are "
+                    "parameters to actually optimise."
+                )
+            gen_params = [p for p in self.representation.generator.parameters() if p.requires_grad]
+            param_groups = [{"params": gen_params, "lr": self.learning_rate}]
         else:
-            # Only image parameters, single learning rate
-            param_groups = [{"params": [reconstruction], "lr": self.learning_rate}]
+            reconstruction.requires_grad = True
+            # Create optimizer with separate parameter groups for image and labels
+            if label_params:
+                # Use separate learning rates for image and label parameters
+                param_groups = [
+                    {"params": [reconstruction], "lr": self.learning_rate},
+                    {"params": label_params, "lr": self.label_learning_rate}
+                ]
+            else:
+                # Only image parameters, single learning rate
+                param_groups = [{"params": [reconstruction], "lr": self.learning_rate}]
 
-        # Create optimizer
-        if self.optimizer_type == "adam":
-            optimizer = optim.Adam(param_groups)
-        elif self.optimizer_type == "lbfgs":
-            optimizer = optim.LBFGS(
-                param_groups,
-                lr=self.learning_rate,
-                max_iter=20,
-                history_size=100,
-            )
+            # When using an UnfrozenGANRepresentation, also optimise the generator's parameters.
+            # Without this the generator weights have gradients but are never updated, making
+            # the representation behave identically to the frozen GANRepresentation.
+            if isinstance(self.representation, UnfrozenGANRepresentation):
+                gen_params = [p for p in self.representation.generator.parameters() if p.requires_grad]
+                param_groups.append({"params": gen_params, "lr": self.learning_rate})
+
+        # Create optimizer via registry (falls back to Adam when optimizer_type is None)
+        if self.optimizer_type is not None:
+            optimizer_builder = build_component(self.optimizer_type)
+            optimizer = optimizer_builder(param_groups, lr=self.learning_rate)
         else:
-            raise ValueError(f"Unknown optimizer: {self.optimizer_type}")
+            optimizer = optim.Adam(param_groups, lr=self.learning_rate)
 
-        # Create scheduler
+        # Create scheduler via registry (None → no scheduler)
         scheduler = None
-        if self.scheduler_type == "cosine":
-            scheduler = optim.lr_scheduler.CosineAnnealingLR(
-                optimizer, T_max=self.max_iterations
-            )
-        elif self.scheduler_type == "step":
-            scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer,
-                                                            milestones=[self.max_iterations // 2.667,
-                                                                        self.max_iterations // 1.6,
-                                                                        self.max_iterations // 1.142], gamma=0.1)
-        elif self.scheduler_type == "exponential":
-            scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.99)
-        else:
-            scheduler = None  # No scheduler
+        if self.scheduler_type is not None:
+            scheduler_builder = build_component(self.scheduler_type)
+            scheduler = scheduler_builder(optimizer, self.max_iterations)
 
         return InternalOptimizerState(
-            client_observations=client_observations,
-            reconstruction=reconstruction,
+            optimizable_tensor=reconstruction,  # Explicit: this is what we optimize
             labels=effective_labels,
             optimizable_params=label_params,
             optimizer=optimizer,
             scheduler=scheduler,
             iteration=0,
             best_loss=float("inf"),
-            best_reconstruction=None,
+            best_optimizable_tensor=None,
             best_labels=None,
             aux_data={},
         )
@@ -410,17 +542,15 @@ class ComposableOptimizer(OptimizationStrategy):
     def _compute_loss(
         self,
         state: InternalOptimizerState,
-        model: nn.Module,
         target_gradients: List[torch.Tensor],
-        loss_fn: nn.Module,
+        ctx: RunContext,
     ) -> tuple[torch.Tensor, dict[str, float]]:
         """Compute combined loss from all components.
 
         Args:
             state: Current optimization state
-            model: Target model
             target_gradients: True gradients to match
-            loss_fn: Loss function for gradient computation
+            ctx: Run context providing target_model and loss_fn
 
         Returns:
             Total loss and dict of individual component losses
@@ -430,43 +560,59 @@ class ComposableOptimizer(OptimizationStrategy):
         effective_labels = self.label_strategy.get_labels_for_forward(
             state.optimizable_params, state.labels
         )
-        losses = {}
 
-        for component in self.loss_components:
-            component_loss = component.compute(
-                reconstruction=state.reconstruction,
-                model=model,
-                labels=effective_labels,
-                target_gradients=target_gradients,
-                loss_fn=loss_fn,
-            )
-            losses[component.name] = component_loss
+        # Compute data-space reconstruction from optimizable parameters
+        # (If using representation: latent -> data; otherwise: identity)
+        reconstruction = self._compute_reconstruction(
+            state.optimizable_tensor,
+            labels=effective_labels,
+        )
 
-        total_loss = sum(losses.values())
-        return total_loss, losses
+        # Inject latent reference into LatentKLDivergenceRegularization components
+        # (must happen after reconstruction so gradients flow through z → G(z) → loss)
+        from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.loss_components import (
+            LatentKLDivergenceRegularization,
+        )
+        for comp in self.loss_components:
+            if isinstance(comp, LatentKLDivergenceRegularization):
+                comp.set_latent(state.optimizable_tensor)
+
+        # All loss components operate on data-space reconstruction
+        return compute_loss_components(
+            self.loss_components, reconstruction, effective_labels, target_gradients, ctx
+        )
 
     def _log_progress(
         self,
         state: InternalOptimizerState,
         total_loss: float,
         losses: dict[str, float],
+        current_lr: float = 0.0,
     ) -> None:
         """Log optimization progress."""
-        log_msg = f"  Iteration {state.iteration}/{self.max_iterations}: "
-        log_msg += f"total_loss={total_loss:.4f} "
-        for name, loss_value in losses.items():
-            log_msg += f"{name}={loss_value:.4f} "
+        suffix = ""
+        latent_code = None
 
-        # Show predicted labels if joint optimization
         if state.optimizable_params:
             soft_labels = state.optimizable_params[0]
             predicted_labels = torch.argmax(soft_labels, dim=1)
             probabilities = torch.softmax(soft_labels, dim=1)
             confidences = torch.max(probabilities, dim=1)[0]
-            log_msg += f", pred={predicted_labels.cpu().tolist()}"
-            log_msg += f", conf={[f'{c:.2f}' for c in confidences.cpu().tolist()]}"
+            suffix = (
+                f"pred={predicted_labels.cpu().tolist()}  "
+                f"conf={[f'{c:.2f}' for c in confidences.cpu().tolist()]}"
+            )
+        # If using latent representation (e.g., GIAS), log latent code statistics
+        if self.representation is not None and hasattr(self.representation, "latent_dim"):
+            # Extract latent code from optimizable_tensor [E, N, G, latent_dim]
+            # For GIAS stage 1: take first seed (E=0), first image (N=0), first restart (G=0)
+            if state.optimizable_tensor.ndim == 4:
+                latent_code = state.optimizable_tensor[0, 0, 0]
 
-        logger.info(log_msg)
+        if self.verbose:
+            suffix += f"  lr={current_lr:.6f}"
+        prefix = f"Iteration {state.iteration}/{self.max_iterations}"
+        log_progress(logger, prefix, total_loss, losses, suffix, latent_code=latent_code)
 
     def _check_early_stop(
         self,
@@ -477,7 +623,7 @@ class ComposableOptimizer(OptimizationStrategy):
         """Check early stopping and update best state."""
         if loss_value < state.best_loss:
             state.best_loss = loss_value
-            state.best_reconstruction = state.reconstruction.detach().clone()
+            state.best_optimizable_tensor = state.optimizable_tensor.detach().clone()
 
             # Get current effective labels
             best_effective_labels = self.label_strategy.get_labels_for_forward(

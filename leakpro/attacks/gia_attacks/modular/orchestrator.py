@@ -2,200 +2,178 @@
 # Copyright 2023-2026 Lindholmen Science Park AB
 # SPDX-License-Identifier: Apache-2.0
 #
-"""Orchestrator for modular gradient inversion attacks.
-
-The orchestrator coordinates all components of a gradient inversion attack:
-1. Label inference (if needed)
-2. Initialization
-3. Optimization
-
-It handles the complete attack pipeline and manages component interactions.
-"""
+"""Orchestrator for modular gradient inversion attacks."""
 
 from __future__ import annotations
 
 import logging
 from copy import deepcopy
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import torch
 from torch import nn
 
+from leakpro.attacks.gia_attacks.modular.core.callbacks import Callback, StopStage
 from leakpro.attacks.gia_attacks.modular.core.component_base import (
+    AggregationStrategy,
     InitializationStrategy,
     LabelInferenceResult,
     LabelInferenceStrategy,
-    OptimizationState,
-    OptimizationStrategy,
 )
+from leakpro.attacks.gia_attacks.modular.core.stage import Stage
+from leakpro.attacks.gia_attacks.modular.core.state import RunContext, WorkingState
 from leakpro.attacks.gia_attacks.modular.core.threat_model import ThreatModel
 from leakpro.fl_utils.fl_client_simulator import ClientObservations
 
 if TYPE_CHECKING:
     from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.epoch_strategies import EpochHandlingStrategy
+    from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.training_simulator import MultiEpochTrainingSimulation
+    from leakpro.attacks.gia_attacks.modular.components.transition_strategies import TransitionStrategy
 
 logger = logging.getLogger(__name__)
 
 
 class ModularGIAOrchestrator:
-    """Orchestrate modular gradient inversion attacks.
+    """Coordinate a multi-stage gradient inversion attack.
 
-    This class coordinates all components of an attack:
-    - Validates components against threat model
-    - Manages attack pipeline execution
-    - Handles component interactions and data flow
+    Owns the full pipeline:
+    - bootstrap (label inference + initialization) → WorkingState
+    - stage loop: stage.run(state, ctx, stage_idx, callbacks)
+    - transitions between stages
+    - checkpoint save/resume between stages
+    - return_best_stage tracking (GIFD behavior)
     """
 
     def __init__(
         self,
         threat_model: ThreatModel,
         initialization: InitializationStrategy,
-        optimization: OptimizationStrategy,
+        stages: list[Stage],
+        training_simulator: "MultiEpochTrainingSimulation",
+        loss_fn: nn.Module | None = None,
         label_inference: LabelInferenceStrategy | None = None,
+        transitions: "list[TransitionStrategy] | None" = None,
+        seed_aggregation: AggregationStrategy | None = None,
+        epoch_aggregation: AggregationStrategy | None = None,
         num_seeds_per_image: int = 1,
         epoch_handling_strategy: "EpochHandlingStrategy | None" = None,
+        return_best_stage: bool = False,
+        checkpoint_dir: str | None = None,
+        seed: int = 42,
     ) -> None:
-        """Initialize orchestrator.
-
-        Args:
-            threat_model: Threat model defining attacker capabilities
-            initialization: Initialization strategy
-            optimization: Optimization strategy
-            label_inference: Optional label inference strategy
-            num_seeds_per_image: Number of seeds per image for multi-seed optimization
-            epoch_handling_strategy: Strategy for handling epochs during reconstruction
-
-        """
         self.threat_model = threat_model
         self.initialization = initialization
-        self.optimization = optimization
+        self.stages = stages
+        self.training_simulator = training_simulator
+        self.loss_fn = loss_fn or nn.CrossEntropyLoss()
         self.label_inference = label_inference
-        self.epoch_handling_strategy = epoch_handling_strategy
+        self.transitions = transitions or []
+        self.seed_aggregation = seed_aggregation
+        self.epoch_aggregation = epoch_aggregation
         self.num_seeds_per_image = num_seeds_per_image
+        self.epoch_handling_strategy = epoch_handling_strategy
+        self.return_best_stage = return_best_stage
+        self.checkpoint_dir = Path(checkpoint_dir) if checkpoint_dir else None
+        self.seed = seed
 
-        # Validate components against threat model
-        logger.info(f"Initializing ModularGIAOrchestrator with threat model: {threat_model.name}")
+        logger.info(f"Initializing ModularGIAOrchestrator: {len(self.stages)} stage(s), threat_model={threat_model.name}")
         self._validate_components()
-        logger.info("✓ All components validated against threat model")
 
     def _validate_components(self) -> None:
-        """Validate that all components are compatible with threat model."""
-        components = [self.initialization, self.optimization]
+        components = [self.initialization, *self.stages]
         if self.label_inference:
             components.append(self.label_inference)
-
         for component in components:
             metadata = component.get_metadata()
             is_allowed, missing = self.threat_model.allows_component(metadata.required_capabilities)
             if not is_allowed:
                 raise ValueError(
                     f"Component '{metadata.name}' requires capabilities "
-                    f"{missing} but threat model only provides {self.threat_model.capabilities}"
+                    f"{missing} not available in threat model '{self.threat_model.name}'."
                 )
 
-    def _validate_input_shape(
-        self,
-        input_shape: tuple[int, ...] | None,
-        client_observations: ClientObservations,
-    ) -> tuple[int, ...]:
-        """Validate and extract input shape."""
-        if input_shape is None:
-            if client_observations.input_shape is None:
-                raise ValueError(
-                    "input_shape must be provided either as parameter or in client_observations.input_shape"
-                )
-            input_shape = client_observations.input_shape
-            logger.info("Using input_shape from client_observations")
-        return input_shape
+    # ------------------------------------------------------------------
+    # Build RunContext
+    # ------------------------------------------------------------------
 
-    def _log_attack_start(self, input_shape: tuple[int, ...], device: torch.device) -> None:
-        """Log attack initialization information."""
-        logger.info("="*60)
-        logger.info("Starting gradient inversion attack")
-        logger.info(f"Input shape: {input_shape}, Device: {device}")
-        logger.info(f"Threat model: {self.threat_model.name}")
-        logger.info("="*60)
-
-    def _log_client_observations(self, client_observations: ClientObservations) -> None:
-        """Log what observations were provided by client."""
-        logger.info("✓ Extracted observations from client")
-        if client_observations.post_bn_stats is not None:
-            logger.info(f"✓ Client provided post-training BN statistics ({len(client_observations.post_bn_stats)} layers)")
-        if client_observations.pre_bn_stats is not None:
-            logger.info(f"✓ Client provided pre-training BN statistics ({len(client_observations.pre_bn_stats)} layers)")
-        if client_observations.num_images is not None:
-            logger.info(f"✓ Client provided num_images: {client_observations.num_images}")
-
-    def _infer_labels(
+    def _build_context(
         self,
         target_model: nn.Module,
         client_observations: ClientObservations,
-        num_samples: int,
-    ) -> LabelInferenceResult | None:
-        """Perform label inference or use provided labels."""
-        logger.info("Stage 1/4: Label Inference")
+        proxy_dataloader: torch.utils.data.DataLoader | None,
+        seed: int,
+    ) -> RunContext:
+        return RunContext(
+            target_model=target_model,
+            client_observations=client_observations,
+            training_simulator=self.training_simulator,
+            loss_fn=self.loss_fn,
+            proxy_dataloader=proxy_dataloader,
+            seed_aggregation=self.seed_aggregation,
+            epoch_aggregation=self.epoch_aggregation,
+            seed=seed,
+        )
 
-        observed_gradients = client_observations.gradients
-        labels = client_observations.labels
+    # ------------------------------------------------------------------
+    # Bootstrap: label inference + initialization → initial WorkingState
+    # ------------------------------------------------------------------
 
+    def _bootstrap(
+        self,
+        ctx: RunContext,
+        input_shape: tuple[int, ...],
+        device: torch.device,
+    ) -> WorkingState:
+        # Label inference
+        label_result = None
         if self.label_inference is not None:
-            gradient_list = [observed_gradients[name] for name, _ in target_model.named_parameters()]
-            is_update = (
-                client_observations.training_settings is not None and
-                client_observations.training_settings.compute_mode == "updates"
+            label_result = self.label_inference.infer(ctx)
+            logger.info(f"Label inference ({self.label_inference.get_metadata().name}): {label_result.labels.tolist()}")
+        elif ctx.client_observations.labels is not None:
+            label_result = LabelInferenceResult(
+                labels=ctx.client_observations.labels, method="provided"
             )
-            logger.debug(f"Using {self.label_inference.get_metadata().name} for label inference")
-            label_result = self.label_inference.infer_labels(
-                gradients=gradient_list,
-                model=target_model,
-                num_samples=num_samples,
-                true_labels=labels,
-                is_update=is_update,
-            )
-            logger.info(f"✓ Inferred labels: {label_result.labels.tolist()}")
-            return label_result
 
-        if labels is not None:
-            label_result = LabelInferenceResult(labels=labels, method="provided")
-            logger.info(f"✓ Using provided labels: {labels.tolist()}")
-            return label_result
+        # Compute the shape we actually need to initialize
+        expected_shape, label_result = self._compute_init_shape(input_shape, ctx, label_result)
 
-        logger.info("No labels available - optimization without label guidance")
-        return None
+        # Query representation strategy for parameter shape (first stage)
+        param_shape = expected_shape
+        first_stage = self.stages[0] if self.stages else None
+        if first_stage is not None and hasattr(first_stage, "representation") and first_stage.representation is not None:
+            param_shape = first_stage.representation.get_parameter_shape(expected_shape)
 
-    def _compute_initialization_shape(
+        init_result = self.initialization.initialize(shape=param_shape, device=device)
+        logger.info(f"Initialization: shape={init_result.reconstruction.shape}")
+
+        return WorkingState(
+            reconstruction=init_result.reconstruction,
+            labels=label_result,
+        )
+
+    def _compute_init_shape(
         self,
         input_shape: tuple[int, ...],
-        client_observations: ClientObservations,
+        ctx: RunContext,
         label_result: LabelInferenceResult | None,
     ) -> tuple[tuple[int, ...], LabelInferenceResult | None]:
-        """Compute initialization shape based on epoch handling strategy."""
         epochs = 1
-        num_images = input_shape[0]
-
-        if client_observations.training_settings is not None:
-            epochs = client_observations.training_settings.epochs
-            logger.info(f"Using epochs={epochs} from training_settings")
-
+        if ctx.client_observations.training_settings is not None:
+            epochs = ctx.client_observations.training_settings.epochs
         if self.epoch_handling_strategy is None:
             return input_shape, label_result
 
-        logger.info(f"Using epoch handling strategy: {self.epoch_handling_strategy.get_name()}")
+        num_images = input_shape[0]
         channels, height, width = input_shape[1:]
-
         expected_shape = self.epoch_handling_strategy.get_expected_reconstruction_shape(
             num_images=num_images,
             num_epochs=epochs,
             num_seeds=self.num_seeds_per_image,
             input_shape=(channels, height, width),
         )
-
-        # Reshape labels if needed
         if label_result is not None:
-            label_result = self._reshape_labels_for_epochs(
-                label_result, num_images, epochs
-            )
-
+            label_result = self._reshape_labels_for_epochs(label_result, num_images, epochs)
         return expected_shape, label_result
 
     def _reshape_labels_for_epochs(
@@ -204,126 +182,199 @@ class ModularGIAOrchestrator:
         num_images: int,
         epochs: int,
     ) -> LabelInferenceResult:
-        """Reshape labels to match epoch handling strategy."""
         label_shape = self.epoch_handling_strategy.get_expected_label_shape(
-            num_images=num_images,
-            num_epochs=epochs,
+            num_images=num_images, num_epochs=epochs
         )
-
-        if label_result.labels.ndim == 1 and len(label_shape) == 2:
-            if label_shape[0] == epochs and label_shape[0] > 1:
-                # MultiEpochSeparate: repeat labels for each epoch [N] -> [E, N]
-                label_result.labels = label_result.labels.unsqueeze(0).expand(epochs, -1).contiguous()
-            elif label_shape[0] == 1:
-                # SingleStorageReused: reshape to [1, N]
-                label_result.labels = label_result.labels.unsqueeze(0)
-
+        label_type = label_result.label_type
+        if label_result.labels.ndim == label_type.bare_ndim:
+            target_epochs = label_shape[0]
+            if target_epochs > 1:
+                label_result.labels = label_type.expand_for_epochs(label_result.labels, target_epochs)
+            else:
+                label_result.labels = label_type.add_epoch_dim(label_result.labels)
         return label_result
 
-    def _create_attack_config(
-        self,
-        input_shape: tuple[int, ...],
-        optimization_state: OptimizationState,
-        label_result: LabelInferenceResult | None,
-        labels: torch.Tensor | None,
-    ) -> dict:
-        """Create final attack configuration dictionary."""
-        return {
-            "threat_model": self.threat_model.name,
-            "input_shape": input_shape,
-            "converged": optimization_state.converged,
-            "final_loss": optimization_state.loss,
-            "iterations": optimization_state.iteration,
-            "inferred_labels": label_result.labels.tolist() if label_result is not None else None,
-            "true_labels": labels.tolist() if labels is not None else None,
-        }
+    # ------------------------------------------------------------------
+    # Checkpoint helpers
+    # ------------------------------------------------------------------
+
+    def _checkpoint_path(self, stage_idx: int) -> Path | None:
+        if self.checkpoint_dir is None:
+            return None
+        return self.checkpoint_dir / f"stage_{stage_idx}_output.pt"
+
+    def _save_checkpoint(self, stage_idx: int, state: WorkingState) -> None:
+        path = self._checkpoint_path(stage_idx)
+        if path is None:
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        labels_tensor = None
+        confidence_tensor = None
+        if state.labels is not None:
+            labels_tensor = state.labels.labels.detach().cpu()
+            if state.labels.confidence is not None:
+                confidence_tensor = state.labels.confidence.detach().cpu()
+        torch.save({
+            "reconstruction": state.reconstruction.detach().cpu() if state.reconstruction is not None else None,
+            "optimizable_tensor": state.optimizable_tensor.detach().cpu() if state.optimizable_tensor is not None else None,
+            "labels": labels_tensor,
+            "confidence": confidence_tensor,
+            "stage_idx": stage_idx,
+            "loss": state.loss,
+            "iteration": state.iteration,
+        }, path)
+        logger.info("Checkpoint saved: %s", path)
+
+    def _load_checkpoint(self, stage_idx: int, device: torch.device) -> WorkingState | None:
+        path = self._checkpoint_path(stage_idx)
+        if path is None or not path.exists():
+            return None
+        saved = torch.load(path, map_location=device, weights_only=False)  # noqa: S614
+        labels = None
+        if saved.get("labels") is not None:
+            confidence = saved.get("confidence")
+            labels = LabelInferenceResult(
+                labels=saved["labels"].to(device),
+                confidence=confidence.to(device) if confidence is not None else None,
+                method=f"checkpoint_stage_{stage_idx}",
+            )
+        return WorkingState(
+            reconstruction=saved["reconstruction"].to(device) if saved.get("reconstruction") is not None else None,
+            optimizable_tensor=saved["optimizable_tensor"].to(device) if saved.get("optimizable_tensor") is not None else None,
+            labels=labels,
+            loss=saved.get("loss", float("inf")),
+            iteration=saved.get("iteration", 0),
+        )
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def build_stage(self, index: int) -> Stage:
+        """Return a single stage by index for standalone execution."""
+        if index < 0 or index >= len(self.stages):
+            raise IndexError(f"Stage index {index} out of range (0..{len(self.stages)-1})")
+        return self.stages[index]
 
     def run_attack(
         self,
         target_model: nn.Module,
         client_observations: ClientObservations,
-        device: torch.device,
+        device: torch.device | None = None,
         proxy_dataloader: torch.utils.data.DataLoader | None = None,
         input_shape: tuple[int, ...] | None = None,
-    ) -> torch.Tensor:
-        """Run complete gradient inversion attack server-side.
-
-        Args:
-            target_model: Server's model
-            client_observations: Observations from client (gradients, BN stats, etc.)
-            device: Device for computation
-            proxy_dataloader: Optional dataloader for proxy data (if needed)
-            input_shape: Shape of input to reconstruct (optional, extracted from client_observations if available)
+        callbacks: list[Callback] | None = None,
+        seed: int | None = None,
+    ) -> tuple[WorkingState, RunContext]:
+        """Run the full attack pipeline.
 
         Returns:
-            Reconstructed data tensor
-
+            (final_state, ctx) — WorkingState with the reconstruction and
+            RunContext for inspection / replay.
         """
-        # Validate and extract input shape
-        input_shape = self._validate_input_shape(input_shape, client_observations)
-        self._log_attack_start(input_shape, device)
-        self._log_client_observations(client_observations)
+        if device is None:
+            device = next(target_model.parameters()).device if len(list(target_model.parameters())) > 0 else torch.device("cpu")
 
-        # Copy target model to ensure we don't modify it
+        if input_shape is None:
+            if client_observations.input_shape is None:
+                raise ValueError("input_shape must be provided either as parameter or via client_observations.input_shape")
+            input_shape = client_observations.input_shape
+
+        effective_seed = seed if seed is not None else self.seed
+        cbs: list[Callback] = list(callbacks) if callbacks else []
         target_model = deepcopy(target_model).to(device)
 
-        # Step 1: Label inference
-        label_result = self._infer_labels(target_model, client_observations, input_shape[0])
+        ctx = self._build_context(target_model, client_observations, proxy_dataloader, effective_seed)
+        state = self._bootstrap(ctx, input_shape, device)
 
-        # Step 2: Initialization
-        logger.info("Stage 2/4: Initialization")
-        logger.debug(f"Using {self.initialization.get_metadata().name} for initialization")
+        for cb in cbs:
+            cb.on_attack_start(state, ctx)
 
-        expected_shape, label_result = self._compute_initialization_shape(
-            input_shape, client_observations, label_result
-        )
+        # Find latest checkpoint to resume from
+        start_from = 0
+        if self.checkpoint_dir is not None:
+            for i in range(len(self.stages) - 1, 0, -1):
+                if (self.checkpoint_dir / f"stage_{i}_output.pt").exists():
+                    start_from = i
+                    logger.info("Resuming from stage %d checkpoint", i)
+                    break
+            if start_from > 0:
+                loaded = self._load_checkpoint(start_from, device)
+                if loaded is not None:
+                    state = loaded
 
-        init_result = self.initialization.initialize(
-            shape=expected_shape,
-            device=device,
-        )
-        reconstruction = init_result.reconstruction
-        logger.info(f"✓ Initialized reconstruction: shape={reconstruction.shape}")
+        best_state: WorkingState | None = None
 
-        # Step 3: Optimization
-        logger.info("Stage 3/4: Optimization")
-        logger.info(f"Using {self.optimization.get_metadata().name} optimizer")
-        optimization_state = self.optimization.optimize(
-            reconstruction=reconstruction,
-            labels=label_result,
-            target_model=target_model,
-            client_observations=client_observations,
-            proxy_dataloader=proxy_dataloader,
-        )
-        reconstruction = optimization_state.reconstruction
-        logger.info(
-            f"✓ Optimization complete: "
-            f"iterations={optimization_state.iteration}, "
-            f"loss={optimization_state.loss:.6f}, "
-            f"converged={optimization_state.converged}"
-        )
+        for i, stage in enumerate(self.stages):
+            if i < start_from:
+                continue
 
+            for cb in cbs:
+                cb.on_stage_start(i, state, ctx)
 
-        logger.info("="*60)
-        logger.info("Attack complete - returning reconstruction to client")
-        logger.info("="*60)
+            # Apply transition between stages
+            if i > 0 and i - 1 < len(self.transitions):
+                transition = self.transitions[i - 1]
+                state = transition.apply(state, ctx)
 
-        config = self._create_attack_config(
-            input_shape, optimization_state, label_result, client_observations.labels
-        )
-        return reconstruction, config
+            # Run the stage
+            try:
+                state = stage.run(state, ctx, stage_idx=i, callbacks=cbs)
+            except StopStage:
+                state.converged = False
+                logger.info("Stage %d stopped early by callback", i)
+
+            # Save checkpoint after non-final stages
+            if i < len(self.stages) - 1:
+                self._save_checkpoint(i, state)
+
+            if self.return_best_stage:
+                if best_state is None or state.loss < best_state.loss:
+                    # Deep-copy labels to prevent joint label optimisation from
+                    # mutating the saved best state through the shared tensor reference.
+                    best_labels = None
+                    if state.labels is not None:
+                        best_labels = LabelInferenceResult(
+                            labels=state.labels.labels.clone(),
+                            confidence=(
+                                state.labels.confidence.clone()
+                                if state.labels.confidence is not None
+                                else None
+                            ),
+                            method=state.labels.method,
+                            label_type=state.labels.label_type,
+                        )
+                    best_state = WorkingState(
+                        reconstruction=state.reconstruction.clone() if state.reconstruction is not None else None,
+                        optimizable_tensor=state.optimizable_tensor.clone() if state.optimizable_tensor is not None else None,
+                        labels=best_labels,
+                        metrics=dict(state.metrics),
+                        iteration=state.iteration,
+                        loss=state.loss,
+                        converged=state.converged,
+                    )
+
+            for cb in cbs:
+                cb.on_stage_end(i, state, ctx)
+
+            logger.info("Stage %d complete: loss=%.6f, converged=%s", i, state.loss, state.converged)
+
+        final = best_state if (self.return_best_stage and best_state is not None) else state
+
+        for cb in cbs:
+            cb.on_attack_end(final, ctx)
+
+        return final, ctx
 
     def __repr__(self) -> str:
-        """String representation of orchestrator."""
-        components = [
+        parts = [
             f"threat_model={self.threat_model.name}",
+            f"stages={len(self.stages)}",
             f"initialization={self.initialization.get_metadata().name}",
-            f"optimization={self.optimization.get_metadata().name}",
         ]
         if self.label_inference:
-            components.append(f"label_inference={self.label_inference.get_metadata().name}")
-
-        return f"ModularGIAOrchestrator({', '.join(components)})"
+            parts.append(f"label_inference={self.label_inference.get_metadata().name}")
+        return f"ModularGIAOrchestrator({', '.join(parts)})"
 
 
 __all__ = ["ModularGIAOrchestrator"]

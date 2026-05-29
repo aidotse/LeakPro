@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import torch
 
+from leakpro.attacks.gia_attacks.modular.config.registry import register
 from leakpro.attacks.gia_attacks.modular.core.component_base import (
     ComponentMetadata,
     InitializationResult,
@@ -24,6 +25,7 @@ from leakpro.attacks.gia_attacks.modular.core.component_base import (
 )
 
 
+@register("init.random_noise")
 class RandomNoiseInitialization(InitializationStrategy):
     """Initialize with random Gaussian noise.
 
@@ -46,8 +48,6 @@ class RandomNoiseInitialization(InitializationStrategy):
         """Get metadata for this initialization strategy."""
         return ComponentMetadata(
             name="random_noise",
-            display_name="Random Noise Initialization",
-            description="Initialize with Gaussian noise N(mean, std)",
             required_capabilities={},
         )
 
@@ -85,7 +85,74 @@ class RandomNoiseInitialization(InitializationStrategy):
         )
 
 
+@register("init.fixed")
+class FixedInitialization(InitializationStrategy):
+    """Initialize with a pre-generated fixed tensor.
+    
+    Useful for exact reproducibility when comparing implementations,
+    as it guarantees identical starting points regardless of RNG state.
+    """
+
+    def __init__(self, fixed_tensor: torch.Tensor) -> None:
+        """Initialize with fixed tensor strategy.
+
+        Args:
+            fixed_tensor: Pre-generated tensor to use as initialization.
+                         Will be cloned and moved to the correct device/dtype.
+
+        """
+        self.fixed_tensor = fixed_tensor.detach().clone()
+
+    @classmethod
+    def get_metadata(cls) -> ComponentMetadata:
+        """Get metadata for this initialization strategy."""
+        return ComponentMetadata(
+            name="fixed",
+            required_capabilities={},
+        )
+
+    def initialize(
+        self,
+        shape: tuple[int, ...],
+        device: torch.device,
+        dtype: torch.dtype = torch.float32,
+    ) -> InitializationResult:
+        """Initialize with fixed tensor.
+
+        Args:
+            shape: Expected shape of reconstruction (must match fixed_tensor shape)
+            device: Device to create tensor on
+            dtype: Data type for tensor
+
+        Returns:
+            InitializationResult with reconstruction tensor in [E, N, G, C, H, W] format.
+
+        """
+        # Clone and move to correct device/dtype
+        reconstruction = self.fixed_tensor.clone().to(device=device, dtype=dtype)
+
+        # Verify shape matches
+        if reconstruction.shape != shape:
+            raise ValueError(
+                f"Fixed tensor shape {reconstruction.shape} does not match "
+                f"expected shape {shape}. Ensure the pre-generated tensor has "
+                f"the correct dimensions [E, N, G, C, H, W]."
+            )
+
+        metadata = {
+            "method": "fixed",
+            "original_device": str(self.fixed_tensor.device),
+            "original_dtype": str(self.fixed_tensor.dtype),
+        }
+
+        return InitializationResult(
+            reconstruction=reconstruction,
+            labels=None,
+            metadata=metadata,
+        )
+
 
 __all__ = [
     "RandomNoiseInitialization",
+    "FixedInitialization",
 ]

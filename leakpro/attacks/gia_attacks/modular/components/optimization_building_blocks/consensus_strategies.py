@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import torch
 
+from leakpro.attacks.gia_attacks.modular.config.registry import register
 from leakpro.attacks.gia_attacks.modular.core.component_base import (
     AggregationStrategy,
     ComponentMetadata,
@@ -40,6 +41,7 @@ from leakpro.attacks.gia_attacks.modular.core.component_base import (
 from leakpro.fl_utils.matching_utils import compute_cost_matrix, hungarian_matching
 
 
+@register("aggregation.none")
 class NoSeedAggregation(AggregationStrategy):
     """No seed aggregation - assumes single seed per image (G=1).
 
@@ -51,8 +53,6 @@ class NoSeedAggregation(AggregationStrategy):
         """Get metadata for no seed aggregation."""
         return ComponentMetadata(
             name="no_seed_aggregation",
-            display_name="No Seed Aggregation (Single Seed)",
-            description="Assumes single seed per image, takes first seed only",
             required_capabilities={},
         )
 
@@ -72,6 +72,7 @@ class NoSeedAggregation(AggregationStrategy):
         return reconstruction
 
 
+@register("aggregation.mean")
 class MeanSeedAggregation(AggregationStrategy):
     """Mean aggregation across seeds.
 
@@ -88,10 +89,7 @@ class MeanSeedAggregation(AggregationStrategy):
         """Get metadata for mean seed aggregation."""
         return ComponentMetadata(
             name="mean_seed_aggregation",
-            display_name="Mean Seed Aggregation",
-            description="Pixel-wise averaging across all seeds per image",
             required_capabilities={},
-            paper_reference="Yin et al., See Through Gradients, CVPR 2021",
         )
 
     def compute_consensus(self, reconstruction: torch.Tensor) -> torch.Tensor:
@@ -113,6 +111,99 @@ class MeanSeedAggregation(AggregationStrategy):
         return reconstruction.mean(dim=2, keepdim=True)
 
 
+@register("aggregation.best")
+class BestSeedAggregation(AggregationStrategy):
+    """Best seed selection based on gradient matching loss.
+
+    Selects the seed with minimum gradient matching loss for each image.
+    This is the approach used in GIFD and GIAS papers with restarts.
+    
+    Note: This strategy REQUIRES storing per-seed losses during optimization.
+    The orchestrator must track losses for each seed and pass them via aux_data.
+
+    Reference:
+        Jeon et al., "Gradient Inversion with Generative Image Prior", NeurIPS 2021
+        Fang et al., "GIFD: A Generative Gradient Inversion Method", ICCV 2023
+    """
+
+    def __init__(self) -> None:
+        """Initialize best seed aggregation."""
+        self._seed_losses = None  # Will be set by orchestrator
+
+    @classmethod
+    def get_metadata(cls) -> ComponentMetadata:
+        """Get metadata for best seed aggregation."""
+        return ComponentMetadata(
+            name="best_seed_aggregation",
+            required_capabilities={},
+        )
+
+    def set_seed_losses(self, losses: torch.Tensor) -> None:
+        """Set per-seed losses for selection.
+        
+        Args:
+            losses: Tensor of shape [E, N, G] with gradient matching loss for each seed
+        """
+        self._seed_losses = losses
+
+    def compute_consensus(self, reconstruction: torch.Tensor) -> torch.Tensor:
+        """Select best seed based on minimum loss.
+
+        Args:
+            reconstruction: Standardized format [E, N, G, C, H, W]
+
+        Returns:
+            Best seeds with shape [E, N, 1, C, H, W]
+
+        """
+        if reconstruction.ndim != 6:
+            raise ValueError(
+                f"Expected 6D reconstruction [E, N, G, C, H, W], got {reconstruction.ndim}D"
+            )
+
+        E, N, G, C, H, W = reconstruction.shape
+
+        if self._seed_losses is None:
+            # Fallback: if no losses provided, just take first seed
+            # This shouldn't happen in normal operation
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning("BestSeedAggregation: No seed losses provided, returning first seed only")
+            return reconstruction[:, :, 0:1]
+
+        # Validate seed losses shape
+        if self._seed_losses.shape != (E, N, G):
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(
+                f"BestSeedAggregation: seed_losses shape mismatch. "
+                f"Expected [{E}, {N}, {G}], got {list(self._seed_losses.shape)}"
+            )
+            return reconstruction[:, :, 0:1]
+
+        # Check for invalid values in losses
+        if torch.isnan(self._seed_losses).any() or torch.isinf(self._seed_losses).any():
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning("BestSeedAggregation: NaN or Inf in seed losses, returning first seed only")
+            return reconstruction[:, :, 0:1]
+
+        # Select best seed (minimum loss) for each (epoch, image) pair
+        # _seed_losses shape: [E, N, G]
+        best_indices = torch.argmin(self._seed_losses, dim=2)  # [E, N]
+
+        # Gather best seeds
+        # Expand indices to match reconstruction shape
+        # best_indices: [E, N] → [E, N, 1, 1, 1, 1] → [E, N, 1, C, H, W]
+        best_indices_expanded = best_indices[:, :, None, None, None, None].expand(E, N, 1, C, H, W)
+
+        # Gather: select the seed at best_indices for each (e, n)
+        best_recon = torch.gather(reconstruction, 2, best_indices_expanded)  # [E, N, 1, C, H, W]
+
+        return best_recon
+
+
+@register("aggregation.registered")
 class RegisteredSeedAggregation(AggregationStrategy):
     """Registered mean aggregation with image alignment.
 
@@ -125,7 +216,9 @@ class RegisteredSeedAggregation(AggregationStrategy):
 
     Where F is an image registration function (e.g., RANSAC-flow).
 
-    Current implementation: Falls back to simple mean (registration TODO).
+    Not yet implemented — instantiation raises ``NotImplementedError``.
+    The See Through Gradients preset uses :class:`MeanSeedAggregation` for now;
+    swap in this strategy once the registration step is wired up.
 
     Reference:
         Yin et al., "See through Gradients: Image Batch Recovery via
@@ -152,13 +245,11 @@ class RegisteredSeedAggregation(AggregationStrategy):
         """Get metadata for registered seed aggregation."""
         return ComponentMetadata(
             name="registered_seed_aggregation",
-            display_name="Registered Seed Aggregation (with Image Alignment)",
-            description="Image registration + averaging for better consensus",
             required_capabilities={},
-            paper_reference="Yin et al., See Through Gradients, CVPR 2021",
         )
 
 
+@register("aggregation.epoch_matching")
 class EpochMatchingConsensus(AggregationStrategy):
     """Match and average reconstructions across epochs for FedAvg attacks.
 
@@ -200,10 +291,7 @@ class EpochMatchingConsensus(AggregationStrategy):
         """Get metadata for epoch matching consensus."""
         return ComponentMetadata(
             name="epoch_matching_consensus",
-            display_name="Epoch Matching Consensus (FedAvg)",
-            description="Match and average reconstructions across epochs using Hungarian algorithm",
             required_capabilities={},
-            paper_reference="Dimitrov et al., Data Leakage in Federated Averaging, 2022",
         )
 
     def compute_consensus(self, reconstruction: torch.Tensor) -> torch.Tensor:
@@ -215,13 +303,12 @@ class EpochMatchingConsensus(AggregationStrategy):
             reconstruction: Standardized format [E, N, 1, C, H, W] with G=1
 
         Returns:
-            Matched and averaged reconstruction with shape [N, C, H, W]
+            Consensus reconstruction [1, N, 1, C, H, W] (maintains 6D contract)
 
         Raises:
             ValueError: If seeds not aggregated (G != 1) or wrong number of dimensions
 
         """
-        # Expect standardized 6D format [E, N, G, C, H, W]
         if reconstruction.ndim != 6:
             raise ValueError(
                 f"Expected 6D reconstruction [E, N, G, C, H, W], got {reconstruction.ndim}D. "
@@ -230,30 +317,28 @@ class EpochMatchingConsensus(AggregationStrategy):
 
         num_epochs, num_images, num_seeds = reconstruction.shape[:3]
 
-        # Validate that seeds have been aggregated
         if num_seeds != 1:
             raise ValueError(
                 f"EpochMatchingConsensus requires seeds to be aggregated first (G=1). "
                 f"Got G={num_seeds}. Apply seed aggregation before epoch aggregation."
             )
 
-        # Validate dimensions
         if self.epochs != num_epochs:
             raise ValueError(
                 f"Expected E={self.epochs} epochs, got {num_epochs}"
             )
-        # Note: N is the total number of images being reconstructed, which may differ
-        # from the mini-batch size used during training. The matching works with any N.
 
-        # Squeeze out seed dimension: [E, N, 1, C, H, W] -> [E, N, C, H, W]
-        reconstruction = reconstruction.squeeze(2)
+        # Remove seed dimension for matching: [E, N, 1, C, H, W] → [E, N, C, H, W]
+        reconstruction = reconstruction[:, :, 0]
 
-        # If single epoch, no matching needed
+        # Match and average across epochs → [N, C, H, W]
         if num_epochs == 1:
-            return reconstruction[0]  # [N, C, H, W]
+            matched = reconstruction[0]
+        else:
+            matched = self._match_and_average(reconstruction)
 
-        # Multi-epoch: match and average
-        return self._match_and_average(reconstruction)
+        # Restore E=1 and G=1 to maintain 6D output contract: [N, C, H, W] → [1, N, 1, C, H, W]
+        return matched.unsqueeze(0).unsqueeze(2)
 
     def _match_and_average(self, reconstruction: torch.Tensor) -> torch.Tensor:
         """Match and average reconstructions for single seed.
@@ -307,6 +392,7 @@ class EpochMatchingConsensus(AggregationStrategy):
 __all__ = [
     "NoSeedAggregation",
     "MeanSeedAggregation",
+    "BestSeedAggregation",
     "RegisteredSeedAggregation",
     "EpochMatchingConsensus",
 ]

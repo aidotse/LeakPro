@@ -13,7 +13,9 @@ from abc import abstractmethod
 from typing import TYPE_CHECKING, Any, Callable, Tuple
 
 import torch
+from pydantic import validate_call
 
+from leakpro.attacks.gia_attacks.modular.config.registry import register
 from leakpro.attacks.gia_attacks.modular.core.component_base import Component, ComponentMetadata
 
 if TYPE_CHECKING:
@@ -50,14 +52,14 @@ class StepStrategy(Component):
         """
         return ComponentMetadata(
             name=cls.__name__,
-            display_name=cls.__name__,
-            description="Optimization step strategy",
             required_capabilities={},
         )
 
+@register("step.standard")
 class StandardStepStrategy(StepStrategy):
     """Standard step execution with closure."""
 
+    @validate_call
     def __init__(self, use_gradient_sign: bool = False, gradient_noise_std: float = 0.0) -> None:
         """Initialize step strategy.
 
@@ -114,6 +116,7 @@ class StandardStepStrategy(StepStrategy):
             return total_loss
 
         state.optimizer.step(closure)
+
         apply_constraints_fn(state)
 
         if state.scheduler is not None:

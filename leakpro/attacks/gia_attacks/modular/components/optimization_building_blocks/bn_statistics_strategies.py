@@ -18,21 +18,18 @@ from __future__ import annotations
 import logging
 from abc import abstractmethod
 from copy import deepcopy
-from typing import Dict, List
+from typing import TYPE_CHECKING, Dict, List
 
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
 from torchvision.models.convnext import LayerNorm2d
 
-from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.training_simulator import (
-    TrainingSimulator,
-)
+from leakpro.attacks.gia_attacks.modular.config.registry import register
 from leakpro.attacks.gia_attacks.modular.core.component_base import (
     Component,
     ComponentMetadata,
 )
-from leakpro.fl_utils.fl_client_simulator import ClientObservations
 from leakpro.fl_utils.model_utils import (
     BNFeatureHook,
     InferredBNFeatureHook,
@@ -40,6 +37,9 @@ from leakpro.fl_utils.model_utils import (
     InferredLN2dFeatureHook,
     InferredLNFeatureHook,
 )
+
+if TYPE_CHECKING:
+    from leakpro.attacks.gia_attacks.modular.core.state import RunContext
 
 logger = logging.getLogger(__name__)
 
@@ -69,27 +69,22 @@ class BNStatisticsStrategy(Component):
     @abstractmethod
     def setup(
         self,
-        model: nn.Module,
+        ctx: "RunContext",
         reconstruction: torch.Tensor | None = None,
-        client_observations: ClientObservations | None = None,
-        training_simulator: TrainingSimulator | None = None,
-        proxy_dataloader: DataLoader | None = None,
     ) -> None:
         """Setup the strategy (e.g., register hooks, compute statistics).
 
         Args:
-            model: The target model
-            reconstruction: Current reconstruction tensor (optional, strategy-specific)
-            client_observations: ClientObservations from FL client (optional, strategy-specific)
-            training_simulator: Training simulator for forward passes (optional, strategy-specific)
-            proxy_dataloader: Server-side dataloader (optional, strategy-specific)
+            ctx: Run context providing target_model, client_observations,
+                training_simulator, and proxy_dataloader.
+            reconstruction: Current reconstruction tensor (optional, used by some
+                strategies to infer batch size when the client didn't provide it).
 
         """
         pass
 
     def compute_regularization(
         self,
-        _model: nn.Module,
         reconstruction: torch.Tensor,
     ) -> torch.Tensor:
         """Compute the BN statistics regularization loss.
@@ -99,7 +94,6 @@ class BNStatisticsStrategy(Component):
         during the forward pass.
 
         Args:
-            _model: The target model (not used, hooks already attached)
             reconstruction: Current reconstruction (used for device detection)
 
         Returns:
@@ -124,6 +118,7 @@ class BNStatisticsStrategy(Component):
         pass
 
 
+@register("bn_stats.running")
 class RunningBNStatisticsStrategy(BNStatisticsStrategy):
     """Use running BN statistics from the model (Huang et al. approach).
 
@@ -148,31 +143,24 @@ class RunningBNStatisticsStrategy(BNStatisticsStrategy):
         """Return metadata describing this strategy's requirements."""
         return ComponentMetadata(
             name="running_bn_statistics",
-            display_name="Running BN Statistics",
-            description="Uses model's running BN statistics (Huang et al.)",
             required_capabilities={"has_bn_statistics": True},
-            paper_reference="Huang et al., NeurIPS 2021",
         )
 
     def setup(
         self,
-        model: nn.Module,
+        ctx: "RunContext",
         reconstruction: torch.Tensor | None = None,
-        client_observations: ClientObservations | None = None,
-        training_simulator: TrainingSimulator | None = None,
-        proxy_dataloader: DataLoader | None = None,
     ) -> None:
         """Setup hooks to track BN statistics during forward pass.
 
         Args:
-            model: The target model
-            reconstruction: Not used by this strategy
-            client_observations: ClientObservations from FL client (contains post_bn_stats)
-            training_simulator: Not used by this strategy
-            proxy_dataloader: Not used by this strategy
+            ctx: Run context providing target_model and client_observations.
+            reconstruction: Not used by this strategy.
 
         """
-        _ = (reconstruction, training_simulator, proxy_dataloader)  # Unused args
+        _ = reconstruction
+        model = ctx.target_model
+        client_observations = ctx.client_observations
         self._initialize_setup()
 
         # Check if client provided post-training BN statistics
@@ -208,6 +196,7 @@ class RunningBNStatisticsStrategy(BNStatisticsStrategy):
         self._freeze_bn_momentum(model)
 
 
+@register("bn_stats.inferred")
 class InferredBNStatisticsStrategy(BNStatisticsStrategy):
     """Infer BN statistics from running statistics momentum (GIA Running approach).
 
@@ -240,34 +229,27 @@ class InferredBNStatisticsStrategy(BNStatisticsStrategy):
         """Return metadata describing this strategy's requirements."""
         return ComponentMetadata(
             name="inferred_bn_statistics",
-            display_name="Inferred BN Statistics",
-            description="Infers BN statistics from momentum updates (GIA Running)",
             required_capabilities={
                 "has_bn_statistics": True,
                 "has_local_hyperparameters": True,
             },
-            paper_reference="GIA Running implementation",
         )
 
     def setup(
         self,
-        model: nn.Module,
+        ctx: "RunContext",
         reconstruction: torch.Tensor | None = None,
-        client_observations: ClientObservations | None = None,
-        training_simulator: TrainingSimulator | None = None,
-        proxy_dataloader: DataLoader | None = None,
     ) -> None:
         """Setup by inferring batch statistics from running statistics changes.
 
         Args:
-            model: The target model
-            reconstruction: Current reconstruction (used to infer num_images if client didn't provide it)
-            client_observations: ClientObservations from FL client (contains pre/post_bn_stats, num_images)
-            training_simulator: Optional training simulator (not used in this strategy)
-            proxy_dataloader: Optional proxy dataloader (not used in this strategy)
+            ctx: Run context providing target_model and client_observations.
+            reconstruction: Current reconstruction (used to infer num_images if
+                client didn't provide it).
 
         """
-        _ = training_simulator, proxy_dataloader  # Unused args
+        model = ctx.target_model
+        client_observations = ctx.client_observations
         self._initialize_setup()
 
         # Extract BN statistics from client observations
@@ -335,6 +317,7 @@ class InferredBNStatisticsStrategy(BNStatisticsStrategy):
         self._freeze_bn_momentum(model)
 
 
+@register("bn_stats.proxy")
 class ProxyBNStatisticsStrategy(BNStatisticsStrategy):
     """Estimate BN statistics from proxy data (GIA Estimate approach).
 
@@ -364,10 +347,7 @@ class ProxyBNStatisticsStrategy(BNStatisticsStrategy):
         """Return metadata describing this strategy's requirements."""
         return ComponentMetadata(
             name="proxy_bn_statistics",
-            display_name="Proxy BN Statistics",
-            description="Estimates BN statistics from proxy data (GIA Estimate)",
             required_capabilities={"has_surrogate_data": True},
-            paper_reference="GIA Estimate implementation",
         )
 
     def _create_statistics_hooks(self, proxy_statistics: List) -> Dict:
@@ -494,23 +474,19 @@ class ProxyBNStatisticsStrategy(BNStatisticsStrategy):
 
     def setup(
         self,
-        model: nn.Module,
+        ctx: "RunContext",
         reconstruction: torch.Tensor | None = None,
-        client_observations: ClientObservations | None = None,
-        training_simulator: TrainingSimulator | None = None,
-        proxy_dataloader: DataLoader | None = None,
     ) -> None:
         """Setup by computing statistics from proxy data.
 
         Args:
-            model: The target model
-            reconstruction: Not used by this strategy
-            client_observations: Not used by this strategy (server uses own proxy data)
-            training_simulator: Training simulator for forward passes
-            proxy_dataloader: DataLoader with proxy data (server's own data, not from client)
+            ctx: Run context providing target_model and proxy_dataloader.
+            reconstruction: Not used by this strategy.
 
         """
-        _ = (reconstruction, client_observations, training_simulator)  # Unused args
+        _ = reconstruction
+        model = ctx.target_model
+        proxy_dataloader = ctx.proxy_dataloader
         self._initialize_setup()
 
         # Check if proxy data is provided

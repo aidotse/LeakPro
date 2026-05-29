@@ -9,6 +9,7 @@ from typing import List, Tuple
 
 import torch
 
+from leakpro.attacks.gia_attacks.modular.config.registry import register
 from leakpro.attacks.gia_attacks.modular.core.component_base import Component, ComponentMetadata, LabelInferenceResult
 
 
@@ -45,12 +46,11 @@ class LabelStrategy(Component):
         """
         return ComponentMetadata(
             name=cls.__name__,
-            display_name=cls.__name__,
-            description="Label handling strategy",
             required_capabilities={},
         )
 
 
+@register("label_strategy.fixed")
 class FixedLabels(LabelStrategy):
     """Use fixed pre-inferred labels (iDLG, inverting gradients)."""
 
@@ -70,6 +70,7 @@ class FixedLabels(LabelStrategy):
         return fixed_labels
 
 
+@register("label_strategy.joint")
 class JointLabelOptimizationStrategy(LabelStrategy):
     """Jointly optimize labels with reconstruction (DLG)."""
 
@@ -102,13 +103,14 @@ class JointLabelOptimizationStrategy(LabelStrategy):
         optimizable_params: List[torch.Tensor],
         labels: torch.Tensor,
     ) -> torch.Tensor:
-        """Return soft labels as probabilities.
+        """Return soft labels as probabilities with epoch prefix.
 
-        Converts the optimizable label logits to probabilities via softmax.
+        Returns [1, N, C] so that epoch_handling_strategy.get_label_for_epoch
+        correctly strips the epoch dim back to [N, C] before passing to TensorDataset.
         """
         if optimizable_params:
             soft_labels = optimizable_params[0]
-            return torch.softmax(soft_labels, dim=1)
+            return torch.softmax(soft_labels, dim=1).unsqueeze(0)  # [N, C] → [1, N, C]
         return labels
 
 
