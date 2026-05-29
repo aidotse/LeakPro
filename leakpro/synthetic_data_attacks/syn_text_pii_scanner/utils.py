@@ -16,19 +16,23 @@ from transformers import PreTrainedTokenizerFast
 import leakpro.synthetic_data_attacks.syn_text_pii_scanner.data_handling as dh
 from leakpro.synthetic_data_attacks.syn_text_pii_scanner.pii_token_classif_models import ner_longformer_model as lgfm
 from leakpro.synthetic_data_attacks.syn_text_pii_scanner.sentence_transformers_models.model import model_sen_trans
+from leakpro.utils.device import get_device as _platform_get_device
 from leakpro.utils.logger import logger
 
 
 def get_device() -> str:
-    """Auxiliary function that returns the device as a string."""
-    dev = "cpu"
-    if torch.cuda.is_available():
-        dev = "cuda"
-    elif torch.backends.mps.is_available():
-        dev = "mps"
-    return dev
+    """Auxiliary function that returns the device as a string.
 
-# Set device to CUDA or MPS if available, otherwise use CPU
+    Selection order: Habana HPU -> CUDA -> Apple MPS -> CPU.
+    """
+    platform = _platform_get_device()
+    if platform.type != "cpu":
+        return platform.type
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+# Set device to HPU/CUDA/MPS if available, otherwise use CPU
 device: torch.device = torch.device(get_device())
 
 def load_json_data(*, file_path: str) -> List[Dict[str, Any]]:

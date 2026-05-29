@@ -17,6 +17,7 @@ from leakpro.attacks.utils.model_handler import ModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.schemas import ShadowModelTrainingSchema, TrainingOutput
 from leakpro.signals.signal_extractor import PytorchModel
+from leakpro.utils.device import get_device
 from leakpro.utils.import_helper import Any, Dict, List, Self, Tuple, Union
 from leakpro.utils.logger import logger
 
@@ -69,7 +70,7 @@ class ShadowModelHandler(ModelHandler):
         self.model_storage_name = "shadow_model"
         self.metadata_storage_name = "metadata"
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = get_device()
 
     def _freeze_value(self:Self, value: Union[List, Dict, Any]) -> Union[tuple, Any]:
         """Convert nested config values to a stable, comparable structure.
@@ -448,7 +449,7 @@ class ShadowModelHandler(ModelHandler):
         # Convert to numpy array for easier manipulation
         models_in_indices = np.asarray(models_in_indices)
 
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = get_device()
         model_indices_tensor = torch.from_numpy(models_in_indices).to(device=device)
         dataset_tensor = torch.from_numpy(dataset_indices).to(device=device)
         indice_masks_tensor = torch.zeros((len(dataset_indices), len(models_in_indices)), dtype=torch.bool, device=device)

@@ -6,9 +6,11 @@
 import numpy as np
 import torch
 from ignite.metrics import SSIM
-from torch import Tensor, abs, cuda, mean, no_grad, norm
+from torch import Tensor, abs, mean, no_grad, norm
 from torch.utils.data import DataLoader
 from torchmetrics.functional import peak_signal_noise_ratio
+
+from leakpro.utils.device import get_device
 
 
 def l2_distance_weights(client_gradient: torch.Tensor, reconstruction_gradient: torch.Tensor,
@@ -108,7 +110,7 @@ def dataloaders_psnr(original_dataloader: DataLoader, recreated_dataloader: Data
         avg_psnr (float): Average PSNR value over the dataset.
 
     """
-    device = "cuda" if cuda.is_available() else "cpu"
+    device = get_device()
     total_psnr = 0.0
 
     with no_grad():
@@ -132,7 +134,7 @@ def dataloaders_ssim_ignite(original_dataloader: DataLoader, recreated_dataloade
     Each recreated image is compared against all original images in the current batch,
     taking the maximum SSIM as its score.
     """
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = get_device()
     data_range = 6.0  # adjust based on your normalization
     ssim_metric = SSIM(data_range=data_range, device=device)
 

@@ -9,13 +9,14 @@ import pickle
 
 import numpy as np
 import torch.nn.functional as F  # noqa: N812
-from torch import cat, cuda, device, save, sigmoid
+from torch import cat, save, sigmoid
 from torch.nn import CrossEntropyLoss, KLDivLoss, Module
 from tqdm import tqdm
 
 from leakpro.attacks.utils.model_handler import ModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.schemas import DistillationModelTrainingSchema
+from leakpro.utils.device import get_device, mark_step
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
@@ -103,7 +104,7 @@ class DistillationModelHandler(ModelHandler):
         optimizer = model_pair["optimizer"] # optimizer for student model
 
         # Get the device for training
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         teacher_model.to(gpu_or_cpu)
         student_model.to(gpu_or_cpu)
         student_model.train()
@@ -148,6 +149,7 @@ class DistillationModelHandler(ModelHandler):
                 optimizer.zero_grad(set_to_none=True)
                 loss.backward()
                 optimizer.step()
+                mark_step(gpu_or_cpu)
                 epoch_loss += loss.item()
 
             logger.info(f"Epoch {d+1}/{num_trajectory_epochs} | Loss: {epoch_loss}")

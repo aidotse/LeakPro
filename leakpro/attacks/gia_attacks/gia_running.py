@@ -12,7 +12,7 @@ from typing import Optional
 
 import torch
 from optuna.trial import Trial
-from torch import Tensor, device
+from torch import Tensor
 from torch.nn import CrossEntropyLoss, Module
 from torch.utils.data import DataLoader
 
@@ -23,6 +23,7 @@ from leakpro.fl_utils.gia_train import train
 from leakpro.fl_utils.model_utils import InferredBNFeatureHook
 from leakpro.fl_utils.similarity_measurements import cosine_similarity_weights, total_variation
 from leakpro.metrics.attack_result import GIAResults
+from leakpro.utils.device import get_device
 from leakpro.utils.import_helper import Callable, Self
 from leakpro.utils.logger import logger
 
@@ -105,7 +106,7 @@ class GIABaseRunning(AbstractGIA):
             None
 
         """
-        gpu_or_cpu = device("cuda" if torch.cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         self.model.to(gpu_or_cpu)
         # calculate number of elements per channel to use to un-bias running var.
         bn_channel_element_counts = []

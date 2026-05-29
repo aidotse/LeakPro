@@ -1,0 +1,84 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
+"""Hardware detection utility for selecting the runtime device.
+
+Selection order:
+    1. Habana Gaudi HPU (if ``habana_frameworks.torch`` is installed and reports an
+       available device).
+    2. NVIDIA CUDA (if ``torch.cuda.is_available()``).
+    3. CPU.
+
+All imports of ``habana_frameworks`` are guarded so this module is safe to import
+on CPU-only or NVIDIA-only systems where the Habana SDK is not installed.
+"""
+from functools import lru_cache
+from typing import Optional
+
+import torch
+
+from leakpro.utils.logger import logger
+
+_HPU_IMPORT_ERROR: Optional[str] = None
+_hthpu = None
+_htcore = None
+
+try:  # pragma: no cover - exercised only on Habana systems
+    import habana_frameworks.torch.hpu as _hthpu  # type: ignore[import-not-found]
+    try:
+        import habana_frameworks.torch.core as _htcore  # type: ignore[import-not-found]
+    except ImportError as exc:
+        _htcore = None
+        _HPU_IMPORT_ERROR = f"habana_frameworks.torch.core unavailable: {exc}"
+except ImportError as exc:
+    _hthpu = None
+    _htcore = None
+    _HPU_IMPORT_ERROR = str(exc)
+
+
+def is_hpu_available() -> bool:
+    """Return ``True`` when a Habana Gaudi HPU is usable in this process."""
+    if _hthpu is None:
+        return False
+    try:
+        return bool(_hthpu.is_available())
+    except Exception as exc:  # pragma: no cover - defensive; Habana stack may raise
+        logger.debug("HPU availability check failed: %s", exc)
+        return False
+
+
+@lru_cache(maxsize=1)
+def get_device() -> torch.device:
+    """Return the best available ``torch.device`` for this host.
+
+    The result is cached for the lifetime of the process; call
+    :func:`get_device.cache_clear` if you need to re-detect (e.g. in tests).
+    """
+    if is_hpu_available():
+        logger.info("Hardware detection: using Habana Gaudi HPU.")
+        return torch.device("hpu")
+    if torch.cuda.is_available():
+        logger.info("Hardware detection: using NVIDIA CUDA.")
+        return torch.device("cuda")
+    logger.info("Hardware detection: using CPU.")
+    return torch.device("cpu")
+
+
+def mark_step(device: Optional[torch.device] = None) -> None:
+    """Trigger a Habana lazy-mode graph compile/execute boundary.
+
+    No-op when not running on HPU or when ``habana_frameworks.torch.core`` is not
+    installed. Safe to call unconditionally from device-agnostic code paths.
+    """
+    if _htcore is None:
+        return
+    target = device if device is not None else get_device()
+    if getattr(target, "type", None) != "hpu":
+        return
+    _htcore.mark_step()
+
+
+def hpu_import_error() -> Optional[str]:
+    """Return the captured import error string for diagnostics, if any."""
+    return _HPU_IMPORT_ERROR

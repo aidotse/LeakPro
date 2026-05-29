@@ -12,7 +12,7 @@ from typing import Optional
 
 import torch
 from optuna.trial import Trial
-from torch import Tensor, device
+from torch import Tensor
 from torch.nn import CrossEntropyLoss, Module
 from torch.utils.data import DataLoader
 from torchvision.models.convnext import LayerNorm2d
@@ -29,6 +29,7 @@ from leakpro.fl_utils.model_utils import (
 )
 from leakpro.fl_utils.similarity_measurements import cosine_similarity_weights, total_variation
 from leakpro.metrics.attack_result import GIAResults
+from leakpro.utils.device import get_device
 from leakpro.utils.import_helper import Callable, Self
 from leakpro.utils.logger import logger
 
@@ -115,7 +116,7 @@ class GIABase(AbstractGIA):
             None
 
         """
-        gpu_or_cpu = device("cuda" if torch.cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         self.model.to(gpu_or_cpu)
         # get client gradient
         client_gradient = self.train_fn(self.model, self.client_loader,
