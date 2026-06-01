@@ -198,8 +198,7 @@ class ResNet18(nn.Module):
 _PRESET_ARCH_IMAGE_PRETRAINED = '''\
 """Preset architecture — ResNet-18 pretrained on ImageNet, frozen backbone.
 
-Only the final classifier trains (~160K params): Dropout(0.3) + Linear.
-Label smoothing (0.1) is applied via the model so the built-in trainer picks it up.
+Only the final FC layer trains (~160K params).
 Best for small datasets (< 100 samples/class). Very DP-SGD friendly.
 """
 import torch.nn as nn
@@ -213,10 +212,7 @@ class ResNet18Pretrained(nn.Module):
         backbone = models.resnet18(weights="IMAGENET1K_V1")
         for p in backbone.parameters():
             p.requires_grad = False          # freeze entire backbone
-        backbone.fc = nn.Sequential(
-            nn.Dropout(0.3),
-            nn.Linear(512, num_classes),
-        )
+        backbone.fc = nn.Linear(backbone.fc.in_features, num_classes)
         self.model = backbone
 
     def forward(self, x):
@@ -894,10 +890,7 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                 if params.dpsgd:
                     log_q.put(f"[train] DP-SGD: epsilon={params.target_epsilon}, delta={params.target_delta}, max_grad_norm={params.max_grad_norm}, virtual_batch_size={params.virtual_batch_size or 16}")
 
-            _label_smoothing = 0.1 if _pretrained else 0.0
-            criterion = nn.CrossEntropyLoss(label_smoothing=_label_smoothing)
-            if _label_smoothing:
-                log_q.put(f"[train] Using label smoothing={_label_smoothing}")
+            criterion = nn.CrossEntropyLoss()
             if params.optimizer == "sgd":
                 optimizer = optim.SGD(model.parameters(), lr=params.learning_rate, momentum=0.9, weight_decay=5e-4)
             else:

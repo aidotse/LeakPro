@@ -198,10 +198,10 @@ const PRESETS: Array<{
     id: "image_pretrained",
     label: "Image (pretrained)",
     icon: "auto_awesome",
-    desc: "ResNet-18 pretrained on ImageNet — backbone fully frozen, only Dropout(0.3) + FC layer trains (~160K params). Label smoothing 0.1 applied. Best for small datasets and DP-SGD.",
+    desc: "ResNet-18 pretrained on ImageNet — backbone fully frozen, only the final FC layer trains (~160K params). Best for small datasets (< 100 samples/class) and DP-SGD.",
     types: ["image"],
     details: {
-      architecture: "ResNet-18 (ImageNet weights, frozen) — ~160K trainable params",
+      architecture: "ResNet-18 (ImageNet weights, frozen backbone) — ~160K trainable params",
       optimizer: "Adam (default) or SGD",
       learning_rate: "0.001",
       scheduler: "none",
