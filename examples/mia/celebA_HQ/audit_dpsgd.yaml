@@ -1,3 +1,7 @@
+##
+## Copyright 2023-2026 Lindholmen Science Park AB
+## SPDX-License-Identifier: Apache-2.0
+##
 
 audit:  # Configurations for auditing
   random_seed: 1236  # Integer specifying the random seed

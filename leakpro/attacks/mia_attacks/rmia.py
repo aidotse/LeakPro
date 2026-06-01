@@ -11,6 +11,8 @@ from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.attacks.utils.utils import softmax_logits
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.reporting.mia_result import MIAResult
+from leakpro.signals.signal import ModelLogits
+from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
@@ -116,6 +118,32 @@ class AttackRMIA(AbstractMIA):
             "detailed": detailed_str,
         }
 
+    def _get_z_logits(self:Self,
+                      logits_cached: np.ndarray,
+                      model,  # noqa: ANN001
+                      z_indices: np.ndarray,
+                      cached_mask: np.ndarray,
+                      logit_row: dict) -> np.ndarray:
+        """Return logits for z_indices, reading from cache where available and computing on-the-fly otherwise."""
+        n = len(z_indices)
+        logits = np.zeros((n, logits_cached.shape[1]))
+
+        if cached_mask.any():
+            rows = np.array([logit_row[int(idx)] for idx in z_indices[cached_mask]])
+            logits[cached_mask] = logits_cached[rows]
+
+        if (~cached_mask).any():
+            # Shadow models are already PytorchModel wrappers; target model is a raw nn.Module.
+            model_wrapped = model if isinstance(model, PytorchModel) else PytorchModel(model, self.handler.get_criterion())
+            unc = np.array(ModelLogits()(
+                [model_wrapped],
+                self.handler,
+                z_indices[~cached_mask],
+            )).squeeze()
+            logits[~cached_mask] = np.atleast_2d(unc)
+
+        return logits
+
     def _prepare_shadow_models(self:Self) -> None:
 
         # Shadow models are trained on all data points in pairs.
@@ -146,24 +174,43 @@ class AttackRMIA(AbstractMIA):
             self._prepare_shadow_models()
 
             self.ground_truth_indices = self.handler.get_labels(self.audit_dataset["data"])
-            self.logits_theta = ShadowModelHandler().load_logits(name="target")
+            self.logits_theta = ShadowModelHandler().load_logits(name=f"target_{ShadowModelHandler().target_model_hash}")
             self.logits_shadow_models = []
             for indx in self.shadow_model_indices:
                 self.logits_shadow_models.append(ShadowModelHandler().load_logits(indx=indx))
 
-        # collect the softmax output of the correct class
-        n_attack_points = self.z_data_sample_fraction * len(self.handler.population) # points to compute p(z)
+        # Sample z from full population per Algorithm 1 of the RMIA paper.
+        # Build a cache lookup (global index → row) once — identical for target and all shadow models.
+        all_cached = np.concatenate([
+            np.asarray(self.handler.train_indices),
+            np.asarray(self.handler.test_indices),
+        ])
+        logit_row = {int(idx): i for i, idx in enumerate(all_cached)}
 
-        # pick random indices sampled from the attack data
-        z_indices = np.random.choice(self.attack_data_indices, size=int(n_attack_points), replace=False)
+        n_z = int(self.z_data_sample_fraction * len(self.attack_data_indices))
+        z_indices = np.random.choice(self.attack_data_indices, size=n_z, replace=False)
         z_labels = self.handler.get_labels(z_indices)
 
-        p_z_given_theta = softmax_logits(self.logits_theta, self.temperature)[z_indices,z_labels]  # noqa: E501
+        # cached_mask is True for z-points present in the logit cache (train+test).
+        # Auxiliary population points not in the cache are computed on-the-fly.
+        # For configs where f_train + f_test = 1.0 this mask is all-True and no forward pass is needed.
+        cached_mask = np.array([int(idx) in logit_row for idx in z_indices])
+
+        # p(z | target model)
+        logits_z_theta = self._get_z_logits(
+            self.logits_theta, self.handler.target_model, z_indices, cached_mask, logit_row)
+        p_z_given_theta = softmax_logits(logits_z_theta, self.temperature)[np.arange(n_z), z_labels]
         p_z_given_theta = np.atleast_2d(p_z_given_theta)
 
-        # collect the softmax output of the correct class for each shadow model
-        sm_logits_shadow_models = [softmax_logits(x, self.temperature) for x in self.logits_shadow_models]
-        p_z_given_shadow_models = np.array([x[z_indices,z_labels] for x in sm_logits_shadow_models])  # noqa: E501
+        # p(z | each shadow model)
+        sm_logits_shadow_models = [
+            softmax_logits(
+                self._get_z_logits(sm_logits, sm, z_indices, cached_mask, logit_row),
+                self.temperature,
+            )
+            for sm, sm_logits in zip(self.shadow_models, self.logits_shadow_models)
+        ]
+        p_z_given_shadow_models = np.array([x[np.arange(n_z), z_labels] for x in sm_logits_shadow_models])
 
         # evaluate the marginal p(z)
         if self.online is True:

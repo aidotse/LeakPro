@@ -26,7 +26,7 @@ class AttackYOQO(AbstractMIA):
         """Configuration for the RMIA attack."""
 
         training_data_fraction: float = Field(default=0.01, ge=0.0, le=1.0, description="Fraction of auxilary dataset to use for each shadow model training")  # noqa: E501
-        num_shadow_models: int = Field(default=1, ge=1, description="Number of shadow models to train")
+        num_shadow_models: int = Field(default=2, ge=1, description="Number of shadow models to train")
         online: bool = Field(default=False, description="Perform online or offline attack")
         lr_xprime_optimization: float = Field(default=1e-3, ge=0.0, description="Learning rate for optimization of xprime")
         max_iterations: int = Field(default=1, ge=1, description="Maximum number of iterations for optimization of xprime")

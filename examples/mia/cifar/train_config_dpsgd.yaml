@@ -4,8 +4,8 @@ run: # Configurations for a specific run
 
 train:
   epochs: 25
-  batch_size: 32
-  virtual_batch_size: 32
+  batch_size: 128
+  virtual_batch_size: 128
   optimizer: SGD
   learning_rate: 0.01
   momentum: 0.9        # (if using SGD)

@@ -165,6 +165,26 @@ cython_debug/
 # mac generated files
 .DS_Store
 
+# Editor swap files
+*.swp
+*.swo
+
+# VS Code
+.vscode/
+
+# Temp directories
+"<TemporaryDirectory*
+
+# Env files
+env.yml
+.env.yml*
+
+# Webapp runtime
+webapp_jobs/
+
+# Vite build cache
+leakpro/webapp/frontend/.vite/
+
 # Ignore data and model folders
 **/data/*
 data/cifar*

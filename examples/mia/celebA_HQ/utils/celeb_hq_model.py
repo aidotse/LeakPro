@@ -19,6 +19,7 @@ from leakpro.schemas import MIAMetaDataSchema, OptimizerConfig, LossConfig
 class ResNet18(nn.Module):
     def __init__(self, num_classes):
         super().__init__()
+        self.num_classes = num_classes
         self.model = resnet18(weights = ResNet18_Weights.IMAGENET1K_V1)
         self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
         self.init_params = {"num_classes": num_classes}
