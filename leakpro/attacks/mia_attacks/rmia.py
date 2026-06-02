@@ -4,7 +4,7 @@
 #
 """Implementation of the RMIA attack."""
 import numpy as np
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
@@ -22,7 +22,8 @@ class AttackRMIA(AbstractMIA):
 
     class AttackConfig(BaseModel):
         """Configuration for the RMIA attack."""
-
+        
+        model_config = ConfigDict(extra='forbid')
         num_shadow_models: int = Field(default=1,
                                        ge=1,
                                        description="Number of shadow models")
@@ -35,11 +36,11 @@ class AttackRMIA(AbstractMIA):
                                               description="Part of available attack data to use for shadow models")
         online: bool = Field(default=False,
                              description="Online vs offline attack")
-        # Parameters to be used with optuna
-        z_data_sample_fraction: float = Field(default=0.5,
+        attack_data_fraction: float = Field(default=0.5,
                                                 ge=0.0,
                                                 le=1.0,
-                                                description="Part of available attack data to use for estimating p(z)",)
+                                                description="Part of available attack data to use for estimating p(z). Going below 0.1 noticeably degrades the attack quality according to paper.")
+        # Parameters to be used with optuna
         gamma: float = Field(default=2.0,
                         ge=0.0,
                         description="Parameter to threshold LLRs",
@@ -187,7 +188,7 @@ class AttackRMIA(AbstractMIA):
         ])
         logit_row = {int(idx): i for i, idx in enumerate(all_cached)}
 
-        n_z = int(self.z_data_sample_fraction * len(self.attack_data_indices))
+        n_z = int(self.attack_data_fraction * len(self.attack_data_indices))
         z_indices = np.random.choice(self.attack_data_indices, size=n_z, replace=False)
         z_labels = self.handler.get_labels(z_indices)
 
