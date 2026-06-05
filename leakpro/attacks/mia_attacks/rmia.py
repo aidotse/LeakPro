@@ -37,9 +37,11 @@ class AttackRMIA(AbstractMIA):
         online: bool = Field(default=False,
                              description="Online vs offline attack")
         attack_data_fraction: float = Field(default=0.5,
-                                                ge=0.0,
-                                                le=1.0,
-                                                description="Part of available attack data to use for estimating p(z). Going below 0.1 noticeably degrades the attack quality according to paper.")
+                                            ge=0.0,
+                                            le=1.0,
+                                            description="Part of available attack data to use for estimating p(z). Going below 0.1 noticeably degrades the attack quality according to paper.")
+        signal: str = Field(default="ModelRescaledLogits",
+                            description="What signal to use.")
         # Parameters to be used with optuna
         gamma: float = Field(default=2.0,
                         ge=0.0,
@@ -200,7 +202,7 @@ class AttackRMIA(AbstractMIA):
         # p(z | target model)
         logits_z_theta = self._get_z_logits(
             self.logits_theta, self.handler.target_model, z_indices, cached_mask, logit_row)
-        p_z_given_theta = softmax_logits(logits_z_theta, self.temperature)[np.arange(n_z), z_labels]
+        p_z_given_theta = softmax_logits(logits_z_theta, self.temperature)[np.arange(n_z), z_labels]  # z_labels are floats (timeseries) -> IndexError: arrays used as indices must be of integer (or boolean) type. Look how students solved this...
         p_z_given_theta = np.atleast_2d(p_z_given_theta)
 
         # p(z | each shadow model)
