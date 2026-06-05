@@ -9,7 +9,7 @@ from typing import Optional, Self
 import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score
-from torch import  cuda, device,  no_grad, nn, optim, sigmoid
+from torch import no_grad, nn, optim, sigmoid
 from torch.nn import BCEWithLogitsLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -20,6 +20,7 @@ from opacus.accountants.utils import get_noise_multiplier
 
 from leakpro import AbstractInputHandler
 from leakpro.schemas import TrainingOutput, EvalOutput
+from leakpro.utils.device import get_device
 from mimic_data_handler import MIMICUserDataset
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
@@ -65,7 +66,7 @@ class LRHandler(BaseMIMICHandler):
         if epochs is None:
             raise ValueError("epochs not found in configs")
 
-        device_name = device("cuda" if cuda.is_available() else "cpu")
+        device_name = get_device()
         model.to(device_name)
 
         accuracy_history = []
@@ -104,7 +105,7 @@ class LRHandler(BaseMIMICHandler):
              loader: DataLoader,
              model: nn.Module,
              criterion: nn.Module) -> EvalOutput:
-        device_name = device("cuda" if cuda.is_available() else "cpu")
+        device_name = get_device()
         model.to(device_name)
         model.eval()
         loss, acc, total_samples = 0, 0, 0
@@ -139,7 +140,7 @@ class GRUHandler(BaseMIMICHandler):
               dpsgd_metadata_path: Optional[str] = None,
               ) -> TrainingOutput:
 
-        device_name = device("cuda" if cuda.is_available() else "cpu")
+        device_name = get_device()
 
         resolved_dpsgd_path = None
         if dpsgd_metadata_path is not None:
@@ -259,7 +260,7 @@ class GRUHandler(BaseMIMICHandler):
              loader: DataLoader,
              model: nn.Module,
              criterion: nn.Module) -> EvalOutput:
-        device_name = device("cuda" if cuda.is_available() else "cpu")
+        device_name = get_device()
         model.to(device_name)
         model.eval()
         loss, acc, total_samples = 0, 0, 0

@@ -18,6 +18,7 @@ dependencies = [
   "dotmap",
   "jinja2",
   "tqdm",
+  "ipywidgets",
   "joblib",
   "pyyaml",
   "scikit-learn",

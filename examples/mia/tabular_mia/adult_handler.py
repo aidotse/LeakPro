@@ -5,25 +5,33 @@
 """Module containing the class to handle the user input for the CIFAR10 dataset."""
 
 import torch
-from torch import cuda, device, optim, sigmoid
-from torch.nn import BCEWithLogitsLoss
+from torch import no_grad, optim
+from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from leakpro.schemas import TrainingOutput
+from leakpro.schemas import EvalOutput, TrainingOutput
+from leakpro.utils.device import get_device, mark_step
 
 from leakpro import AbstractInputHandler
 
 
 class AdultInputHandler(AbstractInputHandler):
-    """Class to handle the user input for the CIFAR10 dataset."""
+    """Class to handle the user input for the Adult tabular dataset."""
 
     def __init__(self, configs: dict) -> None:
         super().__init__(configs = configs)
 
+    class UserDataset(AbstractInputHandler.UserDataset):
+        """Thin wrapper around tabular (data, targets) tensors."""
+
+        def __init__(self, data, targets, **kwargs) -> None:
+            self.data = data.float() if isinstance(data, torch.Tensor) else torch.tensor(data, dtype=torch.float32)
+            self.targets = targets.long() if isinstance(targets, torch.Tensor) else torch.tensor(targets, dtype=torch.long)
+
 
     def get_criterion(self)->None:
         """Set the CrossEntropyLoss for the model."""
-        return BCEWithLogitsLoss()
+        return CrossEntropyLoss()
 
     def get_optimizer(self, model:torch.nn.Module) -> None:
         """Set the optimizer for the model."""
@@ -41,7 +49,7 @@ class AdultInputHandler(AbstractInputHandler):
     ) -> TrainingOutput:
         """Model training procedure."""
 
-        dev = device("cuda" if cuda.is_available() else "cpu")
+        dev = get_device()
         model.to(dev)
         model.train()
 
@@ -53,18 +61,19 @@ class AdultInputHandler(AbstractInputHandler):
             train_acc, train_loss, total_samples = 0.0, 0.0, 0
 
             for data, target in dataloader:
-                target = target.float().unsqueeze(1)
+                target = target.long()
                 data, target = data.to(dev, non_blocking=True), target.to(dev, non_blocking=True)
                 optimizer.zero_grad()
                 output = model(data)
 
                 loss = criterion(output, target)
-                pred = output >= 0.5
+                pred = output.argmax(dim=1)
                 train_acc += pred.eq(target).sum().item()
 
                 loss.backward()
                 optimizer.step()
-                train_loss += loss.item() 
+                mark_step(dev)
+                train_loss += loss.item()
                 total_samples += target.size(0)
 
         train_acc = train_acc/len(dataloader.dataset)
@@ -73,5 +82,30 @@ class AdultInputHandler(AbstractInputHandler):
         
         output_dict = {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}
         output = TrainingOutput(**output_dict)
-        
+
         return output
+
+    def eval(
+        self,
+        dataloader: DataLoader,
+        model: torch.nn.Module,
+        criterion: torch.nn.Module,
+        device: str = None,
+    ) -> EvalOutput:
+        """Evaluate the model on the given dataloader."""
+        dev = get_device()
+        model.to(dev)
+        model.eval()
+        loss, acc, total_samples = 0.0, 0.0, 0
+        with no_grad():
+            for data, target in dataloader:
+                target = target.long()
+                data, target = data.to(dev), target.to(dev)
+                output = model(data)
+                mark_step(dev)
+                loss += criterion(output, target).item() * target.size(0)
+                pred = output.argmax(dim=1)
+                acc += pred.eq(target).sum().item()
+                total_samples += target.size(0)
+        model.to("cpu")
+        return EvalOutput(accuracy=float(acc) / total_samples, loss=loss / total_samples)
