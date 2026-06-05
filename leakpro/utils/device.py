@@ -13,10 +13,14 @@ Selection order:
 All imports of ``habana_frameworks`` are guarded so this module is safe to import
 on CPU-only or NVIDIA-only systems where the Habana SDK is not installed.
 """
+import os
 from functools import lru_cache
 from typing import Optional
 
 import torch
+
+# PT_HPU_LAZY_MODE=0 means eager mode — mark_step() is a no-op in that mode.
+_HPU_LAZY_MODE: bool = os.environ.get("PT_HPU_LAZY_MODE", "1") != "0"
 
 from leakpro.utils.logger import logger
 
@@ -68,10 +72,11 @@ def get_device() -> torch.device:
 def mark_step(device: Optional[torch.device] = None) -> None:
     """Trigger a Habana lazy-mode graph compile/execute boundary.
 
-    No-op when not running on HPU or when ``habana_frameworks.torch.core`` is not
-    installed. Safe to call unconditionally from device-agnostic code paths.
+    No-op when not running on HPU, when ``habana_frameworks.torch.core`` is not
+    installed, or when running in HPU eager mode (PT_HPU_LAZY_MODE=0).
+    Safe to call unconditionally from device-agnostic code paths.
     """
-    if _htcore is None:
+    if _htcore is None or not _HPU_LAZY_MODE:
         return
     target = device if device is not None else get_device()
     if getattr(target, "type", None) != "hpu":

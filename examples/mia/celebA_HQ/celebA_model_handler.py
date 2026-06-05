@@ -7,12 +7,13 @@ Usage:
 """
 
 import torch
-from torch import cuda, device, no_grad, optim
+from torch import no_grad, optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from leakpro import AbstractInputHandler
 from leakpro.schemas import EvalOutput, TrainingOutput
+from leakpro.utils.device import get_device
 
 
 class CelebAModelHandler(AbstractInputHandler, role="model"):
@@ -29,7 +30,7 @@ class CelebAModelHandler(AbstractInputHandler, role="model"):
         if epochs is None:
             raise ValueError("epochs not found in configs")
 
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         model.to(gpu_or_cpu)
 
         accuracy_history, loss_history = [], []
@@ -63,7 +64,7 @@ class CelebAModelHandler(AbstractInputHandler, role="model"):
         return TrainingOutput(model=model, metrics=results)
 
     def eval(self, loader, model, criterion) -> EvalOutput:
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         model.to(gpu_or_cpu)
         model.eval()
         loss, acc, total_samples = 0, 0, 0

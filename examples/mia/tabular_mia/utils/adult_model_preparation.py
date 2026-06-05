@@ -4,9 +4,11 @@
 #
 import pickle
 
-from torch import cuda, device, nn, no_grad, optim, save, sigmoid
+from torch import nn, no_grad, optim, save
 from tqdm import tqdm
-from leakpro.schemas import MIAMetaDataSchema, OptimizerConfig, LossConfig
+from leakpro.schemas import EvalOutput, MIAMetaDataSchema
+from leakpro.utils.conversion import dataloader_to_config, loss_to_config, optimizer_to_config
+from leakpro.utils.device import get_device, mark_step
 
 
 class AdultNet(nn.Module):
@@ -33,23 +35,23 @@ def evaluate(model, loader, criterion, device):
     loss, acc = 0, 0
     with no_grad():
         for data, target in loader:
-            data, target = data.to(device), target.to(device)
-            target = target.float().unsqueeze(1)
+            data, target = data.to(device), target.long().to(device)
             output = model(data)
+            mark_step(device)
             loss += criterion(output, target).item()
-            pred = sigmoid(output) >= 0.5
-            acc += pred.eq(target.data.view_as(pred)).sum()
+            pred = output.argmax(dim=1)
+            acc += pred.eq(target).sum()
         loss /= len(loader)
         acc = float(acc) / len(loader.dataset)
     return loss, acc
 
 def create_trained_model_and_metadata(model, train_loader, test_loader, epochs = 10, metadata = None):
 
-    device_name = device("cuda" if cuda.is_available() else "cpu")
+    device_name = get_device()
     model.to(device_name)
     model.train()
 
-    criterion = nn.BCEWithLogitsLoss()
+    criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.8)
     train_losses, train_accuracies = [], []
     test_losses, test_accuracies = [], []
@@ -59,17 +61,18 @@ def create_trained_model_and_metadata(model, train_loader, test_loader, epochs =
         train_acc, train_loss = 0.0, 0.0
 
         for data, target in train_loader:
-            target = target.float().unsqueeze(1)
+            target = target.long()
             data, target = data.to(device_name, non_blocking=True), target.to(device_name, non_blocking=True)
             optimizer.zero_grad()
             output = model(data)
 
             loss = criterion(output, target)
-            pred = output >= 0.5
+            pred = output.argmax(dim=1)
             train_acc += pred.eq(target).sum().item()
 
             loss.backward()
             optimizer.step()
+            mark_step(device_name)
             train_loss += loss.item()
 
         train_loss /= len(train_loader)
@@ -92,30 +95,17 @@ def create_trained_model_and_metadata(model, train_loader, test_loader, epochs =
     for key, value in model.init_params.items():
         init_params[key] = value
     
-    optimizer_data = {
-        "name": optimizer.__class__.__name__.lower(),
-        "lr": optimizer.param_groups[0].get("lr", 0),
-        "weight_decay": optimizer.param_groups[0].get("weight_decay", 0),
-        "momentum": optimizer.param_groups[0].get("momentum", 0),
-        "dampening": optimizer.param_groups[0].get("dampening", 0),
-        "nesterov": optimizer.param_groups[0].get("nesterov", False)
-    }
-    
-    loss_data = {"name": criterion.__class__.__name__.lower()}
-    
     meta_data = MIAMetaDataSchema(
             train_indices=train_loader.dataset.indices,
             test_indices=test_loader.dataset.indices,
             num_train=len(train_loader.dataset.indices),
             init_params=init_params,
-            optimizer=OptimizerConfig(**optimizer_data),
-            criterion=LossConfig(**loss_data),
-            batch_size=train_loader.batch_size,
+            optimizer=optimizer_to_config(optimizer),
+            criterion=loss_to_config(criterion),
+            data_loader=dataloader_to_config(train_loader),
             epochs=epochs,
-            train_acc=train_acc,
-            test_acc=test_acc,
-            train_loss=train_loss,
-            test_loss=test_loss,
+            train_result=EvalOutput(accuracy=train_acc, loss=train_loss),
+            test_result=EvalOutput(accuracy=test_acc, loss=test_loss),
             dataset="adult"
         )
     

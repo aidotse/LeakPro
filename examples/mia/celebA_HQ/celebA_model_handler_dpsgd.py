@@ -11,7 +11,7 @@ import pickle
 from pathlib import Path
 
 import torch
-from torch import cuda, device, no_grad, optim
+from torch import no_grad, optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -22,6 +22,7 @@ from opacus.validators import ModuleValidator
 
 from leakpro import AbstractInputHandler
 from leakpro.schemas import EvalOutput, TrainingOutput
+from leakpro.utils.device import get_device
 from leakpro.utils.logger import logger
 
 
@@ -94,7 +95,7 @@ class CelebAModelHandlerDPsgd(AbstractInputHandler, role="model"):
         model, optimizer, dataloader, _ = _setup_dpsgd(
             model, optimizer, dataloader, dpsgd_metadata_path)
 
-        dev = torch.device("cuda" if cuda.is_available() else "cpu")
+        dev = get_device()
         model.to(dev)
         model.train()
 
@@ -131,7 +132,7 @@ class CelebAModelHandlerDPsgd(AbstractInputHandler, role="model"):
         return TrainingOutput(model=model, metrics=results)
 
     def eval(self, loader, model, criterion) -> EvalOutput:
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         model.to(gpu_or_cpu)
         model.eval()
         loss, acc, total_samples = 0, 0, 0
