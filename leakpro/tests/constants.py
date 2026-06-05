@@ -63,7 +63,7 @@ def get_audit_config():
     rmia_config.training_data_fraction = 0.5
     rmia_config.num_shadow_models = 2
     rmia_config.online = False
-    rmia_config.z_data_sample_fraction = 0.5
+    rmia_config.attack_data_fraction = 0.5
     audit_config.attack_list.append(rmia_config)
  
     return audit_config

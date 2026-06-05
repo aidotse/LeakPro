@@ -11,11 +11,11 @@ from pydantic import BaseModel, Field, model_validator
 from scipy.stats import norm
 from tqdm import tqdm
 
+import leakpro.signals.functional as signals
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.reporting.mia_result import MIAResult
-import leakpro.signals.functional as signals 
 from leakpro.utils.import_helper import Self
 
 
@@ -29,7 +29,8 @@ class AttackLiRA(AbstractMIA):
         training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow models")  # noqa: E501
         online: bool = Field(default=False, description="Online vs offline attack")
         var_calculation: Literal["carlini", "individual_carlini", "fixed"] = Field(default="carlini", description="Variance estimation method to use [carlini, individual_carlini, fixed]")  # noqa: E501
-        signal: str = Field(default="ModelRescaledLogits", description="What signal to use.")
+        signal: str = Field(default="rescaled_logits",
+                            description="What signal to use. Must be a function in leakpro.signals.functional.")
 
         @model_validator(mode="after")
         def check_num_shadow_models_if_online(self) -> Self:
@@ -69,8 +70,16 @@ class AttackLiRA(AbstractMIA):
         for key, value in self.configs.model_dump().items():
             setattr(self, key, value)
 
-        self.shadow_models = []  # TODO: Remove self.shadow_models? Is self.shadow_models ever used? Parent classes does not requier self.shadow_models to exist?
-        self.signal = getattr(signals, self.configs.signal)
+        # TODO: Remove self.shadow_models? Is it ever used? Parent classes do not require it to exist.
+        self.shadow_models = []
+
+        # Map legacy class-style signal names (pre-functional refactor) to their functional equivalents
+        legacy_signal_names = {"ModelLogits": "logits", "ModelRescaledLogits": "rescaled_logits"}
+        signal_name = legacy_signal_names.get(self.configs.signal, self.configs.signal)
+        if not hasattr(signals, signal_name):
+            raise ValueError(f"Unknown signal '{self.configs.signal}'. "
+                             f"Available: {[f for f in dir(signals) if not f.startswith('_')]}")
+        self.signal = getattr(signals, signal_name)
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""

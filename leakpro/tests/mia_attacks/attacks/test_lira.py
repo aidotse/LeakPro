@@ -49,7 +49,7 @@ def test_lira_prepare_online_attack(image_handler:ImageInputHandler) -> None:
     n_attack_points = len(lira_obj.train_indices) + len(lira_obj.test_indices)
     assert n_attack_points > 0
     assert lira_obj.shadow_models_logits.shape == (lira_params.num_shadow_models, n_attack_points)
-    assert lira_obj.target_logits.shape == (n_attack_points, )
+    assert lira_obj.target_model_logits.shape == (n_attack_points, )
 
 def test_lira_prepare_offline_attack(image_handler:ImageInputHandler) -> None:
     audit_config = get_audit_config()
@@ -73,7 +73,7 @@ def test_lira_prepare_offline_attack(image_handler:ImageInputHandler) -> None:
     n_attack_points = len(lira_obj.train_indices) + len(lira_obj.test_indices)
     assert n_attack_points > 0
     assert lira_obj.shadow_models_logits.shape == (lira_params.num_shadow_models, n_attack_points)
-    assert lira_obj.target_logits.shape == (n_attack_points, )
+    assert lira_obj.target_model_logits.shape == (n_attack_points, )
 
 
 def test_lira_online_attack(image_handler:ImageInputHandler):
