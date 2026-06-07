@@ -11,9 +11,16 @@ from torch import nn
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
-from leakpro.attacks.utils.utils import gaussian_residual_probability, softmax_logits
+from leakpro.attacks.utils.utils import (
+    gaussian_residual_probability,
+    huber_energy,
+    huber_residual_probability,
+    laplace_residual_probability,
+    softmax_logits,
+)
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.reporting.mia_result import MIAResult
+from leakpro.signals.functional import mae, mse
 from leakpro.signals.signal import ModelLogits
 from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import Self
@@ -44,13 +51,12 @@ class AttackRMIA(AbstractMIA):
                                             le=1.0,
                                             description="Part of available attack data to use for estimating p(z). \
 Going below 0.1 noticeably degrades the attack quality according to paper.")
-        signal: str = Field(default="ModelRescaledLogits",
-                            description="What signal to use.")
         sigma: Optional[float] = Field(default=None,
                                        gt=0.0,
-                                       description="Residual std for the Gaussian likelihood used with \
-continuous-output (forecasting/regression) models. None (default) estimates it from shadow-model \
-residuals on the z-population. Ignored for classification models, where temperature applies instead.")
+                                       description="Residual std for the likelihood used with continuous-output \
+(forecasting/regression) models; mapped to the scale of the family implied by the training criterion \
+(Gaussian for MSE, Laplace for L1, Huber for SmoothL1/Huber). None (default) estimates the scale from \
+shadow-model residuals on the z-population. Ignored for classification models, where temperature applies instead.")
         # Parameters to be used with optuna
         gamma: float = Field(default=2.0,
                         ge=0.0,
@@ -108,13 +114,26 @@ residuals on the z-population. Ignored for classification models, where temperat
         self.shadow_models = None
         self.shadow_model_indices = None
 
-        # Resolve the task type from the training criterion: continuous-output losses require the
-        # Gaussian residual likelihood, classification losses the softmax probability of the true class.
-        regression_criteria = (nn.MSELoss, nn.L1Loss, nn.SmoothL1Loss, nn.HuberLoss)
-        self.is_regression = isinstance(self.handler.get_criterion(), regression_criteria)
-        self._sigma2 = None  # resolved in prepare_attack when is_regression
-        logger.info(f"RMIA signal probability mode: {'gaussian residual' if self.is_regression else 'softmax'} "
-                    f"(criterion: {type(self.handler.get_criterion()).__name__})")
+        # Resolve the residual-likelihood family from the training criterion: each regression loss
+        # implies a noise model (MSE -> Gaussian, L1 -> Laplace, SmoothL1/Huber -> Huber), and the
+        # signal probability must use the matching likelihood. Classification losses keep the
+        # softmax probability of the true class.
+        criterion = self.handler.get_criterion()
+        family_by_criterion = ((nn.MSELoss, "gaussian"), (nn.L1Loss, "laplace"),
+                               (nn.SmoothL1Loss, "huber"), (nn.HuberLoss, "huber"))
+        self.likelihood_family = next((family for cls, family in family_by_criterion if isinstance(criterion, cls)), None)
+        self.is_regression = self.likelihood_family is not None
+        # SmoothL1Loss(beta) is HuberLoss(delta=beta) scaled by 1/beta; the constant factor is
+        # absorbed by the likelihood scale, so both map to the Huber family with the same threshold.
+        if isinstance(criterion, nn.SmoothL1Loss):
+            self._huber_delta = criterion.beta
+        elif isinstance(criterion, nn.HuberLoss):
+            self._huber_delta = criterion.delta
+        else:
+            self._huber_delta = None
+        self._scale = None  # likelihood scale, resolved in prepare_attack when is_regression
+        logger.info(f"RMIA signal probability mode: {self.likelihood_family or 'softmax'} "
+                    f"(criterion: {type(criterion).__name__})")
 
         self.load_for_optuna = False
         self.attack_cache_folder_path = ShadowModelHandler().attack_cache_folder_path
@@ -164,12 +183,16 @@ residuals on the z-population. Ignored for classification models, where temperat
 
         return logits
 
-    def _resolve_sigma2(self:Self, shadow_logits_z: list, z_labels: np.ndarray) -> None:
-        """Resolve the Gaussian residual variance used by the regression signal probability.
+    def _resolve_scale(self:Self, shadow_logits_z: list, z_labels: np.ndarray) -> None:
+        """Resolve the residual-likelihood scale used by the regression signal probability.
 
-        Uses the user-provided sigma when given; otherwise estimates sigma^2 once as the mean
-        squared residual of the shadow models on the z-population. The same value is reused for
-        the audit points in _run_attack so the scale is consistent across all probability ratios.
+        With a user-provided sigma (residual std), it is mapped to the scale of the resolved
+        family: sigma^2 for Gaussian, sigma/sqrt(2) for Laplace (Var = 2b^2), and sigma^2 for
+        Huber (variance of the quadratic core). Otherwise the scale is estimated once from the
+        shadow-model residuals on the z-population: the mean squared residual (Gaussian MLE),
+        the mean absolute residual (Laplace MLE), or the mean Huber energy (heuristic — the
+        Huber scale has no closed-form MLE). The same value is reused for the audit points in
+        _run_attack so the scale is consistent across all probability ratios.
 
         Args:
         ----
@@ -178,23 +201,33 @@ residuals on the z-population. Ignored for classification models, where temperat
 
         """
         if self.sigma is not None:
-            self._sigma2 = self.sigma ** 2
+            sigma_to_scale = {"gaussian": self.sigma ** 2,
+                              "laplace": self.sigma / np.sqrt(2.0),
+                              "huber": self.sigma ** 2}
+            self._scale = sigma_to_scale[self.likelihood_family]
             return
 
-        squared_residuals = [np.mean((logits_z - z_labels) ** 2) for logits_z in shadow_logits_z]
-        self._sigma2 = float(np.mean(squared_residuals))
-        if self._sigma2 <= 0.0:
+        if self.likelihood_family == "gaussian":
+            energies = [np.mean(mse(logits_z, z_labels)) for logits_z in shadow_logits_z]
+        elif self.likelihood_family == "laplace":
+            energies = [np.mean(mae(logits_z, z_labels)) for logits_z in shadow_logits_z]
+        else:
+            energies = [np.mean(huber_energy(logits_z, z_labels, self._huber_delta)) for logits_z in shadow_logits_z]
+
+        self._scale = float(np.mean(energies))
+        if self._scale <= 0.0:
             # Degenerate case: shadow models reproduce all z-targets exactly.
-            self._sigma2 = self.epsilon
-        logger.info(f"Estimated Gaussian residual sigma^2 = {self._sigma2:.6g} "
+            self._scale = self.epsilon
+        logger.info(f"Estimated {self.likelihood_family} residual scale = {self._scale:.6g} "
                     f"from {len(shadow_logits_z)} shadow model(s) on {len(z_labels)} z-points")
 
     def _signal_probability(self:Self, logits: np.ndarray, labels: np.ndarray) -> np.ndarray:
         """Compute the per-point probability of the true output given a model.
 
         Classification: temperature softmax indexed at the true class (RMIA paper, Sec. 3).
-        Regression/forecasting: Gaussian residual likelihood exp(-MSE/(2*sigma^2)), the
-        continuous-output analogue; the normalizing constant cancels in RMIA's ratios.
+        Regression/forecasting: residual likelihood matched to the training criterion's noise
+        model — Gaussian exp(-MSE/(2*scale)) for MSE, Laplace exp(-MAE/scale) for L1, Huber
+        for SmoothL1/Huber. The normalizing constants cancel in RMIA's ratios.
 
         Args:
         ----
@@ -207,9 +240,13 @@ residuals on the z-population. Ignored for classification models, where temperat
 
         """
         if self.is_regression:
-            if self._sigma2 is None:
-                raise RuntimeError("Gaussian residual sigma^2 is unresolved — prepare_attack must run first.")
-            return gaussian_residual_probability(logits, labels, self._sigma2)
+            if self._scale is None:
+                raise RuntimeError("Residual likelihood scale is unresolved — prepare_attack must run first.")
+            if self.likelihood_family == "gaussian":
+                return gaussian_residual_probability(logits, labels, self._scale)
+            if self.likelihood_family == "laplace":
+                return laplace_residual_probability(logits, labels, self._scale)
+            return huber_residual_probability(logits, labels, self._scale, self._huber_delta)
         return softmax_logits(logits, self.temperature)[np.arange(len(labels)), labels]
 
     def _prepare_shadow_models(self:Self) -> None:
@@ -278,7 +315,7 @@ residuals on the z-population. Ignored for classification models, where temperat
         ]
 
         if self.is_regression:
-            self._resolve_sigma2(logits_z_shadow_models, z_labels)
+            self._resolve_scale(logits_z_shadow_models, z_labels)
 
         # p(z | target model)
         p_z_given_theta = np.atleast_2d(self._signal_probability(logits_z_theta, z_labels))

@@ -8,10 +8,16 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from dotmap import DotMap
+from pydantic import ValidationError
 from torch import nn
 
 from leakpro.attacks.mia_attacks.rmia import AttackRMIA
-from leakpro.attacks.utils.utils import gaussian_residual_probability, softmax_logits
+from leakpro.attacks.utils.utils import (
+    gaussian_residual_probability,
+    huber_residual_probability,
+    laplace_residual_probability,
+    softmax_logits,
+)
 from leakpro.reporting.mia_result import MIAResult
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.tests.constants import get_audit_config, get_shadow_model_config
@@ -152,7 +158,7 @@ def test_rmia_offline_attack(image_handler:ImageInputHandler):
     assert isinstance(rmia_result, MIAResult)
     
 # ---------------------------------------------------------------------------
-# Task resolution and the Gaussian residual (regression/forecasting) signal path
+# Likelihood-family resolution and the residual (regression/forecasting) signal path
 # ---------------------------------------------------------------------------
 
 def test_rmia_should_resolve_classification_task_when_criterion_is_cross_entropy(image_handler:ImageInputHandler) -> None:
@@ -160,21 +166,41 @@ def test_rmia_should_resolve_classification_task_when_criterion_is_cross_entropy
 
     assert isinstance(image_handler.get_criterion(), nn.CrossEntropyLoss)
     assert rmia_obj.is_regression is False
+    assert rmia_obj.likelihood_family is None
 
 
-def test_rmia_should_resolve_regression_task_when_criterion_is_mse(image_handler:ImageInputHandler) -> None:
+@pytest.mark.parametrize(
+    ("criterion", "expected_family", "expected_delta"),
+    [
+        (nn.MSELoss(), "gaussian", None),
+        (nn.L1Loss(), "laplace", None),
+        (nn.SmoothL1Loss(beta=0.5), "huber", 0.5),
+        (nn.HuberLoss(delta=2.0), "huber", 2.0),
+    ],
+    ids=["mse-gaussian", "l1-laplace", "smooth_l1-huber", "huber-huber"],
+)
+def test_rmia_should_resolve_likelihood_family_from_criterion(
+        image_handler:ImageInputHandler, criterion, expected_family, expected_delta) -> None:
     original_criterion = image_handler._criterion
-    image_handler._criterion = nn.MSELoss()
+    image_handler._criterion = criterion
     try:
         rmia_obj = AttackRMIA(image_handler, None)
         assert rmia_obj.is_regression is True
-        assert rmia_obj._sigma2 is None  # unresolved until prepare_attack
+        assert rmia_obj.likelihood_family == expected_family
+        assert rmia_obj._huber_delta == expected_delta
+        assert rmia_obj._scale is None  # unresolved until prepare_attack
     finally:
         image_handler._criterion = original_criterion
 
 
+def test_rmia_config_should_reject_signal_field() -> None:
+    # 'signal' used to be a silently-ignored config field; it must now fail loudly.
+    with pytest.raises(ValidationError):
+        AttackRMIA.AttackConfig(signal="mse")
+
+
 def test_signal_probability_should_match_softmax_indexing_when_classification() -> None:
-    stub = SimpleNamespace(is_regression=False, temperature=2.0, _sigma2=None)
+    stub = SimpleNamespace(is_regression=False, likelihood_family=None, temperature=2.0, _scale=None, _huber_delta=None)
     rng = np.random.default_rng(0)
     logits = rng.normal(size=(4, 3))
     labels = np.array([0, 2, 1, 1])
@@ -185,8 +211,8 @@ def test_signal_probability_should_match_softmax_indexing_when_classification() 
     assert np.allclose(probabilities, expected)
 
 
-def test_signal_probability_should_use_gaussian_residual_when_regression() -> None:
-    stub = SimpleNamespace(is_regression=True, temperature=2.0, _sigma2=0.5)
+def test_signal_probability_should_use_gaussian_residual_when_criterion_is_mse() -> None:
+    stub = SimpleNamespace(is_regression=True, likelihood_family="gaussian", temperature=2.0, _scale=0.5, _huber_delta=None)
     rng = np.random.default_rng(1)
     forecasts = rng.normal(size=(6, 8))      # (n_points, horizon)
     true_horizons = rng.normal(size=(6, 8))  # float labels, the time-series case
@@ -200,36 +226,91 @@ def test_signal_probability_should_use_gaussian_residual_when_regression() -> No
     assert np.all(probabilities <= 1.0)
 
 
-def test_signal_probability_should_raise_when_sigma2_is_unresolved() -> None:
-    stub = SimpleNamespace(is_regression=True, temperature=2.0, _sigma2=None)
+def test_signal_probability_should_use_laplace_residual_when_criterion_is_l1() -> None:
+    stub = SimpleNamespace(is_regression=True, likelihood_family="laplace", temperature=2.0, _scale=0.7, _huber_delta=None)
+    rng = np.random.default_rng(2)
+    forecasts = rng.normal(size=(5, 4))
+    true_horizons = rng.normal(size=(5, 4))
+
+    probabilities = AttackRMIA._signal_probability(stub, forecasts, true_horizons)
+
+    expected = laplace_residual_probability(forecasts, true_horizons, 0.7)
+    assert np.allclose(probabilities, expected)
+
+
+def test_signal_probability_should_use_huber_residual_when_criterion_is_huber() -> None:
+    stub = SimpleNamespace(is_regression=True, likelihood_family="huber", temperature=2.0, _scale=0.9, _huber_delta=1.5)
+    rng = np.random.default_rng(3)
+    forecasts = rng.normal(size=(5, 4))
+    true_horizons = rng.normal(size=(5, 4))
+
+    probabilities = AttackRMIA._signal_probability(stub, forecasts, true_horizons)
+
+    expected = huber_residual_probability(forecasts, true_horizons, 0.9, 1.5)
+    assert np.allclose(probabilities, expected)
+
+
+def test_signal_probability_should_raise_when_scale_is_unresolved() -> None:
+    stub = SimpleNamespace(is_regression=True, likelihood_family="gaussian", temperature=2.0, _scale=None, _huber_delta=None)
 
     with pytest.raises(RuntimeError, match="prepare_attack"):
         AttackRMIA._signal_probability(stub, np.zeros((2, 3)), np.zeros((2, 3)))
 
 
-def test_resolve_sigma2_should_square_user_sigma_when_provided() -> None:
-    stub = SimpleNamespace(sigma=3.0, epsilon=1e-6, _sigma2=None)
+@pytest.mark.parametrize(
+    ("family", "huber_delta", "expected_scale"),
+    [
+        ("gaussian", None, 9.0),              # sigma^2
+        ("laplace", None, 3.0 / np.sqrt(2)),  # b = sigma / sqrt(2), since Var(Laplace) = 2 b^2
+        ("huber", 1.0, 9.0),                  # variance of the quadratic core
+    ],
+    ids=["gaussian", "laplace", "huber"],
+)
+def test_resolve_scale_should_map_user_sigma_to_family_scale(family, huber_delta, expected_scale) -> None:
+    stub = SimpleNamespace(sigma=3.0, epsilon=1e-6, likelihood_family=family, _huber_delta=huber_delta, _scale=None)
 
-    AttackRMIA._resolve_sigma2(stub, [np.zeros((5, 2))], np.ones((5, 2)))
+    AttackRMIA._resolve_scale(stub, [np.zeros((5, 2))], np.ones((5, 2)))
 
-    assert stub._sigma2 == 9.0
+    assert np.isclose(stub._scale, expected_scale)
 
 
-def test_resolve_sigma2_should_estimate_mean_squared_residual_when_sigma_is_none() -> None:
-    stub = SimpleNamespace(sigma=None, epsilon=1e-6, _sigma2=None)
+def test_resolve_scale_should_estimate_mean_squared_residual_when_gaussian() -> None:
+    stub = SimpleNamespace(sigma=None, epsilon=1e-6, likelihood_family="gaussian", _huber_delta=None, _scale=None)
     z_labels = np.zeros((4, 3))
     shadow_one = np.full((4, 3), 1.0)   # squared residual 1 everywhere
     shadow_two = np.full((4, 3), 3.0)   # squared residual 9 everywhere
 
-    AttackRMIA._resolve_sigma2(stub, [shadow_one, shadow_two], z_labels)
+    AttackRMIA._resolve_scale(stub, [shadow_one, shadow_two], z_labels)
 
-    assert np.isclose(stub._sigma2, 5.0)  # mean of (1, 9)
+    assert np.isclose(stub._scale, 5.0)  # mean of (1, 9)
 
 
-def test_resolve_sigma2_should_fall_back_to_epsilon_when_shadow_residuals_are_zero() -> None:
-    stub = SimpleNamespace(sigma=None, epsilon=1e-6, _sigma2=None)
+def test_resolve_scale_should_estimate_mean_absolute_residual_when_laplace() -> None:
+    stub = SimpleNamespace(sigma=None, epsilon=1e-6, likelihood_family="laplace", _huber_delta=None, _scale=None)
+    z_labels = np.zeros((4, 3))
+    shadow_one = np.full((4, 3), 1.0)   # absolute residual 1 everywhere
+    shadow_two = np.full((4, 3), 3.0)   # absolute residual 3 everywhere
+
+    AttackRMIA._resolve_scale(stub, [shadow_one, shadow_two], z_labels)
+
+    assert np.isclose(stub._scale, 2.0)  # mean of (1, 3), the Laplace scale MLE
+
+
+def test_resolve_scale_should_estimate_mean_huber_energy_when_huber() -> None:
+    stub = SimpleNamespace(sigma=None, epsilon=1e-6, likelihood_family="huber", _huber_delta=1.0, _scale=None)
+    z_labels = np.zeros((4, 3))
+    shadow_one = np.full((4, 3), 1.0)   # |r| = 1 <= delta: energy 0.5 * 1^2 = 0.5
+    shadow_two = np.full((4, 3), 3.0)   # |r| = 3 > delta: energy 1 * (3 - 0.5) = 2.5
+
+    AttackRMIA._resolve_scale(stub, [shadow_one, shadow_two], z_labels)
+
+    assert np.isclose(stub._scale, 1.5)  # mean of (0.5, 2.5)
+
+
+def test_resolve_scale_should_fall_back_to_epsilon_when_shadow_residuals_are_zero() -> None:
+    stub = SimpleNamespace(sigma=None, epsilon=1e-6, likelihood_family="gaussian", _huber_delta=None, _scale=None)
     z_labels = np.ones((3, 2))
 
-    AttackRMIA._resolve_sigma2(stub, [z_labels.copy()], z_labels)
+    AttackRMIA._resolve_scale(stub, [z_labels.copy()], z_labels)
 
-    assert stub._sigma2 == 1e-6
+    assert stub._scale == 1e-6
