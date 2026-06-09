@@ -286,9 +286,9 @@ class ShadowModelHandler(ModelHandler):
             next_index += 1
 
         A = self.construct_balanced_assignments(len(shadow_population), num_models)  # noqa: N806
-        assert np.all(np.sum(A,axis=1) == len(shadow_population)//2)
-        if sampling_method == "balanced":
-            assert np.all(np.sum(A,axis=0) == num_models//2)
+        expected_size = len(shadow_population) // 2
+        if not np.all(np.sum(A, axis=1) == expected_size):
+            raise ValueError("Balanced shadow assignments must contain half of the shadow population per model")
         shadow_population = np.array(shadow_population)
 
         for i, indx in enumerate(indices_to_use):
@@ -297,7 +297,7 @@ class ShadowModelHandler(ModelHandler):
                 data_indices = shadow_population[np.where(A[i,:] == 1)]
             else:  # random sampling (can be overridden by handler)
                 data_indices = self.handler.sample_shadow_indices(shadow_population.tolist(), training_fraction)
-            data_loader = self.handler.get_dataloader(data_indices, params=None)
+            data_loader = self.handler.get_dataloader(data_indices, params=None, batch_size=self.batch_size)
 
             # Get shadow model blueprint
             model, criterion, optimizer = self._get_model_criterion_optimizer()
