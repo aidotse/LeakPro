@@ -41,6 +41,38 @@ def rescaled_logits(logits: np.ndarray, true_labels: np.ndarray) -> np.ndarray:
     y_wrong = np.sum(predictions, axis=1)
     return np.log(y_true+1e-45) - np.log(y_wrong+1e-45)
 
+def loss(logits: np.ndarray, true_labels: np.ndarray) -> np.ndarray:
+    """Per-point cross-entropy loss computed from cached logits and integer class labels.
+
+    Functional counterpart of the ``ModelLoss`` signal for the common classification case:
+    the negative log-likelihood of the true class, ``-log softmax(logits)[y]``. Unlike
+    ``ModelLoss`` (which re-runs the model's own ``loss_fn``), this works directly on cached
+    logits, so it only matches models trained with cross-entropy. For regression/forecasting
+    targets use ``mse``/``mae``/``smape`` instead — those are the model's loss.
+
+    Args:
+        logits (np.ndarray): The logits, shape (n_points, n_classes); a single-column array is
+            treated as a binary logit head.
+        true_labels (np.ndarray): Integer class labels, shape (n_points,).
+
+    Returns:
+        np.ndarray: Per-point cross-entropy loss, shape (n_points,).
+
+    """
+    assert true_labels.dtype == np.int64
+    if logits.shape[1] == 1:
+        def sigmoid(z:np.ndarray) -> np.ndarray:
+            return 1/(1 + np.exp(-z))
+        positive_class_prob = sigmoid(logits).reshape(-1, 1)
+        predictions = np.concatenate([1 - positive_class_prob, positive_class_prob], axis=1)
+    else:
+        predictions = logits - np.max(logits, axis=1, keepdims=True)
+        predictions = np.exp(predictions)
+        predictions = predictions / np.sum(predictions, axis=1, keepdims=True)
+    count = predictions.shape[0]
+    p_true = predictions[np.arange(count), true_labels]
+    return -np.log(p_true + 1e-45)
+
 def mse(logits: np.ndarray, targets: np.ndarray) -> np.ndarray:
     assert logits.shape == targets.shape
     return np.mean((logits - targets)**2, axis=tuple(range(1, logits.ndim)))
@@ -113,8 +145,29 @@ def dtw(logits: np.ndarray, targets: np.ndarray) -> np.ndarray:
     return np.array(distances)
 
 def msm(logits: np.ndarray, targets: np.ndarray) -> np.ndarray:
-    assert logits.shape == targets.shape 
+    assert logits.shape == targets.shape
     distances = Parallel(n_jobs=-1)(
         delayed(mv_msm_distance)(logits[i], targets[i]) for i in range(len(logits))
     )
     return np.array(distances)
+
+
+# Membership-inference orientation of each signal under the offline LiRA tail test.
+#   +1: a HIGHER signal value indicates membership (e.g. confidence/rescaled logits).
+#   -1: a LOWER  signal value indicates membership (errors/distances — members fit better).
+# Used to orient signals so the one-sided Gaussian tail (norm.logcdf) is evaluated in the
+# correct direction; see multi_signal_lira.py and the offline score in arXiv:2509.04169 Eq. (2).
+SIGNAL_MEMBERSHIP_DIRECTION = {
+    "logits": +1,
+    "rescaled_logits": +1,
+    "loss": -1,
+    "mse": -1,
+    "mae": -1,
+    "smape": -1,
+    "rescaled_smape": -1,
+    "seasonality": -1,
+    "trend": -1,
+    "ts2vec": -1,
+    "dtw": -1,
+    "msm": -1,
+}
