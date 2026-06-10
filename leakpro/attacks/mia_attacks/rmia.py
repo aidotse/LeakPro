@@ -182,7 +182,8 @@ class AttackRMIA(AbstractMIA):
         self.ratio_z = p_z_given_theta / (p_z + self.epsilon)
 
     def _run_attack(self:Self) -> None:
-        logger.info("Running RMIA online attack")
+        mode = "online" if self.online else "offline"
+        logger.info(f"Running RMIA {mode} attack")
 
         # collect the softmax output of the correct class
         n_audit_points = len(self.ground_truth_indices)
