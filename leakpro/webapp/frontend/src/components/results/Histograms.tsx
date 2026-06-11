@@ -67,18 +67,18 @@ export default function Histograms({ results }: Props) {
               {
                 x: members, type: "histogram", name: "Members", nbinsx: 100,
                 marker: { color: "rgba(76, 155, 232, 0.6)" },
-              },
+              } as Plotly.Data,
               {
                 x: nonMembers, type: "histogram", name: "Non-members", nbinsx: 100,
                 marker: { color: "rgba(232, 76, 76, 0.6)" },
-              },
+              } as Plotly.Data,
             ]}
             layout={{
               barmode: "overlay",
               paper_bgcolor: "transparent",
               plot_bgcolor: "transparent",
-              xaxis: { title: "Attack signal score", gridcolor: "#334155" },
-              yaxis: { title: "Count", gridcolor: "#334155" },
+              xaxis: { title: { text: "Attack signal score" }, gridcolor: "#334155" },
+              yaxis: { title: { text: "Count" }, gridcolor: "#334155" },
               legend: { orientation: "h", y: -0.2 },
               shapes: [{
                 type: "line", x0: t, x1: t, y0: 0, y1: 1, yref: "paper",
