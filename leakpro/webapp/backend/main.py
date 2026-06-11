@@ -864,6 +864,10 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                 _sample_x = train_subset[0][0]
                 _num_features_data = int(_sample_x.shape[0]) if _sample_x.ndim == 1 else None
 
+                # Binary tasks get a single-logit head trained with BCEWithLogitsLoss;
+                # the kwarg only reaches constructors that accept num_classes.
+                _model_num_classes = 1 if _num_classes_data == 2 else _num_classes_data
+
                 # Instantiate model, passing num_classes and num_features if accepted
                 def _make_model(cls, num_classes, num_features=None, dpsgd=False):
                     sig = _inspect2.signature(cls.__init__)
@@ -877,15 +881,15 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                     return cls(**kwargs)
 
                 if params.dpsgd:
-                    model = _make_model(_arch_cls, _num_classes_data, _num_features_data, dpsgd=True)
+                    model = _make_model(_arch_cls, _model_num_classes, _num_features_data, dpsgd=True)
                     if not hasattr(model, "dpsgd") or not model.dpsgd:
                         from opacus.validators import ModuleValidator as _MV  # noqa: PLC0415
                         model = _MV.fix(model)
                         log_q.put(f"[train] Applied ModuleValidator.fix() to {_arch_cls.__name__} for DP-SGD")
                     else:
-                        log_q.put(f"[train] Instantiated {_arch_cls.__name__}(dpsgd=True, num_classes={_num_classes_data})")
+                        log_q.put(f"[train] Instantiated {_arch_cls.__name__}(dpsgd=True, num_classes={_model_num_classes})")
                 else:
-                    model = _make_model(_arch_cls, _num_classes_data, _num_features_data)
+                    model = _make_model(_arch_cls, _model_num_classes, _num_features_data)
                 # Check if arch uses pretrained weights
                 _arch_src = (job_dir / "arch.py").read_text()
                 _pretrained = (
@@ -893,17 +897,22 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                     ("pretrained=True" in _arch_src)
                 )
                 _feat_info = f", num_features={_num_features_data}" if _num_features_data else ""
-                log_q.put(f"[train] Model: {_arch_cls.__name__}(num_classes={_num_classes_data}{_feat_info}, pretrained={'yes' if _pretrained else 'no'})")
+                log_q.put(f"[train] Model: {_arch_cls.__name__}(num_classes={_model_num_classes}{_feat_info}, pretrained={'yes' if _pretrained else 'no'})")
                 if params.dpsgd:
                     log_q.put(f"[train] DP-SGD: epsilon={params.target_epsilon}, delta={params.target_delta}, max_grad_norm={params.max_grad_norm}, virtual_batch_size={params.virtual_batch_size or 16}")
 
-            _is_binary = (_num_classes_data == 2)
+            # A custom arch may ignore num_classes and keep a 2-logit head, so derive
+            # binary-ness from the actual model output rather than the label count.
+            with torch.no_grad():
+                model.eval()
+                _probe_out = model(_sample_x.unsqueeze(0))
+            _is_binary = (_probe_out.ndim == 2 and _probe_out.shape[1] == 1)
             if _is_binary:
                 criterion = nn.BCEWithLogitsLoss()
-                log_q.put("[train] Loss: BCEWithLogitsLoss (binary, 2 classes)")
+                log_q.put("[train] Loss: BCEWithLogitsLoss (binary, single-logit head)")
             else:
                 criterion = nn.CrossEntropyLoss()
-                log_q.put(f"[train] Loss: CrossEntropyLoss ({_num_classes_data} classes)")
+                log_q.put(f"[train] Loss: CrossEntropyLoss ({_num_classes_data} classes, {_probe_out.shape[1]} logits)")
             if params.optimizer == "sgd":
                 optimizer = optim.SGD(model.parameters(), lr=params.learning_rate, momentum=0.9, weight_decay=5e-4)
             else:
@@ -1119,6 +1128,7 @@ async def get_results(job_id: str) -> dict:
 async def get_sample_data(job_id: str, index: int):
     """Return tabular feature values for a single sample as JSON."""
     import joblib, torch
+    import numpy as np
     job = _get_job(job_id)
     data_path = job.get("data_path")
     if not data_path or not Path(data_path).exists():
@@ -1128,10 +1138,14 @@ async def get_sample_data(job_id: str, index: int):
         row = dataset.data[index]
         if isinstance(row, torch.Tensor):
             row = row.tolist()
+        else:
+            row = np.asarray(row, dtype=float).tolist()
         label = dataset.targets[index]
-        if isinstance(label, torch.Tensor):
+        if hasattr(label, "item"):
             label = label.item()
         feature_names = getattr(dataset, "feature_names", None)
+        if feature_names is not None and not isinstance(feature_names, list):
+            feature_names = list(feature_names)
         return {"index": index, "label": int(label), "features": row,
                 "feature_names": feature_names}
     except Exception as e:
