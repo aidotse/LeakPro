@@ -99,6 +99,7 @@ export interface DataMeta {
   n_classes?: number;
   dtype: string;
   class_distribution?: Record<string, number>;
+  label_column?: string;
 }
 
 export interface HandlerConfig {
