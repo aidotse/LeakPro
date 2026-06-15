@@ -379,6 +379,10 @@ class MultiEpochTrainingSimulation(TrainingSimulator):
         # Convert model to functional form
         patched_model = MetaModule(model)
 
+        # Reset optimizer state so each training simulation starts fresh,
+        # mirroring the client who always begins from a clean optimizer state.
+        self.meta_optimizer.reset()
+
         # Store original parameters
         original_params = OrderedDict(
             (name, param.clone()) for name, param in model.named_parameters()

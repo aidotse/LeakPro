@@ -128,6 +128,12 @@ class MetaAdam(MetaOptimizer):
         self.v = {}
         self.t = 0
 
+    def reset(self: Self) -> None:
+        """Reset the optimizer state (m, v, t) for a new training simulation."""
+        self.m = {}
+        self.v = {}
+        self.t = 0
+
     def step(self: Self, loss: Tensor, params: Dict[str, Tensor]) -> OrderedDict[str, Tensor]:
         """Perform a single optimization step.
 
