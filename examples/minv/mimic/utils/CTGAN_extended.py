@@ -10,6 +10,20 @@ from torch import optim
 from tqdm import tqdm
 
 
+class SerialDataTransformer(DataTransformer):
+    def _parallel_transform(self, raw_data, column_transform_info_list):
+        column_data_list = []
+        for column_transform_info in column_transform_info_list:
+            column_name = column_transform_info.column_name
+            data = raw_data[[column_name]]
+            if column_transform_info.column_type == "continuous":
+                column_data = self._transform_continuous(column_transform_info, data)
+            else:
+                column_data = self._transform_discrete(column_transform_info, data)
+            column_data_list.append(column_data)
+        return column_data_list
+
+
 class CustomCTGAN(CTGAN):
     def __init__(self,
                  embedding_dim=256,
@@ -36,7 +50,7 @@ class CustomCTGAN(CTGAN):
                          discriminator_decay, batch_size, discriminator_steps,
                          log_frequency, verbose, epochs, pac, cuda)
         self.gumbel_seed = 1234
-        self._transformer = DataTransformer()
+        self._transformer = SerialDataTransformer()
 
         self.only_psuedo_label_conditioning = only_pseudo_label_conditioning
 
@@ -199,7 +213,41 @@ class CustomCTGAN(CTGAN):
         return cond, mask, discrete_column_id, category_id_in_col
 
 
-    def fit(self, train_data, target_model, num_classes, inv_criterion, gen_criterion, dis_criterion, n_iter, n_dis, alpha = 0.1, discrete_columns=(), use_inv_loss=True) -> None:
+    def _condition_label_from_c1(self, c1: torch.Tensor) -> torch.Tensor:
+        """Return the class label used to condition the generator.
+
+        PLG-MI Linv must be computed against the requested/conditioned label y,
+        not against the pseudo-label emitted by the generated sample.
+        """
+        if c1 is None:
+            raise ValueError("Cannot recover conditioned label: c1 is None.")
+
+        pl_col_id = int(self._data_sampler._n_discrete_columns - 1)
+        start = int(self._data_sampler._discrete_column_cond_st[pl_col_id])
+
+        if pl_col_id + 1 < len(self._data_sampler._discrete_column_cond_st):
+            end = int(self._data_sampler._discrete_column_cond_st[pl_col_id + 1])
+        else:
+            end = int(self._data_sampler._n_categories)
+
+        return c1[:, start:end].argmax(dim=1).long()
+
+    def fit(
+        self,
+        train_data,
+        target_model,
+        num_classes,
+        inv_criterion,
+        gen_criterion,
+        dis_criterion,
+        n_iter,
+        n_dis,
+        alpha=0.1,        # alpha1 in Eq. 4.3: inversion-loss weight
+        alpha_cond=1.0,   # alpha2 in Eq. 4.3: CTGAN conditioning-loss weight
+        discrete_columns=(),
+        use_inv_loss=True,
+        soft_categorical_target=True,
+    ) -> None:
         """Fit the CTGAN model to the training data using pseudo-labeled guidance as in the PLG-MI attack.
 
         Args:
@@ -239,39 +287,54 @@ class CustomCTGAN(CTGAN):
 
                 # --- D updates ---
                 for _ in range(n_dis):
-                    fakez, real, c1, m1, c2 = self._sample_batch(mat)
+                    fakez, real, c1, m1, c2, _ = self._sample_batch(mat)
                     fake   = self._generator(fakez)
                     fakeact= self._apply_activate(fake)
                     loss_d = self._d_step(fakeact, real, c1, c2)
 
                 # --- G update ---
-                fakez, _, c1, m1, _ = self._sample_batch(mat)
+                fakez, _, c1, m1, _, conditioned_label = self._sample_batch(mat)
+
                 fake    = self._generator(fakez)
                 fakeact = self._apply_activate(fake)
                 y_fake  = self._discriminator(torch.cat([fakeact, c1], dim=1) if c1 is not None else fakeact)
 
-                # pack inputs for GANDALF (pure torch)
-                x_cont, x_cat, pseudo = self._pack_for_gandalf(fakeact)
-                batch = {}
-                if x_cont is not None: batch["continuous"]  = x_cont.float().to(self._device)
-                if x_cat  is not None: batch["categorical"] = x_cat.long().to(self._device)
-                T_logits = mdl(batch)["logits"]
+                if soft_categorical_target:
+                    # Differentiable path for categorical spans: use soft expected embeddings
+                    # instead of hard argmax category indices.
+                    T_logits = self._forward_target_from_fakeact(mdl, fakeact, soft_categorical=True)
+                else:
+                    # Hard fallback. This preserves the old behavior except that Linv target
+                    # below is still corrected to the conditioned label.
+                    x_cont, x_cat, _generated_pseudo = self._pack_for_gandalf(fakeact)
 
-                # Inversion loss: only if we're using it AND we sampled a condition (c1)
+                    batch = {}
+                    if x_cont is not None:
+                        batch["continuous"] = x_cont.float().to(self._device)
+                    if x_cat is not None:
+                        batch["categorical"] = x_cat.long().to(self._device)
+
+                    T_out = mdl(batch)
+                    T_logits = T_out["logits"] if isinstance(T_out, dict) else T_out
+
                 if use_inv_loss and c1 is not None:
-                    inv_loss = inv_criterion(T_logits, pseudo.to(self._device))
+                    # Eq. 4.3: Linv must use the sampled/conditioned label y.
+                    inv_loss = inv_criterion(T_logits, conditioned_label.to(self._device))
                 else:
                     inv_loss = torch.zeros((), device=self._device, dtype=y_fake.dtype)
+                assert conditioned_label.shape[0] == T_logits.shape[0]
+                assert inv_loss.requires_grad
 
-                # Conditioning loss (CTGAN): only if we sampled a condition
                 if c1 is not None:
-                    ce_loss = self._cond_loss(fake, c1, m1)
+                    cond_loss = self._cond_loss(fake, c1, m1)
                 else:
-                    ce_loss = torch.zeros((), device=self._device, dtype=y_fake.dtype)
+                    cond_loss = torch.zeros((), device=self._device, dtype=y_fake.dtype)
 
+                gen_loss = gen_criterion(y_fake)
 
-                loss_g   = gen_criterion(y_fake) + ce_loss
-                loss_all = loss_g + alpha * inv_loss
+                # Eq. 4.3: Lall = LG + alpha1 * Linv + alpha2 * Lcond
+                loss_all = gen_loss + alpha * inv_loss + alpha_cond * cond_loss
+                assert loss_all.requires_grad
 
                 # Log once in a while
                 if (epoch % 100 == 0):  # or every N steps
@@ -287,15 +350,18 @@ class CustomCTGAN(CTGAN):
 
                     # 2) Grad norm of G params without the inversion term (alpha=0)
                     grads_wo = torch.autograd.grad(
-                        loss_g,                        # just gen + CE (no inversion)
+                        gen_loss + alpha_cond * cond_loss,
                         self._generator.parameters(),
                         retain_graph=True,
-                        allow_unused=True
+                        allow_unused=True,
                     )
                     torch.sqrt(sum((g.detach()**2).sum() for g in grads_wo if g is not None)).item()
 
                     # (Optional) also see if inv_loss is connected at all
                     assert inv_loss.requires_grad, "inv_loss is detached from the graph."
+                    assert cond_loss.requires_grad, "cond_loss is detached from the graph."
+                    assert gen_loss.requires_grad, "gen_loss is detached from the graph."
+                    assert loss_all.requires_grad, "loss_all is detached from the graph."
                     # -----------------------------------------------------------------
 
 
@@ -309,19 +375,22 @@ class CustomCTGAN(CTGAN):
             # --- metrics/logging from tensors ---
             with torch.no_grad():
                 preds = T_logits.argmax(dim=1)
-                acc   = (preds == pseudo).float().mean().item()
+                acc = (preds == conditioned_label).float().mean().item()
 
             row = dict(Epoch=epoch,
-                    **{"Generator Loss": loss_g.detach().cpu().item(),
+                    **{
+                        # "Generator Loss": loss_g.detach().cpu().item(),
+                        "Generator Loss": gen_loss.detach().cpu().item(),
                         "Discriminator Loss": loss_d.detach().cpu().item(),
                         "Inversion Loss": inv_loss.detach().cpu().item() if use_inv_loss else 0.0,
-                        "Conditioning Loss (CE)": ce_loss.detach().cpu().item() if c1 is not None else 0.0,
+                        # "Conditioning Loss (CE)": ce_loss.detach().cpu().item() if c1 is not None else 0.0,
+                        "Conditioning Loss (CE)": cond_loss.detach().cpu().item() if c1 is not None else 0.0,
                         "Accuracy": acc})
             self.loss_values = pd.concat([self.loss_values, pd.DataFrame([row])], ignore_index=True)
 
             if (epoch % 50 == 0):
                 tqdm.write(f"Gen {row['Generator Loss']:.2f} | Dis {row['Discriminator Loss']:.2f} | "
-                        f"Inv {row['Inversion Loss']:.2f} | CE {row['Conditioning Loss (CE)']:.2f} | "
+                        f"Inv {row['Inversion Loss']:.2f} | Cond {row['Conditioning Loss (CE)']:.2f} | "
                         f"Acc {acc:.2f}")
 
 
@@ -534,23 +603,38 @@ class CustomCTGAN(CTGAN):
         return mat  # transformed train matrix
 
     def _sample_batch(self, mat):
-        """Sample real and condition, prepare fakez (+cond), all on device."""
+        """Sample real data, CTGAN condition vector, and latent z."""
         fakez = torch.normal(mean=self._z_mean, std=self._z_std)
         condvec = self.sample_condvec(self._batch_size)
+
         if condvec is None:
             c1 = m1 = col = opt = None
             real = self._data_sampler.sample_data(mat, self._batch_size, col, opt)
             c2 = None
+            conditioned_label = None
         else:
-            c1, m1, col, opt = condvec
-            c1 = torch.from_numpy(c1).to(self._device)
-            m1 = torch.from_numpy(m1).to(self._device)
+            c1_np, m1_np, col, opt = condvec
+
+            # Algorithm 2 / Eq. 4.3 for this adaptation assumes pseudo-label conditioning.
+            # If this assert fails, Linv would no longer have a well-defined class label.
+            expected_pseudo_col = self._data_sampler._n_discrete_columns - 1
+            assert np.all(col == expected_pseudo_col), (
+                "PLG-MI CTGAN training must condition only on pseudo_label. "
+                "Set only_pseudo_label_conditioning=True."
+            )
+
+            c1 = torch.from_numpy(c1_np).to(self._device)
+            m1 = torch.from_numpy(m1_np).to(self._device)
+            conditioned_label = self._condition_label_from_c1(c1)
+
             fakez = torch.cat([fakez, c1], dim=1)
+
             perm = np.random.permutation(self._batch_size)
             real = self._data_sampler.sample_data(mat, self._batch_size, col[perm], opt[perm])
             c2 = c1[perm]
+
         real = torch.from_numpy(real.astype("float32")).to(self._device)
-        return fakez, real, c1, m1, c2
+        return fakez, real, c1, m1, c2, conditioned_label
 
     def _d_step(self, fakeact, real, c1, c2):
         """One discriminator update (WGAN-GP)."""
@@ -581,31 +665,130 @@ class CustomCTGAN(CTGAN):
             beta  = fakeact[:, col["beta_slice"]]
             mu    = col["mu"].view(1, -1)
             sigma = col["sigma"].view(1, -1)
-            # u     = self._atanh_clamped(alpha)
-            u     = torch.tanh(alpha)
-            x_k   = mu + scale * sigma * u
+            u = alpha.clamp(min=-1.0 + 1e-6, max=1.0 - 1e-6)
+            x_k = mu + scale * sigma * u
             x     = (beta * x_k).sum(dim=1, keepdim=True)
             xs.append(x)
         return torch.cat(xs, dim=1) if xs else None
 
-    def _pack_for_gandalf(self, fakeact):
-        """Build pytorch-tabular inputs: continuous tensor, categorical indices, and pseudo labels."""
-        # pseudo_label from its one-hot
-        pl = next(c for c in self._schema if c["type"]=="discrete" and c["name"]=="pseudo_label")
-        pseudo = fakeact[:, pl["st"]:pl["st"]+pl["dim"]].argmax(dim=1).long()  # [B]
+    def _pack_for_gandalf(self, fakeact, return_cat_probs: bool = False):
+        """Build pytorch-tabular-compatible tensors from CTGAN activations.
 
-        # continuous raw (optionally standardize to match target training)
+        Hard categorical indices are still returned for compatibility. For loss paths
+        where gradients should pass through categorical spans, request cat_probs and
+        use _forward_target_from_fakeact instead of feeding x_cat directly.
+        """
+        pl = next(
+            c for c in self._schema
+            if c["type"] == "discrete" and c["name"] == "pseudo_label"
+        )
+        pseudo = fakeact[:, pl["st"]:pl["st"] + pl["dim"]].argmax(dim=1).long()
+
         x_cont = self._invert_continuous_columns_torch(fakeact, scale=4.0)
-        # if x_cont is not None and (getattr(self, "_cont_mean", None) is not None) and (getattr(self, "_cont_std", None) is not None):
-        #     x_cont = (x_cont - self._cont_mean) / (self._cont_std + 1e-6)
 
-        # categoricals as indices (excluding pseudo_label)
         idxs = []
+        cat_probs = []
         for col in self._schema:
-            if col["type"]=="discrete" and col["name"]!="pseudo_label":
-                idxs.append(fakeact[:, col["onehot_slice"]].argmax(dim=1))
+            if col["type"] == "discrete" and col["name"] != "pseudo_label":
+                probs = fakeact[:, col["onehot_slice"]]
+                cat_probs.append(probs)
+                idxs.append(probs.argmax(dim=1))
+
         x_cat = torch.stack(idxs, dim=1) if idxs else None
+
+        if return_cat_probs:
+            return x_cont, x_cat, pseudo, cat_probs
         return x_cont, x_cat, pseudo
+    
+    def _forward_target_from_fakeact(
+        self,
+        mdl: torch.nn.Module,
+        fakeact: torch.Tensor,
+        soft_categorical: bool = True,
+    ) -> torch.Tensor:
+        """Forward fake CTGAN activations through a pytorch-tabular target model.
+
+        If soft_categorical=True, categorical spans are passed as expected embeddings:
+            E[e_cat] = p_cat @ embedding_weight
+
+        This keeps gradients from T(f_inv(G(z, y))) back to fakeact for categorical
+        columns, unlike argmax -> long indices.
+        """
+        x_cont, x_cat, _pseudo, cat_probs = self._pack_for_gandalf(
+            fakeact,
+            return_cat_probs=True,
+        )
+        assert len(cat_probs) == len(mdl.embedding_layer.cat_embedding_layers)
+
+        if not soft_categorical:
+            batch = {}
+            if x_cont is not None:
+                batch["continuous"] = x_cont.float().to(self._device)
+            if x_cat is not None:
+                batch["categorical"] = x_cat.long().to(self._device)
+
+            out = mdl(batch)
+            return out["logits"] if isinstance(out, dict) else out
+
+        embedding_layer = mdl.embedding_layer
+
+        if not hasattr(embedding_layer, "cat_embedding_layers"):
+            raise TypeError(
+                "soft_categorical=True currently supports pytorch-tabular models "
+                "whose embedding_layer exposes cat_embedding_layers, e.g. GANDALF "
+                "with Embedding1dLayer."
+            )
+
+        if len(cat_probs) != len(embedding_layer.cat_embedding_layers):
+            raise ValueError(
+                f"CTGAN categorical spans ({len(cat_probs)}) do not match target "
+                f"embedding layers ({len(embedding_layer.cat_embedding_layers)}). "
+                "Check categorical column ordering and encoders."
+            )
+
+        # Continuous branch: mimic Embedding1dLayer.forward for continuous inputs.
+        embedded_parts = []
+
+        if x_cont is not None and x_cont.numel() > 0:
+            x_cont = x_cont.float().to(self._device)
+
+            if getattr(embedding_layer, "batch_norm_continuous_input", False):
+                x_cont = embedding_layer.normalizing_batch_norm(x_cont)
+
+            embedded_parts.append(x_cont)
+
+        # Categorical branch: differentiable expected embedding.
+        soft_cat_embeds = []
+        for probs, emb in zip(cat_probs, embedding_layer.cat_embedding_layers):
+            probs = probs.float().to(self._device)
+            weight = emb.weight
+
+            # pytorch-tabular encoders may reserve row 0 for unknown/padding.
+            # If so, CTGAN's K generated probabilities map to rows 1..K.
+            if probs.shape[1] == weight.shape[0] - 1:
+                weight = weight[1:]
+            elif probs.shape[1] != weight.shape[0]:
+                raise ValueError(
+                    f"Categorical probability width {probs.shape[1]} does not match "
+                    f"embedding rows {weight.shape[0]} for one categorical column."
+                )
+
+            soft_cat_embeds.append(probs @ weight)
+
+        if soft_cat_embeds:
+            embedded_parts.append(torch.cat(soft_cat_embeds, dim=1))
+
+        if not embedded_parts:
+            raise ValueError("No continuous or categorical features produced.")
+
+        x_embedded = torch.cat(embedded_parts, dim=1)
+
+        if getattr(embedding_layer, "embd_dropout", None) is not None:
+            x_embedded = embedding_layer.embd_dropout(x_embedded)
+
+        backbone_features = mdl.compute_backbone(x_embedded)
+        out = mdl.compute_head(backbone_features)
+        return out["logits"] if isinstance(out, dict) else out
 
     def forward_fakeact_with_labels(self, z: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         """Differentiable forward:
@@ -640,25 +823,34 @@ class CustomCTGAN(CTGAN):
 
         return fakeact, cond
 
-    # def _apply_activate(self, data):
-    #     """Apply proper activation function to the output of the generator."""
-    #     data_t = []
-    #     st = 0
-    #     for column_info in self._transformer.output_info_list:
-    #         for span_info in column_info:
-    #             if span_info.activation_fn == 'tanh':
-    #                 ed = st + span_info.dim
-    #                 data_t.append(torch.tanh(data[:, st:ed]))
-    #                 st = ed
-    #             elif span_info.activation_fn == 'softmax':
-    #                 ed = st + span_info.dim
-    #                 transformed = self._gumbel_softmax(data[:, st:ed], tau=0.2)
-    #                 data_t.append(transformed)
-    #                 st = ed
-    #             else:
-    #                 raise ValueError(f'Unexpected activation function {span_info.activation_fn}.')
+    def _apply_activate(self, data):
+        """Apply deterministic CTGAN activations.
 
-    #     return torch.cat(data_t, dim=1)
+        PLG-MI z-optimization needs G(z, y) to be deterministic for fixed z and y.
+        Therefore categorical spans use ordinary softmax, not Gumbel-Softmax.
+        """
+        data_t = []
+        st = 0
+
+        for column_info in self._transformer.output_info_list:
+            for span_info in column_info:
+                ed = st + span_info.dim
+
+                if span_info.activation_fn == "tanh":
+                    data_t.append(torch.tanh(data[:, st:ed]))
+
+                elif span_info.activation_fn == "softmax":
+                    # Replaces CTGAN's stochastic Gumbel-Softmax.
+                    data_t.append(torch.softmax(data[:, st:ed], dim=1))
+
+                else:
+                    raise ValueError(
+                        f"Unexpected activation function {span_info.activation_fn}."
+                    )
+
+                st = ed
+
+        return torch.cat(data_t, dim=1)
 
     def _gumbel_softmax(self,logits, tau=1, hard=False, eps=1e-10, dim=-1):
         """Deterministic when `seed` is provided; otherwise unchanged behavior."""

@@ -43,13 +43,42 @@ class GeneratorHandler():
 
         self.generator = self.generator_blueprint(**self.gen_init_params)
         if self.generator_checkpoint and os.path.exists(self.generator_checkpoint):
-            if self.generator_class == "CustomCTGAN":
-                self.generator = self.generator_blueprint.load(self.generator_checkpoint)
-            else:
-                self.generator.load_state_dict(torch.load(self.generator_checkpoint))
-            logger.info(f"Loaded generator model from {self.generator_checkpoint}")
-            self.trained_bool = True
+            try:
+                if self.generator_class == "CustomCTGAN":
+                    self.generator = self.generator_blueprint.load(self.generator_checkpoint)
+                else:
+                    self.generator.load_state_dict(torch.load(self.generator_checkpoint))
+                logger.info(f"Loaded generator model from {self.generator_checkpoint}")
+                self.trained_bool = True
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    "Could not load generator checkpoint %s; it will be retrained. Error: %s",
+                    self.generator_checkpoint,
+                    e,
+                )
+                self._quarantine_generator_checkpoint()
         return self.generator
+
+    def _quarantine_generator_checkpoint(self) -> None:
+        """Move an unreadable checkpoint aside so the next run can retrain."""
+        if not self.generator_checkpoint or not os.path.exists(self.generator_checkpoint):
+            return
+
+        corrupt_path = f"{self.generator_checkpoint}.corrupt"
+        counter = 1
+        while os.path.exists(corrupt_path):
+            corrupt_path = f"{self.generator_checkpoint}.corrupt.{counter}"
+            counter += 1
+
+        try:
+            os.replace(self.generator_checkpoint, corrupt_path)
+            logger.warning("Moved unreadable generator checkpoint to %s", corrupt_path)
+        except OSError as move_error:
+            logger.warning(
+                "Could not move unreadable generator checkpoint %s: %s",
+                self.generator_checkpoint,
+                move_error,
+            )
 
     def get_generator(self) -> Module:
         """Return the generator model."""

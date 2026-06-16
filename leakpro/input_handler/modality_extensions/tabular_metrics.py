@@ -13,6 +13,48 @@ from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.input_handler.user_imports import get_class_from_module, import_module_from_file
 from leakpro.utils.logger import logger
 
+# Fallback method
+try:
+    import gower
+except ImportError:
+    class _GowerFallback:
+        @staticmethod
+        def gower_matrix(data_x, data_y=None):
+            x = pd.DataFrame(data_x).reset_index(drop=True)
+            y = x if data_y is None else pd.DataFrame(data_y).reset_index(drop=True)
+            y = y.reindex(columns=x.columns)
+
+            distances = np.zeros((len(x), len(y)), dtype=float)
+            counts = np.zeros((len(x), len(y)), dtype=float)
+
+            for col in x.columns:
+                x_col = x[col]
+                y_col = y[col]
+                if pd.api.types.is_numeric_dtype(x_col) and pd.api.types.is_numeric_dtype(y_col):
+                    x_values = pd.to_numeric(x_col, errors="coerce").to_numpy(dtype=float)
+                    y_values = pd.to_numeric(y_col, errors="coerce").to_numpy(dtype=float)
+                    combined = np.concatenate([x_values, y_values])
+                    if np.all(np.isnan(combined)):
+                        continue
+                    col_range = np.nanmax(combined) - np.nanmin(combined)
+                    valid = ~np.isnan(x_values)[:, None] & ~np.isnan(y_values)[None, :]
+                    if col_range == 0 or np.isnan(col_range):
+                        col_dist = np.zeros_like(distances)
+                    else:
+                        col_dist = np.abs(x_values[:, None] - y_values[None, :]) / col_range
+                else:
+                    x_values = x_col.astype(object).to_numpy()
+                    y_values = y_col.astype(object).to_numpy()
+                    valid = ~pd.isna(x_values)[:, None] & ~pd.isna(y_values)[None, :]
+                    col_dist = (x_values[:, None] != y_values[None, :]).astype(float)
+
+                distances += np.where(valid, col_dist, 0.0)
+                counts += valid.astype(float)
+
+            return np.divide(distances, counts, out=np.zeros_like(distances), where=counts > 0)
+
+    gower = _GowerFallback()
+
 
 class TabularMetrics:
     """Class for computing Tabular metrics."""
@@ -145,15 +187,38 @@ class TabularMetrics:
             logger.info(f"Run {i+1}/{num_runs} for accuracy.")
             for label_i, z_i in zip(self.labels, self.z):
                 # generate samples for each pair of label and z
-                generated_samples, _, _ = self.generator_handler.sample_from_generator(batch_size=self.num_class_samples+1, # TODO: Move to configs asserts, num_class_samples ge 2  # noqa: E501
-                                                                                label=label_i,
-                                                                                z=z_i)
-                synthetic_label = generated_samples["pseudo_label"].values
-                synthetic_label = torch.tensor(synthetic_label, dtype=torch.int).to(self.device)
+                generated_samples, _, _ = self.generator_handler.sample_from_generator(
+                    batch_size=self.num_class_samples + 1,
+                    label=label_i,
+                    z=z_i,
+                )
+
+                # Keep this only as a diagnostic: did CTGAN actually emit the requested condition?
+                generated_pseudo_label = torch.tensor(
+                    generated_samples["pseudo_label"].values,
+                    dtype=torch.long,
+                    device=self.device,
+                )
+
                 generated_samples = generated_samples.drop(columns=["pseudo_label"])
+
                 output = self.evaluation_model(generated_samples)
-                prediction = torch.argmax(output, dim=1)
-                correct_predictions.append(prediction == synthetic_label)
+                prediction = torch.argmax(output, dim=1).long()
+
+                intended_label = torch.full_like(
+                    prediction,
+                    int(label_i.item() if hasattr(label_i, "item") else label_i),
+                    device=self.device,
+                )
+
+                # Eq. 3.11 attack accuracy: E(G(z_i, y_i)) == y_i
+                correct_predictions.append(prediction == intended_label)
+
+                # Optional but very useful diagnostic:
+                # condition consistency: generated pseudo-label == requested label
+                if not hasattr(self, "_condition_consistency_parts"):
+                    self._condition_consistency_parts = []
+                self._condition_consistency_parts.append(generated_pseudo_label == intended_label)
 
             correct_predictions = torch.cat(correct_predictions).float()
             accuracies.append(correct_predictions.mean())
@@ -166,6 +231,11 @@ class TabularMetrics:
         logger.info(f"Standard deviation: {self.accuracy_std.item()}")
         self.results["accuracy"] = self.accuracy.item()
         self.results["accuracy_std"] = self.accuracy_std.item()
+
+        if hasattr(self, "_condition_consistency_parts") and self._condition_consistency_parts:
+            condition_consistency = torch.cat(self._condition_consistency_parts).float().mean()
+            self.results["condition_consistency"] = condition_consistency.item()
+            logger.info(f"Condition consistency: {condition_consistency.item()}")
 
 
     def quality_metrics(self) -> None:
@@ -259,12 +329,27 @@ class TabularMetrics:
         # For each unique value in 'identity' column
         unique_values = table_real["identity"].unique()
 
+        skipped_identities = []
+
+        def _as_python_scalar(value):
+            return value.item() if hasattr(value, "item") else value
+
         for value in unique_values:
             logger.info(f"Finding best row for identity: {value}")
             # Filter the table for the current value
             syn_subset = table_synthethic[table_synthethic["pseudo_label"] == value].copy()
             real_subset = table_real[table_real["identity"] == value].copy()
             offset = len(syn_subset)
+
+            if syn_subset.empty or real_subset.empty:
+                logger.warning(
+                    "Skipping Gower best-row search for identity %s: %d synthetic rows, %d real rows.",
+                    value,
+                    len(syn_subset),
+                    len(real_subset),
+                )
+                skipped_identities.append(_as_python_scalar(value))
+                continue
 
             # Concat the two tables
             table = pd.concat([syn_subset, real_subset], axis=0)
@@ -274,6 +359,10 @@ class TabularMetrics:
 
             # Keep Real-synthethic distances
             gower_distance = gower_distance[:offset, offset:]
+            if gower_distance.size == 0:
+                logger.warning("Skipping identity %s because its Gower distance matrix is empty.", value)
+                skipped_identities.append(_as_python_scalar(value))
+                continue
 
             min_index = np.unravel_index(np.argmin(gower_distance, axis=None), gower_distance.shape)
 
@@ -287,6 +376,8 @@ class TabularMetrics:
             # Cat synthetic and real rows to best_rows dataframe
             self.best_rows = pd.concat([self.best_rows, synthetic_row, real_row], axis=0)
             self.best_rows = self.best_rows.reset_index(drop=True)
+
+        self.results["gower_skipped_identities"] = skipped_identities
 
     def save(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
         """Placeholder function to save the metrics to disk.
@@ -312,7 +403,6 @@ class TabularMetrics:
         import re  # noqa: PLC0415
         import time  # noqa: PLC0415
 
-        import gower  # noqa: PLC0415
         import matplotlib.pyplot as plt  # noqa: PLC0415
         import numpy as np  # noqa: PLC0415
         import pandas as pd  # noqa: PLC0415
@@ -489,7 +579,6 @@ class TabularMetrics:
         import re  # noqa: PLC0415
         import time  # noqa: PLC0415
 
-        import gower  # noqa: PLC0415
         import matplotlib.pyplot as plt  # noqa: PLC0415
         import numpy as np  # noqa: PLC0415
         import pandas as pd  # noqa: PLC0415

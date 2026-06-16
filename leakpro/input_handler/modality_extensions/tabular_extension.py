@@ -1,5 +1,6 @@
 """TabularExtension class for handling tabular data with one-hot encoding and decoding."""
 
+import pandas as pd
 from numpy import ndarray
 from torch import Tensor, argmax, cat, tensor
 from torch.nn.functional import one_hot
@@ -17,26 +18,22 @@ class TabularExtension(AbstractModalityExtension):
     """
 
     def __init__(self:Self, handler:MIAHandler) -> None:
-        """Check if the data is a pandas DataFrame."""
+        """Initialize tabular helpers from dataframe or tensor-like datasets."""
 
         super().__init__(handler)
         logger.info("Tabular extension initialized.")
 
-        print(type(self.public_dataset))
+        if isinstance(self.public_dataset, pd.DataFrame):
+            feature_frame = self.public_dataset.drop(columns=["identity"], errors="ignore")
+            x = feature_frame.iloc[:1].to_numpy()
+        else:
+            x, y = next(iter(self.handler.get_public_dataloader(10)))
+            if not isinstance(x, (Tensor, ndarray)) or not isinstance(y, (Tensor, ndarray)):
+                raise ValueError("Data must be a tensor or nparray.")
 
-        dataloader = self.handler.get_public_dataloader(10)
-        iter_dataloader = iter(dataloader)
-        print(type(dataloader.dataset))
-        print(getattr(dataloader.dataset, "columns", None))
-        
-        next_dataloader = next(iter_dataloader)
-        x,y = next_dataloader
-        # x,y = next(iter(self.handler.get_public_dataloader(10)))
-        if not isinstance(x, (Tensor, ndarray)) or not isinstance(y, (Tensor,ndarray)):
-            raise ValueError("Data must be a tensor or nparray.")
-
-        if hasattr(self.handler.population, "dec_to_onehot"):
-            self.dec_to_onehot = self.handler.population.dec_to_onehot
+        population = getattr(self.handler, "population", None)
+        if hasattr(population, "dec_to_onehot"):
+            self.dec_to_onehot = population.dec_to_onehot
 
             # Check number of continuous and categorical columns
             n_dec_cols = len(self.dec_to_onehot)

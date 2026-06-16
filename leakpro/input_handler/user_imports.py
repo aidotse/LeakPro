@@ -3,6 +3,7 @@
 import importlib.util
 import inspect
 import os
+import sys
 
 from torch import nn, optim
 
@@ -16,7 +17,13 @@ def import_module_from_file(filepath:str) -> ModuleType:
     module_name = filepath.rsplit("/", maxsplit=1)[-1].split(".")[0]
     spec = importlib.util.spec_from_file_location(module_name, filepath)
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    # Register file-loaded modules so pickle/torch.save can resolve their classes.
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(module_name, None)
+        raise
     return module
 
 def get_class_from_module(module:ModuleType, class_name:str) -> Callable:

@@ -11,6 +11,7 @@ from pytorch_tabular.models import GANDALFConfig
 # Suppres warnings, pytorch_tabular is very verbose
 warnings.filterwarnings("ignore")
 
+
 # Redefine variables in case upper cell is not run
 # Path to the dataset zip file
 data_folder = "./data"
@@ -33,10 +34,19 @@ with open("train_config.yaml", "r") as file:
 with open(audit_file, "r") as file:
     audit_config = yaml.safe_load(file)
 
-# Access the first attack in the attack_list
-plgmi_attack = next(
-    audit_config["audit"]["attack_list"][attack] for attack in audit_config["audit"]["attack_list"] if attack == "plgmi"
-)
+# Access the PLGMI attack config. Supports both the current
+# {"attack": "plgmi", ...} format and the legacy {"plgmi": ...} format.
+plgmi_attack = None
+for attack in audit_config["audit"]["attack_list"]:
+    if attack.get("attack") == "plgmi":
+        plgmi_attack = attack
+        break
+    if "plgmi" in attack:
+        plgmi_attack = attack["plgmi"]
+        break
+
+if plgmi_attack is None:
+    raise ValueError("No PLGMI attack configuration found in audit.yaml")
 
 # Extract num_classes
 num_classes = plgmi_attack["num_classes"]
@@ -77,30 +87,6 @@ df_test = df.drop(train_indices)
 df_test = df_test[df_test["identity"].isin(df_train["identity"])]
 df_test = df_test.reset_index(drop=True)
 
-# Prints
-
-
-# data_config = DataConfig(
-#     target=["identity"],
-#     continuous_cols=continuous_col_names,
-#     categorical_cols=categorical_col_names,
-#     normalize_continuous_features=False,
-# )
-
-# trainer_config = TrainerConfig(
-#     auto_lr_find=False,
-#     batch_size=256,
-#     max_epochs=150,
-#     early_stopping="train_loss_0",
-# )
-
-# import os
-# os.environ["OMP_NUM_THREADS"] = "8"
-# os.environ["MKL_NUM_THREADS"] = "8"
-
-# import torch
-# torch.set_num_threads(8)
-# torch.set_num_interop_threads(2)
 
 data_config = DataConfig(
     target=["identity"],
@@ -126,12 +112,6 @@ trainer_config = TrainerConfig(
 
 optimizer_config = OptimizerConfig()
 
-# model_config = CategoryEmbeddingModelConfig(
-#     task="classification",
-#     layers="2048-1024-512-256",
-#     activation="ReLU",
-#     learning_rate=1e-3,
-# )
 
 model_config = GANDALFConfig(
 task="classification",

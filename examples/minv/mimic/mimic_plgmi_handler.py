@@ -103,8 +103,9 @@ class Mimic_InputHandler(AbstractInputHandler):  # noqa: N801
                     n_dis: int,
                     device: torch.device,
                     alpha: float,
-                    log_interval: int,  # noqa: ARG002
-                    sample_from_generator: callable  # noqa: ARG002
+                    alpha_cond: float = 1.0,
+                    log_interval: int = 10,  # noqa: ARG002
+                    sample_from_generator: callable = None,  # noqa: ARG002
                   ) -> None:
         """Train the CTGAN model. Inspired by CTGAN from https://github.com/sdv-dev/CTGAN.
 
@@ -126,7 +127,6 @@ class Mimic_InputHandler(AbstractInputHandler):  # noqa: N801
             sample_from_generator: Function to sample from the generator.
 
         """
-        torch.set_default_device(device)
         torch.backends.cudnn.benchmark = True
 
         target_model.to(device)
@@ -139,15 +139,18 @@ class Mimic_InputHandler(AbstractInputHandler):  # noqa: N801
         ctgan = gen
 
         # ctgan takes dataframe or numpy array as input
-        ctgan.fit(train_data= pseudo_loader.dataset,
-                    target_model=target_model,
-                    num_classes=705, # TODO: Fix this, currently doesnt do anything
-                    inv_criterion=inv_criterion,
-                    gen_criterion=gen_criterion,
-                    dis_criterion=dis_criterion,
-                    alpha=alpha,
-                    discrete_columns=discrete_columns,
-                    use_inv_loss=True,
-                    n_iter=n_iter,
-                    n_dis=n_dis)
+        ctgan.fit(
+            train_data=pseudo_loader.dataset,
+            target_model=target_model,
+            num_classes=705,
+            inv_criterion=inv_criterion,
+            gen_criterion=gen_criterion,
+            dis_criterion=dis_criterion,
+            alpha=alpha,              # alpha1
+            alpha_cond=alpha_cond,    # alpha2
+            discrete_columns=discrete_columns,
+            use_inv_loss=True,
+            n_iter=n_iter,
+            n_dis=n_dis,
+        )
         ctgan.save("ctgan.pkl")
