@@ -1,0 +1,21 @@
+##
+## Copyright 2023-2026 Lindholmen Science Park AB
+## SPDX-License-Identifier: Apache-2.0
+##
+run:  # Configurations for a specific run
+  random_seed: 1234
+  log_dir: ./target  # Where the target model + metadata are saved.
+
+train:
+  epochs: 20
+  batch_size: 32
+  optimizer: Adam
+  learning_rate: 0.0001
+  weight_decay: 0.001
+
+data:  # Configuration for data
+  dataset: gdd_ens
+  data_dir: ./data                        # Where the feature table + cached population live.
+  feature_table: msk_solid_heme_ft.csv    # User-provided GDD full feature table (see README).
+  f_train: 0.3           # Fraction of the population used to train the target.
+  f_test: 0.2            # Fraction used as the target's held-out test set.
