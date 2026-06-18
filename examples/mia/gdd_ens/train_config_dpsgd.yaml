@@ -1,0 +1,36 @@
+##
+## Copyright 2023-2026 Lindholmen Science Park AB
+## SPDX-License-Identifier: Apache-2.0
+##
+## DP-SGD target training recipe for the GDD_ENS example.
+##
+## The optimizer/epochs/batch size match the non-DP baseline (train_config.yaml) so the only
+## thing that changes across the epsilon sweep is the added DP noise + per-sample gradient
+## clipping — keeping the utility/privacy trade-off clean (epsilon = infinity = the committed
+## non-DP baseline result). The `dp` block holds the privacy budget; the notebook turns
+## (target_epsilon, target_delta, epochs, sample_rate, ...) into a noise multiplier via Opacus.
+run:
+  random_seed: 1234
+  log_dir: ./target_dpsgd
+
+train:
+  epochs: 20
+  batch_size: 32
+  virtual_batch_size: 32     # max physical batch for Opacus BatchMemoryManager (<= batch_size)
+  optimizer: Adam            # DP-Adam: Adam + per-sample clipping + noise (matches baseline)
+  learning_rate: 0.0001
+  weight_decay: 0.001
+
+dp:
+  target_delta: 1.0e-5       # < 1/N (N ~ 36,976) per the usual delta << 1/N guideline
+  max_grad_norm: 1.0         # per-sample gradient clipping bound
+  epsilon_tolerance: 0.01    # tolerance for the noise-multiplier search
+  eps_error: 0.01            # accountant epsilon error
+  accountant: rdp            # honored by both noise calibration and the PrivacyEngine
+
+data:
+  dataset: gdd_ens
+  data_dir: ./data
+  feature_table: msk_solid_heme_ft.csv
+  f_train: 0.3
+  f_test: 0.2

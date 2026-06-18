@@ -1,0 +1,36 @@
+##
+## Copyright 2023-2026 Lindholmen Science Park AB
+## SPDX-License-Identifier: Apache-2.0
+##
+## DP-SGD variant of audit.yaml. Same attack list as the non-DP baseline so the DP results are
+## directly comparable to it (the non-DP baseline is the epsilon = infinity point of the
+## utility/privacy trade-off). The target is a DP-trained GddMLP_DPsgd; shadow_model is left
+## blank so shadows reuse the target class (GddMLP_DPsgd, dpsgd=True) and are trained under DP.
+audit:  # Configurations for auditing
+  random_seed: 1234
+  attack_list:
+    - attack: lira
+      online: False
+      num_shadow_models: 8
+      training_data_fraction: 0.5
+      var_calculation: "fixed"
+    - attack: rmia
+      online: True
+      num_shadow_models: 8
+      training_data_fraction: 0.5
+    - attack: population
+      attack_data_fraction: 1.0
+  output_dir: "./leakpro_output_dpsgd"
+  attack_type: "mia"  # mia, gia
+  data_modality: "tabular"  # image, tabular
+
+target:
+  module_path: "utils/gdd_model_dpsgd.py"
+  model_class: "GddMLP_DPsgd"
+  target_folder: "./target_dpsgd"
+  data_path: "./data/gdd_ens.pkl"
+  dpsgd_path: "./target_dpsgd/dpsgd_dic.pkl"
+
+shadow_model:
+
+distillation_model:

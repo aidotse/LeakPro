@@ -4,3 +4,8 @@ data/*
 !data/.gitkeep
 leakpro_output/*
 target/*
+# DP-SGD variant outputs + generated per-epsilon configs/results
+leakpro_output_dpsgd/*
+target_dpsgd/*
+audit_dpsgd_eps_*.yaml
+dpsgd_tradeoff.csv
