@@ -118,7 +118,7 @@ class GddModelHandlerDPsgd(AbstractInputHandler, role="model"):
 
             _disable_inplace_activations(model)
             model, optimizer, dataloader, _ = _setup_dpsgd(
-                model, optimizer, dataloader, dpsgd_metadata_path)
+                model, optimizer, dataloader, dpsgd_metadata_path, epochs)
 
         model.to(dev)
         model.train()
@@ -187,7 +187,7 @@ def _train_loop(dataloader, model, criterion, optimizer, dev, epoch, epochs):
     return train_loss, train_acc
 
 
-def _setup_dpsgd(model, optimizer, dataloader, dpsgd_path):
+def _setup_dpsgd(model, optimizer, dataloader, dpsgd_path, epochs):
     if not bool(getattr(model, "dpsgd", False)):
         return model, optimizer, dataloader, None
 
@@ -197,6 +197,16 @@ def _setup_dpsgd(model, optimizer, dataloader, dpsgd_path):
     with open(dpsgd_path, "rb") as f:
         cfg = pickle.load(f)
     logger.info(f"DP-SGD config loaded from {dpsgd_path}: {cfg}")
+
+    # The noise multiplier is calibrated to cfg["epochs"], but the training loop runs `epochs`
+    # (from the metadata recipe, which is also what shadow models replay). If these diverge the
+    # reported epsilon would be wrong — fail loudly rather than misstate the privacy guarantee.
+    if cfg["epochs"] != epochs:
+        raise ValueError(
+            f"DP-SGD epoch mismatch: privacy budget was calibrated for {cfg['epochs']} epochs "
+            f"but training runs {epochs}. The reported epsilon would be invalid. Make "
+            f"dpsgd_dic.pkl['epochs'] match the training/metadata epochs."
+        )
 
     # Honor the configured accountant for BOTH calibration and the engine so the epsilon
     # guarantee cannot silently diverge (the cifar reference hardcodes "prv" and ignores

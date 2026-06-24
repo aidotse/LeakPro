@@ -101,10 +101,10 @@ To control runtime, lower `num_shadow_models` in `audit.yaml` (8 per attack by d
 `gdd_dpsgd.ipynb` trains the same single-MLP target with **DP-SGD** (Opacus) across a grid of
 privacy budgets ε and re-runs LiRA + RMIA + population at each, producing a utility (test
 accuracy) vs. attack-performance (ROC AUC, TPR @ low FPR) trade-off. The ε = ∞ point is the
-non-DP baseline above. Files: `gdd_model_handler_dpsgd.py`, `utils/gdd_model_dpsgd.py`
-(`GddMLP_DPsgd`), `audit_dpsgd.yaml`, `train_config_dpsgd.yaml`.
+non-DP baseline above. Files: `gdd_model_handler_dpsgd.py`, `audit_dpsgd.yaml`,
+`train_config_dpsgd.yaml` (the model reuses `utils/gdd_model.py`'s `GddMLP` with `dpsgd=True`).
 
-- **Shadows are trained under DP too.** `GddMLP_DPsgd` stores `dpsgd=True`, which LeakPro records
+- **Shadows are trained under DP too.** `GddMLP(dpsgd=True)` stores `dpsgd=True`, which LeakPro records
   in the target metadata `init_params`; shadow models are rebuilt from that metadata and so are
   also trained under the same ε. The LiRA/RMIA likelihood ratio is therefore calibrated against
   DP-trained shadows, not non-private ones.
