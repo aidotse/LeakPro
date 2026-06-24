@@ -9,3 +9,6 @@ leakpro_output_dpsgd/*
 target_dpsgd/*
 audit_dpsgd_eps_*.yaml
 dpsgd_tradeoff.csv
+# Ensemble (real-model-style) audit outputs + cached population
+leakpro_output_ensemble/*
+target_ensemble/*

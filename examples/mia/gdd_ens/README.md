@@ -119,6 +119,45 @@ non-DP baseline above. Files: `gdd_model_handler_dpsgd.py`, `audit_dpsgd.yaml`,
 - Requires `opacus` (the LeakPro environment ships it; `pip install opacus` otherwise) and a GPU
   for a full sweep.
 
+### Ensemble (real-model-style audit)
+
+`gdd_ensemble_main.ipynb` audits a **faithful 10-MLP GDD-ENS ensemble** instead of the single-MLP
+proxy. The member architectures are the paper's Supplementary Table S6 (saved at
+`knowledge/papers/gdd-ens-2024/`), and `forward` returns `log(mean_k softmax(member_logits_k))` —
+the paper's softmax-averaging — so LeakPro's signal softmax recovers the true ensemble probability.
+Files: `gdd_ensemble_handler.py`, `utils/gdd_ensemble.py` (`GddEnsemble`, `MLP`, `TABLE_S6`),
+`utils/gdd_paper_data.py`, `audit_ensemble.yaml`, `train_config_ensemble.yaml`.
+
+- **Membership ground truth is the real split, reproduced.** `utils/gdd_paper_data.py` mirrors the
+  GDD_ENS `scripts/split_data.py`: keep `Classification_Category == 'train'` rows, deterministic
+  80/20 `train_test_split(..., random_state=0)`, non-members = the 20% minus rows whose
+  `PATIENT_ID + Cancer_Type` is in the train split. Because the split is deterministic, the members
+  are exactly those the model trained on — **no Supplementary Table S1 needed.** This is a *different*
+  data pipeline from the baseline (`utils/gdd_data.py`), which dedups to one sample per patient.
+- **One shadow = one ensemble.** `shadow_model` is blank in `audit_ensemble.yaml`, so each of the
+  `num_shadow_models` shadows is rebuilt from the target metadata as a full `GddEnsemble` and trained
+  by `GddEnsembleModelHandler`. Total trainings = `10 x (1 + num_shadow_models) x epochs` MLPs. The
+  shipped configs use the paper-faithful recipe (8 shadows x 200 epochs) — a **long GPU run**; lower
+  `num_shadow_models` and `train.epochs` for a quick smoke run.
+- **Deliberate deviations from the paper (read before trusting the numbers).**
+  - *No oversampling, no per-member stratified folds.* The paper upsamples to ≥350/class and trains
+    each member on a `StratifiedShuffleSplit` fold. We omit both: target and shadows are trained
+    **identically** (clean LiRA/RMIA calibration), and without oversampling `StratifiedShuffleSplit`
+    is unsafe on the 38 imbalanced classes. Ensemble diversity comes from the 10 distinct
+    architectures + random init/dropout. An oversampled + stratified variant is a follow-up.
+  - *No per-member HPO.* Architectures are fixed from Table S6; we do not re-run `gp_minimize`.
+  - *Per-member optimizers.* `GddEnsembleModelHandler` builds one Adam per member from Table S6's
+    `learning_rate` / `weight_decay`; the single optimizer recorded in the metadata is nominal and
+    ignored (it cannot express 10 per-member learning rates).
+  - *Member:non-member imbalance ≈ 5:1* is inherent to the 80/20 split; AUC handles it, but
+    low-FPR TPR is the metric to watch.
+- **The target is always trained from scratch; the published weights are not used.** Loading the
+  released model is intentionally out of scope: `data/ensemble.pt` / `ensemble_models.zip` in the
+  GDD_ENS repo are **torch-1.4 whole-model pickles** (and Git-LFS objects — the checked-out 134-byte
+  files are pointers, real sizes ~498 MB / ~474 MB), which are fragile to unpickle on a current
+  torch. We reproduce the architecture (Table S6) and the training split instead, which is fully
+  deterministic and version-independent.
+
 ## Notes
 
 - **Reading the results.** On a representative run the shadow-based attacks beat the population
