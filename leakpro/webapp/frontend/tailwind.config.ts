@@ -9,7 +9,7 @@ export default {
       colors: {
         primary: "#193ce6",
         "background-light": "#f6f6f8",
-        "background-dark": "#111421",
+        "background-dark": "#1b2030",
       },
       fontFamily: {
         display: ["Inter", "sans-serif"],
