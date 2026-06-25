@@ -88,7 +88,7 @@ export default function Step6Run({ jobId, models, onDone, onRestart }: Props) {
       {status === "idle" && (
         <button
           onClick={launch}
-          className="self-start px-8 py-3 rounded-lg bg-slate-700 text-white border border-primary font-bold text-lg hover:bg-slate-600 transition-colors flex items-center gap-3 shadow-xl shadow-black/30"
+          className="self-start px-8 py-3 rounded-lg bg-slate-700 text-cream border border-primary font-bold text-lg hover:bg-slate-600 transition-colors flex items-center gap-3 shadow-xl shadow-black/30"
         >
           <span className="material-symbols-outlined">rocket_launch</span>
           Launch Audit

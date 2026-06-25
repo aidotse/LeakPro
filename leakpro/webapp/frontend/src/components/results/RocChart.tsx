@@ -101,7 +101,7 @@ export default function RocChart({ results }: Props) {
                 on ? prev.filter((n) => n !== m.model_name) : [...prev, m.model_name]
               )}
               className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border transition-colors
-                ${on ? "border-transparent text-white" : "border-slate-300 dark:border-slate-700 text-slate-500"}`}
+                ${on ? "border-transparent text-cream" : "border-slate-300 dark:border-slate-700 text-slate-500"}`}
               style={on ? { backgroundColor: COLOURS[i % COLOURS.length] } : {}}
             >
               {m.model_name}
@@ -120,7 +120,7 @@ export default function RocChart({ results }: Props) {
             onClick={() => setAttackMode(mode)}
             className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-colors
               ${attackMode === mode
-                ? "bg-slate-700 text-white border-transparent"
+                ? "bg-slate-700 text-cream border-transparent"
                 : "border-slate-300 dark:border-slate-700 text-slate-500"}`}
           >
             {mode === "all" ? "All attacks" : "Best per model"}

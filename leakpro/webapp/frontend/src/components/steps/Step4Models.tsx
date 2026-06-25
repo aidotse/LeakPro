@@ -94,7 +94,7 @@ export default function Step4Models({ jobId, onDone, initialModels }: Props) {
         <button
           onClick={() => onDone(models)}
           disabled={!canProceed}
-          className="px-8 py-2.5 rounded-lg bg-slate-700 text-white border border-primary font-bold hover:bg-slate-600 transition-colors flex items-center gap-2 shadow-lg shadow-black/30 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="px-8 py-2.5 rounded-lg bg-slate-700 text-cream border border-primary font-bold hover:bg-slate-600 transition-colors flex items-center gap-2 shadow-lg shadow-black/30 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Continue to Attack Config
           <span className="material-symbols-outlined text-base">arrow_forward</span>
@@ -219,7 +219,7 @@ function UploadModelForm({ jobId, onAdded, onUpdated, existingNames }: {
             <button
               onClick={doValidateModel}
               disabled={checking}
-              className="flex items-center gap-2 px-5 py-2 rounded-lg bg-slate-700 text-white border border-primary font-bold text-sm hover:bg-slate-600 transition-colors disabled:opacity-50"
+              className="flex items-center gap-2 px-5 py-2 rounded-lg bg-slate-700 text-cream border border-primary font-bold text-sm hover:bg-slate-600 transition-colors disabled:opacity-50"
             >
               {checking
                 ? <><span className="material-symbols-outlined text-base animate-spin">sync</span> Validating…</>
@@ -431,7 +431,7 @@ function TrainModelForm({ jobId, onAdded, existingCount, initialModels }: {
           Add another model
         </button>
         <button onClick={trainAll} disabled={training}
-          className="ml-auto px-6 py-2 rounded-lg bg-slate-700 text-white border border-primary font-bold text-sm hover:bg-slate-600 transition-colors shadow-lg shadow-black/30 disabled:opacity-50 flex items-center gap-2"
+          className="ml-auto px-6 py-2 rounded-lg bg-slate-700 text-cream border border-primary font-bold text-sm hover:bg-slate-600 transition-colors shadow-lg shadow-black/30 disabled:opacity-50 flex items-center gap-2"
         >
           {training && <span className="material-symbols-outlined text-base animate-spin">sync</span>}
           {training ? "Training…" : "Start Training"}

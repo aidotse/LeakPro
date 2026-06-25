@@ -288,7 +288,7 @@ export default function Step3Setup({ jobId, handlerConfig, onDone, initialArch }
             onClick={() => setMode(m)}
             className={`px-5 py-2 rounded-lg font-bold text-sm transition-colors
               ${mode === m
-                ? "bg-slate-700 text-white border border-primary shadow-lg shadow-black/30"
+                ? "bg-slate-700 text-cream border border-primary shadow-lg shadow-black/30"
                 : "border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
               }`}
           >
@@ -422,7 +422,7 @@ export default function Step3Setup({ jobId, handlerConfig, onDone, initialArch }
         <button
           onClick={proceed}
           disabled={!canProceed || loading}
-          className="px-8 py-2.5 rounded-lg bg-slate-700 text-white border border-primary font-bold hover:bg-slate-600 transition-colors flex items-center gap-2 shadow-lg shadow-black/30 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="px-8 py-2.5 rounded-lg bg-slate-700 text-cream border border-primary font-bold hover:bg-slate-600 transition-colors flex items-center gap-2 shadow-lg shadow-black/30 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {loading ? "Saving…" : "Continue"}
           <span className="material-symbols-outlined text-base">arrow_forward</span>
@@ -516,7 +516,7 @@ function CodeModal({ title, caption, code, filename, onClose }: {
           </button>
           <button
             onClick={onClose}
-            className="px-5 py-2 rounded-lg bg-slate-700 text-white border border-primary text-sm font-bold hover:bg-slate-600 transition-colors"
+            className="px-5 py-2 rounded-lg bg-slate-700 text-cream border border-primary text-sm font-bold hover:bg-slate-600 transition-colors"
           >
             Close
           </button>
