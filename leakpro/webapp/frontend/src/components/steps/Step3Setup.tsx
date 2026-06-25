@@ -274,7 +274,7 @@ export default function Step3Setup({ jobId, handlerConfig, onDone, initialArch }
     <div className="flex flex-col gap-8">
       <div className="space-y-2">
         <h2 className="text-4xl font-black tracking-tight">Architecture & Training</h2>
-        <p className="text-slate-600 dark:text-slate-400 text-lg max-w-2xl">
+        <p className="text-slate-600 dark:text-slate-200 text-lg max-w-2xl">
           Choose a built-in preset that matches your data type, or upload your own architecture
           and training loop.
         </p>
@@ -333,7 +333,7 @@ export default function Step3Setup({ jobId, handlerConfig, onDone, initialArch }
                       )}
                     </div>
                   </div>
-                  <p className="text-sm text-slate-500 dark:text-slate-400">{p.desc}</p>
+                  <p className="text-sm text-slate-500 dark:text-slate-200">{p.desc}</p>
                 </div>
 
                 {/* Details toggle */}
@@ -498,7 +498,7 @@ function CodeModal({ title, caption, code, filename, onClose }: {
         </div>
 
         {/* Caption */}
-        <p className="px-6 pt-4 text-sm text-slate-500 dark:text-slate-400">{caption}</p>
+        <p className="px-6 pt-4 text-sm text-slate-500 dark:text-slate-200">{caption}</p>
 
         {/* Code */}
         <pre className="overflow-auto px-6 py-4 font-mono text-xs text-slate-300 bg-slate-950 mx-6 my-4 rounded-xl max-h-[55vh] leading-relaxed">

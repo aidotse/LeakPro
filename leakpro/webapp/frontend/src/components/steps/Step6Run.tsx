@@ -67,7 +67,7 @@ export default function Step6Run({ jobId, models, onDone, onRestart }: Props) {
     <div className="flex flex-col gap-8">
       <div className="space-y-2">
         <h2 className="text-4xl font-black tracking-tight">Run Audit</h2>
-        <p className="text-slate-600 dark:text-slate-400 text-lg max-w-2xl">
+        <p className="text-slate-600 dark:text-slate-200 text-lg max-w-2xl">
           {models.length} model{models.length !== 1 ? "s" : ""} queued. The audit runs in the
           background. You can watch the live log below.
         </p>
@@ -97,7 +97,7 @@ export default function Step6Run({ jobId, models, onDone, onRestart }: Props) {
 
       {/* Running state */}
       {status === "running" && (
-        <div className="flex items-center gap-3 text-slate-600 dark:text-slate-400">
+        <div className="flex items-center gap-3 text-slate-600 dark:text-slate-200">
           <span className="material-symbols-outlined text-primary animate-spin">sync</span>
           <span className="font-semibold">Running…</span>
           <span className="font-mono text-sm">{fmtElapsed(elapsed)}</span>
@@ -131,7 +131,7 @@ export default function Step6Run({ jobId, models, onDone, onRestart }: Props) {
 
       {/* Log path info */}
       {status !== "idle" && (
-        <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
+        <p className="text-xs text-slate-500 dark:text-slate-200 flex items-center gap-1">
           <span className="material-symbols-outlined text-sm">save</span>
           Log saved to <code className="font-mono">leakpro_output/{"<model_name>"}/leakpro.log</code> inside your job folder.
         </p>

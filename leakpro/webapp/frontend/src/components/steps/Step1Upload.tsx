@@ -123,7 +123,7 @@ function CodeModal({ onClose }: { onClose: () => void }) {
             <span className="material-symbols-outlined">close</span>
           </button>
         </div>
-        <p className="px-6 pt-4 text-sm text-slate-500 dark:text-slate-400">
+        <p className="px-6 pt-4 text-sm text-slate-500 dark:text-slate-200">
           Your <code>dataset_handler.py</code> must define a <code>UserDataset</code> class that is
           <strong> indexable</strong> — <code>dataset[i]</code> must return a <code>(input, label)</code> pair.
           Data must be a float32 tensor in [0, 1]. Adapt the normalisation and channel order to match your data format.
@@ -270,7 +270,7 @@ export default function Step1Upload({ jobId, onDone, initialMeta }: Props) {
     <div className="flex flex-col gap-8">
       <div className="space-y-2">
         <h2 className="text-4xl font-black tracking-tight">Load Dataset</h2>
-        <p className="text-slate-600 dark:text-slate-400 text-lg max-w-2xl">
+        <p className="text-slate-600 dark:text-slate-200 text-lg max-w-2xl">
           Point to your training dataset on the server, or upload a file from your local machine.
           Supports CSV, JSONL, Parquet, NumPy (.npy), or PyTorch (.pkl / .pt).
         </p>
@@ -322,7 +322,7 @@ function ServerPathForm({ jobId, onDone, initialMeta }: { jobId: string; onDone:
       <div className="flex flex-col gap-2">
         <label className="text-xs font-semibold text-slate-500">Absolute path on server</label>
         <div className="flex gap-2">
-          <div className="flex-1 flex items-center gap-2 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-3 bg-white dark:bg-slate-800 focus-within:border-primary transition-colors">
+          <div className="flex-1 flex items-center gap-2 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-3 bg-cream focus-within:border-primary transition-colors">
             <span className="material-symbols-outlined text-slate-400 text-base shrink-0">folder_open</span>
             <input
               type="text"
@@ -330,7 +330,7 @@ function ServerPathForm({ jobId, onDone, initialMeta }: { jobId: string; onDone:
               onChange={(e) => { setPath(e.target.value); setMeta(null); setError(null); }}
               onKeyDown={(e) => e.key === "Enter" && validate()}
               placeholder="/absolute/path/to/data.pkl"
-              className="flex-1 bg-transparent outline-none text-sm font-mono"
+              className="flex-1 bg-transparent outline-none text-sm font-mono text-slate-900 placeholder:text-slate-400"
             />
           </div>
           <button
@@ -441,7 +441,7 @@ function UploadForm({ jobId, onDone, initialMeta }: { jobId: string; onDone: (m:
         ) : (
           <>
             <h3 className="text-xl font-bold mb-2">Drag and drop your file here</h3>
-            <p className="text-slate-500 dark:text-slate-400">CSV, JSONL, Parquet, .npy, .pkl, .pt — up to 2 GB</p>
+            <p className="text-slate-500 dark:text-slate-200">CSV, JSONL, Parquet, .npy, .pkl, .pt — up to 2 GB</p>
           </>
         )}
       </div>
