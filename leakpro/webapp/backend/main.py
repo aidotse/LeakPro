@@ -913,9 +913,13 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
 
             # A custom arch may ignore num_classes and keep a 2-logit head, so derive
             # binary-ness from the actual model output rather than the label count.
+            _was_training = model.training
             with torch.no_grad():
                 model.eval()
                 _probe_out = model(_sample_x.unsqueeze(0))
+            # Restore training mode: the DP-SGD path validates with Opacus before the
+            # training loop runs, and Opacus rejects a model left in eval mode.
+            model.train(_was_training)
             _is_binary = (_probe_out.ndim == 2 and _probe_out.shape[1] == 1)
             if _is_binary:
                 criterion = nn.BCEWithLogitsLoss()
