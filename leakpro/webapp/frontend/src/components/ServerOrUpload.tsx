@@ -87,7 +87,7 @@ export default function ServerOrUpload({ label, hint, accept, icon, onFile, onPa
               />
             </div>
             <button onClick={handlePath} disabled={!path.trim() || loading}
-              className="px-4 py-2 rounded-lg bg-primary text-white font-bold text-xs hover:bg-primary/90 disabled:opacity-50 shrink-0">
+              className="px-4 py-2 rounded-lg bg-slate-700 text-white border border-primary font-bold text-xs hover:bg-slate-600 disabled:opacity-50 shrink-0">
               {loading ? "…" : "Use"}
             </button>
           </div>

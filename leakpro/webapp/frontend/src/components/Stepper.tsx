@@ -29,7 +29,7 @@ export default function Stepper({ current }: StepperProps) {
           >
             <div
               className={`size-10 rounded-full flex items-center justify-center ring-4 ring-background-light dark:ring-background-dark transition-all
-                ${active ? "bg-primary text-white" : done ? "bg-primary/20 text-primary" : "bg-slate-200 dark:bg-slate-800 text-slate-500"}`}
+                ${active ? "bg-slate-700 text-white border border-primary" : done ? "bg-primary/20 text-primary" : "bg-slate-200 dark:bg-slate-800 text-slate-500"}`}
             >
               {done ? (
                 <span className="material-symbols-outlined text-xl">check</span>
