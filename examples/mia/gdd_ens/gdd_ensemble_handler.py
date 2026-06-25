@@ -19,7 +19,6 @@ Training notes:
   comes from the 10 distinct architectures + random init/dropout.
 """
 
-import torch
 from torch import cuda, device, nn, no_grad, optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -70,23 +69,16 @@ class GddEnsembleModelHandler(AbstractInputHandler, role="model"):
                     loss.backward()
                     opt.step()
 
-        train_metrics = self._evaluate(dataloader, model, crit, dev)
+        train_metrics = self.eval(dataloader, model, crit)
         model.to("cpu")
         return TrainingOutput(model=model, metrics=train_metrics)
 
-    def eval(self, loader: DataLoader, model: nn.Module, criterion: nn.Module) -> EvalOutput:
+    def eval(self, loader: DataLoader, model: nn.Module, criterion: nn.Module) -> EvalOutput:  # noqa: ARG002
+        # ``criterion`` is intentionally unused: the ensemble ``forward`` already returns
+        # log(mean softmax), so the metric is NLL on those log-probs directly. Applying the passed
+        # CrossEntropyLoss (used to train the raw-logit members) would log-softmax a second time.
         dev = device("cuda" if cuda.is_available() else "cpu")
         model.to(dev)
-        return self._evaluate(loader, model, criterion, dev)
-
-    @staticmethod
-    def _evaluate(loader: DataLoader, model: nn.Module, criterion: nn.Module, dev: torch.device) -> EvalOutput:  # noqa: ARG004
-        """Ensemble accuracy/loss from the averaged-softmax forward (model.forward = log mean prob).
-
-        ``model(x)`` already returns log-probabilities, so loss is NLL on them directly. The passed
-        ``criterion`` (CrossEntropyLoss, used to train the raw-logit members) would apply a second
-        log-softmax and is intentionally not used for the ensemble metric.
-        """
         model.eval()
         loss, correct, total = 0.0, 0, 0
         with no_grad():
