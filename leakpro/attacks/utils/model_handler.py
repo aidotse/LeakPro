@@ -149,8 +149,9 @@ class ModelHandler():
         # caches a single model, so drop only the leading model-list axis. A bare
         # .squeeze() would also collapse the class axis of a single-logit binary head
         # (1, N, 1) -> (N,), breaking attacks that index logits as [rows, labels].
-        logits = np.array(ModelLogits()(model, self.handler, data_indices))
-        logits = logits.squeeze(axis=0) if logits.shape[0] == 1 else logits.squeeze()
+        # squeeze(axis=0) leaves N and num_classes intact and raises if more than one
+        # model was passed, surfacing that misuse instead of silently mangling the cache.
+        logits = np.array(ModelLogits()(model, self.handler, data_indices)).squeeze(axis=0)
         np.save(cache_file, logits)
         np.save(indices_file, data_indices)
         logger.info(f"Saved logits to {cache_file}")
