@@ -255,6 +255,11 @@ _jobs: dict[str, dict[str, Any]] = {}
 # Per-job log queues
 _log_queues: dict[str, queue.Queue] = {}
 _executor = ThreadPoolExecutor(max_workers=4)
+# Training mutates process-global state (sys.stdout capture + log_q.put wrapping),
+# so only one model trains at a time across the whole server. Without this,
+# concurrent _train() threads clobber each other's stdout and cross-write into
+# each other's train.log, and can leave log_q.put pointing at a closed file.
+_train_lock = threading.Lock()
 
 
 def _job_dir(job_id: str) -> Path:
@@ -692,6 +697,10 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                 pass
 
         old_stdout = _sys.stdout
+        _train_log_file = None  # default so the finally below never NameErrors
+        # Serialize: stdout + log_q.put patching mutate process-global state.
+        _train_lock.acquire()
+        _orig_log_q_put = log_q.put  # capture the real put while holding the lock
         _sys.stdout = _StdoutCapture()
 
         try:
@@ -707,7 +716,6 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
             # Save training log to file
             _train_log_path = target_folder / "train.log"
             _train_log_file = open(_train_log_path, "w")
-            _orig_log_q_put = log_q.put
             def _log_and_save(msg):
                 _orig_log_q_put(msg)
                 if not msg.startswith("__"):
@@ -1059,7 +1067,9 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
         finally:
             _sys.stdout = old_stdout
             log_q.put = _orig_log_q_put
-            _train_log_file.close()
+            if _train_log_file is not None:
+                _train_log_file.close()
+            _train_lock.release()
             log_q.put("__TRAIN_DONE__")
 
     _executor.submit(_train)
