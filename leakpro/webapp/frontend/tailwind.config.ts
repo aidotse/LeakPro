@@ -10,7 +10,7 @@ export default {
         primary: "#f5a623",
         cream: "#FFFEFA",
         "background-light": "#f6f6f8",
-        "background-dark": "#002A3A",
+        "background-dark": "#1d3e4a",
       },
       fontFamily: {
         display: ["Inter", "sans-serif"],

@@ -243,7 +243,7 @@ function DatasetHandlerUpload({ jobId, onUploaded, initialDone }: { jobId: strin
           <input type="text" value={serverPath} onChange={(e) => setServerPath(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handlePath()}
             placeholder="/home/user/my_data_handler.py"
-            className="flex-1 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm font-mono bg-white dark:bg-slate-800 outline-none focus:border-primary" />
+            className="flex-1 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm font-mono bg-cream text-slate-900 placeholder:text-slate-400 outline-none focus:border-primary" />
           <button onClick={handlePath} disabled={!serverPath.trim() || uploading}
             className="px-4 py-2 rounded-lg bg-slate-700 text-cream border border-primary font-bold text-sm hover:bg-slate-600 transition-colors disabled:opacity-50">
             {uploading ? "Loading…" : "Use"}
