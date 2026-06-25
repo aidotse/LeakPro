@@ -18,8 +18,13 @@ audit:
       online: True
       num_shadow_models: 8
       training_data_fraction: 0.5
-    - attack: population
-      attack_data_fraction: 1.0
+    # NOTE: the population (P) attack is intentionally absent here (it is in the single-MLP
+    # baseline's audit.yaml). The paper-faithful split in utils/gdd_paper_data.py partitions the
+    # ENTIRE population into members (80% train) + non-members (20% test), so the audit dataset
+    # equals the whole population and there is no held-out reference data left to fit the P-attack's
+    # loss thresholds. AttackP raises "audit dataset is the same size as the population dataset" and
+    # is skipped. LiRA/RMIA are unaffected — their reference comes from shadow models, not a held-out
+    # population slice. See the README ("Ensemble") for details.
   output_dir: "./leakpro_output_ensemble"
   attack_type: "mia"
   data_modality: "tabular"

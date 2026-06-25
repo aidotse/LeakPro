@@ -134,6 +134,17 @@ Files: `gdd_ensemble_handler.py`, `utils/gdd_ensemble.py` (`GddEnsemble`, `MLP`,
   `PATIENT_ID + Cancer_Type` is in the train split. Because the split is deterministic, the members
   are exactly those the model trained on — **no Supplementary Table S1 needed.** This is a *different*
   data pipeline from the baseline (`utils/gdd_data.py`), which dedups to one sample per patient.
+- **No population (P) attack, by design.** The baseline audits LiRA / RMIA / **population**, but
+  `audit_ensemble.yaml` runs only LiRA + RMIA. The population attack fits its loss thresholds on data
+  in neither the train nor the test set (`include_train_indices=False, include_test_indices=False`),
+  i.e. it needs a held-out reference partition. The paper-faithful split partitions the **entire**
+  population into members (80%) + non-members (20%), so `audit_size == population_size` and there is
+  nothing left to threshold on: `AttackP` raises *"the audit dataset is the same size as the population
+  dataset"* and LeakPro skips it. The baseline avoids this because it carves only `f_train` + `f_test`
+  fractions and leaves the remaining samples in the population. LiRA and RMIA are unaffected, their
+  reference distribution comes from shadow models, not a held-out population slice. (Running the
+  P-attack against the ensemble would require reserving a third partition outside both train and test,
+  e.g. the test rows currently discarded by the patient-dedup step, which would diverge from the paper split.)
 - **One shadow = one ensemble.** `shadow_model` is blank in `audit_ensemble.yaml`, so each of the
   `num_shadow_models` shadows is rebuilt from the target metadata as a full `GddEnsemble` and trained
   by `GddEnsembleModelHandler`. Total trainings = `10 x (1 + num_shadow_models) x epochs` MLPs. The
