@@ -160,7 +160,7 @@ export default function Step5Attacks({ jobId, models, onDone }: Props) {
     <div className="flex flex-col gap-8">
       <div className="space-y-2">
         <h2 className="text-4xl font-black tracking-tight">Configure Attacks</h2>
-        <p className="text-slate-600 dark:text-slate-400 text-lg max-w-2xl">
+        <p className="text-slate-600 dark:text-slate-200 text-lg max-w-2xl">
           Add attacks to each model independently. You can add the same attack multiple times
           with different parameters to compare configurations.
         </p>

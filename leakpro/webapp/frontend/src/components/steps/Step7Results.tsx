@@ -140,7 +140,7 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-1">
           <h2 className="text-4xl font-black tracking-tight">Results</h2>
-          <p className="text-slate-600 dark:text-slate-400 text-lg">
+          <p className="text-slate-600 dark:text-slate-200 text-lg">
             {hasResults
               ? `${allResults.length} model${allResults.length !== 1 ? "s" : ""}${sessionCount > 1 ? ` across ${sessionCount} sessions` : ""}`
               : "No results for this session yet"}

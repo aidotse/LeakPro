@@ -7,7 +7,7 @@ interface NavProps {
 
 export default function Nav({ onToggleDark, dark }: NavProps) {
   return (
-    <header className="border-b border-slate-300 bg-cream text-slate-900 px-6 py-4 shrink-0">
+    <header className="border-b border-slate-200 dark:border-slate-800 bg-background-light dark:bg-background-dark px-6 py-4 shrink-0">
       <div className="max-w-6xl mx-auto flex items-center justify-between">
         <div className="flex items-center gap-3">
           <img src="/logo.jpg" alt="LeakPro" className="h-10 w-10 rounded-lg object-contain" />
@@ -16,10 +16,10 @@ export default function Nav({ onToggleDark, dark }: NavProps) {
         <div className="flex items-center gap-4">
           <button
             onClick={onToggleDark}
-            className="p-2 hover:bg-slate-200 rounded-lg transition-colors"
+            className="p-2 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-lg transition-colors"
             title="Toggle dark mode"
           >
-            <span className="material-symbols-outlined text-slate-600">
+            <span className="material-symbols-outlined text-slate-600 dark:text-slate-300">
               {dark ? "light_mode" : "dark_mode"}
             </span>
           </button>

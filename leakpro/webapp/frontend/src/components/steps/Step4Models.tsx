@@ -38,7 +38,7 @@ export default function Step4Models({ jobId, onDone, initialModels }: Props) {
     <div className="flex flex-col gap-8">
       <div className="space-y-2">
         <h2 className="text-4xl font-black tracking-tight">Models</h2>
-        <p className="text-slate-600 dark:text-slate-400 text-lg max-w-2xl">
+        <p className="text-slate-600 dark:text-slate-200 text-lg max-w-2xl">
           Upload an existing trained model, train new ones, or both. You can add multiple models
           to compare them side-by-side in the results.
         </p>
@@ -456,7 +456,7 @@ function TrainModelForm({ jobId, onAdded, existingCount, initialModels }: {
 
       {/* Live log stream */}
       {(logs.length > 0 || training) && (
-        <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
+        <p className="text-xs text-slate-500 dark:text-slate-200 flex items-center gap-1">
           <span className="material-symbols-outlined text-sm">save</span>
           Log saved to <code className="font-mono">models/{"<model_name>"}/train.log</code> inside your job folder.
         </p>

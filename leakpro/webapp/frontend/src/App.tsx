@@ -98,7 +98,7 @@ export default function App() {
 
         {step < 5 && (
           <div className="flex items-center justify-between pt-6 border-t border-slate-200 dark:border-slate-800">
-            <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-sm">
+            <div className="flex items-center gap-2 text-slate-500 dark:text-slate-200 text-sm">
               <span className="material-symbols-outlined text-sm">lock</span>
               Your data is processed locally and never leaves your secure environment.
             </div>

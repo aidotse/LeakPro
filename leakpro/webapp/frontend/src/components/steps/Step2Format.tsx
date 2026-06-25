@@ -35,7 +35,7 @@ export default function Step2Format({ jobId, meta, onDone }: Props) {
     <div className="flex flex-col gap-8">
       <div className="space-y-2">
         <h2 className="text-4xl font-black tracking-tight">Confirm Format</h2>
-        <p className="text-slate-600 dark:text-slate-400 text-lg max-w-2xl">
+        <p className="text-slate-600 dark:text-slate-200 text-lg max-w-2xl">
           We detected the following dataset properties. Review and confirm before continuing.
         </p>
       </div>
