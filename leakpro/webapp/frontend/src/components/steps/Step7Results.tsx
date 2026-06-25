@@ -212,7 +212,7 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
                         <button
                           onClick={() => loadPastJob(j.job_id)}
                           disabled={loadingJobId === j.job_id}
-                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-bold hover:bg-primary/90 disabled:opacity-50 shrink-0"
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-700 text-white border border-primary text-xs font-bold hover:bg-slate-600 disabled:opacity-50 shrink-0"
                         >
                           {loadingJobId === j.job_id
                             ? <span className="material-symbols-outlined text-sm animate-spin">sync</span>
@@ -266,7 +266,7 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
               <button
                 onClick={confirmRename}
                 disabled={Object.values(pendingRename.renames).some((v) => !v.trim())}
-                className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-bold hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                className="px-4 py-2 rounded-lg bg-slate-700 text-white border border-primary text-sm font-bold hover:bg-slate-600 disabled:opacity-50 transition-colors"
               >Confirm &amp; Load</button>
             </div>
           </div>

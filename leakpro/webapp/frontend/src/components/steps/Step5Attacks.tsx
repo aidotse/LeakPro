@@ -215,7 +215,7 @@ export default function Step5Attacks({ jobId, models, onDone }: Props) {
           {totalInstances} attack instance{totalInstances !== 1 ? "s" : ""} across {models.length} model{models.length !== 1 ? "s" : ""}
         </p>
         <button onClick={proceed} disabled={totalInstances === 0 || saving}
-          className="px-8 py-2.5 rounded-lg bg-primary text-white font-bold hover:bg-primary/90 transition-colors flex items-center gap-2 shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed">
+          className="px-8 py-2.5 rounded-lg bg-slate-700 text-white border border-primary font-bold hover:bg-slate-600 transition-colors flex items-center gap-2 shadow-lg shadow-black/30 disabled:opacity-50 disabled:cursor-not-allowed">
           {saving ? "Saving…" : "Continue to Run"}
           <span className="material-symbols-outlined text-base">arrow_forward</span>
         </button>
