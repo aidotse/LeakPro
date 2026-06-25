@@ -751,7 +751,9 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                 "source": "trained",
                 "target_folder": str(target_folder),
                 "dpsgd": params.dpsgd,
-                "target_epsilon": params.target_epsilon,
+                # Store the effective epsilon (default 5.0) so the UI never shows
+                # "ε=undefined" when DP-SGD is enabled without an explicit value.
+                "target_epsilon": (params.target_epsilon or 5.0) if params.dpsgd else params.target_epsilon,
                 "train_params": params.model_dump(),
                 "status": "training",
             }
@@ -958,7 +960,7 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                 import pickle as _pkl
                 _accountant = params.accountant if params.accountant in ("prv", "rdp") else "prv"
                 _dpsgd_meta = {
-                    "target_epsilon":    params.target_epsilon or 10.0,
+                    "target_epsilon":    params.target_epsilon or 5.0,
                     "target_delta":      params.target_delta if params.target_delta is not None else 1e-5,
                     "sample_rate":       1.0 / len(loader),
                     "epochs":            params.epochs,
