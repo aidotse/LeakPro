@@ -141,7 +141,7 @@ function CodeModal({ onClose }: { onClose: () => void }) {
           </button>
           <button
             onClick={onClose}
-            className="px-5 py-2 rounded-lg bg-slate-700 text-white border border-primary text-sm font-bold hover:bg-slate-600 transition-colors"
+            className="px-5 py-2 rounded-lg bg-slate-700 text-cream border border-primary text-sm font-bold hover:bg-slate-600 transition-colors"
           >
             Close
           </button>
@@ -245,7 +245,7 @@ function DatasetHandlerUpload({ jobId, onUploaded, initialDone }: { jobId: strin
             placeholder="/home/user/my_data_handler.py"
             className="flex-1 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm font-mono bg-white dark:bg-slate-800 outline-none focus:border-primary" />
           <button onClick={handlePath} disabled={!serverPath.trim() || uploading}
-            className="px-4 py-2 rounded-lg bg-slate-700 text-white border border-primary font-bold text-sm hover:bg-slate-600 transition-colors disabled:opacity-50">
+            className="px-4 py-2 rounded-lg bg-slate-700 text-cream border border-primary font-bold text-sm hover:bg-slate-600 transition-colors disabled:opacity-50">
             {uploading ? "Loading…" : "Use"}
           </button>
         </div>
@@ -336,7 +336,7 @@ function ServerPathForm({ jobId, onDone, initialMeta }: { jobId: string; onDone:
           <button
             onClick={validate}
             disabled={!path.trim() || loading}
-            className="px-5 py-3 rounded-lg bg-slate-700 text-white border border-primary font-bold text-sm hover:bg-slate-600 transition-colors disabled:opacity-50 shrink-0"
+            className="px-5 py-3 rounded-lg bg-slate-700 text-cream border border-primary font-bold text-sm hover:bg-slate-600 transition-colors disabled:opacity-50 shrink-0"
           >
             {loading ? "Checking…" : "Validate"}
           </button>
@@ -370,7 +370,7 @@ function ServerPathForm({ jobId, onDone, initialMeta }: { jobId: string; onDone:
             <button
               onClick={() => onDone(meta)}
               disabled={!handlerUploaded}
-              className="px-8 py-2.5 rounded-lg bg-slate-700 text-white border border-primary font-bold hover:bg-slate-600 transition-colors flex items-center gap-2 shadow-lg shadow-black/30 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-8 py-2.5 rounded-lg bg-slate-700 text-cream border border-primary font-bold hover:bg-slate-600 transition-colors flex items-center gap-2 shadow-lg shadow-black/30 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Continue <span className="material-symbols-outlined text-base">arrow_forward</span>
             </button>
@@ -446,7 +446,7 @@ function UploadForm({ jobId, onDone, initialMeta }: { jobId: string; onDone: (m:
         )}
       </div>
       {!file && (
-        <span className="bg-slate-700 text-white border border-primary px-6 py-2.5 rounded-lg font-bold hover:bg-slate-600 transition-colors shadow-lg shadow-black/30">
+        <span className="bg-slate-700 text-cream border border-primary px-6 py-2.5 rounded-lg font-bold hover:bg-slate-600 transition-colors shadow-lg shadow-black/30">
           Browse Files
         </span>
       )}
@@ -473,7 +473,7 @@ function UploadForm({ jobId, onDone, initialMeta }: { jobId: string; onDone: (m:
           <button
             onClick={() => onDone(meta)}
             disabled={!handlerUploaded}
-            className="px-8 py-2.5 rounded-lg bg-slate-700 text-white border border-primary font-bold hover:bg-slate-600 transition-colors flex items-center gap-2 shadow-lg shadow-black/30 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-8 py-2.5 rounded-lg bg-slate-700 text-cream border border-primary font-bold hover:bg-slate-600 transition-colors flex items-center gap-2 shadow-lg shadow-black/30 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Continue <span className="material-symbols-outlined text-base">arrow_forward</span>
           </button>
@@ -495,7 +495,7 @@ function ModeButton({ active, onClick, icon, label }: {
       onClick={onClick}
       className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-colors
         ${active
-          ? "bg-slate-700 text-white border border-primary shadow-lg shadow-black/30"
+          ? "bg-slate-700 text-cream border border-primary shadow-lg shadow-black/30"
           : "border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
         }`}
     >

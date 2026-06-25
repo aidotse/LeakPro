@@ -283,7 +283,7 @@ export default function Venn({ results }: Props) {
                 onClick={() => setFprValue(opt.value)}
                 className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-colors
                   ${fprValue === opt.value
-                    ? "bg-slate-700 text-white border-transparent"
+                    ? "bg-slate-700 text-cream border-transparent"
                     : "border-slate-300 dark:border-slate-700 text-slate-500"}`}
               >
                 {opt.label}

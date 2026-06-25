@@ -64,7 +64,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-100 font-display">
+    <div className="min-h-screen flex flex-col bg-background-light dark:bg-background-dark text-slate-900 dark:text-cream font-display">
       <Nav dark={dark} onToggleDark={() => setDark(!dark)} />
 
       <main className="flex-1 max-w-4xl mx-auto w-full px-6 py-12 flex flex-col gap-12">
