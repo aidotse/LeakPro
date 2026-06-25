@@ -58,13 +58,13 @@ export default function ServerOrUpload({ label, hint, accept, icon, onFile, onPa
   }
 
   return (
-    <div className="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+    <div className="border border-slate-200 dark:border-surface-border rounded-xl overflow-hidden">
       {/* Tab bar */}
-      <div className="flex border-b border-slate-200 dark:border-slate-700">
+      <div className="flex border-b border-slate-200 dark:border-surface-border">
         {(["server", "upload"] as const).map((m) => (
           <button key={m} onClick={() => setMode(m)}
             className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-bold transition-colors
-              ${mode === m ? "bg-primary/10 text-primary border-b-2 border-primary" : "text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800"}`}>
+              ${mode === m ? "bg-primary/10 text-primary border-b-2 border-primary" : "text-slate-500 hover:bg-slate-50 dark:hover:bg-surface-2"}`}>
             <span className="material-symbols-outlined text-sm">{m === "server" ? "dns" : "upload_file"}</span>
             {m === "server" ? "Server path" : "Upload"}
           </button>
@@ -76,7 +76,7 @@ export default function ServerOrUpload({ label, hint, accept, icon, onFile, onPa
 
         {mode === "server" ? (
           <div className="flex gap-2">
-            <div className="flex-1 flex items-center gap-2 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 bg-cream focus-within:border-primary transition-colors">
+            <div className="flex-1 flex items-center gap-2 border border-slate-300 dark:border-surface-border rounded-lg px-3 py-2 bg-cream focus-within:border-primary transition-colors">
               <span className="material-symbols-outlined text-slate-400 text-sm shrink-0">folder_open</span>
               <input
                 type="text" value={path}
@@ -92,7 +92,7 @@ export default function ServerOrUpload({ label, hint, accept, icon, onFile, onPa
             </button>
           </div>
         ) : (
-          <label className="flex items-center gap-3 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-lg px-4 py-3 cursor-pointer hover:border-primary/50 transition-colors">
+          <label className="flex items-center gap-3 border-2 border-dashed border-slate-300 dark:border-surface-border rounded-lg px-4 py-3 cursor-pointer hover:border-primary/50 transition-colors">
             <input type="file" className="hidden" accept={accept}
               onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])} />
             <span className={`material-symbols-outlined text-2xl ${loading ? "text-primary animate-pulse" : "text-slate-400"}`}>{icon}</span>

@@ -76,7 +76,7 @@ export default function Step6Run({ jobId, models, onDone, onRestart }: Props) {
       {/* Summary cards */}
       <div className="flex gap-4 flex-wrap">
         {models.map((m) => (
-          <div key={m.name} className="flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 text-sm">
+          <div key={m.name} className="flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-200 dark:border-surface-border bg-slate-50/50 dark:bg-surface/50 text-sm">
             <span className="material-symbols-outlined text-primary text-base">psychology</span>
             <span className="font-semibold">{m.name}</span>
             {m.dpsgd && <span className="text-xs text-blue-500 font-semibold">DP-SGD</span>}
@@ -121,7 +121,7 @@ export default function Step6Run({ jobId, models, onDone, onRestart }: Props) {
           </div>
           <button
             onClick={onRestart}
-            className="self-start flex items-center gap-2 px-5 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-sm font-bold hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+            className="self-start flex items-center gap-2 px-5 py-2 rounded-lg border border-slate-300 dark:border-surface-border text-sm font-bold hover:bg-slate-50 dark:hover:bg-surface-2 transition-colors"
           >
             <span className="material-symbols-outlined text-base">restart_alt</span>
             Start Over
@@ -139,8 +139,8 @@ export default function Step6Run({ jobId, models, onDone, onRestart }: Props) {
 
       {/* Live log terminal — always visible once launched */}
       {status !== "idle" && (
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
-          <div className="px-4 py-2 bg-slate-100 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 text-xs font-mono text-slate-500 flex items-center gap-2">
+        <div className="rounded-xl border border-slate-200 dark:border-surface-border overflow-hidden">
+          <div className="px-4 py-2 bg-slate-100 dark:bg-surface border-b border-slate-200 dark:border-surface-border text-xs font-mono text-slate-500 flex items-center gap-2">
             <span className={`size-2.5 rounded-full ${status === "running" ? "bg-green-400 animate-pulse" : status === "done" ? "bg-green-400" : "bg-red-400"}`} />
             Live output
             {status === "running" && <span className="ml-auto font-mono">{fmtElapsed(elapsed)}</span>}

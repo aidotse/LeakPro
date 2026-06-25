@@ -114,10 +114,10 @@ function CodeModal({ onClose }: { onClose: () => void }) {
       onClick={onClose}
     >
       <div
-        className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col overflow-hidden"
+        className="bg-white dark:bg-surface rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-surface-border">
           <h3 className="font-bold text-lg">Example: Data Handler</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors">
             <span className="material-symbols-outlined">close</span>
@@ -131,10 +131,10 @@ function CodeModal({ onClose }: { onClose: () => void }) {
         <pre className="overflow-auto px-6 py-4 font-mono text-xs text-slate-300 bg-slate-950 mx-6 my-4 rounded-xl max-h-[55vh] leading-relaxed">
           {DATASET_HANDLER_TEMPLATE}
         </pre>
-        <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-slate-800">
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-surface-border">
           <button
             onClick={downloadTemplate}
-            className="flex items-center gap-2 px-5 py-2 rounded-lg border border-slate-300 dark:border-slate-700 text-sm font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            className="flex items-center gap-2 px-5 py-2 rounded-lg border border-slate-300 dark:border-surface-border text-sm font-bold hover:bg-slate-100 dark:hover:bg-surface-2 transition-colors"
           >
             <span className="material-symbols-outlined text-base">download</span>
             Download template
@@ -195,7 +195,7 @@ function DatasetHandlerUpload({ jobId, onUploaded, initialDone }: { jobId: strin
   };
 
   return (
-    <div className="flex flex-col gap-3 p-5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+    <div className="flex flex-col gap-3 p-5 rounded-xl border border-slate-200 dark:border-surface-border bg-slate-50/50 dark:bg-surface/50">
       {showModal && <CodeModal onClose={() => setShowModal(false)} />}
 
       <div className="flex items-start justify-between gap-4">
@@ -203,9 +203,9 @@ function DatasetHandlerUpload({ jobId, onUploaded, initialDone }: { jobId: strin
           <p className="font-bold text-sm">Data Handler</p>
           <p className="text-xs text-slate-500 mt-0.5">
             Define how LeakPro wraps your data for training and auditing. Must define a{" "}
-            <code className="text-xs bg-slate-200 dark:bg-slate-700 px-1 rounded">UserDataset</code> class
-            that is <strong>indexable</strong> — <code className="text-xs bg-slate-200 dark:bg-slate-700 px-1 rounded">dataset[i]</code> returns
-            an <code className="text-xs bg-slate-200 dark:bg-slate-700 px-1 rounded">(input, label)</code> pair.
+            <code className="text-xs bg-slate-200 dark:bg-surface-2 px-1 rounded">UserDataset</code> class
+            that is <strong>indexable</strong> — <code className="text-xs bg-slate-200 dark:bg-surface-2 px-1 rounded">dataset[i]</code> returns
+            an <code className="text-xs bg-slate-200 dark:bg-surface-2 px-1 rounded">(input, label)</code> pair.
           </p>
         </div>
         <button onClick={() => setShowModal(true)} className="shrink-0 flex items-center gap-1 text-xs text-primary font-semibold hover:underline">
@@ -233,7 +233,7 @@ function DatasetHandlerUpload({ jobId, onUploaded, initialDone }: { jobId: strin
           <input ref={inputRef} type="file" accept=".py" className="hidden"
             onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])} />
           <button onClick={() => inputRef.current?.click()} disabled={uploading}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 text-sm text-slate-500 hover:border-primary hover:text-primary transition-colors disabled:opacity-50">
+            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-dashed border-slate-300 dark:border-surface-border text-sm text-slate-500 hover:border-primary hover:text-primary transition-colors disabled:opacity-50">
             <span className="material-symbols-outlined text-base">upload_file</span>
             {uploading ? "Uploading…" : "Upload dataset_handler.py"}
           </button>
@@ -243,7 +243,7 @@ function DatasetHandlerUpload({ jobId, onUploaded, initialDone }: { jobId: strin
           <input type="text" value={serverPath} onChange={(e) => setServerPath(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handlePath()}
             placeholder="/home/user/my_data_handler.py"
-            className="flex-1 border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2 text-sm font-mono bg-cream text-slate-900 placeholder:text-slate-400 outline-none focus:border-primary" />
+            className="flex-1 border border-slate-300 dark:border-surface-border rounded-lg px-3 py-2 text-sm font-mono bg-cream text-slate-900 placeholder:text-slate-400 outline-none focus:border-primary" />
           <button onClick={handlePath} disabled={!serverPath.trim() || uploading}
             className="px-4 py-2 rounded-lg bg-slate-700 text-cream border border-primary font-bold text-sm hover:bg-slate-600 transition-colors disabled:opacity-50">
             {uploading ? "Loading…" : "Use"}
@@ -322,7 +322,7 @@ function ServerPathForm({ jobId, onDone, initialMeta }: { jobId: string; onDone:
       <div className="flex flex-col gap-2">
         <label className="text-xs font-semibold text-slate-500">Absolute path on server</label>
         <div className="flex gap-2">
-          <div className="flex-1 flex items-center gap-2 border border-slate-300 dark:border-slate-700 rounded-lg px-4 py-3 bg-cream focus-within:border-primary transition-colors">
+          <div className="flex-1 flex items-center gap-2 border border-slate-300 dark:border-surface-border rounded-lg px-4 py-3 bg-cream focus-within:border-primary transition-colors">
             <span className="material-symbols-outlined text-slate-400 text-base shrink-0">folder_open</span>
             <input
               type="text"
@@ -423,7 +423,7 @@ function UploadForm({ jobId, onDone, initialMeta }: { jobId: string; onDone: (m:
       className={`flex flex-col items-center justify-center border-2 border-dashed rounded-xl p-12 cursor-pointer transition-all
         ${dragging ? "border-primary bg-primary/10"
           : file ? "border-green-500 bg-green-500/5"
-          : "border-slate-300 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 hover:border-primary/50 hover:bg-primary/5"
+          : "border-slate-300 dark:border-surface-border bg-slate-50/50 dark:bg-surface/50 hover:border-primary/50 hover:bg-primary/5"
         }`}
     >
       <input type="file" className="hidden"
@@ -496,7 +496,7 @@ function ModeButton({ active, onClick, icon, label }: {
       className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold text-sm transition-colors
         ${active
           ? "bg-slate-700 text-cream border border-primary shadow-lg shadow-black/30"
-          : "border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+          : "border border-slate-300 dark:border-surface-border hover:bg-slate-100 dark:hover:bg-surface-2"
         }`}
     >
       <span className="material-symbols-outlined text-base">{icon}</span>
@@ -507,7 +507,7 @@ function ModeButton({ active, onClick, icon, label }: {
 
 function MetaField({ label, value }: { label: string; value: string }) {
   return (
-    <div className="bg-white dark:bg-slate-800 rounded-lg p-3 border border-slate-200 dark:border-slate-700">
+    <div className="bg-white dark:bg-surface-2 rounded-lg p-3 border border-slate-200 dark:border-surface-border">
       <p className="text-xs text-slate-500 mb-1">{label}</p>
       <p className="font-mono text-sm font-bold">{value}</p>
     </div>

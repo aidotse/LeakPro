@@ -90,19 +90,19 @@ export default function Records({ results, jobId }: Props) {
       </div>
 
       {topRecords.length > 0 ? (
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+        <div className="rounded-xl border border-slate-200 dark:border-surface-border overflow-hidden">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
+            <thead className="bg-slate-50 dark:bg-surface border-b border-slate-200 dark:border-surface-border">
               <tr>
                 {headers.map((h) => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-500">{h}</th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+            <tbody className="divide-y divide-slate-200 dark:divide-surface-border">
               {topRecords.map((r) => (
                 <React.Fragment key={`${attackName}-${selectedKey}-${r.rank}`}>
-                  <tr className="hover:bg-slate-50/50 dark:hover:bg-slate-900/50">
+                  <tr className="hover:bg-slate-50/50 dark:hover:bg-surface/50">
                     <td className="px-4 py-2.5 font-bold text-slate-400">#{r.rank}</td>
                     {isImage ? (
                       <td className="px-4 py-2.5">
@@ -122,7 +122,7 @@ export default function Records({ results, jobId }: Props) {
                     <td className="px-4 py-2.5 font-mono">{r.index}</td>
                     <td className="px-4 py-2.5">
                       <div className="flex items-center gap-2">
-                        <div className="flex-1 h-1.5 rounded-full bg-slate-200 dark:bg-slate-700">
+                        <div className="flex-1 h-1.5 rounded-full bg-slate-200 dark:bg-surface-2">
                           <div
                             className="h-1.5 rounded-full bg-red-500"
                             style={{ width: `${Math.min(r.score * 100, 100)}%` }}
@@ -149,8 +149,8 @@ export default function Records({ results, jobId }: Props) {
       {/* Tabular row modal */}
       {(modalData || modalLoading) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setModalData(null)}>
-          <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xl w-full max-w-2xl mx-4 overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+          <div className="bg-white dark:bg-surface rounded-xl shadow-2xl w-full max-w-2xl mx-4 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-surface-border">
               <h3 className="font-bold text-base">
                 {modalData ? `Sample #${modalData.index} — Label: ${modalData.label}` : "Loading…"}
               </h3>
@@ -165,7 +165,7 @@ export default function Records({ results, jobId }: Props) {
                   {modalData.features.map((v, i) => {
                     const name = modalData.feature_names?.[i] ?? `f${i}`;
                     return (
-                      <div key={i} className="flex justify-between gap-4 px-2 py-1 rounded bg-slate-50 dark:bg-slate-800">
+                      <div key={i} className="flex justify-between gap-4 px-2 py-1 rounded bg-slate-50 dark:bg-surface-2">
                         <span className="text-slate-400 truncate max-w-[70%]" title={name}>{name}</span>
                         <span className="font-semibold shrink-0">{v.toFixed(4)}</span>
                       </div>
@@ -186,12 +186,12 @@ function ImgWithLoader({ src }: { src: string }) {
   return (
     <div className="w-16 h-16 relative">
       {!loaded && (
-        <div className="absolute inset-0 rounded border border-slate-200 dark:border-slate-700 bg-slate-200 dark:bg-slate-700 animate-pulse" />
+        <div className="absolute inset-0 rounded border border-slate-200 dark:border-surface-border bg-slate-200 dark:bg-surface-2 animate-pulse" />
       )}
       <img
         src={src}
         alt=""
-        className={`w-16 h-16 object-contain rounded border border-slate-200 dark:border-slate-700 transition-opacity duration-200 ${loaded ? "opacity-100" : "opacity-0"}`}
+        className={`w-16 h-16 object-contain rounded border border-slate-200 dark:border-surface-border transition-opacity duration-200 ${loaded ? "opacity-100" : "opacity-0"}`}
         onLoad={() => setLoaded(true)}
         onError={() => setLoaded(true)}
       />
@@ -214,7 +214,7 @@ function Selector({ label, value, options, onChange }: {
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm px-3 py-2 min-w-[10rem] pr-8"
+        className="rounded border-slate-300 dark:border-surface-border bg-white dark:bg-surface-2 text-sm px-3 py-2 min-w-[10rem] pr-8"
       >
         {normalized.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>

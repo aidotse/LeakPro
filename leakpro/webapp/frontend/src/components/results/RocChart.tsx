@@ -101,7 +101,7 @@ export default function RocChart({ results }: Props) {
                 on ? prev.filter((n) => n !== m.model_name) : [...prev, m.model_name]
               )}
               className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold border transition-colors
-                ${on ? "border-transparent text-cream" : "border-slate-300 dark:border-slate-700 text-slate-500"}`}
+                ${on ? "border-transparent text-cream" : "border-slate-300 dark:border-surface-border text-slate-500"}`}
               style={on ? { backgroundColor: COLOURS[i % COLOURS.length] } : {}}
             >
               {m.model_name}
@@ -121,7 +121,7 @@ export default function RocChart({ results }: Props) {
             className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-colors
               ${attackMode === mode
                 ? "bg-slate-700 text-cream border-transparent"
-                : "border-slate-300 dark:border-slate-700 text-slate-500"}`}
+                : "border-slate-300 dark:border-surface-border text-slate-500"}`}
           >
             {mode === "all" ? "All attacks" : "Best per model"}
           </button>
@@ -130,7 +130,7 @@ export default function RocChart({ results }: Props) {
         {/* Download CSV */}
         <button
           onClick={downloadCSV}
-          className="ml-auto flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-500 text-xs font-bold hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+          className="ml-auto flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-surface-border text-slate-500 text-xs font-bold hover:bg-slate-50 dark:hover:bg-surface-2 transition-colors"
         >
           <span className="material-symbols-outlined text-sm">download</span>
           CSV
@@ -160,22 +160,22 @@ export default function RocChart({ results }: Props) {
       />
 
       {/* TPR table */}
-      <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+      <div className="rounded-xl border border-slate-200 dark:border-surface-border overflow-hidden">
         <table className="w-full text-xs">
-          <thead className="bg-slate-50 dark:bg-slate-900">
+          <thead className="bg-slate-50 dark:bg-surface">
             <tr>
               {["Model", "Attack", "AUC", "TPR@10%", "TPR@1%", "TPR@0.1%", "TPR@0%"].map((h) => (
                 <th key={h} className="px-3 py-2 text-left font-bold uppercase tracking-wider text-slate-500">{h}</th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+          <tbody className="divide-y divide-slate-200 dark:divide-surface-border">
             {results.flatMap((m) =>
               m.attacks.map((a, ai) => {
                 const infoOpen = openInfoKey === m.model_name;
                 const isLastAttack = ai === m.attacks.length - 1;
                 return [
-                  <tr key={`${m.model_name}-${a.attack_name}`} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/50">
+                  <tr key={`${m.model_name}-${a.attack_name}`} className="hover:bg-slate-50/50 dark:hover:bg-surface/50">
                     <td className="px-3 py-2 font-semibold">
                       <div className="flex items-center gap-1">
                         {m.model_name}
@@ -196,7 +196,7 @@ export default function RocChart({ results }: Props) {
                     <td className="px-3 py-2 font-mono">{fmt(a.tpr_at_fpr["TPR@0%FPR"])}</td>
                   </tr>,
                   infoOpen && isLastAttack ? (
-                    <tr key={`${m.model_name}-info`} className="bg-slate-50 dark:bg-slate-900/60">
+                    <tr key={`${m.model_name}-info`} className="bg-slate-50 dark:bg-surface/60">
                       <td colSpan={7} className="px-6 py-4">
                         <MetaPanel r={m} />
                       </td>
