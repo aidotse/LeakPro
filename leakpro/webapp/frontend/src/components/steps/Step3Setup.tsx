@@ -289,7 +289,7 @@ export default function Step3Setup({ jobId, handlerConfig, onDone, initialArch }
             className={`px-5 py-2 rounded-lg font-bold text-sm transition-colors
               ${mode === m
                 ? "bg-slate-700 text-cream border border-primary shadow-lg shadow-black/30"
-                : "border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+                : "border border-slate-300 dark:border-surface-border hover:bg-slate-100 dark:hover:bg-surface-2"
               }`}
           >
             {m === "preset" ? "Use built-in preset" : "Upload my own"}
@@ -311,7 +311,7 @@ export default function Step3Setup({ jobId, handlerConfig, onDone, initialArch }
                   ${enabled ? "cursor-pointer" : "opacity-40 cursor-not-allowed"}
                   ${selected
                     ? "border-primary bg-primary/5 shadow-lg shadow-primary/10"
-                    : "border-slate-200 dark:border-slate-800"}
+                    : "border-slate-200 dark:border-surface-border"}
                   ${enabled && !selected ? "hover:border-primary/40" : ""}
                 `}
               >
@@ -343,7 +343,7 @@ export default function Step3Setup({ jobId, handlerConfig, onDone, initialArch }
                     setExpandedPreset(expanded ? null : p.id);
                   }}
                   disabled={!enabled}
-                  className="w-full flex items-center justify-between px-5 py-2.5 border-t border-slate-100 dark:border-slate-800 text-xs font-semibold text-slate-500 hover:text-primary transition-colors disabled:pointer-events-none"
+                  className="w-full flex items-center justify-between px-5 py-2.5 border-t border-slate-100 dark:border-surface-border text-xs font-semibold text-slate-500 hover:text-primary transition-colors disabled:pointer-events-none"
                 >
                   Details
                   <span className="material-symbols-outlined text-sm">
@@ -353,7 +353,7 @@ export default function Step3Setup({ jobId, handlerConfig, onDone, initialArch }
 
                 {/* Expanded details */}
                 {expanded && (
-                  <div className="px-5 pb-5 flex flex-col gap-2 border-t border-slate-100 dark:border-slate-800 pt-3">
+                  <div className="px-5 pb-5 flex flex-col gap-2 border-t border-slate-100 dark:border-surface-border pt-3">
                     <DetailRow label="Architecture" value={p.details.architecture} />
                     <DetailRow label="Optimizer" value={p.details.optimizer} />
                     <DetailRow label="Learning rate" value={p.details.learning_rate} />
@@ -486,11 +486,11 @@ function CodeModal({ title, caption, code, filename, onClose }: {
       onClick={onClose}
     >
       <div
-        className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col overflow-hidden"
+        className="bg-white dark:bg-surface rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-surface-border">
           <h3 className="font-bold text-lg">{title}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors">
             <span className="material-symbols-outlined">close</span>
@@ -506,10 +506,10 @@ function CodeModal({ title, caption, code, filename, onClose }: {
         </pre>
 
         {/* Footer */}
-        <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-slate-800">
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-surface-border">
           <button
             onClick={() => downloadFile(code, filename)}
-            className="flex items-center gap-2 px-5 py-2 rounded-lg border border-slate-300 dark:border-slate-700 text-sm font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            className="flex items-center gap-2 px-5 py-2 rounded-lg border border-slate-300 dark:border-surface-border text-sm font-bold hover:bg-slate-100 dark:hover:bg-surface-2 transition-colors"
           >
             <span className="material-symbols-outlined text-base">download</span>
             Download template

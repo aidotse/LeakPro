@@ -167,9 +167,9 @@ export default function Step5Attacks({ jobId, models, onDone }: Props) {
       </div>
 
       {models.map((model, mi) => (
-        <div key={model.name} className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+        <div key={model.name} className="rounded-xl border border-slate-200 dark:border-surface-border overflow-hidden">
           {/* Model header */}
-          <div className="flex items-center gap-3 px-6 py-4 bg-slate-50/50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-800">
+          <div className="flex items-center gap-3 px-6 py-4 bg-slate-50/50 dark:bg-surface/50 border-b border-slate-200 dark:border-surface-border">
             <div className="size-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
               <span className="material-symbols-outlined text-sm">psychology</span>
             </div>
@@ -237,16 +237,16 @@ function AttackInstanceCard({ instance, onRemove, onLabelChange, onParamChange }
   const def = ATTACK_DEFS[instance.attack];
 
   return (
-    <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
+    <div className="border border-slate-200 dark:border-surface-border rounded-lg overflow-hidden">
       {/* Header row */}
-      <div className="flex items-center gap-3 px-4 py-3 bg-slate-50/50 dark:bg-slate-900/30">
-        <span className="text-xs font-bold text-slate-400 bg-slate-200 dark:bg-slate-700 px-2 py-0.5 rounded">
+      <div className="flex items-center gap-3 px-4 py-3 bg-slate-50/50 dark:bg-surface/30">
+        <span className="text-xs font-bold text-slate-400 bg-slate-200 dark:bg-surface-2 px-2 py-0.5 rounded">
           {def.label}
         </span>
         <input
           value={instance.label}
           onChange={(e) => onLabelChange(e.target.value)}
-          className="flex-1 bg-transparent border-b border-dashed border-slate-300 dark:border-slate-600 outline-none text-sm font-semibold focus:border-primary px-0 py-0.5"
+          className="flex-1 bg-transparent border-b border-dashed border-slate-300 dark:border-surface-border outline-none text-sm font-semibold focus:border-primary px-0 py-0.5"
           placeholder="Instance name"
         />
         {def.params.length > 0 && (
@@ -263,7 +263,7 @@ function AttackInstanceCard({ instance, onRemove, onLabelChange, onParamChange }
 
       {/* Params panel */}
       {expanded && def.params.length > 0 && (
-        <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-700 grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <div className="px-4 py-3 border-t border-slate-200 dark:border-surface-border grid grid-cols-2 sm:grid-cols-3 gap-3">
           {def.params.map((p) => (
             <ParamField
               key={p.key}
@@ -303,21 +303,21 @@ function ParamField({ def, value, onChange }: {
       {def.type === "boolean" ? (
         <label className="flex items-center gap-2 cursor-pointer">
           <div onClick={() => onChange(!value)}
-            className={`relative w-9 h-5 rounded-full transition-colors ${value ? "bg-primary" : "bg-slate-300 dark:bg-slate-600"}`}>
+            className={`relative w-9 h-5 rounded-full transition-colors ${value ? "bg-primary" : "bg-slate-300 dark:bg-surface-2"}`}>
             <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${value ? "translate-x-4" : ""}`} />
           </div>
           <span className="text-xs">{value ? "On" : "Off"}</span>
         </label>
       ) : def.type === "select" ? (
         <select value={String(value)} onChange={(e) => onChange(e.target.value)}
-          className="w-full rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs px-2 py-1.5">
+          className="w-full rounded border-slate-300 dark:border-surface-border bg-white dark:bg-surface-2 text-xs px-2 py-1.5">
           {def.options?.map((o) => <option key={o} value={o}>{o}</option>)}
         </select>
       ) : (
         <input type="number" value={Number(value)}
           min={def.min} max={def.max} step={def.step ?? 1}
           onChange={(e) => onChange(Number(e.target.value))}
-          className="w-full rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-xs px-2 py-1.5 font-mono"
+          className="w-full rounded border-slate-300 dark:border-surface-border bg-white dark:bg-surface-2 text-xs px-2 py-1.5 font-mono"
         />
       )}
     </div>
@@ -332,7 +332,7 @@ function AddAttackRow({ onAdd }: { onAdd: (attack: string) => void }) {
   return (
     <div className="flex items-center gap-2 pt-1">
       <select value={selected} onChange={(e) => setSelected(e.target.value)}
-        className="rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm px-3 py-1.5">
+        className="rounded border-slate-300 dark:border-surface-border bg-white dark:bg-surface-2 text-sm px-3 py-1.5">
         {Object.entries(ATTACK_DEFS).map(([id, def]) => (
           <option key={id} value={id}>{def.label}</option>
         ))}

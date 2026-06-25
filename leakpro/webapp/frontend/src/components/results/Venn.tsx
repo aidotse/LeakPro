@@ -188,21 +188,21 @@ function PairwiseTable({
       <p className="text-xs text-slate-400 text-center">
         Venn diagram limited to 3 attacks — showing pairwise Jaccard overlap (|A∩B| / |A∪B|)
       </p>
-      <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+      <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-surface-border">
         <table className="text-xs w-full">
           <thead>
             <tr>
-              <th className="px-3 py-2 bg-slate-50 dark:bg-slate-900" />
+              <th className="px-3 py-2 bg-slate-50 dark:bg-surface" />
               {names.map((name, i) => (
-                <th key={i} className="px-3 py-2 bg-slate-50 dark:bg-slate-900 font-bold text-left" style={{ color: colors[i % colors.length] }}>
+                <th key={i} className="px-3 py-2 bg-slate-50 dark:bg-surface font-bold text-left" style={{ color: colors[i % colors.length] }}>
                   {name}
                 </th>
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+          <tbody className="divide-y divide-slate-200 dark:divide-surface-border">
             {names.map((rowName, i) => (
-              <tr key={i} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/50">
+              <tr key={i} className="hover:bg-slate-50/50 dark:hover:bg-surface/50">
                 <td className="px-3 py-2 font-bold" style={{ color: colors[i % colors.length] }}>{rowName}</td>
                 {names.map((_, j) => {
                   const v = jaccards[i][j];
@@ -264,7 +264,7 @@ export default function Venn({ results }: Props) {
             <select
               value={selectedModel}
               onChange={(e) => setSelectedModel(e.target.value)}
-              className="rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm px-3 py-2 min-w-[10rem] pr-8"
+              className="rounded border-slate-300 dark:border-surface-border bg-white dark:bg-surface-2 text-sm px-3 py-2 min-w-[10rem] pr-8"
             >
               {results.map((m) => (
                 <option key={m.model_name} value={m.model_name}>{m.model_name}</option>
@@ -284,7 +284,7 @@ export default function Venn({ results }: Props) {
                 className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-colors
                   ${fprValue === opt.value
                     ? "bg-slate-700 text-cream border-transparent"
-                    : "border-slate-300 dark:border-slate-700 text-slate-500"}`}
+                    : "border-slate-300 dark:border-surface-border text-slate-500"}`}
               >
                 {opt.label}
               </button>
@@ -316,26 +316,26 @@ export default function Venn({ results }: Props) {
 
       {/* Per-attack stats */}
       {validAttacks.length > 0 && (
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
-          <div className="px-3 py-2 bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
+        <div className="rounded-xl border border-slate-200 dark:border-surface-border overflow-hidden">
+          <div className="px-3 py-2 bg-slate-50 dark:bg-surface border-b border-slate-200 dark:border-surface-border">
             <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
               Members identified at {FPR_OPTIONS.find((o) => o.value === fprValue)?.label} FPR
             </span>
           </div>
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
+            <thead className="bg-slate-50 dark:bg-surface border-b border-slate-200 dark:border-surface-border">
               <tr>
                 {["Attack", "Identified", "% of Members", "Total Members"].map((h) => (
                   <th key={h} className="px-4 py-2 text-left text-xs font-bold uppercase tracking-wider text-slate-500">{h}</th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+            <tbody className="divide-y divide-slate-200 dark:divide-surface-border">
               {validAttacks.map((atk, i) => {
                 const count = attackSets[i].size;
                 const pct = totalMembers > 0 ? (count / totalMembers * 100).toFixed(1) : "—";
                 return (
-                  <tr key={atk.attack_name} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/50">
+                  <tr key={atk.attack_name} className="hover:bg-slate-50/50 dark:hover:bg-surface/50">
                     <td className="px-4 py-2.5 font-semibold flex items-center gap-2">
                       <span className="inline-block w-3 h-3 rounded-full shrink-0" style={{ background: colors[i] }} />
                       {atk.attack_name}

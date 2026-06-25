@@ -45,10 +45,10 @@ export default function Step4Models({ jobId, onDone, initialModels }: Props) {
       </div>
 
       {/* Sub-flow A: upload existing */}
-      <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+      <div className="rounded-xl border border-slate-200 dark:border-surface-border overflow-hidden">
         <button
           onClick={() => setShowUpload(!showUpload)}
-          className="w-full flex items-center gap-3 px-6 py-4 bg-slate-50/50 dark:bg-slate-900/50 hover:bg-primary/5 transition-colors text-left"
+          className="w-full flex items-center gap-3 px-6 py-4 bg-slate-50/50 dark:bg-surface/50 hover:bg-primary/5 transition-colors text-left"
         >
           <span className="material-symbols-outlined text-primary">upload</span>
           <span className="font-bold">I have a trained model to upload</span>
@@ -64,10 +64,10 @@ export default function Step4Models({ jobId, onDone, initialModels }: Props) {
       </div>
 
       {/* Sub-flow B: train new */}
-      <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+      <div className="rounded-xl border border-slate-200 dark:border-surface-border overflow-hidden">
         <button
           onClick={() => setShowTrain(!showTrain)}
-          className="w-full flex items-center gap-3 px-6 py-4 bg-slate-50/50 dark:bg-slate-900/50 hover:bg-primary/5 transition-colors text-left"
+          className="w-full flex items-center gap-3 px-6 py-4 bg-slate-50/50 dark:bg-surface/50 hover:bg-primary/5 transition-colors text-left"
         >
           <span className="material-symbols-outlined text-primary">model_training</span>
           <span className="font-bold">Train a new model</span>
@@ -198,13 +198,13 @@ function UploadModelForm({ jobId, onAdded, onUpdated, existingNames }: {
           value={name}
           disabled={nameLocked}
           onChange={(e) => { setName(e.target.value); setResult(null); setCheckError(null); }}
-          className="w-full rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm px-3 py-2 disabled:opacity-60 disabled:cursor-not-allowed"
+          className="w-full rounded border-slate-300 dark:border-surface-border bg-white dark:bg-surface-2 text-sm px-3 py-2 disabled:opacity-60 disabled:cursor-not-allowed"
         />
       </div>
 
       {/* ── Model weights ─────────────────────────────────────── */}
       {!result?.ok && (
-        <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-4 space-y-3">
+        <div className="rounded-lg border border-slate-200 dark:border-surface-border p-4 space-y-3">
           <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Model weights</p>
           <ServerOrUpload
             label="Weights file (.pkl / .pt / .pth)"
@@ -244,7 +244,7 @@ function UploadModelForm({ jobId, onAdded, onUpdated, existingNames }: {
       )}
 
       {/* ── Model metadata — always visible once uploaded, survives model validation ── */}
-      <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-4 space-y-3">
+      <div className="rounded-lg border border-slate-200 dark:border-surface-border p-4 space-y-3">
         <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Model metadata</p>
         <ServerOrUpload
           label="Metadata file (.pkl)"
@@ -445,7 +445,7 @@ function TrainModelForm({ jobId, onAdded, existingCount, initialModels }: {
             <span className="font-semibold">{progress.model} — Epoch {progress.epoch} / {progress.total}</span>
             <span className="font-mono">{pct}%</span>
           </div>
-          <div className="h-2 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+          <div className="h-2 rounded-full bg-slate-200 dark:bg-surface-2 overflow-hidden">
             <div
               className="h-full rounded-full bg-primary transition-all duration-300"
               style={{ width: `${pct}%` }}
@@ -462,8 +462,8 @@ function TrainModelForm({ jobId, onAdded, existingCount, initialModels }: {
         </p>
       )}
       {(logs.length > 0 || training) && (
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
-          <div className="px-4 py-2 bg-slate-100 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 text-xs font-mono text-slate-500 flex items-center gap-2">
+        <div className="rounded-xl border border-slate-200 dark:border-surface-border overflow-hidden">
+          <div className="px-4 py-2 bg-slate-100 dark:bg-surface border-b border-slate-200 dark:border-surface-border text-xs font-mono text-slate-500 flex items-center gap-2">
             <span className={`size-2 rounded-full ${training ? "bg-green-400 animate-pulse" : "bg-slate-400"}`} />
             Training log
           </div>
@@ -532,12 +532,12 @@ function TrainMetricsChart({ metrics }: { metrics: TrainMetrics }) {
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
-      <div className="px-4 py-2 bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 text-xs font-semibold text-slate-500 flex items-center gap-2">
+    <div className="rounded-xl border border-slate-200 dark:border-surface-border overflow-hidden">
+      <div className="px-4 py-2 bg-slate-50 dark:bg-surface border-b border-slate-200 dark:border-surface-border text-xs font-semibold text-slate-500 flex items-center gap-2">
         <span className="material-symbols-outlined text-sm text-green-500">show_chart</span>
         {metrics.model} — Training curves
       </div>
-      <div className="grid grid-cols-2 divide-x divide-slate-200 dark:divide-slate-800 bg-white dark:bg-slate-950">
+      <div className="grid grid-cols-2 divide-x divide-slate-200 dark:divide-surface-border bg-white dark:bg-surface-deep">
         <Plot
           data={lossData}
           layout={{ ...layout, title: { text: "Loss", font: { size: 12, color: fontColor } } }}
@@ -560,12 +560,12 @@ function TrainCard({ params, onChange, onRemove }: {
   params: TrainParams; onChange: (p: Partial<TrainParams>) => void; onRemove?: () => void;
 }) {
   return (
-    <div className="border border-slate-200 dark:border-slate-700 rounded-xl p-5 space-y-4">
+    <div className="border border-slate-200 dark:border-surface-border rounded-xl p-5 space-y-4">
       <div className="flex items-center justify-between">
         <input
           value={params.name}
           onChange={(e) => onChange({ name: e.target.value })}
-          className="font-bold text-sm border-0 border-b border-slate-300 dark:border-slate-600 bg-transparent focus:outline-none focus:border-primary px-0 py-1"
+          className="font-bold text-sm border-0 border-b border-slate-300 dark:border-surface-border bg-transparent focus:outline-none focus:border-primary px-0 py-1"
           placeholder="Model name"
         />
         {onRemove && (
@@ -584,7 +584,7 @@ function TrainCard({ params, onChange, onRemove }: {
           <select
             value={params.optimizer}
             onChange={(e) => onChange({ optimizer: e.target.value })}
-            className="w-full rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm px-3 py-2"
+            className="w-full rounded border-slate-300 dark:border-surface-border bg-white dark:bg-surface-2 text-sm px-3 py-2"
           >
             <option value="adam">Adam</option>
             <option value="sgd">SGD</option>
@@ -604,7 +604,7 @@ function TrainCard({ params, onChange, onRemove }: {
       <label className="flex items-center gap-3 cursor-pointer">
         <div
           onClick={() => onChange({ dpsgd: !params.dpsgd })}
-          className={`relative w-10 h-5 rounded-full transition-colors ${params.dpsgd ? "bg-primary" : "bg-slate-300 dark:bg-slate-600"}`}
+          className={`relative w-10 h-5 rounded-full transition-colors ${params.dpsgd ? "bg-primary" : "bg-slate-300 dark:bg-surface-2"}`}
         >
           <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${params.dpsgd ? "translate-x-5" : ""}`} />
         </div>
@@ -637,7 +637,7 @@ function NumberField({ label, value, min, max, step = 1, onChange }: {
         max={max}
         step={step}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm px-3 py-2"
+        className="w-full rounded border-slate-300 dark:border-surface-border bg-white dark:bg-surface-2 text-sm px-3 py-2"
       />
     </div>
   );
@@ -661,7 +661,7 @@ function CompatCard({ result }: { result: CompatResult }) {
 
         {/* Inference test results */}
         {result.sample_outputs && result.sample_outputs.length > 0 && (
-          <div className="rounded-md border border-green-500/20 bg-white/60 dark:bg-slate-900/60 p-3 space-y-2">
+          <div className="rounded-md border border-green-500/20 bg-white/60 dark:bg-surface/60 p-3 space-y-2">
             <p className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
               <span className="material-symbols-outlined text-sm text-primary">psychology</span>
               Inference test — real data samples
@@ -706,7 +706,7 @@ function CompatCard({ result }: { result: CompatResult }) {
 
 function ModelCard({ model, onRemove }: { model: ModelEntry; onRemove: () => void }) {
   return (
-    <div className="flex items-center gap-4 p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+    <div className="flex items-center gap-4 p-4 rounded-xl border border-slate-200 dark:border-surface-border bg-slate-50/50 dark:bg-surface/50">
       <div className={`size-9 rounded-lg flex items-center justify-center
         ${model.status === "ready" ? "bg-green-500/10 text-green-500" : model.status === "training" ? "bg-primary/10 text-primary" : "bg-red-500/10 text-red-500"}`}>
         <span className="material-symbols-outlined text-base">
