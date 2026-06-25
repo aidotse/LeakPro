@@ -76,14 +76,14 @@ export default function ServerOrUpload({ label, hint, accept, icon, onFile, onPa
 
         {mode === "server" ? (
           <div className="flex gap-2">
-            <div className="flex-1 flex items-center gap-2 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 bg-white dark:bg-slate-800 focus-within:border-primary transition-colors">
+            <div className="flex-1 flex items-center gap-2 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 bg-cream focus-within:border-primary transition-colors">
               <span className="material-symbols-outlined text-slate-400 text-sm shrink-0">folder_open</span>
               <input
                 type="text" value={path}
                 onChange={(e) => setPath(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handlePath()}
                 placeholder="/absolute/path/on/server"
-                className="flex-1 bg-transparent outline-none text-xs font-mono"
+                className="flex-1 bg-transparent outline-none text-xs font-mono text-slate-900 placeholder:text-slate-400"
               />
             </div>
             <button onClick={handlePath} disabled={!path.trim() || loading}
