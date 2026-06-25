@@ -145,7 +145,12 @@ class ModelHandler():
         if not isinstance(model, list):
             model = [model]
         data_indices = np.concatenate((self.handler.train_indices, self.handler.test_indices))
-        logits = np.array(ModelLogits()(model, self.handler, data_indices)).squeeze()
+        # ModelLogits returns one (N, num_classes) entry per model; cache_logits always
+        # caches a single model, so drop only the leading model-list axis. A bare
+        # .squeeze() would also collapse the class axis of a single-logit binary head
+        # (1, N, 1) -> (N,), breaking attacks that index logits as [rows, labels].
+        logits = np.array(ModelLogits()(model, self.handler, data_indices))
+        logits = logits.squeeze(axis=0) if logits.shape[0] == 1 else logits.squeeze()
         np.save(cache_file, logits)
         np.save(indices_file, data_indices)
         logger.info(f"Saved logits to {cache_file}")
