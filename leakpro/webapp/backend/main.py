@@ -24,6 +24,28 @@ from leakpro.schemas import EvalOutput, TrainingOutput
 # Default train / eval — used when no custom handler.py is uploaded
 # ---------------------------------------------------------------------------
 
+def _safe_device(min_free_mb: int = 400):
+    """Pick CUDA only if it has real free memory, else CPU.
+
+    On a shared/full GPU, moving even a tiny model to CUDA raises an OOM
+    RuntimeError. Falling back to CPU keeps small jobs (e.g. tabular MLP/LR)
+    runnable when another process is occupying the card.
+    """
+    import torch
+    if not torch.cuda.is_available():
+        return torch.device("cpu")
+    try:
+        free, _total = torch.cuda.mem_get_info()
+        if free < min_free_mb * 1024 * 1024:
+            print(f"[train] GPU has only {free // (1024 * 1024)} MiB free — training on CPU")
+            return torch.device("cpu")
+        probe = torch.zeros(1, device="cuda"); del probe
+        return torch.device("cuda")
+    except RuntimeError:
+        print("[train] CUDA unavailable or out of memory — training on CPU")
+        return torch.device("cpu")
+
+
 def _default_train(loader, model, criterion, optimizer, epochs,
                    dpsgd_metadata_path=None, virtual_batch_size=16, binary=False):
     """Built-in training loop. Pass dpsgd_metadata_path to activate DP-SGD."""
@@ -31,7 +53,7 @@ def _default_train(loader, model, criterion, optimizer, epochs,
     import torch
     from tqdm import tqdm
 
-    dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    dev = _safe_device()
 
     if dpsgd_metadata_path:
         from opacus import PrivacyEngine
@@ -161,7 +183,7 @@ def _default_train(loader, model, criterion, optimizer, epochs,
 def _default_eval(loader, model, criterion, binary=False):
     """Built-in eval loop."""
     import torch
-    dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    dev = _safe_device()
     model.to(dev)
     model.eval()
     loss, acc, total = 0.0, 0.0, 0
