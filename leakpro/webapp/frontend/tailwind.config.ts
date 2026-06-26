@@ -16,7 +16,7 @@ export default {
         // page), surface-2 = chips/hover, surface-deep = darkest wells (code blocks).
         surface: "#254c5b",
         "surface-2": "#2d5867",
-        "surface-deep": "#182f38",
+        "surface-deep": "#152f3a",
         "surface-border": "#365d6c",
       },
       fontFamily: {
