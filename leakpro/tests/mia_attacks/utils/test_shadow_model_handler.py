@@ -68,12 +68,11 @@ def test_shadow_model_creation_and_loading(image_handler:ImageInputHandler) -> N
     # Test creation
     n_models = 2
     training_fraction = 0.5
-    online = False
 
     entries_start = os.listdir(sm.storage_path)
     n_entries_start = len(entries_start)
 
-    indx = sm.create_shadow_models(n_models, image_handler.test_indices, training_fraction, online)[0]
+    indx = sm.create_shadow_models(n_models, image_handler.test_indices, training_fraction)[0]
     entries = os.listdir(sm.storage_path)
     n_entries_phase1 = len(entries)
     assert n_entries_phase1 - n_entries_start == 2*n_models
@@ -222,7 +221,6 @@ def test_shadow_model_filter_requires_full_config_match(image_handler: ImageInpu
         "batch_size": sm.batch_size,
         "train_result": EvalOutput(accuracy=0.0, loss=0.0),
         "test_result": EvalOutput(accuracy=0.0, loss=0.0),
-        "online": True,
         "model_class": sm.model_class,
         "model_module_path": sm.model_path,
         "target_model_hash": sm.target_model_hash,
@@ -241,7 +239,7 @@ def test_shadow_model_filter_requires_full_config_match(image_handler: ImageInpu
     with open(tmp_path / "metadata_1.pkl", "wb") as file:
         pickle.dump(stale_metadata, file)
 
-    all_indices, filtered_indices = sm._filter(data_size=5, online=True)
+    all_indices, filtered_indices = sm._filter(data_size=5)
 
     assert sorted(all_indices) == [0, 1]
     assert filtered_indices == [0]
@@ -275,7 +273,7 @@ def test_shadow_model_creation_uses_shadow_batch_size(
     monkeypatch.setattr(image_handler, "eval", lambda *args, **kwargs: EvalOutput(accuracy=0.0, loss=0.0))
     monkeypatch.setattr(sm, "cache_logits", lambda *args, **kwargs: None)
 
-    sm.create_shadow_models(num_models=1, shadow_population=image_handler.test_indices, training_fraction=0.5, online=False)
+    sm.create_shadow_models(num_models=1, shadow_population=image_handler.test_indices, training_fraction=0.5)
 
     assert observed["batch_size"] == shadow_config.batch_size
 
@@ -316,7 +314,6 @@ def test_filter_rejects_shadow_models_from_different_population(image_handler: I
         "batch_size": sm.batch_size,
         "train_result": EvalOutput(accuracy=0.0, loss=0.0),
         "test_result": EvalOutput(accuracy=0.0, loss=0.0),
-        "online": False,
         "model_class": sm.model_class,
         "model_module_path": sm.model_path,
         "target_model_hash": sm.target_model_hash,
@@ -326,7 +323,7 @@ def test_filter_rejects_shadow_models_from_different_population(image_handler: I
     with open(tmp_path / "metadata_0.pkl", "wb") as f:
         pickle.dump(stale_metadata, f)
 
-    all_indices, filtered_indices = sm._filter(data_size=5, online=False)
+    all_indices, filtered_indices = sm._filter(data_size=5)
 
     assert all_indices == [0]
     assert filtered_indices == []

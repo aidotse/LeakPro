@@ -119,7 +119,6 @@ class AttackOSLO(AbstractMIA):
             num_models = self.num_source_models + self.num_validation_models,
             shadow_population =  self.attack_data_indices,
             training_fraction = self.training_data_fraction,
-            online = self.online
         )
 
         self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)
