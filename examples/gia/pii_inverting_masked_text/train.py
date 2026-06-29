@@ -5,7 +5,7 @@
 """Train function that keeps the computational graph intact."""
 from collections import OrderedDict
 
-from torch import cuda, device
+from leakpro.utils.device import get_device
 from torch.nn import Module
 from torch.utils.data import DataLoader
 from leakpro.fl_utils.gia_module_to_functional import MetaModule
@@ -32,7 +32,7 @@ def train(
     """
     seed_everything(seed=42)
     
-    gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+    gpu_or_cpu = get_device()
     model.to(gpu_or_cpu)
     patched_model = MetaModule(model)
     model.train()

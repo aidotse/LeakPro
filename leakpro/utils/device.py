@@ -52,13 +52,34 @@ def is_hpu_available() -> bool:
         return False
 
 
+_VALID_OVERRIDE_DEVICES = {"cpu", "cuda", "hpu"}
+
+
 @lru_cache(maxsize=1)
 def get_device() -> torch.device:
     """Return the best available ``torch.device`` for this host.
 
     The result is cached for the lifetime of the process; call
     :func:`get_device.cache_clear` if you need to re-detect (e.g. in tests).
+
+    The environment variable ``LEAKPRO_DEVICE`` can pin the device without
+    code changes — useful in CI or when debugging on a mixed HPU+CUDA machine::
+
+        LEAKPRO_DEVICE=cpu pytest ...
+
+    Accepted values (case-insensitive): ``cpu``, ``cuda``, ``hpu``.
+    An unrecognised value is ignored with a warning and normal detection runs.
     """
+    override = os.environ.get("LEAKPRO_DEVICE", "").strip().lower()
+    if override:
+        if override in _VALID_OVERRIDE_DEVICES:
+            logger.info("Hardware detection: device overridden by LEAKPRO_DEVICE=%s.", override)
+            return torch.device(override)
+        logger.warning(
+            "LEAKPRO_DEVICE=%r is not a recognised device (valid: %s); ignoring override.",
+            override,
+            ", ".join(sorted(_VALID_OVERRIDE_DEVICES)),
+        )
     if is_hpu_available():
         logger.info("Hardware detection: using Habana Gaudi HPU.")
         return torch.device("hpu")

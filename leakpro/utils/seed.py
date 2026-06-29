@@ -9,6 +9,7 @@ import numpy as np
 import torch
 
 from leakpro.utils.device import get_device
+from leakpro.utils.logger import logger
 
 
 def seed_everything(seed: int) -> None:
@@ -27,7 +28,7 @@ def seed_everything(seed: int) -> None:
                 hthpu.manual_seed_all(seed)
             elif hasattr(hthpu, "random") and hasattr(hthpu.random, "manual_seed_all"):
                 hthpu.random.manual_seed_all(seed)
-        except ImportError:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("HPU seed could not be set: %s", exc)
     np.random.seed(seed)
     random.seed(seed)

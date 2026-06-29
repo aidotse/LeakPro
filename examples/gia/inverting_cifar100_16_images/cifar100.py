@@ -4,13 +4,14 @@
 #
 """Module with functions for preparing the dataset for training the target models."""
 import torchvision
-from torch import Tensor, as_tensor, cuda, device, randperm
+from torch import Tensor, as_tensor, randperm
 from torch.utils.data import DataLoader, Subset
 from torchvision import transforms
 
 from leakpro.fl_utils.data_utils import get_meanstd
+from leakpro.utils.device import get_device
 
-DEVICE = device("cuda" if cuda.is_available() else "cpu")
+DEVICE = get_device()
 
 def get_cifar100_loader(start_idx:int = None, num_images:int = 16, client_batch_size:int = 32, pre_train_batch_size: int=64,
                         num_workers:int = 2 ) -> tuple[DataLoader, DataLoader, Tensor, Tensor]:

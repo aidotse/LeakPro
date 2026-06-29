@@ -6,7 +6,7 @@
 
 import torch
 from torch import no_grad, optim
-from torch.nn import CrossEntropyLoss
+from torch.nn import BCEWithLogitsLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from leakpro.schemas import EvalOutput, TrainingOutput
@@ -30,8 +30,8 @@ class AdultInputHandler(AbstractInputHandler):
 
 
     def get_criterion(self)->None:
-        """Set the CrossEntropyLoss for the model."""
-        return CrossEntropyLoss()
+        """Set the BCEWithLogitsLoss for the model."""
+        return BCEWithLogitsLoss()
 
     def get_optimizer(self, model:torch.nn.Module) -> None:
         """Set the optimizer for the model."""
@@ -61,13 +61,13 @@ class AdultInputHandler(AbstractInputHandler):
             train_acc, train_loss, total_samples = 0.0, 0.0, 0
 
             for data, target in dataloader:
-                target = target.long()
+                target = target.float().unsqueeze(1)
                 data, target = data.to(dev, non_blocking=True), target.to(dev, non_blocking=True)
                 optimizer.zero_grad()
                 output = model(data)
 
                 loss = criterion(output, target)
-                pred = output.argmax(dim=1)
+                pred = output >= 0.5
                 train_acc += pred.eq(target).sum().item()
 
                 loss.backward()
@@ -99,12 +99,12 @@ class AdultInputHandler(AbstractInputHandler):
         loss, acc, total_samples = 0.0, 0.0, 0
         with no_grad():
             for data, target in dataloader:
-                target = target.long()
-                data, target = data.to(dev), target.to(dev)
+                target = target.float().unsqueeze(1)
+                data, target = data.to(dev, non_blocking=True), target.to(dev, non_blocking=True)
                 output = model(data)
                 mark_step(dev)
                 loss += criterion(output, target).item() * target.size(0)
-                pred = output.argmax(dim=1)
+                pred = output >= 0.5
                 acc += pred.eq(target).sum().item()
                 total_samples += target.size(0)
         model.to("cpu")

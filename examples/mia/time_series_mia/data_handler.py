@@ -9,7 +9,9 @@ import yaml
 import torch
 import random
 import numpy as np
-from torch import cuda, optim
+from torch import optim
+
+from leakpro.utils.device import get_device
 from torch.nn import MSELoss
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
@@ -63,7 +65,7 @@ class IndividualizedInputHandler(AbstractInputHandler):
             best_state_dict = copy.deepcopy(model.state_dict())
 
         # prepare training
-        device = torch.device("cuda" if cuda.is_available() else "cpu")
+        device = get_device()
         model.to(device)
 
         # training loop
@@ -111,7 +113,7 @@ class IndividualizedInputHandler(AbstractInputHandler):
         criterion: torch.nn.Module = None,
     ) -> EvalOutput:
         """Model evaluation procedure."""
-        device = torch.device("cuda" if cuda.is_available() else "cpu")
+        device = get_device()
         eval_loss = evaluate(model, dataloader, criterion, device)
         output_dict = {"accuracy": 1.0, "loss": eval_loss}     # TODO: accuracy should be an optional metric!
         eval_output = EvalOutput(**output_dict)

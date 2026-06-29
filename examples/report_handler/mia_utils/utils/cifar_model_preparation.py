@@ -3,7 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 import torch.nn as nn
-from torch import device, optim, cuda, no_grad, save, sigmoid
+from torch import optim, no_grad, save, sigmoid
+
+from leakpro.utils.device import get_device
 import torchvision.models as models
 import pickle
 from tqdm import tqdm
@@ -41,7 +43,7 @@ def create_trained_model_and_metadata(model,
     momentum = train_config["train"]["momentum"]
     epochs = train_config["train"]["epochs"]
     
-    device_name = device("cuda" if cuda.is_available() else "cpu")
+    device_name = get_device()
     model.to(device_name)
     model.train()
 

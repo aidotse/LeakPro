@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Callable, Tuple
 import torch
 
 from leakpro.attacks.gia_attacks.modular.core.component_base import Component, ComponentMetadata
+from leakpro.utils.device import mark_step
 
 if TYPE_CHECKING:
     from leakpro.attacks.gia_attacks.modular.components.composable_optimizer import InternalOptimizerState
@@ -114,6 +115,7 @@ class StandardStepStrategy(StepStrategy):
             return total_loss
 
         state.optimizer.step(closure)
+        mark_step()
         apply_constraints_fn(state)
 
         if state.scheduler is not None:

@@ -18,6 +18,11 @@ def softmax_logits(logits: np.ndarray, temp:float=1.0, dimension:int=-1) -> np.n
         dimension (int): Dimension to apply softmax.
 
     """
+    # 1D logits from BCEWithLogitsLoss: .squeeze() in cache_logits collapses [N,1] → [N].
+    # Reshape to [N, 1] so the single-class branch below handles it correctly.
+    if logits.ndim == 1:
+        logits = logits.reshape(-1, 1)
+
     # If the number of classes is 1, apply sigmoid to return a matrix of [1 - p, p]
     if logits.shape[dimension] == 1:
         logits = from_numpy(logits)
