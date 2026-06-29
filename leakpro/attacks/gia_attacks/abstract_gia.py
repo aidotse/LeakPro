@@ -20,6 +20,7 @@ from leakpro.fl_utils.model_utils import MedianPool2d
 from leakpro.fl_utils.similarity_measurements import dataloaders_psnr, dataloaders_ssim_ignite, text_reconstruciton_score
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.schemas import OptunaConfig
+from leakpro.utils.device import mark_step
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
@@ -116,6 +117,7 @@ class AbstractGIA(AbstractAttack):
                 closure = gradient_closure(optimizer)
                 pre_step_loader = deepcopy(reconstruction_loader)
                 loss = optimizer.step(closure)
+                mark_step()
                 scheduler.step()
                 with torch.no_grad():
                     # force pixels to be in reasonable ranges
@@ -176,6 +178,7 @@ class AbstractGIA(AbstractAttack):
                 previous_reconstruction_data = deepcopy(reconstruction_loader)
                 previous_optimizer_state = deepcopy(optimizer.state_dict())
                 last_loss = optimizer.step(closure)
+                mark_step()
                 loss = self.inference_closure()
                 tryout = 0
                 while loss > last_loss and tryout < tryouts:
@@ -189,6 +192,7 @@ class AbstractGIA(AbstractAttack):
                         param_group["lr"] = param_group["lr"]/2
                     closure = gradient_closure(optimizer)
                     _ = optimizer.step(closure)
+                    mark_step()
                     loss = self.inference_closure()
 
                     tryout += 1

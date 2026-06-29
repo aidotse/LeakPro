@@ -4,7 +4,9 @@
 #
 import os
 import torch
-from torch import cuda, device, optim
+from torch import optim
+
+from leakpro.utils.device import get_device
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -42,7 +44,7 @@ class CelebA_InputHandler(AbstractInputHandler):
         if not epochs:
             raise ValueError("Epochs not found in configurations")
 
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         model.to(gpu_or_cpu)
 
         for epoch in range(epochs):
@@ -73,7 +75,7 @@ class CelebA_InputHandler(AbstractInputHandler):
     
     def evaluate(self, dataloader: DataLoader, model: torch.nn.Module, criterion: torch.nn.Module) -> dict:
         """Evaluate the model."""
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         model.to(gpu_or_cpu)
         model.eval()
 

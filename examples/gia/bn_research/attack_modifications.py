@@ -4,8 +4,8 @@
 #
 import torch
 from leakpro.fl_utils.similarity_measurements import cosine_similarity_weights, l2_norm, total_variation
+from leakpro.utils.device import get_device
 from leakpro.utils.import_helper import Callable, Self
-from torch import cuda, device
 import time
 
 import torch
@@ -122,7 +122,7 @@ def prepare_attack(self:Self) -> None:
         None
 
     """
-    gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+    gpu_or_cpu = get_device()
     self.model.to(gpu_or_cpu)
     self.model.train()
     bn_channel_element_counts = []

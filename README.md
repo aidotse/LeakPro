@@ -116,7 +116,37 @@ Our [example portfolio](https://github.com/aidotse/LeakPro/tree/readme/examples)
 1. **Navigate to the project repo**
 `cd Leakpro`
 2. **Install with pip**
-`pip install -e .[dev]`
+
+   **CPU / CUDA (default):**
+   ```bash
+   pip install -e .[dev]
+   ```
+
+   **Habana Gaudi (HPU):** the Habana plugin requires the **CPU upstream** build of
+   torch, not the default CUDA wheel that pip resolves from PyPI. Install torch
+   manually first so pip respects the already-installed version:
+
+   ```bash
+   # Step 1 — CPU upstream torch (Habana requires this exact build variant)
+   pip install torch==2.10.0 --index-url https://download.pytorch.org/whl/cpu
+
+   # Step 2 — LeakPro with HPU dev and runtime extras
+   pip install -e ".[hpu,dev-hpu]"
+
+   # Step 3 — remaining HPU runtime dependencies
+   python -m leakpro.utils.hardware_setup --install
+   ```
+
+   > **Why step 1 is required:** `habana_frameworks` checks the torch build variant
+   > at import time and raises an `AssertionError` if it finds a CUDA build
+   > (`2.10.0+cu128`). pip cannot be told to prefer the CPU wheel via
+   > `pyproject.toml`, so the wheel must be pre-installed before the extras are
+   > resolved.
+   >
+   > **`habana-torch-plugin`** itself must be pulled from Habana's own package
+   > index — it is not on PyPI. Follow the
+   > [Habana installation guide](https://docs.habana.ai/en/latest/Installation_Guide/index.html)
+   > before running the steps above.
 
 ## How to run
 

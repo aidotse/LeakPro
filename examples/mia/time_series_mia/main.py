@@ -10,6 +10,7 @@ sys.path.append(project_root)
 from examples.mia.time_series_mia.utils.data_preparation import preprocess_dataset, get_dataloaders
 from examples.mia.time_series_mia.utils.metrics import smape, nd
 from examples.mia.time_series_mia.utils.model_preparation import create_trained_model_and_metadata, predict
+from leakpro.utils.device import get_device
 from leakpro.utils.seed import seed_everything
 from examples.mia.time_series_mia.utils.models.LSTM import LSTM
 from examples.mia.time_series_mia.utils.models.TCN import TCN
@@ -110,7 +111,7 @@ if __name__ == "__main__":
     train_loss, test_loss = create_trained_model_and_metadata(model, train_loader, test_loader, epochs, optimizer, loss_fn, dataset_name, val_loader, early_stopping, patience)
     
     # Print metrics on final model, unscaled vs scaled, train and test
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = get_device()
     scaler = dataset.scaler
 
     train = predict(model, train_loader, device, scaler, original_scale=False)

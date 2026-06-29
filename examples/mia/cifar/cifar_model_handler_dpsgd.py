@@ -11,7 +11,9 @@ import pickle
 from pathlib import Path
 
 import torch
-from torch import cuda, no_grad, optim
+from torch import no_grad, optim
+
+from leakpro.utils.device import get_device
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -88,7 +90,7 @@ class CifarModelHandlerDPsgd(AbstractInputHandler, role="model"):
         if not hasattr(model, "dpsgd"):
             raise ValueError("Model is missing required 'dpsgd' attribute")
 
-        dev = torch.device("cuda" if cuda.is_available() else "cpu")
+        dev = get_device()
         run_dpsgd = bool(model.dpsgd)
         virtual_batch_size = min(dataloader.batch_size, virtual_batch_size)
 
@@ -141,7 +143,7 @@ class CifarModelHandlerDPsgd(AbstractInputHandler, role="model"):
         return TrainingOutput(model=model, metrics=results)
 
     def eval(self, loader, model, criterion) -> EvalOutput:
-        gpu_or_cpu = torch.device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         model.to(gpu_or_cpu)
         model.eval()
         loss, acc, total_samples = 0, 0, 0

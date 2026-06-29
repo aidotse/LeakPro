@@ -13,7 +13,7 @@ from train import train
 from transformers import LongformerTokenizerFast
 from longformer_model import OneHotBERT
 import torch
-from torch import device
+from leakpro.utils.device import get_device
 from data_.data import LabelSet, TrainingBatch
 
 if __name__ == "__main__":
@@ -23,7 +23,7 @@ if __name__ == "__main__":
 
     # define model
     bert = "allenai/longformer-base-4096"
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = get_device()
     label_set = LabelSet(labels=["MASK"])
     model = OneHotBERT(model = bert, num_labels = len(label_set.ids_to_label.values()))
     model = model.to(device)

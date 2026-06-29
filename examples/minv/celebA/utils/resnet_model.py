@@ -10,7 +10,9 @@ for image classification.
 import os
 import pickle
 
-from torch import cuda, device, nn, no_grad, optim, save
+from torch import nn, no_grad, optim, save
+
+from leakpro.utils.device import get_device
 from torchvision.models import resnet18, resnet50, resnet152
 from torchvision.models import ResNet18_Weights, ResNet50_Weights, ResNet152_Weights
 from tqdm import tqdm
@@ -74,7 +76,7 @@ def create_trained_model_and_metadata(model, train_loader, test_loader, train_co
     epochs = train_config["train"]["epochs"]
     weight_decay = train_config["train"]["weight_decay"]
 
-    device_name = device("cuda" if cuda.is_available() else "cpu")
+    device_name = get_device()
     model.to(device_name)
     model.train()
 

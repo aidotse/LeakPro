@@ -35,11 +35,12 @@ def evaluate(model, loader, criterion, device):
     loss, acc = 0, 0
     with no_grad():
         for data, target in loader:
-            data, target = data.to(device), target.long().to(device)
+            data = data.to(device)
+            target = target.float().unsqueeze(1).to(device)
             output = model(data)
             mark_step(device)
             loss += criterion(output, target).item()
-            pred = output.argmax(dim=1)
+            pred = output >= 0.5
             acc += pred.eq(target).sum()
         loss /= len(loader)
         acc = float(acc) / len(loader.dataset)
@@ -51,7 +52,7 @@ def create_trained_model_and_metadata(model, train_loader, test_loader, epochs =
     model.to(device_name)
     model.train()
 
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.8)
     train_losses, train_accuracies = [], []
     test_losses, test_accuracies = [], []
@@ -61,13 +62,13 @@ def create_trained_model_and_metadata(model, train_loader, test_loader, epochs =
         train_acc, train_loss = 0.0, 0.0
 
         for data, target in train_loader:
-            target = target.long()
+            target = target.float().unsqueeze(1)
             data, target = data.to(device_name, non_blocking=True), target.to(device_name, non_blocking=True)
             optimizer.zero_grad()
             output = model(data)
 
             loss = criterion(output, target)
-            pred = output.argmax(dim=1)
+            pred = output >= 0.5
             train_acc += pred.eq(target).sum().item()
 
             loss.backward()

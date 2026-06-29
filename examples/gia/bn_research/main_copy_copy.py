@@ -11,13 +11,14 @@ from leakpro.attacks.gia_attacks.huang import Huang, HuangConfig
 from leakpro.attacks.gia_attacks.invertinggradients import InvertingConfig, InvertingGradients
 from leakpro.run import run_gia_attack
 from leakpro.schemas import OptunaConfig
+from leakpro.utils.device import get_device
 from leakpro.utils.seed import seed_everything
 from model import ResNet, BasicBlock
 
 if __name__ == "__main__":
     # seed_everything(1234)
     model = ResNet(BasicBlock, [5, 5, 5], num_classes=10, base_width=16 * 10)
-    gpu_or_cpu = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    gpu_or_cpu = get_device()
     model.to(gpu_or_cpu)
     bn_channel_element_counts = []
     def bn_forward_hook(module, input, output):

@@ -10,7 +10,7 @@ import re
 
 import numpy as np
 import torch
-from torch import is_tensor, os
+from torch import is_tensor
 from ts2vec import TS2Vec
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler

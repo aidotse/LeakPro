@@ -10,7 +10,9 @@ from torch.utils.data import Dataset
 from transformers import PreTrainedTokenizerFast
 import torch
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+from leakpro.utils.device import get_device
+
+device = get_device()
 
 ## Adapted from https://www.lighttag.io/blog/sequence-labeling-with-transformers/example
 

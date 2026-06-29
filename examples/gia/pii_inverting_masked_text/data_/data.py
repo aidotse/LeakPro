@@ -11,8 +11,9 @@ import itertools
 from tokenizers import Encoding
 import torch.nn.functional as F
 
+from leakpro.utils.device import get_device
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+device = get_device()
 
 ## Adapted from https://www.lighttag.io/blog/sequence-labeling-with-transformers/example
 

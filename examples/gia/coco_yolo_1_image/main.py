@@ -8,7 +8,7 @@ from leakpro.fl_utils.gia_train import trainyolo
 from leakpro.schemas import OptunaConfig
 from leakpro.utils.seed import seed_everything
 from model import yolo_v8_n_basicblock, ComputeLoss, yolo_v8_n_preactblock, yolo_v8_n
-from torch import cuda, device
+from leakpro.utils.device import get_device
 
 if __name__ == "__main__":
     seed_everything(1234)
@@ -19,7 +19,7 @@ if __name__ == "__main__":
     configs = GIABaseRunningConfig()
     configs.optimizer = MetaSGD(lr=0.1)
     configs.data_extension = GiaImageYoloExtension()
-    gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+    gpu_or_cpu = get_device()
     client_loader, data_mean, data_std = get_coco_detection_loader(start_idx=108000, num_images=1, batch_size=1, aug=False)
     model.to(gpu_or_cpu)
     configs.criterion = ComputeLoss(model)

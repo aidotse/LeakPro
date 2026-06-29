@@ -9,6 +9,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader
 
+from leakpro.utils.device import get_device
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
@@ -16,7 +17,7 @@ from leakpro.utils.logger import logger
 def pre_train(model: nn.Module, trainloader: DataLoader, epochs: int = 10) -> None:
     """Pre train a model for a specified amount of epochs."""
     loss_fn = Classification()
-    setup = {"dtype": torch.float, "device": torch.device("cuda" if torch.cuda.is_available() else "cpu")}
+    setup = {"dtype": torch.float, "device": get_device()}
     model.to(setup["device"])
     stats = defaultdict(list)
     optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9,

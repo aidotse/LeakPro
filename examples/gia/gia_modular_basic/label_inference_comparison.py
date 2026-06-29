@@ -28,6 +28,7 @@ from leakpro.attacks.gia_attacks.modular.components.label_inference import (
     OracleLabels,
 )
 from leakpro.fl_utils.fl_client_simulator import FLClientSimulator
+from leakpro.utils.device import get_device
 from leakpro.utils.seed import seed_everything
 from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.training_simulator import (
     TrainingSettings,
@@ -125,7 +126,7 @@ def main():
     print()
     
     seed_everything(42)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = get_device()
     print(f"Device: {device}\n")
     
     # ==========================================================================

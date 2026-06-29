@@ -9,7 +9,9 @@
 import os
 import pickle
 
-from torch import cuda, device, nn, no_grad, optim, save
+from torch import nn, no_grad, optim, save
+
+from leakpro.utils.device import get_device
 from torchvision.models import ResNet18_Weights, resnet18
 from tqdm import tqdm
 
@@ -50,7 +52,7 @@ def create_trained_model_and_metadata(model,
     epochs = train_config["train"]["epochs"]
     weight_decay = train_config["train"]["weight_decay"]
 
-    device_name = device("cuda" if cuda.is_available() else "cpu")
+    device_name = get_device()
     model.to(device_name)
     model.train()
 
