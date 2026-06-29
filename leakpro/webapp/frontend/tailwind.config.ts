@@ -14,7 +14,7 @@ export default {
         // Teal-family surfaces so cards/panels harmonize with the dark teal page
         // instead of the old blue-black slate. surface = raised card (lighter than
         // page), surface-2 = chips/hover, surface-deep = darkest wells (code blocks).
-        surface: "#254c5b",
+        surface: "#203b45",
         "surface-2": "#2d5867",
         "surface-deep": "#152f3a",
         "surface-border": "#365d6c",
