@@ -67,7 +67,7 @@ export default function Step6Run({ jobId, models, onDone, onRestart }: Props) {
     <div className="flex flex-col gap-8">
       <div className="space-y-2">
         <h2 className="text-4xl font-black tracking-tight">Run Audit</h2>
-        <p className="text-slate-600 dark:text-slate-400 text-lg max-w-2xl">
+        <p className="text-slate-600 dark:text-slate-200 text-lg max-w-2xl">
           {models.length} model{models.length !== 1 ? "s" : ""} queued. The audit runs in the
           background. You can watch the live log below.
         </p>
@@ -76,7 +76,7 @@ export default function Step6Run({ jobId, models, onDone, onRestart }: Props) {
       {/* Summary cards */}
       <div className="flex gap-4 flex-wrap">
         {models.map((m) => (
-          <div key={m.name} className="flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 text-sm">
+          <div key={m.name} className="flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-200 dark:border-surface-border bg-slate-50/50 dark:bg-surface/50 text-sm">
             <span className="material-symbols-outlined text-primary text-base">psychology</span>
             <span className="font-semibold">{m.name}</span>
             {m.dpsgd && <span className="text-xs text-blue-500 font-semibold">DP-SGD</span>}
@@ -88,7 +88,7 @@ export default function Step6Run({ jobId, models, onDone, onRestart }: Props) {
       {status === "idle" && (
         <button
           onClick={launch}
-          className="self-start px-8 py-3 rounded-lg bg-primary text-white font-bold text-lg hover:bg-primary/90 transition-colors flex items-center gap-3 shadow-xl shadow-primary/20"
+          className="self-start px-8 py-3 rounded-lg bg-slate-700 text-cream border border-primary font-bold text-lg hover:bg-slate-600 transition-colors flex items-center gap-3 shadow-xl shadow-black/30"
         >
           <span className="material-symbols-outlined">rocket_launch</span>
           Launch Audit
@@ -97,7 +97,7 @@ export default function Step6Run({ jobId, models, onDone, onRestart }: Props) {
 
       {/* Running state */}
       {status === "running" && (
-        <div className="flex items-center gap-3 text-slate-600 dark:text-slate-400">
+        <div className="flex items-center gap-3 text-slate-600 dark:text-slate-200">
           <span className="material-symbols-outlined text-primary animate-spin">sync</span>
           <span className="font-semibold">Running…</span>
           <span className="font-mono text-sm">{fmtElapsed(elapsed)}</span>
@@ -121,7 +121,7 @@ export default function Step6Run({ jobId, models, onDone, onRestart }: Props) {
           </div>
           <button
             onClick={onRestart}
-            className="self-start flex items-center gap-2 px-5 py-2 rounded-lg border border-slate-300 dark:border-slate-600 text-sm font-bold hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+            className="self-start flex items-center gap-2 px-5 py-2 rounded-lg border border-slate-300 dark:border-surface-border text-sm font-bold hover:bg-slate-50 dark:hover:bg-surface-2 transition-colors"
           >
             <span className="material-symbols-outlined text-base">restart_alt</span>
             Start Over
@@ -131,7 +131,7 @@ export default function Step6Run({ jobId, models, onDone, onRestart }: Props) {
 
       {/* Log path info */}
       {status !== "idle" && (
-        <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
+        <p className="text-xs text-slate-500 dark:text-slate-200 flex items-center gap-1">
           <span className="material-symbols-outlined text-sm">save</span>
           Log saved to <code className="font-mono">leakpro_output/{"<model_name>"}/leakpro.log</code> inside your job folder.
         </p>
@@ -139,8 +139,8 @@ export default function Step6Run({ jobId, models, onDone, onRestart }: Props) {
 
       {/* Live log terminal — always visible once launched */}
       {status !== "idle" && (
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
-          <div className="px-4 py-2 bg-slate-100 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 text-xs font-mono text-slate-500 flex items-center gap-2">
+        <div className="rounded-xl border border-slate-200 dark:border-surface-border overflow-hidden">
+          <div className="px-4 py-2 bg-slate-100 dark:bg-surface border-b border-slate-200 dark:border-surface-border text-xs font-mono text-slate-500 flex items-center gap-2">
             <span className={`size-2.5 rounded-full ${status === "running" ? "bg-green-400 animate-pulse" : status === "done" ? "bg-green-400" : "bg-red-400"}`} />
             Live output
             {status === "running" && <span className="ml-auto font-mono">{fmtElapsed(elapsed)}</span>}

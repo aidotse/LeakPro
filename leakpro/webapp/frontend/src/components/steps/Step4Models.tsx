@@ -38,17 +38,17 @@ export default function Step4Models({ jobId, onDone, initialModels }: Props) {
     <div className="flex flex-col gap-8">
       <div className="space-y-2">
         <h2 className="text-4xl font-black tracking-tight">Models</h2>
-        <p className="text-slate-600 dark:text-slate-400 text-lg max-w-2xl">
+        <p className="text-slate-600 dark:text-slate-200 text-lg max-w-2xl">
           Upload an existing trained model, train new ones, or both. You can add multiple models
           to compare them side-by-side in the results.
         </p>
       </div>
 
       {/* Sub-flow A: upload existing */}
-      <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+      <div className="rounded-xl border border-slate-200 dark:border-surface-border overflow-hidden">
         <button
           onClick={() => setShowUpload(!showUpload)}
-          className="w-full flex items-center gap-3 px-6 py-4 bg-slate-50/50 dark:bg-slate-900/50 hover:bg-primary/5 transition-colors text-left"
+          className="w-full flex items-center gap-3 px-6 py-4 bg-slate-50/50 dark:bg-surface/50 hover:bg-primary/5 transition-colors text-left"
         >
           <span className="material-symbols-outlined text-primary">upload</span>
           <span className="font-bold">I have a trained model to upload</span>
@@ -64,10 +64,10 @@ export default function Step4Models({ jobId, onDone, initialModels }: Props) {
       </div>
 
       {/* Sub-flow B: train new */}
-      <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+      <div className="rounded-xl border border-slate-200 dark:border-surface-border overflow-hidden">
         <button
           onClick={() => setShowTrain(!showTrain)}
-          className="w-full flex items-center gap-3 px-6 py-4 bg-slate-50/50 dark:bg-slate-900/50 hover:bg-primary/5 transition-colors text-left"
+          className="w-full flex items-center gap-3 px-6 py-4 bg-slate-50/50 dark:bg-surface/50 hover:bg-primary/5 transition-colors text-left"
         >
           <span className="material-symbols-outlined text-primary">model_training</span>
           <span className="font-bold">Train a new model</span>
@@ -94,7 +94,7 @@ export default function Step4Models({ jobId, onDone, initialModels }: Props) {
         <button
           onClick={() => onDone(models)}
           disabled={!canProceed}
-          className="px-8 py-2.5 rounded-lg bg-primary text-white font-bold hover:bg-primary/90 transition-colors flex items-center gap-2 shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="px-8 py-2.5 rounded-lg bg-slate-700 text-cream border border-primary font-bold hover:bg-slate-600 transition-colors flex items-center gap-2 shadow-lg shadow-black/30 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Continue to Attack Config
           <span className="material-symbols-outlined text-base">arrow_forward</span>
@@ -198,13 +198,13 @@ function UploadModelForm({ jobId, onAdded, onUpdated, existingNames }: {
           value={name}
           disabled={nameLocked}
           onChange={(e) => { setName(e.target.value); setResult(null); setCheckError(null); }}
-          className="w-full rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm px-3 py-2 disabled:opacity-60 disabled:cursor-not-allowed"
+          className="w-full rounded border-slate-300 dark:border-surface-border bg-white dark:bg-surface-2 text-sm px-3 py-2 disabled:opacity-60 disabled:cursor-not-allowed"
         />
       </div>
 
       {/* ── Model weights ─────────────────────────────────────── */}
       {!result?.ok && (
-        <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-4 space-y-3">
+        <div className="rounded-lg border border-slate-200 dark:border-surface-border p-4 space-y-3">
           <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Model weights</p>
           <ServerOrUpload
             label="Weights file (.pkl / .pt / .pth)"
@@ -219,7 +219,7 @@ function UploadModelForm({ jobId, onAdded, onUpdated, existingNames }: {
             <button
               onClick={doValidateModel}
               disabled={checking}
-              className="flex items-center gap-2 px-5 py-2 rounded-lg bg-primary text-white font-bold text-sm hover:bg-primary/90 transition-colors disabled:opacity-50"
+              className="flex items-center gap-2 px-5 py-2 rounded-lg bg-slate-700 text-cream border border-primary font-bold text-sm hover:bg-slate-600 transition-colors disabled:opacity-50"
             >
               {checking
                 ? <><span className="material-symbols-outlined text-base animate-spin">sync</span> Validating…</>
@@ -244,7 +244,7 @@ function UploadModelForm({ jobId, onAdded, onUpdated, existingNames }: {
       )}
 
       {/* ── Model metadata — always visible once uploaded, survives model validation ── */}
-      <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-4 space-y-3">
+      <div className="rounded-lg border border-slate-200 dark:border-surface-border p-4 space-y-3">
         <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Model metadata</p>
         <ServerOrUpload
           label="Metadata file (.pkl)"
@@ -355,6 +355,11 @@ function TrainModelForm({ jobId, onAdded, existingCount, initialModels }: {
     // Only train the cards that are currently shown (not already-trained models)
     const toTrain = [...cards];
 
+    // The backend emits one __TRAIN_DONE__ per model (they train concurrently),
+    // so count them and only close the socket once the whole batch is done —
+    // otherwise later models' __METRICS__ (and their plots) are dropped.
+    let doneCount = 0;
+
     const wsUrl = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/jobs/${jobId}/logs`;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
@@ -376,6 +381,8 @@ function TrainModelForm({ jobId, onAdded, existingCount, initialModels }: {
         return;
       }
       if (msg === "__TRAIN_DONE__") {
+        doneCount += 1;
+        if (doneCount < toTrain.length) return;  // wait for the rest of the batch
         ws.close();
         setTraining(false);
         setProgress(null);
@@ -424,7 +431,7 @@ function TrainModelForm({ jobId, onAdded, existingCount, initialModels }: {
           Add another model
         </button>
         <button onClick={trainAll} disabled={training}
-          className="ml-auto px-6 py-2 rounded-lg bg-primary text-white font-bold text-sm hover:bg-primary/90 transition-colors shadow-lg shadow-primary/20 disabled:opacity-50 flex items-center gap-2"
+          className="ml-auto px-6 py-2 rounded-lg bg-slate-700 text-cream border border-primary font-bold text-sm hover:bg-slate-600 transition-colors shadow-lg shadow-black/30 disabled:opacity-50 flex items-center gap-2"
         >
           {training && <span className="material-symbols-outlined text-base animate-spin">sync</span>}
           {training ? "Training…" : "Start Training"}
@@ -438,7 +445,7 @@ function TrainModelForm({ jobId, onAdded, existingCount, initialModels }: {
             <span className="font-semibold">{progress.model} — Epoch {progress.epoch} / {progress.total}</span>
             <span className="font-mono">{pct}%</span>
           </div>
-          <div className="h-2 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+          <div className="h-2 rounded-full bg-slate-200 dark:bg-surface-2 overflow-hidden">
             <div
               className="h-full rounded-full bg-primary transition-all duration-300"
               style={{ width: `${pct}%` }}
@@ -449,14 +456,14 @@ function TrainModelForm({ jobId, onAdded, existingCount, initialModels }: {
 
       {/* Live log stream */}
       {(logs.length > 0 || training) && (
-        <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
+        <p className="text-xs text-slate-500 dark:text-slate-200 flex items-center gap-1">
           <span className="material-symbols-outlined text-sm">save</span>
           Log saved to <code className="font-mono">models/{"<model_name>"}/train.log</code> inside your job folder.
         </p>
       )}
       {(logs.length > 0 || training) && (
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
-          <div className="px-4 py-2 bg-slate-100 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 text-xs font-mono text-slate-500 flex items-center gap-2">
+        <div className="rounded-xl border border-slate-200 dark:border-surface-border overflow-hidden">
+          <div className="px-4 py-2 bg-slate-100 dark:bg-surface border-b border-slate-200 dark:border-surface-border text-xs font-mono text-slate-500 flex items-center gap-2">
             <span className={`size-2 rounded-full ${training ? "bg-green-400 animate-pulse" : "bg-slate-400"}`} />
             Training log
           </div>
@@ -525,12 +532,12 @@ function TrainMetricsChart({ metrics }: { metrics: TrainMetrics }) {
   }
 
   return (
-    <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
-      <div className="px-4 py-2 bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 text-xs font-semibold text-slate-500 flex items-center gap-2">
+    <div className="rounded-xl border border-slate-200 dark:border-surface-border overflow-hidden">
+      <div className="px-4 py-2 bg-slate-50 dark:bg-surface border-b border-slate-200 dark:border-surface-border text-xs font-semibold text-slate-500 flex items-center gap-2">
         <span className="material-symbols-outlined text-sm text-green-500">show_chart</span>
         {metrics.model} — Training curves
       </div>
-      <div className="grid grid-cols-2 divide-x divide-slate-200 dark:divide-slate-800 bg-white dark:bg-slate-950">
+      <div className="grid grid-cols-2 divide-x divide-slate-200 dark:divide-surface-border bg-white dark:bg-surface-deep">
         <Plot
           data={lossData}
           layout={{ ...layout, title: { text: "Loss", font: { size: 12, color: fontColor } } }}
@@ -553,12 +560,12 @@ function TrainCard({ params, onChange, onRemove }: {
   params: TrainParams; onChange: (p: Partial<TrainParams>) => void; onRemove?: () => void;
 }) {
   return (
-    <div className="border border-slate-200 dark:border-slate-700 rounded-xl p-5 space-y-4">
+    <div className="border border-slate-200 dark:border-surface-border rounded-xl p-5 space-y-4">
       <div className="flex items-center justify-between">
         <input
           value={params.name}
           onChange={(e) => onChange({ name: e.target.value })}
-          className="font-bold text-sm border-0 border-b border-slate-300 dark:border-slate-600 bg-transparent focus:outline-none focus:border-primary px-0 py-1"
+          className="font-bold text-sm border-0 border-b border-slate-300 dark:border-surface-border bg-transparent focus:outline-none focus:border-primary px-0 py-1"
           placeholder="Model name"
         />
         {onRemove && (
@@ -577,7 +584,7 @@ function TrainCard({ params, onChange, onRemove }: {
           <select
             value={params.optimizer}
             onChange={(e) => onChange({ optimizer: e.target.value })}
-            className="w-full rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm px-3 py-2"
+            className="w-full rounded border-slate-300 dark:border-surface-border bg-white dark:bg-surface-2 text-sm px-3 py-2"
           >
             <option value="adam">Adam</option>
             <option value="sgd">SGD</option>
@@ -597,7 +604,7 @@ function TrainCard({ params, onChange, onRemove }: {
       <label className="flex items-center gap-3 cursor-pointer">
         <div
           onClick={() => onChange({ dpsgd: !params.dpsgd })}
-          className={`relative w-10 h-5 rounded-full transition-colors ${params.dpsgd ? "bg-primary" : "bg-slate-300 dark:bg-slate-600"}`}
+          className={`relative w-10 h-5 rounded-full transition-colors ${params.dpsgd ? "bg-primary" : "bg-slate-300 dark:bg-surface-2"}`}
         >
           <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${params.dpsgd ? "translate-x-5" : ""}`} />
         </div>
@@ -607,7 +614,7 @@ function TrainCard({ params, onChange, onRemove }: {
 
       {params.dpsgd && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pl-4 border-l-2 border-primary/30">
-          <NumberField label="Target ε" value={params.target_epsilon ?? 10} min={0.1} max={100} step={0.1} onChange={(v) => onChange({ target_epsilon: v })} />
+          <NumberField label="Target ε" value={params.target_epsilon ?? 5} min={0.1} max={100} step={0.1} onChange={(v) => onChange({ target_epsilon: v })} />
           <NumberField label="Target δ" value={params.target_delta ?? 1e-5} min={1e-7} max={0.1} step={1e-6} onChange={(v) => onChange({ target_delta: v })} />
           <NumberField label="Max Grad Norm" value={params.max_grad_norm ?? 1.0} min={0.01} max={10} step={0.01} onChange={(v) => onChange({ max_grad_norm: v })} />
           <NumberField label="Virtual Batch Size" value={params.virtual_batch_size ?? 16} min={1} max={512} step={1} onChange={(v) => onChange({ virtual_batch_size: v })} />
@@ -630,7 +637,7 @@ function NumberField({ label, value, min, max, step = 1, onChange }: {
         max={max}
         step={step}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm px-3 py-2"
+        className="w-full rounded border-slate-300 dark:border-surface-border bg-white dark:bg-surface-2 text-sm px-3 py-2"
       />
     </div>
   );
@@ -654,7 +661,7 @@ function CompatCard({ result }: { result: CompatResult }) {
 
         {/* Inference test results */}
         {result.sample_outputs && result.sample_outputs.length > 0 && (
-          <div className="rounded-md border border-green-500/20 bg-white/60 dark:bg-slate-900/60 p-3 space-y-2">
+          <div className="rounded-md border border-green-500/20 bg-white/60 dark:bg-surface/60 p-3 space-y-2">
             <p className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
               <span className="material-symbols-outlined text-sm text-primary">psychology</span>
               Inference test — real data samples
@@ -699,7 +706,7 @@ function CompatCard({ result }: { result: CompatResult }) {
 
 function ModelCard({ model, onRemove }: { model: ModelEntry; onRemove: () => void }) {
   return (
-    <div className="flex items-center gap-4 p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+    <div className="flex items-center gap-4 p-4 rounded-xl border border-slate-200 dark:border-surface-border bg-slate-50/50 dark:bg-surface/50">
       <div className={`size-9 rounded-lg flex items-center justify-center
         ${model.status === "ready" ? "bg-green-500/10 text-green-500" : model.status === "training" ? "bg-primary/10 text-primary" : "bg-red-500/10 text-red-500"}`}>
         <span className="material-symbols-outlined text-base">
@@ -727,5 +734,11 @@ function defaultParams(n: number): TrainParams {
     f_train: 0.5,
     f_test: 0.5,
     dpsgd: false,
+    // DP-SGD defaults — set here (not just as input fallbacks) so they are
+    // submitted even when the user enables DP-SGD without touching the fields.
+    target_epsilon: 5,
+    target_delta: 1e-5,
+    max_grad_norm: 1.0,
+    virtual_batch_size: 16,
   };
 }

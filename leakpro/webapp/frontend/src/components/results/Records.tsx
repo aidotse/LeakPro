@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from "react";
-import { ModelResult } from "../../api";
+import React, { useMemo, useState, useCallback } from "react";
+import { api, ModelResult } from "../../api";
 
 // model key is "jobId/modelName" to support cross-session results
 function modelKey(m: ModelResult) { return `${m.job_id ?? ""}/${m.model_name}`; }
@@ -43,6 +43,25 @@ export default function Records({ results, jobId }: Props) {
     URL.revokeObjectURL(url);
   };
 
+  const isImage = model?.train_meta?.data_type === "image";
+  const headers = isImage
+    ? ["Rank", "Image", "Sample Index", "Risk Score", "Member"]
+    : ["Rank", "", "Sample Index", "Risk Score", "Member"];
+
+  const [modalData, setModalData] = useState<{ index: number; label: number; features: number[]; feature_names?: string[] } | null>(null);
+  const [modalLoading, setModalLoading] = useState(false);
+
+  const openModal = useCallback(async (index: number, jobIdForModel: string) => {
+    setModalLoading(true);
+    setModalData(null);
+    try {
+      const d = await api.getSampleData(jobIdForModel, index);
+      setModalData(d);
+    } finally {
+      setModalLoading(false);
+    }
+  }, []);
+
   return (
     <div className="flex flex-col gap-6">
       {/* Selectors */}
@@ -71,46 +90,92 @@ export default function Records({ results, jobId }: Props) {
       </div>
 
       {topRecords.length > 0 ? (
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+        <div className="rounded-xl border border-slate-200 dark:border-surface-border overflow-hidden">
           <table className="w-full text-sm">
-            <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
+            <thead className="bg-slate-50 dark:bg-surface border-b border-slate-200 dark:border-surface-border">
               <tr>
-                {["Rank", "Image", "Sample Index", "Risk Score", "Member"].map((h) => (
+                {headers.map((h) => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-500">{h}</th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+            <tbody className="divide-y divide-slate-200 dark:divide-surface-border">
               {topRecords.map((r) => (
-                <tr key={`${attackName}-${selectedKey}-${r.rank}`} className="hover:bg-slate-50/50 dark:hover:bg-slate-900/50">
-                  <td className="px-4 py-2.5 font-bold text-slate-400">#{r.rank}</td>
-                  <td className="px-4 py-2.5">
-                    <ImgWithLoader src={`/jobs/${model?.job_id ?? jobId}/sample_image/${r.index}`} />
-                  </td>
-                  <td className="px-4 py-2.5 font-mono">{r.index}</td>
-                  <td className="px-4 py-2.5">
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1 h-1.5 rounded-full bg-slate-200 dark:bg-slate-700">
-                        <div
-                          className="h-1.5 rounded-full bg-red-500"
-                          style={{ width: `${Math.min(r.score * 100, 100)}%` }}
-                        />
+                <React.Fragment key={`${attackName}-${selectedKey}-${r.rank}`}>
+                  <tr className="hover:bg-slate-50/50 dark:hover:bg-surface/50">
+                    <td className="px-4 py-2.5 font-bold text-slate-400">#{r.rank}</td>
+                    {isImage ? (
+                      <td className="px-4 py-2.5">
+                        <ImgWithLoader src={`/jobs/${model?.job_id ?? jobId}/sample_image/${r.index}`} />
+                      </td>
+                    ) : (
+                      <td className="px-4 py-2.5">
+                        <button
+                          onClick={() => openModal(r.index, model?.job_id ?? jobId)}
+                          className="text-slate-400 hover:text-primary transition-colors"
+                          title="View row data"
+                        >
+                          <span className="material-symbols-outlined text-base">table_rows</span>
+                        </button>
+                      </td>
+                    )}
+                    <td className="px-4 py-2.5 font-mono">{r.index}</td>
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 h-1.5 rounded-full bg-slate-200 dark:bg-surface-2">
+                          <div
+                            className="h-1.5 rounded-full bg-red-500"
+                            style={{ width: `${Math.min(r.score * 100, 100)}%` }}
+                          />
+                        </div>
+                        <span className="font-mono text-xs">{r.score.toFixed(4)}</span>
                       </div>
-                      <span className="font-mono text-xs">{r.score.toFixed(4)}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <span className="text-xs bg-red-500/10 text-red-500 px-2 py-0.5 rounded-full font-semibold">
-                      Member
-                    </span>
-                  </td>
-                </tr>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <span className="text-xs bg-red-500/10 text-red-500 px-2 py-0.5 rounded-full font-semibold">
+                        Member
+                      </span>
+                    </td>
+                  </tr>
+                </React.Fragment>
               ))}
             </tbody>
           </table>
         </div>
       ) : (
         <p className="text-slate-500 text-sm">No records available for this attack.</p>
+      )}
+
+      {/* Tabular row modal */}
+      {(modalData || modalLoading) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setModalData(null)}>
+          <div className="bg-white dark:bg-surface rounded-xl shadow-2xl w-full max-w-2xl mx-4 overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-surface-border">
+              <h3 className="font-bold text-base">
+                {modalData ? `Sample #${modalData.index} — Label: ${modalData.label}` : "Loading…"}
+              </h3>
+              <button onClick={() => setModalData(null)} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+            <div className="overflow-y-auto max-h-96 p-6">
+              {modalLoading && <p className="text-slate-500 text-sm animate-pulse">Fetching row data…</p>}
+              {modalData && (
+                <div className="flex flex-col gap-1 font-mono text-xs">
+                  {modalData.features.map((v, i) => {
+                    const name = modalData.feature_names?.[i] ?? `f${i}`;
+                    return (
+                      <div key={i} className="flex justify-between gap-4 px-2 py-1 rounded bg-slate-50 dark:bg-surface-2">
+                        <span className="text-slate-400 truncate max-w-[70%]" title={name}>{name}</span>
+                        <span className="font-semibold shrink-0">{v.toFixed(4)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -121,12 +186,12 @@ function ImgWithLoader({ src }: { src: string }) {
   return (
     <div className="w-16 h-16 relative">
       {!loaded && (
-        <div className="absolute inset-0 rounded border border-slate-200 dark:border-slate-700 bg-slate-200 dark:bg-slate-700 animate-pulse" />
+        <div className="absolute inset-0 rounded border border-slate-200 dark:border-surface-border bg-slate-200 dark:bg-surface-2 animate-pulse" />
       )}
       <img
         src={src}
         alt=""
-        className={`w-16 h-16 object-contain rounded border border-slate-200 dark:border-slate-700 transition-opacity duration-200 ${loaded ? "opacity-100" : "opacity-0"}`}
+        className={`w-16 h-16 object-contain rounded border border-slate-200 dark:border-surface-border transition-opacity duration-200 ${loaded ? "opacity-100" : "opacity-0"}`}
         onLoad={() => setLoaded(true)}
         onError={() => setLoaded(true)}
       />
@@ -149,7 +214,7 @@ function Selector({ label, value, options, onChange }: {
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm px-3 py-2 min-w-[10rem] pr-8"
+        className="rounded border-slate-300 dark:border-surface-border bg-white dark:bg-surface-2 text-sm px-3 py-2 min-w-[10rem] pr-8"
       >
         {normalized.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>

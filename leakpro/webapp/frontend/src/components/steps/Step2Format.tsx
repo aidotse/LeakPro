@@ -35,13 +35,13 @@ export default function Step2Format({ jobId, meta, onDone }: Props) {
     <div className="flex flex-col gap-8">
       <div className="space-y-2">
         <h2 className="text-4xl font-black tracking-tight">Confirm Format</h2>
-        <p className="text-slate-600 dark:text-slate-400 text-lg max-w-2xl">
+        <p className="text-slate-600 dark:text-slate-200 text-lg max-w-2xl">
           We detected the following dataset properties. Review and confirm before continuing.
         </p>
       </div>
 
       {/* Auto-detected card */}
-      <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-6 bg-slate-50/50 dark:bg-slate-900/50 space-y-4">
+      <div className="rounded-xl border border-slate-200 dark:border-surface-border p-6 bg-slate-50/50 dark:bg-surface/50 space-y-4">
         <div className="flex items-center gap-3 mb-2">
           <div className="size-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
             <span className="material-symbols-outlined">{TYPE_ICONS[meta.data_type] ?? "help_outline"}</span>
@@ -74,14 +74,14 @@ export default function Step2Format({ jobId, meta, onDone }: Props) {
         </button>
 
         {advanced && (
-          <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-200 dark:border-slate-700">
+          <div className="grid grid-cols-2 gap-4 pt-2 border-t border-slate-200 dark:border-surface-border">
             <div>
               <label className="text-xs font-semibold text-slate-500 mb-1 block">Number of classes</label>
               <input
                 type="number"
                 value={nClasses}
                 onChange={(e) => setNClasses(Number(e.target.value))}
-                className="w-full rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm px-3 py-2"
+                className="w-full rounded border-slate-300 dark:border-surface-border bg-white dark:bg-surface-2 text-sm px-3 py-2"
               />
             </div>
           </div>
@@ -92,7 +92,7 @@ export default function Step2Format({ jobId, meta, onDone }: Props) {
         <button
           onClick={confirm}
           disabled={loading}
-          className="px-8 py-2.5 rounded-lg bg-primary text-white font-bold hover:bg-primary/90 transition-colors flex items-center gap-2 shadow-lg shadow-primary/20 disabled:opacity-50"
+          className="px-8 py-2.5 rounded-lg bg-slate-700 text-cream border border-primary font-bold hover:bg-slate-600 transition-colors flex items-center gap-2 shadow-lg shadow-black/30 disabled:opacity-50"
         >
           {loading ? "Saving…" : "Confirm & Continue"}
           <span className="material-symbols-outlined text-base">arrow_forward</span>
@@ -104,7 +104,7 @@ export default function Step2Format({ jobId, meta, onDone }: Props) {
 
 function MetaField({ label, value }: { label: string; value: string }) {
   return (
-    <div className="bg-white dark:bg-slate-800 rounded-lg p-3 border border-slate-200 dark:border-slate-700">
+    <div className="bg-white dark:bg-surface-2 rounded-lg p-3 border border-slate-200 dark:border-surface-border">
       <p className="text-xs text-slate-500 mb-1">{label}</p>
       <p className="font-mono text-sm font-bold">{value}</p>
     </div>

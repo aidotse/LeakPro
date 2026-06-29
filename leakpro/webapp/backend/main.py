@@ -25,7 +25,7 @@ from leakpro.schemas import EvalOutput, TrainingOutput
 # ---------------------------------------------------------------------------
 
 def _default_train(loader, model, criterion, optimizer, epochs,
-                   dpsgd_metadata_path=None, virtual_batch_size=16):
+                   dpsgd_metadata_path=None, virtual_batch_size=16, binary=False):
     """Built-in training loop. Pass dpsgd_metadata_path to activate DP-SGD."""
     import os, pickle
     import torch
@@ -108,14 +108,16 @@ def _default_train(loader, model, criterion, optimizer, epochs,
                 model.train()
                 train_loss, train_acc = 0.0, 0.0
                 for inputs, labels in tqdm(mem_loader, desc=f"Epoch {epoch+1}/{epochs}"):
-                    labels = labels.long().view(-1)
+                    labels = labels.float().view(-1) if binary else labels.long().view(-1)
                     inputs, labels = inputs.to(dev), labels.to(dev)
                     optimizer.zero_grad()
                     outputs = model(inputs)
+                    if binary: outputs = outputs.squeeze(1)
                     loss = criterion(outputs, labels)
                     loss.backward()
                     optimizer.step()
-                    train_acc += outputs.argmax(1).eq(labels).sum().item()
+                    preds = (outputs.sigmoid() > 0.5).float() if binary else outputs.argmax(1).float()
+                    train_acc += preds.eq(labels).sum().item()
                     train_loss += loss.item() * labels.size(0)
                 n = len(mem_loader.dataset)
                 accuracy_history.append(train_acc / n)
@@ -132,14 +134,16 @@ def _default_train(loader, model, criterion, optimizer, epochs,
             model.train()
             train_loss, train_acc, total = 0.0, 0.0, 0
             for inputs, labels in tqdm(loader, desc=f"Epoch {epoch+1}/{epochs}"):
-                labels = labels.long().view(-1)
+                labels = labels.float().view(-1) if binary else labels.long().view(-1)
                 inputs, labels = inputs.to(dev), labels.to(dev)
                 optimizer.zero_grad()
                 outputs = model(inputs)
+                if binary: outputs = outputs.squeeze(1)
                 loss = criterion(outputs, labels)
                 loss.backward()
                 optimizer.step()
-                train_acc += outputs.argmax(1).eq(labels).sum().item()
+                preds = (outputs.sigmoid() > 0.5).float() if binary else outputs.argmax(1).float()
+                train_acc += preds.eq(labels).sum().item()
                 train_loss += loss.item() * labels.size(0)
                 total += labels.size(0)
             accuracy_history.append(train_acc / total)
@@ -154,7 +158,7 @@ def _default_train(loader, model, criterion, optimizer, epochs,
     return TrainingOutput(model=model, metrics=metrics)
 
 
-def _default_eval(loader, model, criterion):
+def _default_eval(loader, model, criterion, binary=False):
     """Built-in eval loop."""
     import torch
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -163,11 +167,13 @@ def _default_eval(loader, model, criterion):
     loss, acc, total = 0.0, 0.0, 0
     with torch.no_grad():
         for data, target in loader:
-            target = target.long().view(-1).to(dev)
+            target = target.float().view(-1).to(dev) if binary else target.long().view(-1).to(dev)
             data = data.to(dev)
             output = model(data)
+            if binary: output = output.squeeze(1)
             loss += criterion(output, target).item() * target.size(0)
-            acc += output.argmax(1).eq(target).sum().item()
+            preds = (output.sigmoid() > 0.5).float() if binary else output.argmax(1).float()
+            acc += preds.eq(target).sum().item()
             total += target.size(0)
     model.to("cpu")
     return EvalOutput(accuracy=acc / total if total else 0.0, loss=loss / total if total else 0.0)
@@ -194,9 +200,31 @@ class ResNet18(nn.Module):
         return self.model(x)
 '''
 
+_PRESET_ARCH_TABULAR = '''\
+"""Preset MLP for tabular data. num_features and num_classes are auto-detected."""
+import torch.nn as nn
+
+
+class MLP(nn.Module):
+    def __init__(self, num_features=10, num_classes=2):
+        super().__init__()
+        self.num_features = num_features
+        self.num_classes = num_classes
+        self.net = nn.Sequential(
+            nn.Linear(num_features, 256), nn.ReLU(), nn.Dropout(0.3),
+            nn.Linear(256, 128), nn.ReLU(), nn.Dropout(0.3),
+            nn.Linear(128, 64),  nn.ReLU(), nn.Dropout(0.3),
+            nn.Linear(64, num_classes),
+        )
+
+    def forward(self, x):
+        return self.net(x)
+'''
+
 _PRESET_ARCHS: dict[str, str] = {
     "cifar_wrn":   _PRESET_ARCH_IMAGE,
     "cifar_image": _PRESET_ARCH_IMAGE,
+    "tabular_mlp": _PRESET_ARCH_TABULAR,
 }
 
 from .checker import run_check
@@ -227,6 +255,11 @@ _jobs: dict[str, dict[str, Any]] = {}
 # Per-job log queues
 _log_queues: dict[str, queue.Queue] = {}
 _executor = ThreadPoolExecutor(max_workers=4)
+# Training mutates process-global state (sys.stdout capture + log_q.put wrapping),
+# so only one model trains at a time across the whole server. Without this,
+# concurrent _train() threads clobber each other's stdout and cross-write into
+# each other's train.log, and can leave log_q.put pointing at a closed file.
+_train_lock = threading.Lock()
 
 
 def _job_dir(job_id: str) -> Path:
@@ -664,6 +697,10 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                 pass
 
         old_stdout = _sys.stdout
+        _train_log_file = None  # default so the finally below never NameErrors
+        # Serialize: stdout + log_q.put patching mutate process-global state.
+        _train_lock.acquire()
+        _orig_log_q_put = log_q.put  # capture the real put while holding the lock
         _sys.stdout = _StdoutCapture()
 
         try:
@@ -679,7 +716,6 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
             # Save training log to file
             _train_log_path = target_folder / "train.log"
             _train_log_file = open(_train_log_path, "w")
-            _orig_log_q_put = log_q.put
             def _log_and_save(msg):
                 _orig_log_q_put(msg)
                 if not msg.startswith("__"):
@@ -692,7 +728,9 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                 "source": "trained",
                 "target_folder": str(target_folder),
                 "dpsgd": params.dpsgd,
-                "target_epsilon": params.target_epsilon,
+                # Store the effective epsilon (default 5.0) so the UI never shows
+                # "ε=undefined" when DP-SGD is enabled without an explicit value.
+                "target_epsilon": (params.target_epsilon or 5.0) if params.dpsgd else params.target_epsilon,
                 "train_params": params.model_dump(),
                 "status": "training",
             }
@@ -832,37 +870,63 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                 _num_classes_data = int(torch.cat(_all_labels).max().item()) + 1
                 log_q.put(f"[train] Detected {_num_classes_data} classes from dataset labels")
 
-                # Instantiate model, passing num_classes if the constructor accepts it
-                def _make_model(cls, num_classes, dpsgd=False):
+                # Detect num_features for tabular models
+                _sample_x = train_subset[0][0]
+                _num_features_data = int(_sample_x.shape[0]) if _sample_x.ndim == 1 else None
+
+                # Binary tasks get a single-logit head trained with BCEWithLogitsLoss;
+                # the kwarg only reaches constructors that accept num_classes.
+                _model_num_classes = 1 if _num_classes_data == 2 else _num_classes_data
+
+                # Instantiate model, passing num_classes and num_features if accepted
+                def _make_model(cls, num_classes, num_features=None, dpsgd=False):
                     sig = _inspect2.signature(cls.__init__)
                     kwargs = {}
                     if "num_classes" in sig.parameters:
                         kwargs["num_classes"] = num_classes
+                    if num_features is not None and "num_features" in sig.parameters:
+                        kwargs["num_features"] = num_features
                     if dpsgd and "dpsgd" in sig.parameters:
                         kwargs["dpsgd"] = True
                     return cls(**kwargs)
 
                 if params.dpsgd:
-                    model = _make_model(_arch_cls, _num_classes_data, dpsgd=True)
+                    model = _make_model(_arch_cls, _model_num_classes, _num_features_data, dpsgd=True)
                     if not hasattr(model, "dpsgd") or not model.dpsgd:
                         from opacus.validators import ModuleValidator as _MV  # noqa: PLC0415
                         model = _MV.fix(model)
                         log_q.put(f"[train] Applied ModuleValidator.fix() to {_arch_cls.__name__} for DP-SGD")
                     else:
-                        log_q.put(f"[train] Instantiated {_arch_cls.__name__}(dpsgd=True, num_classes={_num_classes_data})")
+                        log_q.put(f"[train] Instantiated {_arch_cls.__name__}(dpsgd=True, num_classes={_model_num_classes})")
                 else:
-                    model = _make_model(_arch_cls, _num_classes_data)
+                    model = _make_model(_arch_cls, _model_num_classes, _num_features_data)
                 # Check if arch uses pretrained weights
                 _arch_src = (job_dir / "arch.py").read_text()
                 _pretrained = (
                     ("ResNet18_Weights" in _arch_src and "weights=None" not in _arch_src) or
                     ("pretrained=True" in _arch_src)
                 )
-                log_q.put(f"[train] Model: {_arch_cls.__name__}(num_classes={_num_classes_data}, pretrained={'yes' if _pretrained else 'no'})")
+                _feat_info = f", num_features={_num_features_data}" if _num_features_data else ""
+                log_q.put(f"[train] Model: {_arch_cls.__name__}(num_classes={_model_num_classes}{_feat_info}, pretrained={'yes' if _pretrained else 'no'})")
                 if params.dpsgd:
                     log_q.put(f"[train] DP-SGD: epsilon={params.target_epsilon}, delta={params.target_delta}, max_grad_norm={params.max_grad_norm}, virtual_batch_size={params.virtual_batch_size or 16}")
 
-            criterion = nn.CrossEntropyLoss()
+            # A custom arch may ignore num_classes and keep a 2-logit head, so derive
+            # binary-ness from the actual model output rather than the label count.
+            _was_training = model.training
+            with torch.no_grad():
+                model.eval()
+                _probe_out = model(_sample_x.unsqueeze(0))
+            # Restore training mode: the DP-SGD path validates with Opacus before the
+            # training loop runs, and Opacus rejects a model left in eval mode.
+            model.train(_was_training)
+            _is_binary = (_probe_out.ndim == 2 and _probe_out.shape[1] == 1)
+            if _is_binary:
+                criterion = nn.BCEWithLogitsLoss()
+                log_q.put("[train] Loss: BCEWithLogitsLoss (binary, single-logit head)")
+            else:
+                criterion = nn.CrossEntropyLoss()
+                log_q.put(f"[train] Loss: CrossEntropyLoss ({_num_classes_data} classes, {_probe_out.shape[1]} logits)")
             if params.optimizer == "sgd":
                 optimizer = optim.SGD(model.parameters(), lr=params.learning_rate, momentum=0.9, weight_decay=5e-4)
             else:
@@ -874,7 +938,7 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
             if params.dpsgd:
                 import pickle as _pkl
                 _dpsgd_meta = {
-                    "target_epsilon":    params.target_epsilon or 10.0,
+                    "target_epsilon":    params.target_epsilon or 5.0,
                     "target_delta":      params.target_delta if params.target_delta is not None else 1e-5,
                     "sample_rate":       1.0 / len(loader),
                     "epochs":            params.epochs,
@@ -930,8 +994,9 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                     loader, model, criterion, optimizer, epochs=params.epochs,
                     dpsgd_metadata_path=str(_dpsgd_path) if _dpsgd_path else None,
                     virtual_batch_size=_vbs,
+                    binary=_is_binary,
                 )
-                test_eval = _default_eval(test_loader, result.model, criterion)
+                test_eval = _default_eval(test_loader, result.model, criterion, binary=_is_binary)
 
             # Restore tqdm
             if _orig_tqdm:
@@ -1006,7 +1071,9 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
         finally:
             _sys.stdout = old_stdout
             log_q.put = _orig_log_q_put
-            _train_log_file.close()
+            if _train_log_file is not None:
+                _train_log_file.close()
+            _train_lock.release()
             log_q.put("__TRAIN_DONE__")
 
     _executor.submit(_train)
@@ -1071,6 +1138,34 @@ async def get_results(job_id: str) -> dict:
     for r in results:
         r["job_id"] = job_id
     return {"job_id": job_id, "results": results}
+
+
+@app.get("/jobs/{job_id}/sample_data/{index}")
+async def get_sample_data(job_id: str, index: int):
+    """Return tabular feature values for a single sample as JSON."""
+    import joblib, torch
+    import numpy as np
+    job = _get_job(job_id)
+    data_path = job.get("data_path")
+    if not data_path or not Path(data_path).exists():
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    try:
+        dataset = joblib.load(data_path)
+        row = dataset.data[index]
+        if isinstance(row, torch.Tensor):
+            row = row.tolist()
+        else:
+            row = np.asarray(row, dtype=float).tolist()
+        label = dataset.targets[index]
+        if hasattr(label, "item"):
+            label = label.item()
+        feature_names = getattr(dataset, "feature_names", None)
+        if feature_names is not None and not isinstance(feature_names, list):
+            feature_names = list(feature_names)
+        return {"index": index, "label": int(label), "features": row,
+                "feature_names": feature_names}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/jobs/{job_id}/sample_image/{index}")

@@ -84,6 +84,8 @@ export const api = {
 
   // Step 7
   getResults: (id: string) => get<{ job_id: string; results: ModelResult[] }>(`/jobs/${id}/results`),
+  getSampleData: (jobId: string, index: number) =>
+    get<{ index: number; label: number; features: number[]; feature_names?: string[] }>(`/jobs/${jobId}/sample_data/${index}`),
 };
 
 // ---------------------------------------------------------------------------
@@ -97,6 +99,7 @@ export interface DataMeta {
   n_classes?: number;
   dtype: string;
   class_distribution?: Record<string, number>;
+  label_column?: string;
 }
 
 export interface HandlerConfig {

@@ -198,13 +198,13 @@ const PRESETS: Array<{
     id: "tabular_mlp",
     label: "Tabular (MLP)",
     icon: "table_rows",
-    desc: "Multi-layer perceptron for tabular / CSV data with numeric features.",
+    desc: "MLP for tabular data. num_features and num_classes are detected automatically. Uses BCE loss for binary tasks, CrossEntropy for multi-class.",
     types: ["tabular"],
     details: {
-      architecture: "MLP — 3 hidden layers [256 → 128 → 64] + ReLU + Dropout(0.3)",
-      optimizer: "Adam",
-      learning_rate: "1e-3",
-      scheduler: "None",
+      architecture: "MLP — 256 → 128 → 64 + ReLU + Dropout(0.3), auto BCE/CrossEntropy",
+      optimizer: "Adam (default) or SGD",
+      learning_rate: "0.001",
+      scheduler: "none",
     },
   },
   {
@@ -274,7 +274,7 @@ export default function Step3Setup({ jobId, handlerConfig, onDone, initialArch }
     <div className="flex flex-col gap-8">
       <div className="space-y-2">
         <h2 className="text-4xl font-black tracking-tight">Architecture & Training</h2>
-        <p className="text-slate-600 dark:text-slate-400 text-lg max-w-2xl">
+        <p className="text-slate-600 dark:text-slate-200 text-lg max-w-2xl">
           Choose a built-in preset that matches your data type, or upload your own architecture
           and training loop.
         </p>
@@ -288,8 +288,8 @@ export default function Step3Setup({ jobId, handlerConfig, onDone, initialArch }
             onClick={() => setMode(m)}
             className={`px-5 py-2 rounded-lg font-bold text-sm transition-colors
               ${mode === m
-                ? "bg-primary text-white shadow-lg shadow-primary/20"
-                : "border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+                ? "bg-slate-700 text-cream border border-primary shadow-lg shadow-black/30"
+                : "border border-slate-300 dark:border-surface-border hover:bg-slate-100 dark:hover:bg-surface-2"
               }`}
           >
             {m === "preset" ? "Use built-in preset" : "Upload my own"}
@@ -311,7 +311,7 @@ export default function Step3Setup({ jobId, handlerConfig, onDone, initialArch }
                   ${enabled ? "cursor-pointer" : "opacity-40 cursor-not-allowed"}
                   ${selected
                     ? "border-primary bg-primary/5 shadow-lg shadow-primary/10"
-                    : "border-slate-200 dark:border-slate-800"}
+                    : "border-slate-200 dark:border-surface-border"}
                   ${enabled && !selected ? "hover:border-primary/40" : ""}
                 `}
               >
@@ -333,7 +333,7 @@ export default function Step3Setup({ jobId, handlerConfig, onDone, initialArch }
                       )}
                     </div>
                   </div>
-                  <p className="text-sm text-slate-500 dark:text-slate-400">{p.desc}</p>
+                  <p className="text-sm text-slate-500 dark:text-slate-200">{p.desc}</p>
                 </div>
 
                 {/* Details toggle */}
@@ -343,7 +343,7 @@ export default function Step3Setup({ jobId, handlerConfig, onDone, initialArch }
                     setExpandedPreset(expanded ? null : p.id);
                   }}
                   disabled={!enabled}
-                  className="w-full flex items-center justify-between px-5 py-2.5 border-t border-slate-100 dark:border-slate-800 text-xs font-semibold text-slate-500 hover:text-primary transition-colors disabled:pointer-events-none"
+                  className="w-full flex items-center justify-between px-5 py-2.5 border-t border-slate-100 dark:border-surface-border text-xs font-semibold text-slate-500 hover:text-primary transition-colors disabled:pointer-events-none"
                 >
                   Details
                   <span className="material-symbols-outlined text-sm">
@@ -353,7 +353,7 @@ export default function Step3Setup({ jobId, handlerConfig, onDone, initialArch }
 
                 {/* Expanded details */}
                 {expanded && (
-                  <div className="px-5 pb-5 flex flex-col gap-2 border-t border-slate-100 dark:border-slate-800 pt-3">
+                  <div className="px-5 pb-5 flex flex-col gap-2 border-t border-slate-100 dark:border-surface-border pt-3">
                     <DetailRow label="Architecture" value={p.details.architecture} />
                     <DetailRow label="Optimizer" value={p.details.optimizer} />
                     <DetailRow label="Learning rate" value={p.details.learning_rate} />
@@ -422,7 +422,7 @@ export default function Step3Setup({ jobId, handlerConfig, onDone, initialArch }
         <button
           onClick={proceed}
           disabled={!canProceed || loading}
-          className="px-8 py-2.5 rounded-lg bg-primary text-white font-bold hover:bg-primary/90 transition-colors flex items-center gap-2 shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="px-8 py-2.5 rounded-lg bg-slate-700 text-cream border border-primary font-bold hover:bg-slate-600 transition-colors flex items-center gap-2 shadow-lg shadow-black/30 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {loading ? "Saving…" : "Continue"}
           <span className="material-symbols-outlined text-base">arrow_forward</span>
@@ -486,11 +486,11 @@ function CodeModal({ title, caption, code, filename, onClose }: {
       onClick={onClose}
     >
       <div
-        className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col overflow-hidden"
+        className="bg-white dark:bg-surface rounded-2xl shadow-2xl w-full max-w-3xl flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-surface-border">
           <h3 className="font-bold text-lg">{title}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors">
             <span className="material-symbols-outlined">close</span>
@@ -498,7 +498,7 @@ function CodeModal({ title, caption, code, filename, onClose }: {
         </div>
 
         {/* Caption */}
-        <p className="px-6 pt-4 text-sm text-slate-500 dark:text-slate-400">{caption}</p>
+        <p className="px-6 pt-4 text-sm text-slate-500 dark:text-slate-200">{caption}</p>
 
         {/* Code */}
         <pre className="overflow-auto px-6 py-4 font-mono text-xs text-slate-300 bg-slate-950 mx-6 my-4 rounded-xl max-h-[55vh] leading-relaxed">
@@ -506,17 +506,17 @@ function CodeModal({ title, caption, code, filename, onClose }: {
         </pre>
 
         {/* Footer */}
-        <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-slate-800">
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-200 dark:border-surface-border">
           <button
             onClick={() => downloadFile(code, filename)}
-            className="flex items-center gap-2 px-5 py-2 rounded-lg border border-slate-300 dark:border-slate-700 text-sm font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            className="flex items-center gap-2 px-5 py-2 rounded-lg border border-slate-300 dark:border-surface-border text-sm font-bold hover:bg-slate-100 dark:hover:bg-surface-2 transition-colors"
           >
             <span className="material-symbols-outlined text-base">download</span>
             Download template
           </button>
           <button
             onClick={onClose}
-            className="px-5 py-2 rounded-lg bg-primary text-white text-sm font-bold hover:bg-primary/90 transition-colors"
+            className="px-5 py-2 rounded-lg bg-slate-700 text-cream border border-primary text-sm font-bold hover:bg-slate-600 transition-colors"
           >
             Close
           </button>
