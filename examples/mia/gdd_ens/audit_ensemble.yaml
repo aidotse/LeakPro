@@ -1,0 +1,40 @@
+##
+## Copyright 2023-2026 Lindholmen Science Park AB
+## SPDX-License-Identifier: Apache-2.0
+##
+## Audit config for the ENSEMBLE (real-model-style) target. Same attack list as the single-MLP
+## baseline (audit.yaml) so the two are comparable. "One shadow = one ensemble": shadow_model is left
+## blank, so each of the num_shadow_models shadows reuses the target class (GddEnsemble) and is itself
+## a full 10-MLP ensemble trained by GddEnsembleModelHandler.
+audit:
+  random_seed: 1234
+  attack_list:
+    - attack: lira
+      online: False
+      num_shadow_models: 8
+      training_data_fraction: 0.5
+      var_calculation: "fixed"
+    - attack: rmia
+      online: True
+      num_shadow_models: 8
+      training_data_fraction: 0.5
+    # NOTE: the population (P) attack is intentionally absent here (it is in the single-MLP
+    # baseline's audit.yaml). The paper-faithful split in utils/gdd_paper_data.py partitions the
+    # ENTIRE population into members (80% train) + non-members (20% test), so the audit dataset
+    # equals the whole population and there is no held-out reference data left to fit the P-attack's
+    # loss thresholds. AttackP raises "audit dataset is the same size as the population dataset" and
+    # is skipped. LiRA/RMIA are unaffected — their reference comes from shadow models, not a held-out
+    # population slice. See the README ("Ensemble") for details.
+  output_dir: "./leakpro_output_ensemble"
+  attack_type: "mia"
+  data_modality: "tabular"
+
+target:
+  module_path: "utils/gdd_ensemble.py"
+  model_class: "GddEnsemble"
+  target_folder: "./target_ensemble"
+  data_path: "./data/gdd_ens_ensemble.pkl"
+
+shadow_model:
+
+distillation_model:
