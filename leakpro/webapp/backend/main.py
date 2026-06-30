@@ -198,8 +198,13 @@ class ResNet18(nn.Module):
 _PRESET_ARCH_IMAGE_PRETRAINED = '''\
 """Preset architecture — ResNet-18 pretrained on ImageNet, frozen backbone.
 
-Only the final FC layer trains (~160K params).
-Best for small datasets (< 100 samples/class). Very DP-SGD friendly.
+Only the final FC head trains (512 * num_classes params; e.g. ~5K for 10 classes).
+Best for small datasets (< 100 samples/class).
+
+Note: under DP-SGD, Opacus's ModuleValidator replaces every BatchNorm with
+GroupNorm. This drops the pretrained ImageNet normalization stats, and the new
+GroupNorm affine params are trainable, so DP-SGD trains the FC head plus all
+GroupNorm params -- not the FC head alone.
 """
 import torch.nn as nn
 import torchvision.models as models
