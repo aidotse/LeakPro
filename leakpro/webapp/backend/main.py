@@ -84,16 +84,17 @@ def _default_train(loader, model, criterion, optimizer, epochs,
             cfg = pickle.load(f)
 
         sample_rate = 1 / len(loader)
+        _accountant = cfg.get("accountant", "prv")
         noise_multiplier = get_noise_multiplier(
             target_epsilon=cfg["target_epsilon"],
             target_delta=cfg["target_delta"],
             sample_rate=sample_rate,
             epochs=cfg["epochs"],
-            epsilon_tolerance=cfg["epsilon_tolerance"],
-            accountant="prv",
-            eps_error=cfg["eps_error"],
+            epsilon_tolerance=cfg.get("epsilon_tolerance", 0.01),
+            accountant=_accountant,
+            eps_error=cfg.get("eps_error", 0.01),
         )
-        privacy_engine = PrivacyEngine(accountant="prv")
+        privacy_engine = PrivacyEngine(accountant=_accountant)
         model, optimizer, loader = privacy_engine.make_private(
             module=model, optimizer=optimizer, data_loader=loader,
             noise_multiplier=noise_multiplier, max_grad_norm=cfg["max_grad_norm"],
@@ -194,9 +195,39 @@ class ResNet18(nn.Module):
         return self.model(x)
 '''
 
+_PRESET_ARCH_IMAGE_PRETRAINED = '''\
+"""Preset architecture — ResNet-18 pretrained on ImageNet, frozen backbone.
+
+Only the final FC head trains (512 * num_classes params; e.g. ~5K for 10 classes).
+Best for small datasets (< 100 samples/class).
+
+Note: under DP-SGD, Opacus's ModuleValidator replaces every BatchNorm with
+GroupNorm. This drops the pretrained ImageNet normalization stats, and the new
+GroupNorm affine params are trainable, so DP-SGD trains the FC head plus all
+GroupNorm params -- not the FC head alone.
+"""
+import torch.nn as nn
+import torchvision.models as models
+
+
+class ResNet18Pretrained(nn.Module):
+    def __init__(self, num_classes=10):
+        super().__init__()
+        self.num_classes = num_classes
+        backbone = models.resnet18(weights="IMAGENET1K_V1")
+        for p in backbone.parameters():
+            p.requires_grad = False          # freeze entire backbone
+        backbone.fc = nn.Linear(backbone.fc.in_features, num_classes)
+        self.model = backbone
+
+    def forward(self, x):
+        return self.model(x)
+'''
+
 _PRESET_ARCHS: dict[str, str] = {
-    "cifar_wrn":   _PRESET_ARCH_IMAGE,
-    "cifar_image": _PRESET_ARCH_IMAGE,
+    "cifar_wrn":        _PRESET_ARCH_IMAGE,
+    "cifar_image":      _PRESET_ARCH_IMAGE,
+    "image_pretrained": _PRESET_ARCH_IMAGE_PRETRAINED,
 }
 
 from .checker import run_check
@@ -856,7 +887,9 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                 _arch_src = (job_dir / "arch.py").read_text()
                 _pretrained = (
                     ("ResNet18_Weights" in _arch_src and "weights=None" not in _arch_src) or
-                    ("pretrained=True" in _arch_src)
+                    ("pretrained=True" in _arch_src) or
+                    ('weights="IMAGENET' in _arch_src) or
+                    ("weights='IMAGENET" in _arch_src)
                 )
                 log_q.put(f"[train] Model: {_arch_cls.__name__}(num_classes={_num_classes_data}, pretrained={'yes' if _pretrained else 'no'})")
                 if params.dpsgd:
@@ -873,13 +906,14 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
             _vbs = params.virtual_batch_size or 16
             if params.dpsgd:
                 import pickle as _pkl
+                _accountant = params.accountant if params.accountant in ("prv", "rdp") else "prv"
                 _dpsgd_meta = {
                     "target_epsilon":    params.target_epsilon or 10.0,
                     "target_delta":      params.target_delta if params.target_delta is not None else 1e-5,
                     "sample_rate":       1.0 / len(loader),
                     "epochs":            params.epochs,
                     "epsilon_tolerance": 0.01,
-                    "accountant":        "prv",
+                    "accountant":        _accountant,
                     "eps_error":         0.01,
                     "max_grad_norm":     params.max_grad_norm or 1.0,
                 }

@@ -175,6 +175,7 @@ interface PresetDetail {
   optimizer: string;
   learning_rate: string;
   scheduler: string;
+  note?: string;
 }
 
 const PRESETS: Array<{
@@ -183,15 +184,29 @@ const PRESETS: Array<{
 }> = [
   {
     id: "cifar_image",
-    label: "Image",
+    label: "Image (scratch)",
     icon: "image",
-    desc: "ResNet-18 trained from scratch on your dataset. Works for any 3-channel images — num_classes detected automatically. Upload your own arch.py to use pretrained weights.",
+    desc: "ResNet-18 trained from scratch on your dataset. Works for any 3-channel images — num_classes detected automatically. Best when you have plenty of data (500+ samples/class).",
     types: ["image"],
     details: {
-      architecture: "ResNet-18 (random init) — ~11M params",
+      architecture: "ResNet-18 (random init) — ~11M trainable params",
       optimizer: "Adam (default) or SGD",
       learning_rate: "0.001",
       scheduler: "none",
+    },
+  },
+  {
+    id: "image_pretrained",
+    label: "Image (pretrained)",
+    icon: "auto_awesome",
+    desc: "ResNet-18 pretrained on ImageNet, fine-tuned on your dataset. Best for small datasets (< 100 samples/class) and DP-SGD.",
+    types: ["image"],
+    details: {
+      architecture: "ResNet-18 (ImageNet weights), frozen backbone — only the FC head trains (512 × num_classes params, e.g. ~5K for 10 classes)",
+      optimizer: "Adam (default) or SGD",
+      learning_rate: "0.001",
+      scheduler: "none",
+      note: "Under DP-SGD, Opacus replaces every BatchNorm with GroupNorm. This drops the pretrained ImageNet normalization stats, and the new GroupNorm affine params become trainable — so DP-SGD trains the FC head plus all GroupNorm params, not the FC head alone.",
     },
   },
   {
@@ -358,6 +373,12 @@ export default function Step3Setup({ jobId, handlerConfig, onDone, initialArch }
                     <DetailRow label="Optimizer" value={p.details.optimizer} />
                     <DetailRow label="Learning rate" value={p.details.learning_rate} />
                     <DetailRow label="Scheduler" value={p.details.scheduler} />
+                    {p.details.note && (
+                      <div className="flex items-start gap-1.5 mt-1 rounded-lg bg-amber-50 dark:bg-amber-950/30 px-2.5 py-2">
+                        <span className="material-symbols-outlined text-sm text-amber-600 dark:text-amber-400 shrink-0">info</span>
+                        <span className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">{p.details.note}</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
