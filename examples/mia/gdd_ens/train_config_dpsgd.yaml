@@ -22,7 +22,9 @@ train:
   weight_decay: 0.001
 
 dp:
-  target_delta: 1.0e-5       # < 1/N (N ~ 36,976) per the usual delta << 1/N guideline
+  target_delta: 1.0e-5       # < 1/N per the usual delta << 1/N guideline. N is the DP *training*
+                             # set = f_train (0.3) x the de-duplicated one-per-patient population
+                             # (~36,976), i.e. ~11k rows — NOT the full population.
   max_grad_norm: 1.0         # per-sample gradient clipping bound
   epsilon_tolerance: 0.01    # tolerance for the noise-multiplier search
   eps_error: 0.01            # accountant epsilon error

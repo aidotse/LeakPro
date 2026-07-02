@@ -121,12 +121,20 @@ non-DP baseline above. Files: `gdd_model_handler_dpsgd.py`, `audit_dpsgd.yaml`,
 
 ### Ensemble (real-model-style audit)
 
-`gdd_ensemble_main.ipynb` audits a **faithful 10-MLP GDD-ENS ensemble** instead of the single-MLP
-proxy. The member architectures are the paper's Supplementary Table S6 (saved at
+`gdd_ensemble_main.ipynb` audits an **architecture-faithful 10-MLP GDD-ENS ensemble** instead of the
+single-MLP proxy. The member architectures are the paper's Supplementary Table S6 (saved at
 `knowledge/papers/gdd-ens-2024/`), and `forward` returns `log(mean_k softmax(member_logits_k))` —
 the paper's softmax-averaging — so LeakPro's signal softmax recovers the true ensemble probability.
 Files: `gdd_ensemble_handler.py`, `utils/gdd_ensemble.py` (`GddEnsemble`, `MLP`, `TABLE_S6`),
 `utils/gdd_paper_data.py`, `audit_ensemble.yaml`, `train_config_ensemble.yaml`.
+
+> **"Architecture-faithful", not training-faithful — the leakage numbers are not GDD-ENS's.** The
+> member architectures and the softmax-averaging rule match the paper, but the *training* does not:
+> the paper decorrelates its 10 members with per-member `StratifiedShuffleSplit` folds, independent
+> per-member HPO, and rare-class oversampling, whereas here all 10 members train on the **identical
+> in-split**, differing only by architecture and random init/dropout. That materially changes
+> ensemble diversity — and therefore the membership-leakage profile — so the MIA numbers here must
+> **not** be read as the deployed GDD-ENS's actual leakage. The full deviation list is below.
 
 - **Membership ground truth is the real split, reproduced.** `utils/gdd_paper_data.py` mirrors the
   GDD_ENS `scripts/split_data.py`: keep `Classification_Category == 'train'` rows, deterministic

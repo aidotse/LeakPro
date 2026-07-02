@@ -18,6 +18,11 @@ audit:
       online: True
       num_shadow_models: 8
       training_data_fraction: 0.5
+      # NOTE: RMIA pulls raw ModelLogits and applies softmax_logits(., temperature). Because
+      # GddEnsemble.forward returns log(mean softmax), RMIA computes softmax(log p / T) — a
+      # *tempered* ensemble probability, not p exactly (unlike LiRA's get_rescaled_logits, whose
+      # stable softmax recovers p). Self-consistent, since target and shadows are both GddEnsemble,
+      # so not a calibration bug; but the semantics differ from the single-MLP case and from LiRA.
     # NOTE: the population (P) attack is intentionally absent here (it is in the single-MLP
     # baseline's audit.yaml). The paper-faithful split in utils/gdd_paper_data.py partitions the
     # ENTIRE population into members (80% train) + non-members (20% test), so the audit dataset

@@ -26,6 +26,7 @@ notebook can record ``train_indices`` (members) / ``test_indices`` (non-members)
 metadata and let LeakPro evaluate the attack against the true membership.
 """
 
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -103,9 +104,20 @@ def prepare_gdd_paper_population(
     nonmembers_X = test_df[feature_cols].to_numpy(dtype=np.float32)
     features = np.concatenate([members_X, nonmembers_X], axis=0)
 
-    # Encode targets over the combined population so every label seen anywhere is mapped.
+    # Encode targets over the combined population so every label seen anywhere is mapped. Assumption:
+    # every tumor type present among non-members also appears among members. A type appearing ONLY in
+    # the non-member (test) split would get an output neuron the target never trains on — harmless for
+    # the 38 well-populated GDD classes, but warn loudly if it ever happens rather than train silently
+    # against a dead class.
     encoder = LabelEncoder()
     all_labels = pd.concat([train_labels, test_labels]).to_numpy()
+    nonmember_only = set(np.unique(test_labels.to_numpy())) - set(np.unique(train_labels.to_numpy()))
+    if nonmember_only:
+        warnings.warn(
+            f"{len(nonmember_only)} tumor type(s) appear only among non-members "
+            f"({sorted(nonmember_only)}); the target never trains on their class neuron.",
+            stacklevel=2,
+        )
     targets = encoder.fit_transform(all_labels).astype(np.int64)
 
     n_members = members_X.shape[0]

@@ -2,12 +2,15 @@
 # Copyright 2023-2026 Lindholmen Science Park AB
 # SPDX-License-Identifier: Apache-2.0
 #
-"""GDD-ENS ensemble target model (faithful 10-MLP reimplementation).
+"""GDD-ENS ensemble target model (architecture-faithful 10-MLP reimplementation).
 
 This is the model the *ensemble* (real-model-style) audit trains and attacks, as opposed to the
-single ``GddMLP`` proxy in ``gdd_model.py``. It reproduces the architecture from the GDD_ENS repo
+single ``GddMLP`` proxy in ``gdd_model.py``. It reproduces the *architecture* from the GDD_ENS repo
 (``scripts/train_gdd_nn.py``) and the per-member hyperparameters from the paper's Supplementary
-Table S6 (Darmofal et al., Cancer Discovery 2024).
+Table S6 (Darmofal et al., Cancer Discovery 2024). The *training* deliberately deviates from the
+paper (no per-member folds/HPO/oversampling) so target and shadows train identically for clean
+LiRA/RMIA calibration — see the README's "Ensemble" section; the leakage numbers are therefore not
+the deployed GDD-ENS's.
 
 Two faithfulness details worth knowing:
 
@@ -33,9 +36,16 @@ from torch.nn import functional as F  # noqa: N812
 # Per-member hyperparameters from GDD-ENS Supplementary Table S6 (all 10 MLPs). Architecture fields
 # (num_fc_layers, num_fc_units, dropout_rate) define each member; learning_rate / weight_decay are
 # read by the model handler to build per-member optimizers during training.
+#
+# The architecture fields (num_fc_layers, num_fc_units) were cross-checked against the authors'
+# released ensemble weights (data/ensemble_models/fold_*.pt): all 10 members match Table S6 except
+# member 2, whose saved layers are Linear(n_features->950)/950->950/950->38, i.e. num_fc_units=950,
+# not the 1051 printed in the table. We use 950 to reproduce the deployed model. dropout_rate /
+# learning_rate / weight_decay cannot be recovered from the saved weights, so they remain as printed
+# in Table S6 (unverified against the released model).
 TABLE_S6 = (
     {"num_fc_layers": 1, "num_fc_units": 1376, "dropout_rate": 0.5,      "learning_rate": 1.46e-4, "weight_decay": 7.87e-4},
-    {"num_fc_layers": 2, "num_fc_units": 1051, "dropout_rate": 0.5,      "learning_rate": 2.22e-4, "weight_decay": 4.8e-5},
+    {"num_fc_layers": 2, "num_fc_units": 950,  "dropout_rate": 0.5,      "learning_rate": 2.22e-4, "weight_decay": 4.8e-5},
     {"num_fc_layers": 2, "num_fc_units": 1265, "dropout_rate": 0.5,      "learning_rate": 1.45e-4, "weight_decay": 5.1e-5},
     {"num_fc_layers": 1, "num_fc_units": 1842, "dropout_rate": 1.3185e-2, "learning_rate": 1.57e-4, "weight_decay": 2.9e-4},
     {"num_fc_layers": 3, "num_fc_units": 2048, "dropout_rate": 2.7e-5,   "learning_rate": 2.56e-4, "weight_decay": 1.0e-5},
