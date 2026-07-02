@@ -37,12 +37,13 @@ from torch.nn import functional as F  # noqa: N812
 # (num_fc_layers, num_fc_units, dropout_rate) define each member; learning_rate / weight_decay are
 # read by the model handler to build per-member optimizers during training.
 #
-# The architecture fields (num_fc_layers, num_fc_units) were cross-checked against the authors'
-# released ensemble weights (data/ensemble_models/fold_*.pt): all 10 members match Table S6 except
-# member 2, whose saved layers are Linear(n_features->950)/950->950/950->38, i.e. num_fc_units=950,
-# not the 1051 printed in the table. We use 950 to reproduce the deployed model. dropout_rate /
-# learning_rate / weight_decay cannot be recovered from the saved weights, so they remain as printed
-# in Table S6 (unverified against the released model).
+# All values were transcribed from Supplementary Table S6 and human-verified against it. The two
+# architecture fields (num_fc_layers, num_fc_units) were additionally cross-checked against the
+# authors' released ensemble weights (data/ensemble_models/fold_*.pt): every member matches both the
+# table and the weights EXCEPT member 2, where the table prints num_fc_units=1051 but the saved
+# layers are Linear(n_features->950)/950->950/950->38, i.e. 950. We use 950 to reproduce the deployed
+# model (paper-vs-weights discrepancy resolved in favor of the shipped weights). dropout_rate /
+# learning_rate / weight_decay cannot be recovered from the weights; they match Table S6 as printed.
 TABLE_S6 = (
     {"num_fc_layers": 1, "num_fc_units": 1376, "dropout_rate": 0.5,      "learning_rate": 1.46e-4, "weight_decay": 7.87e-4},
     {"num_fc_layers": 2, "num_fc_units": 950,  "dropout_rate": 0.5,      "learning_rate": 2.22e-4, "weight_decay": 4.8e-5},
