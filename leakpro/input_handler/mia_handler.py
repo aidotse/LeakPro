@@ -4,9 +4,7 @@
 #
 """Parent class for user inputs."""
 
-import inspect
 import pickle
-import types
 
 import joblib
 import numpy as np
@@ -65,8 +63,7 @@ def _fix_bn_inplace(model: torch.nn.Module) -> None:
 class MIAHandler:
     """Parent class for user inputs."""
 
-    def __init__(self:Self, configs: dict, user_input_handler:AbstractInputHandler,
-                 training_handler:AbstractInputHandler = None) -> None:
+    def __init__(self:Self, configs: dict, user_input_handler:AbstractInputHandler) -> None:
         self.configs = configs
         self._load_model_class()
         self._load_target_metadata()
@@ -75,17 +72,9 @@ class MIAHandler:
         self._load_criterion()
         self._load_dataloader_params()
 
-        # training_handler provides train() and eval(); falls back to user_input_handler
-        _training = training_handler if training_handler is not None else user_input_handler
-
-        # Attach methods defined in AbstractInputHandler from the training handler
-        for name, _ in inspect.getmembers(AbstractInputHandler, predicate=inspect.isfunction):
-            if hasattr(_training, name) and not name.startswith("__"):
-                attr = getattr(_training, name)
-                if callable(attr):
-                    attr = types.MethodType(attr, self)
-                setattr(self, name, attr)
-
+        # AbstractInputHandler methods (train/eval/...) are attached to the handler once,
+        # centrally in LeakPro.setup_handler(). Previously this loop ran here as well,
+        # duplicating that work for the MIA path (issue #394).
         # UserDataset always comes from the data handler (user_input_handler)
         self.UserDataset = user_input_handler.UserDataset
 
