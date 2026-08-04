@@ -7,10 +7,10 @@ combination with shadow models where logits are precomputed and cached.
 import numpy as np
 import torch
 from joblib import Parallel, delayed
-from sktime.distances import dtw_distance
 from torch import cuda
 from ts2vec import TS2Vec
 
+from leakpro.signals.utils.dtw import mv_dtw_distance
 from leakpro.signals.utils.msm import mv_msm_distance
 
 
@@ -172,7 +172,7 @@ def dtw(logits: np.ndarray, targets: np.ndarray) -> np.ndarray:
     """Per-point Dynamic Time Warping distance between logits and targets."""
     assert logits.shape == targets.shape
     distances = Parallel(n_jobs=-1)(
-        delayed(dtw_distance)(logits[i], targets[i]) for i in range(len(logits))
+        delayed(mv_dtw_distance)(logits[i], targets[i]) for i in range(len(logits))
     )
     return np.array(distances)
 

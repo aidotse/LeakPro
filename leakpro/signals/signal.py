@@ -15,15 +15,10 @@ from tqdm import tqdm
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.signals.signal_extractor import Model
+from leakpro.signals.utils.dtw import mv_dtw_distance
 from leakpro.signals.utils.get_TS2Vec import get_ts2vec_model
 from leakpro.signals.utils.msm import mv_msm_distance
 from leakpro.utils.import_helper import List, Optional, Self, Tuple
-
-try:
-    from sktime.distances import dtw_distance
-    HAS_SKTIME = True
-except ImportError:
-    HAS_SKTIME = False
 
 
 class Signal(ABC):
@@ -562,8 +557,6 @@ class DTW(Signal):
 
     This particular class is used to get the Dynamic Time Warping distance
     between a time-series model output and the target series.
-
-    Note: Requires the `sktime` package to be installed.
     """
 
     def __call__(
@@ -585,12 +578,6 @@ class DTW(Signal):
             The signal value.
 
         """
-        if not HAS_SKTIME:
-            raise ImportError(
-                "DTW signal requires the 'sktime' package. "
-                "Install it with: pip install sktime"
-            )
-
         data_loader = handler.get_dataloader(indices, shuffle=False)
         assert self._is_shuffling(data_loader) is False, "DataLoader must not shuffle data to maintain order of indices"
 
@@ -600,7 +587,7 @@ class DTW(Signal):
 
             for data, target in tqdm(data_loader, desc=f"Getting DTW distance for model {m+1}/{len(models)}"):
                 output = model.get_logits(data)
-                batch_dtw_distances = np.array(list(map(dtw_distance, target.numpy(), output)))
+                batch_dtw_distances = np.array(list(map(mv_dtw_distance, target.numpy(), output)))
                 model_dtw_distance.extend(batch_dtw_distances)
 
             model_dtw_distance = np.array(model_dtw_distance)

@@ -7,7 +7,8 @@ import pytest
 import torch
 from torch import optim
 
-from leakpro.signals.signal import SIGNAL_REGISTRY, MSM, create_signal_instance
+from leakpro.signals.signal import SIGNAL_REGISTRY, DTW, MSM, create_signal_instance
+from leakpro.signals.utils.dtw import mv_dtw_distance
 from leakpro.signals.utils.msm import mv_msm_distance, mv_msm_cost
 
 
@@ -95,29 +96,136 @@ class TestMSMSignal:
 
 
 # ---------------------------------------------------------------------------
-# DTW Signal — ImportError when sktime is absent
+# DTW distance unit tests (no external dependency)
+# ---------------------------------------------------------------------------
+
+class TestMvDtwDistance:
+    """The in-repo DTW must stay a faithful DTW_D: squared local cost, summed along the path.
+
+    The expected values below were verified against ``sktime.distances.dtw_distance`` (0.40.1)
+    before sktime was dropped as a dependency, so they pin the exact semantics the time-series
+    signals were originally built on.
+    """
+
+    def test_identical_series_is_zero(self) -> None:
+        """Distance between a series and itself should be 0."""
+        x = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
+        assert mv_dtw_distance(x, x) == pytest.approx(0.0)
+
+    def test_local_cost_is_squared_not_absolute(self) -> None:
+        """A single unit offset costs 1.0; an absolute-difference cost would also give 1.0,
+        so pair this with the scaling test below to pin the square.
+        """
+        assert mv_dtw_distance(np.array([1.0, 2.0]), np.array([1.0, 3.0])) == pytest.approx(1.0)
+
+    def test_cost_scales_quadratically_with_offset(self) -> None:
+        """Doubling the offset must quadruple the distance (squared, not absolute, cost)."""
+        one = mv_dtw_distance(np.array([0.0, 0.0]), np.array([0.0, 1.0]))
+        two = mv_dtw_distance(np.array([0.0, 0.0]), np.array([0.0, 2.0]))
+        assert two == pytest.approx(4.0 * one)
+
+    def test_no_square_root_is_taken(self) -> None:
+        """Distance is the raw sum of squared local costs along the path, not its square root."""
+        # Two time points each offset by 3 => 9 + 9 = 18, not sqrt(18).
+        x = np.array([[0.0], [0.0]])
+        y = np.array([[3.0], [3.0]])
+        assert mv_dtw_distance(x, y) == pytest.approx(18.0)
+
+    def test_warping_absorbs_a_time_shift(self) -> None:
+        """A time-shifted copy must cost far less than the unwarped distance.
+
+        This is the regression guard for the axis convention: axis 0 is time. If the axes are
+        swapped, warping cannot absorb the shift and the distance collapses to the no-warp value.
+        """
+        rng = np.random.default_rng(7)
+        base = rng.normal(size=(12, 3))
+        shifted = np.vstack([base[0:1], base[:-1]])
+
+        warped = mv_dtw_distance(base, shifted)
+        unwarped = float(np.sum((base - shifted) ** 2))
+
+        assert warped == pytest.approx(2.916957, abs=1e-5)
+        assert unwarped == pytest.approx(49.248474, abs=1e-5)
+        assert warped < unwarped / 10
+
+    def test_symmetric(self) -> None:
+        """DTW with a symmetric local cost is itself symmetric."""
+        rng = np.random.default_rng(3)
+        x, y = rng.normal(size=(9, 2)), rng.normal(size=(9, 2))
+        assert mv_dtw_distance(x, y) == pytest.approx(mv_dtw_distance(y, x))
+
+    def test_never_exceeds_unwarped_distance(self) -> None:
+        """The diagonal path is always available, so DTW <= the aligned squared distance."""
+        rng = np.random.default_rng(4)
+        x, y = rng.normal(size=(15, 3)), rng.normal(size=(15, 3))
+        assert mv_dtw_distance(x, y) <= np.sum((x - y) ** 2) + 1e-12
+
+    def test_output_is_scalar(self) -> None:
+        x = np.random.rand(4, 2)
+        y = np.random.rand(4, 2)
+        assert isinstance(mv_dtw_distance(x, y), float)
+
+    def test_univariate_1d_input_accepted(self) -> None:
+        """Univariate series may be passed as 1d arrays, matching sktime's old behaviour."""
+        flat = mv_dtw_distance(np.array([0.0, 1.0, 0.0]), np.array([0.0, 0.0, 1.0]))
+        column = mv_dtw_distance(np.array([[0.0], [1.0], [0.0]]), np.array([[0.0], [0.0], [1.0]]))
+        assert flat == pytest.approx(1.0)
+        assert column == pytest.approx(flat)
+
+    def test_different_lengths(self) -> None:
+        """Series of unequal length are supported (the cost matrix is rectangular)."""
+        x = np.random.rand(3, 1)
+        y = np.random.rand(5, 1)
+        result = mv_dtw_distance(x, y)
+        assert isinstance(result, float)
+        assert result >= 0
+
+    def test_single_timepoint_series_maps_to_every_point(self) -> None:
+        """A length-1 series has exactly one valid warping path: onto every point of the other.
+
+        Its cost is therefore the summed squared distance to all of them. sktime could not be
+        used as a reference here, because its input normaliser silently transposes (k, 1) arrays.
+        """
+        x = np.array([[1.0, 2.0]])
+        y = np.array([[0.0, 0.0], [1.0, 1.0], [2.0, 2.0]])
+        expected = np.sum((x[0] - y) ** 2)  # 5 + 1 + 1 = 7
+        assert mv_dtw_distance(x, y) == pytest.approx(expected)
+        assert mv_dtw_distance(y, x) == pytest.approx(expected)
+
+    def test_mismatched_variable_count_raises(self) -> None:
+        """Series must agree on the number of variables."""
+        with pytest.raises(ValueError, match="same number of variables"):
+            mv_dtw_distance(np.random.rand(4, 2), np.random.rand(4, 3))
+
+
+# ---------------------------------------------------------------------------
+# DTW Signal end-to-end test (mocked handler/model)
 # ---------------------------------------------------------------------------
 
 class TestDTWSignal:
-    def test_dtw_raises_import_error_without_sktime(self) -> None:
-        """DTW signal must raise ImportError when sktime is not installed."""
-        from leakpro.signals import signal as sig_module
+    def test_dtw_signal_returns_one_array_per_model(self) -> None:
+        """DTW signal should return one non-negative array per model, one value per sample."""
+        data = torch.randn(4, 5, 2)
+        targets = torch.randn(4, 3, 2)
+        dataset = torch.utils.data.TensorDataset(data, targets)
+        loader = torch.utils.data.DataLoader(dataset, batch_size=2, shuffle=False)
 
-        original = sig_module.HAS_SKTIME
-        try:
-            sig_module.HAS_SKTIME = False
-            dtw = sig_module.DTW()
-            with pytest.raises(ImportError, match="sktime"):
-                dtw([], MagicMock(), np.arange(2))
-        finally:
-            sig_module.HAS_SKTIME = original
+        model = MagicMock()
+        model.get_logits.side_effect = lambda x: x[:, :3, :].numpy()
+        handler = MagicMock()
+        handler.get_dataloader.return_value = loader
+
+        results = DTW()([model], handler, np.arange(4))
+
+        assert len(results) == 1
+        assert results[0].shape == (4,)
+        assert np.all(results[0] >= 0)
 
     def test_dtw_in_signal_registry(self) -> None:
         assert "DTW" in SIGNAL_REGISTRY
 
     def test_create_signal_instance_dtw(self) -> None:
         signal = create_signal_instance("DTW")
-        from leakpro.signals.signal import DTW
         assert isinstance(signal, DTW)
 
 
