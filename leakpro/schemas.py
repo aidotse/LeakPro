@@ -203,7 +203,6 @@ class ShadowModelTrainingSchema(BaseModel):
     batch_size: Optional[int] = Field(default=None, ge=1, description="Batch size used during training")
     train_result: EvalOutput = Field(..., description="Evaluation output for the training set")
     test_result: EvalOutput = Field(..., description="Evaluation output for the test set")
-    online: bool = Field(..., description="Online vs. offline training")
     model_class: str = Field(..., description="Model class name")
     model_module_path: Optional[str] = Field(default=None, description="Path to the model module")
     target_model_hash: str = Field(..., description="Hash of target model")
@@ -258,5 +257,15 @@ class MIAResultSchema(BaseModel):
     fp: Union[ArrayOrScalar, None] = Field(None, description="FP values")
     tn: Union[ArrayOrScalar, None] = Field(None, description="TN values")
     fn: Union[ArrayOrScalar, None] = Field(None, description="FN values")
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # Prevent extra fields
+
+class MinvResultSchema(BaseModel):
+    """Schema for the Minv attack results."""
+
+    name: str = Field(..., description="Name of the result")
+    id: str = Field(..., description="Unique identifier for the result")
+    config: Dict[str, Any] = Field(..., description="Configuration of the attack")
+    metrics: Dict[str, Any] = Field(..., description="Reconstruction metrics")
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # Prevent extra fields

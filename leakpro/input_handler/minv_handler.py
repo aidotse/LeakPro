@@ -101,10 +101,53 @@ class MINVHandler:
         try:
             with open(self.model_path, "rb") as f:
                 self.target_model = self.target_model_blueprint(**init_params)
-                self.target_model.load_state_dict(torch.load(f))
+                self.target_model.load_state_dict(self._safe_torch_load(f))
             logger.info(f"Loaded target model from {model_path}")
         except FileNotFoundError as e:
             raise FileNotFoundError(f"Could not find the trained target model at {model_path}") from e
+
+    def load_model_from_config(
+        self: Self,
+        module_path: str,
+        model_class: str,
+        model_folder: str,
+        role: str = "model",
+    ) -> nn.Module:
+        """Load a trained model and metadata from an explicit model config."""
+        if model_class is None:
+            raise ValueError(f"{role} model_class not found in configs.")
+        if module_path is None:
+            raise ValueError(f"{role} module_path not found in configs.")
+        if model_folder is None:
+            raise ValueError(f"{role} model folder not found in configs.")
+
+        try:
+            model_module = import_module_from_file(module_path)
+            model_blueprint = get_class_from_module(model_module, model_class)
+            logger.info(f"{role.capitalize()} model blueprint created from {model_class} in {module_path}.")
+        except Exception as e:
+            raise ValueError(f"Failed to create the {role} model blueprint from {model_class} in {module_path}") from e
+
+        metadata_path = f"{model_folder}/model_metadata.pkl"
+        try:
+            with open(metadata_path, "rb") as f:
+                model_metadata = joblib.load(f)
+        except FileNotFoundError as e:
+            raise FileNotFoundError(f"Could not find the {role} model metadata at {metadata_path}") from e
+
+        if not isinstance(model_metadata, BaseModel):
+            model_metadata = MIAMetaDataSchema(**model_metadata)
+
+        model_path = f"{model_folder}/target_model.pkl"
+        try:
+            with open(model_path, "rb") as f:
+                model = model_blueprint(**model_metadata.init_params)
+                model.load_state_dict(self._safe_torch_load(f))
+        except FileNotFoundError as e:
+            raise FileNotFoundError(f"Could not find the trained {role} model at {model_path}") from e
+
+        logger.info(f"Loaded {role} model from {model_folder}")
+        return model
 
     def get_public_dataloader(self:Self, batch_size: int) -> DataLoader:
         """Return the public dataset dataloader."""
@@ -116,8 +159,18 @@ class MINVHandler:
 
     def get_num_classes(self:Self) -> int:
         """Return the number of classes in the target model."""
-        # TODO: Implement this to work with different types of datasets (where the label is not always called y)
-        return self.private_dataset.y.unique().shape[0]
+        if hasattr(self.private_dataset, "y"):
+            return int(torch.unique(self.private_dataset.y).shape[0])
+        if hasattr(self.private_dataset, "targets"):
+            return int(torch.unique(torch.as_tensor(self.private_dataset.targets)).shape[0])
+        if hasattr(self.target_model, "num_classes"):
+            return int(self.target_model.num_classes)
+        init_num_classes = self.target_model_metadata.init_params.get("num_classes")
+        if init_num_classes is not None:
+            return int(init_num_classes)
+        raise ValueError(
+            "Could not infer number of classes from private dataset or target model metadata."
+        )
 
     def _load_criterion(self:Self) -> None:
         """Get the criterion for the target model."""
@@ -145,3 +198,11 @@ class MINVHandler:
     def get_criterion(self:Self) -> nn.modules.loss._Loss:
         """Get the criterion for the target model."""
         return self._criterion
+
+    @staticmethod
+    def _safe_torch_load(path_or_buffer: object) -> dict:
+        """Load torch state dicts across torch versions with safe defaults."""
+        try:
+            return torch.load(path_or_buffer, map_location="cpu", weights_only=True)
+        except TypeError:
+            return torch.load(path_or_buffer, map_location="cpu")

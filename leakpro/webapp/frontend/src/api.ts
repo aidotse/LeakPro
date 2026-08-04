@@ -144,6 +144,7 @@ export interface TrainParams {
   target_delta?: number;
   max_grad_norm?: number;
   virtual_batch_size?: number;
+  accountant?: string;
 }
 
 export interface AttackParams {

@@ -101,7 +101,7 @@ class AttackBASE(AbstractMIA):
             num_models = self.num_shadow_models,
             shadow_population = self.attack_data_indices,
             training_fraction = self.training_data_fraction,
-            online = self.online)
+        )
         # load shadow models
         self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)
         if self.online is False:

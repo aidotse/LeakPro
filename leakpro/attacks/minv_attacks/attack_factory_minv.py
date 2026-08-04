@@ -5,6 +5,7 @@
 """Module that contains the AttackFactory class which is responsible for creating the attack objects."""
 
 from leakpro.attacks.minv_attacks.abstract_minv import AbstractMINV
+from leakpro.attacks.minv_attacks.diffmi import AttackDiffMi
 from leakpro.attacks.minv_attacks.plgmi import AttackPLGMI
 from leakpro.input_handler.minv_handler import MINVHandler
 
@@ -14,6 +15,7 @@ class AttackFactoryMINV:
 
     attack_classes = {
         "plgmi": AttackPLGMI,
+        "diffmi": AttackDiffMi,
         }
 
     # Shared variables for all attacks

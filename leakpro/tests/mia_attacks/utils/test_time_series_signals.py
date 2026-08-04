@@ -174,7 +174,6 @@ class TestRandomShadowSampling:
             2,
             image_handler.test_indices,
             training_fraction=0.5,
-            online=False,
             sampling_method="random"
         )
         assert len(indices) > 0

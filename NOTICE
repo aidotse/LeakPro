@@ -49,6 +49,12 @@ This product includes software developed at Lindholmen Science Park AB
    Source: https://github.com/yuezhihan/ts2vec
    Note: Package metadata does not declare a license; license identified from upstream source.
 
+8. Diff-MI
+   Located in: leakpro/attacks/minv_attacks/utils/diff_mi/
+   Copyright (c) 2024 Li, Ouxiang et al.
+   Licensed under Apache-2.0 License.
+   Source: https://github.com/Ouxiang-Li/Diff-MI
+
 ===============================================================================
 ==  Scientific Acknowledgments                                               ==
 ===============================================================================

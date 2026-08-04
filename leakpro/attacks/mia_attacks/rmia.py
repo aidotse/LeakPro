@@ -260,7 +260,7 @@ shadow-model residuals on the z-population. Ignored for classification models, w
             num_models = self.num_shadow_models,
             shadow_population = self.attack_data_indices,
             training_fraction = self.training_data_fraction,
-            online = True)
+        )
         # load shadow models
         self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)
 
@@ -335,7 +335,8 @@ shadow-model residuals on the z-population. Ignored for classification models, w
         self.ratio_z = p_z_given_theta / (p_z + self.epsilon)
 
     def _run_attack(self:Self) -> None:
-        logger.info("Running RMIA online attack")
+        mode = "online" if self.online else "offline"
+        logger.info(f"Running RMIA {mode} attack")
 
         # probability of the true output for each audit point given the target model
         n_audit_points = len(self.ground_truth)

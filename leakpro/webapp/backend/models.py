@@ -80,6 +80,7 @@ class TrainParams(BaseModel):
     target_delta: float | None = None
     max_grad_norm: float | None = None
     virtual_batch_size: int | None = None
+    accountant: str = "prv"          # "prv" | "rdp"
 
 
 class ModelInfo(BaseModel):

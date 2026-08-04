@@ -71,7 +71,7 @@ class CelebA_InputHandler(AbstractInputHandler):
         return TrainingOutput(**output)
     
     
-    def evaluate(self, dataloader: DataLoader, model: torch.nn.Module, criterion: torch.nn.Module) -> dict:
+    def eval(self, dataloader: DataLoader, model: torch.nn.Module, criterion: torch.nn.Module) -> dict:
         """Evaluate the model."""
         gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
         model.to(gpu_or_cpu)
@@ -132,7 +132,6 @@ class CelebA_InputHandler(AbstractInputHandler):
                 log_interval: Log interval.
                 sample_from_generator: Function to sample from the generator.
         """
-        torch.set_default_device(device)
         torch.backends.cudnn.benchmark = True
         gen_losses = []
         dis_losses = []

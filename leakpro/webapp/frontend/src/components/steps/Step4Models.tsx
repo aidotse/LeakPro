@@ -611,6 +611,17 @@ function TrainCard({ params, onChange, onRemove }: {
           <NumberField label="Target δ" value={params.target_delta ?? 1e-5} min={1e-7} max={0.1} step={1e-6} onChange={(v) => onChange({ target_delta: v })} />
           <NumberField label="Max Grad Norm" value={params.max_grad_norm ?? 1.0} min={0.01} max={10} step={0.01} onChange={(v) => onChange({ max_grad_norm: v })} />
           <NumberField label="Virtual Batch Size" value={params.virtual_batch_size ?? 16} min={1} max={512} step={1} onChange={(v) => onChange({ virtual_batch_size: v })} />
+          <div>
+            <label className="text-xs font-semibold text-slate-500 mb-1 block">Accountant</label>
+            <select
+              value={params.accountant ?? "prv"}
+              onChange={(e) => onChange({ accountant: e.target.value })}
+              className="w-full rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm px-3 py-2"
+            >
+              <option value="prv">PRV (recommended)</option>
+              <option value="rdp">RDP</option>
+            </select>
+          </div>
         </div>
       )}
     </div>
@@ -727,5 +738,6 @@ function defaultParams(n: number): TrainParams {
     f_train: 0.5,
     f_test: 0.5,
     dpsgd: false,
+    accountant: "prv",
   };
 }
