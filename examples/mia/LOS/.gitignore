@@ -3,3 +3,8 @@ data/*
 
 # But do not ignore the .gitkeep file
 !data/.gitkeep
+
+# Artifacts produced by mimic_XGB_main.ipynb (trained booster, shadow models, audit report).
+# The root .gitignore covers "target/" and "leakpro_output" but not these suffixed names.
+target_XGB/
+leakpro_output_xgb/
