@@ -18,7 +18,10 @@ class UserDataset(AbstractInputHandler.UserDataset):
     Wraps the pre-normalized LOS LR dataset for LeakPro.
 
     data:    float32 Tensor (N, 7488) — already StandardScaler-normalized
-    targets: float32 Tensor (N,)      — binary labels (0 = LOS ≤ 3 days, 1 = LOS > 3 days)
+    targets: int64 (Long) Tensor (N,) — binary class labels (0 = LOS <= 3 days, 1 = LOS > 3 days).
+             Stored as Long, like every other LeakPro dataset handler, since labels double as class
+             indices elsewhere in the attack code; call sites that need BCEWithLogitsLoss's float
+             target (e.g. the single-logit binary path) cast with `.float()` on the fly.
     """
 
     def __init__(self, data, targets, **kwargs):
