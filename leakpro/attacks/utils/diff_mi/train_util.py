@@ -31,6 +31,21 @@ from .nn import update_ema
 from .resample import LossAwareSampler, UniformSampler
 
 
+def _tensor_tree_to_cpu(obj: Any) -> Any:
+    """Recursively move every tensor in a (possibly nested) dict/list/tuple to CPU.
+
+    torch.save on some Habana HPU tensors triggers a storage.cpu() bug ("Number of dims
+    in tensor don't match in permute"); moving tensors to CPU ourselves first avoids it.
+    """
+    if isinstance(obj, th.Tensor):
+        return obj.detach().to("cpu")
+    if isinstance(obj, dict):
+        return {k: _tensor_tree_to_cpu(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return type(obj)(_tensor_tree_to_cpu(v) for v in obj)
+    return obj
+
+
 def pretrain_completion_path(save_path: str, save_name: str) -> str:
     """Return the sidecar path that marks a completed pretraining run."""
     return bf.join(save_path, f"{save_name}.complete.json")
@@ -400,7 +415,7 @@ class PreTrain:
                 logger.info(f"saving model {rate}...")
                 filename = f"{self.save_name}.pt" if not rate else f"ema_{rate}_{self.save_name}.pt"
                 with bf.BlobFile(bf.join(self.save_path, filename), "wb") as f:
-                    th.save(state_dict, f)
+                    th.save(_tensor_tree_to_cpu(state_dict), f)
 
         save_checkpoint(0, self.mp_trainer.master_params)
         for rate, params in zip(self.ema_rate, self.ema_params):
@@ -411,7 +426,7 @@ class PreTrain:
                 bf.join(self.save_path, f"opt_{self.save_name}.pt"),
                 "wb",
             ) as f:
-                th.save(self.opt.state_dict(), f)
+                th.save(_tensor_tree_to_cpu(self.opt.state_dict()), f)
 
         dist_util.barrier()
 
@@ -682,7 +697,7 @@ class FineTune:
         filename = f"{self.save_name}.pt"
         os.makedirs(self.save_path, exist_ok=True)
         with bf.BlobFile(bf.join(self.save_path, filename), "wb") as f:
-            th.save(self.state_dict, f)
+            th.save(_tensor_tree_to_cpu(self.state_dict), f)
             logger.info(f"New best mean acc: {self.best_mean_acc:.2%}. Saving model to {f.name}")
 
 

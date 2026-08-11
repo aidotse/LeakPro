@@ -39,6 +39,7 @@ from leakpro.attacks.utils.diffusion_handler import DiffMiHandler
 from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.reporting.minva_result import MinvResult
 from leakpro.schemas import ReconstructionConfig
+from leakpro.utils.device import get_device
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 from leakpro.utils.save_load import hash_config
@@ -98,7 +99,7 @@ class AttackDiffMi(AbstractMINV):
 
         self.diff_handler = DiffMiHandler(self.handler, configs=self.config)
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = get_device()
 
     def _setup_(self:Self) -> None:
         """Setup the attack."""

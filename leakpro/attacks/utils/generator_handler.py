@@ -86,5 +86,6 @@ class GeneratorHandler():
 
     def save_generator(self, generator: Module, path: str) -> None:
         """Save the generator model."""
-        torch.save(generator.state_dict(), path)
+        cpu_state_dict = {k: v.detach().to("cpu") for k, v in generator.state_dict().items()}
+        torch.save(cpu_state_dict, path)
         logger.info(f"Saved generator model to {path}")

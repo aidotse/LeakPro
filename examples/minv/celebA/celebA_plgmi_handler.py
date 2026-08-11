@@ -16,6 +16,15 @@ import kornia
 import time
 
 
+def _cpu_state_dict(model: torch.nn.Module) -> dict:
+    """Move each tensor in a state dict to CPU individually.
+
+    Avoids letting torch.save() copy the whole storage from device to CPU in
+    one raw operation, which triggers a permute bug in the Habana HPU backend.
+    """
+    return {k: v.detach().to("cpu") for k, v in model.state_dict().items()}
+
+
 class CelebA_InputHandler(AbstractInputHandler):
     """Class to handle the user input for the CelebA dataset for plgmi attack."""
     
@@ -220,8 +229,8 @@ class CelebA_InputHandler(AbstractInputHandler):
                 
                 if not os.path.exists('./gan_checks'):
                     os.makedirs('./gan_checks')
-                torch.save(gen.state_dict(), f'./gan_checks/gen_checkpoint_{i}.pth')
-                torch.save(dis.state_dict(), f'./gan_checks/dis_checkpoint_{i}.pth')
+                torch.save(_cpu_state_dict(gen), f'./gan_checks/gen_checkpoint_{i}.pth')
+                torch.save(_cpu_state_dict(dis), f'./gan_checks/dis_checkpoint_{i}.pth')
 
-        torch.save(gen.state_dict(), './gen.pth')
-        torch.save(dis.state_dict(), './dis.pth')
+        torch.save(_cpu_state_dict(gen), './gen.pth')
+        torch.save(_cpu_state_dict(dis), './dis.pth')
