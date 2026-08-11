@@ -135,12 +135,16 @@ class AttackRMIA(AbstractMIA):
         if (~cached_mask).any():
             # Shadow models are already PytorchModel wrappers; target model is a raw nn.Module.
             model_wrapped = model if isinstance(model, PytorchModel) else PytorchModel(model, self.handler.get_criterion())
+            # Drop only the model axis. A bare .squeeze() also collapses the class axis for
+            # single-output binary models, yielding (n,) where (n, 1) is required.
             unc = np.array(ModelLogits()(
                 [model_wrapped],
                 self.handler,
                 z_indices[~cached_mask],
-            )).squeeze()
-            logits[~cached_mask] = np.atleast_2d(unc)
+            ))
+            if unc.shape[0] == 1:
+                unc = unc[0]
+            logits[~cached_mask] = unc
 
         return logits
 
@@ -173,7 +177,10 @@ class AttackRMIA(AbstractMIA):
         if not self.load_for_optuna:
             self._prepare_shadow_models()
 
-            self.ground_truth_indices = self.handler.get_labels(self.audit_dataset["data"])
+            # Cast to int: these are used as class indices into the softmax below, and datasets
+            # with a binary target commonly carry float labels (BCEWithLogitsLoss requires them).
+            self.ground_truth_indices = np.asarray(
+                self.handler.get_labels(self.audit_dataset["data"])).reshape(-1).astype(np.int64)
             self.logits_theta = ShadowModelHandler().load_logits(name=f"target_{ShadowModelHandler().target_model_hash}")
             self.logits_shadow_models = []
             for indx in self.shadow_model_indices:
@@ -189,7 +196,7 @@ class AttackRMIA(AbstractMIA):
 
         n_z = int(self.z_data_sample_fraction * len(self.attack_data_indices))
         z_indices = np.random.choice(self.attack_data_indices, size=n_z, replace=False)
-        z_labels = self.handler.get_labels(z_indices)
+        z_labels = np.asarray(self.handler.get_labels(z_indices)).reshape(-1).astype(np.int64)
 
         # cached_mask is True for z-points present in the logit cache (train+test).
         # Auxiliary population points not in the cache are computed on-the-fly.

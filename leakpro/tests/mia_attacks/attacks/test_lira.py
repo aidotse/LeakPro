@@ -138,3 +138,47 @@ def test_lira_offline_attack(image_handler:ImageInputHandler):
 
     assert lira_result is not None
     assert isinstance(lira_result, MIAResult)
+
+def test_rescale_logits_should_accept_float_labels() -> None:
+    """Datasets using BCEWithLogitsLoss carry float labels, which cannot index an array.
+
+    Regression test: float labels used to raise
+    "arrays used as indices must be of integer (or boolean) type".
+    """
+    rng = np.random.default_rng(1)
+    logits = rng.normal(size=(32, 1)).astype(np.float32)
+    labels_int = rng.integers(0, 2, 32)
+
+    from_float = AttackLiRA.rescale_logits(None, logits, labels_int.astype(np.float32))
+    from_int = AttackLiRA.rescale_logits(None, logits, labels_int)
+
+    assert np.allclose(from_float, from_int)
+
+
+def test_rescale_logits_should_match_the_torch_implementation_for_binary_models() -> None:
+    """The numpy and torch rescaling paths must agree, otherwise cached and live logits diverge."""
+    import torch
+    from torch import nn
+
+    from leakpro.signals.signal_extractor import PytorchModel
+
+    rng = np.random.default_rng(2)
+    logits = rng.normal(size=(64, 1)).astype(np.float32)
+    labels = rng.integers(0, 2, 64).astype(np.float32)
+
+    class _ConstantModel(nn.Module):
+        """Returns fixed logits so both paths score exactly the same values."""
+
+        def __init__(self, values: np.ndarray) -> None:
+            super().__init__()
+            self.register_buffer("values", torch.tensor(values))
+
+        def forward(self, _: torch.Tensor) -> torch.Tensor:
+            return self.values
+
+    torch_scores = PytorchModel(_ConstantModel(logits), nn.BCEWithLogitsLoss()).get_rescaled_logits(
+        torch.zeros(64, 3), torch.from_numpy(labels)
+    )
+    numpy_scores = AttackLiRA.rescale_logits(None, logits, labels)
+
+    assert np.allclose(numpy_scores, torch_scores, atol=1e-5)
