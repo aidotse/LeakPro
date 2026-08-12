@@ -41,7 +41,8 @@ class TestIsHpuAvailable:
     def test_returns_true_when_is_available_true(self):
         mock_hthpu = MagicMock()
         mock_hthpu.is_available.return_value = True
-        with patch.object(device_module, "_hthpu", mock_hthpu):
+        with patch.object(device_module, "_hthpu", mock_hthpu), \
+             patch.object(device_module, "_probe_hpu_acquisition"):
             assert is_hpu_available() is True
 
     def test_returns_false_when_is_available_false(self):
@@ -56,6 +57,17 @@ class TestIsHpuAvailable:
         with patch.object(device_module, "_hthpu", mock_hthpu):
             assert is_hpu_available() is False
 
+    def test_returns_false_when_acquisition_fails_after_is_available_true(self):
+        """is_available() can report True while the device still can't be acquired."""
+        mock_hthpu = MagicMock()
+        mock_hthpu.is_available.return_value = True
+        with patch.object(device_module, "_hthpu", mock_hthpu), \
+             patch.object(
+                 device_module, "_probe_hpu_acquisition",
+                 side_effect=RuntimeError("synStatus=8 [Device not found]"),
+             ):
+            assert is_hpu_available() is False
+
 
 # ---------------------------------------------------------------------------
 # get_device  (lru_cache cleared by autouse fixture)
@@ -65,7 +77,8 @@ class TestGetDevice:
     def test_hpu_path(self):
         mock_hthpu = MagicMock()
         mock_hthpu.is_available.return_value = True
-        with patch.object(device_module, "_hthpu", mock_hthpu):
+        with patch.object(device_module, "_hthpu", mock_hthpu), \
+             patch.object(device_module, "_probe_hpu_acquisition"):
             device = get_device()
         assert device == torch.device("hpu")
 
@@ -85,9 +98,23 @@ class TestGetDevice:
         mock_hthpu = MagicMock()
         mock_hthpu.is_available.return_value = True
         with patch.object(device_module, "_hthpu", mock_hthpu), \
+             patch.object(device_module, "_probe_hpu_acquisition"), \
              patch("torch.cuda.is_available", return_value=True):
             device = get_device()
         assert device == torch.device("hpu")
+
+    def test_hpu_falls_back_to_cuda_when_acquisition_fails(self):
+        """is_available() true but a real acquisition failure must fall through to CUDA."""
+        mock_hthpu = MagicMock()
+        mock_hthpu.is_available.return_value = True
+        with patch.object(device_module, "_hthpu", mock_hthpu), \
+             patch.object(
+                 device_module, "_probe_hpu_acquisition",
+                 side_effect=RuntimeError("synStatus=8 [Device not found]"),
+             ), \
+             patch("torch.cuda.is_available", return_value=True):
+            device = get_device()
+        assert device == torch.device("cuda")
 
     def test_result_is_cached(self):
         with patch.object(device_module, "_hthpu", None), \
@@ -180,6 +207,7 @@ class TestMarkStep:
         mock_hthpu.is_available.return_value = True
         with patch.object(device_module, "_htcore", mock_htcore), \
              patch.object(device_module, "_hthpu", mock_hthpu), \
+             patch.object(device_module, "_probe_hpu_acquisition"), \
              patch.object(device_module, "_HPU_LAZY_MODE", True):
             mark_step()
         mock_htcore.mark_step.assert_called_once()

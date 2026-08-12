@@ -41,12 +41,27 @@ except ImportError as exc:
     _HPU_IMPORT_ERROR = str(exc)
 
 
+def _probe_hpu_acquisition() -> None:
+    """Attempt a real HPU allocation; raises if the device cannot be acquired.
+
+    ``_hthpu.is_available()`` only confirms the Habana software stack is loaded —
+    it does not guarantee a physical device can actually be claimed (e.g. no card
+    present, driver not loaded, device held by another process). This exercises
+    the same lazy-init path a later ``tensor.to("hpu")`` call would hit, so a
+    missing/busy card is caught here instead of failing deep inside training.
+    """
+    torch.zeros(1, device="hpu")
+
+
 def is_hpu_available() -> bool:
     """Return ``True`` when a Habana Gaudi HPU is usable in this process."""
     if _hthpu is None:
         return False
     try:
-        return bool(_hthpu.is_available())
+        if not _hthpu.is_available():
+            return False
+        _probe_hpu_acquisition()
+        return True
     except Exception as exc:  # pragma: no cover - defensive; Habana stack may raise
         logger.debug("HPU availability check failed: %s", exc)
         return False
