@@ -54,6 +54,10 @@ dev = [
   "pytorch-ignite",  # from federated
   "optuna",          # federated and mia
   "kornia",          # from minv
+  "blobfile",        # from minv
+  "lpips",           # from minv
+  "robustness",      # from minv
+  "mpi4py",          # from minv
   "opacus",          # from mia
   "albumentations",  # federated example
   "requests",
