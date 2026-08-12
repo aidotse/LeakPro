@@ -19,10 +19,10 @@ from typing import Optional
 
 import torch
 
+from leakpro.utils.logger import logger
+
 # PT_HPU_LAZY_MODE=0 means eager mode — mark_step() is a no-op in that mode.
 _HPU_LAZY_MODE: bool = os.environ.get("PT_HPU_LAZY_MODE", "1") != "0"
-
-from leakpro.utils.logger import logger
 
 _HPU_IMPORT_ERROR: Optional[str] = None
 _hthpu = None

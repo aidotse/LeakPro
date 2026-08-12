@@ -31,7 +31,7 @@ from .nn import update_ema
 from .resample import LossAwareSampler, UniformSampler
 
 
-def _tensor_tree_to_cpu(obj: Any) -> Any:
+def _tensor_tree_to_cpu(obj: Any) -> Any:  # noqa: ANN401
     """Recursively move every tensor in a (possibly nested) dict/list/tuple to CPU.
 
     torch.save on some Habana HPU tensors triggers a storage.cpu() bug ("Number of dims
