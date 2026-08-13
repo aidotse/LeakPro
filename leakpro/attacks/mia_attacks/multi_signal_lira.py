@@ -27,12 +27,13 @@ class AttackMSLiRA(AbstractMIA):
         """Configuration for the MSLiRA attack."""
 
         model_config = ConfigDict(extra="forbid")
-        signals: list[str] = Field(default=["ModelRescaledLogits"], description="What signals to use.")
+        signals: list[str] = Field(default=["ModelRescaledLogits"], min_length=1,
+                                   description="What signals to use.")
         num_shadow_models: int = Field(default=2, ge=1, description="Number of shadow models")
         training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow models")  # noqa: E501
         online: bool = Field(default=False, description="Online vs offline attack")
         var_calculation: Literal["carlini", "individual_carlini", "fixed"] = Field(default="carlini", description="Variance estimation method to use [carlini, individual_carlini, fixed]")  # noqa: E501
-        std_eps: float = Field(default=1e-30, ge=0.0, le=0.001, description="Small value to add to the standard deviations when estimating Gaussians (for numerical stability).")  # noqa: E501
+        std_eps: float = Field(default=1e-30, gt=0.0, le=0.001, description="Small value to add to the standard deviations when estimating Gaussians (for numerical stability).")  # noqa: E501
 
         @model_validator(mode="after")
         def check_num_shadow_models_if_online(self) -> Self:

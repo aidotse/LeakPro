@@ -155,6 +155,16 @@ def test_mslira_does_not_requery_models_per_signal(
     assert call_count["n"] == attack.num_shadow_models + 1
 
 
+def test_mslira_rejects_empty_signal_list(image_handler: ImageInputHandler) -> None:
+    """An empty signal list must fail at construction, before any shadow model is trained.
+
+    Left unchecked it reaches np.stack([]) in prepare_attack, after the full training cost, and
+    fails with a numpy message naming neither the config key nor the attack.
+    """
+    with pytest.raises(ValidationError, match="signals"):
+        AttackMSLiRA(image_handler, _ms_config(signals=[]))
+
+
 def test_mslira_rejects_unknown_config_key(image_handler: ImageInputHandler) -> None:
     """An unknown config key must be reported, not silently ignored."""
     with pytest.raises(ValidationError, match="individual_mia"):
