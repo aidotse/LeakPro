@@ -30,6 +30,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from opacus import PrivacyEngine
+from opacus.utils.batch_memory_manager import BatchMemoryManager
 from torch import nn, optim
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -109,16 +110,24 @@ def train_dpsgd_cnn(config: dict, splits: dict, train_indices: np.ndarray,
             max_grad_norm=config["max_grad_norm"],
         )
 
-    model.train()
-    for _ in range(epochs):
-        for xb, yb in loader:
-            optimizer.zero_grad()
-            loss = criterion(model(xb.to(device)), yb.to(device))
-            loss.backward()
-            optimizer.step()
+    def run_epochs(epoch_loader) -> None:
+        for _ in range(epochs):
+            for xb, yb in epoch_loader:
+                optimizer.zero_grad()
+                loss = criterion(model(xb.to(device)), yb.to(device))
+                loss.backward()
+                optimizer.step()
 
+    model.train()
     if config["noise_multiplier"] > 0:
+        # Cap the physical batch: per-example gradients cost batch x params memory.
+        # The sampled (logical) batch size, and hence the accounting, is unchanged.
+        with BatchMemoryManager(data_loader=loader, max_physical_batch_size=256,
+                                optimizer=optimizer) as mem_loader:
+            run_epochs(mem_loader)
         epsilon = engine.get_epsilon(delta=DELTA)
+    else:
+        run_epochs(loader)
     logger.info(f"Trained CNN: formal epsilon = {epsilon:.2f} (delta = {DELTA}).")
     model.campaign_extras = {"epsilon": epsilon, "delta": DELTA}
     return model.eval()
@@ -140,6 +149,8 @@ def make_fns(splits: dict, epochs: int, n_refs: int, device: str, ref_seed: int 
     """Build the campaign's (train, utility, attack) callables."""
 
     def train_fn(config: dict) -> nn.Module:
+        if device.startswith("cuda"):
+            torch.cuda.empty_cache()  # models from the previous config are gone; release their cache
         return train_dpsgd_cnn(config, splits, splits["target_train"], epochs, device)
 
     @torch.no_grad()
@@ -159,17 +170,22 @@ def make_fns(splits: dict, epochs: int, n_refs: int, device: str, ref_seed: int 
         x, y = splits["x"], splits["y"]
         members, nonmembers = splits["audit_members"], splits["audit_nonmembers"]
 
-        ref_models = []
+        # Train references one at a time and free each after scoring (GPU memory).
+        ref_phi_members = np.zeros(len(members))
+        ref_phi_nonmembers = np.zeros(len(nonmembers))
         for _ in range(n_refs):
             sub = rng.choice(splits["ref_pool"], size=N_TARGET_TRAIN, replace=False)
-            ref_models.append(train_dpsgd_cnn(config, splits, sub, epochs, device))
+            ref = train_dpsgd_cnn(config, splits, sub, epochs, device)
+            ref_phi_members += _confidence_logits(ref, x[members], y[members], device) / n_refs
+            ref_phi_nonmembers += _confidence_logits(ref, x[nonmembers], y[nonmembers], device) / n_refs
+            del ref
+            if device.startswith("cuda"):
+                torch.cuda.empty_cache()
 
-        def calibrated(idx: np.ndarray) -> np.ndarray:
-            target_phi = _confidence_logits(model, x[idx], y[idx], device)
-            ref_phi = np.mean([_confidence_logits(r, x[idx], y[idx], device) for r in ref_models], axis=0)
-            return target_phi - ref_phi
-
-        return AttackScores(member_scores=calibrated(members), nonmember_scores=calibrated(nonmembers))
+        return AttackScores(
+            member_scores=_confidence_logits(model, x[members], y[members], device) - ref_phi_members,
+            nonmember_scores=_confidence_logits(model, x[nonmembers], y[nonmembers], device) - ref_phi_nonmembers,
+        )
 
     return train_fn, utility_fn, attack_fn
 
