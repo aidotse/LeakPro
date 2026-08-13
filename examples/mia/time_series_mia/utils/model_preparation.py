@@ -57,17 +57,27 @@ def evaluate(model, loader, criterion, device, original_scale=False):
         loss /= len(loader)
     return loss
 
+def get_criterion(loss_fn):
+    """Map the train_config `train.loss` string to its criterion.
+
+    Single source of truth for the mapping: the input handler resolves the same string, and RMIA
+    infers its residual likelihood family from the criterion the handler reports (MSE -> Gaussian,
+    L1 -> Laplace). If the two ever disagree, the attack scores the target under the wrong
+    likelihood.
+    """
+    if loss_fn.lower() == "mse":
+        return nn.MSELoss()
+    if loss_fn.lower() == "mae":
+        return nn.L1Loss()
+    raise NotImplementedError(f"Loss function not found: {loss_fn}")
+
+
 def create_trained_model_and_metadata(model, train_loader, test_loader, epochs, optimizer_name, loss_fn, dataset_name, val_loader, early_stopping, patience):
     device = torch.device("cuda" if cuda.is_available() else "cpu")
     model.to(device)
     model.train()
 
-    if loss_fn.lower() == "mse":
-        criterion = nn.MSELoss()
-    elif loss_fn.lower() == "mae":
-        criterion = nn.L1Loss()
-    else:
-        raise NotImplementedError(f"Loss function not found: {loss_fn}")
+    criterion = get_criterion(loss_fn)
 
     if optimizer_name.lower() == "adam":
         optimizer = optim.Adam(model.parameters())
