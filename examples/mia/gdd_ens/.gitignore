@@ -1,0 +1,14 @@
+# GENIE data is controlled-access and the feature table is ~860 MB — never commit it.
+# (The repo-level .gitignore also ignores **/data/*, target/, leakpro_output.)
+data/*
+!data/.gitkeep
+leakpro_output/*
+target/*
+# DP-SGD variant outputs + generated per-epsilon configs/results
+leakpro_output_dpsgd/*
+target_dpsgd/*
+audit_dpsgd_eps_*.yaml
+dpsgd_tradeoff.csv
+# Ensemble (real-model-style) audit outputs + cached population
+leakpro_output_ensemble/*
+target_ensemble/*

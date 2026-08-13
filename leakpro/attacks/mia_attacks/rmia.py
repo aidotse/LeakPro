@@ -174,12 +174,17 @@ shadow-model residuals on the z-population. Ignored for classification models, w
         if (~cached_mask).any():
             # Shadow models are already PytorchModel wrappers; target model is a raw nn.Module.
             model_wrapped = model if isinstance(model, PytorchModel) else PytorchModel(model, self.handler.get_criterion())
+            # squeeze(axis=0) drops only the single-model axis ModelLogits() always adds.
+            # A bare .squeeze() also collapses the num_classes axis for single-logit (binary)
+            # models, turning (n_uncached, 1) into (n_uncached,) and making np.atleast_2d
+            # reshape it to (1, n_uncached) instead of (n_uncached, 1) — the shape mismatch
+            # the reviewer hit on binary/tabular models.
             unc = np.array(ModelLogits()(
                 [model_wrapped],
                 self.handler,
                 z_indices[~cached_mask],
-            )).squeeze()
-            logits[~cached_mask] = np.atleast_2d(unc)
+            )).squeeze(axis=0)
+            logits[~cached_mask] = unc
 
         return logits
 

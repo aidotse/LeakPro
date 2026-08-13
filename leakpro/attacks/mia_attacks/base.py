@@ -6,14 +6,12 @@
 
 import numpy as np
 from pydantic import BaseModel, Field
-from scipy.special import (
-    log_softmax,
-    logsumexp,
-)
+from scipy.special import logsumexp
 from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
+from leakpro.attacks.utils.utils import softmax_logits
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.reporting.mia_result import MIAResult
 from leakpro.signals.signal import ModelLogits
@@ -84,6 +82,19 @@ class AttackBASE(AbstractMIA):
             "detailed": detailed_str,
         }
 
+    def _log_conf(self:Self, logits: np.ndarray, ground_truth_indices: np.ndarray) -> np.ndarray:
+        """Log-confidence of the correct class, for either multi-class or single-logit (binary) logits.
+
+        Raw logits can't be fed straight into scipy's log_softmax when the model has a single
+        output unit (binary classification): log_softmax over one column is always 0, and indexing
+        with a ground-truth label of 1 raises an IndexError. softmax_logits() already knows how to
+        expand a single logit into [1-p, p] via sigmoid before applying temperature scaling, so we
+        reuse it here (same helper RMIA uses) and take the log ourselves.
+        """
+        n_points = logits.shape[0]
+        probs = softmax_logits(logits, self.temperature)
+        return np.log(probs + self.epsilon)[np.arange(n_points), ground_truth_indices]
+
     def prepare_attack(self:Self) -> None:
         """Prepare data needed for running the attack on the target model and dataset.
 
@@ -124,13 +135,13 @@ class AttackBASE(AbstractMIA):
         ground_truth_indices = dataloader.dataset.targets.numpy()
         assert n_points == len(ground_truth_indices), "Number of points and labels must be the same"
         logger.info(f"Scoring {n_points} points with BASE attack")
-        logits_target = np.array(ModelLogits()([self.target_model], None, None, dataloader)).squeeze()
-        log_conf_target = log_softmax(logits_target / self.temperature, axis=-1)[np.arange(n_points), ground_truth_indices]
+        logits_target = np.array(ModelLogits()([self.target_model], None, None, dataloader)).squeeze(axis=0)
+        log_conf_target = self._log_conf(logits_target, ground_truth_indices)
         # run points through shadow models and collect the log confidence values
         logits_sm = []
         for m in tqdm(self.shadow_models, desc="Scoring with shadow models"):
-            logits_sm.append( np.array(ModelLogits()([m], self.handler, None, dataloader)).squeeze() )
-        log_conf_shadow_models = np.array([log_softmax(x / self.temperature, axis=-1)[np.arange(n_points), ground_truth_indices] for x in logits_sm])  # noqa: E501
+            logits_sm.append( np.array(ModelLogits()([m], self.handler, None, dataloader)).squeeze(axis=0) )
+        log_conf_shadow_models = np.array([self._log_conf(x, ground_truth_indices) for x in logits_sm])
 
         if self.online is True:
             threshold = logsumexp(log_conf_shadow_models, axis=0) - np.log(self.num_shadow_models)
@@ -166,17 +177,16 @@ class AttackBASE(AbstractMIA):
 
         # Load the logits for the target model and shadow models
         ground_truth_indices = self.handler.get_labels(self.audit_dataset["data"])
-        n_audit_points = len(self.audit_dataset["data"])
         logits_target = ShadowModelHandler().load_logits(name=f"target_{ShadowModelHandler().target_model_hash}")
         logits_shadow_models = []
         for indx in self.shadow_model_indices:
             logits_shadow_models.append(ShadowModelHandler().load_logits(indx=indx))
 
         # collect the log confidence output of the correct class (which is the negative cross-entropy loss)
-        log_conf_target = log_softmax(logits_target / self.temperature, axis=-1)[np.arange(n_audit_points),ground_truth_indices]
+        log_conf_target = self._log_conf(logits_target, ground_truth_indices)
 
         # run points through shadow models and collect the log confidence values
-        log_conf_shadow_models = np.array([log_softmax(x / self.temperature, axis=-1)[np.arange(n_audit_points),ground_truth_indices] for x in logits_shadow_models])  # noqa: E501
+        log_conf_shadow_models = np.array([self._log_conf(x, ground_truth_indices) for x in logits_shadow_models])
 
         if self.online is True:
             threshold = logsumexp(log_conf_shadow_models, axis=0) - np.log(self.num_shadow_models)
