@@ -248,6 +248,12 @@ class AttackLossTrajectory(AbstractMIA):
             # Calculate the losses for the distilled student models
             #---------------------------------------------------------------------
             criterion = DistillationModelHandler().get_criterion()
+            # BCEWithLogitsLoss (single-logit/binary models) requires a float target of the same
+            # dtype as the model output; CrossEntropyLoss requires the original Long class index.
+            # `target` comes out of the dataloader as Long, so cast only in the binary case —
+            # otherwise BCE raises "result type Float can't be cast to the desired output type Long".
+            is_binary_criterion = isinstance(criterion, nn.BCEWithLogitsLoss)
+            target_for_loss = target.float() if is_binary_criterion else target
             trajectory_current = np.array([])
             for d in range(self.number_of_traj) :
                 distill_model[d].to(gpu_or_cpu)
@@ -258,7 +264,7 @@ class AttackLossTrajectory(AbstractMIA):
 
                 # Calculate the loss
                 loss = []
-                for logit_target_i, target_i in zip(distill_model_soft_output, target):
+                for logit_target_i, target_i in zip(distill_model_soft_output, target_for_loss):
                     loss_i = criterion(logit_target_i, target_i)
                     loss.append(loss_i)
                 loss = np.array([loss_i.detach().cpu().numpy() for loss_i in loss]).reshape(-1, 1)
@@ -271,7 +277,7 @@ class AttackLossTrajectory(AbstractMIA):
             batch_logit_target = teacher_model(data).squeeze() # TODO: replace with hopskipjump for label only
             batch_loss_teacher = []
 
-            for (batch_logit_target_i, target_i) in zip(batch_logit_target, target):
+            for (batch_logit_target_i, target_i) in zip(batch_logit_target, target_for_loss):
                 loss = criterion(batch_logit_target_i, target_i)
                 batch_loss_teacher.append(loss)
             batch_loss_teacher = np.array([batch_loss_teacher_i.cpu().detach().numpy() for batch_loss_teacher_i in
