@@ -6,5 +6,6 @@ data/*
 
 # Artifacts produced by mimic_XGB_main.ipynb (trained booster, shadow models, audit report).
 # The root .gitignore covers "target/" and "leakpro_output" but not these suffixed names.
+traget_LR/
 target_XGB/
 leakpro_output_xgb/
