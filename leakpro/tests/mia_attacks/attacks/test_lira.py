@@ -40,8 +40,8 @@ def test_lira_prepare_online_attack(image_handler:ImageInputHandler) -> None:
 
     lira_obj.prepare_attack()
 
-    # ensure correct number of shadow models are read
-    assert len(lira_obj.shadow_models) == lira_params.num_shadow_models
+    # ensure correct number of shadow models are created
+    assert len(lira_obj.shadow_model_indices) == lira_params.num_shadow_models
     # ensure the attack data indices correspond to the correct pool
     assert sorted(lira_obj.attack_data_indices) == list(range(image_handler.population_size))
 
@@ -64,8 +64,8 @@ def test_lira_prepare_offline_attack(image_handler:ImageInputHandler) -> None:
 
     lira_obj.prepare_attack()
 
-    # ensure correct number of shadow models are read
-    assert len(lira_obj.shadow_models) == lira_params.num_shadow_models
+    # ensure correct number of shadow models are created
+    assert len(lira_obj.shadow_model_indices) == lira_params.num_shadow_models
     # ensure the attack data indices correspond to the correct pool (all of the data)
     assert sorted(lira_obj.attack_data_indices) == list(range(image_handler.population_size))
 

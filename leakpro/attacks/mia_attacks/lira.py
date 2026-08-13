@@ -70,9 +70,6 @@ class AttackLiRA(AbstractMIA):
         for key, value in self.configs.model_dump().items():
             setattr(self, key, value)
 
-        # TODO: Remove self.shadow_models? Is it ever used? Parent classes do not require it to exist.
-        self.shadow_models = []
-
         # Accepts both functional names and the class-style names used by older configs.
         self.signal = functional.get(self.configs.signal)
 
@@ -118,7 +115,7 @@ class AttackLiRA(AbstractMIA):
                                                                               training_fraction = self.training_data_fraction,
                                                                               )
 
-        self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)
+        # The shadow models themselves are never loaded: the attack scores their cached logits.
         self.out_indices = ~ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"]).T
 
         # The signal is applied to the cached logits, so these hold signal values (rescaled logits,

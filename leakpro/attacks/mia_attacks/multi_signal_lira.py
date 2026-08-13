@@ -75,8 +75,6 @@ class AttackMSLiRA(AbstractMIA):
             raise ValueError("The audit dataset is the same size as the population dataset. \
                     There is no data left for the shadow models.")
 
-        self.shadow_models = []
-
         # Membership direction per signal (+1 higher=member, -1 lower=member). Resolved here so an
         # unknown signal fails at construction, before any models are trained.
         self.signal_directions = np.array([functional.direction(name) for name in self.signals])
@@ -131,8 +129,7 @@ class AttackMSLiRA(AbstractMIA):
                                                                               training_fraction = self.training_data_fraction,
                                                                               )
 
-        self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)
-
+        # The shadow models themselves are never loaded: the attack scores their cached logits.
         logger.info("Create masks for all IN and OUT samples")
         self.in_indices_masks = ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"])
 
