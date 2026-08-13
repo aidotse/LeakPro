@@ -150,11 +150,16 @@ class AttackMSLiRA(AbstractMIA):
         target_signals = []
         for signal_fn, signal_name in zip(self.signal_fns, self.signals):
             logger.info(f"Calculating {signal_name} for the target model")
-            target_signals.append(signal_fn(target_logits, targets))
+            target_signals.append(
+                self._check_signal_shape(signal_fn(target_logits, targets), target_logits.shape[0], signal_name)
+            )
 
             logger.info(f"Calculating {signal_name} for all {self.num_shadow_models} shadow models")
             # (n_shadow_models, n_audit_points) -> (n_audit_points, n_shadow_models)
-            per_model = np.array([signal_fn(logits, targets) for logits in shadow_logits])
+            per_model = np.array([
+                self._check_signal_shape(signal_fn(logits, targets), logits.shape[0], signal_name)
+                for logits in shadow_logits
+            ])
             shadow_models_signals.append(per_model.T)
 
         # Stack signals to (n_audit_points, n_shadow_models, n_signals) / (n_audit_points, n_signals).
@@ -201,6 +206,35 @@ class AttackMSLiRA(AbstractMIA):
         # invariant to this sign flip, so applying it here is safe for both modes.
         self.shadow_models_signals = self.shadow_models_signals * self.signal_directions
         self.target_signals = self.target_signals * self.signal_directions
+
+    @staticmethod
+    def _check_signal_shape(signal_values: np.ndarray, n_audit_points: int, signal_name: str) -> np.ndarray:
+        """Verify a signal produced exactly one value per audit point.
+
+        Each signal contributes one axis of the stacked score arrays, so it must reduce to a
+        scalar per point. A vector-valued signal (``logits``, which passes the raw per-class
+        logits through) would otherwise stack into a malformed array and be scored along the
+        wrong axis.
+
+        Args:
+            signal_values (np.ndarray): Values returned by the signal function.
+            n_audit_points (int): Number of audit points the logits were computed on.
+            signal_name (str): Name of the signal, as given in the config.
+
+        Returns:
+            np.ndarray: signal_values unchanged.
+
+        Raises:
+            ValueError: If the signal did not return one scalar per audit point.
+
+        """
+        if signal_values.shape != (n_audit_points,):
+            raise ValueError(
+                f"Signal '{signal_name}' returned shape {signal_values.shape}, but MS-LiRA "
+                f"requires one scalar per audit point, i.e. {(n_audit_points,)}. Use a scalar "
+                "signal such as 'rescaled_logits' or 'loss'."
+            )
+        return signal_values
 
     def get_std(self:Self, signals: list, mask: list, is_in: bool, var_calculation: str) -> np.ndarray:
         """A function to define what method to use for calculating variance for LiRA."""

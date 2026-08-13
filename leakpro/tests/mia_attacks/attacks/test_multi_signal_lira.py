@@ -154,6 +154,19 @@ def test_mslira_does_not_requery_models_per_signal(
     assert call_count["n"] == attack.num_shadow_models + 1
 
 
+def test_mslira_rejects_non_scalar_signal(image_handler: ImageInputHandler) -> None:
+    """A signal returning a vector per point must fail in prepare_attack, not stack a wrong axis.
+
+    'logits' passes the raw per-class logits through, so it yields (n_points, n_classes) instead
+    of one scalar per point, which would stack into a malformed score array.
+    """
+    _ensure_shadow_handler(image_handler)
+    attack = AttackMSLiRA(image_handler, _ms_config(signals=["rescaled_logits", "logits"]))
+
+    with pytest.raises(ValueError, match="one scalar per audit point"):
+        attack.prepare_attack()
+
+
 def test_mslira_unknown_signal_fails(image_handler: ImageInputHandler) -> None:
     """A signal MS-LiRA cannot score must fail loudly at construction.
 

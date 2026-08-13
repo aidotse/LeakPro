@@ -121,19 +121,44 @@ class AttackLiRA(AbstractMIA):
         # The signal is applied to the cached logits, so these hold signal values (rescaled logits,
         # an error, a distance, ...) rather than logits; named accordingly, as in MS-LiRA.
         true_labels = self.handler.get_labels(self.audit_dataset["data"]).squeeze()
-        self.target_signals = self.signal(
-            ShadowModelHandler().load_logits(name="target"),
-            true_labels
-        )
+        target_logits = ShadowModelHandler().load_logits(name="target")
+        self.target_signals = self._check_signal_shape(self.signal(target_logits, true_labels),
+                                                       n_audit_points=target_logits.shape[0])
         self.shadow_models_signals = []
         for indx in self.shadow_model_indices:
+            shadow_logits = ShadowModelHandler().load_logits(indx=indx)
             self.shadow_models_signals.append(
-                self.signal(
-                    ShadowModelHandler().load_logits(indx=indx),
-                    true_labels
-                ).T
+                self._check_signal_shape(self.signal(shadow_logits, true_labels),
+                                         n_audit_points=shadow_logits.shape[0])
             )
         self.shadow_models_signals = np.array(self.shadow_models_signals)
+
+    def _check_signal_shape(self:Self, signal_values: np.ndarray, n_audit_points: int) -> np.ndarray:
+        """Verify the signal produced exactly one value per audit point.
+
+        LiRA models each point's signal as a scalar Gaussian, so a signal returning a vector per
+        point (``logits``, which passes the raw per-class logits through) cannot be scored. Left
+        unchecked, the extra axis silently becomes the audit-sample axis in run_attack and the
+        attack reports scores for the wrong number of points.
+
+        Args:
+            signal_values (np.ndarray): Values returned by the configured signal function.
+            n_audit_points (int): Number of audit points the logits were computed on.
+
+        Returns:
+            np.ndarray: signal_values unchanged.
+
+        Raises:
+            ValueError: If the signal did not return one scalar per audit point.
+
+        """
+        if signal_values.shape != (n_audit_points,):
+            raise ValueError(
+                f"Signal '{self.configs.signal}' returned shape {signal_values.shape}, but LiRA "
+                f"requires one scalar per audit point, i.e. {(n_audit_points,)}. Use a scalar "
+                "signal such as 'rescaled_logits' or 'loss'."
+            )
+        return signal_values
 
     def get_std(self:Self, signals: list, mask: list, is_in: bool, var_calculation: str) -> np.ndarray:
         """A function to define what method to use for calculating variance for LiRA."""

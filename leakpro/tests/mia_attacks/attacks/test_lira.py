@@ -4,6 +4,7 @@
 #
 
 import numpy as np
+import pytest
 
 from leakpro.attacks.mia_attacks.lira import AttackLiRA
 from leakpro.reporting.mia_result import MIAResult
@@ -138,3 +139,21 @@ def test_lira_offline_attack(image_handler:ImageInputHandler):
 
     assert lira_result is not None
     assert isinstance(lira_result, MIAResult)
+
+
+def test_lira_rejects_non_scalar_signal(image_handler:ImageInputHandler) -> None:
+    """A signal returning a vector per point must fail in prepare_attack, not score the wrong axis.
+
+    'logits' passes the raw per-class logits through, so it yields (n_points, n_classes). Without
+    the check, the class axis silently becomes the audit-sample axis in run_attack.
+    """
+    audit_config = get_audit_config()
+    lira_params = audit_config.attack_list[0]
+    lira_params.signal = "logits"
+    image_handler.configs.shadow_model = get_shadow_model_config()
+    lira_obj = AttackLiRA(image_handler, lira_params)
+    if ShadowModelHandler.is_created() == False:
+        ShadowModelHandler(image_handler)
+
+    with pytest.raises(ValueError, match="one scalar per audit point"):
+        lira_obj.prepare_attack()
