@@ -117,6 +117,9 @@ class Campaign:
         logger.info(f"Evaluating config {index}: {config}")
         record = EvaluationRecord(index=index, config=config, seed=self.seed, proxy_fpr=self.proxy_fpr)
         model = self.train_fn(config)
+        extras = getattr(model, "campaign_extras", None)
+        if extras:
+            record.update(extras)  # e.g. formal epsilon, train/test gap
         record["utility"] = float(self.utility_fn(model))
 
         if self.utility_gate is not None and not self.utility_gate(record["utility"], self.records):

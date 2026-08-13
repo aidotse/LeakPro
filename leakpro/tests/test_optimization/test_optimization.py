@@ -80,8 +80,13 @@ class TestObjectives:
 def _fake_campaign(tmp_path, gate=None, seed=0):
     """Campaign over synthetic objectives: utility rises and leakage falls with noise."""
 
+    class FakeModel(dict):
+        campaign_extras = None
+
     def train(config):
-        return config  # the "model" is just its config
+        model = FakeModel(config)  # the "model" is just its config
+        model.campaign_extras = {"epsilon": 1.0 / config["noise_multiplier"]}
+        return model
 
     def utility(model):
         return 1.0 / (1.0 + model["noise_multiplier"])
@@ -98,9 +103,10 @@ class TestCampaign:
     def test_run_persists_and_resumes(self, tmp_path):
         records = _fake_campaign(tmp_path).run(8)
         assert len(records) == 8
-        lines = (tmp_path / "evaluations.jsonl").read_text().strip().splitlines()
+        lines = [json.loads(line) for line in (tmp_path / "evaluations.jsonl").read_text().strip().splitlines()]
         assert len(lines) == 8
-        assert all("attack_tpr" in json.loads(line) for line in lines)
+        assert all("attack_tpr" in line for line in lines)
+        assert all("epsilon" in line for line in lines)  # campaign_extras recorded
 
         resumed = _fake_campaign(tmp_path)
         assert len(resumed.records) == 8
