@@ -150,10 +150,10 @@ class AttackMSLiRA(AbstractMIA):
         shadow_logits = [ShadowModelHandler().load_logits(indx=indx) for indx in self.shadow_model_indices]
 
         shadow_models_signals = []
-        target_model_signals = []
+        target_signals = []
         for signal_fn, signal_name in zip(self.signal_fns, self.signals):
             logger.info(f"Calculating {signal_name} for the target model")
-            target_model_signals.append(signal_fn(target_logits, targets))
+            target_signals.append(signal_fn(target_logits, targets))
 
             logger.info(f"Calculating {signal_name} for all {self.num_shadow_models} shadow models")
             # (n_shadow_models, n_audit_points) -> (n_audit_points, n_shadow_models)
@@ -163,7 +163,7 @@ class AttackMSLiRA(AbstractMIA):
         # Stack signals to (n_audit_points, n_shadow_models, n_signals) / (n_audit_points, n_signals).
         # Computed over the full audit set; the online branch filters rows below.
         self.shadow_models_signals = np.stack(shadow_models_signals, axis=-1)
-        self.target_model_signals = np.stack(target_model_signals, axis=-1)
+        self.target_signals = np.stack(target_signals, axis=-1)
 
         if self.online:
             # Exclude all audit points that have either no IN or OUT samples
@@ -174,7 +174,7 @@ class AttackMSLiRA(AbstractMIA):
             self.audit_data_indices = audit_indices[mask]
             self.in_indices_masks = self.in_indices_masks[mask, :]
             self.shadow_models_signals = self.shadow_models_signals[mask]
-            self.target_model_signals = self.target_model_signals[mask]
+            self.target_signals = self.target_signals[mask]
 
             # Filter IN and OUT members
             self.in_members = np.arange(np.sum(mask[self.audit_dataset["in_members"]]))
@@ -203,7 +203,7 @@ class AttackMSLiRA(AbstractMIA):
         # before they can be summed across the signal axis. The online likelihood ratio is
         # invariant to this sign flip, so applying it here is safe for both modes.
         self.shadow_models_signals = self.shadow_models_signals * self.signal_directions
-        self.target_model_signals = self.target_model_signals * self.signal_directions
+        self.target_signals = self.target_signals * self.signal_directions
 
     def get_std(self:Self, signals: list, mask: list, is_in: bool, var_calculation: str) -> np.ndarray:
         """A function to define what method to use for calculating variance for LiRA."""
@@ -290,7 +290,7 @@ class AttackMSLiRA(AbstractMIA):
                             total=n_audit_samples,
                             desc="Processing audit samples"):
 
-            target_signals = self.target_model_signals[i]
+            sample_target_signals = self.target_signals[i]
 
             # Compute OUT statistics
             out_means = np.mean(shadow_models_signals[~mask], axis=0)
@@ -300,11 +300,11 @@ class AttackMSLiRA(AbstractMIA):
                 # Online: summed per-signal log-likelihood ratio (paper Eq. 1)
                 in_means = np.mean(shadow_models_signals[mask], axis=0)
                 in_stds = self.get_std(shadow_models_signals, mask, True, self.var_calculation)
-                score[i] = self._online_score(target_signals, in_means, in_stds,
+                score[i] = self._online_score(sample_target_signals, in_means, in_stds,
                                               out_means, out_stds, self.std_eps)
             else:
                 # Offline: one-sided multivariate Gaussian tail under OUT (paper Eq. 2)
-                score[i] = self._offline_score(target_signals, out_means, out_stds, self.std_eps)
+                score[i] = self._offline_score(sample_target_signals, out_means, out_stds, self.std_eps)
 
             if np.isnan(score[i]):
                 raise ValueError("Score is NaN")

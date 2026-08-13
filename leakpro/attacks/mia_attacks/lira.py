@@ -102,8 +102,8 @@ class AttackLiRA(AbstractMIA):
         """Prepares data to obtain metric on the target model and dataset, using signals computed on the auxiliary model/dataset.
 
         It selects a balanced subset of data samples from in-group and out-group members
-        of the audit dataset, prepares the data for evaluation, and computes the logits
-        for both shadow models and the target model.
+        of the audit dataset, prepares the data for evaluation, and computes the configured
+        signal for both shadow models and the target model.
         """
 
         # Fixed variance is used when the number of shadow models is below 32 (64, IN and OUT models)
@@ -121,54 +121,56 @@ class AttackLiRA(AbstractMIA):
         self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)
         self.out_indices = ~ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"]).T
 
+        # The signal is applied to the cached logits, so these hold signal values (rescaled logits,
+        # an error, a distance, ...) rather than logits; named accordingly, as in MS-LiRA.
         true_labels = self.handler.get_labels(self.audit_dataset["data"]).squeeze()
-        self.target_model_logits = self.signal(
+        self.target_signals = self.signal(
             ShadowModelHandler().load_logits(name="target"),
             true_labels
         )
-        self.shadow_models_logits = []
+        self.shadow_models_signals = []
         for indx in self.shadow_model_indices:
-            self.shadow_models_logits.append(
+            self.shadow_models_signals.append(
                 self.signal(
                     ShadowModelHandler().load_logits(indx=indx),
                     true_labels
                 ).T
             )
-        self.shadow_models_logits = np.array(self.shadow_models_logits)
+        self.shadow_models_signals = np.array(self.shadow_models_signals)
 
-    def get_std(self:Self, logits: list, mask: list, is_in: bool, var_calculation: str) -> np.ndarray:
+    def get_std(self:Self, signals: list, mask: list, is_in: bool, var_calculation: str) -> np.ndarray:
         """A function to define what method to use for calculating variance for LiRA."""
 
         # Fixed/Global variance calculation.
         if var_calculation == "fixed":
-            return self._fixed_variance(logits, mask, is_in)
+            return self._fixed_variance(signals, mask, is_in)
 
         # Variance calculation as in the paper ( Membership Inference Attacks From First Principles )
         if var_calculation == "carlini":
-            return self._carlini_variance(logits, mask, is_in)
+            return self._carlini_variance(signals, mask, is_in)
 
         # Variance calculation as in the paper ( Membership Inference Attacks From First Principles )
         #   but check IN and OUT samples individualy
         if var_calculation == "individual_carlini":
-            return self._individual_carlini(logits, mask, is_in)
+            return self._individual_carlini(signals, mask, is_in)
 
         return np.array([None])
 
-    def _fixed_variance(self:Self, logits: list, mask: list, is_in: bool) -> np.ndarray:
+    def _fixed_variance(self:Self, signals: list, mask: list, is_in: bool) -> np.ndarray:
         if is_in and not self.online:
             return np.array([None])
-        return np.std(logits[mask])
+        return np.std(signals[mask])
 
-    def _carlini_variance(self:Self, logits: list, mask: list, is_in: bool) -> np.ndarray:
+    def _carlini_variance(self:Self, signals: list, mask: list, is_in: bool) -> np.ndarray:
         if self.num_shadow_models >= self.fix_var_threshold*2:
-                return np.std(logits[mask])
+                return np.std(signals[mask])
         if is_in:
             return self.fixed_in_std
         return self.fixed_out_std
 
-    def _individual_carlini(self:Self, logits: list, mask: list, is_in: bool) -> np.ndarray:
+    def _individual_carlini(self:Self, signals: list, mask: list, is_in: bool) -> np.ndarray:
         if np.count_nonzero(mask) >= self.fix_var_threshold:
-            return np.std(logits[mask])
+            return np.std(signals[mask])
         if is_in:
             return self.fixed_in_std
         return self.fixed_out_std
@@ -176,9 +178,9 @@ class AttackLiRA(AbstractMIA):
     def run_attack(self:Self) -> MIAResult:
         """Runs the attack on the target model and dataset and assess privacy risks or data leakage.
 
-        This method evaluates how the target model's output (logits) for a specific dataset
-        compares to the output of shadow models to determine if the dataset was part of the
-        model's training data or not.
+        This method evaluates how the signal computed on the target model's output for a specific
+        dataset compares to the same signal on the shadow models, to determine if the dataset was
+        part of the model's training data or not.
 
         Returns
         -------
@@ -186,35 +188,35 @@ class AttackLiRA(AbstractMIA):
         true labels, and signal values.
 
         """
-        n_audit_samples = self.shadow_models_logits.shape[1]
+        n_audit_samples = self.shadow_models_signals.shape[1]
         score = np.zeros(n_audit_samples)  # List to hold the computed probability scores for each sample
 
-        self.fixed_in_std = self.get_std(self.shadow_models_logits.flatten(), (~self.out_indices).flatten(), True, "fixed")
-        self.fixed_out_std = self.get_std(self.shadow_models_logits.flatten(), self.out_indices.flatten(), False, "fixed")
+        self.fixed_in_std = self.get_std(self.shadow_models_signals.flatten(), (~self.out_indices).flatten(), True, "fixed")
+        self.fixed_out_std = self.get_std(self.shadow_models_signals.flatten(), self.out_indices.flatten(), False, "fixed")
 
-        # Iterate over and extract logits for IN and OUT shadow models for each audit sample
+        # Iterate over and extract signals for IN and OUT shadow models for each audit sample
         for i in tqdm(range(n_audit_samples), total=n_audit_samples, desc="Processing audit samples"):
 
-            # Calculate the mean for OUT shadow model logits
+            # Calculate the mean for OUT shadow model signals
             out_mask = self.out_indices[:,i]
-            sm_logits = self.shadow_models_logits[:,i]
+            sm_signals = self.shadow_models_signals[:,i]
 
-            out_mean = np.mean(sm_logits[out_mask])
-            out_std = self.get_std(sm_logits, out_mask, False, self.var_calculation)
+            out_mean = np.mean(sm_signals[out_mask])
+            out_std = self.get_std(sm_signals, out_mask, False, self.var_calculation)
 
-            # Get the logit from the target model for the current sample
-            target_model_logit = self.target_model_logits[i]
+            # Get the signal from the target model for the current sample
+            target_signal = self.target_signals[i]
 
             # Calculate the log probability density function value
             if self.online:
-                in_mean = np.mean(sm_logits[~out_mask])
-                in_std = self.get_std(sm_logits, ~out_mask, True, self.var_calculation)
+                in_mean = np.mean(sm_signals[~out_mask])
+                in_std = self.get_std(sm_signals, ~out_mask, True, self.var_calculation)
 
-                pr_in = norm.logpdf(target_model_logit, in_mean, in_std + 1e-30)
-                pr_out = norm.logpdf(target_model_logit, out_mean, out_std + 1e-30)
+                pr_in = norm.logpdf(target_signal, in_mean, in_std + 1e-30)
+                pr_out = norm.logpdf(target_signal, out_mean, out_std + 1e-30)
             else:
                 pr_in = 0
-                pr_out = -norm.logcdf(target_model_logit, out_mean, out_std + 1e-30)
+                pr_out = -norm.logcdf(target_signal, out_mean, out_std + 1e-30)
 
             score[i] = (pr_in - pr_out)  # Append the calculated probability density value to the score list
             if np.isnan(score[i]):

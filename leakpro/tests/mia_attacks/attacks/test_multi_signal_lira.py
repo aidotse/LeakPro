@@ -80,7 +80,7 @@ def test_mslira_prepare_stacks_signals(image_handler: ImageInputHandler) -> None
     n_points = attack.shadow_models_signals.shape[0]
 
     assert attack.shadow_models_signals.shape == (n_points, n_models, n_signals)
-    assert attack.target_model_signals.shape == (n_points, n_signals)
+    assert attack.target_signals.shape == (n_points, n_signals)
     assert n_points > 0
 
 
@@ -107,7 +107,7 @@ def test_mslira_online_single_signal_runs(image_handler: ImageInputHandler) -> N
 
     result = attack.run_attack()
 
-    assert attack.target_model_signals.shape == (len(attack.audit_data_indices), 1)
+    assert attack.target_signals.shape == (len(attack.audit_data_indices), 1)
     assert not np.any(np.isnan(attack.in_member_signals))
     assert not np.any(np.isnan(attack.out_member_signals))
     assert isinstance(result, MIAResult)

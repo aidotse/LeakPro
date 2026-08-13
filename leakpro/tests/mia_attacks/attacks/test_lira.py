@@ -48,8 +48,8 @@ def test_lira_prepare_online_attack(image_handler:ImageInputHandler) -> None:
     # Check that the filtering of the attack data is correct (this is done after shadow models are created)
     n_attack_points = len(lira_obj.train_indices) + len(lira_obj.test_indices)
     assert n_attack_points > 0
-    assert lira_obj.shadow_models_logits.shape == (lira_params.num_shadow_models, n_attack_points)
-    assert lira_obj.target_model_logits.shape == (n_attack_points, )
+    assert lira_obj.shadow_models_signals.shape == (lira_params.num_shadow_models, n_attack_points)
+    assert lira_obj.target_signals.shape == (n_attack_points, )
 
 def test_lira_prepare_offline_attack(image_handler:ImageInputHandler) -> None:
     audit_config = get_audit_config()
@@ -72,8 +72,8 @@ def test_lira_prepare_offline_attack(image_handler:ImageInputHandler) -> None:
     # Check that the filtering of the attack data is correct (this is done after shadow models are created)
     n_attack_points = len(lira_obj.train_indices) + len(lira_obj.test_indices)
     assert n_attack_points > 0
-    assert lira_obj.shadow_models_logits.shape == (lira_params.num_shadow_models, n_attack_points)
-    assert lira_obj.target_model_logits.shape == (n_attack_points, )
+    assert lira_obj.shadow_models_signals.shape == (lira_params.num_shadow_models, n_attack_points)
+    assert lira_obj.target_signals.shape == (n_attack_points, )
 
 
 def test_lira_online_attack(image_handler:ImageInputHandler):
@@ -88,7 +88,7 @@ def test_lira_online_attack(image_handler:ImageInputHandler):
     lira_obj.prepare_attack()
 
     # Test standard deviation calculation
-    std_fixed = lira_obj.get_std(lira_obj.shadow_models_logits.flatten(),
+    std_fixed = lira_obj.get_std(lira_obj.shadow_models_signals.flatten(),
                            ~lira_obj.out_indices.flatten(),
                            True,
                            "fixed")
@@ -96,12 +96,12 @@ def test_lira_online_attack(image_handler:ImageInputHandler):
     lira_obj.fixed_in_std = std_fixed
     lira_obj.fixed_out_std = std_fixed
 
-    std_carlini = lira_obj.get_std(lira_obj.shadow_models_logits.flatten(),
+    std_carlini = lira_obj.get_std(lira_obj.shadow_models_signals.flatten(),
                            ~lira_obj.out_indices.flatten(),
                            True,
                            "carlini")
 
-    std_individual = lira_obj.get_std(lira_obj.shadow_models_logits.flatten(),
+    std_individual = lira_obj.get_std(lira_obj.shadow_models_signals.flatten(),
                            ~lira_obj.out_indices.flatten(),
                            True,
                            "individual_carlini")
