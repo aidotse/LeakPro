@@ -17,6 +17,7 @@ suite; here we exercise the online attack, where multiple signals are combined.
 
 import numpy as np
 import pytest
+from pydantic import ValidationError
 from scipy.stats import norm
 
 from leakpro.attacks.mia_attacks.multi_signal_lira import AttackMSLiRA
@@ -152,6 +153,12 @@ def test_mslira_does_not_requery_models_per_signal(
 
     # One load for the target model + one per shadow model. The two signals add no extra loads.
     assert call_count["n"] == attack.num_shadow_models + 1
+
+
+def test_mslira_rejects_unknown_config_key(image_handler: ImageInputHandler) -> None:
+    """An unknown config key must be reported, not silently ignored."""
+    with pytest.raises(ValidationError, match="individual_mia"):
+        AttackMSLiRA(image_handler, _ms_config(individual_mia=False))
 
 
 def test_mslira_rejects_non_scalar_signal(image_handler: ImageInputHandler) -> None:

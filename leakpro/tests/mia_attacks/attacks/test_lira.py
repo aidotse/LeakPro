@@ -5,6 +5,8 @@
 
 import numpy as np
 import pytest
+from dotmap import DotMap
+from pydantic import ValidationError
 
 from leakpro.attacks.mia_attacks.lira import AttackLiRA
 from leakpro.reporting.mia_result import MIAResult
@@ -16,7 +18,8 @@ from leakpro.tests.input_handler.image_input_handler import ImageInputHandler
 def test_lira_setup(image_handler:ImageInputHandler) -> None:
     """Test the initialization of LiRA."""
     audit_config = get_audit_config()
-    lira_params = audit_config.attack_list[0]
+    # Strip the "attack" routing key, as AttackScheduler does before constructing the attack
+    lira_params = DotMap({k: v for k, v in audit_config.attack_list[0].items() if k != "attack"})
     lira_obj = AttackLiRA(image_handler, lira_params)
 
     assert lira_obj is not None
@@ -30,7 +33,8 @@ def test_lira_setup(image_handler:ImageInputHandler) -> None:
 
 def test_lira_prepare_online_attack(image_handler:ImageInputHandler) -> None:
     audit_config = get_audit_config()
-    lira_params = audit_config.attack_list[0]
+    # Strip the "attack" routing key, as AttackScheduler does before constructing the attack
+    lira_params = DotMap({k: v for k, v in audit_config.attack_list[0].items() if k != "attack"})
     lira_params.online = True
 
     image_handler.configs.shadow_model = get_shadow_model_config()
@@ -54,7 +58,8 @@ def test_lira_prepare_online_attack(image_handler:ImageInputHandler) -> None:
 
 def test_lira_prepare_offline_attack(image_handler:ImageInputHandler) -> None:
     audit_config = get_audit_config()
-    lira_params = audit_config.attack_list[0]
+    # Strip the "attack" routing key, as AttackScheduler does before constructing the attack
+    lira_params = DotMap({k: v for k, v in audit_config.attack_list[0].items() if k != "attack"})
     lira_params.online = False
 
     image_handler.configs.shadow_model = get_shadow_model_config()
@@ -80,7 +85,8 @@ def test_lira_prepare_offline_attack(image_handler:ImageInputHandler) -> None:
 def test_lira_online_attack(image_handler:ImageInputHandler):
     # Set up for testing
     audit_config = get_audit_config()
-    lira_params = audit_config.attack_list[0]
+    # Strip the "attack" routing key, as AttackScheduler does before constructing the attack
+    lira_params = DotMap({k: v for k, v in audit_config.attack_list[0].items() if k != "attack"})
     lira_params.online = True
     image_handler.configs.shadow_model = get_shadow_model_config()
     lira_obj = AttackLiRA(image_handler, lira_params)
@@ -120,7 +126,8 @@ def test_lira_online_attack(image_handler:ImageInputHandler):
 def test_lira_offline_attack(image_handler:ImageInputHandler):
     # Set up for testing
     audit_config = get_audit_config()
-    lira_params = audit_config.attack_list[0]
+    # Strip the "attack" routing key, as AttackScheduler does before constructing the attack
+    lira_params = DotMap({k: v for k, v in audit_config.attack_list[0].items() if k != "attack"})
     lira_params.online = False
     image_handler.configs.shadow_model = get_shadow_model_config()
     lira_obj = AttackLiRA(image_handler, lira_params)
@@ -141,6 +148,20 @@ def test_lira_offline_attack(image_handler:ImageInputHandler):
     assert isinstance(lira_result, MIAResult)
 
 
+def test_lira_rejects_unknown_config_key(image_handler:ImageInputHandler) -> None:
+    """An unknown config key must be reported, not silently ignored.
+
+    audit.yaml carried 'individual_mia', which is not a LiRA option and had no effect. With
+    extra="forbid" such a key fails at construction instead of quietly doing nothing.
+    """
+    audit_config = get_audit_config()
+    lira_params = DotMap({k: v for k, v in audit_config.attack_list[0].items() if k != "attack"})
+    lira_params.individual_mia = False
+
+    with pytest.raises(ValidationError, match="individual_mia"):
+        AttackLiRA(image_handler, lira_params)
+
+
 def test_lira_rejects_non_scalar_signal(image_handler:ImageInputHandler) -> None:
     """A signal returning a vector per point must fail in prepare_attack, not score the wrong axis.
 
@@ -148,7 +169,8 @@ def test_lira_rejects_non_scalar_signal(image_handler:ImageInputHandler) -> None
     the check, the class axis silently becomes the audit-sample axis in run_attack.
     """
     audit_config = get_audit_config()
-    lira_params = audit_config.attack_list[0]
+    # Strip the "attack" routing key, as AttackScheduler does before constructing the attack
+    lira_params = DotMap({k: v for k, v in audit_config.attack_list[0].items() if k != "attack"})
     lira_params.signal = "logits"
     image_handler.configs.shadow_model = get_shadow_model_config()
     lira_obj = AttackLiRA(image_handler, lira_params)

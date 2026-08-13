@@ -32,8 +32,7 @@ audit: # Configurations for auditing
       signal: msm  # mse, mae, smape, rescaled_smape, seasonality, trend, ts2vec, dtw, msm
       num_shadow_models: 2
       online: True  # True, False
-      individual_mia: False  # True, False
-      
+
     # RMIA
     # The residual likelihood is matched to the training criterion automatically
     # (MSE -> Gaussian, L1 -> Laplace, SmoothL1/Huber -> Huber); there is no signal choice.

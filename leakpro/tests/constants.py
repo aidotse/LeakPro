@@ -54,7 +54,6 @@ def get_audit_config():
     lira_config.training_data_fraction = 0.5
     lira_config.num_shadow_models = 2
     lira_config.online = False
-    lira_config.fixed_variance = True
     audit_config.attack_list.append(lira_config)
     
     # RMIA parameters

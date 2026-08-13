@@ -7,7 +7,7 @@
 from typing import Literal
 
 import numpy as np
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from scipy.stats import norm
 from tqdm import tqdm
 
@@ -26,6 +26,7 @@ class AttackMSLiRA(AbstractMIA):
     class AttackConfig(BaseModel):
         """Configuration for the MSLiRA attack."""
 
+        model_config = ConfigDict(extra="forbid")
         signals: list[str] = Field(default=["ModelRescaledLogits"], description="What signals to use.")
         num_shadow_models: int = Field(default=2, ge=1, description="Number of shadow models")
         training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow models")  # noqa: E501
