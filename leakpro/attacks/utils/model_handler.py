@@ -145,7 +145,13 @@ class ModelHandler():
         if not isinstance(model, list):
             model = [model]
         data_indices = np.concatenate((self.handler.train_indices, self.handler.test_indices))
-        logits = np.array(ModelLogits()(model, self.handler, data_indices)).squeeze()
+        # Drop only the model axis. A bare .squeeze() also collapses the class axis for
+        # single-output binary models, caching (n_samples,) instead of (n_samples, 1) and
+        # breaking every consumer that reads logits.shape[1] (LiRA.rescale_logits, RMIA).
+        # Multi-class shapes are unaffected: (1, n, c) -> (n, c) either way.
+        logits = np.array(ModelLogits()(model, self.handler, data_indices))
+        if logits.shape[0] == 1:
+            logits = logits[0]
         np.save(cache_file, logits)
         np.save(indices_file, data_indices)
         logger.info(f"Saved logits to {cache_file}")

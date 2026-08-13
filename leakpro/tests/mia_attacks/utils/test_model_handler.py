@@ -41,3 +41,33 @@ def test_model_handler(image_handler:ImageInputHandler) -> None:
     assert m.__class__.__name__ == new_model.__class__.__name__
     assert o.__class__.__name__ == new_criterion.__class__.__name__
     assert c.__class__.__name__ == model_handler.optimizer_class.__name__
+
+
+def test_cache_logits_should_keep_the_class_axis_for_single_output_models(
+    image_handler:ImageInputHandler, monkeypatch  # noqa: ANN001
+) -> None:
+    """Cached logits must stay 2D so consumers can read logits.shape[1].
+
+    Regression test: cache_logits used a bare .squeeze(), which collapsed the class axis of a
+    binary single-output model to (n_samples,). LiRA.rescale_logits and RMIA then failed with
+    IndexError on shape[1], making every binary target unauditable.
+    """
+    import numpy as np
+
+    import leakpro.attacks.utils.model_handler as model_handler_module
+
+    model_handler = ModelHandler(image_handler)
+    n_samples = len(image_handler.train_indices) + len(image_handler.test_indices)
+
+    class _SingleOutputLogits:
+        """Stands in for ModelLogits on a model emitting one logit per sample."""
+
+        def __call__(self, models, handler, indices):  # noqa: ANN001, ANN204, ARG002
+            return [np.zeros((len(indices), 1), dtype=np.float32) for _ in models]
+
+    monkeypatch.setattr(model_handler_module, "ModelLogits", _SingleOutputLogits)
+    model_handler.cache_logits(model=None, name="binary_shape_regression")
+
+    cached = model_handler.load_logits("binary_shape_regression")
+    assert cached.ndim == 2
+    assert cached.shape == (n_samples, 1)

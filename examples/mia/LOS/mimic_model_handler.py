@@ -9,7 +9,7 @@ from typing import Optional, Self
 import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score
-from torch import  cuda, device,  no_grad, nn, optim, sigmoid
+from torch import  cuda, device, from_numpy, no_grad, nn, optim, sigmoid
 from torch.nn import BCEWithLogitsLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -122,6 +122,94 @@ class LRHandler(BaseMIMICHandler):
         acc = float(acc) / total_samples
 
         return EvalOutput(accuracy=acc, loss=loss)
+
+
+def _drain_loader(loader: DataLoader, n_features: int) -> tuple:
+    """Materialize a dataloader into a single feature matrix and label vector.
+
+    Preallocated rather than concatenated: the LOS design matrix is 23944 x 7488 float32
+    (~717 MB), and building a list of batches before concatenating would transiently double
+    the memory held for every shadow model.
+    """
+    n_samples = len(loader.dataset)
+    x = np.empty((n_samples, n_features), dtype=np.float32)
+    y = np.empty(n_samples, dtype=np.float32)
+
+    offset = 0
+    for inputs, labels in loader:
+        batch_size = labels.shape[0]
+        x[offset:offset + batch_size] = inputs.detach().cpu().numpy().reshape(batch_size, -1)
+        y[offset:offset + batch_size] = labels.detach().cpu().numpy().reshape(-1)
+        offset += batch_size
+
+    if offset != n_samples:
+        raise RuntimeError(f"Drained {offset} samples but dataset reports {n_samples}")
+    return x, y
+
+
+def _margin_metrics(margins: np.ndarray, y: np.ndarray) -> EvalOutput:
+    """Accuracy and mean BCE-with-logits loss from raw margins."""
+    margins = margins.reshape(-1)
+    accuracy = float(((margins > 0).astype(np.float32) == y).mean())
+    # log(1 + exp(-m)) for members of class 1, log(1 + exp(m)) for class 0, computed stably.
+    signed = np.where(y > 0.5, -margins, margins)
+    loss = float(np.mean(np.logaddexp(0.0, signed)))
+    return EvalOutput(accuracy=accuracy, loss=loss)
+
+
+class XGBHandler(BaseMIMICHandler):
+    """Input handler for the XGBoost length-of-stay target.
+
+    Trees are not trained by gradient descent, so `criterion`, `optimizer` and `epochs` are
+    accepted (LeakPro's ShadowModelHandler passes them positionally) and then ignored. All
+    reported metrics still use BCEWithLogitsLoss on raw margins, so they are directly
+    comparable to the LR and GRU-D handlers.
+
+    NOTE: `train` and `eval` must not call helper methods through `self`. MIAHandler rebinds
+    the methods it finds on AbstractInputHandler onto itself via `types.MethodType(attr, self)`,
+    so at audit time `self` is a MIAHandler, not an XGBHandler, and any attribute added by this
+    subclass is invisible. Hence the module-level helpers above.
+    """
+
+    def get_optimizer(self, model: nn.Module) -> optim.Optimizer:
+        """Return a stepless placeholder optimizer.
+
+        Never used to update anything, but `MIAHandler.get_target_replica` builds one for every
+        shadow model, and torch optimizers raise on an empty parameter list.
+        """
+        return optim.SGD(model.parameters(), lr=0.0)
+
+    def train(self: Self,
+              dataloader: DataLoader,
+              model: nn.Module = None,
+              criterion: nn.Module = None,  # noqa: ARG002
+              optimizer: optim.Optimizer = None,  # noqa: ARG002
+              epochs: int = None,  # noqa: ARG002
+              ) -> TrainingOutput:
+
+        if model is None:
+            raise ValueError("XGBHandler.train requires a model instance")
+
+        x, y = _drain_loader(dataloader, model.input_dim)
+        print(f"Fitting XGBoost on {x.shape[0]} samples x {x.shape[1]} features...")
+        model.fit(x, y.astype(np.int64))
+
+        with no_grad():
+            margins = model(from_numpy(x)).numpy()
+
+        results = _margin_metrics(margins, y)
+        print(f"Train accuracy={results.accuracy:.4f}, loss={results.loss:.6f}")
+        return TrainingOutput(model=model, metrics=results)
+
+    def eval(self: Self,
+             loader: DataLoader,
+             model: nn.Module,
+             criterion: nn.Module = None) -> EvalOutput:  # noqa: ARG002
+
+        x, y = _drain_loader(loader, model.input_dim)
+        with no_grad():
+            margins = model(from_numpy(x)).numpy()
+        return _margin_metrics(margins, y)
 
 
 class GRUHandler(BaseMIMICHandler):

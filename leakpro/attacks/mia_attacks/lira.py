@@ -104,6 +104,11 @@ class AttackLiRA(AbstractMIA):
             np.ndarray: The rescaled logits.
 
         """
+        # Labels are used as class indices below. Datasets with a binary target commonly carry
+        # float labels (BCEWithLogitsLoss requires them), so cast — this mirrors the
+        # `y.type(IntTensor)` the equivalent torch path in PytorchModel.get_rescaled_logits does.
+        true_label = np.asarray(true_label).reshape(-1).astype(np.int64)
+
         if logits.shape[1] == 1:
             def sigmoid(z:np.ndarray) -> np.ndarray:
                 return 1/(1 + np.exp(-z))

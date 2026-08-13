@@ -1,0 +1,56 @@
+##
+## Copyright 2023-2026 Lindholmen Science Park AB
+## SPDX-License-Identifier: Apache-2.0
+##
+## Audit configuration for the XGBoost length-of-stay target (mimic_XGB_main.ipynb).
+##
+## IMPORTANT — attack compatibility.
+## The XGBoost target is an nn.Module shim around a booster (see xgb_target_model.py). It has no
+## gradients, so only attacks that rely on logit/loss signals work here. Do NOT add:
+##   hsj         - needs get_hop_skip_jump_distance, which backprops through the model
+##   loss_traj   - needs DistillationModelHandler, i.e. gradient training on soft targets
+##   seqmia      - same distillation dependency
+##   dts         - time-series only
+## These will construct successfully from this config and then fail or return meaningless
+## scores. Compatible attacks: lira, rmia, population, base, multi_signal_lira, yoqo, ramia.
+##
+audit:  # Configurations for auditing
+  random_seed: 1234  # Integer specifying the random seed
+  attack_list:
+    - attack: lira
+      online: True
+      num_shadow_models: 8
+      # Keep this at 0.5. Shadow models are always trained on len(shadow_population)//2 via
+      # construct_balanced_assignments, but the cache signature keys on
+      # int(len(shadow_population) * training_data_fraction). The two agree only at 0.5; at any
+      # other value the cache never matches and all 8 models are retrained on every run
+      # (~6 min here). See issue #345.
+      training_data_fraction: 0.5
+    - attack: rmia
+      online: False
+      num_shadow_models: 4
+      gamma: 1
+
+  # NOTE: the `population` attack is deliberately not included. It passes the raw loss to
+  # MIAResult.from_fixed_thresholds, which predicts membership with `signal >= threshold` —
+  # but lower loss means member, so its ROC comes out inverted. Measured on this target:
+  # reported AUC 0.214, correctly-oriented AUC 0.786 (member mean loss 0.212 vs non-member
+  # 0.619). This is a pre-existing issue in attack_p.py affecting all targets, not something
+  # specific to XGBoost, so it is left alone here rather than worked around in the example.
+
+  output_dir: "./leakpro_output_xgb"
+  attack_type: "mia" #mia, gia
+  data_modality: "tabular" #image, tabular
+
+## XGBoost model configurations
+target:
+  # Target model path
+  module_path: "./xgb_target_model.py"
+  model_class: "XGBLOS"
+  target_folder: "./target_XGB"
+  # Data paths — XGB uses the flattened LR_data layout, not the 3D GRUD_data one
+  data_path: "./data/LR_data/dataset.pkl"
+
+shadow_model:
+
+distillation_model:

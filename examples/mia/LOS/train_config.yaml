@@ -7,9 +7,18 @@ run: # Configurations for a specific run
   log_dir: target # String for indicating where to save all the information, including models and computed signals. We can reuse the models saved in the same log_dir.
 
 
-train: 
-  training_method : GRUD # LR, GRUD, GRUD_DPSGD
-  LR: 
+train:
+  training_method : GRUD # LR, GRUD, GRUD_DPSGD, XGB
+  XGB: # XGB reuses the flattened LR_data layout; it has no epochs/optimizer (see mimic_XGB_main.ipynb)
+    n_estimators: 200 # Integer number of boosting rounds
+    max_depth: 6 # Integer maximum tree depth. Together with n_estimators this drives the train/test gap the attack exploits
+    learning_rate: 0.1 # Float boosting learning rate (eta)
+    subsample: 0.8 # Float row subsampling ratio per tree
+    colsample_bytree: 0.3 # Float column subsampling ratio per tree. Low because the design matrix is 7488 features wide
+    reg_lambda: 1.0 # Float L2 regularisation on leaf weights
+    tree_method: hist # String XGBoost tree construction algorithm
+    random_state: 1234 # Integer seed for the subsampling RNG
+  LR:
     epochs: 40 # Integer number for indicating the epochs for training target model. For speedyresnet, it uses its own number of epochs.
     # batch_size: 128 # Integer number for indicating batch size for training the target model. For speedyresnet, it uses its own batch size.
     optimizer: SGD # String which indicates the optimizer. We support Adam and SGD. For speedyresnet, it uses its own optimizer.
