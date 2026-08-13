@@ -11,11 +11,11 @@ from pydantic import BaseModel, Field, model_validator
 from scipy.stats import norm
 from tqdm import tqdm
 
-import leakpro.signals.functional as signals
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.reporting.mia_result import MIAResult
+from leakpro.signals import functional
 from leakpro.utils.import_helper import Self
 
 
@@ -73,13 +73,8 @@ class AttackLiRA(AbstractMIA):
         # TODO: Remove self.shadow_models? Is it ever used? Parent classes do not require it to exist.
         self.shadow_models = []
 
-        # Map legacy class-style signal names (pre-functional refactor) to their functional equivalents
-        legacy_signal_names = {"ModelLogits": "logits", "ModelRescaledLogits": "rescaled_logits"}
-        signal_name = legacy_signal_names.get(self.configs.signal, self.configs.signal)
-        if not hasattr(signals, signal_name):
-            raise ValueError(f"Unknown signal '{self.configs.signal}'. "
-                             f"Available: {[f for f in dir(signals) if not f.startswith('_')]}")
-        self.signal = getattr(signals, signal_name)
+        # Accepts both functional names and the class-style names used by older configs.
+        self.signal = functional.get(self.configs.signal)
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""

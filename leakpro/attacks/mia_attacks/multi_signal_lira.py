@@ -16,59 +16,8 @@ from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.reporting.mia_result import MIAResult
 from leakpro.signals import functional
-from leakpro.signals.functional import SIGNAL_MEMBERSHIP_DIRECTION
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
-
-# Maps the class-style signal names accepted in the config to the functional signal names
-# used as keys in SIGNAL_MEMBERSHIP_DIRECTION. (HopSkipJumpDistance has no functional twin and
-# is not a valid MS-LiRA signal.)
-_CLASS_TO_FUNCTIONAL = {
-    "ModelLogits": "logits",
-    "ModelRescaledLogits": "rescaled_logits",
-    "ModelLoss": "loss",
-    "Seasonality": "seasonality",
-    "Trend": "trend",
-    "MSE": "mse",
-    "MAE": "mae",
-    "SMAPE": "smape",
-    "RescaledSMAPE": "rescaled_smape",
-    "TS2Vec": "ts2vec",
-    "DTW": "dtw",
-    "MSM": "msm",
-}
-
-
-def _signal_membership_direction(signal_name: str) -> int:
-    """Return +1 if a higher value of this signal indicates membership, -1 if lower does.
-
-    Accepts both class-style names (config) and functional names. Raises ValueError for any
-    signal whose direction is not declared, so a new signal must opt in explicitly.
-    """
-    functional_name = _CLASS_TO_FUNCTIONAL.get(signal_name, signal_name)
-    try:
-        return SIGNAL_MEMBERSHIP_DIRECTION[functional_name]
-    except KeyError as e:
-        raise ValueError(
-            f"No membership direction defined for signal '{signal_name}'. Add an entry to "
-            "SIGNAL_MEMBERSHIP_DIRECTION in leakpro/signals/functional.py (+1 if a higher value "
-            "indicates membership, -1 if a lower value does)."
-        ) from e
-
-
-def _resolve_signal_fn(signal_name: str) -> callable:
-    """Resolve a config signal name to its function in ``leakpro.signals.functional``.
-
-    Accepts both class-style names (e.g. ``ModelRescaledLogits``) and functional names
-    (e.g. ``rescaled_logits``) for config back-compat. The functional signal runs on cached
-    logits, so it never re-queries a model (unlike the class-based ``Signal`` objects).
-    Raises ValueError for an unknown signal.
-    """
-    functional_name = _CLASS_TO_FUNCTIONAL.get(signal_name, signal_name)
-    if not hasattr(functional, functional_name):
-        available = [f for f in dir(functional) if not f.startswith("_") and callable(getattr(functional, f))]
-        raise ValueError(f"Unknown signal '{signal_name}'. Available functional signals: {available}")
-    return getattr(functional, functional_name)
 
 
 class AttackMSLiRA(AbstractMIA):
@@ -128,14 +77,12 @@ class AttackMSLiRA(AbstractMIA):
 
         self.shadow_models = []
 
-        # Membership direction per signal (+1 higher=member, -1 lower=member). Resolved first so
-        # an unknown/undeclared signal fails with the direction error before any models are trained.
-        self.signal_directions = np.array(
-            [_signal_membership_direction(name) for name in self.signals]
-        )
+        # Membership direction per signal (+1 higher=member, -1 lower=member). Resolved here so an
+        # unknown signal fails at construction, before any models are trained.
+        self.signal_directions = np.array([functional.direction(name) for name in self.signals])
 
         # Functional signals run on cached logits (no per-model re-query); see prepare_attack.
-        self.signal_fns = [_resolve_signal_fn(name) for name in self.signals]
+        self.signal_fns = [functional.get(name) for name in self.signals]
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""

@@ -19,11 +19,7 @@ import numpy as np
 import pytest
 from scipy.stats import norm
 
-from leakpro.attacks.mia_attacks.multi_signal_lira import (
-    AttackMSLiRA,
-    _resolve_signal_fn,
-    _signal_membership_direction,
-)
+from leakpro.attacks.mia_attacks.multi_signal_lira import AttackMSLiRA
 from leakpro.signals import functional
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.reporting.mia_result import MIAResult
@@ -158,13 +154,14 @@ def test_mslira_does_not_requery_models_per_signal(
     assert call_count["n"] == attack.num_shadow_models + 1
 
 
-def test_mslira_undeclared_signal_direction_fails(image_handler: ImageInputHandler) -> None:
-    """A signal with no membership-direction entry must fail loudly at construction.
+def test_mslira_unknown_signal_fails(image_handler: ImageInputHandler) -> None:
+    """A signal MS-LiRA cannot score must fail loudly at construction.
 
-    HopSkipJumpDistance is a registered signal but has no functional twin / direction, so it is
-    not a valid MS-LiRA signal and should be rejected before any models are trained.
+    HopSkipJumpDistance is a registered class-based signal but has no functional counterpart (and
+    hence no membership direction), so it is not a valid MS-LiRA signal and should be rejected
+    before any models are trained.
     """
-    with pytest.raises(ValueError, match="No membership direction defined"):
+    with pytest.raises(ValueError, match="Unknown signal"):
         AttackMSLiRA(image_handler, _ms_config(signals=["HopSkipJumpDistance"]))
 
 
@@ -172,46 +169,6 @@ def test_mslira_undeclared_signal_direction_fails(image_handler: ImageInputHandl
 # Scoring formulas (pure unit tests — the offline path cannot run on the
 # population==audit fixture, so the math is exercised via the static helpers).
 # ---------------------------------------------------------------------------
-
-class TestSignalDirectionResolution:
-    """_signal_membership_direction accepts both class-style and functional names."""
-
-    def test_class_names(self) -> None:
-        """Class-style config names resolve to a direction via the functional mapping."""
-        assert _signal_membership_direction("ModelRescaledLogits") == +1
-        assert _signal_membership_direction("ModelLoss") == -1
-        assert _signal_membership_direction("MSE") == -1
-
-    def test_functional_names(self) -> None:
-        """Functional names resolve directly."""
-        assert _signal_membership_direction("rescaled_logits") == +1
-        assert _signal_membership_direction("mse") == -1
-
-    def test_unknown_signal_raises(self) -> None:
-        """An undeclared signal raises rather than silently defaulting a direction."""
-        with pytest.raises(ValueError, match="No membership direction defined"):
-            _signal_membership_direction("NotASignal")
-
-
-class TestResolveSignalFn:
-    """_resolve_signal_fn maps config names to leakpro.signals.functional functions."""
-
-    def test_class_names_map_to_functional(self) -> None:
-        """Class-style config names resolve to their functional equivalents."""
-        assert _resolve_signal_fn("ModelRescaledLogits") is functional.rescaled_logits
-        assert _resolve_signal_fn("ModelLoss") is functional.loss
-        assert _resolve_signal_fn("MSE") is functional.mse
-
-    def test_functional_names_resolve_directly(self) -> None:
-        """Functional names resolve to the same-named function."""
-        assert _resolve_signal_fn("rescaled_logits") is functional.rescaled_logits
-        assert _resolve_signal_fn("dtw") is functional.dtw
-
-    def test_unknown_signal_raises(self) -> None:
-        """An unknown signal raises rather than silently returning a non-signal attribute."""
-        with pytest.raises(ValueError, match="Unknown signal"):
-            _resolve_signal_fn("NotASignal")
-
 
 class TestOfflineScore:
     """Offline score = one-sided multivariate Gaussian tail (paper Eq. 2)."""

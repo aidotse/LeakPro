@@ -4,6 +4,8 @@ These functions take in logits and targets in general, and are mainly used in
 combination with shadow models where logits are precomputed and cached.
 """
 
+from collections.abc import Callable
+
 import numpy as np
 import torch
 from joblib import Parallel, delayed
@@ -205,3 +207,99 @@ SIGNAL_MEMBERSHIP_DIRECTION = {
     "dtw": -1,
     "msm": -1,
 }
+
+# The signals an attack config may name. Explicit rather than derived from the module namespace:
+# a `getattr(functional, name)` lookup also resolves imports such as `np` or `torch`, which then
+# fail far from the config that named them.
+SIGNAL_FUNCTIONS = {
+    "logits": logits,
+    "rescaled_logits": rescaled_logits,
+    "loss": loss,
+    "mse": mse,
+    "mae": mae,
+    "smape": smape,
+    "rescaled_smape": rescaled_smape,
+    "seasonality": seasonality,
+    "trend": trend,
+    "ts2vec": ts2vec,
+    "dtw": dtw,
+    "msm": msm,
+}
+
+# Class-style signal names accepted in attack configs, mapped to their functional equivalents.
+# (HopSkipJumpDistance has no functional counterpart and is not resolvable here.)
+LEGACY_SIGNAL_NAMES = {
+    "ModelLogits": "logits",
+    "ModelRescaledLogits": "rescaled_logits",
+    "ModelLoss": "loss",
+    "Seasonality": "seasonality",
+    "Trend": "trend",
+    "MSE": "mse",
+    "MAE": "mae",
+    "SMAPE": "smape",
+    "RescaledSMAPE": "rescaled_smape",
+    "TS2Vec": "ts2vec",
+    "DTW": "dtw",
+    "MSM": "msm",
+}
+
+# A signal is usable only if it declares both a function and a membership direction. Checked at
+# import so that adding one half of a new signal fails immediately instead of at attack time.
+if SIGNAL_FUNCTIONS.keys() != SIGNAL_MEMBERSHIP_DIRECTION.keys():
+    raise RuntimeError(
+        "SIGNAL_FUNCTIONS and SIGNAL_MEMBERSHIP_DIRECTION must declare the same signals; "
+        f"mismatch: {SIGNAL_FUNCTIONS.keys() ^ SIGNAL_MEMBERSHIP_DIRECTION.keys()}"
+    )
+
+
+def _resolve_name(signal_name: str) -> str:
+    """Map a config signal name to its functional name, raising if it names no known signal."""
+    functional_name = LEGACY_SIGNAL_NAMES.get(signal_name, signal_name)
+    if functional_name not in SIGNAL_FUNCTIONS:
+        raise ValueError(
+            f"Unknown signal '{signal_name}'. Available signals: {sorted(SIGNAL_FUNCTIONS)} "
+            f"(class-style aliases: {sorted(LEGACY_SIGNAL_NAMES)}). To add a new signal, define it "
+            "in leakpro/signals/functional.py and register it in BOTH SIGNAL_FUNCTIONS and "
+            "SIGNAL_MEMBERSHIP_DIRECTION (+1 if a higher value indicates membership, -1 if a lower "
+            "value does)."
+        )
+    return functional_name
+
+
+def get(signal_name: str) -> Callable[[np.ndarray, np.ndarray], np.ndarray]:
+    """Return the signal function a config named.
+
+    Accepts both functional names (e.g. ``rescaled_logits``) and the class-style names used by
+    older configs (e.g. ``ModelRescaledLogits``). Unlike ``dict.get`` this raises instead of
+    returning ``None``, so a mistyped signal fails at attack construction rather than later.
+
+    Args:
+        signal_name (str): Functional or class-style signal name from an attack config.
+
+    Returns:
+        Callable: The signal function, taking (logits, targets) and returning per-point values.
+
+    Raises:
+        ValueError: If the name matches no known signal.
+
+    """
+    return SIGNAL_FUNCTIONS[_resolve_name(signal_name)]
+
+
+def direction(signal_name: str) -> int:
+    """Return +1 if a higher value of this signal indicates membership, -1 if a lower value does.
+
+    Accepts both functional and class-style names. Every signal must declare a direction, so a
+    new signal has to opt in explicitly rather than inherit a default orientation.
+
+    Args:
+        signal_name (str): Functional or class-style signal name from an attack config.
+
+    Returns:
+        int: +1 (higher = member) or -1 (lower = member).
+
+    Raises:
+        ValueError: If the name matches no known signal.
+
+    """
+    return SIGNAL_MEMBERSHIP_DIRECTION[_resolve_name(signal_name)]

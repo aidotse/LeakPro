@@ -66,3 +66,79 @@ class TestSignalMembershipDirection:
     def test_every_direction_is_plus_or_minus_one(self) -> None:
         """Directions are strictly +1 or -1 (used as a multiplicative sign)."""
         assert set(functional.SIGNAL_MEMBERSHIP_DIRECTION.values()) <= {+1, -1}
+
+
+class TestGet:
+    """``functional.get`` maps a config signal name to its signal function."""
+
+    def test_class_names_map_to_functional(self) -> None:
+        """Class-style config names resolve to their functional equivalents."""
+        assert functional.get("ModelRescaledLogits") is functional.rescaled_logits
+        assert functional.get("ModelLoss") is functional.loss
+        assert functional.get("MSE") is functional.mse
+
+    def test_functional_names_resolve_directly(self) -> None:
+        """Functional names resolve to the same-named function."""
+        assert functional.get("rescaled_logits") is functional.rescaled_logits
+        assert functional.get("dtw") is functional.dtw
+
+    def test_unknown_signal_raises(self) -> None:
+        """An unknown signal raises rather than returning None the way dict.get would."""
+        with pytest.raises(ValueError, match="Unknown signal"):
+            functional.get("NotASignal")
+
+    def test_module_attribute_is_not_a_signal(self) -> None:
+        """Module-level imports are not resolvable as signals, unlike a getattr-based lookup."""
+        for name in ["np", "torch", "Parallel", "SIGNAL_MEMBERSHIP_DIRECTION"]:
+            with pytest.raises(ValueError, match="Unknown signal"):
+                functional.get(name)
+
+    def test_alias_wins_over_a_same_named_import(self) -> None:
+        """``TS2Vec`` names the signal, not the imported TS2Vec model class it collides with."""
+        assert functional.get("TS2Vec") is functional.ts2vec
+
+    def test_error_tells_a_contributor_how_to_register_a_signal(self) -> None:
+        """The error must name both registries: a new signal is unusable until it is in both."""
+        with pytest.raises(ValueError) as excinfo:
+            functional.get("kurtosis")
+        message = str(excinfo.value)
+        assert "SIGNAL_FUNCTIONS" in message
+        assert "SIGNAL_MEMBERSHIP_DIRECTION" in message
+
+
+class TestDirection:
+    """``functional.direction`` resolves the same names as ``get`` to an orientation."""
+
+    def test_class_names(self) -> None:
+        """Class-style config names resolve to a direction via the alias mapping."""
+        assert functional.direction("ModelRescaledLogits") == +1
+        assert functional.direction("ModelLoss") == -1
+        assert functional.direction("MSE") == -1
+
+    def test_functional_names(self) -> None:
+        """Functional names resolve directly."""
+        assert functional.direction("rescaled_logits") == +1
+        assert functional.direction("mse") == -1
+
+    def test_unknown_signal_raises(self) -> None:
+        """An undeclared signal raises rather than silently defaulting a direction."""
+        with pytest.raises(ValueError, match="Unknown signal"):
+            functional.direction("NotASignal")
+
+
+class TestSignalRegistries:
+    """Every usable signal declares both a function and a membership direction."""
+
+    def test_registries_declare_the_same_signals(self) -> None:
+        """A signal missing from either registry is a half-registered signal."""
+        assert functional.SIGNAL_FUNCTIONS.keys() == functional.SIGNAL_MEMBERSHIP_DIRECTION.keys()
+
+    def test_aliases_point_at_registered_signals(self) -> None:
+        """Every class-style alias resolves to a signal that exists."""
+        for alias, name in functional.LEGACY_SIGNAL_NAMES.items():
+            assert name in functional.SIGNAL_FUNCTIONS, alias
+
+    def test_registered_functions_are_named_consistently(self) -> None:
+        """The registry key matches the function it points at, so configs and code agree."""
+        for name, fn in functional.SIGNAL_FUNCTIONS.items():
+            assert fn.__name__ == name
