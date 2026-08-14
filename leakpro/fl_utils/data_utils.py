@@ -5,7 +5,7 @@
 """Util functions relating to data."""
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from typing import Any, List, Literal, Self
+from typing import List, Literal
 
 import numpy as np
 import torch
@@ -52,6 +52,29 @@ class CustomYoloTensorDataset(Dataset):
     def __getitem__(self: Self, index: int) -> tuple[Tensor, Any]:
         """Get item from index."""
         return self.reconstruction[index], self.labels[index], 1
+
+
+class CustomDetrTensorDataset(Dataset):
+    """Tensor dataset holding DETR style targets (one dict per image)."""
+
+    def __init__(self:Self, reconstruction: torch.Tensor, labels: list) -> None:
+        self.reconstruction = reconstruction
+        self.labels = labels
+
+    def __len__(self: Self) -> int:
+        """Dataset length."""
+        return self.reconstruction.size(0)
+
+    def __getitem__(self: Self, index: int) -> tuple[Tensor, Any]:
+        """Get item from index."""
+        return self.reconstruction[index], self.labels[index]
+
+
+def detr_collate_fn(batch: List[tuple[Tensor, dict]]) -> tuple[Tensor, List[dict]]:
+    """Collate images into a batch tensor and keep the DETR targets as a list of dicts."""
+    images = torch.stack([image for image, _ in batch], dim=0)
+    targets = [target for _, target in batch]
+    return images, targets
 
 
 class GiaImageCloneNoiseExtension(GiaDataModalityExtension):
@@ -195,6 +218,33 @@ class GiaImageYoloExtension(GiaDataModalityExtension):
                 org_labels.append(deepcopy(label))
         org_dataset = CustomYoloTensorDataset(original, org_labels)
         org_loader = DataLoader(org_dataset, batch_size=32, shuffle=True)
+        return org_loader, original, reconstruction, labels, reconstruction_loader
+
+
+class GiaImageDetrExtension(GiaDataModalityExtension):
+    """Image extension for GIA on DETR style object detectors.
+
+    Targets are dicts (class_labels, boxes) rather than tensors, so the loaders need a
+    collate function which keeps them as a list of dicts, one per image.
+    """
+
+    def get_at_data(self: Self, client_loader: DataLoader) -> DataLoader:
+        """DataLoader with random noise images of the same shape as the client_loader's dataset, using the same targets."""
+        img_shape = client_loader.dataset[0][0].shape
+        num_images = len(client_loader.dataset)
+        batch_size = client_loader.batch_size
+        labels = []
+        for _, label in client_loader:
+            labels.extend(deepcopy(label))
+
+        reconstruction = randn((num_images, *img_shape))
+        reconstruction_dataset = CustomDetrTensorDataset(reconstruction, labels)
+        reconstruction_loader = DataLoader(reconstruction_dataset, batch_size=batch_size,
+                                           shuffle=False, collate_fn=detr_collate_fn)
+
+        original = torch.stack([img.clone() for img, _ in client_loader.dataset], dim=0)
+        org_dataset = CustomDetrTensorDataset(original, deepcopy(labels))
+        org_loader = DataLoader(org_dataset, batch_size=batch_size, shuffle=False, collate_fn=detr_collate_fn)
         return org_loader, original, reconstruction, labels, reconstruction_loader
 
 

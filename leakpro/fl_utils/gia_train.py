@@ -98,6 +98,39 @@ def train_nostep(
     return grads
 
 
+def train_detr(
+    model: Module,
+    data: DataLoader,
+    optimizer: MetaOptimizer,
+    criterion: Module,
+    epochs: int,
+    device: Optional[torch.device] = None,
+) -> list:
+    """Model training procedure for GIA on DETR style detectors.
+
+    Same as train, but the targets are a list of dicts (one per image) holding class labels
+    and boxes, which have to be moved to the device field by field.
+    """
+    if device is None:
+        device = torch.device("cuda" if cuda.is_available() else "cpu")
+    model.to(device)
+    patched_model = MetaModule(model, device=device)
+    for _ in range(epochs):
+        for inputs, targets in data:
+            inputs = inputs.to(device, non_blocking=True)
+            targets = [{k: v.to(device, non_blocking=True) for k, v in target.items()} for target in targets]
+            outputs = patched_model(inputs, patched_model.parameters)
+            loss = criterion(outputs, targets)
+            patched_model.parameters = optimizer.step(loss, patched_model.parameters)
+    model_delta = OrderedDict(
+        (name, param - param_origin)
+        for ((name, param), (name_origin, param_origin)) in zip(
+            patched_model.parameters.items(), OrderedDict(model.named_parameters()).items()
+        )
+    )
+    return list(model_delta.values())
+
+
 def trainyolo(
     model: Module,
     data: DataLoader,
