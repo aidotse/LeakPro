@@ -194,11 +194,8 @@ def install_profile(profile: PlatformProfile, pip_executable: Optional[str] = No
     if not profile.pip_packages:
         sys.stdout.write(f"No extra pip packages required for platform {profile.name}.\n")
         return 0
-    pip = pip_executable or shutil.which("pip") or shutil.which("pip3")
-    if pip is None:
-        sys.stderr.write("Could not locate pip executable; aborting install.\n")
-        return 1
-    cmd = [pip, "install", *profile.pip_packages]
+    cmd = [pip_executable, "install", *profile.pip_packages] if pip_executable \
+        else [sys.executable, "-m", "pip", "install", *profile.pip_packages]
     sys.stdout.write("Running: " + " ".join(cmd) + "\n")
     return subprocess.call(cmd)  # noqa: S603 - args are constructed from a fixed allow-list
 

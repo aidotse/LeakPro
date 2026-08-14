@@ -40,7 +40,7 @@ def evaluate(model, loader, criterion, device):
             output = model(data)
             mark_step(device)
             loss += criterion(output, target).item()
-            pred = output >= 0.5
+            pred = output >= 0
             acc += pred.eq(target).sum()
         loss /= len(loader)
         acc = float(acc) / len(loader.dataset)
@@ -68,7 +68,7 @@ def create_trained_model_and_metadata(model, train_loader, test_loader, epochs =
             output = model(data)
 
             loss = criterion(output, target)
-            pred = output >= 0.5
+            pred = output >= 0
             train_acc += pred.eq(target).sum().item()
 
             loss.backward()

@@ -18,7 +18,6 @@ dependencies = [
   "dotmap",
   "jinja2",
   "tqdm",
-  "ipywidgets",
   "joblib",
   "pyyaml",
   "scikit-learn",
@@ -45,7 +44,7 @@ dev = [
   "pytest-mock",
   "coverage-badge",
   "ruff",
-  "torch",           # from mia & federated — unpinned for CPU/CUDA users
+  "torch>=2.6.0",    # from mia & federated
   "torchvision",     # matches torch series chosen by the resolver
   "torchmetrics",    # from federated
   "numba",           # from synthetic
@@ -60,6 +59,7 @@ dev = [
   "mpi4py",          # from minv
   "opacus",          # from mia
   "albumentations",  # federated example
+  "ipywidgets",      # notebook progress bars for examples
   "requests",
   "pip-licenses",
   "licenseheaders",

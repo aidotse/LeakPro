@@ -67,7 +67,7 @@ class AdultInputHandler(AbstractInputHandler):
                 output = model(data)
 
                 loss = criterion(output, target)
-                pred = output >= 0.5
+                pred = output >= 0
                 train_acc += pred.eq(target).sum().item()
 
                 loss.backward()
@@ -78,8 +78,8 @@ class AdultInputHandler(AbstractInputHandler):
 
         train_acc = train_acc/len(dataloader.dataset)
         train_loss = train_loss/len(dataloader)
-        
-        
+
+        model.to("cpu")
         output_dict = {"model": model, "metrics": {"accuracy": train_acc, "loss": train_loss}}
         output = TrainingOutput(**output_dict)
 
@@ -93,7 +93,7 @@ class AdultInputHandler(AbstractInputHandler):
         device: str = None,
     ) -> EvalOutput:
         """Evaluate the model on the given dataloader."""
-        dev = get_device()
+        dev = torch.device(device) if device else get_device()
         model.to(dev)
         model.eval()
         loss, acc, total_samples = 0.0, 0.0, 0
@@ -104,7 +104,7 @@ class AdultInputHandler(AbstractInputHandler):
                 output = model(data)
                 mark_step(dev)
                 loss += criterion(output, target).item() * target.size(0)
-                pred = output >= 0.5
+                pred = output >= 0
                 acc += pred.eq(target).sum().item()
                 total_samples += target.size(0)
         model.to("cpu")

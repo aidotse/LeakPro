@@ -130,12 +130,14 @@ def preprocess_adult_dataset(path):
 
     return dataset
 
-def get_adult_dataloaders(dataset, train_fraction=0.5, test_fraction=0.5):
-    """Split dataset into train/test loaders using sequential indices.
+def get_adult_dataloaders(dataset, train_fraction=0.3, test_fraction=0.3, seed=1234):
+    """Split dataset into train/test loaders using a seeded random split.
 
-    Sequential (non-random) assignment ensures that position i in the cached
-    logit array corresponds to population sample i, which is required by the
-    MIA attacks that index logits directly with population indices.
+    preprocess_adult_dataset concatenates adult.data then adult.test before
+    this function ever sees the data, so a sequential (prefix-based) split
+    would draw train/test/population unevenly from the two source files. A
+    seeded random split keeps the three sets i.i.d. while staying
+    reproducible. `seed` should match audit.yaml's `random_seed`.
     """
     dataset_size = len(dataset)
     train_size = int(train_fraction * dataset_size)
@@ -144,7 +146,7 @@ def get_adult_dataloaders(dataset, train_fraction=0.5, test_fraction=0.5):
     if train_size + test_size > dataset_size:
         raise ValueError("train_fraction + test_fraction must be <= 1.0")
 
-    indices = np.arange(dataset_size)
+    indices = np.random.default_rng(seed).permutation(dataset_size)
     train_indices = indices[:train_size]
     test_indices = indices[train_size:train_size + test_size]
 
