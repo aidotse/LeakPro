@@ -32,14 +32,21 @@ def logits(logits: np.ndarray, targets: np.ndarray) -> np.ndarray:
 
 
 def rescaled_logits(logits: np.ndarray, true_labels: np.ndarray) -> np.ndarray:
-    """Rescale the logits to a range of [0, 1].
+    """Logit-scale the model's confidence in the true class: log(p / (1 - p)).
+
+    Maps the softmax confidence p of the true class from [0, 1] onto the whole real line, which
+    is Carlini's phi from LiRA (Sec. IV-B). LiRA fits a per-example Gaussian to this quantity, and
+    the confidence itself is far from normal (it piles up near 1); the logit transform is what
+    makes the normal fit reasonable.
 
     Args:
-        logits (np.ndarray): The logits to be rescaled.
-        true_labels (np.ndarray): The true labels for the logits.
+        logits (np.ndarray): Model logits, shape (n_points, n_classes); a single column is treated
+            as a binary logit head.
+        true_labels (np.ndarray): Integer class labels, shape (n_points,).
 
     Returns:
-        np.ndarray: The rescaled logits.
+        np.ndarray: One unbounded score per point, shape (n_points,). Higher means the model is
+            more confident in the true class.
 
     """
     assert true_labels.dtype == np.int64
