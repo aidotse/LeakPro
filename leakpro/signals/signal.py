@@ -495,7 +495,9 @@ class RescaledSMAPE(Signal):
             denominator = np.abs(model_outputs) + np.abs(model_targets) + 1e-30
             fraction = numerator / denominator
             smape_loss = np.mean(fraction, axis=(1,2))
-            rescaled_smape = np.log(smape_loss / (1 - smape_loss + 1e-30))
+            # Epsilon on both ends: a perfectly reproduced series gives smape_loss == 0, and
+            # log(0) = -inf would poison the per-point Gaussian LiRA fits over shadow models.
+            rescaled_smape = np.log((smape_loss + 1e-30) / (1 - smape_loss + 1e-30))
 
             results.append(rescaled_smape)
         return np.array(results)

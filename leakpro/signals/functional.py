@@ -121,13 +121,20 @@ def smape(logits: np.ndarray, targets: np.ndarray) -> np.ndarray:
 
 
 def rescaled_smape(logits: np.ndarray, targets: np.ndarray) -> np.ndarray:
-    """Per-point SMAPE mapped through a logit transform to spread values over the real line."""
+    """Per-point SMAPE mapped through a logit transform to spread values over the real line.
+
+    SMAPE saturates at both ends: 0 for an exactly reproduced series, and 1 whenever prediction
+    and target have opposite signs (a zero-valued target counts). Both ends therefore get the same
+    epsilon, which bounds the result to +-log(1/1e-30) ~ +-69 instead of letting a saturated point
+    become -inf. Non-finite signals do not stay local: they poison the shadow-model mean and std
+    that LiRA fits per point.
+    """
     assert logits.shape == targets.shape
     numerator = np.abs(logits - targets)
     denominator = np.abs(logits) + np.abs(targets) + 1e-30
     fraction = numerator / denominator
     smape_loss = np.mean(fraction, axis=tuple(range(1, logits.ndim)))
-    return np.log(smape_loss / (1 - smape_loss + 1e-30))
+    return np.log((smape_loss + 1e-30) / (1 - smape_loss + 1e-30))
 
 
 def seasonality(logits: np.ndarray, targets: np.ndarray) -> np.ndarray:

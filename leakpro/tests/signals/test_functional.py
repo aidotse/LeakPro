@@ -49,6 +49,35 @@ class TestFunctionalLoss:
             functional.loss(np.array([[1.0, 0.0]]), np.array([0], dtype=np.float64))
 
 
+class TestRescaledSmape:
+    """``functional.rescaled_smape`` must stay finite at both saturation points of SMAPE."""
+
+    def test_perfect_prediction_is_finite(self) -> None:
+        """An exactly reproduced series gives SMAPE 0; log(0) would be -inf."""
+        series = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        assert np.all(np.isfinite(functional.rescaled_smape(series, series.copy())))
+
+    def test_zero_target_is_finite(self) -> None:
+        """A zero-valued target with a non-zero prediction gives SMAPE 1, the other singularity."""
+        predictions = np.array([[1.0, 2.0, 3.0]])
+        targets = np.zeros_like(predictions)
+        assert np.all(np.isfinite(functional.rescaled_smape(predictions, targets)))
+
+    def test_saturated_ends_are_symmetric(self) -> None:
+        """The same epsilon on both ends puts the two extremes at +-log(1/eps)."""
+        series = np.array([[1.0, 2.0, 3.0]])
+        best = functional.rescaled_smape(series, series.copy())
+        worst = functional.rescaled_smape(series, np.zeros_like(series))
+        np.testing.assert_allclose(best, -worst, rtol=1e-6)
+
+    def test_worse_prediction_scores_higher(self) -> None:
+        """The transform is monotone in SMAPE: a worse prediction gives a larger value."""
+        targets = np.array([[1.0, 2.0, 3.0]])
+        close = functional.rescaled_smape(targets + 0.1, targets)
+        far = functional.rescaled_smape(targets + 1.0, targets)
+        assert close[0] < far[0]
+
+
 class TestSignalMembershipDirection:
     """The orientation table encodes whether higher (+1) or lower (-1) means membership."""
 
