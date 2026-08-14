@@ -54,6 +54,67 @@ class TestMvMsmDistance:
         assert result >= 0
 
 
+def _textbook_msm_distance(x: np.ndarray, y: np.ndarray, cost: float = 1.0) -> float:
+    """Naive univariate MSM (Stefan et al., 2013), written straight from the recurrence."""
+    n, m = len(x), len(y)
+    accumulated = np.full((n, m), np.inf)
+    accumulated[0, 0] = abs(x[0] - y[0])
+    for i in range(1, n):
+        accumulated[i, 0] = accumulated[i - 1, 0] + mv_msm_cost(x[i], x[i - 1], y[0], cost)
+    for j in range(1, m):
+        accumulated[0, j] = accumulated[0, j - 1] + mv_msm_cost(y[j], x[0], y[j - 1], cost)
+    for i in range(1, n):
+        for j in range(1, m):
+            accumulated[i, j] = min(
+                accumulated[i - 1, j - 1] + abs(x[i] - y[j]),
+                accumulated[i - 1, j] + mv_msm_cost(x[i], x[i - 1], y[j], cost),
+                accumulated[i, j - 1] + mv_msm_cost(y[j], x[i], y[j - 1], cost),
+            )
+    return float(accumulated[-1, -1])
+
+
+class TestMvMsmIsTheIndependentVariant:
+    """mv_msm_distance is MSM_I: standard MSM per variable, summed over variables."""
+
+    def test_univariate_matches_the_textbook_recurrence(self) -> None:
+        """The vectorised DP must agree with the naive recurrence it replaces."""
+        rng = np.random.default_rng(0)
+        x, y = rng.normal(size=(7, 1)), rng.normal(size=(5, 1))
+        assert mv_msm_distance(x, y) == pytest.approx(_textbook_msm_distance(x[:, 0], y[:, 0]))
+
+    def test_multivariate_is_the_sum_over_variables(self) -> None:
+        """Each variable is aligned on its own path, so the distance decomposes exactly."""
+        rng = np.random.default_rng(1)
+        x, y = rng.normal(size=(6, 3)), rng.normal(size=(8, 3))
+        per_variable = sum(
+            mv_msm_distance(x[:, [v]], y[:, [v]]) for v in range(x.shape[1])
+        )
+        assert mv_msm_distance(x, y) == pytest.approx(per_variable)
+
+    def test_one_dimensional_input_is_treated_as_one_variable(self) -> None:
+        """Shape (n,) and shape (n, 1) must give the same distance."""
+        rng = np.random.default_rng(2)
+        x, y = rng.normal(size=6), rng.normal(size=6)
+        assert mv_msm_distance(x, y) == pytest.approx(mv_msm_distance(x[:, None], y[:, None]))
+
+    def test_symmetric_in_its_arguments(self) -> None:
+        """MSM is a metric, so swapping the series must not change the distance."""
+        rng = np.random.default_rng(3)
+        x, y = rng.normal(size=(5, 2)), rng.normal(size=(7, 2))
+        assert mv_msm_distance(x, y) == pytest.approx(mv_msm_distance(y, x))
+
+    def test_mismatched_variable_count_raises(self) -> None:
+        """Comparing series with different variable counts is a caller error, not a broadcast."""
+        rng = np.random.default_rng(4)
+        with pytest.raises(ValueError, match="same number of variables"):
+            mv_msm_distance(rng.normal(size=(4, 2)), rng.normal(size=(4, 3)))
+
+    def test_split_and_merge_charge_the_cost_constant(self) -> None:
+        """A larger MSM cost constant makes non-matching alignments more expensive."""
+        x, y = np.array([[0.0], [0.0], [0.0]]), np.array([[0.0], [5.0], [0.0], [0.0]])
+        assert mv_msm_distance(x, y, cost=2.0) > mv_msm_distance(x, y, cost=1.0)
+
+
 # ---------------------------------------------------------------------------
 # MSM Signal end-to-end test (mocked handler/model)
 # ---------------------------------------------------------------------------
