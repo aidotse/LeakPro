@@ -5,8 +5,10 @@
 """Unit tests for leakpro.utils.device.
 
 Tests cover:
-- is_hpu_available(): None _hthpu, runtime exception, normal True/False
-- get_device(): HPU path, CUDA path, CPU path, HPU-beats-CUDA priority, lru_cache
+- is_hpu_available(): False only when _hthpu is None; raises HPUAcquisitionError
+  for any installed-but-unusable case (is_available() False/raises, probe fails)
+- get_device(): HPU path, CUDA path, CPU path, HPU-beats-CUDA priority, lru_cache,
+  HPU acquisition failure raises instead of silently falling back
 - mark_step(): no-op conditions (None htcore, eager mode, non-HPU device),
                actual call on HPU in lazy mode, default-arg fallback to get_device()
 - hpu_import_error(): None and string cases
@@ -18,7 +20,7 @@ import pytest
 import torch
 
 import leakpro.utils.device as device_module
-from leakpro.utils.device import get_device, hpu_import_error, is_hpu_available, mark_step
+from leakpro.utils.device import HPUAcquisitionError, get_device, hpu_import_error, is_hpu_available, mark_step
 
 
 @pytest.fixture(autouse=True)
@@ -45,19 +47,22 @@ class TestIsHpuAvailable:
              patch.object(device_module, "_probe_hpu_acquisition"):
             assert is_hpu_available() is True
 
-    def test_returns_false_when_is_available_false(self):
+    def test_raises_when_is_available_false(self):
+        """habana_frameworks is installed but reports no device: that's an error, not CPU fallback."""
         mock_hthpu = MagicMock()
         mock_hthpu.is_available.return_value = False
-        with patch.object(device_module, "_hthpu", mock_hthpu):
-            assert is_hpu_available() is False
+        with patch.object(device_module, "_hthpu", mock_hthpu), \
+             pytest.raises(HPUAcquisitionError):
+            is_hpu_available()
 
-    def test_returns_false_when_is_available_raises(self):
+    def test_raises_when_is_available_raises(self):
         mock_hthpu = MagicMock()
         mock_hthpu.is_available.side_effect = RuntimeError("HPU init failed")
-        with patch.object(device_module, "_hthpu", mock_hthpu):
-            assert is_hpu_available() is False
+        with patch.object(device_module, "_hthpu", mock_hthpu), \
+             pytest.raises(HPUAcquisitionError):
+            is_hpu_available()
 
-    def test_returns_false_when_acquisition_fails_after_is_available_true(self):
+    def test_raises_when_acquisition_fails_after_is_available_true(self):
         """is_available() can report True while the device still can't be acquired."""
         mock_hthpu = MagicMock()
         mock_hthpu.is_available.return_value = True
@@ -65,8 +70,9 @@ class TestIsHpuAvailable:
              patch.object(
                  device_module, "_probe_hpu_acquisition",
                  side_effect=RuntimeError("synStatus=8 [Device not found]"),
-             ):
-            assert is_hpu_available() is False
+             ), \
+             pytest.raises(HPUAcquisitionError):
+            is_hpu_available()
 
 
 # ---------------------------------------------------------------------------
@@ -103,8 +109,8 @@ class TestGetDevice:
             device = get_device()
         assert device == torch.device("hpu")
 
-    def test_hpu_falls_back_to_cuda_when_acquisition_fails(self):
-        """is_available() true but a real acquisition failure must fall through to CUDA."""
+    def test_hpu_acquisition_failure_raises_instead_of_falling_back(self):
+        """habana_frameworks installed + unusable card must raise, never silently pick CUDA/CPU."""
         mock_hthpu = MagicMock()
         mock_hthpu.is_available.return_value = True
         with patch.object(device_module, "_hthpu", mock_hthpu), \
@@ -112,9 +118,9 @@ class TestGetDevice:
                  device_module, "_probe_hpu_acquisition",
                  side_effect=RuntimeError("synStatus=8 [Device not found]"),
              ), \
-             patch("torch.cuda.is_available", return_value=True):
-            device = get_device()
-        assert device == torch.device("cuda")
+             patch("torch.cuda.is_available", return_value=True), \
+             pytest.raises(HPUAcquisitionError):
+            get_device()
 
     def test_result_is_cached(self):
         with patch.object(device_module, "_hthpu", None), \

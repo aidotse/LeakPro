@@ -53,18 +53,43 @@ def _probe_hpu_acquisition() -> None:
     torch.zeros(1, device="hpu")
 
 
+class HPUAcquisitionError(RuntimeError):
+    """Habana software stack is installed but no usable HPU could be acquired.
+
+    ``habana_frameworks`` is never installed by accident, so if it's present and a
+    device still can't be claimed, that's an environment problem (no card, driver
+    not loaded, device held by another process) — not a reason to silently fall
+    back to CUDA/CPU. Set ``LEAKPRO_DEVICE=cpu`` to run on CPU deliberately.
+    """
+
+
 def is_hpu_available() -> bool:
-    """Return ``True`` when a Habana Gaudi HPU is usable in this process."""
+    """Return ``True`` when a Habana Gaudi HPU is usable in this process.
+
+    Only returns ``False`` when ``habana_frameworks`` isn't installed at all — that's
+    the sole case a fallback to CUDA/CPU should happen without complaint. If the
+    package IS installed but a device can't actually be acquired, this raises
+    :class:`HPUAcquisitionError` instead of returning ``False``.
+    """
     if _hthpu is None:
         return False
     try:
-        if not _hthpu.is_available():
-            return False
+        available = _hthpu.is_available()
+    except Exception as exc:
+        raise HPUAcquisitionError(
+            f"habana_frameworks is installed but is_available() raised: {exc}",
+        ) from exc
+    if not available:
+        raise HPUAcquisitionError(
+            "habana_frameworks is installed but reports no available HPU device.",
+        )
+    try:
         _probe_hpu_acquisition()
-        return True
-    except Exception as exc:  # pragma: no cover - defensive; Habana stack may raise
-        logger.debug("HPU availability check failed: %s", exc)
-        return False
+    except Exception as exc:
+        raise HPUAcquisitionError(
+            f"habana_frameworks is installed but the HPU device could not be acquired: {exc}",
+        ) from exc
+    return True
 
 
 _VALID_OVERRIDE_DEVICES = {"cpu", "cuda", "hpu"}
@@ -84,6 +109,12 @@ def get_device() -> torch.device:
 
     Accepted values (case-insensitive): ``cpu``, ``cuda``, ``hpu``.
     An unrecognised value is ignored with a warning and normal detection runs.
+
+    Raises:
+        HPUAcquisitionError: ``habana_frameworks`` is installed but no usable HPU
+            could be acquired. This is deliberate — see that class's docstring.
+            Set ``LEAKPRO_DEVICE=cpu`` to opt into CPU instead.
+
     """
     override = os.environ.get("LEAKPRO_DEVICE", "").strip().lower()
     if override:
