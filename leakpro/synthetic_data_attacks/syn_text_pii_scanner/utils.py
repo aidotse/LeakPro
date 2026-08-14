@@ -32,6 +32,17 @@ def get_device() -> str:
         return "mps"
     return "cpu"
 
+def __getattr__(name: str) -> object:
+    """Lazily resolve ``device`` on access instead of at import time (PEP 562).
+
+    Keeps ``utils.device`` as a valid public attribute for existing callers while
+    ensuring importing this module can't fail on a broken HPU box -- the resolution
+    (and any ``HPUAcquisitionError``) only happens when something actually reads it.
+    """
+    if name == "device":
+        return torch.device(get_device())
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 def load_json_data(*, file_path: str) -> List[Dict[str, Any]]:
     """Function to load data from json file in given file path."""
     with open(file_path, "r", encoding="utf-8") as f:
