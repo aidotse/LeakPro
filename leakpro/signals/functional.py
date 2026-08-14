@@ -7,7 +7,6 @@ combination with shadow models where logits are precomputed and cached.
 from collections.abc import Callable
 
 import numpy as np
-import torch
 from joblib import Parallel, delayed
 from torch import cuda
 from ts2vec import TS2Vec
@@ -176,7 +175,6 @@ def ts2vec(logits: np.ndarray, targets: np.ndarray, batch_size: int = 256) -> np
         logits = np.expand_dims(logits, axis=2)
         targets = np.expand_dims(targets, axis=2)
     device = "cuda:0" if cuda.is_available() else "cpu"
-    torch.backends.cudnn.deterministic = False
     ts2vec_model = TS2Vec(input_dims = targets.shape[-1], device = device, batch_size = batch_size)
     ts2vec_model.fit(targets)
     logits_encoded = ts2vec_model.encode(logits, encoding_window="full_series", batch_size=batch_size)

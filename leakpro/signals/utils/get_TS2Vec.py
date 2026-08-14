@@ -9,8 +9,7 @@ import pickle
 import re
 
 import numpy as np
-import torch
-from torch import cuda, is_tensor, os
+from torch import cuda, is_tensor
 from ts2vec import TS2Vec
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
@@ -44,7 +43,6 @@ def get_ts2vec_model(
         os.makedirs(ts2vec_dir)
 
     device = "cuda:0" if cuda.is_available() else "cpu"
-    torch.backends.cudnn.deterministic = False
 
     # Init TS2Vec
     model_loaded = False
