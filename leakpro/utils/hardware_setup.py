@@ -121,6 +121,27 @@ def _build_hpu_profile() -> PlatformProfile:
     )
 
 
+def _profile_for_device_error(exc: Exception) -> PlatformProfile:
+    """Map a get_device() failure to the right report -- HPU-specific vs generic."""
+    from leakpro.utils.device import HPUAcquisitionError  # noqa: PLC0415
+
+    if isinstance(exc, HPUAcquisitionError):
+        # habana_frameworks is installed but couldn't claim a device -- this IS
+        # the HPU case, not CPU. Report it as such instead of masking it.
+        profile = _build_hpu_profile()
+        return PlatformProfile(
+            name=profile.name,
+            description=f"Habana Gaudi (HPU) stack on disk, but device could not be acquired: {exc}",
+            pip_packages=profile.pip_packages,
+            notes=profile.notes,
+        )
+    return PlatformProfile(
+        name="cpu",
+        description=f"Device detection failed: {exc}",
+        notes=["Falling back to CPU profile."],
+    )
+
+
 def detect_profile() -> PlatformProfile:
     """Return the install profile for the detected platform.
 
@@ -151,11 +172,7 @@ def detect_profile() -> PlatformProfile:
 
             device = get_device()
         except Exception as exc:  # noqa: BLE001
-            return PlatformProfile(
-                name="cpu",
-                description=f"Device detection failed: {exc}",
-                notes=["Falling back to CPU profile."],
-            )
+            return _profile_for_device_error(exc)
         if device.type == "hpu":
             return _build_hpu_profile()
         if device.type == "cuda":

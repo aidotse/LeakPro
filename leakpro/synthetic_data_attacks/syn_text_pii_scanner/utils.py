@@ -32,9 +32,6 @@ def get_device() -> str:
         return "mps"
     return "cpu"
 
-# Set device to HPU/CUDA/MPS if available, otherwise use CPU
-device: torch.device = torch.device(get_device())
-
 def load_json_data(*, file_path: str) -> List[Dict[str, Any]]:
     """Function to load data from json file in given file path."""
     with open(file_path, "r", encoding="utf-8") as f:
@@ -147,6 +144,9 @@ def forward_pass(*, # noqa: C901
             If True, prints progress of forward pass.
 
     """
+    #Resolve device lazily (at call time, not import time) so importing this
+    #module can't fail on a broken HPU box.
+    device: torch.device = torch.device(get_device())
     #Assert input
     assert isinstance(data, Data), "Input data must be of type Data."
     assert isinstance(model, lgfm.NERLongformerModel), "Model must be of type NERLongformerModel."

@@ -47,13 +47,14 @@ def setup_dist() -> None:
 
 def dev() -> th.device:
     """Get the device to use for torch.distributed."""
-    if th.cuda.is_available():
+    device = get_device()
+    if device.type == "cuda":
         if MPI is not None:
             return th.device(f"cuda:{MPI.COMM_WORLD.Get_rank() % GPUS_PER_NODE}")
         if dist.is_initialized():
             return th.device(f"cuda:{th.cuda.current_device()}")
         return th.device("cuda:0")
-    return get_device()
+    return device
 
 
 def load_state_dict(path: str, **kwargs: object) -> object:

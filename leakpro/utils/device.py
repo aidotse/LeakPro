@@ -49,8 +49,13 @@ def _probe_hpu_acquisition() -> None:
     present, driver not loaded, device held by another process). This exercises
     the same lazy-init path a later ``tensor.to("hpu")`` call would hit, so a
     missing/busy card is caught here instead of failing deep inside training.
+
+    The ``.cpu()`` is required, not decorative: in Habana's lazy mode (the default)
+    ``torch.zeros(1, device="hpu")`` alone only queues the op instead of running it,
+    so a dead card would pass this check. Copying the result back forces the queued
+    graph to actually execute.
     """
-    torch.zeros(1, device="hpu")
+    torch.zeros(1, device="hpu").cpu()
 
 
 class HPUAcquisitionError(RuntimeError):
@@ -63,10 +68,11 @@ class HPUAcquisitionError(RuntimeError):
     """
 
 
-def is_hpu_available() -> bool:
+def require_hpu() -> bool:
     """Return ``True`` when a Habana Gaudi HPU is usable in this process.
 
-    Only returns ``False`` when ``habana_frameworks`` isn't installed at all — that's
+    Named ``require_`` rather than ``is_`` because this is not a plain predicate: it
+    only returns ``False`` when ``habana_frameworks`` isn't installed at all — that's
     the sole case a fallback to CUDA/CPU should happen without complaint. If the
     package IS installed but a device can't actually be acquired, this raises
     :class:`HPUAcquisitionError` instead of returning ``False``.
@@ -126,7 +132,7 @@ def get_device() -> torch.device:
             override,
             ", ".join(sorted(_VALID_OVERRIDE_DEVICES)),
         )
-    if is_hpu_available():
+    if require_hpu():
         logger.info("Hardware detection: using Habana Gaudi HPU.")
         return torch.device("hpu")
     if torch.cuda.is_available():

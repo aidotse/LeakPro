@@ -48,6 +48,7 @@ __all__ = ["AbstractInputHandler", "LeakPro"]
 def _emit_device_banner() -> None:
     """Log the detected device. Deferred imports keep ``import leakpro`` resilient to a broken torch."""
     try:
+        from .utils.device import HPUAcquisitionError as _HPUAcquisitionError  # noqa: PLC0415
         from .utils.device import get_device as _get_device  # noqa: PLC0415
         from .utils.logger import logger as _logger  # noqa: PLC0415
     except Exception as banner_err:  # noqa: BLE001
@@ -63,6 +64,18 @@ def _emit_device_banner() -> None:
 
     try:
         device = _get_device()
+    except _HPUAcquisitionError as banner_err:
+        # Deliberately not swallowed as a generic "skipped" warning: this is not a
+        # benign detection gap, it's a broken environment that will fail again the
+        # moment any device-dependent code runs (get_device()'s lru_cache does not
+        # cache exceptions, so every later call re-raises this same error).
+        _logger.error(
+            "LeakPro: Habana Gaudi HPU is installed but not usable (%s). "
+            "Run `python -m leakpro.utils.hardware_setup` for diagnostics, or set "
+            "LEAKPRO_DEVICE=cpu to run on CPU deliberately.",
+            banner_err,
+        )
+        return
     except Exception as banner_err:  # noqa: BLE001
         _logger.warning(
             "LeakPro device detection skipped (%s). "
