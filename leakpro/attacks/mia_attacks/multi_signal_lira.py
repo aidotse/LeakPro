@@ -16,6 +16,7 @@ from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.reporting.mia_result import MIAResult
 from leakpro.signals import functional
+from leakpro.signals.utils.get_TS2Vec import bind_ts2vec_encoder
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
@@ -134,6 +135,13 @@ class AttackMSLiRA(AbstractMIA):
         # The shadow models themselves are never loaded: the attack scores their cached logits.
         logger.info("Create masks for all IN and OUT samples")
         self.in_indices_masks = ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"])
+
+        # ts2vec is the one signal carrying a fitted artefact, and it must be the SAME artefact for
+        # every model whose values are compared below. Fit it once on the shadow population here.
+        self.signal_fns = [
+            bind_ts2vec_encoder(signal_fn, self.handler, self.attack_data_indices)
+            for signal_fn in self.signal_fns
+        ]
 
         # Compute every signal once on CACHED logits. cache_logits/load_logits store and realign
         # logits to concat(train_indices, test_indices) == audit_dataset["data"], so the cached

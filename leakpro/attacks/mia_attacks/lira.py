@@ -16,6 +16,7 @@ from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.reporting.mia_result import MIAResult
 from leakpro.signals import functional
+from leakpro.signals.utils.get_TS2Vec import bind_ts2vec_encoder
 from leakpro.utils.import_helper import Self
 
 
@@ -118,6 +119,11 @@ class AttackLiRA(AbstractMIA):
 
         # The shadow models themselves are never loaded: the attack scores their cached logits.
         self.out_indices = ~ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"]).T
+
+        # ts2vec carries a fitted artefact, and the target and shadow values below are only
+        # comparable if they share it. Fit it once on the shadow population; other signals are
+        # returned unchanged.
+        self.signal = bind_ts2vec_encoder(self.signal, self.handler, self.attack_data_indices)
 
         # The signal is applied to the cached logits, so these hold signal values (rescaled logits,
         # an error, a distance, ...) rather than logits; named accordingly, as in MS-LiRA.

@@ -168,17 +168,38 @@ def trend(logits: np.ndarray, targets: np.ndarray) -> np.ndarray:
     return np.linalg.norm(trend_true - trend_pred, axis=(1, 2))
 
 
-def ts2vec(logits: np.ndarray, targets: np.ndarray, batch_size: int = 256) -> np.ndarray:
-    """Per-point distance between TS2Vec embeddings of logits and targets."""
+def ts2vec(logits: np.ndarray, targets: np.ndarray, batch_size: int = 256,
+           encoder: TS2Vec = None) -> np.ndarray:
+    """Per-point distance between TS2Vec embeddings of logits and targets.
+
+    Pass ``encoder`` whenever the values are compared across models, which is every LiRA-style
+    use: the attacks call this once per shadow model and once for the target, and TS2Vec training
+    is stochastic, so letting each call fit its own encoder puts encoder-training noise into the
+    per-point mean and variance the attack fits. See
+    :func:`leakpro.signals.utils.get_TS2Vec.bind_ts2vec_encoder`, which fits one encoder on the
+    shadow population and binds it here.
+
+    Args:
+        logits (np.ndarray): Predicted series, shape (n_points, horizon[, n_variables]).
+        targets (np.ndarray): Ground-truth series of the same shape.
+        batch_size (int): Batch size used when fitting and encoding.
+        encoder (TS2Vec): Encoder shared across models. If None, one is fitted on ``targets``,
+            which is only meaningful for a single standalone call.
+
+    Returns:
+        np.ndarray: One distance per point, shape (n_points,).
+
+    """
     assert logits.shape == targets.shape
     if logits.ndim == 2:  # expand dims if times series are univariate
         logits = np.expand_dims(logits, axis=2)
         targets = np.expand_dims(targets, axis=2)
-    device = "cuda:0" if cuda.is_available() else "cpu"
-    ts2vec_model = TS2Vec(input_dims = targets.shape[-1], device = device, batch_size = batch_size)
-    ts2vec_model.fit(targets)
-    logits_encoded = ts2vec_model.encode(logits, encoding_window="full_series", batch_size=batch_size)
-    targets_encoded = ts2vec_model.encode(targets, encoding_window="full_series", batch_size=batch_size)
+    if encoder is None:
+        device = "cuda:0" if cuda.is_available() else "cpu"
+        encoder = TS2Vec(input_dims = targets.shape[-1], device = device, batch_size = batch_size)
+        encoder.fit(targets)
+    logits_encoded = encoder.encode(logits, encoding_window="full_series", batch_size=batch_size)
+    targets_encoded = encoder.encode(targets, encoding_window="full_series", batch_size=batch_size)
     return np.linalg.norm(logits_encoded - targets_encoded, axis=1)
 
 

@@ -78,6 +78,57 @@ class TestRescaledSmape:
         assert close[0] < far[0]
 
 
+class TestTs2vecEncoderSharing:
+    """The ts2vec signal must encode every model with one shared encoder."""
+
+    @staticmethod
+    def _series(seed: int) -> tuple:
+        rng = np.random.default_rng(seed)
+        targets = rng.normal(size=(8, 16, 1)).astype(np.float32)
+        predictions = targets + rng.normal(scale=0.1, size=targets.shape).astype(np.float32)
+        return predictions, targets
+
+    def test_a_bound_encoder_makes_repeated_calls_identical(self) -> None:
+        """Two calls on the same input must agree, or the value is not comparable across models."""
+        from ts2vec import TS2Vec
+        predictions, targets = self._series(0)
+        encoder = TS2Vec(input_dims=1, device="cpu", batch_size=4)
+        encoder.fit(targets)
+
+        first = functional.ts2vec(predictions, targets, batch_size=4, encoder=encoder)
+        second = functional.ts2vec(predictions, targets, batch_size=4, encoder=encoder)
+        np.testing.assert_array_equal(first, second)
+
+    def test_without_an_encoder_each_call_fits_its_own(self) -> None:
+        """Documents why the encoder must be passed: unbound calls disagree on identical input."""
+        predictions, targets = self._series(1)
+        first = functional.ts2vec(predictions, targets, batch_size=4)
+        second = functional.ts2vec(predictions, targets, batch_size=4)
+        assert not np.array_equal(first, second)
+
+    def test_bind_fits_one_encoder_on_the_shadow_population(self, tmp_path: object) -> None:
+        """The bound signal must reuse its encoder, and fit it on the shadow population."""
+        import types
+
+        from leakpro.signals.utils.get_TS2Vec import bind_ts2vec_encoder
+        predictions, targets = self._series(2)
+        population = np.concatenate([targets, targets], axis=0)  # audited points plus extra
+        handler = types.SimpleNamespace(
+            configs=types.SimpleNamespace(audit=types.SimpleNamespace(output_dir=str(tmp_path))),
+            population=types.SimpleNamespace(targets=population),
+        )
+
+        bound = bind_ts2vec_encoder(functional.ts2vec, handler, np.arange(len(targets)), batch_size=4)
+        assert bound is not functional.ts2vec
+        np.testing.assert_array_equal(bound(predictions, targets), bound(predictions, targets))
+
+    def test_bind_leaves_other_signals_untouched(self) -> None:
+        """Only ts2vec carries a fitted artefact, so nothing else may be wrapped."""
+        from leakpro.signals.utils.get_TS2Vec import bind_ts2vec_encoder
+        for signal_fn in [functional.mse, functional.dtw, functional.rescaled_logits]:
+            assert bind_ts2vec_encoder(signal_fn, None, None) is signal_fn
+
+
 class TestSignalMembershipDirection:
     """The orientation table encodes whether higher (+1) or lower (-1) means membership."""
 
