@@ -15,6 +15,7 @@ from leakpro.optimization import (
     PETRecipe,
     build_campaign_fns,
     confidence_signal,
+    make_opacus_compatible,
     train_with_dpsgd,
 )
 
@@ -144,3 +145,91 @@ class TestBuildCampaignFns:
             utility_metric=lambda model, x, y, device: 0.42)
         model = train_with_dpsgd(_toy_recipe(splits), NONPRIVATE, splits["target_train"], "cpu")
         assert utility_fn(model) == 0.42
+
+
+def _batchnorm_recipe(splits, dim=8, classes=3, epochs=1):
+    """A model Opacus rejects as submitted: BatchNorm mixes samples within a batch."""
+    def make_loader(idx, cfg):
+        return DataLoader(TensorDataset(splits["x"][idx], splits["y"][idx]),
+                          batch_size=int(cfg["batch_size"]), shuffle=True)
+
+    return PETRecipe(
+        make_model=lambda cfg: nn.Sequential(
+            nn.Linear(dim, 16), nn.BatchNorm1d(16), nn.ReLU(inplace=True), nn.Linear(16, classes)),
+        make_optimizer=lambda params, cfg: optim.SGD(params, lr=cfg["learning_rate"]),
+        make_loader=make_loader,
+        criterion=nn.CrossEntropyLoss(),
+        epochs=epochs,
+    )
+
+
+class TestOpacusCompatibility:
+    def test_batchnorm_model_trains_under_dpsgd(self):
+        # Before the ModuleValidator pass this raised straight out of make_private.
+        splits = _toy_splits()
+        model = train_with_dpsgd(_batchnorm_recipe(splits), PRIVATE, splits["target_train"], "cpu")
+        assert np.isfinite(model.campaign_extras["epsilon"])
+
+    def test_batchnorm_is_replaced_and_inplace_disabled(self):
+        fixed = make_opacus_compatible(
+            nn.Sequential(nn.Linear(8, 16), nn.BatchNorm1d(16), nn.ReLU(inplace=True)))
+        assert not any(isinstance(m, nn.modules.batchnorm._BatchNorm) for m in fixed.modules())
+        assert not any(getattr(m, "inplace", False) for m in fixed.modules())
+
+    def test_nonprivate_path_leaves_batchnorm_alone(self):
+        # eps = inf means no Opacus, so there is no reason to rewrite the user's model.
+        splits = _toy_splits()
+        model = train_with_dpsgd(_batchnorm_recipe(splits), NONPRIVATE, splits["target_train"], "cpu")
+        assert any(isinstance(m, nn.modules.batchnorm._BatchNorm) for m in model.modules())
+
+    def test_compatible_model_is_returned_unchanged(self):
+        model = nn.Sequential(nn.Linear(8, 16), nn.GroupNorm(4, 16))
+        assert make_opacus_compatible(model) is model
+
+    def test_resnet_residual_block_trains_under_dpsgd(self):
+        # torchvision's `out += identity` is in-place and lives in forward, so
+        # ModuleValidator cannot see it; without the patch Opacus's hooks fail here.
+        torchvision = pytest.importorskip("torchvision")
+        rng = np.random.default_rng(0)
+        x = torch.tensor(rng.normal(size=(64, 4, 8, 8)), dtype=torch.float32)
+        y = torch.tensor(rng.integers(0, 3, size=64))
+        splits = {"x": x, "y": y, "target_train": np.arange(64), "ref_pool": np.arange(64),
+                  "audit_members": np.arange(8), "audit_nonmembers": np.arange(8), "utility_eval": np.arange(8)}
+
+        recipe = PETRecipe(
+            make_model=lambda cfg: nn.Sequential(
+                torchvision.models.resnet.BasicBlock(4, 4),
+                nn.AdaptiveAvgPool2d(1), nn.Flatten(), nn.Linear(4, 3)),
+            make_optimizer=lambda params, cfg: optim.SGD(params, lr=cfg["learning_rate"]),
+            make_loader=lambda idx, cfg: DataLoader(
+                TensorDataset(splits["x"][idx], splits["y"][idx]), batch_size=int(cfg["batch_size"]), shuffle=True),
+            criterion=nn.CrossEntropyLoss(),
+            epochs=1,
+        )
+        model = train_with_dpsgd(recipe, PRIVATE, splits["target_train"], "cpu")
+        assert np.isfinite(model.campaign_extras["epsilon"])
+
+
+class TestAccountant:
+    def test_accountant_is_configurable_and_changes_epsilon(self):
+        splits = _toy_splits()
+        recipe = _toy_recipe(splits)
+        prv = train_with_dpsgd(recipe, PRIVATE, splits["target_train"], "cpu", accountant="prv")
+        rdp = train_with_dpsgd(recipe, PRIVATE, splits["target_train"], "cpu", accountant="rdp")
+        # PRV is the tighter bound, so it must not report a larger epsilon than RDP.
+        assert prv.campaign_extras["epsilon"] < rdp.campaign_extras["epsilon"]
+
+    def test_default_accountant_is_prv(self):
+        splits = _toy_splits()
+        recipe = _toy_recipe(splits)
+        default = train_with_dpsgd(recipe, PRIVATE, splits["target_train"], "cpu")
+        prv = train_with_dpsgd(recipe, PRIVATE, splits["target_train"], "cpu", accountant="prv")
+        assert default.campaign_extras["epsilon"] == pytest.approx(prv.campaign_extras["epsilon"], rel=1e-9)
+
+    def test_build_campaign_fns_threads_accountant_through(self):
+        splits = _toy_splits()
+        train_fn, _, _ = build_campaign_fns(
+            _toy_recipe(splits), splits, n_refs=1, device="cpu", accountant="rdp")
+        direct = train_with_dpsgd(_toy_recipe(splits), PRIVATE, splits["target_train"], "cpu", accountant="rdp")
+        assert train_fn(PRIVATE).campaign_extras["epsilon"] == pytest.approx(
+            direct.campaign_extras["epsilon"], rel=1e-9)

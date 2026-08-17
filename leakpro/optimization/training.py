@@ -21,11 +21,13 @@ writing those callables directly.
 
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
+from types import MethodType
 
 import numpy as np
 import torch
 from opacus import PrivacyEngine
 from opacus.utils.batch_memory_manager import BatchMemoryManager
+from opacus.validators import ModuleValidator
 from torch.nn import Module, Parameter
 from torch.nn.modules.loss import _Loss
 from torch.optim import Optimizer
@@ -66,6 +68,62 @@ class PETRecipe:
             raise ValueError(f"output_kind must be 'logits' or 'binary_probs', got '{self.output_kind}'.")
 
 
+def _patch_residual_blocks(model: Module) -> None:
+    """Rewrite torchvision residual blocks to add the skip connection out of place.
+
+    ``ModuleValidator`` cannot fix this: ``out += identity`` lives in the block's
+    ``forward``, not in a submodule, and the in-place add overwrites the tensor
+    Opacus's backward hooks need. Silently does nothing if torchvision is absent.
+    """
+    try:
+        from torchvision.models.resnet import BasicBlock, Bottleneck
+    except ImportError:
+        return
+
+    def basic_forward(self: Module, x: torch.Tensor) -> torch.Tensor:
+        identity = x if self.downsample is None else self.downsample(x)
+        out = self.relu(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        return self.relu(out + identity)
+
+    def bottleneck_forward(self: Module, x: torch.Tensor) -> torch.Tensor:
+        identity = x if self.downsample is None else self.downsample(x)
+        out = self.relu(self.bn1(self.conv1(x)))
+        out = self.relu(self.bn2(self.conv2(out)))
+        out = self.bn3(self.conv3(out))
+        return self.relu(out + identity)
+
+    for module in model.modules():
+        if isinstance(module, BasicBlock):
+            module.forward = MethodType(basic_forward, module)
+        elif isinstance(module, Bottleneck):
+            module.forward = MethodType(bottleneck_forward, module)
+
+
+def make_opacus_compatible(model: Module) -> Module:
+    """Rewrite a module until Opacus can attach per-sample gradient hooks to it.
+
+    Three incompatibilities, in the order they bite: BatchNorm mixes samples
+    within a batch, so ``ModuleValidator`` swaps it for GroupNorm; in-place
+    activations overwrite tensors the hooks still need; and torchvision's
+    residual blocks add their skip connection in place (see
+    ``_patch_residual_blocks``).
+
+    Returns the fixed module, which may be a different object than the input —
+    build the optimizer from *this* model's parameters, not the original's.
+    """
+    if ModuleValidator.validate(model, strict=False):
+        model = ModuleValidator.fix(model)
+        logger.info("Model was not Opacus-compatible; ModuleValidator.fix() applied (BatchNorm -> GroupNorm).")
+
+    for module in model.modules():
+        if isinstance(getattr(module, "inplace", None), bool):
+            module.inplace = False
+
+    _patch_residual_blocks(model)
+    return model
+
+
 def train_with_dpsgd(  # noqa: PLR0913
     recipe: PETRecipe,
     config: dict,
@@ -73,22 +131,32 @@ def train_with_dpsgd(  # noqa: PLR0913
     device: str,
     delta: float = 1e-5,
     max_physical_batch: int = 256,
+    accountant: str = "prv",
 ) -> Module:
     """Train one model under the sampled config; the single shared Opacus path.
 
-    ``noise_multiplier > 0`` wraps the loop in a PrivacyEngine with the physical
-    batch capped at ``max_physical_batch`` (per-example gradients cost
-    batch x params memory; the sampled batch size and the accounting are
-    unchanged). ``noise_multiplier == 0`` runs the plain loop — the non-private
+    ``noise_multiplier > 0`` runs the model through ``make_opacus_compatible``
+    and wraps the loop in a PrivacyEngine with the physical batch capped at
+    ``max_physical_batch`` (per-example gradients cost batch x params memory;
+    the sampled batch size and the accounting are unchanged).
+    ``noise_multiplier == 0`` runs the plain loop, untouched — the non-private
     anchor, ε = ∞.
+
+    ``accountant`` must match whatever else in the pipeline reports ε, or the
+    numbers are not comparable: PRV is tighter than RDP, so the same noise reads
+    as a smaller ε under "prv". It defaults to "prv" for agreement with the
+    webapp's DP-SGD path.
 
     The formal (ε, δ) is stored on the returned model as ``campaign_extras``,
     which ``Campaign`` records next to the empirical attack result.
     """
     loader = recipe.make_loader(train_indices, config)
     model = recipe.make_model(config).to(device)
-    optimizer = recipe.make_optimizer(model.parameters(), config)
     private = config.get("noise_multiplier", 0) > 0
+    if private:
+        # Before the optimizer: fixing the model can replace parameter objects.
+        model = make_opacus_compatible(model).to(device)
+    optimizer = recipe.make_optimizer(model.parameters(), config)
 
     def run_epochs(epoch_loader) -> None:  # noqa: ANN001
         for _ in range(recipe.epochs):
@@ -100,7 +168,7 @@ def train_with_dpsgd(  # noqa: PLR0913
 
     model.train()
     if private:
-        engine = PrivacyEngine(accountant="rdp")
+        engine = PrivacyEngine(accountant=accountant)
         model, optimizer, loader = engine.make_private(
             module=model,
             optimizer=optimizer,
@@ -151,6 +219,9 @@ def build_campaign_fns(  # noqa: PLR0913
     device: str,
     utility_metric: str | Callable = "accuracy",
     ref_seed: int = 1,
+    delta: float = 1e-5,
+    max_physical_batch: int = 256,
+    accountant: str = "prv",
 ) -> tuple[Callable, Callable, Callable]:
     """Turn a recipe + data splits into a Campaign's (train_fn, utility_fn, attack_fn).
 
@@ -164,6 +235,11 @@ def build_campaign_fns(  # noqa: PLR0913
         device: torch device string.
         utility_metric: "accuracy", "auc", or a callable (model, x, y, device) -> float.
         ref_seed: seed for reference-pool subsampling.
+        delta: privacy-accounting δ, passed to every training run.
+        max_physical_batch: per-example-gradient memory cap; does not change the
+            sampled batch size or the accounting.
+        accountant: Opacus accountant ("prv", "rdp", "gdp"). Reference models use
+            the same one as the target, so mimicry stays exact.
 
     """
     missing = [k for k in REQUIRED_SPLIT_KEYS if k not in splits]
@@ -172,9 +248,11 @@ def build_campaign_fns(  # noqa: PLR0913
     if len(splits["ref_pool"]) == 0:
         raise ValueError("Reference pool is empty; the matched attack needs disjoint training data.")
 
+    train_kwargs = {"delta": delta, "max_physical_batch": max_physical_batch, "accountant": accountant}
+
     def train_fn(config: dict) -> Module:
         _free_cuda(device)
-        return train_with_dpsgd(recipe, config, splits["target_train"], device)
+        return train_with_dpsgd(recipe, config, splits["target_train"], device, **train_kwargs)
 
     def utility_fn(model: Module) -> float:
         idx = splits["utility_eval"]
@@ -194,6 +272,7 @@ def build_campaign_fns(  # noqa: PLR0913
             ref = train_with_dpsgd(recipe, config, sub, device)
             ref_phi_m += confidence_signal(ref, x[members], y[members], device, recipe.output_kind) / n_refs
             ref_phi_n += confidence_signal(ref, x[nonmembers], y[nonmembers], device, recipe.output_kind) / n_refs
+            ref = train_with_dpsgd(recipe, config, sub, device, **train_kwargs)
             del ref
             _free_cuda(device)
 
