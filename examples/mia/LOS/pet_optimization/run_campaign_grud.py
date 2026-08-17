@@ -4,18 +4,21 @@
 #
 """PET optimization campaign on the MIMIC LOS GRU-D target.
 
-The leakier LOS counterpart to run_campaign.py (logistic regression): GRU-D is
-a recurrent net over the raw multivariate time series, so its
-utility-vs-attack-success frontier has a real privacy axis to trace.
+GRU-D is the leakier LOS target (a recurrent net over the raw multivariate time
+series, versus the flat logistic-regression target in ``run_campaign.py``), so
+its utility-vs-attack frontier has a real privacy axis to trace.
 
-Same design as the LR campaign — joint DP-SGD knob search, matched-reference
-MIA (full mimicry), AUC utility, TPR@1% loop metric — with two GRU-D specifics:
+Like the LR and CIFAR campaigns, this file only declares a ``PETRecipe`` (the
+GRU-D model, optimizer, loader, loss) and the data splits; the DP-SGD loop,
+matched-reference attack and utility evaluation come from the shared core path.
 
-- GRU-D outputs a raw logit (BCEWithLogitsLoss); the membership signal is the
-  signed logit (phi = logit for members of the true class, negated otherwise).
-- GRU-D contains a custom FilterLinear and a manual 104-step recurrence, so
-  Opacus is put on its functorch per-sample-gradient path (force_functorch).
-  Correct but slower than LR/CNN targets: keep --n-configs and epochs modest.
+Two GRU-D specifics worth knowing:
+- The model outputs a raw logit (BCEWithLogitsLoss), so ``output_kind`` is
+  "binary_logits".
+- GRU-D contains a custom ``FilterLinear`` and a manual 104-step recurrence.
+  Opacus is put on its functorch per-sample-gradient path (``force_functorch``)
+  to differentiate it; this is correct but far slower than the LR/CNN targets,
+  so keep --n-configs and epochs modest.
 
 Usage:
     python run_campaign_grud.py --smoke          # 2 configs, pipeline check
@@ -30,9 +33,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from opacus import PrivacyEngine
-from opacus.utils.batch_memory_manager import BatchMemoryManager
-from sklearn.metrics import roc_auc_score
 from torch import nn, optim, zeros
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -42,23 +42,25 @@ sys.path.insert(0, str(EXAMPLE_DIR))  # mimic_data_handler (unpickling) + target
 from target_models import GRUD  # noqa: E402
 
 from leakpro.optimization import (  # noqa: E402
-    AttackScores,
     Campaign,
     Knob,
     KnobSpace,
-    confidence_signal,
+    PETRecipe,
+    build_campaign_fns,
     pareto_front,
     plot_frontier,
 )
 from leakpro.utils.logger import logger  # noqa: E402
 
-DELTA = 1e-5
 N_AUDIT = 2000
-HIDDEN_SIZE = 78
 
 
 def load_splits(seed: int = 0) -> dict:
-    """Load the LOS GRU-D time-series dataset and carve person-disjoint roles."""
+    """Load the LOS GRU-D time-series dataset and carve disjoint roles.
+
+    train_indices -> target-train + reference pool (disjoint);
+    test_indices  -> audit nonmembers + utility eval (disjoint).
+    """
     data_dir = EXAMPLE_DIR / "data" / "GRUD_data"
     with (data_dir / "dataset.pkl").open("rb") as f:
         dataset = pickle.load(f)
@@ -84,96 +86,38 @@ def load_splits(seed: int = 0) -> dict:
     }
 
 
-def _build_grud(x: torch.Tensor, batch_size: int) -> nn.Module:
-    """Instantiate GRU-D; init params mirror the LOS example notebooks."""
+def make_recipe(splits: dict, epochs: int, hidden_size: int = 78) -> PETRecipe:
+    """The GRU-D training recipe. Init params mirror the LOS example's notebooks.
+
+    ``input_size`` and ``X_mean`` follow the packed [N, time*3, features] layout:
+    input_size = time_steps = data.shape[1] // 3, X_mean = zeros(1, features, time_steps).
+    """
+    x = splits["x"]
     time_steps = x.shape[1] // 3
     features = x.shape[2]
-    return GRUD(
-        input_size=time_steps,
-        hidden_size=HIDDEN_SIZE,
-        X_mean=zeros(1, features, time_steps),
-        batch_size=batch_size,
-        bn_flag=False,          # BatchNorm is incompatible with Opacus
-        force_functorch=True,   # custom FilterLinear needs the functorch grad sampler
-    )
+    x_mean = zeros(1, features, time_steps)
 
-
-def train_dpsgd_grud(config: dict, splits: dict, train_indices: np.ndarray,
-                     epochs: int, device: str) -> nn.Module:
-    """Train one GRU-D model with DP-SGD under the sampled config."""
-    x, y = splits["x"], splits["y"]
-    loader = DataLoader(
-        TensorDataset(x[train_indices], y[train_indices]),
-        batch_size=int(config["batch_size"]), shuffle=True,
-    )
-    model = _build_grud(x, int(config["batch_size"])).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=config["learning_rate"])
-    criterion = nn.BCEWithLogitsLoss()
-
-    engine = PrivacyEngine(accountant="rdp")
-    model, optimizer, loader = engine.make_private(
-        module=model,
-        optimizer=optimizer,
-        data_loader=loader,
-        noise_multiplier=config["noise_multiplier"],
-        max_grad_norm=config["max_grad_norm"],
-    )
-
-    model.train()
-    with BatchMemoryManager(data_loader=loader, max_physical_batch_size=128,
-                            optimizer=optimizer) as mem_loader:
-        for _ in range(epochs):
-            for xb, yb in mem_loader:
-                optimizer.zero_grad()
-                loss = criterion(model(xb.to(device)), yb.to(device))
-                loss.backward()
-                optimizer.step()
-
-    epsilon = engine.get_epsilon(delta=DELTA)
-    logger.info(f"Trained DP-SGD GRU-D: formal epsilon = {epsilon:.2f} (delta = {DELTA}).")
-    model.campaign_extras = {"epsilon": epsilon, "delta": DELTA}
-    return model.eval()
-
-
-def make_fns(splits: dict, epochs: int, n_refs: int, device: str, ref_seed: int = 1) -> tuple:
-    """Build the campaign's (train, utility, attack) callables."""
-
-    def train_fn(config: dict) -> nn.Module:
-        if device.startswith("cuda"):
-            torch.cuda.empty_cache()
-        return train_dpsgd_grud(config, splits, splits["target_train"], epochs, device)
-
-    @torch.no_grad()
-    def utility_fn(model: nn.Module) -> float:
-        idx = splits["utility_eval"]
-        scores = []
-        for i in range(0, len(idx), 1024):
-            scores.append(model(splits["x"][idx[i:i + 1024]].to(device)).cpu().reshape(-1))
-        return float(roc_auc_score(splits["y"][idx].numpy().ravel(), torch.cat(scores).numpy()))
-
-    def attack_fn(model: nn.Module, config: dict) -> AttackScores:
-        # Full mimicry: references share the candidate's config, on disjoint data.
-        rng = np.random.default_rng(ref_seed)
-        x, y = splits["x"], splits["y"]
-        members, nonmembers = splits["audit_members"], splits["audit_nonmembers"]
-
-        ref_phi_m = np.zeros(len(members))
-        ref_phi_n = np.zeros(len(nonmembers))
-        for _ in range(n_refs):
-            sub = rng.choice(splits["ref_pool"], size=len(splits["target_train"]), replace=False)
-            ref = train_dpsgd_grud(config, splits, sub, epochs, device)
-            ref_phi_m += confidence_signal(ref, x[members], y[members], device, "binary_logits") / n_refs
-            ref_phi_n += confidence_signal(ref, x[nonmembers], y[nonmembers], device, "binary_logits") / n_refs
-            del ref
-            if device.startswith("cuda"):
-                torch.cuda.empty_cache()
-
-        return AttackScores(
-            member_scores=confidence_signal(model, x[members], y[members], device, "binary_logits") - ref_phi_m,
-            nonmember_scores=confidence_signal(model, x[nonmembers], y[nonmembers], device, "binary_logits") - ref_phi_n,
+    def make_model(config: dict) -> nn.Module:
+        return GRUD(
+            input_size=time_steps,
+            hidden_size=hidden_size,
+            X_mean=x_mean,
+            batch_size=int(config["batch_size"]),
+            bn_flag=False,          # BatchNorm is incompatible with Opacus
+            force_functorch=True,   # custom FilterLinear needs the functorch grad sampler
         )
 
-    return train_fn, utility_fn, attack_fn
+    return PETRecipe(
+        make_model=make_model,
+        make_optimizer=lambda params, config: optim.Adam(params, lr=config["learning_rate"]),
+        make_loader=lambda indices, config: DataLoader(
+            TensorDataset(x[indices], splits["y"][indices]),
+            batch_size=int(config["batch_size"]), shuffle=True,
+        ),
+        criterion=nn.BCEWithLogitsLoss(),
+        epochs=epochs,
+        output_kind="binary_logits",
+    )
 
 
 
@@ -224,12 +168,19 @@ def main() -> None:
         args.n_configs, args.epochs, args.n_refs = 2, 1, 1
         args.out = args.out + "_smoke"
 
-    # Campaign re-seeds torch per configuration from (seed, index); this covers
-    # only what happens before the loop starts.
+    # Seed torch too: numpy covers the Sobol draw and the split permutation,
+    # but model init, shuffling, Poisson sampling and the DP noise run off
+    # torch's global RNG.
     torch.manual_seed(args.seed)
     splits = load_splits(seed=args.seed)
+    # Auto-detected on purpose: GRUD pins X_mean, the identity matrix and
+    # FilterLinear's filter to this device at construction, and .to(device)
+    # does not move those unregistered attributes — a flag would accept a
+    # value it cannot honor.
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    train_fn, utility_fn, attack_fn = make_fns(splits, args.epochs, args.n_refs, device)
+    recipe = make_recipe(splits, args.epochs)
+    train_fn, utility_fn, attack_fn = build_campaign_fns(
+        recipe, splits, n_refs=args.n_refs, device=device, utility_metric="auc")
 
     campaign = Campaign(
         train_fn, utility_fn, attack_fn,

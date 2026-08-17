@@ -101,6 +101,14 @@ class TestConfidenceSignal:
         phi = confidence_signal(model, p, y, "cpu", output_kind="binary_probs")
         assert phi[0] == pytest.approx(-phi[1])  # log(0.9/0.1) vs log(0.1/0.9)
 
+    def test_binary_logits_signed_by_label(self):
+        model = nn.Identity()
+        logit = torch.tensor([[2.0], [2.0]])
+        y = torch.tensor([[1.0], [0.0]])
+        phi = confidence_signal(model, logit, y, "cpu", output_kind="binary_logits")
+        assert phi[0] == pytest.approx(2.0)   # confident and correct
+        assert phi[1] == pytest.approx(-2.0)  # confident and wrong
+
 
 class TestBuildCampaignFns:
     def test_end_to_end_on_toy_data(self):
