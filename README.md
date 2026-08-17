@@ -150,8 +150,11 @@ Our [example portfolio](https://github.com/aidotse/LeakPro/tree/readme/examples)
    >
    > **HPU validation scope:** the device abstraction (`get_device()` / `mark_step()`)
    > is wired through every attack family, including GIA, and follows Habana's own
-   > eager-mode default. GIA has not yet been validated end-to-end on physical HPU
-   > hardware as part of this work.
+   > eager-mode default. GIA (`InvertingGradients`) has been run end-to-end on
+   > physical Gaudi hardware as a smoke test — gradients, the meta-optimizer step,
+   > and `mark_step()` all execute correctly on `hpu:0` tensors. That run used a
+   > handful of attack iterations to confirm correctness, not the full iteration
+   > count, so reconstruction quality on HPU is not yet benchmarked against CUDA/CPU.
 
 ## How to run
 
