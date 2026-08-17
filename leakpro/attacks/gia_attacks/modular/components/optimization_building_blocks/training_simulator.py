@@ -21,7 +21,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from leakpro.attacks.gia_attacks.modular.core.component_base import Component, ComponentMetadata
 from leakpro.fl_utils.gia_module_to_functional import MetaModule
-from leakpro.fl_utils.gia_optimizers import MetaAdam, MetaSGD
+from leakpro.fl_utils.gia_optimizers import MetaAdam, MetaMomentum, MetaSGD
 
 if TYPE_CHECKING:
     from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.epoch_strategies import EpochHandlingStrategy
@@ -53,6 +53,15 @@ class TrainingSettings:
     shuffle_mode: str = "attack"
     """Training mode: 'attack' (deterministic) or 'client' (realistic with shuffling)"""
 
+    optimizer_state: dict | None = None
+    """Optional initial optimizer state (warm-start), e.g. {"m": {...}, "v": {...}, "t": int}, keyed by
+    parameter name. Applied to the meta-optimizer at the start of every simulated training run (via reset).
+    None => zero-init (default). Flows client -> observations -> attacker so both sides use the same state."""
+
+    learning_rate: float | None = None
+    """Learning rate for the meta-optimizer. None => use the optimizer-specific default (sgd 0.01,
+    adam 0.001, momentum 0.0001). Flows client -> observations -> attacker so both sides match."""
+
     @classmethod
     def from_simulator(cls, simulator: "TrainingSimulator") -> "TrainingSettings":
         """Extract training settings from an existing TrainingSimulator instance.
@@ -72,6 +81,8 @@ class TrainingSettings:
                 compute_mode=simulator.compute_mode,
                 model_mode=simulator.model_mode,
                 shuffle_mode=simulator.shuffle_mode,
+                optimizer_state=simulator.optimizer_state,
+                learning_rate=simulator.learning_rate,
             )
         raise ValueError(f"Unknown simulator type: {type(simulator)}")
 
@@ -119,15 +130,17 @@ class MultiEpochTrainingSimulation(TrainingSimulator):
     """
 
     def __init__(
-            self,
-            epochs: int = 1,
-            optimizer_type: str = "sgd",
-            batch_size: int | None = None,
-            compute_mode: str = "updates",
-            model_mode: str = "train",
-            shuffle_mode: str = "attack",
-            epoch_handling_strategy: "EpochHandlingStrategy | None" = None,
-        ) -> None:
+        self,
+        epochs: int = 1,
+        optimizer_type: str = "sgd",
+        batch_size: int | None = None,
+        compute_mode: str = "updates",
+        model_mode: str = "train",
+        shuffle_mode: str = "attack",
+        epoch_handling_strategy: "EpochHandlingStrategy | None" = None,
+        optimizer_state: dict | None = None,
+        learning_rate: float | None = None,
+    ) -> None:
         """Initialize training simulator.
 
         Args:
@@ -142,6 +155,10 @@ class MultiEpochTrainingSimulation(TrainingSimulator):
                 - "client": Realistic client simulation with batch shuffling
             epoch_handling_strategy: Strategy for how to handle reconstruction data across epochs.
                 Controls whether we use separate images per epoch, repeat same images, etc.
+            optimizer_state: Optional initial optimizer state to warm-start the meta-optimizer, e.g.
+                {"m": {...}, "v": {...}, "t": int} keyed by parameter name. None => zero-init (default).
+            learning_rate: Learning rate for the meta-optimizer. None => optimizer-specific default
+                (sgd 0.01, adam 0.001, momentum 0.0001).
 
         """
         self.epochs = epochs
@@ -151,15 +168,32 @@ class MultiEpochTrainingSimulation(TrainingSimulator):
         self.model_mode = model_mode
         self.shuffle_mode = shuffle_mode
         self.epoch_handling_strategy = epoch_handling_strategy
+        self.optimizer_state = optimizer_state
+        self.learning_rate = learning_rate
 
         if shuffle_mode not in ["attack", "client"]:
             raise ValueError(f"Unknown shuffle mode: {shuffle_mode}. Must be 'attack' or 'client'")
 
-        # Initialize meta-optimizer
+        # Initialize meta-optimizer (warm-started from optimizer_state if provided).
+        # learning_rate=None falls back to the optimizer-specific default.
+        state = optimizer_state or {}
+        default_lr = {"sgd": 0.01, "adam": 0.001, "momentum": 0.0001}.get(optimizer_type)
+        lr = learning_rate if learning_rate is not None else default_lr
         if optimizer_type == "sgd":
-            self.meta_optimizer = MetaSGD(lr=0.01)
+            self.meta_optimizer = MetaSGD(lr=lr)
         elif optimizer_type == "adam":
-            self.meta_optimizer = MetaAdam(lr=0.001)
+            self.meta_optimizer = MetaAdam(
+                lr=lr,
+                m_init=state.get("m"),
+                v_init=state.get("v"),
+                t_init=state.get("t", 0),
+            )
+        elif optimizer_type == "momentum":
+            self.meta_optimizer = MetaMomentum(
+                lr=lr,
+                m_init=state.get("m"),
+                t_init=state.get("t", 0),
+            )
         else:
             raise ValueError(f"Unknown optimizer_type: {optimizer_type}")
 
@@ -212,7 +246,7 @@ class MultiEpochTrainingSimulation(TrainingSimulator):
         else:
             model.train()
         # Detect mode from input shape
-        is_client_data = (input_data.ndim == 4)
+        is_client_data = input_data.ndim == 4
 
         if is_client_data:
             # Client real data: [N, C, H, W]
@@ -384,9 +418,7 @@ class MultiEpochTrainingSimulation(TrainingSimulator):
         self.meta_optimizer.reset()
 
         # Store original parameters
-        original_params = OrderedDict(
-            (name, param.clone()) for name, param in model.named_parameters()
-        )
+        original_params = OrderedDict((name, param.clone()) for name, param in model.named_parameters())
 
         # Iterate through epochs
         for epoch_idx in range(self.epochs):
@@ -406,7 +438,7 @@ class MultiEpochTrainingSimulation(TrainingSimulator):
 
             # Only shuffle in client mode (attack mode is always deterministic)
             # Attack always uses use_epoch_strategy=True, client uses False
-            shuffle_batches = (self.shuffle_mode == "client" and not use_epoch_strategy)
+            shuffle_batches = self.shuffle_mode == "client" and not use_epoch_strategy
             dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle_batches)
 
             # Train on batches for this epoch
@@ -419,15 +451,11 @@ class MultiEpochTrainingSimulation(TrainingSimulator):
                 loss = loss_fn(outputs, batch_labels)
 
                 # Meta-optimizer step (creates new parameter set)
-                patched_model.parameters = self.meta_optimizer.step(
-                    loss, patched_model.parameters
-                )
+                patched_model.parameters = self.meta_optimizer.step(loss, patched_model.parameters)
 
         # Compute parameter updates (delta)
         updates = OrderedDict()
-        for (name, new_param), (_, orig_param) in zip(
-            patched_model.parameters.items(), original_params.items()
-        ):
+        for (name, new_param), (_, orig_param) in zip(patched_model.parameters.items(), original_params.items()):
             updates[name] = new_param - orig_param
 
         return updates

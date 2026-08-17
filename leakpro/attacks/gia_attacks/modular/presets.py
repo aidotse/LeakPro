@@ -184,8 +184,7 @@ class AttackConfig:
 
         if self.threat_model_type not in threat_model_factories:
             raise ValueError(
-                f"Unknown threat_model_type: {self.threat_model_type}. "
-                f"Available: {list(threat_model_factories.keys())}"
+                f"Unknown threat_model_type: {self.threat_model_type}. Available: {list(threat_model_factories.keys())}"
             )
 
         return threat_model_factories[self.threat_model_type]()
@@ -244,9 +243,7 @@ class AttackConfig:
             loss_components.append(self._build_bn_loss_component())
 
         if self.label_entropy_weight > 0 and self.labels == "joint":
-            loss_components.append(
-                LabelEntropyRegularization(weight=self.label_entropy_weight)
-            )
+            loss_components.append(LabelEntropyRegularization(weight=self.label_entropy_weight))
 
         # Add epoch order-invariant prior for multi-epoch FedAvg attacks
         if self.fedavg_lambda_inv > 0 and training_settings.epochs > 1:
@@ -330,11 +327,13 @@ class AttackConfig:
         # Create final training settings
         training_settings = TrainingSettings(
             epochs=epochs,
-            optimizer_type="sgd",
+            optimizer_type=client_settings.optimizer_type,
             training_batch_size=batch_size,
             compute_mode=compute_mode,
             model_mode=model_mode,
             shuffle_mode=self.training_simulator_mode,
+            optimizer_state=client_settings.optimizer_state,  # match client's warm-start state
+            learning_rate=client_settings.learning_rate,  # match client's learning rate
         )
 
         logger.info(
@@ -353,7 +352,9 @@ class AttackConfig:
             model_mode=training_settings.model_mode,
             shuffle_mode="attack",  # Attack always uses deterministic mode
             epoch_handling_strategy=epoch_handling_strategy,  # Pass strategy to simulator
-            )
+            optimizer_state=training_settings.optimizer_state,  # warm-start state from client
+            learning_rate=training_settings.learning_rate,  # learning rate from client
+        )
 
         # Build loss components (pass training_settings for accurate epoch counts)
         loss_components = self._build_loss_components(training_simulator, training_settings)
@@ -366,34 +367,28 @@ class AttackConfig:
         # - Multiple epochs (> 1)
         # - Using multi-epoch-separate strategy (Dimitrov-style)
         epoch_aggregation = None
-        if (training_settings.epochs > 1 and
-            self.epoch_handling_strategy == "multi_epoch_separate"):
+        if training_settings.epochs > 1 and self.epoch_handling_strategy == "multi_epoch_separate":
             epoch_aggregation = EpochMatchingConsensus(
                 epochs=training_settings.epochs,
                 metric=self.fedavg_matching_metric,
             )
             logger.info(
-                f"✓ Enabled epoch matching aggregation: "
-                f"epochs={training_settings.epochs}, metric={self.fedavg_matching_metric}"
+                f"✓ Enabled epoch matching aggregation: epochs={training_settings.epochs}, metric={self.fedavg_matching_metric}"
             )
 
         # Add group consistency if multi-seed and weight > 0
         if self.group_weight > 0 and self.num_seeds_per_image > 1:
-            loss_components.append(
-                GroupConsistencyRegularization(
-                    seed_aggregation=seed_aggregation,
-                    weight=self.group_weight
-                )
-            )
+            loss_components.append(GroupConsistencyRegularization(seed_aggregation=seed_aggregation, weight=self.group_weight))
 
         # Build constraint
         constraint = ClipConstraint() if self.use_clip_constraint else None
 
         # Build step strategy
-        step_strategy = StandardStepStrategy(
-            use_gradient_sign=self.use_gradient_sign,
-            gradient_noise_std=self.gradient_noise_std
-        ) if self.use_gradient_sign or self.gradient_noise_std > 0 else None
+        step_strategy = (
+            StandardStepStrategy(use_gradient_sign=self.use_gradient_sign, gradient_noise_std=self.gradient_noise_std)
+            if self.use_gradient_sign or self.gradient_noise_std > 0
+            else None
+        )
 
         # Build optimizer
         optimization = ComposableOptimizer(

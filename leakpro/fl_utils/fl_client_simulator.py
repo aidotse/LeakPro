@@ -114,10 +114,15 @@ class FLClientSimulator:
         self._cache_original_data()
 
     def _cache_original_data(self) -> None:
-        """Cache the original data for later metric computation."""
-        data, labels = next(iter(self.client_data))
-        self.original_inputs = data.to(self.device)
-        self.original_labels = labels.to(self.device)
+        """Cache the original data for later metric computation.
+
+        Collects the full dataset across all batches, so the client uses every image it was
+        given regardless of the loader's batch_size (which would otherwise yield only the first
+        batch). The training simulation mini-batches this via training_settings.training_batch_size.
+        """
+        inputs, labels = zip(*list(self.client_data))
+        self.original_inputs = torch.cat(inputs).to(self.device)
+        self.original_labels = torch.cat(labels).to(self.device)
 
     def train_and_observe(
         self,
@@ -173,6 +178,8 @@ class FLClientSimulator:
             compute_mode=training_settings.compute_mode,
             model_mode=training_settings.model_mode,
             shuffle_mode="client",  # Client uses realistic shuffling
+            optimizer_state=training_settings.optimizer_state,
+            learning_rate=training_settings.learning_rate,
         )
 
         # CLIENT TRAINS LOCALLY (server cannot observe this process)
