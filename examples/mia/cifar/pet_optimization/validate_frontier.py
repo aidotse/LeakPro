@@ -27,20 +27,22 @@ import numpy as np
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from run_campaign import N_TARGET_TRAIN, load_splits, train_dpsgd_cnn  # noqa: E402
+from run_campaign import N_TARGET_TRAIN, load_splits, make_recipe  # noqa: E402
 
 from leakpro.optimization import (  # noqa: E402
     AttackScores,
     EvaluationRecord,
+    PETRecipe,
     confidence_signal,
     proxy_agreement,
+    train_with_dpsgd,
     validate_frontier,
 )
 from leakpro.optimization.validation import resolution_warning  # noqa: E402
 from leakpro.utils.logger import logger  # noqa: E402
 
 
-def make_revalidate_fn(splits: dict, epochs: int, n_refs: int, device: str,
+def make_revalidate_fn(splits: dict, recipe: PETRecipe, n_refs: int, device: str,
                        audit_size: int, seed: int = 99) -> callable:
     """Stronger attack: more matched references, larger audit set, fresh reference seed.
 
@@ -54,23 +56,24 @@ def make_revalidate_fn(splits: dict, epochs: int, n_refs: int, device: str,
 
     def revalidate_fn(config: dict) -> AttackScores:
         x, y = splits["x"], splits["y"]
-        target = train_dpsgd_cnn(config, splits, splits["target_train"], epochs, device)
+        kind = recipe.output_kind
+        target = train_with_dpsgd(recipe, config, splits["target_train"], device)
 
         ref_phi_m = np.zeros(len(members))
         ref_phi_n = np.zeros(len(nonmembers))
         rng = np.random.default_rng(rng_master.integers(1 << 30))
         for _ in range(n_refs):
             sub = rng.choice(splits["ref_pool"], size=N_TARGET_TRAIN, replace=False)
-            ref = train_dpsgd_cnn(config, splits, sub, epochs, device)
-            ref_phi_m += confidence_signal(ref, x[members], y[members], device, "logits") / n_refs
-            ref_phi_n += confidence_signal(ref, x[nonmembers], y[nonmembers], device, "logits") / n_refs
+            ref = train_with_dpsgd(recipe, config, sub, device)
+            ref_phi_m += confidence_signal(ref, x[members], y[members], device, kind) / n_refs
+            ref_phi_n += confidence_signal(ref, x[nonmembers], y[nonmembers], device, kind) / n_refs
             del ref
             if device.startswith("cuda"):
                 torch.cuda.empty_cache()
 
         scores = AttackScores(
-            member_scores=confidence_signal(target, x[members], y[members], device, "logits") - ref_phi_m,
-            nonmember_scores=confidence_signal(target, x[nonmembers], y[nonmembers], device, "logits") - ref_phi_n,
+            member_scores=confidence_signal(target, x[members], y[members], device, kind) - ref_phi_m,
+            nonmember_scores=confidence_signal(target, x[nonmembers], y[nonmembers], device, kind) - ref_phi_n,
         )
         del target
         if device.startswith("cuda"):
@@ -125,7 +128,8 @@ def main() -> None:
     if warning:
         logger.warning(warning)
 
-    revalidate_fn = make_revalidate_fn(splits, args.epochs, args.n_refs, args.device, args.audit_size)
+    recipe = make_recipe(splits, args.epochs)
+    revalidate_fn = make_revalidate_fn(splits, recipe, args.n_refs, args.device, args.audit_size)
 
     start = time.time()
     validated = validate_frontier(records, revalidate_fn, report_fprs=tuple(args.report_fprs))
