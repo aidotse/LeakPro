@@ -49,19 +49,21 @@ export default function Optimization({ jobId, model, onBack, onAdopted }: Props)
     run == null || run.status === "idle" ? "setup" : run.status === "running" ? "running" : "done";
 
   // ── polling ──────────────────────────────────────────────────────────────
-  const poll = useCallback(async () => {
+  // `silent` covers the first look: a model that has never been optimized has
+  // no run to fetch, which is the normal starting state, not a failure.
+  const poll = useCallback(async (silent = false) => {
     try {
       setRun(await api.getOptimization(jobId, model.model_name));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (!silent) setError(e instanceof Error ? e.message : String(e));
     }
   }, [jobId, model.model_name]);
 
-  useEffect(() => { poll(); }, [poll]);
+  useEffect(() => { poll(true); }, [poll]);
 
   useEffect(() => {
     if (run?.status !== "running") return;
-    pollRef.current = setInterval(poll, POLL_MS);
+    pollRef.current = setInterval(() => poll(true), POLL_MS);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [run?.status, poll]);
 
