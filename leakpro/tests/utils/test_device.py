@@ -20,7 +20,14 @@ import pytest
 import torch
 
 import leakpro.utils.device as device_module
-from leakpro.utils.device import HPUAcquisitionError, get_device, hpu_import_error, mark_step, require_hpu
+from leakpro.utils.device import (
+    HPUAcquisitionError,
+    _detect_hpu_lazy_mode,
+    get_device,
+    hpu_import_error,
+    mark_step,
+    require_hpu,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -167,6 +174,45 @@ class TestGetDevice:
              patch("torch.cuda.is_available", return_value=False):
             device = get_device()
         assert device == torch.device("cpu")
+
+
+# ---------------------------------------------------------------------------
+# _detect_hpu_lazy_mode
+# ---------------------------------------------------------------------------
+
+class TestDetectHpuLazyMode:
+    def test_prefers_habana_is_lazy_true(self, monkeypatch):
+        monkeypatch.delenv("PT_HPU_LAZY_MODE", raising=False)
+        with patch.object(device_module, "_habana_is_lazy", lambda: True):
+            assert _detect_hpu_lazy_mode() is True
+
+    def test_prefers_habana_is_lazy_false(self, monkeypatch):
+        """Habana's own helper wins even if the env var would suggest otherwise."""
+        monkeypatch.setenv("PT_HPU_LAZY_MODE", "1")
+        with patch.object(device_module, "_habana_is_lazy", lambda: False):
+            assert _detect_hpu_lazy_mode() is False
+
+    def test_falls_back_to_env_var_when_helper_unavailable(self, monkeypatch):
+        monkeypatch.setenv("PT_HPU_LAZY_MODE", "1")
+        with patch.object(device_module, "_habana_is_lazy", None):
+            assert _detect_hpu_lazy_mode() is True
+
+    def test_unset_env_var_defaults_to_eager_matching_habana(self, monkeypatch):
+        """Regression test: this used to default to lazy=True, the opposite of
+        Habana's own default, causing mark_step() to fire needlessly whenever
+        PT_HPU_LAZY_MODE was left unset (the common case)."""
+        monkeypatch.delenv("PT_HPU_LAZY_MODE", raising=False)
+        with patch.object(device_module, "_habana_is_lazy", None):
+            assert _detect_hpu_lazy_mode() is False
+
+    def test_falls_back_to_env_var_when_helper_raises(self, monkeypatch):
+        monkeypatch.setenv("PT_HPU_LAZY_MODE", "1")
+
+        def _raise():
+            raise RuntimeError("boom")
+
+        with patch.object(device_module, "_habana_is_lazy", _raise):
+            assert _detect_hpu_lazy_mode() is True
 
 
 # ---------------------------------------------------------------------------

@@ -94,12 +94,13 @@ def _build_hpu_profile() -> PlatformProfile:
             spec = f"torch=={version_pin}"
         notes.append(
             f"Habana plugin pins torch {version_pin} (per {source}). "
-            f"Install with: `pip install '{spec}'` (upstream CPU build) "
-            "and set `PT_HPU_LAZY_MODE=0` to enable HPU in eager mode."
+            f"Install with: `pip install '{spec}'` (upstream CPU build). "
+            "HPU runs in eager mode by default (`PT_HPU_LAZY_MODE` unset or `0`)."
         )
         notes.append(
-            "For lazy-mode (best performance) you need Habana's torch fork "
-            "from https://docs.habana.ai/en/latest/Installation_Guide/index.html"
+            "For lazy-mode (best performance) set `PT_HPU_LAZY_MODE=1` and use "
+            "Habana's torch fork from "
+            "https://docs.habana.ai/en/latest/Installation_Guide/index.html"
         )
     else:
         notes.append(

@@ -147,6 +147,11 @@ Our [example portfolio](https://github.com/aidotse/LeakPro/tree/readme/examples)
    > index — it is not on PyPI. Follow the
    > [Habana installation guide](https://docs.habana.ai/en/latest/Installation_Guide/index.html)
    > before running the steps above.
+   >
+   > **HPU validation scope:** the device abstraction (`get_device()` / `mark_step()`)
+   > is wired through every attack family, including GIA, and follows Habana's own
+   > eager-mode default. GIA has not yet been validated end-to-end on physical HPU
+   > hardware as part of this work.
 
 ## How to run
 

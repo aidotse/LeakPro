@@ -21,12 +21,10 @@ import torch
 
 from leakpro.utils.logger import logger
 
-# PT_HPU_LAZY_MODE=0 means eager mode — mark_step() is a no-op in that mode.
-_HPU_LAZY_MODE: bool = os.environ.get("PT_HPU_LAZY_MODE", "1") != "0"
-
 _HPU_IMPORT_ERROR: Optional[str] = None
 _hthpu = None
 _htcore = None
+_habana_is_lazy = None
 
 try:  # pragma: no cover - exercised only on Habana systems
     import habana_frameworks.torch.hpu as _hthpu  # type: ignore[import-not-found]
@@ -35,10 +33,44 @@ try:  # pragma: no cover - exercised only on Habana systems
     except ImportError as exc:
         _htcore = None
         _HPU_IMPORT_ERROR = f"habana_frameworks.torch.core unavailable: {exc}"
+    try:
+        from habana_frameworks.torch.utils.internal import (
+            is_lazy as _habana_is_lazy,  # type: ignore[import-not-found]  # noqa: E501
+        )
+    except ImportError:
+        _habana_is_lazy = None
 except ImportError as exc:
     _hthpu = None
     _htcore = None
     _HPU_IMPORT_ERROR = str(exc)
+
+
+def _detect_hpu_lazy_mode() -> bool:
+    """Determine whether the installed Habana stack is running in lazy mode.
+
+    Habana's own ``is_lazy()`` treats an *unset* ``PT_HPU_LAZY_MODE`` as eager
+    mode (``os.getenv("PT_HPU_LAZY_MODE", "0") != "0"``). An earlier version of
+    this module re-implemented that check with the opposite default ("1"),
+    so whenever the variable was left unset it assumed lazy mode while the
+    installed Habana runtime was actually running eager — ``mark_step()``
+    would then call ``_htcore.mark_step()`` needlessly, which Habana itself
+    silently downgrades to a no-op with a one-time warning. Deferring to
+    Habana's own helper (when importable) makes this immune to Habana
+    changing its default again in a future release; the env-var fallback
+    below mirrors Habana's current default for hosts where the helper isn't
+    available.
+    """
+    if _habana_is_lazy is not None:
+        try:
+            return bool(_habana_is_lazy())
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("habana_frameworks.is_lazy() raised: %s; falling back to PT_HPU_LAZY_MODE.", exc)
+    return os.environ.get("PT_HPU_LAZY_MODE", "0") != "0"
+
+
+# PT_HPU_LAZY_MODE=0 (Habana's own default when unset) means eager mode —
+# mark_step() is a no-op in that mode.
+_HPU_LAZY_MODE: bool = _detect_hpu_lazy_mode()
 
 
 def _probe_hpu_acquisition() -> None:
