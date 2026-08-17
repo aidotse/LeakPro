@@ -11,6 +11,8 @@ import optuna
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from torch.nn import Module
 
+from leakpro.risk.schemas import UseCaseProfile
+
 ArrayOrScalar = Union[np.ndarray, np.integer, int, list]
 
 class OptimizerConfig(BaseModel):
@@ -137,6 +139,9 @@ class LeakProConfig(BaseModel):
     target: TargetConfig
     shadow_model: Optional[ShadowModelConfig] = Field(None, description="Shadow model config")
     distillation_model: Optional[DistillationModelConfig] = Field(None, description="Distillation model config")
+    # Deployment context for risk assessment, not an audit parameter, hence top level. Declaring it
+    # does not trigger anything: assessment is an explicit assess_risk() call on the audit results.
+    use_case: Optional[UseCaseProfile] = Field(None, description="Use-case profile for risk assessment")
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields
 
 
