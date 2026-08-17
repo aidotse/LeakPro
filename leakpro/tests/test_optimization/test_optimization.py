@@ -18,7 +18,10 @@ from leakpro.optimization import (
     default_dpsgd_space,
     pareto_front,
     plot_frontier,
+    proxy_agreement,
+    resolution_warning,
     tpr_at_fpr,
+    validate_frontier,
 )
 
 
@@ -135,4 +138,59 @@ class TestFrontier:
     def test_plot_writes_file(self, tmp_path):
         records = _fake_campaign(tmp_path).run(8)
         out = plot_frontier(records, tmp_path / "frontier.png")
-        assert out.exists() and out.stat().st_size > 0
+        assert out.exists()
+        assert out.stat().st_size > 0
+
+
+def _fake_revalidate(separation_of):
+    """Stronger attack stand-in: bigger audit set, same underlying separation."""
+
+    def revalidate_fn(config):
+        rng = np.random.default_rng(7)
+        sep = separation_of(config)
+        return AttackScores(rng.normal(sep, 1, 20000), rng.normal(0, 1, 20000))
+
+    return revalidate_fn
+
+
+class TestValidation:
+    def test_resolution_warning_fires_only_when_underpowered(self):
+        assert resolution_warning(2000, 0.001) is not None  # 2 expected events
+        assert resolution_warning(20000, 0.001) is None  # 20 expected events
+
+    def test_validate_frontier_reports_each_fpr(self, tmp_path):
+        records = _fake_campaign(tmp_path).run(8)
+        validated = validate_frontier(
+            records,
+            _fake_revalidate(lambda c: 2.0 / (1.0 + c["noise_multiplier"])),
+            report_fprs=(0.001, 0.01),
+        )
+        assert validated
+        assert len(validated) == len(pareto_front(records))
+        for record in validated:
+            block = record["validation"]
+            assert block["n_nonmembers"] == 20000
+            for key in ("tpr_at_0.001", "tpr_at_0.01"):
+                assert 0.0 <= block[key]["tpr"] <= 1.0
+                assert block[key]["ci95"][0] <= block[key]["tpr"] <= block[key]["ci95"][1]
+            assert block["tpr_at_0.001"]["warning"] is None  # 20k nonmembers is enough
+
+    def test_proxy_agreement_detects_agreement(self, tmp_path):
+        records = _fake_campaign(tmp_path).run(12)
+        result = proxy_agreement(
+            records,
+            _fake_revalidate(lambda c: 2.0 / (1.0 + c["noise_multiplier"])),
+            n_configs=6,
+        )
+        assert result["spearman_rho"] > 0.7  # same mechanism drives both FPR levels
+        assert len(result["pairs"]) == 6
+
+    def test_proxy_agreement_detects_disagreement(self, tmp_path):
+        records = _fake_campaign(tmp_path).run(12)
+        # Tail behaviour inverted relative to the proxy: ranking must not survive.
+        result = proxy_agreement(
+            records,
+            _fake_revalidate(lambda c: c["noise_multiplier"] / 4.0),
+            n_configs=6,
+        )
+        assert result["spearman_rho"] < 0.0

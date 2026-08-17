@@ -63,8 +63,12 @@ class SmallCNN(nn.Module):
         return self.classifier(self.features(x))
 
 
-def load_splits(seed: int = 0) -> dict:
-    """Load CIFAR-10 (60k) and carve disjoint roles: target train, reference pool, audit, utility."""
+def load_splits(seed: int = 0, audit_size: int = N_AUDIT) -> dict:
+    """Load CIFAR-10 (60k) and carve disjoint roles: target train, reference pool, audit, utility.
+
+    ``audit_size`` enlarges the audit sets for the validation pass (tail FPRs need
+    far more nonmembers than the loop does); the loop keeps the default.
+    """
     with (EXAMPLE_DIR / "data" / "cifar10.pkl").open("rb") as f:
         dataset = pickle.load(f)
 
@@ -76,6 +80,12 @@ def load_splits(seed: int = 0) -> dict:
     target_train = order[:N_TARGET_TRAIN]
     ref_pool = order[N_TARGET_TRAIN:2 * N_TARGET_TRAIN + 10000]
     rest = order[2 * N_TARGET_TRAIN + 10000:]
+
+    # Nonmembers must not overlap the utility split; members are drawn from the
+    # target's own training set, so the cap is the training-set size.
+    n_audit = min(audit_size, len(target_train), len(rest) - N_UTILITY_EVAL)
+    if n_audit < audit_size:
+        logger.warning(f"Audit size capped at {n_audit} (requested {audit_size}) by the available disjoint data.")
     return {
         "x": x,
         "y": y,
@@ -83,7 +93,9 @@ def load_splits(seed: int = 0) -> dict:
         "ref_pool": ref_pool,
         "audit_members": target_train[:N_AUDIT],
         "audit_nonmembers": rest[:N_AUDIT],
-        "utility_eval": rest[N_AUDIT:N_AUDIT + N_UTILITY_EVAL],
+        "audit_members_large": target_train[:n_audit],
+        "audit_nonmembers_large": rest[:n_audit],
+        "utility_eval": rest[n_audit:n_audit + N_UTILITY_EVAL],
     }
 
 
