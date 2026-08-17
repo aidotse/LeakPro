@@ -271,6 +271,8 @@ export interface OptimizationRun {
   /** Unprotected quality this run is measured against, 0..1. */
   baseline_utility?: number;
   max_quality_loss?: number;
+  /** Set when the audit set is too small for the reported figure to mean much. */
+  resolution_warning?: string;
   error?: string;
 }
 

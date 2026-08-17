@@ -328,6 +328,13 @@ export default function Optimization({ jobId, model, onBack, onAdopted }: Props)
 
           {phase === "done" && <p className="text-sm text-slate-500">{COPY.resultsBlurb}</p>}
 
+          {run?.resolution_warning && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-600 dark:text-amber-400 flex items-start gap-2">
+              <span className="material-symbols-outlined text-base shrink-0">warning</span>
+              <span><span className="font-bold">{COPY.lowResolution}</span> {run.resolution_warning}</span>
+            </div>
+          )}
+
           {run?.status === "failed" ? (
             <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-500">
               {run.error ?? COPY.failed}

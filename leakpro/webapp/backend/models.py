@@ -111,6 +111,20 @@ class CompatResult(BaseModel):
 # Step 5 — Attack config
 # ---------------------------------------------------------------------------
 
+class PETStartParams(BaseModel):
+    """Request to begin a PET optimization run for one model."""
+
+    # Display-side constraint: it dims settings that fall below the user's
+    # quality floor, but never gates the search, so moving the slider
+    # afterwards re-reads the same results instead of invalidating them.
+    max_quality_loss: float = 0.05
+    # Any knob named here is pinned to that value; the rest stay searched.
+    advanced: dict[str, float] = {}
+    n_configs: int | None = None
+    n_refs: int | None = None
+    delta: float | None = None
+
+
 class AttackParams(BaseModel):
     attack: str
     params: dict[str, Any] = {}

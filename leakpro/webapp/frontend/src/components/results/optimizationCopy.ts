@@ -55,6 +55,7 @@ export const COPY = {
   adopt: "Adopt this configuration",
   adopted: "Added to your results as an optimized setting.",
 
+  lowResolution: "These numbers rest on very few records.",
   noResults: "No settings were tested successfully.",
   failed: "The optimization run failed.",
   back: "Back to results",
