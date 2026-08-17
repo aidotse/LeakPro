@@ -47,9 +47,10 @@ class PETRecipe:
         make_loader: (indices, config) -> training DataLoader (reads e.g. ``batch_size``).
         criterion: loss module shared by target and reference models.
         epochs: fixed number of training epochs.
-        output_kind: "logits" for raw multiclass logits (CrossEntropyLoss models),
-            "binary_probs" for a single sigmoid output column (BCELoss models).
-            Decides how membership confidence is extracted.
+        output_kind: how membership confidence is read from the model output.
+            "logits" — raw multiclass logits (CrossEntropyLoss models);
+            "binary_probs" — a single sigmoid probability column (BCELoss models);
+            "binary_logits" — a single raw logit column (BCEWithLogitsLoss models).
 
     """
 
@@ -62,8 +63,9 @@ class PETRecipe:
 
     def __post_init__(self) -> None:
         """Validate the output kind."""
-        if self.output_kind not in ("logits", "binary_probs"):
-            raise ValueError(f"output_kind must be 'logits' or 'binary_probs', got '{self.output_kind}'.")
+        valid = ("logits", "binary_probs", "binary_logits")
+        if self.output_kind not in valid:
+            raise ValueError(f"output_kind must be one of {valid}, got '{self.output_kind}'.")
 
 
 def train_with_dpsgd(  # noqa: PLR0913
@@ -134,9 +136,14 @@ def confidence_logits(  # noqa: PLR0913
     outs = []
     for i in range(0, len(x), batch):
         out = model(x[i:i + batch].to(device)).cpu()
+        y_batch = y[i:i + batch].reshape(-1)
+        if output_kind == "binary_logits":
+            # phi = logit(p_true): the raw logit already is it for y=1, negated for y=0.
+            logit = out.reshape(-1)
+            outs.append(torch.where(y_batch > 0.5, logit, -logit))
+            continue
         if output_kind == "binary_probs":
             p = out.reshape(-1).clamp(1e-6, 1 - 1e-6)
-            y_batch = y[i:i + batch].reshape(-1)
             p_true = torch.where(y_batch > 0.5, p, 1 - p)
         else:
             probs = torch.softmax(out, dim=1).clamp(1e-6, 1 - 1e-6)
