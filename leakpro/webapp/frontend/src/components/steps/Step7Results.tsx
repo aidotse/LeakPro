@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { api, ModelResult, JobListItem } from "../../api";
+import { api, ModelResult, JobListItem, Setting, Verification } from "../../api";
 import Summary from "../results/Summary";
+import Optimization from "../results/Optimization";
 import RocChart from "../results/RocChart";
 import Histograms from "../results/Histograms";
 import Records from "../results/Records";
@@ -28,6 +29,7 @@ interface PendingRename {
 
 export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Props) {
   const [allResults, setAllResults] = useState<ModelResult[] | null>(null);
+  const [optimizing, setOptimizing] = useState<ModelResult | null>(null);
   const [noResults, setNoResults] = useState(false);
   const [tab, setTab] = useState("summary");
 
@@ -123,12 +125,44 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
     });
   };
 
+  // An adopted setting becomes a normal summary row, tagged so it reads as
+  // the outcome of optimization rather than another audited model.
+  const addOptimizedRow = (base: ModelResult, setting: Setting, verification: Verification) => {
+    const verified = verification.verified;
+    if (!verified) return;
+    setAllResults((prev) => [
+      ...(prev ?? []),
+      {
+        ...base,
+        model_name: `${base.model_name} (optimized)`,
+        source: "optimized",
+        optimized: true,
+        dpsgd: true,
+        target_epsilon: setting.epsilon,
+        test_accuracy: verified.utility,
+        train_accuracy: undefined,
+        attacks: [],
+      },
+    ]);
+  };
+
   if (allResults === null) {
     return (
       <div className="flex flex-col items-center gap-4 py-16">
         <span className="material-symbols-outlined text-4xl text-primary animate-spin">sync</span>
         <p className="text-slate-500">Loading results…</p>
       </div>
+    );
+  }
+
+  if (optimizing) {
+    return (
+      <Optimization
+        jobId={jobId}
+        model={optimizing}
+        onBack={() => setOptimizing(null)}
+        onAdopted={(setting, verification) => addOptimizedRow(optimizing, setting, verification)}
+      />
     );
   }
 
@@ -303,7 +337,7 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
           </div>
 
           <div>
-            {tab === "summary"    && <Summary    results={allResults} />}
+            {tab === "summary"    && <Summary    results={allResults} onOptimize={setOptimizing} />}
             {tab === "roc"        && <RocChart   results={allResults} />}
             {tab === "histograms" && <Histograms results={allResults} />}
             {tab === "records"    && <Records    results={allResults} jobId={jobId} />}

@@ -1,8 +1,13 @@
 import React, { useState } from "react";
 import { ModelResult } from "../../api";
 import MetaPanel from "./MetaPanel";
+import { COPY } from "./optimizationCopy";
 
-interface Props { results: ModelResult[] }
+interface Props {
+  results: ModelResult[];
+  /** Opens the optimization view for one model. Omitted when unavailable. */
+  onOptimize?: (model: ModelResult) => void;
+}
 
 function riskLevel(auc: number | undefined): { label: string; color: string; bg: string } {
   if (auc === undefined) return { label: "N/A", color: "text-slate-400", bg: "bg-slate-100 dark:bg-surface-2" };
@@ -30,7 +35,7 @@ function pct(v: number | undefined) {
   return v !== undefined ? (v * 100).toFixed(1) + "%" : "—";
 }
 
-export default function Summary({ results }: Props) {
+export default function Summary({ results, onOptimize }: Props) {
   const [openKey, setOpenKey] = useState<string | null>(null);
 
   const toggleInfo = (key: string) => setOpenKey((prev) => (prev === key ? null : key));
@@ -79,6 +84,33 @@ export default function Summary({ results }: Props) {
         </div>
       )}
 
+      {/* Protection — one entry per model, since each is optimized on its own */}
+      {onOptimize && results.length > 0 && (
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-4 flex flex-col gap-3">
+          <div>
+            <p className="font-bold text-sm">Reduce the risk</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Test protection settings automatically and see the best trade-offs between privacy and quality.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {results.map((m) => (
+              <button
+                key={`${m.job_id}/${m.model_name}`}
+                onClick={() => onOptimize(m)}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-primary/50 text-primary text-sm font-bold hover:bg-primary/5 transition-colors"
+              >
+                <span className="material-symbols-outlined text-base">shield</span>
+                {COPY.entry}
+                {results.length > 1 && (
+                  <span className="font-normal text-slate-400">· {m.model_name}</span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Comparison table */}
       <div className="rounded-xl border border-slate-200 dark:border-surface-border overflow-hidden">
         <div className="flex items-center justify-between px-3 py-2 bg-slate-50 dark:bg-surface border-b border-slate-200 dark:border-surface-border">
@@ -115,6 +147,11 @@ export default function Summary({ results }: Props) {
                     <td className="px-4 py-3 font-semibold">
                       <div className="flex items-center gap-2 flex-wrap">
                         {m.model_name}
+                        {m.optimized && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary font-bold uppercase tracking-wider">
+                            optimized
+                          </span>
+                        )}
                         {m.model_class && (
                           <span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 dark:bg-surface-2 text-slate-500 font-mono">
                             {m.model_class}
