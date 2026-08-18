@@ -219,6 +219,8 @@ export interface ModelResult {
   attacks: AttackResult[];
   /** Set when this row came from an adopted optimization result. */
   optimized?: boolean;
+  /** Original backend name, kept when the compare view renames a row for display. */
+  orig_model_name?: string;
 }
 
 // ---------------------------------------------------------------------------

@@ -34,6 +34,13 @@ function pickHighlights(best: Setting[], max = 5): Setting[] {
 }
 
 export default function Optimization({ jobId, model, onBack, onAdopted }: Props) {
+  // A model loaded from a previous session belongs to its own job, which owns
+  // the dataset and architecture the campaign retrains from. Optimize against
+  // that job under the model's original name, not the current session's job or
+  // the display name the compare view may have renamed it to.
+  const targetJob = model.job_id ?? jobId;
+  const targetName = model.orig_model_name ?? model.model_name;
+
   const [run, setRun] = useState<OptimizationRun | null>(null);
   const [maxQualityLoss, setMaxQualityLoss] = useState(0.05);
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -53,11 +60,11 @@ export default function Optimization({ jobId, model, onBack, onAdopted }: Props)
   // no run to fetch, which is the normal starting state, not a failure.
   const poll = useCallback(async (silent = false) => {
     try {
-      setRun(await api.getOptimization(jobId, model.model_name));
+      setRun(await api.getOptimization(targetJob, targetName));
     } catch (e) {
       if (!silent) setError(e instanceof Error ? e.message : String(e));
     }
-  }, [jobId, model.model_name]);
+  }, [targetJob, targetName]);
 
   useEffect(() => { poll(true); }, [poll]);
 
@@ -73,7 +80,7 @@ export default function Optimization({ jobId, model, onBack, onAdopted }: Props)
     setStarting(true);
     setError(null);
     try {
-      await api.startOptimization(jobId, model.model_name, { max_quality_loss: maxQualityLoss, advanced });
+      await api.startOptimization(targetJob, targetName, { max_quality_loss: maxQualityLoss, advanced });
       await poll();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -110,7 +117,7 @@ export default function Optimization({ jobId, model, onBack, onAdopted }: Props)
     setAdopted(false);
     setError(null);
     try {
-      setVerification(await api.verifySetting(jobId, model.model_name, setting.index));
+      setVerification(await api.verifySetting(targetJob, targetName, setting.index));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -120,16 +127,16 @@ export default function Optimization({ jobId, model, onBack, onAdopted }: Props)
     if (verification?.status !== "running" || !selected) return;
     const id = setInterval(async () => {
       try {
-        setVerification(await api.getVerification(jobId, model.model_name, selected.index));
+        setVerification(await api.getVerification(targetJob, targetName, selected.index));
       } catch { /* keep the last state; the next tick retries */ }
     }, POLL_MS);
     return () => clearInterval(id);
-  }, [verification?.status, selected, jobId, model.model_name]);
+  }, [verification?.status, selected, targetJob, targetName]);
 
   const adopt = async () => {
     if (!selected || !verification) return;
     try {
-      await api.adoptSetting(jobId, model.model_name, selected.index);
+      await api.adoptSetting(targetJob, targetName, selected.index);
       setAdopted(true);
       onAdopted(selected, verification);
     } catch (e) {

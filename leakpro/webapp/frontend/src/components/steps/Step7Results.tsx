@@ -77,7 +77,9 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
 
   const mergeResults = (pastJobId: string, newResults: ModelResult[], renames: Record<string, string>) => {
     const renamed = newResults.map((m) =>
-      renames[m.model_name] ? { ...m, model_name: renames[m.model_name] } : m
+      // Keep the backend name so optimization can still find the model in its
+      // own job after the display name changes.
+      renames[m.model_name] ? { ...m, model_name: renames[m.model_name], orig_model_name: m.model_name } : m
     );
     setAllResults((prev) => {
       const base = prev ?? [];
