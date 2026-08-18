@@ -7,7 +7,7 @@
 from typing import Literal
 
 import numpy as np
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from scipy.stats import norm
 from tqdm import tqdm
 
@@ -15,6 +15,8 @@ from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.reporting.mia_result import MIAResult
+from leakpro.signals import functional
+from leakpro.signals.utils.get_TS2Vec import bind_ts2vec_encoder
 from leakpro.utils.import_helper import Self
 
 
@@ -24,10 +26,13 @@ class AttackLiRA(AbstractMIA):
     class AttackConfig(BaseModel):
         """Configuration for the LiRA attack."""
 
+        model_config = ConfigDict(extra="forbid")
         num_shadow_models: int = Field(default=1, ge=1, description="Number of shadow models")
         training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow models")  # noqa: E501
         online: bool = Field(default=False, description="Online vs offline attack")
         var_calculation: Literal["carlini", "individual_carlini", "fixed"] = Field(default="carlini", description="Variance estimation method to use [carlini, individual_carlini, fixed]")  # noqa: E501
+        signal: str = Field(default="rescaled_logits",
+                            description="What signal to use. Must be a function in leakpro.signals.functional.")
 
         @model_validator(mode="after")
         def check_num_shadow_models_if_online(self) -> Self:
@@ -67,7 +72,8 @@ class AttackLiRA(AbstractMIA):
         for key, value in self.configs.model_dump().items():
             setattr(self, key, value)
 
-        self.shadow_models = []
+        # Accepts both functional names and the class-style names used by older configs.
+        self.signal = functional.get(self.configs.signal)
 
     def description(self:Self) -> dict:
         """Return a description of the attack."""
@@ -91,43 +97,12 @@ class AttackLiRA(AbstractMIA):
             "detailed": detailed_str,
         }
 
-    def rescale_logits(self:Self, logits: np.ndarray, true_label:np.ndarray) -> np.ndarray:
-        """Rescale the logits to a range of [0, 1].
-
-        Args:
-        ----
-            logits (np.ndarray): The logits to be rescaled.
-            true_label (np.ndarray): The true labels for the logits.
-
-        Returns:
-        -------
-            np.ndarray: The rescaled logits.
-
-        """
-        if logits.shape[1] == 1:
-            def sigmoid(z:np.ndarray) -> np.ndarray:
-                return 1/(1 + np.exp(-z))
-            positive_class_prob = sigmoid(logits).reshape(-1, 1)
-            predictions = np.concatenate([1 - positive_class_prob, positive_class_prob], axis=1)
-        else:
-            predictions = logits - np.max(logits, axis=1, keepdims=True)
-            predictions = np.exp(predictions)
-            predictions = predictions/np.sum(predictions,axis=1, keepdims=True)
-
-        count = predictions.shape[0]
-        y_true = predictions[np.arange(count), true_label]
-        predictions[np.arange(count), true_label] = 0
-
-        y_wrong = np.sum(predictions, axis=1)
-        output_signals = np.log(y_true+1e-45) - np.log(y_wrong+1e-45)
-        return output_signals  # noqa: RET504
-
     def prepare_attack(self:Self)->None:
         """Prepares data to obtain metric on the target model and dataset, using signals computed on the auxiliary model/dataset.
 
         It selects a balanced subset of data samples from in-group and out-group members
-        of the audit dataset, prepares the data for evaluation, and computes the logits
-        for both shadow models and the target model.
+        of the audit dataset, prepares the data for evaluation, and computes the configured
+        signal for both shadow models and the target model.
         """
 
         # Fixed variance is used when the number of shadow models is below 32 (64, IN and OUT models)
@@ -142,52 +117,89 @@ class AttackLiRA(AbstractMIA):
                                                                               training_fraction = self.training_data_fraction,
                                                                               )
 
-        self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)
-
+        # The shadow models themselves are never loaded: the attack scores their cached logits.
         self.out_indices = ~ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"]).T
 
-        true_labels = self.handler.get_labels(self.audit_dataset["data"])
-        self.target_logits = ShadowModelHandler().load_logits(name=f"target_{ShadowModelHandler().target_model_hash}")
-        self.shadow_models_logits = []
+        # ts2vec carries a fitted artefact, and the target and shadow values below are only
+        # comparable if they share it. Fit it once on the shadow population; other signals are
+        # returned unchanged.
+        self.signal = bind_ts2vec_encoder(self.signal, self.handler, self.attack_data_indices)
+
+        # The signal is applied to the cached logits, so these hold signal values (rescaled logits,
+        # an error, a distance, ...) rather than logits; named accordingly, as in MS-LiRA.
+        true_labels = self.handler.get_labels(self.audit_dataset["data"]).squeeze()
+        target_logits = ShadowModelHandler().load_logits(name="target")
+        self.target_signals = self._check_signal_shape(self.signal(target_logits, true_labels),
+                                                       n_audit_points=target_logits.shape[0])
+        self.shadow_models_signals = []
         for indx in self.shadow_model_indices:
-            self.shadow_models_logits.append(ShadowModelHandler().load_logits(indx=indx))
+            shadow_logits = ShadowModelHandler().load_logits(indx=indx)
+            self.shadow_models_signals.append(
+                self._check_signal_shape(self.signal(shadow_logits, true_labels),
+                                         n_audit_points=shadow_logits.shape[0])
+            )
+        self.shadow_models_signals = np.array(self.shadow_models_signals)
 
-        self.shadow_models_logits = np.array([self.rescale_logits(x, true_labels) for x in self.shadow_models_logits])
-        self.target_logits = self.rescale_logits(self.target_logits, true_labels)
+    def _check_signal_shape(self:Self, signal_values: np.ndarray, n_audit_points: int) -> np.ndarray:
+        """Verify the signal produced exactly one value per audit point.
 
-    def get_std(self:Self, logits: list, mask: list, is_in: bool, var_calculation: str) -> np.ndarray:
+        LiRA models each point's signal as a scalar Gaussian, so a signal returning a vector per
+        point (``logits``, which passes the raw per-class logits through) cannot be scored. Left
+        unchecked, the extra axis silently becomes the audit-sample axis in run_attack and the
+        attack reports scores for the wrong number of points.
+
+        Args:
+            signal_values (np.ndarray): Values returned by the configured signal function.
+            n_audit_points (int): Number of audit points the logits were computed on.
+
+        Returns:
+            np.ndarray: signal_values unchanged.
+
+        Raises:
+            ValueError: If the signal did not return one scalar per audit point.
+
+        """
+        if signal_values.shape != (n_audit_points,):
+            raise ValueError(
+                f"Signal '{self.configs.signal}' returned shape {signal_values.shape}, but LiRA "
+                f"requires one scalar per audit point, i.e. {(n_audit_points,)}. Use a scalar "
+                "signal such as 'rescaled_logits' or 'loss'."
+            )
+        return signal_values
+
+    def get_std(self:Self, signals: list, mask: list, is_in: bool, var_calculation: str) -> np.ndarray:
         """A function to define what method to use for calculating variance for LiRA."""
 
         # Fixed/Global variance calculation.
         if var_calculation == "fixed":
-            return self._fixed_variance(logits, mask, is_in)
+            return self._fixed_variance(signals, mask, is_in)
 
         # Variance calculation as in the paper ( Membership Inference Attacks From First Principles )
         if var_calculation == "carlini":
-            return self._carlini_variance(logits, mask, is_in)
+            return self._carlini_variance(signals, mask, is_in)
 
         # Variance calculation as in the paper ( Membership Inference Attacks From First Principles )
         #   but check IN and OUT samples individualy
         if var_calculation == "individual_carlini":
-            return self._individual_carlini(logits, mask, is_in)
+            return self._individual_carlini(signals, mask, is_in)
 
         return np.array([None])
 
-    def _fixed_variance(self:Self, logits: list, mask: list, is_in: bool) -> np.ndarray:
+    def _fixed_variance(self:Self, signals: list, mask: list, is_in: bool) -> np.ndarray:
         if is_in and not self.online:
             return np.array([None])
-        return np.std(logits[mask])
+        return np.std(signals[mask])
 
-    def _carlini_variance(self:Self, logits: list, mask: list, is_in: bool) -> np.ndarray:
+    def _carlini_variance(self:Self, signals: list, mask: list, is_in: bool) -> np.ndarray:
         if self.num_shadow_models >= self.fix_var_threshold*2:
-                return np.std(logits[mask])
+                return np.std(signals[mask])
         if is_in:
             return self.fixed_in_std
         return self.fixed_out_std
 
-    def _individual_carlini(self:Self, logits: list, mask: list, is_in: bool) -> np.ndarray:
+    def _individual_carlini(self:Self, signals: list, mask: list, is_in: bool) -> np.ndarray:
         if np.count_nonzero(mask) >= self.fix_var_threshold:
-            return np.std(logits[mask])
+            return np.std(signals[mask])
         if is_in:
             return self.fixed_in_std
         return self.fixed_out_std
@@ -195,9 +207,9 @@ class AttackLiRA(AbstractMIA):
     def run_attack(self:Self) -> MIAResult:
         """Runs the attack on the target model and dataset and assess privacy risks or data leakage.
 
-        This method evaluates how the target model's output (logits) for a specific dataset
-        compares to the output of shadow models to determine if the dataset was part of the
-        model's training data or not.
+        This method evaluates how the signal computed on the target model's output for a specific
+        dataset compares to the same signal on the shadow models, to determine if the dataset was
+        part of the model's training data or not.
 
         Returns
         -------
@@ -205,35 +217,35 @@ class AttackLiRA(AbstractMIA):
         true labels, and signal values.
 
         """
-        n_audit_samples = self.shadow_models_logits.shape[1]
+        n_audit_samples = self.shadow_models_signals.shape[1]
         score = np.zeros(n_audit_samples)  # List to hold the computed probability scores for each sample
 
-        self.fixed_in_std = self.get_std(self.shadow_models_logits.flatten(), (~self.out_indices).flatten(), True, "fixed")
-        self.fixed_out_std = self.get_std(self.shadow_models_logits.flatten(), self.out_indices.flatten(), False, "fixed")
+        self.fixed_in_std = self.get_std(self.shadow_models_signals.flatten(), (~self.out_indices).flatten(), True, "fixed")
+        self.fixed_out_std = self.get_std(self.shadow_models_signals.flatten(), self.out_indices.flatten(), False, "fixed")
 
-        # Iterate over and extract logits for IN and OUT shadow models for each audit sample
+        # Iterate over and extract signals for IN and OUT shadow models for each audit sample
         for i in tqdm(range(n_audit_samples), total=n_audit_samples, desc="Processing audit samples"):
 
-            # Calculate the mean for OUT shadow model logits
+            # Calculate the mean for OUT shadow model signals
             out_mask = self.out_indices[:,i]
-            sm_logits = self.shadow_models_logits[:,i]
+            sm_signals = self.shadow_models_signals[:,i]
 
-            out_mean = np.mean(sm_logits[out_mask])
-            out_std = self.get_std(sm_logits, out_mask, False, self.var_calculation)
+            out_mean = np.mean(sm_signals[out_mask])
+            out_std = self.get_std(sm_signals, out_mask, False, self.var_calculation)
 
-            # Get the logit from the target model for the current sample
-            target_logit = self.target_logits[i]
+            # Get the signal from the target model for the current sample
+            target_signal = self.target_signals[i]
 
             # Calculate the log probability density function value
             if self.online:
-                in_mean = np.mean(sm_logits[~out_mask])
-                in_std = self.get_std(sm_logits, ~out_mask, True, self.var_calculation)
+                in_mean = np.mean(sm_signals[~out_mask])
+                in_std = self.get_std(sm_signals, ~out_mask, True, self.var_calculation)
 
-                pr_in = norm.logpdf(target_logit, in_mean, in_std + 1e-30)
-                pr_out = norm.logpdf(target_logit, out_mean, out_std + 1e-30)
+                pr_in = norm.logpdf(target_signal, in_mean, in_std + 1e-30)
+                pr_out = norm.logpdf(target_signal, out_mean, out_std + 1e-30)
             else:
                 pr_in = 0
-                pr_out = -norm.logcdf(target_logit, out_mean, out_std + 1e-30)
+                pr_out = -norm.logcdf(target_signal, out_mean, out_std + 1e-30)
 
             score[i] = (pr_in - pr_out)  # Append the calculated probability density value to the score list
             if np.isnan(score[i]):
