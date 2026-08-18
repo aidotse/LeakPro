@@ -58,6 +58,8 @@ export const COPY = {
   lowResolution: "These numbers rest on very few records.",
   noResults: "No settings were tested successfully.",
   failed: "The optimization run failed.",
+  retry: "Try again",
+  retryHint: "You can start it again — finished settings are kept.",
   back: "Back to results",
 } as const;
 

@@ -300,14 +300,16 @@ export default function Optimization({ jobId, model, onBack, onAdopted }: Props)
           )}
         </div>
 
-        {phase === "setup" && (
+        {/* A failed run must stay startable: hiding the button here once locked
+            the view permanently on a stale error read back from disk. */}
+        {(phase === "setup" || run?.status === "failed") && (
           <button
             onClick={start}
             disabled={starting}
             className="self-start px-8 py-2.5 rounded-lg bg-slate-700 text-cream border border-primary font-bold hover:bg-slate-600 transition-colors flex items-center gap-2 disabled:opacity-50"
           >
-            <span className="material-symbols-outlined text-base">rocket_launch</span>
-            {starting ? "…" : COPY.start}
+            <span className="material-symbols-outlined text-base">{run?.status === "failed" ? "refresh" : "rocket_launch"}</span>
+            {starting ? "…" : run?.status === "failed" ? COPY.retry : COPY.start}
           </button>
         )}
       </div>
@@ -343,8 +345,9 @@ export default function Optimization({ jobId, model, onBack, onAdopted }: Props)
           )}
 
           {run?.status === "failed" ? (
-            <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-500">
-              {run.error ?? COPY.failed}
+            <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-500 flex flex-col gap-1">
+              <span className="font-bold">{COPY.failed} {COPY.retryHint}</span>
+              <span className="text-xs opacity-80 break-words">{run.error ?? ""}</span>
             </div>
           ) : tested.length === 0 && phase === "done" ? (
             <p className="text-sm text-slate-400 italic">{COPY.noResults}</p>
