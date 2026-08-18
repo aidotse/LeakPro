@@ -8,7 +8,8 @@
  */
 
 export const COPY = {
-  entry: "Find the best protection",
+  entry: "Optimize protection",
+  sectionBlurb: "Test protection settings per model with the buttons in the table.",
   title: "Find the best protection",
   intro:
     "We train your model many times with different protection settings and test each one, " +

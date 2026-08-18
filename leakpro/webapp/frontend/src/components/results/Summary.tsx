@@ -148,6 +148,37 @@ const HOW_IT_WORKS = (
   </>
 );
 
+const HOW_PROTECTION = (
+  <>
+    <p>
+      Your model is retrained many times, each with a different strength of protection. Every version is
+      attacked the same way the audit attacked the original and scored for quality, so you can see the
+      trade-off and pick a setting.
+    </p>
+    <Detail>
+      <p>
+        The protection is noise added during training (differentially private training). Four settings are
+        varied together — how much noise, how strongly individual examples are capped, the learning rate,
+        and the batch size — because tuning them separately misses the best combinations.
+      </p>
+      <p>
+        Attack success means the share of training records an attacker identifies at a 1% false-alarm
+        rate, the same measure as this table. The attacker is given the same advantage as in the audit:
+        reference models trained exactly like the tested one.
+      </p>
+      <p>
+        The search uses a faster, approximate version of the attack. The setting you confirm is re-checked
+        with a stronger attack before it can be adopted, and the estimate and the verified number are
+        shown side by side — if the estimate was optimistic, that is flagged rather than hidden.
+      </p>
+      <p className="text-xs text-slate-400">
+        The formal privacy budget (ε) is recorded next to every measured result, so the empirical and the
+        mathematical guarantee can be compared.
+      </p>
+    </Detail>
+  </>
+);
+
 const ABOUT_ALPHA = (
   <>
     <p>How many false alarms the attacker puts up with. Lower is stricter. Use 1% unless you have a reason not to.</p>
@@ -435,6 +466,19 @@ export default function Summary({ results, onOptimize, risk, onRiskChange }: Pro
         </div>
       </div>
 
+      {/* Protection bar, same shape as the risk bar: title, info, one line. */}
+      {onOptimize && (
+        <div className="flex items-center justify-between gap-3 flex-wrap rounded-xl border border-slate-200 dark:border-surface-border bg-slate-50 dark:bg-surface px-4 py-3">
+          <div>
+            <p className="font-bold text-sm flex items-center gap-1">
+              Optimize protection
+              <InfoButton label="How protection is optimized" title="How protection is optimized">{HOW_PROTECTION}</InfoButton>
+            </p>
+            <p className="text-xs text-slate-400">{COPY.sectionBlurb}</p>
+          </div>
+        </div>
+      )}
+
       {error && (
         <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-500">{error}</div>
       )}
@@ -561,21 +605,27 @@ export default function Summary({ results, onOptimize, risk, onRiskChange }: Pro
                         : <span className="text-slate-400">—</span>}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-1">
+                      <div className="flex items-center justify-end gap-1.5 flex-wrap">
                         <button
                           onClick={() => setWizard(key)}
                           title={a ? "Change this model's use case" : "Declare this model's use case"}
-                          className={`material-symbols-outlined text-base transition-colors ${a ? "text-primary" : "text-slate-400 hover:text-primary"}`}
+                          className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-xs font-bold whitespace-nowrap transition-colors ${
+                            a
+                              ? "border-primary/50 text-primary hover:bg-primary/5"
+                              : "border-slate-300 dark:border-surface-border text-slate-500 hover:text-primary hover:border-primary/50"
+                          }`}
                         >
-                          balance
+                          <span className="material-symbols-outlined text-sm">balance</span>
+                          Risk assessment
                         </button>
                         {onOptimize && (
                           <button
                             onClick={() => onOptimize(m)}
                             title={COPY.entry}
-                            className="material-symbols-outlined text-base text-slate-400 hover:text-primary transition-colors"
+                            className="flex items-center gap-1 px-2 py-1 rounded-lg border border-slate-300 dark:border-surface-border text-xs font-bold text-slate-500 hover:text-primary hover:border-primary/50 whitespace-nowrap transition-colors"
                           >
-                            shield
+                            <span className="material-symbols-outlined text-sm">shield</span>
+                            {COPY.entry}
                           </button>
                         )}
                       </div>
