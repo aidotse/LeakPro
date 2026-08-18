@@ -123,6 +123,9 @@ class PETStartParams(BaseModel):
     n_configs: int | None = None
     n_refs: int | None = None
     delta: float | None = None
+    # Per-sample-gradient memory cap under DP-SGD. Lower it to fit a big model
+    # or a busy GPU; it changes speed only, never the privacy accounting.
+    max_physical_batch: int = 32
 
 
 class AttackParams(BaseModel):

@@ -1270,13 +1270,19 @@ def _pet_read_json(path: Path) -> dict | None:
 
 def _pet_spawn(job_id: str, model_name: str, extra: list[str]) -> None:
     """Launch the runner detached, so it survives this process exiting."""
+    import os  # noqa: PLC0415
     import subprocess  # noqa: PLC0415
 
     cmd = [sys.executable, "-m", "leakpro.webapp.backend.pet_runner",
            str(_job_dir(job_id)), model_name, *extra]
+    # Let CUDA grow its allocation instead of pre-reserving fixed segments; the
+    # campaign trains many models back to back, so fragmentation is the common
+    # cause of a spurious out-of-memory long before the card is actually full.
+    env = {**os.environ, "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"}
     subprocess.Popen(  # noqa: S603
         cmd,
         cwd=str(Path(__file__).parents[3]),
+        env=env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,

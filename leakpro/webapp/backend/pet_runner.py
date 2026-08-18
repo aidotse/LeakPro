@@ -44,6 +44,9 @@ from leakpro.utils.logger import logger
 DEFAULT_N_CONFIGS = 24
 DEFAULT_N_REFS = 2
 DEFAULT_EPOCHS = 10
+# Per-sample-gradient memory cap under DP-SGD. 256 fits a small model but OOMs a
+# ResNet on a 24 GB card; 32 is the safe webapp default. Speed only, not accounting.
+DEFAULT_MAX_PHYSICAL_BATCH = 32
 
 # The verification pass exists because the search runs a deliberately cheap
 # attack. It re-attacks one setting with more reference models so the number
@@ -200,6 +203,7 @@ def run_campaign(job_dir: Path, model_name: str) -> None:
     request = json.loads((out / "request.json").read_text()) if (out / "request.json").exists() else {}
     n_configs = int(request.get("n_configs") or DEFAULT_N_CONFIGS)
     n_refs = int(request.get("n_refs") or DEFAULT_N_REFS)
+    max_physical_batch = int(request.get("max_physical_batch") or DEFAULT_MAX_PHYSICAL_BATCH)
 
     recipe, splits, space, model = build(job, job_dir, model_name)
     space = _apply_advanced(space, request.get("advanced") or {})
@@ -216,8 +220,9 @@ def run_campaign(job_dir: Path, model_name: str) -> None:
 
     train_fn, utility_fn, attack_fn = build_campaign_fns(
         recipe, splits, n_refs=n_refs, device=device,
-        utility_metric="auc" if recipe.output_kind != "logits" else "accuracy",
+        utility_metric="accuracy",
         delta=float(request.get("delta") or 1e-5),
+        max_physical_batch=max_physical_batch,
     )
     campaign = Campaign(train_fn, utility_fn, attack_fn, knob_space=space, output_dir=out, seed=int(job.get("seed", 0)))
     records = campaign.run(n_configs)
@@ -246,11 +251,14 @@ def run_verification(job_dir: Path, model_name: str, index: int) -> None:
     estimated = {"attack_tpr": record.get("attack_tpr"), "utility": record["utility"]}
     target.write_text(json.dumps(json_safe({"status": "running", "index": index, "estimated": estimated}), indent=2))
 
+    request = json.loads((out / "request.json").read_text()) if (out / "request.json").exists() else {}
+    max_physical_batch = int(request.get("max_physical_batch") or DEFAULT_MAX_PHYSICAL_BATCH)
     recipe, splits, _, _ = build(job, job_dir, model_name)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     train_fn, utility_fn, attack_fn = build_campaign_fns(
         recipe, splits, n_refs=VERIFY_N_REFS, device=device,
-        utility_metric="auc" if recipe.output_kind != "logits" else "accuracy",
+        utility_metric="accuracy",
+        max_physical_batch=max_physical_batch,
     )
 
     config = record["config"]

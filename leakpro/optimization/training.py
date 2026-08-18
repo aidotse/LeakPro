@@ -232,8 +232,11 @@ def _evaluate_utility(model: Module, metric: str | Callable, x: torch.Tensor,
     if metric == "accuracy":
         correct = 0
         for i in range(0, len(x), 1024):
-            pred = model(x[i:i + 1024].to(device)).argmax(dim=1).cpu()
-            correct += int((pred == y[i:i + 1024]).sum())
+            out = model(x[i:i + 1024].to(device)).cpu()
+            # A single-logit head is a binary classifier: threshold at 0, don't
+            # argmax (argmax over one column is always 0 — silently 0% or 100%).
+            pred = (out.reshape(-1) > 0).long() if (out.ndim == 1 or out.shape[-1] == 1) else out.argmax(dim=1)
+            correct += int((pred == y[i:i + 1024].reshape(-1).long()).sum())
         return correct / len(x)
     if metric == "auc":
         from sklearn.metrics import roc_auc_score
