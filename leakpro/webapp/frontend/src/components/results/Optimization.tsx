@@ -3,7 +3,7 @@ import Plot from "react-plotly.js";
 import { api, ModelResult, OptimizationRun, Setting, Verification } from "../../api";
 import { COPY, tagsFor } from "./optimizationCopy";
 
-const ACCENT = "#193ce6";
+const ACCENT = "#f5a623";
 const TESTED = "#94a3b8";
 const POLL_MS = 2000;
 
@@ -218,7 +218,7 @@ export default function Optimization({ jobId, model, onBack, onAdopted }: Props)
         </div>
         <button
           onClick={onBack}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-700 text-sm font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-300 dark:border-surface-border text-sm font-bold hover:bg-slate-100 dark:hover:bg-surface-2 transition-colors shrink-0"
         >
           <span className="material-symbols-outlined text-base">arrow_back</span>
           {COPY.back}
@@ -232,7 +232,7 @@ export default function Optimization({ jobId, model, onBack, onAdopted }: Props)
       )}
 
       {/* Constraint — one control, everything else behind Advanced */}
-      <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-5 flex flex-col gap-4">
+      <div className="rounded-xl border border-slate-200 dark:border-surface-border p-5 flex flex-col gap-4">
         <div className="flex items-center gap-6 flex-wrap">
           <div className="flex-1 min-w-[280px]">
             <label className="text-sm font-bold block mb-2">
@@ -285,7 +285,7 @@ export default function Optimization({ jobId, model, onBack, onAdopted }: Props)
                       else next[k] = Number(e.target.value);
                       return next;
                     })}
-                    className="w-full rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs px-2 py-1.5 font-mono"
+                    className="w-full rounded border-slate-300 dark:border-surface-border bg-white dark:bg-surface text-xs px-2 py-1.5 font-mono"
                   />
                 </div>
               ))}
@@ -297,7 +297,7 @@ export default function Optimization({ jobId, model, onBack, onAdopted }: Props)
           <button
             onClick={start}
             disabled={starting}
-            className="self-start px-8 py-2.5 rounded-lg bg-primary text-white font-bold hover:opacity-90 transition-opacity flex items-center gap-2 disabled:opacity-50"
+            className="self-start px-8 py-2.5 rounded-lg bg-slate-700 text-cream border border-primary font-bold hover:bg-slate-600 transition-colors flex items-center gap-2 disabled:opacity-50"
           >
             <span className="material-symbols-outlined text-base">rocket_launch</span>
             {starting ? "…" : COPY.start}
@@ -404,7 +404,7 @@ function StatCard({ label, value, tone }: { label: string; value: string; tone?:
     <div className={`rounded-lg px-4 py-3 border ${
       tone === "amber"
         ? "border-amber-500/40 bg-amber-500/10"
-        : "border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900"
+        : "border-slate-200 dark:border-surface-border bg-slate-50 dark:bg-surface"
     }`}>
       <p className="text-xs text-slate-400">{label}</p>
       <p className="font-mono font-bold text-lg">{value}</p>
@@ -441,7 +441,7 @@ function SettingPanel({
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <aside className="relative w-full max-w-md h-full overflow-y-auto bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 p-6 flex flex-col gap-6">
+      <aside className="relative w-full max-w-md h-full overflow-y-auto bg-white dark:bg-surface border-l border-slate-200 dark:border-surface-border p-6 flex flex-col gap-6">
         <div className="flex items-start justify-between">
           <h3 className="text-xl font-black">{COPY.panelTitle}</h3>
           <button onClick={onClose} className="material-symbols-outlined text-slate-400 hover:text-slate-600">close</button>
@@ -452,7 +452,7 @@ function SettingPanel({
           <StatCard label={COPY.estimatedQuality} value={`${(setting.utility * 100).toFixed(2)}%`} />
         </div>
 
-        <div className="rounded-lg border border-slate-200 dark:border-slate-800 divide-y divide-slate-200 dark:divide-slate-800">
+        <div className="rounded-lg border border-slate-200 dark:border-surface-border divide-y divide-slate-200 dark:divide-surface-border">
           {rows.map(([label, value]) => (
             <div key={label} className="flex items-center justify-between px-4 py-2.5 text-sm">
               <span className="text-slate-500">{label}</span>
@@ -464,7 +464,7 @@ function SettingPanel({
         {verification == null && (
           <button
             onClick={onConfirm}
-            className="px-6 py-2.5 rounded-lg bg-primary text-white font-bold hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
+            className="px-6 py-2.5 rounded-lg bg-slate-700 text-cream border border-primary font-bold hover:bg-slate-600 transition-colors flex items-center justify-center gap-2"
           >
             <span className="material-symbols-outlined text-base">verified</span>
             {COPY.confirm}
@@ -472,7 +472,7 @@ function SettingPanel({
         )}
 
         {verification?.status === "running" && (
-          <div className="rounded-xl border border-slate-200 dark:border-slate-800 px-4 py-4 flex flex-col gap-2">
+          <div className="rounded-xl border border-slate-200 dark:border-surface-border px-4 py-4 flex flex-col gap-2">
             <div className="flex items-center gap-3">
               <span className="material-symbols-outlined text-primary animate-spin">sync</span>
               <span className="font-semibold text-sm">{COPY.verifying}</span>
@@ -514,7 +514,7 @@ function SettingPanel({
             ) : (
               <button
                 onClick={onAdopt}
-                className="px-6 py-2.5 rounded-lg bg-primary text-white font-bold hover:opacity-90 transition-opacity flex items-center justify-center gap-2"
+                className="px-6 py-2.5 rounded-lg bg-slate-700 text-cream border border-primary font-bold hover:bg-slate-600 transition-colors flex items-center justify-center gap-2"
               >
                 <span className="material-symbols-outlined text-base">check</span>
                 {COPY.adopt}
