@@ -4,7 +4,6 @@ import math
 import os
 import torch
 import tqdm
-from leakpro.utils.device import get_device
 import numpy as np
 import time
 import torchvision
@@ -161,13 +160,13 @@ def compute_ap(tp, conf, pred_cls, target_cls, eps=1e-16):
     return tp, fp, m_pre, m_rec, map50, mean_ap
 
 def test_eval(model, loader):
-    device = get_device()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     model.eval()
     model.half()
 
     # Configure
-    iou_v = torch.linspace(0.5, 0.95, 10).to(device)  # iou vector for mAP@0.5:0.95
+    iou_v = torch.linspace(0.5, 0.95, 10).cuda()  # iou vector for mAP@0.5:0.95
     n_iou = iou_v.numel()
 
     m_pre = 0.
@@ -177,8 +176,8 @@ def test_eval(model, loader):
     metrics = []
     p_bar = tqdm.tqdm(loader, desc=('%10s' * 3) % ('precision', 'recall', 'mAP'), disable=True, leave=True)
     for samples, targets, shapes in p_bar:
-        samples = samples.to(device)
-        targets = targets.to(device)
+        samples = samples.cuda()
+        targets = targets.cuda()
         samples = samples.half()  # uint8 to fp16/32
         samples = samples / 255  # 0 - 255 to 0.0 - 1.0
         _, _, height, width = samples.shape  # batch size, channels, height, width
@@ -188,17 +187,17 @@ def test_eval(model, loader):
         outputs = model(samples)
 
         # NMS
-        targets[:, 2:] *= torch.tensor((width, height, width, height)).to(device)  # to pixels
+        targets[:, 2:] *= torch.tensor((width, height, width, height)).cuda()  # to pixels
         outputs = non_max_suppression(outputs, 0.001, 0.65)
 
         # Metrics
         for i, output in enumerate(outputs):
             labels = targets[targets[:, 0] == i, 1:]
-            correct = torch.zeros(output.shape[0], n_iou, dtype=torch.bool).to(device)
+            correct = torch.zeros(output.shape[0], n_iou, dtype=torch.bool).cuda()
 
             if output.shape[0] == 0:
                 if labels.shape[0]:
-                    metrics.append((correct, *torch.zeros((3, 0)).to(device)))
+                    metrics.append((correct, *torch.zeros((3, 0)).cuda()))
                 continue
 
             detections = output.clone()
@@ -317,7 +316,7 @@ def clip_gradients(model, max_norm=10.0):
 def test_train(model, loader, loader_test, save = True, epochs=300):
     batch_size = 32
     # Optimizer
-    device = get_device()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     lrf = 0.010
     accumulate = max(round(64 / (batch_size)), 1)
@@ -351,7 +350,7 @@ def test_train(model, loader, loader_test, save = True, epochs=300):
     # Start training
     best = 0
     num_batch = len(loader)
-    amp_scale = torch.cuda.amp.GradScaler() if device.type == "cuda" else None
+    amp_scale = torch.cuda.amp.GradScaler()
     criterion = ComputeLoss(model)
     warmup_epochs = 3.000
     num_warmup = max(round(warmup_epochs * num_batch), 1000)
@@ -374,8 +373,8 @@ def test_train(model, loader, loader_test, save = True, epochs=300):
 
         for i, (samples, targets, _) in p_bar:
             x = i + num_batch * epoch  # number of iterations
-            samples = samples.to(device).float() / 255
-            targets = targets.to(device)
+            samples = samples.cuda().float() / 255
+            targets = targets.cuda()
 
             # Warmup
             if x <= num_warmup:
@@ -393,7 +392,7 @@ def test_train(model, loader, loader_test, save = True, epochs=300):
                         y['momentum'] = np.interp(x, xp, fp)
 
             # Forward
-            with torch.amp.autocast(device_type=device.type):
+            with torch.cuda.amp.autocast():
                 outputs = model(samples)  # forward
             loss = criterion(outputs, targets)
 
@@ -402,27 +401,20 @@ def test_train(model, loader, loader_test, save = True, epochs=300):
             loss *= batch_size  # loss scaled by batch_size
 
             # Backward
-            if amp_scale is not None:
-                amp_scale.scale(loss).backward()
-            else:
-                loss.backward()
+            amp_scale.scale(loss).backward()
 
             # Optimize
             if x % accumulate == 0:
-                if amp_scale is not None:
-                    amp_scale.unscale_(optimizer)  # unscale gradients
-                    clip_gradients(model)  # clip gradients
-                    amp_scale.step(optimizer)  # optimizer.step
-                    amp_scale.update()
-                else:
-                    clip_gradients(model)
-                    optimizer.step()
+                amp_scale.unscale_(optimizer)  # unscale gradients
+                clip_gradients(model)  # clip gradients
+                amp_scale.step(optimizer)  # optimizer.step
+                amp_scale.update()
                 optimizer.zero_grad()
                 if ema:
                     ema.update(model)
 
             # Log
-            memory = f'{torch.cuda.memory_reserved() / 1E9:.3g}G' if device.type == "cuda" else "N/A"
+            memory = f'{torch.cuda.memory_reserved() / 1E9:.3g}G'  # (GB)
             s = ('%10s' * 2 + '%10.4g') % (f'{epoch + 1}/{epochs}', memory, m_loss.avg)
             p_bar.set_description(s)
 

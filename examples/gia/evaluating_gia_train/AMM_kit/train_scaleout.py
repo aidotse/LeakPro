@@ -4,9 +4,7 @@
 #
 from typing import Optional
 
-from torch import Tensor
-
-from leakpro.utils.device import get_device
+from torch import Tensor, cuda, device
 import torch
 from torch.nn import CrossEntropyLoss, Module
 from torch.utils.data import DataLoader
@@ -31,7 +29,7 @@ def train(
     Training does not update the original model, but returns a norm of what the update would have been.
     """
     if device is None:
-        device = get_device()
+        device = torch.device("cuda" if cuda.is_available() else "cpu")
     model.to(device)
 
     for _ in range(epochs):

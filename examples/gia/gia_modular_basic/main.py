@@ -12,7 +12,6 @@ import matplotlib.pyplot as plt
 from leakpro.attacks.gia_attacks.modular.presets import dlg_attack, huang_attack, idlg_attack, inverting_gradients_attack, gia_running_attack, gia_estimate_attack
 from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.step_strategies import StandardStepStrategy
 from leakpro.fl_utils.fl_client_simulator import FLClientSimulator
-from leakpro.utils.device import get_device
 from leakpro.utils.seed import seed_everything
 from leakpro.attacks.gia_attacks.modular.components.optimization_building_blocks.training_simulator import (
     TrainingSettings,
@@ -28,7 +27,7 @@ def main():
     print("="*60)
     
     seed_everything(1234)
-    device = get_device()
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Device: {device}\n")
     
     # Model

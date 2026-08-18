@@ -5,7 +5,6 @@
 from transformers import LongformerModel
 from torch import nn
 import torch
-from leakpro.utils.device import get_device
 
 class Model(nn.Module):
     """
@@ -65,7 +64,7 @@ class OneHotBERT(nn.Module):
         # Replace the embedding layer with a Linear layer
         self.embedding_layer = nn.Linear(self.vocab_size, self.hidden_size, bias=False)
         self.token_mask = torch.ones(self.vocab_size)
-        device = get_device()
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.token_mask = self.token_mask.to(device)
         self.norm_data = norm_data
         for param in self.bert.parameters():
@@ -191,7 +190,7 @@ class OneHotBERT(nn.Module):
         # Replace the embedding layer with a Linear layer
         self.embedding_layer = nn.Linear(self.vocab_size, self.hidden_size, bias=False)
         self.token_mask = torch.ones(self.vocab_size)
-        device = get_device()
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.token_mask = self.token_mask.to(device)
         self.norm_data = norm_data
         for param in self.bert.parameters():
