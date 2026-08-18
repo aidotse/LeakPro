@@ -19,25 +19,31 @@ import RiskDiagram from "./RiskDiagram";
  */
 
 export interface RiskState {
-  draft: RiskRequest;
-  applied: RiskRequest | null;
+  /** Per-model declarations, keyed like `assessments`. Declaring is per model because the
+   *  population at risk is a property of the training split (f_train), not the dataset.
+   *  PARKED: nothing stops two models on identical data being declared with different
+   *  sensitivities; a copy-from-model affordance is the known fix, deferred for now. */
+  drafts: Record<string, RiskRequest>;
+  applied: Record<string, RiskRequest>;
   /** Keyed by `${job_id}/${model_name}` — model names are not unique across jobs in compare mode. */
   assessments: Record<string, RiskAssessment>;
   unassessable: Record<string, string>;
   error: string | null;
 }
 
+export const DEFAULT_PROFILE: RiskRequest = {
+  tolerated_fpr: 0.01,
+  attacker_prior: 0.5,
+  records_per_subject: 1,
+  data_type_sensitivity: 1,
+  subject_type_weight: 1,
+  extrapolate_to_population: false,
+  notes: "",
+};
+
 export const initialRiskState: RiskState = {
-  draft: {
-    tolerated_fpr: 0.01,
-    attacker_prior: 0.5,
-    records_per_subject: 1,
-    data_type_sensitivity: 1,
-    subject_type_weight: 1,
-    extrapolate_to_population: false,
-    notes: "",
-  },
-  applied: null,
+  drafts: {},
+  applied: {},
   assessments: {},
   unassessable: {},
   error: null,
@@ -276,36 +282,65 @@ const ABOUT_BAND = (
 export default function Summary({ results, onOptimize, risk, onRiskChange }: Props) {
   // Ephemeral view state only. Anything the user would be annoyed to lose lives in `risk`.
   const [openKey, setOpenKey] = useState<string | null>(null);
-  const [wizard, setWizard] = useState(false);
+  // The model key being declared, or null when the wizard is closed.
+  const [wizard, setWizard] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [details, setDetails] = useState<string | null>(null);
 
-  const { draft, applied, assessments, unassessable, error } = risk;
-  const setDraft = (next: RiskRequest) => onRiskChange({ ...risk, draft: next });
+  const { drafts, applied, assessments, unassessable, error } = risk;
 
-  const alpha = applied?.tolerated_fpr ?? draft.tolerated_fpr;
+  // A model declared for the first time is seeded from the last profile the user
+  // submitted anywhere: judgement fields rarely differ across models of one
+  // comparison, so carrying them over is the cheap consistency default.
+  const appliedProfiles = Object.values(applied);
+  const lastApplied = appliedProfiles[appliedProfiles.length - 1];
+  const draft = (wizard ? drafts[wizard] : undefined) ?? lastApplied ?? DEFAULT_PROFILE;
+  const setDraft = (next: RiskRequest) => {
+    if (wizard) onRiskChange({ ...risk, drafts: { ...drafts, [wizard]: next } });
+  };
+
+  // Display fallback for rows not yet assessed; assessed rows use their own alpha.
+  const alpha = lastApplied?.tolerated_fpr ?? DEFAULT_PROFILE.tolerated_fpr;
+  const alphaFor = (key: string) => applied[key]?.tolerated_fpr ?? alpha;
   const toggleInfo = (key: string) => setOpenKey((prev) => (prev === key ? null : key));
 
+  const wizardModel = wizard ? results.find((m) => modelKey(m) === wizard) : undefined;
+  // Left blank, the backend fills NDS with the model's exact num_train from its
+  // metadata; this estimate only makes that visible in the placeholder.
+  const derivedSubjects =
+    wizardModel?.train_meta?.n_samples != null && wizardModel?.train_meta?.f_train != null
+      ? Math.round(wizardModel.train_meta.n_samples * wizardModel.train_meta.f_train)
+      : undefined;
+
   const submit = async () => {
-    // Compare mode can show models from several jobs, and the endpoint is per job, so assess each job
-    // the visible models come from and merge under composite keys.
-    const jobIds = Array.from(new Set(results.map((m) => m.job_id).filter((v): v is string => !!v)));
-    if (!jobIds.length) {
-      onRiskChange({ ...risk, error: "No job id on these results." });
+    // One model per request: the population at risk follows the training split,
+    // so each model carries its own declaration.
+    const m = wizardModel;
+    if (!wizard || !m) return;
+    if (!m.job_id) {
+      onRiskChange({ ...risk, error: "No job id on this model." });
       return;
     }
     setBusy(true);
     onRiskChange({ ...risk, error: null });
     try {
-      const responses = await Promise.all(jobIds.map((id) => api.assessRisk(id, draft)));
-      const assessed: Record<string, RiskAssessment> = {};
-      const failed: Record<string, string> = {};
-      responses.forEach((res, i) => {
-        Object.entries(res.assessments).forEach(([name, a]) => { assessed[`${jobIds[i]}/${name}`] = a; });
-        Object.entries(res.unassessable).forEach(([name, why]) => { failed[`${jobIds[i]}/${name}`] = why; });
+      const res = await api.assessRisk(m.job_id, { ...draft, model_name: m.orig_model_name ?? m.model_name });
+      const assessed = { ...assessments };
+      const failed = { ...unassessable };
+      delete assessed[wizard];
+      delete failed[wizard];
+      // The response is keyed by the backend name; re-key to the display name.
+      Object.values(res.assessments).forEach((a) => { assessed[wizard] = a; });
+      Object.values(res.unassessable).forEach((why) => { failed[wizard] = why; });
+      onRiskChange({
+        ...risk,
+        assessments: assessed,
+        unassessable: failed,
+        applied: { ...applied, [wizard]: draft },
+        drafts: { ...drafts, [wizard]: draft },
+        error: null,
       });
-      onRiskChange({ ...risk, assessments: assessed, unassessable: failed, applied: draft, error: null });
-      setWizard(false);
+      setWizard(null);
     } catch (e) {
       onRiskChange({ ...risk, error: e instanceof Error ? e.message : String(e) });
     } finally {
@@ -323,11 +358,12 @@ export default function Summary({ results, onOptimize, risk, onRiskChange }: Pro
     const rows = [header.join(",")];
     results.forEach((m) => {
       const a = assessments[modelKey(m)];
-      const tpr = bestTpr(m, alpha);
+      const rowAlpha = alphaFor(modelKey(m));
+      const tpr = bestTpr(m, rowAlpha);
       rows.push([
         m.model_name,
         m.model_class ?? "",
-        alpha,
+        rowAlpha,
         a?.measured.success_rate?.toFixed(6) ?? tpr?.value.toFixed(6) ?? "",
         a?.measured.advantage?.toFixed(6) ?? "",
         a?.measured.lift?.toFixed(3) ?? "",
@@ -354,7 +390,6 @@ export default function Summary({ results, onOptimize, risk, onRiskChange }: Pro
     URL.revokeObjectURL(url);
   };
 
-  const alphaLabel = ALPHAS.find((a) => a.value === alpha)?.label ?? `${alpha * 100}%`;
   const shown = details ? assessments[details] : undefined;
 
   return (
@@ -364,13 +399,14 @@ export default function Summary({ results, onOptimize, risk, onRiskChange }: Pro
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           {results.map((m) => {
             const a = assessments[modelKey(m)];
-            const tpr = bestTpr(m, alpha);
+            const cardAlpha = alphaFor(modelKey(m));
+            const tpr = bestTpr(m, cardAlpha);
             const style = bandStyle(a?.combined.vulnerability_band);
             return (
               <div key={modelKey(m)}
                    className={a ? `rounded-xl p-4 ${style.bg}` : "rounded-xl p-4 bg-slate-50 dark:bg-surface border border-slate-200 dark:border-surface-border"}>
                 <p className={`text-2xl font-black ${a ? style.color : "text-primary"}`}>
-                  {a ? a.combined.vulnerability_band : `${num(tpr ? tpr.value / alpha : undefined, 1)}×`}
+                  {a ? a.combined.vulnerability_band : `${num(tpr ? tpr.value / cardAlpha : undefined, 1)}×`}
                 </p>
                 <p className="text-[11px] uppercase tracking-wider text-slate-400 -mt-0.5">
                   {a ? "vulnerability" : "vs random"}
@@ -392,17 +428,11 @@ export default function Summary({ results, onOptimize, risk, onRiskChange }: Pro
             <InfoButton label="How risk is computed" title="How risk is computed">{HOW_IT_WORKS}</InfoButton>
           </p>
           <p className="text-xs text-slate-400">
-            {applied
-              ? `α = ${alphaLabel} FPR · π = ${applied.attacker_prior} · policy ${Object.values(assessments)[0]?.policy_version ?? "—"}`
-              : "Measured leakage is above. Add your use case to turn it into risk."}
+            {appliedProfiles.length > 0
+              ? `${appliedProfiles.length} of ${results.length} model${results.length !== 1 ? "s" : ""} assessed · policy ${Object.values(assessments)[0]?.policy_version ?? "—"}`
+              : "Measured leakage is above. Declare each model's use case with the buttons in the table."}
           </p>
         </div>
-        <button
-          onClick={() => setWizard(true)}
-          className="px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-bold hover:opacity-90 transition-opacity"
-        >
-          {applied ? "Change inputs" : "Declare your use case"}
-        </button>
       </div>
 
       {error && (
@@ -417,33 +447,6 @@ export default function Summary({ results, onOptimize, risk, onRiskChange }: Pro
               <li key={key}><b>{key.slice(key.indexOf("/") + 1)}</b>: {reason}</li>
             ))}
           </ul>
-        </div>
-      )}
-
-      {/* Protection — one entry per model, since each is optimized on its own */}
-      {onOptimize && results.length > 0 && (
-        <div className="rounded-xl border border-slate-200 dark:border-surface-border p-4 flex flex-col gap-3">
-          <div>
-            <p className="font-bold text-sm">Reduce the risk</p>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Test protection settings automatically and see the best trade-offs between privacy and quality.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {results.map((m) => (
-              <button
-                key={`${m.job_id}/${m.model_name}`}
-                onClick={() => onOptimize(m)}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg border border-primary/50 text-primary text-sm font-bold hover:bg-primary/5 transition-colors"
-              >
-                <span className="material-symbols-outlined text-base">shield</span>
-                {COPY.entry}
-                {results.length > 1 && (
-                  <span className="font-normal text-slate-400">· {m.model_name}</span>
-                )}
-              </button>
-            ))}
-          </div>
         </div>
       )}
 
@@ -464,7 +467,7 @@ export default function Summary({ results, onOptimize, risk, onRiskChange }: Pro
             <tr>
               <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-500">Model</th>
               <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-500">
-                TPR@{alphaLabel} <InfoButton label={`TPR at ${alphaLabel} FPR`}>{ABOUT_TPR}</InfoButton>
+                TPR@α <InfoButton label="TPR at the tolerated FPR (α)">{ABOUT_TPR}</InfoButton>
               </th>
               <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-500">
                 Lift <InfoButton label="Lift over random guessing">{ABOUT_LIFT}</InfoButton>
@@ -479,13 +482,15 @@ export default function Summary({ results, onOptimize, risk, onRiskChange }: Pro
               <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-500">
                 Band <InfoButton label="Vulnerability band">{ABOUT_BAND}</InfoButton>
               </th>
+              <th className="px-4 py-3 text-right text-xs font-bold uppercase tracking-wider text-slate-500">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200 dark:divide-surface-border">
             {results.map((m) => {
               const key = modelKey(m);
               const a = assessments[key];
-              const tpr = bestTpr(m, alpha);
+              const rowAlpha = alphaFor(key);
+              const tpr = bestTpr(m, rowAlpha);
               const style = bandStyle(a?.combined.vulnerability_band);
               const isOpen = openKey === key;
               return (
@@ -536,7 +541,7 @@ export default function Summary({ results, onOptimize, risk, onRiskChange }: Pro
                         ? <>{pct(tpr.value)} <span className="text-slate-400 font-sans text-xs">({tpr.attack})</span></>
                         : "—"}
                     </td>
-                    <td className="px-4 py-3 font-mono">{tpr ? `${num(tpr.value / alpha, 1)}×` : "—"}</td>
+                    <td className="px-4 py-3 font-mono">{tpr ? `${num(tpr.value / rowAlpha, 1)}×` : "—"}</td>
                     <td className="px-4 py-3 font-mono">
                       {a?.combined.ppv != null
                         ? <>{pct(a.combined.ppv)} <span className="text-slate-400 font-sans text-xs">(π={a.declared.attacker_prior})</span></>
@@ -555,10 +560,30 @@ export default function Summary({ results, onOptimize, risk, onRiskChange }: Pro
                         ? <span className={`font-bold ${style.color}`}>{a.combined.vulnerability_band}</span>
                         : <span className="text-slate-400">—</span>}
                     </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => setWizard(key)}
+                          title={a ? "Change this model's use case" : "Declare this model's use case"}
+                          className={`material-symbols-outlined text-base transition-colors ${a ? "text-primary" : "text-slate-400 hover:text-primary"}`}
+                        >
+                          balance
+                        </button>
+                        {onOptimize && (
+                          <button
+                            onClick={() => onOptimize(m)}
+                            title={COPY.entry}
+                            className="material-symbols-outlined text-base text-slate-400 hover:text-primary transition-colors"
+                          >
+                            shield
+                          </button>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                   {isOpen && (
                     <tr className="bg-slate-50 dark:bg-surface/60">
-                      <td colSpan={7} className="px-6 py-4"><MetaPanel r={m} /></td>
+                      <td colSpan={8} className="px-6 py-4"><MetaPanel r={m} /></td>
                     </tr>
                   )}
                 </React.Fragment>
@@ -573,7 +598,8 @@ export default function Summary({ results, onOptimize, risk, onRiskChange }: Pro
         {results.map((m) => {
           const key = modelKey(m);
           const a = assessments[key];
-          const tpr = bestTpr(m, alpha);
+          const proseAlpha = alphaFor(modelKey(m));
+          const tpr = bestTpr(m, proseAlpha);
           const style = bandStyle(a?.combined.vulnerability_band);
           return (
             <div key={key}
@@ -585,7 +611,7 @@ export default function Summary({ results, onOptimize, risk, onRiskChange }: Pro
               </p>
               <p className="text-sm text-slate-600 dark:text-slate-300">
                 {tpr
-                  ? `At a ${alphaLabel} false-positive rate, ${tpr.attack} identifies ${pct(tpr.value)} of training members, ${num(tpr.value / alpha, 1)}× better than chance.`
+                  ? `At a ${ALPHAS.find((x) => x.value === proseAlpha)?.label ?? pct(proseAlpha)} false-positive rate, ${tpr.attack} identifies ${pct(tpr.value)} of training members, ${num(tpr.value / proseAlpha, 1)}× better than chance.`
                   : "No usable attack results at this operating point."}
                 {a?.combined.ppv != null && ` An attacker claiming membership would be right ${pct(a.combined.ppv)} of the time.`}
               </p>
@@ -604,11 +630,11 @@ export default function Summary({ results, onOptimize, risk, onRiskChange }: Pro
 
       {/* Wizard: labels and inputs only, explanations behind info buttons */}
       {wizard && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4" onClick={() => setWizard(false)}>
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4" onClick={() => setWizard(null)}>
           <div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white dark:bg-surface-deep p-6 shadow-2xl"
                onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-black mb-1 flex items-center gap-1">
-              Your use case
+              Use case — {wizardModel?.model_name ?? ""}
               <InfoButton label="How risk is computed" title="How risk is computed">{HOW_IT_WORKS}</InfoButton>
             </h3>
             <p className="text-xs text-slate-500 mb-5">Only you can supply these. Defaults are neutral.</p>
@@ -651,7 +677,8 @@ export default function Summary({ results, onOptimize, risk, onRiskChange }: Pro
                 <label className="flex flex-col gap-1">
                   <span className="font-bold">Data subjects (NDS)</span>
                   <input
-                    type="number" min={1} placeholder="training-set size"
+                    type="number" min={1}
+                    placeholder={derivedSubjects != null ? `from metadata (~${derivedSubjects.toLocaleString()})` : "training-set size"}
                     className="rounded-lg border border-slate-300 dark:border-surface-border bg-transparent px-3 py-2"
                     value={draft.n_subjects ?? ""}
                     onChange={(e) => setDraft({ ...draft, n_subjects: e.target.value ? Number(e.target.value) : undefined })}
@@ -740,7 +767,7 @@ export default function Summary({ results, onOptimize, risk, onRiskChange }: Pro
             </div>
 
             <div className="mt-6 flex justify-end gap-2">
-              <button onClick={() => setWizard(false)}
+              <button onClick={() => setWizard(null)}
                       className="px-4 py-2 rounded-lg border border-slate-300 dark:border-surface-border text-sm font-bold">
                 Cancel
               </button>
