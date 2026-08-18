@@ -38,6 +38,16 @@ python main.py
 Dependencies beyond the LeakPro `federated` extra: `transformers`, `timm` (DETR's ResNet backbone) and
 `pycocotools`.
 
+## Reconstruction metric
+
+This example optimizes **LPIPS** rather than SSIM (`configs.similarity_metric = "lpips"`, and the
+default of `run_optuna.py` and `run_experiments.py`). LPIPS is a perceptual distance between deep
+features, so **lower is better**, and the attack loop negates it internally to keep optuna maximizing.
+SSIM measures local luminance, contrast and structure, which on these reconstructions stays in a noise
+floor around 0.002 and barely separates a partial recovery from noise; LPIPS spreads them out. SSIM and
+PSNR are still computed and reported alongside, so old numbers remain comparable. Pass
+`--metric ssim` to either runner to select on SSIM instead.
+
 ## Credits
 
 - **Attack implementation inspired by:**

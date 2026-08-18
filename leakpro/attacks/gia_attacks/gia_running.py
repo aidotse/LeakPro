@@ -51,6 +51,9 @@ class GIABaseRunningConfig:
     bn_reg: float = 0.00016
     # if we compare difference only for top 10 layers with largest changes. Potentially good for larger models.
     top10norms: bool = False
+    # reconstruction quality metric used to pick the final image and to score optuna trials:
+    # "ssim" (higher is better) or "lpips" (a perceptual distance, scored negated so higher is better)
+    similarity_metric: str = "ssim"
 
 
 class GIABaseRunning(AbstractGIA):

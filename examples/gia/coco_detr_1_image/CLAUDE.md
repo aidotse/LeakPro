@@ -21,6 +21,25 @@ single hand-picked setting with `attack_lr` fixed at 0.1, and optuna searches th
 proves a randomly initialized shallow detector can leak. What kills stock DETR is where the update
 norm lands, not the absence of pretrained weights.
 
+## The objective is LPIPS now, not SSIM (2026-08-18)
+
+Every table below is in SSIM, but the metric that now selects the final reconstruction and scores an
+optuna trial is **LPIPS** — `configs.similarity_metric`, added to `InvertingConfig` and
+`GIABaseRunningConfig`, defaulting to `"ssim"` in core so no other example changes, and set to
+`"lpips"` in `main.py` and as the `--metric` default of `run_experiments.py` and `run_optuna.py`.
+Reason: SSIM sits at ~0.002 across essentially every configuration tried here, which is too compressed
+a range to rank trials by; LPIPS compares deep features and spreads partial recoveries apart.
+
+Mechanics worth knowing: LPIPS is a *distance*, so `dataloaders_similarity` returns it negated and the
+loop and optuna keep their "higher is better" convention — a study's best value being negative is
+expected, and `-1.21` is worse than `-0.78`. Runs print `lpips=` as the raw distance. `best_sim` now
+starts at `-inf` instead of 0, which it had to, since no negated LPIPS score ever beats 0. SSIM and
+PSNR are still computed for the final image and still printed, so the tables below stay comparable;
+`--metric ssim` reproduces the old selection exactly. Implementation is `dataloaders_lpips` in
+`leakpro/fl_utils/similarity_measurements.py`, using torchmetrics (already a `federated` dep, so no new
+requirement) with AlexNet features, denormalizing to [0,1] first and taking the min distance per
+reconstruction to mirror the SSIM max.
+
 ## Run it
 
 **Use the system `python3` (3.10), NOT the project `.venv`.** The venv's `pytorch-ignite` segfaults on

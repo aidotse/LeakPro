@@ -30,6 +30,10 @@ p.add_argument("--median-pooling", type=int, default=1)
 p.add_argument("--save", type=int, default=0)
 p.add_argument("--attack", default="inverting", choices=["inverting", "base"])
 p.add_argument("--bn-reg", type=float, default=None)
+p.add_argument("--metric", default="lpips", choices=["lpips", "ssim"],
+               help="Which reconstruction metric selects the final image. LPIPS is a perceptual distance "
+                    "(lower is better) and separates partial recoveries from noise far better than SSIM, "
+                    "which sits in its noise floor on these reconstructions.")
 add_model_args(p)
 add_data_args(p)
 add_loss_args(p)
@@ -52,6 +56,7 @@ configs.at_iterations = args.iters
 configs.tv_reg = args.tv
 configs.attack_lr = args.lr
 configs.median_pooling = bool(args.median_pooling)
+configs.similarity_metric = args.metric
 if args.bn_reg is not None:
     configs.bn_reg = args.bn_reg
 
@@ -68,8 +73,11 @@ else:
     attack.prepare_attack()
     res = None
     for i, sim, r in attack.run_attack():
-        print(f"[{args.name}] iter={i} ssim={float(sim):.4f} best_loss={float(attack.best_loss):.4f} "
+        # The loop yields "higher is better", so LPIPS comes back negated; report it as the distance.
+        score = -float(sim) if args.metric == "lpips" else float(sim)
+        print(f"[{args.name}] iter={i} {args.metric}={score:.4f} best_loss={float(attack.best_loss):.4f} "
               f"t={time.time() - t0:.0f}s", flush=True)
         res = r if r is not None else res
-print(f"[{args.name}] DONE ssim={float(res.SSIM_score):.4f} psnr={float(res.PSNR_score):.2f} "
+lpips_field = "" if res.LPIPS_score is None else f"lpips={float(res.LPIPS_score):.4f} "
+print(f"[{args.name}] DONE {lpips_field}ssim={float(res.SSIM_score):.4f} psnr={float(res.PSNR_score):.2f} "
       f"best_loss={float(attack.best_loss):.4f} time={time.time() - t0:.0f}s", flush=True)

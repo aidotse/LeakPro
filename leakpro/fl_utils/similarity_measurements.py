@@ -9,6 +9,7 @@ from ignite.metrics import SSIM
 from torch import Tensor, abs, cuda, mean, no_grad, norm
 from torch.utils.data import DataLoader
 from torchmetrics.functional import peak_signal_noise_ratio
+from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
 
 def l2_distance_weights(client_gradient: torch.Tensor, reconstruction_gradient: torch.Tensor,
@@ -150,6 +151,71 @@ def dataloaders_ssim_ignite(original_dataloader: DataLoader, recreated_dataloade
                 ssim_value = ssim_metric.compute()
                 max_ssim_scores.append(ssim_value)
     return sum(max_ssim_scores) / len(max_ssim_scores) if max_ssim_scores else 0.0
+
+
+_lpips_metrics = {}
+
+
+def _lpips_metric(net_type: str, device: str) -> LearnedPerceptualImagePatchSimilarity:
+    """Build the LPIPS network once per (net, device) and reuse it.
+
+    Constructing it downloads and instantiates a pretrained backbone, which is far too expensive to
+    redo on every evaluation inside the attack loop.
+    """
+    key = (net_type, device)
+    if key not in _lpips_metrics:
+        _lpips_metrics[key] = LearnedPerceptualImagePatchSimilarity(net_type=net_type, normalize=True).to(device)
+    return _lpips_metrics[key]
+
+
+def dataloaders_lpips(original_dataloader: DataLoader, recreated_dataloader: DataLoader,
+                      data_mean: Tensor = None, data_std: Tensor = None, net_type: str = "alex") -> float:
+    """Calculate the average min LPIPS distance for each recreated image over all original images.
+
+    LPIPS is a perceptual *distance*: 0 means identical and larger means less alike, so each recreated
+    image takes the minimum over the originals in the batch, mirroring the maximum that
+    `dataloaders_ssim_ignite` takes. The network expects images in [0, 1], so the loaders'
+    normalization is undone first when the mean and std are known.
+    """
+    device = "cuda" if cuda.is_available() else "cpu"
+    metric = _lpips_metric(net_type, device)
+
+    def denormalize(x: Tensor) -> Tensor:
+        if data_mean is None or data_std is None:
+            return x.clamp(0.0, 1.0)
+        return (x * data_std.to(x.device) + data_mean.to(x.device)).clamp(0.0, 1.0)
+
+    min_lpips_scores = []
+
+    with no_grad():
+        for orig_batch, rec_batch in zip(original_dataloader, recreated_dataloader):
+            orig_images = denormalize(orig_batch[0].to(device))
+            rec_images = denormalize(rec_batch[0].to(device))
+
+            for rec_image in rec_images:
+                pair_scores = []
+                for orig_image in orig_images:
+                    # forward() accumulates into the metric's global state, which we never use.
+                    metric.reset()
+                    pair_scores.append(float(metric(rec_image.unsqueeze(0), orig_image.unsqueeze(0))))
+                min_lpips_scores.append(min(pair_scores))
+    metric.reset()
+    # 1.0 is the "nothing to compare against" distance; the loaders are never empty in practice.
+    return sum(min_lpips_scores) / len(min_lpips_scores) if min_lpips_scores else 1.0
+
+
+def dataloaders_similarity(metric: str, original_dataloader: DataLoader, recreated_dataloader: DataLoader,
+                           data_mean: Tensor = None, data_std: Tensor = None) -> float:
+    """Score a reconstruction with the named metric, oriented so that higher is always better.
+
+    The attack loop keeps the best scoring reconstruction and optuna maximizes the yielded value, so a
+    distance metric has to enter negated.
+    """
+    if metric == "ssim":
+        return dataloaders_ssim_ignite(original_dataloader, recreated_dataloader)
+    if metric == "lpips":
+        return -dataloaders_lpips(original_dataloader, recreated_dataloader, data_mean, data_std)
+    raise ValueError(f"Unknown similarity metric '{metric}', expected 'ssim' or 'lpips'.")
 
 
 def text_reconstruciton_score(original_dataloader: DataLoader, recreated_dataloader: DataLoader, token_used: Tensor) -> float:

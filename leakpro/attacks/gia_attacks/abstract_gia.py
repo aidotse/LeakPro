@@ -17,7 +17,13 @@ from torch.utils.data import DataLoader
 from leakpro.attacks.attack_base import AbstractAttack
 from leakpro.attacks.utils.hyperparameter_tuning.optuna import optuna_optimal_hyperparameters
 from leakpro.fl_utils.model_utils import MedianPool2d
-from leakpro.fl_utils.similarity_measurements import dataloaders_psnr, dataloaders_ssim_ignite, text_reconstruciton_score
+from leakpro.fl_utils.similarity_measurements import (
+    dataloaders_lpips,
+    dataloaders_psnr,
+    dataloaders_similarity,
+    dataloaders_ssim_ignite,
+    text_reconstruciton_score,
+)
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.schemas import OptunaConfig
 from leakpro.utils.import_helper import Self
@@ -110,6 +116,12 @@ class AbstractGIA(AbstractAttack):
                                                             milestones=[at_iterations // 2.667,
                                                                         at_iterations // 1.6,
                                                                         at_iterations // 1.142], gamma=0.1)
+        # Which reconstruction quality metric drives the selection of the final image and the value
+        # optuna maximizes. It is always oriented so that higher is better, so a distance metric like
+        # LPIPS arrives negated and the tracker cannot start at 0 the way it can for SSIM.
+        similarity_metric = getattr(configs, "similarity_metric", "ssim")
+        self.best_sim = -float("inf")
+        self.final_best = deepcopy(reconstruction_loader)
         try:
             for i in range(at_iterations):
                 # loss function which does training and compares distance from reconstruction training to the real training.
@@ -133,12 +145,13 @@ class AbstractGIA(AbstractAttack):
                     logger.info(f"New best loss: {loss} on round: {i}")
                 if i % 250 == 0:
                     logger.info(f"Iteration {i}, loss {loss}")
-                    ssim = dataloaders_ssim_ignite(client_loader, self.best_reconstruction)
-                    if ssim > self.best_sim:
+                    sim = dataloaders_similarity(similarity_metric, client_loader, self.best_reconstruction,
+                                                 data_mean, data_std)
+                    if sim > self.best_sim:
                         self.final_best = deepcopy(self.best_reconstruction)
-                        self.best_sim = ssim
-                    current_sim = self.best_sim if chose_best_ssim_as_final else ssim
-                    logger.info(f"curent ssim: {self.best_sim}")
+                        self.best_sim = sim
+                    current_sim = self.best_sim if chose_best_ssim_as_final else sim
+                    logger.info(f"curent {similarity_metric}: {self.best_sim}")
                     yield i, current_sim, None
         except Exception as e:
             logger.info(f"Attack stopped due to {e}. \
@@ -146,11 +159,16 @@ class AbstractGIA(AbstractAttack):
         result = self.final_best if chose_best_ssim_as_final else reconstruction_loader
         ssim_score = dataloaders_ssim_ignite(client_loader, result)
         psnr_score = dataloaders_psnr(client_loader, result)
-        logger.info(f"final sim: {ssim_score}")
+        # LPIPS is always reported when it is the objective, and the yielded value stays the metric the
+        # attack was actually optimizing so optuna compares like with like.
+        lpips_score = dataloaders_lpips(client_loader, result, data_mean, data_std) \
+            if similarity_metric == "lpips" else None
+        final_sim = -lpips_score if similarity_metric == "lpips" else ssim_score
+        logger.info(f"final sim ({similarity_metric}): {final_sim}")
         gia_result = GIAResults(client_loader, result,
-                          psnr_score=psnr_score, ssim_score=ssim_score,
+                          psnr_score=psnr_score, ssim_score=ssim_score, lpips_score=lpips_score,
                           data_mean=data_mean, data_std=data_std, config=configs)
-        yield i, ssim_score, gia_result
+        yield i, final_sim, gia_result
 
 
     def generic_attack_loop_text(self: Self, configs:dict, gradient_closure: Callable, at_iterations: int,

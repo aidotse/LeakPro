@@ -27,6 +27,9 @@ if __name__ == "__main__":
     configs.tv_reg = 0.02
     configs.attack_lr = 0.1
     configs.median_pooling = True
+    # LPIPS rather than SSIM picks the final reconstruction: SSIM sits in its noise floor on these
+    # images, while the perceptual distance still separates a partial recovery from noise.
+    configs.similarity_metric = "lpips"
 
     attack_object = InvertingGradients(model, client_loader, data_mean, data_std,
                                        train_fn=train_detr, configs=configs)

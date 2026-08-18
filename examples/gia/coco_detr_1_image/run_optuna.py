@@ -6,6 +6,12 @@ optuna also choose which of several candidate client images to attack, because h
 leaks varies a great deal between images. Fixed hand picked hyperparameters are not a fair test of
 whether an architecture leaks, since the attack learning rate alone is searched over six orders of
 magnitude.
+
+The searched objective is LPIPS by default, not SSIM: SSIM scores local luminance and contrast
+structure and on these reconstructions it sits in the noise floor (~0.002) while still ranking
+essentially noise, whereas LPIPS compares deep features and separates a partially recovered image
+from noise much more sharply. LPIPS is a distance, so it is reported negated and optuna keeps
+maximizing.
 """
 import argparse
 import time
@@ -39,6 +45,9 @@ p.add_argument("--check-interval", type=int, default=500,
                help="Pruning check interval; must be a multiple of 250, which is the attack's yield period.")
 p.add_argument("--num-trial-images", type=int, default=5,
                help="How many candidate client images optuna may choose between.")
+p.add_argument("--metric", default="lpips", choices=["lpips", "ssim"],
+               help="Reconstruction quality metric the search optimizes. LPIPS is a distance, so it is "
+                    "negated and the study still maximizes; the reported best value is -LPIPS.")
 add_model_args(p)
 add_data_args(p)
 add_loss_args(p)
@@ -70,6 +79,7 @@ configs.optimizer = MetaSGD(lr=0.1)
 configs.criterion = build_criterion(args, model, trial_data[0], dev)
 configs.data_extension = GiaImageDetrExtension()
 configs.at_iterations = args.iters
+configs.similarity_metric = args.metric
 
 if args.attack == "inverting":
     attack = InvertingGradients(model, trial_data[0], data_mean, data_std, train_fn=train_detr,
@@ -84,8 +94,9 @@ optuna_config.check_interval = args.check_interval
 optuna_config.direction = "maximize"
 optuna_config.pruner = optuna.pruners.MedianPruner(n_warmup_steps=args.check_interval)
 
-print(f"[{args.name}] model={model_tag(args)} attack={args.attack} trials={args.trials} "
-      f"iters={args.iters} img_size={args.img_size} images={args.num_trial_images}", flush=True)
+print(f"[{args.name}] model={model_tag(args)} attack={args.attack} metric={args.metric} "
+      f"trials={args.trials} iters={args.iters} img_size={args.img_size} "
+      f"images={args.num_trial_images}", flush=True)
 t0 = time.time()
 attack.run_with_optuna(optuna_config=optuna_config)
 print(f"[{args.name}] SEARCH DONE in {time.time() - t0:.0f}s", flush=True)

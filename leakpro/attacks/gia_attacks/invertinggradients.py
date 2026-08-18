@@ -50,6 +50,9 @@ class InvertingConfig:
     median_pooling: bool = False
     # if we compare difference only for top 10 layers with largest changes. Potentially good for larger models.
     top10norms: bool = False
+    # reconstruction quality metric used to pick the final image and to score optuna trials:
+    # "ssim" (higher is better) or "lpips" (a perceptual distance, scored negated so higher is better)
+    similarity_metric: str = "ssim"
 
 class InvertingGradients(AbstractGIA):
     """Gradient inversion attack by Geiping et al."""
