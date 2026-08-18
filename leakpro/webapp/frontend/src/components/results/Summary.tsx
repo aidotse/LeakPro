@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { api, ModelResult, RiskAssessment, RiskRequest } from "../../api";
-import InfoButton from "../InfoButton";
+import InfoButton, { Detail } from "../InfoButton";
 import MetaPanel from "./MetaPanel";
 import RiskDiagram from "./RiskDiagram";
 
@@ -108,165 +108,166 @@ function bestTpr(model: ModelResult, alpha: number): { value: number; attack: st
 }
 
 // ---------------------------------------------------------------------------
-// Explanation content. Kept here, out of the layout, so the panels stay readable.
+// Explanation content. Each one opens with a plain-language lead; the depth sits behind a nested
+// Detail disclosure so the first thing a reader sees is never a wall of text.
 // ---------------------------------------------------------------------------
 
 const HOW_IT_WORKS = (
   <>
     <p>
-      The audit measures how often an attack correctly identifies a training member. Whether that
-      matters depends on your deployment, which LeakPro cannot observe. So the assessment keeps the two
-      halves apart and combines them without inventing any weights.
+      The audit measures how often an attack succeeds. You say how much a success would cost. Risk is
+      those two multiplied.
     </p>
     <RiskDiagram className="my-1" />
-    <p>
-      <b>Nothing is hidden in a coefficient.</b> Every number is either measured by this audit or
-      declared by you, and the result lists the assumption behind each derived figure.
-    </p>
-    <p>
-      <b>Why Loss Event Frequency is just the measured success rate.</b> In the published model,
-      <code> LEF = V × (RP × TEF)</code>, where <b>RP</b> is the <i>retention period</i> — how long the
-      data stays available to be attacked — and <b>TEF</b> is the <i>threat event frequency</i>, how
-      often an adversary tries. LeakPro can observe neither, so both are set to 1: a single attack
-      attempt against a model that is retained. If repeated attempts are plausible in your setting,
-      the real frequency is higher than this assessment assumes, and you should scale it up yourself.
-    </p>
-    <p className="text-xs text-slate-400">
-      Structure: Sion, Van Landuyt, Wuyts &amp; Joosen, “Privacy Risk Assessment for Data
-      Subject-aware Threat Modeling”, IWPE 2019. Precision: Jayaraman, Wang, Knipmeyer, Gu &amp; Evans,
-      “Revisiting Membership Inference Under Realistic Assumptions”, PoPETs 2021, Theorem 4.2.
-      Sensitivity scale: CNIL PIA-3 knowledge bases, 2018.
-    </p>
+    <Detail>
+      <p>
+        Nothing is hidden in a coefficient: every number is either measured here or declared by you, and
+        the result lists the assumption behind each derived figure.
+      </p>
+      <p>
+        Loss Event Frequency is the measured success rate on its own because the published model puts two
+        more factors in it — retention period (how long the data stays attackable) and threat event
+        frequency (how often an adversary tries). LeakPro can observe neither, so both are set to 1: one
+        attempt on a model that is kept. If repeated attempts are plausible for you, real frequency is
+        higher than this assumes.
+      </p>
+      <p className="text-xs text-slate-400">
+        Structure: Sion, Van Landuyt, Wuyts &amp; Joosen, IWPE 2019. Precision: Jayaraman, Wang,
+        Knipmeyer, Gu &amp; Evans, PoPETs 2021, Theorem 4.2. Sensitivity scale: CNIL PIA-3, 2018.
+      </p>
+    </Detail>
   </>
 );
 
 const ABOUT_ALPHA = (
   <>
-    <p>
-      α is the false-positive rate the attacker is assumed to tolerate. It sets the operating point the
-      whole assessment is read at, so there is no default: the choice is yours.
-    </p>
-    <ul className="list-disc ml-5 flex flex-col gap-1">
-      <li><b>1%</b> — resolvable on the audit set sizes most targets have. Start here.</li>
-      <li><b>0.1%</b> — stricter. Needs at least 1000 non-members to be measurable at all.</li>
-      <li><b>0.01%</b> — very strict. Needs at least 10000 non-members.</li>
-    </ul>
-    <p>
-      Below the resolution of your audit set, a true positive rate of zero means “not measurable”, not
-      “no leakage”. The backend refuses to report derived figures there rather than let you read a zero
-      as safety.
-    </p>
+    <p>How many false alarms the attacker puts up with. Lower is stricter. Use 1% unless you have a reason not to.</p>
+    <Detail>
+      <p>
+        A stricter rate needs a bigger audit set to be measurable at all: you need at least 1/α
+        non-members, so 1000 for 0.1% and 10000 for 0.01%.
+      </p>
+      <p>
+        Below that, a true positive rate of zero means “not measurable”, not “no leakage”, so the
+        derived figures are withheld rather than letting a zero read as safety.
+      </p>
+    </Detail>
   </>
 );
 
 const ABOUT_PRIOR = (
   <>
     <p>
-      π is the share of the attacker’s candidate pool that really are members. It does not change the
-      measurement; it changes what the measurement means.
+      How common members are in the pool the attacker is guessing from. The audit assumes half of them
+      are, which makes any attack look better than it would in practice.
     </p>
-    <p>
-      The audit runs on a balanced split, so every TPR and AUC it reports implicitly assumes π = 0.5.
-      Real pools are usually far more skewed, and precision falls steeply as they are. At a 1%
-      false-positive rate and a measured TPR of 10%, an attacker is right 91% of the time at π = 0.5 —
-      and about 1% of the time at π = 0.001.
-    </p>
-    <p>Both values are always reported, so a balanced-prior figure can never be quoted by accident.</p>
+    <Detail>
+      <p>
+        It changes what the measurement means, not the measurement. With a 10% true positive rate at a 1%
+        false-alarm rate, an attacker is right 91% of the time if half the pool are members, and about 1%
+        of the time if one in a thousand are.
+      </p>
+      <p>Both values are always reported, so the flattering one can never be quoted by accident.</p>
+    </Detail>
   </>
 );
 
 const ABOUT_FACTORS = (
   <>
     <p>
-      These four are the Loss Magnitude factors from Sion et al.: <code>LM = DTS × NR × DST × NDS</code>.
-      The paper deliberately supplies no numeric values for them, so they are yours to set. All default
-      to a neutral 1.0, which reduces the loss magnitude to a plain count of subjects.
+      Four numbers describing how bad a leak would be for the people in your data. All default to 1,
+      meaning no weighting.
     </p>
-    <ul className="list-disc ml-5 flex flex-col gap-1">
-      <li><b>DTS</b> — sensitivity of the leaked data type. The CNIL PIA severity levels are a defensible starting scale.</li>
-      <li><b>NR</b> — records of this data type per subject. Fractions are fine when only some subjects contribute it.</li>
-      <li><b>DST</b> — weight for the subject type. Raise it for vulnerable subjects such as minors or patients.</li>
-      <li><b>NDS</b> — number of data subjects. Left blank, the target’s training-set size is used.</li>
-    </ul>
-    <p className="text-xs text-slate-400">
-      Sion et al. note the model assumes these factors are independent, which they flag as a
-      simplification of reality. That assumption is recorded in every assessment.
-    </p>
+    <Detail>
+      <ul className="list-disc ml-5 flex flex-col gap-1">
+        <li><b>Sensitivity</b> — how revealing the leaked data type is. The CNIL PIA severity levels are a defensible scale.</li>
+        <li><b>Records per subject</b> — fractions are fine when only some subjects contribute the data.</li>
+        <li><b>Subject weight</b> — raise it for vulnerable subjects such as minors or patients.</li>
+        <li><b>Data subjects</b> — left blank, the target’s training-set size is used.</li>
+      </ul>
+      <p>
+        These are the Loss Magnitude factors of Sion et al., who supply the structure but deliberately no
+        values, and who note the model treats the factors as independent — a simplification recorded in
+        every assessment.
+      </p>
+    </Detail>
   </>
 );
 
 const ABOUT_TPR = (
-  <p>
-    Of all the training members in the audit set, the share the strongest attack correctly identifies
-    while keeping its false-positive rate at or below α. Attacks whose ROC is inverted (AUC below 0.5)
-    are excluded rather than counted as weak evidence.
-  </p>
+  <>
+    <p>Share of training members the best attack finds, at your false-alarm rate.</p>
+    <Detail>
+      <p>
+        Attacks whose ROC is inverted (AUC below 0.5) are excluded rather than counted as weak evidence,
+        because an inverted result makes a real leak read as no leak.
+      </p>
+    </Detail>
+  </>
 );
 
 const ABOUT_LIFT = (
-  <p>
-    How many times better than random guessing the attack is at this operating point: TPR divided by α.
-    A lift of 1× is no better than chance. The band label is derived from this figure alone, and it is
-    an unsourced convenience — no published thresholds exist for it.
-  </p>
+  <>
+    <p>How many times better than guessing the attack is. 1× is chance.</p>
+    <Detail>
+      <p>
+        True positive rate divided by the false-alarm rate. The band label comes from this figure alone,
+        and its thresholds are round numbers rather than anything published.
+      </p>
+    </Detail>
+  </>
 );
 
 const ABOUT_PPV = (
   <>
-    <p>
-      If the attacker claims a record was in the training set, how often are they right? This is the
-      number that decides whether a leak is actionable, and it depends on your declared prior π as much
-      as on the attack.
-    </p>
-    <p className="font-mono text-xs">PPV = TPR / (TPR + γ·α), γ = (1 − π) / π</p>
-    <p>
-      <b>γ is how outnumbered the members are:</b> for every genuine member in the attacker’s candidate
-      pool there are γ non-members. It is derived from your π, not a separate input — π = 0.5 gives
-      γ = 1, π = 0.01 gives γ = 99, π = 0.001 gives γ = 999.
-    </p>
-    <p>
-      That is why it multiplies the false-positive rate. At π = 0.001 with a measured TPR of 10% and
-      α = 1%, each member yields 0.10 expected true positives while the 999 non-members yield
-      999 × 0.01 = 9.99 false ones — about ten false alarms per correct hit, so precision is roughly
-      1%. The identical measurement reads 91% at π = 0.5.
-    </p>
-    <p className="text-xs text-slate-400">
-      A tenfold more skewed pool costs as much precision as a tenfold looser threshold, which is the
-      same reason strict operating points matter.
-    </p>
+    <p>When the attacker says “this record was used in training”, how often they are right.</p>
+    <Detail>
+      <p className="font-mono text-xs">PPV = TPR / (TPR + γ·α), γ = (1 − π) / π</p>
+      <p>
+        γ is how outnumbered the members are: for every real member in the pool there are γ others. It
+        comes from your prior, so π = 0.5 gives γ = 1 and π = 0.001 gives γ = 999.
+      </p>
+      <p>
+        That is why it multiplies the false-alarm rate. At π = 0.001 with a 10% true positive rate and a
+        1% false-alarm rate, one member yields 0.10 correct flags while the other 999 yield about 10
+        wrong ones — so roughly ten false alarms per hit.
+      </p>
+    </Detail>
   </>
 );
 
 const ABOUT_EXPOSED = (
   <>
-    <p>
-      The measured success rate applied to your declared population: how many subjects an attacker would
-      be expected to identify. Sensitivity weights are deliberately left out of this figure so it stays
-      a plain count you can reason about.
-    </p>
-    <p>
-      <b>This count does not depend on π, and should not.</b> The true positive rate is conditional on a
-      record actually being a member, so it is unaffected by how the attacker’s pool is composed —
-      which means this figure already counts true positives only. Multiplying it by precision would be
-      circular, since precision times the flagged set <i>is</i> the true-positive count.
-    </p>
-    <p>
-      A skewed prior does not reduce how many members are genuinely identified; it increases the false
-      accusations sitting alongside them. So read the two columns as different questions: this one is
-      how many people the attack really exposes, precision is how far an attacker can trust any single
-      claim. “1000 exposed at 1% precision” and “40 exposed at 99% precision” are both real findings,
-      and they call for different responses.
-    </p>
+    <p>Roughly how many of your subjects an attacker would actually identify.</p>
+    <Detail>
+      <p>
+        This count does not depend on the prior, and should not. The true positive rate is conditional on
+        a record really being a member, so the figure already counts correct identifications only.
+        Multiplying it by precision would be circular, since precision times the flagged set is that same
+        count.
+      </p>
+      <p>
+        A skewed prior does not reduce how many members are identified; it adds false accusations beside
+        them. So read the two columns as different questions: this one is how many people are exposed,
+        precision is how far a single claim can be trusted.
+      </p>
+      <p>Sensitivity weights are left out on purpose, so this stays a plain count.</p>
+    </Detail>
   </>
 );
 
 const ABOUT_BAND = (
-  <p>
-    An advisory label over the measured lift only, never over the combination of measurement and
-    judgement. The thresholds are round numbers chosen so that NONE means no better than chance and
-    SEVERE means two orders of magnitude better than chance. They are not calibrated against anything
-    published, which is why the policy version travels with every assessment.
-  </p>
+  <>
+    <p>A rough label for the measured lift. Advisory only.</p>
+    <Detail>
+      <p>
+        It labels the measurement, never the combination of measurement and judgement. NONE means no
+        better than chance and SEVERE means two orders of magnitude better, but the thresholds are not
+        calibrated against anything published — which is why the policy version travels with every
+        assessment.
+      </p>
+    </Detail>
+  </>
 );
 
 export default function Summary({ results, risk, onRiskChange }: Props) {
@@ -655,11 +656,13 @@ export default function Summary({ results, risk, onRiskChange }: Props) {
                 <span className="font-bold flex items-center gap-1">
                   Cost per exposed subject
                   <InfoButton label="Cost per exposed subject">
-                    <p>
-                      Optional, in any unit you choose. Left blank, no monetary figure is reported at
-                      all — a default cost would be fabricated, and a fabricated cost is worse than
-                      none.
-                    </p>
+                    <p>Optional, in any unit you like.</p>
+                    <Detail>
+                      <p>
+                        Left blank, no monetary figure is reported at all. A default cost would be made
+                        up, and a made-up cost is worse than none.
+                      </p>
+                    </Detail>
                   </InfoButton>
                 </span>
                 <input
@@ -679,11 +682,13 @@ export default function Summary({ results, risk, onRiskChange }: Props) {
                 <span className="flex items-center gap-1">
                   Extrapolate exposed records to the full training set
                   <InfoButton label="Extrapolation">
-                    <p>
-                      Scales the exposed-record count from the audit set up to the training population.
-                      Off by default: per-record vulnerability is strongly non-uniform, so this is an
-                      estimate under an assumption, not a measurement.
-                    </p>
+                    <p>Scales the exposed count from the audit set up to the whole training set.</p>
+                    <Detail>
+                      <p>
+                        Off by default, because some records are far more exposed than others. The
+                        scaled number is an estimate under that assumption, not a measurement.
+                      </p>
+                    </Detail>
                   </InfoButton>
                 </span>
               </label>

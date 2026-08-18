@@ -79,3 +79,21 @@ export default function InfoButton({
     </>
   );
 }
+
+/**
+ * Progressive disclosure inside an info modal: a one-line lead stays visible, the depth is one click
+ * further in. Native details/summary so there is no state to manage and it stays keyboard-accessible.
+ */
+export function Detail({ children, label = "More detail" }: { children: React.ReactNode; label?: string }) {
+  return (
+    <details className="group">
+      <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden text-xs font-bold text-primary hover:underline">
+        {label}
+        <span className="material-symbols-outlined align-middle text-sm ml-0.5 group-open:rotate-180 transition-transform">
+          expand_more
+        </span>
+      </summary>
+      <div className="mt-2 flex flex-col gap-2 text-slate-500 dark:text-slate-300">{children}</div>
+    </details>
+  );
+}
