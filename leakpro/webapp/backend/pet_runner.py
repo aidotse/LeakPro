@@ -20,11 +20,19 @@ import argparse
 import importlib.util
 import json
 import math
+import os
 import pickle
 import sys
 import traceback
 from pathlib import Path
 from typing import Any
+
+# Set before torch touches CUDA. The spawner sets this too, but the runner is a
+# fresh process every launch, so setting it here means the fix cannot be defeated
+# by a stale (un-reloaded) backend. Lets CUDA grow its allocation instead of
+# pre-reserving fixed segments, which is the usual cause of a spurious OOM when
+# the campaign trains many models back to back.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 import numpy as np
 import torch
@@ -196,6 +204,32 @@ def _apply_advanced(space: KnobSpace, advanced: dict) -> KnobSpace:
     return space
 
 
+def _is_oom(exc: BaseException) -> bool:
+    """True for a CUDA out-of-memory error, however this torch version raises it."""
+    oom_type = getattr(torch.cuda, "OutOfMemoryError", ())
+    return isinstance(exc, oom_type) or "out of memory" in str(exc).lower()
+
+
+def _run_with_oom_backoff(build_fns, run, max_physical_batch: int, floor: int = 4):  # noqa: ANN001
+    """Run `run(train_fn, utility_fn, attack_fn)`, halving the batch cap on OOM.
+
+    The cap is a memory measure only, so shrinking it never changes a result.
+    The campaign resumes from its JSONL, so a retry re-runs only the config that
+    ran out of memory, not the whole sweep.
+    """
+    batch = max_physical_batch
+    while True:
+        try:
+            return run(*build_fns(batch))
+        except Exception as exc:  # noqa: BLE001
+            if not _is_oom(exc) or batch <= floor:
+                raise
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            batch = max(floor, batch // 2)
+            logger.warning(f"CUDA out of memory; retrying at max_physical_batch={batch}.")
+
+
 def run_campaign(job_dir: Path, model_name: str) -> None:
     """Run the whole sweep, then record the best trade-offs."""
     out = pet_dir(job_dir, model_name)
@@ -218,14 +252,20 @@ def run_campaign(job_dir: Path, model_name: str) -> None:
     write_status(out, status="running", model_name=model_name, n_configs=n_configs,
                  baseline_utility=model.get("test_accuracy"), resolution_warning=warning)
 
-    train_fn, utility_fn, attack_fn = build_campaign_fns(
-        recipe, splits, n_refs=n_refs, device=device,
-        utility_metric="accuracy",
-        delta=float(request.get("delta") or 1e-5),
-        max_physical_batch=max_physical_batch,
-    )
-    campaign = Campaign(train_fn, utility_fn, attack_fn, knob_space=space, output_dir=out, seed=int(job.get("seed", 0)))
-    records = campaign.run(n_configs)
+    delta = float(request.get("delta") or 1e-5)
+    seed = int(job.get("seed", 0))
+
+    def build_fns(batch: int):  # noqa: ANN202
+        return build_campaign_fns(
+            recipe, splits, n_refs=n_refs, device=device,
+            utility_metric="accuracy", delta=delta, max_physical_batch=batch,
+        )
+
+    def run_campaign_fns(train_fn, utility_fn, attack_fn):  # noqa: ANN001, ANN202
+        campaign = Campaign(train_fn, utility_fn, attack_fn, knob_space=space, output_dir=out, seed=seed)
+        return campaign.run(n_configs)
+
+    records = _run_with_oom_backoff(build_fns, run_campaign_fns, max_physical_batch)
 
     front = pareto_front(records)
     write_status(
@@ -255,16 +295,21 @@ def run_verification(job_dir: Path, model_name: str, index: int) -> None:
     max_physical_batch = int(request.get("max_physical_batch") or DEFAULT_MAX_PHYSICAL_BATCH)
     recipe, splits, _, _ = build(job, job_dir, model_name)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    train_fn, utility_fn, attack_fn = build_campaign_fns(
-        recipe, splits, n_refs=VERIFY_N_REFS, device=device,
-        utility_metric="accuracy",
-        max_physical_batch=max_physical_batch,
-    )
-
     config = record["config"]
-    model = train_fn(config)
-    utility = float(utility_fn(model))
-    tpr, _, _ = tpr_at_fpr(attack_fn(model, config), record.get("proxy_fpr", 0.01))
+
+    def build_fns(batch: int):  # noqa: ANN202
+        return build_campaign_fns(
+            recipe, splits, n_refs=VERIFY_N_REFS, device=device,
+            utility_metric="accuracy", max_physical_batch=batch,
+        )
+
+    def verify_once(train_fn, utility_fn, attack_fn):  # noqa: ANN001, ANN202
+        model = train_fn(config)
+        util = float(utility_fn(model))
+        tpr_val, _, _ = tpr_at_fpr(attack_fn(model, config), record.get("proxy_fpr", 0.01))
+        return util, tpr_val, getattr(model, "campaign_extras", {}).get("epsilon")
+
+    utility, tpr, epsilon = _run_with_oom_backoff(build_fns, verify_once, max_physical_batch)
 
     target.write_text(json.dumps(json_safe({
         "status": "done",
@@ -273,7 +318,7 @@ def run_verification(job_dir: Path, model_name: str, index: int) -> None:
         "verified": {
             "attack_tpr": tpr,
             "utility": utility,
-            "epsilon": getattr(model, "campaign_extras", {}).get("epsilon"),
+            "epsilon": epsilon,
         },
     }), indent=2))
     logger.info(f"Verified setting {index}: TPR {tpr:.4f} (search estimated {estimated['attack_tpr']}).")
