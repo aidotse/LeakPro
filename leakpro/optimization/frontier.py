@@ -30,9 +30,15 @@ def pareto_front(records: list[EvaluationRecord]) -> list[EvaluationRecord]:
 
 def plot_frontier(records: list[EvaluationRecord], path: str | Path) -> Path:
     """Scatter all evaluations, highlight the Pareto front, save to ``path``."""
+    import sys
+
     import matplotlib
 
-    matplotlib.use("Agg")
+    # Only force the headless backend when pyplot has not been imported yet:
+    # matplotlib.use() would otherwise silently hijack an interactive session's
+    # backend for the rest of the process (e.g. a notebook calling this).
+    if "matplotlib.pyplot" not in sys.modules:
+        matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     scored = [r for r in records if r.get("attack_tpr") is not None]

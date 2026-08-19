@@ -63,7 +63,13 @@ def load_splits(seed: int = 0) -> dict:
     test_idx = rng.permutation(np.asarray(indices["test_indices"]))
 
     n_target = len(train_idx) // 2
-    n_audit = 2000
+    # Audit members must be a subset of target_train (the first n_target train
+    # indices), and nonmembers plus a non-empty utility split must both fit in
+    # the test indices — cap instead of assuming the dataset is large enough.
+    n_audit = min(2000, n_target, len(test_idx) - 1)
+    if n_audit <= 0 or len(test_idx) - n_audit <= 0:
+        raise ValueError(f"Dataset too small for the campaign splits: {len(train_idx)} train / "
+                         f"{len(test_idx)} test indices.")
     return {
         "x": x,
         "y": y,

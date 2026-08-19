@@ -92,6 +92,29 @@ def main() -> None:
                for line in (campaign_dir / "evaluations.jsonl").read_text().strip().splitlines()]
     logger.info(f"Loaded {len(records)} evaluations from {campaign_dir}.")
 
+    # Validation only means anything if it retrains with the campaign's own
+    # recipe: a different seed reshuffles every split, a different epoch count
+    # is a different model. Cross-check against what the campaign recorded
+    # instead of trusting the flags.
+    meta_path = campaign_dir / "run_meta.json"
+    if meta_path.exists():
+        meta = json.loads(meta_path.read_text())
+        for field in ("epochs", "seed"):
+            if field in meta and getattr(args, field) != meta[field]:
+                raise SystemExit(
+                    f"--{field}={getattr(args, field)} does not match the campaign's {field}={meta[field]} "
+                    f"(from {meta_path}). Validating with a mismatched recipe produces confidently wrong numbers."
+                )
+    else:
+        record_seeds = {r.get("seed") for r in records if "seed" in r}
+        if record_seeds and record_seeds != {args.seed}:
+            raise SystemExit(
+                f"--seed={args.seed} does not match the seed(s) {sorted(record_seeds)} stored in the "
+                "campaign records. Validating with a mismatched seed reshuffles every split."
+            )
+        logger.warning("No run_meta.json in the campaign dir; --epochs cannot be cross-checked. "
+                       "Make sure it matches the campaign's epochs.")
+
     splits = load_splits(seed=args.seed, audit_size=args.audit_size)
     warning = resolution_warning(args.audit_size, min(args.report_fprs))
     if warning:

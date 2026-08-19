@@ -89,6 +89,16 @@ class KnobSpace:
         knobs = [k for k in self.knobs if k.name != name]
         return KnobSpace(knobs, fixed={**self.fixed, name: value})
 
+    def to_dict(self) -> dict:
+        """JSON-serializable description of the space, used to guard campaign resume."""
+        return {
+            "knobs": [
+                {"name": k.name, "low": k.low, "high": k.high, "log_scale": k.log_scale, "integer": k.integer}
+                for k in self.knobs
+            ],
+            "fixed": dict(self.fixed),
+        }
+
     def sample_sobol(self, n: int, seed: int = 0) -> list[dict[str, float]]:
         """Draw ``n`` configurations from a scrambled Sobol sequence (deterministic per seed)."""
         if self.dim == 0:

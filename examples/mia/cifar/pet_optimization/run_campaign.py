@@ -22,6 +22,7 @@ Usage:
 """
 
 import argparse
+import json
 import pickle
 import sys
 import time
@@ -84,6 +85,9 @@ def load_splits(seed: int = 0, audit_size: int = N_AUDIT) -> dict:
     # Nonmembers must not overlap the utility split; members are drawn from the
     # target's own training set, so the cap is the training-set size.
     n_audit = min(audit_size, len(target_train), len(rest) - N_UTILITY_EVAL)
+    if n_audit <= 0:
+        raise ValueError(f"Dataset too small: {len(rest)} samples left after target/ref splits "
+                         f"cannot fit an audit set plus {N_UTILITY_EVAL} utility samples.")
     if n_audit < audit_size:
         logger.warning(f"Audit size capped at {n_audit} (requested {audit_size}) by the available disjoint data.")
     return {
@@ -91,8 +95,8 @@ def load_splits(seed: int = 0, audit_size: int = N_AUDIT) -> dict:
         "y": y,
         "target_train": target_train,
         "ref_pool": ref_pool,
-        "audit_members": target_train[:N_AUDIT],
-        "audit_nonmembers": rest[:N_AUDIT],
+        "audit_members": target_train[:min(N_AUDIT, n_audit)],
+        "audit_nonmembers": rest[:min(N_AUDIT, n_audit)],
         "audit_members_large": target_train[:n_audit],
         "audit_nonmembers_large": rest[:n_audit],
         "utility_eval": rest[n_audit:n_audit + N_UTILITY_EVAL],
@@ -202,15 +206,21 @@ def make_fns(splits: dict, epochs: int, n_refs: int, device: str, ref_seed: int 
     return train_fn, utility_fn, attack_fn
 
 
-def knob_space(include_nonprivate: bool) -> KnobSpace:
-    """Joint DP-SGD space; optionally let noise reach 0 to anchor the leaky end of the frontier."""
-    noise_low = 0.0 if include_nonprivate else 0.4
+def knob_space() -> KnobSpace:
+    """Joint DP-SGD space, log-scaled. The non-private anchor is never sampled
+    from this space: a continuous draw hits exactly 0 with probability zero, so
+    the anchor is passed to ``Campaign.run(anchors=...)`` instead."""
     return KnobSpace([
-        Knob("noise_multiplier", noise_low, 4.0, log_scale=not include_nonprivate),
+        Knob("noise_multiplier", 0.4, 4.0, log_scale=True),
         Knob("max_grad_norm", 0.1, 10.0, log_scale=True),
         Knob("learning_rate", 1e-3, 0.5, log_scale=True),
         Knob("batch_size", 64, 1024, log_scale=True, integer=True),
     ])
+
+
+# The epsilon = infinity end of the frontier: plain SGD with mid-range utility
+# knobs. Clipping is inactive at noise 0, so max_grad_norm is a placeholder.
+NONPRIVATE_ANCHOR = {"noise_multiplier": 0.0, "max_grad_norm": 10.0, "learning_rate": 0.05, "batch_size": 128}
 
 
 def main() -> None:
@@ -222,7 +232,7 @@ def main() -> None:
     parser.add_argument("--out", default="leakpro_output/pet_optimization")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--include-nonprivate", action="store_true",
-                        help="let noise_multiplier reach 0 (linear scale) to anchor the leaky end")
+                        help="evaluate one explicit noise=0 configuration (index -1) to anchor the leaky end")
     parser.add_argument("--smoke", action="store_true", help="2 configs, 2 epochs, 1 ref: pipeline check only")
     args = parser.parse_args()
 
@@ -235,19 +245,23 @@ def main() -> None:
 
     campaign = Campaign(
         train_fn, utility_fn, attack_fn,
-        knob_space=knob_space(args.include_nonprivate),
+        knob_space=knob_space(),
         output_dir=args.out,
         seed=args.seed,
     )
+    # Recorded so validate_frontier can refuse to "validate" with a different recipe.
+    (Path(args.out) / "run_meta.json").write_text(
+        json.dumps({"epochs": args.epochs, "n_refs": args.n_refs, "seed": args.seed}))
     start = time.time()
-    records = campaign.run(args.n_configs)
+    records = campaign.run(args.n_configs, anchors=[NONPRIVATE_ANCHOR] if args.include_nonprivate else None)
     logger.info(f"Campaign done: {len(records)} configs in {time.time() - start:.0f}s.")
 
     front = pareto_front(records)
     logger.info(f"Pareto front ({len(front)} points):")
     for r in front:
+        eps = r.get("epsilon")
         logger.info(f"  utility={r['utility']:.4f}  TPR@1%={r['attack_tpr']:.4f}  "
-                    f"eps={r.get('epsilon', float('nan')):.2f}  config={r['config']}")
+                    f"eps={'inf' if eps is None else f'{eps:.2f}'}  config={r['config']}")
     plot_path = plot_frontier(records, Path(args.out) / "frontier.png")
     logger.info(f"Frontier plot: {plot_path}")
 

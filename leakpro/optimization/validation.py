@@ -128,12 +128,27 @@ def proxy_agreement(
     warning = resolution_warning(len(scores.nonmember_scores), target_fpr)
     if warning:
         logger.warning(f"Proxy agreement: {warning}")
-    logger.info(f"Proxy agreement: Spearman rho = {rho:.3f} (p = {pvalue:.3g}) over {len(picks)} configs.")
+
+    # spearmanr returns NaN when either ranking is constant (e.g. every
+    # re-attack lands at TPR 0 because the target FPR is unresolvable). A NaN
+    # must not pass silently: it would disable the "rho well below 0.7 is a
+    # finding" check while looking like a number.
+    if np.isnan(rho):
+        undefined = ("Spearman rho is undefined: at least one ranking is constant. This usually means the "
+                     f"target FPR {target_fpr:.2%} produced no resolvable TPR differences; the proxy check "
+                     "is INCONCLUSIVE, not passed.")
+        logger.warning(f"Proxy agreement: {undefined}")
+        warning = f"{warning} {undefined}" if warning else undefined
+        rho_out, p_out = None, None
+    else:
+        logger.info(f"Proxy agreement: Spearman rho = {rho:.3f} (p = {pvalue:.3g}) over {len(picks)} configs.")
+        rho_out, p_out = float(rho), float(pvalue)
+
     return {
         "proxy_fpr": proxy_fpr,
         "target_fpr": target_fpr,
-        "spearman_rho": float(rho),
-        "p_value": float(pvalue),
+        "spearman_rho": rho_out,
+        "p_value": p_out,
         "n_configs": len(picks),
         "resolution_warning": warning,
         "pairs": pairs,

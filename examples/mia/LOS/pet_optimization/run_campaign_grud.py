@@ -195,7 +195,10 @@ def main() -> None:
     parser.add_argument("--n-configs", type=int, default=20)
     parser.add_argument("--epochs", type=int, default=8)
     parser.add_argument("--n-refs", type=int, default=2)
-    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    # No --device flag on purpose: GRUD pins X_mean, the identity matrix and
+    # FilterLinear's filter to the auto-detected device at construction, and
+    # .to(device) does not move those unregistered attributes — a flag would
+    # accept a value it cannot honor.
     parser.add_argument("--out", default="leakpro_output/pet_optimization_grud")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--smoke", action="store_true", help="2 configs, 1 epoch, 1 ref: pipeline check only")
@@ -206,7 +209,8 @@ def main() -> None:
         args.out = args.out + "_smoke"
 
     splits = load_splits(seed=args.seed)
-    train_fn, utility_fn, attack_fn = make_fns(splits, args.epochs, args.n_refs, args.device)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    train_fn, utility_fn, attack_fn = make_fns(splits, args.epochs, args.n_refs, device)
 
     campaign = Campaign(
         train_fn, utility_fn, attack_fn,

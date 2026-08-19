@@ -194,3 +194,125 @@ class TestValidation:
             n_configs=6,
         )
         assert result["spearman_rho"] < 0.0
+
+
+class TestTieSafety:
+    """tpr_at_fpr must never realize a higher FPR than requested — DP-SGD
+    saturates outputs, so tied nonmember blocks are the normal case, not an edge."""
+
+    @staticmethod
+    def _realized_fpr(nonmembers, tpr_threshold_probe_members, fpr):
+        # Recompute what FPR the chosen operating point actually admits, by
+        # finding the member-counting rule's threshold implicitly: any member
+        # score x is counted iff tpr counts it; probe with the nonmembers.
+        tpr, _, n = tpr_at_fpr(AttackScores(np.asarray(nonmembers, float),
+                                            np.asarray(nonmembers, float)), fpr)
+        # Using the nonmembers as members: TPR == realized FPR by construction.
+        return tpr
+
+    def test_all_tied_nonmembers_do_not_blow_the_budget(self):
+        nm = np.zeros(1000)
+        m = np.zeros(1000)
+        tpr, k, n = tpr_at_fpr(AttackScores(m, nm), 0.01)
+        assert tpr == 0.0  # counting the tied block would mean 100% FPR
+        assert self._realized_fpr(nm, m, 0.01) <= 0.01
+
+    def test_tie_block_crossing_the_boundary_is_excluded(self):
+        nm = np.concatenate([np.ones(500), np.zeros(500)])
+        m = np.ones(1000)
+        tpr, _, _ = tpr_at_fpr(AttackScores(m, nm), 0.01)
+        # Admitting the 500-strong tied block would realize 50% FPR at a 1% budget.
+        assert tpr == 0.0
+        assert self._realized_fpr(nm, m, 0.01) <= 0.01
+
+    def test_partial_tie_falls_back_to_next_distinct_value(self):
+        # 5 nonmembers at 2.0, 995 below: the block fits inside a 1% budget.
+        nm = np.concatenate([np.full(5, 2.0), np.linspace(-1, 1, 995)])
+        m = np.full(100, 2.0)
+        tpr, _, _ = tpr_at_fpr(AttackScores(m, nm), 0.01)
+        assert tpr == 1.0  # threshold sits at 2.0; realized FPR = 5/1000 <= 1%
+
+    def test_distinct_scores_match_the_classic_rule(self):
+        rng = np.random.default_rng(0)
+        nm = rng.normal(size=2000)  # continuous -> ties have measure zero
+        m = rng.normal(1.0, 1.0, size=2000)
+        tpr, _, _ = tpr_at_fpr(AttackScores(m, nm), 0.01)
+        n_admit = int(np.floor(0.01 * nm.size))
+        classic = np.mean(m >= np.sort(nm)[::-1][n_admit - 1])
+        assert tpr == pytest.approx(classic)
+
+
+class TestCampaignRobustness:
+    def test_resume_with_different_identity_refuses(self, tmp_path):
+        _fake_campaign(tmp_path, seed=0).run(4)
+        with pytest.raises(ValueError, match="different seed"):
+            _fake_campaign(tmp_path, seed=1)
+
+    def test_failing_config_is_recorded_and_does_not_kill_the_sweep(self, tmp_path):
+        calls = {"n": 0}
+
+        def flaky_train(config):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise RuntimeError("boom")
+            model = type("M", (dict,), {"campaign_extras": None})(config)
+            model.campaign_extras = {"epsilon": 1.0}
+            return model
+
+        def utility(model):
+            return 0.5
+
+        def attack(model, config):
+            rng = np.random.default_rng(0)
+            return AttackScores(rng.normal(1, 1, 500), rng.normal(0, 1, 500))
+
+        campaign = Campaign(flaky_train, utility, attack, default_dpsgd_space(), tmp_path)
+        records = campaign.run(4)
+        errored = [r for r in records if "error" in r]
+        assert len(records) == 4
+        assert len(errored) == 1 and "boom" in errored[0]["error"]
+
+        # Resume retries the errored config instead of livelocking or skipping it.
+        resumed = Campaign(flaky_train, utility, attack, default_dpsgd_space(), tmp_path)
+        final = resumed.run(4)
+        ok_indices = {r["index"] for r in final if "error" not in r}
+        assert ok_indices == {0, 1, 2, 3}
+
+    def test_anchor_runs_under_reserved_negative_index(self, tmp_path):
+        anchor = {"noise_multiplier": 0.0, "max_grad_norm": 1.0, "learning_rate": 0.05, "batch_size": 128}
+
+        def train(config):
+            model = type("M", (dict,), {"campaign_extras": None})(config)
+            eps = float("inf") if config["noise_multiplier"] == 0 else 1.0
+            model.campaign_extras = {"epsilon": eps}
+            return model
+
+        def utility(model):
+            return 0.9
+
+        def attack(model, config):
+            rng = np.random.default_rng(1)
+            return AttackScores(rng.normal(1, 1, 500), rng.normal(0, 1, 500))
+
+        campaign = Campaign(train, utility, attack, default_dpsgd_space(), tmp_path)
+        records = campaign.run(3, anchors=[anchor])
+        assert {r["index"] for r in records} == {-1, 0, 1, 2}
+        anchor_record = next(r for r in records if r["index"] == -1)
+        # epsilon = inf is stored as None: bare Infinity is not JSON and browsers reject it.
+        assert anchor_record["epsilon"] is None
+        raw = (tmp_path / "evaluations.jsonl").read_text()
+        assert "Infinity" not in raw and json.loads(raw.splitlines()[0]) is not None
+
+
+class TestProxyAgreementNaN:
+    def test_constant_rankings_report_inconclusive_not_a_number(self, tmp_path):
+        records = _fake_campaign(tmp_path).run(6)
+
+        def constant_revalidate(config):
+            # Target-FPR re-attack that cannot resolve anything: all scores tied.
+            return AttackScores(np.zeros(500), np.zeros(500))
+
+        out = proxy_agreement(records, constant_revalidate, n_configs=4)
+        assert out["spearman_rho"] is None
+        assert out["p_value"] is None
+        assert "INCONCLUSIVE" in (out["resolution_warning"] or "")

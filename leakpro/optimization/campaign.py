@@ -17,6 +17,7 @@ the same configuration as the candidate target.
 """
 
 import json
+import math
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -90,7 +91,26 @@ class Campaign:
     def _log_path(self) -> Path:
         return self.output_dir / "evaluations.jsonl"
 
+    @property
+    def _meta_path(self) -> Path:
+        return self.output_dir / "campaign.json"
+
+    def _identity(self) -> dict:
+        return {"seed": self.seed, "proxy_fpr": self.proxy_fpr, "knob_space": self.knob_space.to_dict()}
+
     def _load_existing(self) -> None:
+        # Resume is index-based, and indices only name Sobol positions of ONE
+        # (seed, space) pair — mixing sweeps would silently attribute another
+        # campaign's results to this one's configurations. Refuse instead.
+        if self._meta_path.exists():
+            stored = json.loads(self._meta_path.read_text())
+            if stored != self._identity():
+                raise ValueError(
+                    f"{self.output_dir} holds a campaign with a different seed, proxy_fpr or knob space; "
+                    "resuming would mix incompatible sweeps. Use a fresh output_dir or match the stored settings."
+                )
+        else:
+            self._meta_path.write_text(json.dumps(self._identity(), indent=2))
         if not self._log_path.exists():
             return
         with self._log_path.open() as f:
@@ -98,19 +118,49 @@ class Campaign:
         if self.records:
             logger.info(f"Resuming campaign: {len(self.records)} evaluations found in {self._log_path}.")
 
+    @staticmethod
+    def _json_safe(value):  # noqa: ANN001, ANN205
+        # float("inf") serializes as a bare `Infinity`, which is not JSON and
+        # which browsers reject; the non-private anchor's epsilon is exactly
+        # that. None is the documented spelling of "no finite value".
+        if isinstance(value, dict):
+            return {k: Campaign._json_safe(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [Campaign._json_safe(v) for v in value]
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
+        return value
+
     def _append(self, record: EvaluationRecord) -> None:
+        record = EvaluationRecord(self._json_safe(record))
         self.records.append(record)
         with self._log_path.open("a") as f:
             f.write(json.dumps(record) + "\n")
 
-    def run(self, n_configs: int) -> list[EvaluationRecord]:
-        """Evaluate a Sobol sweep of ``n_configs`` configurations (resumes if interrupted)."""
-        configs = self.knob_space.sample_sobol(n_configs, seed=self.seed)
-        done = {r["index"] for r in self.records}
-        for index, config in enumerate(configs):
+    def run(self, n_configs: int, anchors: list[dict[str, float]] | None = None) -> list[EvaluationRecord]:
+        """Evaluate a Sobol sweep of ``n_configs`` configurations (resumes if interrupted).
+
+        ``anchors`` are explicit configurations evaluated before the sweep under
+        reserved negative indices (-1, -2, ...): sampling can never land on an
+        exact value like ``noise_multiplier == 0``, so documented anchor points
+        must be forced, not hoped for.
+
+        A configuration that raises is recorded with an ``error`` field and the
+        sweep continues; errored indices are retried on the next resume.
+        """
+        planned = [(-(i + 1), config) for i, config in enumerate(anchors or [])]
+        planned += list(enumerate(self.knob_space.sample_sobol(n_configs, seed=self.seed)))
+        done = {r["index"] for r in self.records if "error" not in r}
+        for index, config in planned:
             if index in done:
                 continue
-            self._append(self._evaluate(index, config))
+            try:
+                record = self._evaluate(index, config)
+            except Exception as exc:  # noqa: BLE001 — one bad config must not kill or livelock the sweep
+                logger.error(f"Config {index} failed: {exc}")
+                record = EvaluationRecord(index=index, config=config, seed=self.seed,
+                                          proxy_fpr=self.proxy_fpr, error=str(exc))
+            self._append(record)
         return self.records
 
     def _evaluate(self, index: int, config: dict[str, float]) -> EvaluationRecord:
