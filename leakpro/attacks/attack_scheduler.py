@@ -7,8 +7,10 @@
 from pathlib import Path
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.schemas import AuditConfig
 from leakpro.utils.import_helper import Any, Dict, Self
 from leakpro.utils.logger import logger
+from leakpro.utils.seed import seed_everything
 
 
 class AttackScheduler:
@@ -30,6 +32,12 @@ class AttackScheduler:
 
         """
         configs = handler.configs
+
+        # Seed once at audit start so attack construction (e.g. audit-data sampling)
+        # is reproducible. Non-int guard keeps DotMap-based test configs working.
+        seed = getattr(configs.audit, "random_seed", None)
+        self.random_seed = seed if isinstance(seed, int) else AuditConfig.model_fields["random_seed"].default
+        seed_everything(self.random_seed)
 
         # Create factory
         attack_type = configs.audit.attack_type
@@ -103,6 +111,9 @@ class AttackScheduler:
         """Run the attacks and return the results."""
         results = []
         for attack_obj, attack_type in zip(self.attacks, self.attack_names):
+            # Re-seed before every attack so each attack sees the same random state
+            # regardless of which earlier attacks ran or were loaded from cache.
+            seed_everything(self.random_seed)
             run_with_optuna = use_optuna and attack_obj.optuna_params > 0
 
             # If Optuna is used, the attack should not be loaded even if it already exists
