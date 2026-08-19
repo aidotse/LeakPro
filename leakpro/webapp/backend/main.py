@@ -38,46 +38,20 @@ def _default_train(loader, model, criterion, optimizer, epochs,
         from opacus import PrivacyEngine
         from opacus.accountants.utils import get_noise_multiplier
         from opacus.utils.batch_memory_manager import BatchMemoryManager
-        from opacus.validators import ModuleValidator
 
-        errors = ModuleValidator.validate(model, strict=False)
-        if errors:
-            model = ModuleValidator.fix(model)
+        from leakpro.optimization import make_opacus_compatible
+
+        # One implementation of the Opacus-compat rewrite (BatchNorm -> GroupNorm,
+        # in-place activations off, residual adds out of place) shared with the
+        # PET campaign path, so a model trained here and a model trained by a
+        # campaign are the same architecture.
+        fixed = make_opacus_compatible(model)
+        if fixed is not model:
+            model = fixed
             opt_cls = optimizer.__class__
             opt_cfg = {k: v for group in optimizer.param_groups
                        for k, v in group.items() if k != "params"}
             optimizer = opt_cls(model.parameters(), **opt_cfg)
-
-        for module in model.modules():
-            if hasattr(module, "inplace") and isinstance(module.inplace, bool):
-                module.inplace = False
-
-        # ModuleValidator.fix() replaces BatchNorm but leaves ResNet's skip-connection
-        # `out += identity` in-place, which Opacus's backward hooks forbid.
-        # Patch every BasicBlock/Bottleneck to use `out = out + identity` instead.
-        try:
-            import types as _types
-            from torchvision.models.resnet import BasicBlock as _BB, Bottleneck as _BN
-            def _bb_fwd(self, x):
-                identity = x
-                out = self.conv1(x); out = self.bn1(out); out = self.relu(out)
-                out = self.conv2(out); out = self.bn2(out)
-                if self.downsample is not None: identity = self.downsample(x)
-                return self.relu(out + identity)
-            def _bn_fwd(self, x):
-                identity = x
-                out = self.conv1(x); out = self.bn1(out); out = self.relu(out)
-                out = self.conv2(out); out = self.bn2(out); out = self.relu(out)
-                out = self.conv3(out); out = self.bn3(out)
-                if self.downsample is not None: identity = self.downsample(x)
-                return self.relu(out + identity)
-            for _m in model.modules():
-                if isinstance(_m, _BB):
-                    _m.forward = _types.MethodType(_bb_fwd, _m)
-                elif isinstance(_m, _BN):
-                    _m.forward = _types.MethodType(_bn_fwd, _m)
-        except ImportError:
-            pass
 
         if not os.path.exists(dpsgd_metadata_path):
             raise FileNotFoundError(f"DP-SGD config not found: {dpsgd_metadata_path}")
