@@ -14,3 +14,10 @@ Once the dataset is ready, you can proceed to run any of the use case notebooks.
 
 
 
+
+## PET optimization
+
+`pet_optimization/` traces the utility-vs-attack-success frontier for DP-SGD on
+the LR and GRU-D targets — how much AUC each level of privacy protection costs,
+measured rather than assumed. It needs the dataset pickles the notebooks above
+generate. See [`pet_optimization/README.md`](pet_optimization/README.md).

@@ -44,6 +44,7 @@ from leakpro.utils.logger import logger
 DELTA = 1e-5
 N_TARGET_TRAIN = 15000
 N_AUDIT = 2000
+NUM_CLASSES = 10
 N_UTILITY_EVAL = 5000
 
 
@@ -206,6 +207,30 @@ def make_fns(splits: dict, epochs: int, n_refs: int, device: str, ref_seed: int 
     return train_fn, utility_fn, attack_fn
 
 
+
+def above_chance(num_classes: int):  # noqa: ANN201
+    """Utility gate: only attack models that actually learned something.
+
+    A model at or below the chance floor is not a meaningful audit target — its
+    scores carry no signal, so the attack measures nothing while still paying
+    for the target plus every reference model. Worse, a degenerate model tends
+    to produce a chance-level TPR that is unbeatable on the privacy axis, so the
+    artifact lands on the Pareto front.
+    """
+    floor = 1.0 / num_classes
+
+    def gate(utility: float, _history) -> bool:  # noqa: ANN001
+        if utility <= floor:
+            logger.warning(
+                f"Utility {utility:.4f} is at or below the {floor:.4f} chance floor: "
+                "skipping the attack, this model did not learn."
+            )
+            return False
+        return True
+
+    return gate
+
+
 def knob_space() -> KnobSpace:
     """Joint DP-SGD space, log-scaled. The non-private anchor is never sampled
     from this space: a continuous draw hits exactly 0 with probability zero, so
@@ -240,6 +265,12 @@ def main() -> None:
         args.n_configs, args.epochs, args.n_refs = 2, 2, 1
         args.out = args.out + "_smoke"
 
+    # Seed torch too: the Sobol draw and the split permutation are numpy, but
+    # model init, DataLoader shuffling, Opacus Poisson sampling and the DP noise
+    # itself all run off torch's global RNG. Without this, --seed does not make
+    # a run reproducible and the resume/validation seed guards promise more than
+    # they deliver.
+    torch.manual_seed(args.seed)
     splits = load_splits(seed=args.seed)
     train_fn, utility_fn, attack_fn = make_fns(splits, args.epochs, args.n_refs, args.device)
 
@@ -248,6 +279,7 @@ def main() -> None:
         knob_space=knob_space(),
         output_dir=args.out,
         seed=args.seed,
+        utility_gate=above_chance(NUM_CLASSES),
     )
     # Recorded so validate_frontier can refuse to "validate" with a different recipe.
     (Path(args.out) / "run_meta.json").write_text(

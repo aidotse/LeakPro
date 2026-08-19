@@ -9,11 +9,21 @@ attack, metrics, persistence) and its scatter is already a frontier estimate.
 A model-based sampler (qNEHVI) replaces the Sobol draw later without touching
 anything else.
 
-The campaign is decoupled from LeakPro internals on purpose: it consumes three
-callables (train, utility, attack), and the example-side adapter maps sampled
-knob values into an ``AbstractInputHandler`` recipe. Full mimicry is the
-adapter's contract: reference models inside ``attack_fn`` must be trained with
-the same configuration as the candidate target.
+The campaign is deliberately outside LeakPro's attack stack: it consumes three
+callables (train, utility, attack) and imports nothing from ``leakpro`` beyond
+the logger. No ``AbstractInputHandler`` is involved — the examples train and
+score raw tensors directly, and the scoring path here is its own, separate from
+``leakpro/signals`` and ``MIAResult``.
+
+That separation buys a loop that can retrain and re-attack a model per sampled
+configuration without carrying handler machinery, but it is a duplicate scoring
+path, and keeping it means accepting that its conventions can drift from the
+attack stack's. Wiring ``attack_fn`` to LeakPro's own attacks is the obvious
+alternative and remains open.
+
+Full mimicry is the adapter's contract either way: reference models inside
+``attack_fn`` must be trained with the same configuration as the candidate
+target.
 """
 
 import json
@@ -178,16 +188,30 @@ class Campaign:
             return record
 
         scores = self.attack_fn(model, config)
-        tpr, k, n = tpr_at_fpr(scores, self.proxy_fpr)
-        lower, upper = clopper_pearson_ci(k, n)
+        measured = tpr_at_fpr(scores, self.proxy_fpr)
+        lower, upper = clopper_pearson_ci(measured.events, measured.n_members)
         record.update(
-            attack_tpr=tpr,
-            attack_tpr_events=k,
-            attack_tpr_n=n,
+            attack_tpr=measured.tpr,
+            attack_tpr_events=measured.events,
+            attack_tpr_n=measured.n_members,
             attack_tpr_ci95=[lower, upper],
+            # The operating point behind the number. Without these a TPR is
+            # uninterpretable: an unresolvable estimate and a genuinely private
+            # model both read as a bare 0.0.
+            attack_realized_fpr=measured.realized_fpr,
+            attack_threshold=measured.threshold,
+            attack_resolution_warning=measured.warning,
+            # Binomial sampling error over audit points ONLY. It excludes
+            # target-training randomness and the reference draw, which are
+            # plausibly larger, so it is narrower than the true uncertainty on a
+            # quantity pareto_front then minimizes over many draws.
+            attack_tpr_ci95_kind="clopper_pearson_binomial_only",
         )
+        if measured.warning:
+            logger.warning(f"Config {index}: {measured.warning}")
         logger.info(
             f"Config {index}: utility {record['utility']:.4f}, "
-            f"TPR@{self.proxy_fpr:.0%} = {tpr:.4f} ({k}/{n} events)."
+            f"TPR@{self.proxy_fpr:.0%} = {measured.tpr:.4f} "
+            f"({measured.events}/{measured.n_members} events, realized FPR {measured.realized_fpr:.2%})."
         )
         return record

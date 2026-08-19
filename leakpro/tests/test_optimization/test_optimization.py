@@ -62,13 +62,13 @@ class TestKnobs:
 class TestObjectives:
     def test_tpr_perfect_separation(self):
         scores = AttackScores(np.linspace(10, 20, 1000), np.linspace(0, 1, 1000))
-        tpr, k, n = tpr_at_fpr(scores, 0.01)
+        tpr, k, n = tpr_at_fpr(scores, 0.01)[:3]
         assert tpr == 1.0 and k == n == 1000
 
     def test_tpr_no_signal_is_near_fpr(self):
         rng = np.random.default_rng(0)
         scores = AttackScores(rng.normal(size=20000), rng.normal(size=20000))
-        tpr, _, _ = tpr_at_fpr(scores, 0.01)
+        tpr = tpr_at_fpr(scores, 0.01).tpr
         assert 0.005 < tpr < 0.02
 
     def test_clopper_pearson_edges(self):
@@ -186,60 +186,94 @@ class TestValidation:
         assert len(result["pairs"]) == 6
 
     def test_proxy_agreement_detects_disagreement(self, tmp_path):
+        # Both TPRs now come from the same revalidated scores, so a disagreement
+        # can only come from the SHAPE of the score distribution differing
+        # across configs — which is the only thing the check should be sensitive
+        # to. Build configs whose tail and bulk separation rank oppositely:
+        # more noise puts a larger fraction far out in the tail (better at
+        # 0.1% FPR) while shrinking the bulk that clears the 1% threshold.
         records = _fake_campaign(tmp_path).run(12)
-        # Tail behaviour inverted relative to the proxy: ranking must not survive.
-        result = proxy_agreement(
-            records,
-            _fake_revalidate(lambda c: c["noise_multiplier"] / 4.0),
-            n_configs=6,
-        )
+
+        def shape_revalidate(config):
+            t = min(1.0, config["noise_multiplier"] / 8.0)
+            n = 20000
+            rng = np.random.default_rng(7)
+            nonmembers = rng.normal(0, 1, n)
+            far, mid = 4.0, 2.6          # above the 0.1% and 1% quantiles of N(0,1)
+            n_far = int(n * (0.05 + 0.10 * t))          # tail: grows with noise
+            n_mid = int(n * (0.50 - 0.40 * t))          # bulk: shrinks with noise
+            members = np.concatenate([
+                np.full(n_far, far),
+                np.full(n_mid, mid),
+                rng.normal(-3, 1, n - n_far - n_mid),
+            ])
+            return AttackScores(members, nonmembers)
+
+        result = proxy_agreement(records, shape_revalidate, n_configs=6)
         assert result["spearman_rho"] < 0.0
 
 
 class TestTieSafety:
-    """tpr_at_fpr must never realize a higher FPR than requested — DP-SGD
-    saturates outputs, so tied nonmember blocks are the normal case, not an edge."""
+    """Interpolated ROC: continuous in the data, and a no-signal attack reads as
+    chance rather than as perfect privacy."""
 
-    @staticmethod
-    def _realized_fpr(nonmembers, tpr_threshold_probe_members, fpr):
-        # Recompute what FPR the chosen operating point actually admits, by
-        # finding the member-counting rule's threshold implicitly: any member
-        # score x is counted iff tpr counts it; probe with the nonmembers.
-        tpr, _, n = tpr_at_fpr(AttackScores(np.asarray(nonmembers, float),
-                                            np.asarray(nonmembers, float)), fpr)
-        # Using the nonmembers as members: TPR == realized FPR by construction.
-        return tpr
+    def test_all_tied_scores_read_as_chance_not_privacy(self):
+        # Every score identical: the attack has no signal at all. The honest
+        # answer is chance-level TPR; the old discrete rule returned 0.0, which
+        # is indistinguishable from a perfectly private model and unbeatable on
+        # the privacy axis, so it was guaranteed to sit on the Pareto front.
+        m = tpr_at_fpr(AttackScores(np.zeros(1000), np.zeros(1000)), 0.01)
+        assert m.tpr == pytest.approx(0.01, abs=1e-9)
+        assert m.warning is not None  # nearest achievable point is far off
 
-    def test_all_tied_nonmembers_do_not_blow_the_budget(self):
-        nm = np.zeros(1000)
-        m = np.zeros(1000)
-        tpr, k, n = tpr_at_fpr(AttackScores(m, nm), 0.01)
-        assert tpr == 0.0  # counting the tied block would mean 100% FPR
-        assert self._realized_fpr(nm, m, 0.01) <= 0.01
+    def test_tie_block_spanning_the_budget_is_continuous(self):
+        # The reviewer's case: with a tie block crossing floor(alpha*n), two
+        # extra tied nonmembers moved the discrete rule from 5% to 0%.
+        # Interpolation must vary smoothly instead of collapsing.
+        def tpr_with(n_tied):
+            rng = np.random.default_rng(0)
+            nm = np.concatenate([np.full(n_tied, 5.0), rng.normal(-5, 1, 2000 - n_tied)])
+            m = np.concatenate([np.full(100, 5.0), rng.normal(-5, 1, 1900)])
+            return tpr_at_fpr(AttackScores(m, nm), 0.01).tpr
 
-    def test_tie_block_crossing_the_boundary_is_excluded(self):
-        nm = np.concatenate([np.ones(500), np.zeros(500)])
-        m = np.ones(1000)
-        tpr, _, _ = tpr_at_fpr(AttackScores(m, nm), 0.01)
-        # Admitting the 500-strong tied block would realize 50% FPR at a 1% budget.
-        assert tpr == 0.0
-        assert self._realized_fpr(nm, m, 0.01) <= 0.01
+        at20, at22, at30, at60 = (tpr_with(n) for n in (20, 22, 30, 60))
+        assert at20 > at22 > at30 > at60 > 0.0   # monotone, never collapsing to zero
+        assert abs(at20 - at22) < 0.02           # two extra ties move it slightly
 
-    def test_partial_tie_falls_back_to_next_distinct_value(self):
-        # 5 nonmembers at 2.0, 995 below: the block fits inside a 1% budget.
-        nm = np.concatenate([np.full(5, 2.0), np.linspace(-1, 1, 995)])
-        m = np.full(100, 2.0)
-        tpr, _, _ = tpr_at_fpr(AttackScores(m, nm), 0.01)
-        assert tpr == 1.0  # threshold sits at 2.0; realized FPR = 5/1000 <= 1%
-
-    def test_distinct_scores_match_the_classic_rule(self):
+    def test_distinct_scores_are_never_worse_than_the_classic_rule(self):
+        # On distinct scores the interpolated value equals the classic
+        # floor(fpr*n) threshold, or beats it at the SAME realized FPR when
+        # members fall in the gap below that nonmember: those can be counted
+        # without admitting another nonmember. An attack lower-bounds risk, so
+        # the better operating point is the honest one.
         rng = np.random.default_rng(0)
         nm = rng.normal(size=2000)  # continuous -> ties have measure zero
         m = rng.normal(1.0, 1.0, size=2000)
-        tpr, _, _ = tpr_at_fpr(AttackScores(m, nm), 0.01)
+        measured = tpr_at_fpr(AttackScores(m, nm), 0.01)
         n_admit = int(np.floor(0.01 * nm.size))
         classic = np.mean(m >= np.sort(nm)[::-1][n_admit - 1])
-        assert tpr == pytest.approx(classic)
+        assert measured.tpr >= classic - 1e-12
+        assert measured.realized_fpr <= 0.01 + 1e-12   # never over the budget
+        assert measured.warning is None
+
+    def test_operating_point_is_reported(self):
+        # The blocking review item: a TPR is uninterpretable without the FPR
+        # actually realized and the threshold behind it.
+        rng = np.random.default_rng(1)
+        m = tpr_at_fpr(AttackScores(rng.normal(1, 1, 2000), rng.normal(0, 1, 2000)), 0.01)
+        assert 0.0 <= m.realized_fpr <= 0.01
+        assert np.isfinite(m.threshold)
+        assert m.n_members == 2000
+
+    def test_coarse_distribution_is_flagged(self):
+        # Five distinct values across 2000 nonmembers, as a saturated DP model
+        # produces: the nearest achievable point is far below 1%, so the number
+        # is interpolated rather than observed and must say so.
+        nm = np.repeat([27.6, 13.8, 0.0, -13.8, -27.6], [164, 33, 1503, 293, 7])
+        mem = np.repeat([27.6, 0.0, -27.6], [172, 1500, 328])
+        measured = tpr_at_fpr(AttackScores(mem, nm), 0.001)
+        assert measured.warning is not None
+        assert "interpolated, not observed" in measured.warning
 
 
 class TestCampaignRobustness:

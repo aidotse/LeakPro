@@ -69,18 +69,40 @@ def validate_frontier(
         n_nonmembers = len(scores.nonmember_scores)
         results = {}
         for fpr in report_fprs:
-            tpr, k, n = tpr_at_fpr(scores, fpr)
-            low, high = clopper_pearson_ci(k, n)
+            m = tpr_at_fpr(scores, fpr)
+            low, high = clopper_pearson_ci(m.events, m.n_members)
             results[f"tpr_at_{fpr}"] = {
-                "tpr": tpr, "events": k, "n_members": n, "ci95": [low, high],
-                "warning": resolution_warning(n_nonmembers, fpr),
+                "tpr": m.tpr, "events": m.events, "n_members": m.n_members, "ci95": [low, high],
+                "realized_fpr": m.realized_fpr, "threshold": m.threshold,
+                "warning": " ".join(filter(None, [resolution_warning(n_nonmembers, fpr), m.warning])) or None,
             }
             logger.info(
-                f"  config {record['index']}: TPR@{fpr:.1%} = {tpr:.4f} "
-                f"[{low:.4f}, {high:.4f}] ({k}/{n} events)"
+                f"  config {record['index']}: TPR@{fpr:.1%} = {m.tpr:.4f} "
+                f"[{low:.4f}, {high:.4f}] ({m.events}/{m.n_members} events, "
+                f"realized FPR {m.realized_fpr:.2%})"
             )
         out = EvaluationRecord(record)
-        out["validation"] = {"n_nonmembers": n_nonmembers, **results}
+        # The loop's TPR came from a cheaper attack on a smaller audit set; the
+        # gap between it and the revalidated number at the same FPR is the only
+        # direct estimate of the optimism the search introduced, and
+        # pareto_front minimizes over that noise. Record it rather than leaving
+        # the two numbers side by side for a reader to subtract.
+        loop_tpr = record.get("attack_tpr")
+        loop_fpr = record.get("proxy_fpr")
+        revalidated_at_loop_fpr = results.get(f"tpr_at_{loop_fpr}", {}).get("tpr") if loop_fpr else None
+        selection_bias = (
+            None if loop_tpr is None or revalidated_at_loop_fpr is None
+            else revalidated_at_loop_fpr - loop_tpr
+        )
+        out["validation"] = {
+            "n_nonmembers": n_nonmembers,
+            "loop_attack_tpr": loop_tpr,
+            "revalidated_at_loop_fpr": revalidated_at_loop_fpr,
+            # Positive means the loop under-reported attack success for this
+            # config, i.e. the frontier point was optimistic.
+            "selection_bias": selection_bias,
+            **results,
+        }
         validated.append(out)
     return validated
 
@@ -113,15 +135,25 @@ def proxy_agreement(
     proxy_tprs, target_tprs, pairs = [], [], []
     for i in picks:
         record = ordered[i]
+        # Both TPRs come from the SAME revalidated scores, so the only thing
+        # that differs between them is the FPR level. Reading the proxy off the
+        # loop's record instead would vary attack strength, audit size and the
+        # target-model instance at the same time, and a low rho could not then
+        # be attributed to the FPR level at all.
         scores = revalidate_fn(record["config"])
-        target_tpr, k, n = tpr_at_fpr(scores, target_fpr)
-        proxy_tprs.append(record["attack_tpr"])
-        target_tprs.append(target_tpr)
+        proxy = tpr_at_fpr(scores, proxy_fpr)
+        target = tpr_at_fpr(scores, target_fpr)
+        proxy_tprs.append(proxy.tpr)
+        target_tprs.append(target.tpr)
         pairs.append({
             "index": record["index"],
-            f"proxy_tpr_at_{proxy_fpr}": record["attack_tpr"],
-            f"tpr_at_{target_fpr}": target_tpr,
-            "events": k, "n_members": n,
+            f"proxy_tpr_at_{proxy_fpr}": proxy.tpr,
+            f"tpr_at_{target_fpr}": target.tpr,
+            "events": target.events, "n_members": target.n_members,
+            "realized_fpr": target.realized_fpr,
+            # The loop's own value, for reference only — it is NOT what the
+            # correlation is computed on.
+            "loop_attack_tpr": record.get("attack_tpr"),
         })
 
     rho, pvalue = spearmanr(proxy_tprs, target_tprs)

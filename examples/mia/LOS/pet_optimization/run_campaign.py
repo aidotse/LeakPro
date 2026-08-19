@@ -164,6 +164,26 @@ def make_fns(splits: dict, epochs: int, n_refs: int, device: str, ref_seed: int 
     return train_fn, utility_fn, attack_fn
 
 
+
+def above_chance_auc(floor: float = 0.5):  # noqa: ANN201
+    """Utility gate: only attack models that beat chance AUC.
+
+    A binary model at or below 0.5 AUC has not learned; attacking it spends the
+    target plus every reference model to measure nothing, and the degenerate
+    result can still land on the Pareto front.
+    """
+    def gate(utility: float, _history) -> bool:  # noqa: ANN001
+        if utility <= floor:
+            logger.warning(
+                f"AUC {utility:.4f} is at or below the {floor:.2f} chance floor: "
+                "skipping the attack, this model did not learn."
+            )
+            return False
+        return True
+
+    return gate
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--n-configs", type=int, default=50)
@@ -179,6 +199,10 @@ def main() -> None:
         args.n_configs, args.epochs, args.n_refs = 2, 2, 1
         args.out = args.out + "_smoke"
 
+    # Seed torch too: numpy covers the Sobol draw and the split permutation,
+    # but model init, shuffling, Poisson sampling and the DP noise run off
+    # torch's global RNG.
+    torch.manual_seed(args.seed)
     splits = load_splits(seed=args.seed)
     train_fn, utility_fn, attack_fn = make_fns(splits, args.epochs, args.n_refs, args.device)
 
@@ -187,6 +211,7 @@ def main() -> None:
         knob_space=default_dpsgd_space(),
         output_dir=args.out,
         seed=args.seed,
+        utility_gate=above_chance_auc(),
     )
     start = time.time()
     records = campaign.run(args.n_configs)
