@@ -18,6 +18,7 @@ from leakpro.optimization import (
     make_opacus_compatible,
     train_with_dpsgd,
 )
+from leakpro.optimization.training import _patch_residual_blocks
 
 
 def _toy_splits(n=600, dim=8, classes=3, seed=0):
@@ -163,6 +164,18 @@ def _batchnorm_recipe(splits, dim=8, classes=3, epochs=1):
     )
 
 
+try:  # torchvision is optional; the subclass test skips without it
+    from torchvision.models.resnet import BasicBlock as _BasicBlock
+
+    class _CustomResidualBlock(_BasicBlock):
+        """A residual block with its own forward — must survive the Opacus patcher untouched."""
+
+        def forward(self, x):  # noqa: ANN001, ANN201, D102
+            return self.conv1(x) * 1.0
+except ImportError:  # pragma: no cover
+    _CustomResidualBlock = None
+
+
 class TestOpacusCompatibility:
     def test_batchnorm_model_trains_under_dpsgd(self):
         # Before the ModuleValidator pass this raised straight out of make_private.
@@ -176,11 +189,58 @@ class TestOpacusCompatibility:
         assert not any(isinstance(m, nn.modules.batchnorm._BatchNorm) for m in fixed.modules())
         assert not any(getattr(m, "inplace", False) for m in fixed.modules())
 
-    def test_nonprivate_path_leaves_batchnorm_alone(self):
-        # eps = inf means no Opacus, so there is no reason to rewrite the user's model.
+    def test_nonprivate_anchor_shares_the_private_architecture(self):
+        # Every point on a frontier must be the same model. If only private
+        # configs got BatchNorm -> GroupNorm, the anchor's utility gap would
+        # mix the cost of DP noise with the cost of an architecture change.
         splits = _toy_splits()
-        model = train_with_dpsgd(_batchnorm_recipe(splits), NONPRIVATE, splits["target_train"], "cpu")
-        assert any(isinstance(m, nn.modules.batchnorm._BatchNorm) for m in model.modules())
+        anchor = train_with_dpsgd(_batchnorm_recipe(splits), NONPRIVATE, splits["target_train"], "cpu")
+        private = train_with_dpsgd(_batchnorm_recipe(splits), PRIVATE, splits["target_train"], "cpu")
+        def leaves(model):
+            return [type(m).__name__ for m in model.modules() if not list(m.children())]
+
+        assert not any(isinstance(m, nn.modules.batchnorm._BatchNorm) for m in anchor.modules())
+        # Leaves only: the private model is additionally wrapped in Opacus's
+        # GradSampleModule, which is not an architecture difference.
+        assert leaves(anchor) == leaves(private)
+
+    def test_missing_noise_multiplier_is_rejected(self):
+        # Fail closed: defaulting the key would silently train non-privately.
+        splits = _toy_splits()
+        bad = {k: v for k, v in PRIVATE.items() if k != "noise_multiplier"}
+        with pytest.raises(KeyError, match="noise_multiplier"):
+            train_with_dpsgd(_toy_recipe(splits), bad, splits["target_train"], "cpu")
+
+    def test_accountant_is_recorded_with_the_epsilon(self):
+        splits = _toy_splits()
+        model = train_with_dpsgd(_toy_recipe(splits), PRIVATE, splits["target_train"], "cpu", accountant="rdp")
+        assert model.campaign_extras["accountant"] == "rdp"
+
+    def test_short_reference_pool_is_rejected(self):
+        # Full mimicry is a promise: shrinking references silently would weaken
+        # the attack and bias the audit optimistic.
+        splits = _toy_splits()
+        splits["ref_pool"] = splits["ref_pool"][:10]
+        with pytest.raises(ValueError, match="Full mimicry"):
+            build_campaign_fns(_toy_recipe(splits), splits, n_refs=1, device="cpu")
+
+    def test_auc_metric_refuses_multiclass_output(self):
+        splits = _toy_splits()
+        _, utility_fn, _ = build_campaign_fns(
+            _toy_recipe(splits), splits, n_refs=1, device="cpu", utility_metric="auc")
+        model = train_with_dpsgd(_toy_recipe(splits), NONPRIVATE, splits["target_train"], "cpu")
+        with pytest.raises(ValueError, match="single-column"):
+            utility_fn(model)
+
+    def test_overridden_residual_forward_is_left_alone(self):
+        # The patcher works by assigning a bound method into the instance
+        # __dict__, so that is what "was it patched?" actually means.
+        torchvision = pytest.importorskip("torchvision")
+        custom = _CustomResidualBlock(8, 8)
+        stock = torchvision.models.resnet.BasicBlock(8, 8)
+        _patch_residual_blocks(nn.Sequential(custom, stock))
+        assert "forward" not in custom.__dict__   # subclass left untouched
+        assert "forward" in stock.__dict__        # stock block still patched
 
     def test_compatible_model_is_returned_unchanged(self):
         model = nn.Sequential(nn.Linear(8, 16), nn.GroupNorm(4, 16))

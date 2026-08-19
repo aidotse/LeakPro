@@ -53,6 +53,7 @@ from leakpro.optimization import (  # noqa: E402
 from leakpro.utils.logger import logger  # noqa: E402
 
 N_AUDIT = 2000
+MAX_PHYSICAL_BATCH = 128
 
 
 def load_splits(seed: int = 0) -> dict:
@@ -75,14 +76,21 @@ def load_splits(seed: int = 0) -> dict:
     test_idx = rng.permutation(np.asarray(indices["test_indices"]))
 
     n_target = len(train_idx) // 2
+    # Members must stay inside target_train (the first n_target indices) and the
+    # nonmembers must leave a non-empty utility split behind — cap rather than
+    # assume the dataset is big enough, as the LR campaign does.
+    n_audit = min(N_AUDIT, n_target, len(test_idx) - 1)
+    if n_audit <= 0 or len(test_idx) - n_audit <= 0:
+        raise ValueError(f"Dataset too small for the campaign splits: {len(train_idx)} train / "
+                         f"{len(test_idx)} test indices.")
     return {
         "x": x,
         "y": y,
         "target_train": train_idx[:n_target],
         "ref_pool": train_idx[n_target:],
-        "audit_members": train_idx[:N_AUDIT],  # subset of target_train
-        "audit_nonmembers": test_idx[:N_AUDIT],
-        "utility_eval": test_idx[N_AUDIT:],
+        "audit_members": train_idx[:n_audit],  # subset of target_train
+        "audit_nonmembers": test_idx[:n_audit],
+        "utility_eval": test_idx[n_audit:],
     }
 
 
@@ -173,14 +181,13 @@ def main() -> None:
     # torch's global RNG.
     torch.manual_seed(args.seed)
     splits = load_splits(seed=args.seed)
-    # Auto-detected on purpose: GRUD pins X_mean, the identity matrix and
-    # FilterLinear's filter to this device at construction, and .to(device)
-    # does not move those unregistered attributes — a flag would accept a
-    # value it cannot honor.
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cuda" if torch.cuda.is_available() else "cpu"  # see the parser note above
     recipe = make_recipe(splits, args.epochs)
     train_fn, utility_fn, attack_fn = build_campaign_fns(
-        recipe, splits, n_refs=args.n_refs, device=device, utility_metric="auc")
+        recipe, splits, n_refs=args.n_refs, device=device, utility_metric="auc",
+        # GRU-D is the memory-heaviest target in the repo: per-sample gradients
+        # over the unrolled sequence OOM at the shared 256 default.
+        max_physical_batch=MAX_PHYSICAL_BATCH)
 
     campaign = Campaign(
         train_fn, utility_fn, attack_fn,

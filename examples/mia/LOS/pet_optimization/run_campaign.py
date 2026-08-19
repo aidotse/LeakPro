@@ -72,22 +72,18 @@ def load_splits(seed: int = 0) -> dict:
     }
 
 
-class LRSigmoid(nn.Module):
-    """Logistic regression emitting probabilities (matches the LOS example's LR + BCELoss)."""
-
-    def __init__(self, input_dim: int) -> None:
-        super().__init__()
-        self.linear = nn.Linear(input_dim, 1)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.sigmoid(self.linear(x))
-
-
 def make_recipe(splits: dict, epochs: int) -> PETRecipe:
-    """The LOS training recipe: logistic regression + Adam + BCE."""
+    """The LOS training recipe: logistic regression + Adam + BCE.
+
+    The model is the example's own ``target_models.LR`` — the same class the
+    audited target was trained with, so the campaign measures that model rather
+    than a look-alike.
+    """
+    from target_models import LR  # noqa: PLC0415 — EXAMPLE_DIR is on sys.path above
+
     input_dim = splits["x"].shape[1]
     return PETRecipe(
-        make_model=lambda config: LRSigmoid(input_dim),
+        make_model=lambda config: LR(input_dim),
         make_optimizer=lambda params, config: optim.Adam(params, lr=config["learning_rate"]),
         make_loader=lambda indices, config: DataLoader(
             TensorDataset(splits["x"][indices], splits["y"][indices]),

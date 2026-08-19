@@ -93,11 +93,20 @@ def _patch_residual_blocks(model: Module) -> None:
         out = self.bn3(self.conv3(out))
         return self.relu(out + identity)
 
+    # Only patch blocks that still use the stock forward. A subclass overriding
+    # forward (SE, attention, anything custom) would be silently replaced by the
+    # vanilla residual path, changing the model instead of just making it
+    # Opacus-safe.
     for module in model.modules():
-        if isinstance(module, BasicBlock):
+        if isinstance(module, BasicBlock) and type(module).forward is BasicBlock.forward:
             module.forward = MethodType(basic_forward, module)
-        elif isinstance(module, Bottleneck):
+        elif isinstance(module, Bottleneck) and type(module).forward is Bottleneck.forward:
             module.forward = MethodType(bottleneck_forward, module)
+        elif isinstance(module, (BasicBlock, Bottleneck)):
+            logger.warning(
+                f"{type(module).__name__} overrides forward; leaving it untouched. If it adds the "
+                "residual in place, Opacus will reject it — rewrite that forward out of place."
+            )
 
 
 def make_opacus_compatible(model: Module) -> Module:
@@ -135,12 +144,19 @@ def train_with_dpsgd(  # noqa: PLR0913
 ) -> Module:
     """Train one model under the sampled config; the single shared Opacus path.
 
-    ``noise_multiplier > 0`` runs the model through ``make_opacus_compatible``
-    and wraps the loop in a PrivacyEngine with the physical batch capped at
-    ``max_physical_batch`` (per-example gradients cost batch x params memory;
-    the sampled batch size and the accounting are unchanged).
-    ``noise_multiplier == 0`` runs the plain loop, untouched — the non-private
-    anchor, ε = ∞.
+    Every model goes through ``make_opacus_compatible`` regardless of noise, so
+    all points on one frontier share an architecture: applying the BatchNorm to
+    GroupNorm rewrite only to private configs would leave the non-private anchor
+    a structurally different model, and its utility gap would then mix the cost
+    of DP noise with the cost of an architecture change. The submitted
+    architecture is therefore not necessarily what gets trained — check the log
+    for the ModuleValidator notice.
+
+    ``noise_multiplier > 0`` wraps the loop in a PrivacyEngine with the physical
+    batch capped at ``max_physical_batch`` (per-example gradients cost
+    batch x params memory; the sampled batch size and the accounting are
+    unchanged). ``noise_multiplier == 0`` runs the plain loop — the non-private
+    anchor, ε = ∞. The key is required either way: see below.
 
     ``accountant`` must match whatever else in the pipeline reports ε, or the
     numbers are not comparable: PRV is tighter than RDP, so the same noise reads
@@ -150,12 +166,22 @@ def train_with_dpsgd(  # noqa: PLR0913
     The formal (ε, δ) is stored on the returned model as ``campaign_extras``,
     which ``Campaign`` records next to the empirical attack result.
     """
+    # Never default this: a missing or misspelled key would silently train a
+    # fully non-private model from a function whose whole purpose is DP-SGD.
+    # Non-private runs must say so by passing an explicit 0.
+    if "noise_multiplier" not in config:
+        raise KeyError(
+            "config has no 'noise_multiplier'. Pass an explicit 0.0 for the non-private anchor; "
+            "defaulting it would silently disable DP-SGD."
+        )
+    private = config["noise_multiplier"] > 0
+
     loader = recipe.make_loader(train_indices, config)
-    model = recipe.make_model(config).to(device)
-    private = config.get("noise_multiplier", 0) > 0
-    if private:
-        # Before the optimizer: fixing the model can replace parameter objects.
-        model = make_opacus_compatible(model).to(device)
+    # Applied on both branches so every point on a frontier shares one
+    # architecture: rewriting BatchNorm only for private configs would make the
+    # non-private anchor a different model, and its utility gap would then mix
+    # the cost of DP noise with the cost of an architecture change.
+    model = make_opacus_compatible(recipe.make_model(config)).to(device)
     optimizer = recipe.make_optimizer(model.parameters(), config)
 
     def run_epochs(epoch_loader) -> None:  # noqa: ANN001
@@ -185,7 +211,11 @@ def train_with_dpsgd(  # noqa: PLR0913
         epsilon = float("inf")
 
     logger.info(f"Trained model: formal epsilon = {epsilon:.2f} (delta = {delta}).")
-    model.campaign_extras = {"epsilon": epsilon, "delta": delta}
+    # The accountant travels with the number: PRV and RDP epsilons are not
+    # comparable, so a record that does not name its accountant cannot be
+    # safely compared with one from another run.
+    model.campaign_extras = {"epsilon": epsilon, "delta": delta,
+                             "accountant": accountant if private else None}
     return model.eval()
 
 
@@ -207,8 +237,16 @@ def _evaluate_utility(model: Module, metric: str | Callable, x: torch.Tensor,
         return correct / len(x)
     if metric == "auc":
         from sklearn.metrics import roc_auc_score
-        scores = [model(x[i:i + 4096].to(device)).cpu().reshape(-1) for i in range(0, len(x), 4096)]
-        return float(roc_auc_score(y.numpy().ravel(), torch.cat(scores).numpy()))
+        outs = [model(x[i:i + 4096].to(device)).cpu() for i in range(0, len(x), 4096)]
+        scores = torch.cat(outs)
+        # Flattening a multiclass output would interleave class scores with
+        # sample labels and produce a meaningless number, so refuse instead.
+        if scores.ndim > 1 and scores.shape[-1] != 1:
+            raise ValueError(
+                f"utility_metric='auc' needs a single-column model output, got shape {tuple(scores.shape)}. "
+                "Use 'accuracy' for multiclass models, or pass a callable."
+            )
+        return float(roc_auc_score(y.numpy().ravel(), scores.reshape(-1).numpy()))
     raise ValueError(f"Unknown utility_metric '{metric}'; use 'accuracy', 'auc' or a callable.")
 
 
@@ -247,6 +285,15 @@ def build_campaign_fns(  # noqa: PLR0913
         raise KeyError(f"splits is missing {missing}; required keys are {REQUIRED_SPLIT_KEYS}.")
     if len(splits["ref_pool"]) == 0:
         raise ValueError("Reference pool is empty; the matched attack needs disjoint training data.")
+    # Full mimicry means references train on as much data as the target. Quietly
+    # shrinking them would weaken the attack and make the audit read safer than
+    # it is, so a short reference pool is an error, not a silent downgrade.
+    if len(splits["ref_pool"]) < len(splits["target_train"]):
+        raise ValueError(
+            f"Reference pool ({len(splits['ref_pool'])}) is smaller than the target's training set "
+            f"({len(splits['target_train'])}). Full mimicry needs at least as many reference samples; "
+            "shrinking them silently would bias the audit optimistic."
+        )
 
     train_kwargs = {"delta": delta, "max_physical_batch": max_physical_batch, "accountant": accountant}
 
@@ -262,7 +309,7 @@ def build_campaign_fns(  # noqa: PLR0913
         rng = np.random.default_rng(ref_seed)
         x, y = splits["x"], splits["y"]
         members, nonmembers = splits["audit_members"], splits["audit_nonmembers"]
-        n_ref_train = min(len(splits["target_train"]), len(splits["ref_pool"]))
+        n_ref_train = len(splits["target_train"])  # guaranteed <= ref_pool by the check above
 
         # References are trained one at a time and freed after scoring (GPU memory).
         ref_phi_m = np.zeros(len(members))
