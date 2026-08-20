@@ -6,6 +6,7 @@ import asyncio
 import json
 import queue
 import shutil
+import sys
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -37,46 +38,20 @@ def _default_train(loader, model, criterion, optimizer, epochs,
         from opacus import PrivacyEngine
         from opacus.accountants.utils import get_noise_multiplier
         from opacus.utils.batch_memory_manager import BatchMemoryManager
-        from opacus.validators import ModuleValidator
 
-        errors = ModuleValidator.validate(model, strict=False)
-        if errors:
-            model = ModuleValidator.fix(model)
+        from leakpro.optimization import make_opacus_compatible
+
+        # One implementation of the Opacus-compat rewrite (BatchNorm -> GroupNorm,
+        # in-place activations off, residual adds out of place) shared with the
+        # PET campaign path, so a model trained here and a model trained by a
+        # campaign are the same architecture.
+        fixed = make_opacus_compatible(model)
+        if fixed is not model:
+            model = fixed
             opt_cls = optimizer.__class__
             opt_cfg = {k: v for group in optimizer.param_groups
                        for k, v in group.items() if k != "params"}
             optimizer = opt_cls(model.parameters(), **opt_cfg)
-
-        for module in model.modules():
-            if hasattr(module, "inplace") and isinstance(module.inplace, bool):
-                module.inplace = False
-
-        # ModuleValidator.fix() replaces BatchNorm but leaves ResNet's skip-connection
-        # `out += identity` in-place, which Opacus's backward hooks forbid.
-        # Patch every BasicBlock/Bottleneck to use `out = out + identity` instead.
-        try:
-            import types as _types
-            from torchvision.models.resnet import BasicBlock as _BB, Bottleneck as _BN
-            def _bb_fwd(self, x):
-                identity = x
-                out = self.conv1(x); out = self.bn1(out); out = self.relu(out)
-                out = self.conv2(out); out = self.bn2(out)
-                if self.downsample is not None: identity = self.downsample(x)
-                return self.relu(out + identity)
-            def _bn_fwd(self, x):
-                identity = x
-                out = self.conv1(x); out = self.bn1(out); out = self.relu(out)
-                out = self.conv2(out); out = self.bn2(out); out = self.relu(out)
-                out = self.conv3(out); out = self.bn3(out)
-                if self.downsample is not None: identity = self.downsample(x)
-                return self.relu(out + identity)
-            for _m in model.modules():
-                if isinstance(_m, _BB):
-                    _m.forward = _types.MethodType(_bb_fwd, _m)
-                elif isinstance(_m, _BN):
-                    _m.forward = _types.MethodType(_bn_fwd, _m)
-        except ImportError:
-            pass
 
         if not os.path.exists(dpsgd_metadata_path):
             raise FileNotFoundError(f"DP-SGD config not found: {dpsgd_metadata_path}")
@@ -270,8 +245,12 @@ from .models import (
     JobSummary,
     ModelAttackConfig,
     ModelInfo,
+    PETStartParams,
+    RiskRequest,
+    RiskResponse,
     TrainParams,
 )
+from .dataset_modules import register_job_dataset_modules
 from .worker import run_audit_job
 
 # ---------------------------------------------------------------------------
@@ -1174,6 +1153,56 @@ async def get_results(job_id: str) -> dict:
     return {"job_id": job_id, "results": results}
 
 
+@app.post("/jobs/{job_id}/risk", response_model=RiskResponse)
+async def assess_job_risk(job_id: str, req: RiskRequest) -> RiskResponse:
+    """Assess use-case risk for a finished job's attack results.
+
+    All scoring lives in leakpro.risk: this endpoint adapts the stored results, calls the library once
+    per model, and returns the assessments untouched. Nothing here decides what is risky.
+    """
+    from leakpro.risk import UseCaseProfile, assess_risk, result_from_mapping  # noqa: PLC0415
+
+    job = _get_job(job_id)
+    if job["status"] != JobStatus.done:
+        raise HTTPException(status_code=425, detail=f"Job status: {job['status']}")
+
+    profile_fields = req.model_dump(exclude={"model_name"})
+    try:
+        profile = UseCaseProfile(**profile_fields)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Invalid use-case profile: {e}") from e
+
+    assessments: dict[str, dict] = {}
+    unassessable: dict[str, str] = {}
+    for model in job.get("results", []):
+        name = model.get("model_name", "?")
+        if req.model_name is not None and name != req.model_name:
+            continue
+        results = [result_from_mapping(a) for a in model.get("attacks", [])]
+        if not results:
+            unassessable[name] = "no attack results"
+            continue
+        try:
+            gap = None
+            if model.get("train_accuracy") is not None and model.get("test_accuracy") is not None:
+                gap = float(model["train_accuracy"]) - float(model["test_accuracy"])
+            assessment = assess_risk(
+                results,
+                profile,
+                num_train=model.get("num_train"),
+                train_test_gap=gap,
+                dp_epsilon=model.get("target_epsilon"),
+                strict=False,
+            )
+            assessments[name] = assessment.model_dump()
+        except Exception as e:  # noqa: BLE001 - surfaced per model rather than failing the request
+            unassessable[name] = str(e)
+
+    if not assessments and not unassessable:
+        raise HTTPException(status_code=404, detail="No models found for this job")
+    return RiskResponse(job_id=job_id, assessments=assessments, unassessable=unassessable)
+
+
 @app.get("/jobs/{job_id}/sample_data/{index}")
 async def get_sample_data(job_id: str, index: int):
     """Return tabular feature values for a single sample as JSON."""
@@ -1184,6 +1213,7 @@ async def get_sample_data(job_id: str, index: int):
     if not data_path or not Path(data_path).exists():
         raise HTTPException(status_code=404, detail="Dataset not found")
     try:
+        register_job_dataset_modules(_job_dir(job_id))
         dataset = joblib.load(data_path)
         row = dataset.data[index]
         if isinstance(row, torch.Tensor):
@@ -1216,7 +1246,11 @@ async def get_sample_image(job_id: str, index: int):
     if not data_path or not Path(data_path).exists():
         raise HTTPException(status_code=404, detail="Dataset not found")
 
-    dataset = joblib.load(data_path)
+    register_job_dataset_modules(_job_dir(job_id))
+    try:
+        dataset = joblib.load(data_path)
+    except Exception as e:  # noqa: BLE001 - a named 404 beats a bare 500 in the img tag
+        raise HTTPException(status_code=404, detail=f"Cannot load dataset: {e}")
 
     try:
         img = dataset.data[index]
@@ -1240,6 +1274,169 @@ async def get_sample_image(job_id: str, index: int):
     buf = io.BytesIO()
     Image.fromarray(img).save(buf, format="PNG")
     return Response(content=buf.getvalue(), media_type="image/png")
+
+
+# ---------------------------------------------------------------------------
+# PET optimization
+#
+# A campaign is n_configs x (1 + n_refs) full trainings, so it runs as a
+# detached subprocess rather than on _executor: it must outlive both the
+# request and a backend restart. Progress is read back off disk -- the runner
+# appends one JSON line per evaluated setting -- so there is no in-memory
+# state to lose, and killing the process is a resumable pause rather than a
+# lost run.
+# ---------------------------------------------------------------------------
+
+def _pet_dir(job_id: str, model_name: str) -> Path:
+    return _job_dir(job_id) / "pet" / model_name
+
+
+def _pet_read_json(path: Path) -> dict | None:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return None  # a status file caught mid-write; the next poll gets it
+
+
+def _pet_spawn(job_id: str, model_name: str, extra: list[str]) -> None:
+    """Launch the runner detached, so it survives this process exiting."""
+    import os  # noqa: PLC0415
+    import subprocess  # noqa: PLC0415
+
+    cmd = [sys.executable, "-m", "leakpro.webapp.backend.pet_runner",
+           str(_job_dir(job_id)), model_name, *extra]
+    # Let CUDA grow its allocation instead of pre-reserving fixed segments; the
+    # campaign trains many models back to back, so fragmentation is the common
+    # cause of a spurious out-of-memory long before the card is actually full.
+    env = {**os.environ, "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"}
+    subprocess.Popen(  # noqa: S603
+        cmd,
+        cwd=str(Path(__file__).parents[3]),
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
+@app.post("/jobs/{job_id}/pet/start")
+async def pet_start(job_id: str, model_name: str, params: PETStartParams) -> dict:
+    """Begin (or resume) a campaign for one model."""
+    job = _get_job(job_id)
+    if not any(m["name"] == model_name for m in job.get("models", [])):
+        raise HTTPException(status_code=404, detail=f"No model named '{model_name}' in this job.")
+
+    out = _pet_dir(job_id, model_name)
+    status = _pet_read_json(out / "status.json") or {}
+    if status.get("status") == "running":
+        raise HTTPException(status_code=409, detail="An optimization run is already in progress.")
+
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "request.json").write_text(json.dumps(params.model_dump(), indent=2))
+    # Written here rather than in the runner so a poll landing before the
+    # subprocess has started does not read the previous run's status.
+    (out / "status.json").write_text(json.dumps({"status": "running", "model_name": model_name}))
+    _pet_spawn(job_id, model_name, [])
+    return {"ok": True}
+
+
+@app.get("/jobs/{job_id}/pet/campaign")
+async def pet_campaign(job_id: str, model_name: str) -> dict:
+    """Everything the optimization view needs, read straight off disk."""
+    _get_job(job_id)
+    out = _pet_dir(job_id, model_name)
+    status = _pet_read_json(out / "status.json")
+    if status is None:
+        return {"status": "idle", "model_name": model_name, "settings": [], "best_indices": []}
+
+    settings: list[dict] = []
+    log = out / "evaluations.jsonl"
+    if log.exists():
+        for line in log.read_text().splitlines():
+            if line.strip():
+                try:
+                    settings.append(json.loads(line))
+                except json.JSONDecodeError:
+                    break  # a partially flushed final line; take what is complete
+
+    return {
+        "status": status.get("status", "idle"),
+        "model_name": model_name,
+        "n_configs": status.get("n_configs"),
+        "baseline_utility": status.get("baseline_utility"),
+        "settings": settings,
+        "best_indices": status.get("best_indices", []),
+        "resolution_warning": status.get("resolution_warning"),
+        "error": status.get("error"),
+    }
+
+
+@app.post("/jobs/{job_id}/pet/verify")
+async def pet_verify(job_id: str, model_name: str, body: dict) -> dict:
+    """Re-measure one setting with a stronger attack than the search used."""
+    _get_job(job_id)
+    index = int(body["index"])
+    out = _pet_dir(job_id, model_name)
+    if not (out / "evaluations.jsonl").exists():
+        raise HTTPException(status_code=404, detail="This model has no optimization results to verify.")
+
+    existing = _pet_read_json(out / f"verification_{index}.json")
+    if existing and existing.get("status") == "running":
+        return existing
+
+    _pet_spawn(job_id, model_name, ["--verify", str(index)])
+    return {"status": "running", "index": index, "estimated": {"attack_tpr": None, "utility": None}}
+
+
+@app.get("/jobs/{job_id}/pet/verify")
+async def pet_verify_status(job_id: str, model_name: str, index: int) -> dict:
+    """Poll a verification started by the POST above."""
+    _get_job(job_id)
+    result = _pet_read_json(_pet_dir(job_id, model_name) / f"verification_{index}.json")
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"No verification running for setting {index}.")
+    return result
+
+
+@app.post("/jobs/{job_id}/pet/adopt")
+async def pet_adopt(job_id: str, model_name: str, body: dict) -> dict:
+    """Record a verified setting as a result row of its own."""
+    job = _get_job(job_id)
+    index = int(body["index"])
+    out = _pet_dir(job_id, model_name)
+
+    verification = _pet_read_json(out / f"verification_{index}.json")
+    if not verification or verification.get("status") != "done":
+        raise HTTPException(status_code=409, detail="This setting has not been verified yet.")
+
+    settings = [json.loads(line) for line in (out / "evaluations.jsonl").read_text().splitlines() if line.strip()]
+    record = next((r for r in settings if r["index"] == index), None)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"No evaluated setting with index {index}.")
+
+    verified = verification["verified"]
+    base = next((m for m in job.get("models", []) if m["name"] == model_name), {})
+    adopted = {
+        "model_name": f"{model_name} (optimized)",
+        "source": "optimized",
+        "optimized": True,
+        "dpsgd": True,
+        "target_epsilon": verified.get("epsilon"),
+        "test_accuracy": verified.get("utility"),
+        "train_accuracy": None,
+        "model_class": base.get("model_class"),
+        "attacks": [],
+        "pet_config": record["config"],
+        "pet_attack_tpr": verified.get("attack_tpr"),
+        "pet_proxy_fpr": record.get("proxy_fpr", 0.01),
+    }
+    job.setdefault("results", [])
+    job["results"] = [r for r in job["results"] if r.get("model_name") != adopted["model_name"]]
+    job["results"].append(adopted)
+    _save_job(job_id)
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------

@@ -147,6 +147,24 @@ class TestBuildCampaignFns:
         model = train_with_dpsgd(_toy_recipe(splits), NONPRIVATE, splits["target_train"], "cpu")
         assert utility_fn(model) == 0.42
 
+    def test_accuracy_metric_handles_single_logit_head(self):
+        # A binary head outputs one column; argmax over it is always 0, which
+        # would silently report 0% or 100%. Accuracy must threshold at 0 instead.
+        class PerfectBinary(nn.Module):
+            """Emits the label's sign as a logit: always correct, so accuracy == 1."""
+
+            def forward(self, x):  # noqa: ANN001, ANN201, D102
+                return x[:, :1] * 0.0 + x[:, :1]  # single column, keeps grad graph shape
+
+        n = 40
+        x = torch.cat([torch.full((n // 2, 4), 3.0), torch.full((n // 2, 4), -3.0)])
+        y = torch.cat([torch.ones(n // 2), torch.zeros(n // 2)])  # 1 where logit>0, 0 where <0
+        splits = {"x": x, "y": y, "target_train": np.arange(n), "ref_pool": np.arange(n),
+                  "audit_members": np.arange(4), "audit_nonmembers": np.arange(4), "utility_eval": np.arange(n)}
+        _, utility_fn, _ = build_campaign_fns(
+            _toy_recipe(splits), splits, n_refs=1, device="cpu", utility_metric="accuracy")
+        assert utility_fn(PerfectBinary()) == pytest.approx(1.0)
+
 
 def _batchnorm_recipe(splits, dim=8, classes=3, epochs=1):
     """A model Opacus rejects as submitted: BatchNorm mixes samples within a batch."""

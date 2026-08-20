@@ -12,6 +12,8 @@ import yaml
 from pathlib import Path
 from typing import Any
 
+from leakpro.webapp.backend.dataset_modules import register_job_dataset_modules
+
 logger = logging.getLogger("leakpro.webapp.worker")
 
 
@@ -292,29 +294,13 @@ def run_audit_job(
                 if str(_LEAKPRO_ROOT) not in sys.path:
                     sys.path.insert(0, str(_LEAKPRO_ROOT))
 
-                # Register dataset_handler.py under its original module name so joblib can
-                # deserialise population pickles that reference the original class path.
-                # Original name is inferred from the handler class name:
-                #   CelebADataHandler → celebA_data_handler
-                #   CifarDataHandler  → cifar_data_handler
-                _dh_path = job_dir / "dataset_handler.py"
-                if _dh_path.exists():
-                    import importlib.util as _ilu_dh
-                    _dh_spec = _ilu_dh.spec_from_file_location("dataset_handler", _dh_path)
-                    _dh_mod = _ilu_dh.module_from_spec(_dh_spec)
-                    _dh_spec.loader.exec_module(_dh_mod)
-                    sys.modules["dataset_handler"] = _dh_mod
-                    for _attr in dir(_dh_mod):
-                        _obj = getattr(_dh_mod, _attr, None)
-                        if (isinstance(_obj, type)
-                                and hasattr(_obj, "UserDataset")
-                                and _attr not in ("AbstractInputHandler", "object")):
-                            _orig = _attr.replace("DataHandler", "_data_handler") \
-                                        .replace("InputHandler", "_input_handler")
-                            _orig = _orig[0].lower() + _orig[1:]
-                            if _orig not in sys.modules:
-                                sys.modules[_orig] = _dh_mod
-                                log_q.put(f"[worker] Registered dataset_handler.py as '{_orig}' for pickle deserialization")
+                # Register dataset_handler.py under the module names the job's
+                # pickles were written with. One implementation, shared with the
+                # PET runner and the sample-data endpoints — three copies of
+                # this drifted apart before, and the endpoints' copy only
+                # existed because images broke for models loaded from an
+                # earlier session.
+                register_job_dataset_modules(job_dir)
 
                 # Stub out leakpro.dataset so joblib can deserialise old GeneralDataset pickles.
                 # MIAHandler._load_population accesses .data and .targets; the old class stored
@@ -401,6 +387,14 @@ def run_audit_job(
                     "n_samples":          _dm.get("n_samples"),
                 } if (_tp or _hc or _dm) else None
 
+                # Training-set size of the target, needed by leakpro.risk to scale exposure to the
+                # population. Read from the handler while it is still alive; saved results cannot
+                # recover it.
+                try:
+                    _num_train = int(lp.handler.target_model_metadata.num_train)
+                except Exception:  # noqa: BLE001 - metadata is optional for non-MIA handlers
+                    _num_train = None
+
                 model_results = {
                     "model_name": model_name,
                     "source": model_spec.get("source", "trained"),
@@ -410,6 +404,7 @@ def run_audit_job(
                     "test_accuracy": model_spec.get("test_accuracy"),
                     "model_class": _model_class,
                     "train_meta": _train_meta,
+                    "num_train": _num_train,
                     "attacks": [_serialise_result(r) for r in results],
                 }
                 all_results.append(model_results)

@@ -84,8 +84,23 @@ export const api = {
 
   // Step 7
   getResults: (id: string) => get<{ job_id: string; results: ModelResult[] }>(`/jobs/${id}/results`),
+  // Risk assessment. All scoring happens in leakpro/risk on the backend; this posts the declared
+  // use-case profile and renders whatever comes back.
+  assessRisk: (id: string, profile: RiskRequest) => post<RiskResponse>(`/jobs/${id}/risk`, profile),
   getSampleData: (jobId: string, index: number) =>
     get<{ index: number; label: number; features: number[]; feature_names?: string[] }>(`/jobs/${jobId}/sample_data/${index}`),
+
+  // PET optimization
+  startOptimization: (id: string, model: string, params: OptimizationParams) =>
+    post<{ ok: boolean }>(`/jobs/${id}/pet/start?model_name=${encodeURIComponent(model)}`, params),
+  getOptimization: (id: string, model: string) =>
+    get<OptimizationRun>(`/jobs/${id}/pet/campaign?model_name=${encodeURIComponent(model)}`),
+  verifySetting: (id: string, model: string, index: number) =>
+    post<Verification>(`/jobs/${id}/pet/verify?model_name=${encodeURIComponent(model)}`, { index }),
+  getVerification: (id: string, model: string, index: number) =>
+    get<Verification>(`/jobs/${id}/pet/verify?model_name=${encodeURIComponent(model)}&index=${index}`),
+  adoptSetting: (id: string, model: string, index: number) =>
+    post<{ ok: boolean }>(`/jobs/${id}/pet/adopt?model_name=${encodeURIComponent(model)}`, { index }),
 };
 
 // ---------------------------------------------------------------------------
@@ -204,5 +219,149 @@ export interface ModelResult {
   model_class?: string;
   job_id?: string;
   train_meta?: TrainMeta;
+  num_train?: number;
   attacks: AttackResult[];
+  /** Set when this row came from an adopted optimization result. */
+  optimized?: boolean;
+  /** Original backend name, kept when the compare view renames a row for display. */
+  orig_model_name?: string;
+}
+
+// ---------------------------------------------------------------------------
+// PET optimization
+//
+// One Setting == one evaluated configuration, mirroring a line of the
+// campaign's evaluations.jsonl. Field names follow that file so the backend
+// can serve records without reshaping them.
+// ---------------------------------------------------------------------------
+
+export interface SettingConfig {
+  noise_multiplier?: number;
+  max_grad_norm?: number;
+  learning_rate?: number;
+  batch_size?: number;
+  [knob: string]: number | undefined;
+}
+
+export interface Setting {
+  index: number;
+  config: SettingConfig;
+  /** Task performance, 0..1. Higher is better. */
+  utility: number;
+  /** Attack success at `proxy_fpr`, 0..1. Lower is safer. Absent if not attacked. */
+  attack_tpr?: number;
+  attack_tpr_ci95?: [number, number];
+  /** False-alarm rate the attack figure was measured at (0.01 == 1%). */
+  proxy_fpr?: number;
+  /** The false-alarm rate actually achievable in the data, which can be below
+   *  `proxy_fpr` when the score distribution is coarse. */
+  attack_realized_fpr?: number;
+  attack_threshold?: number;
+  /** Set when the reported TPR is interpolated rather than observed: the audit
+   *  set could not resolve this operating point. Not evidence of privacy. */
+  attack_resolution_warning?: string | null;
+  /** Distinct nonmember score values — few means a saturated model. */
+  attack_distinct_nonmember_scores?: number;
+  epsilon?: number;
+  delta?: number;
+  /** Present when the run skipped the attack for this setting. */
+  attack_skipped?: string;
+}
+
+export interface OptimizationParams {
+  /** Fraction of baseline quality the user is willing to give up, 0..1. */
+  max_quality_loss: number;
+  /** Optional overrides; omitted keys keep the campaign's own defaults. */
+  advanced?: Record<string, number>;
+}
+
+export interface OptimizationRun {
+  status: "idle" | "running" | "done" | "failed";
+  model_name: string;
+  /** Total settings the run intends to test; absent until the run reports it. */
+  n_configs?: number;
+  settings: Setting[];
+  /** Indices of the best trade-offs, ascending by utility. */
+  best_indices: number[];
+  /** Unprotected quality this run is measured against, 0..1. */
+  baseline_utility?: number;
+  max_quality_loss?: number;
+  /** Set when the audit set is too small for the reported figure to mean much. */
+  resolution_warning?: string;
+  error?: string;
+}
+
+export interface Verification {
+  status: "running" | "done" | "failed";
+  index: number;
+  estimated: { attack_tpr: number; utility: number };
+  verified?: {
+    attack_tpr: number;
+    utility: number;
+    epsilon?: number;
+    realized_fpr?: number;
+    resolution_warning?: string | null;
+  };
+  error?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Risk assessment (mirrors leakpro/risk/schemas.py and backend models.py)
+// ---------------------------------------------------------------------------
+
+/** Declared harm parameters. Field names follow Sion et al.'s Loss Magnitude decomposition. */
+export interface RiskRequest {
+  model_name?: string;
+  tolerated_fpr: number;          // alpha; required on purpose, no default
+  attacker_prior?: number;        // pi
+  n_subjects?: number;            // NDS
+  records_per_subject?: number;   // NR
+  data_type_sensitivity?: number; // DTS
+  subject_type_weight?: number;   // DST
+  cost_per_exposed_subject?: number;
+  extrapolate_to_population?: boolean;
+  notes?: string;
+}
+
+export interface RiskMeasured {
+  attack_name: string;
+  operating_point: number;
+  success_rate: number;
+  advantage: number;
+  lift: number;
+  resolvable: boolean;
+  roc_auc?: number;
+  n_members_audit: number;
+  n_non_members_audit: number;
+  n_exposed_audit?: number;
+  min_resolvable_fpr: number;
+}
+
+export interface RiskCombined {
+  ppv?: number;
+  ppv_balanced?: number;
+  gamma: number;
+  loss_magnitude?: number;
+  loss_event_frequency: number;
+  risk?: number;
+  expected_exposed_subjects?: number;
+  expected_cost?: number;
+  extrapolated_exposed_records?: number;
+  vulnerability_band?: string;
+}
+
+export interface RiskAssessment {
+  measured: RiskMeasured;
+  declared: Record<string, unknown> & { n_subjects?: number; n_subjects_source: string; attacker_prior: number };
+  combined: RiskCombined;
+  assumptions: string[];
+  warnings: string[];
+  policy_version: string;
+  leakpro_version: string;
+}
+
+export interface RiskResponse {
+  job_id: string;
+  assessments: Record<string, RiskAssessment>;
+  unassessable: Record<string, string>;
 }

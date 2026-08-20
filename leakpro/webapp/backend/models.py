@@ -111,6 +111,23 @@ class CompatResult(BaseModel):
 # Step 5 — Attack config
 # ---------------------------------------------------------------------------
 
+class PETStartParams(BaseModel):
+    """Request to begin a PET optimization run for one model."""
+
+    # Display-side constraint: it dims settings that fall below the user's
+    # quality floor, but never gates the search, so moving the slider
+    # afterwards re-reads the same results instead of invalidating them.
+    max_quality_loss: float = 0.05
+    # Any knob named here is pinned to that value; the rest stay searched.
+    advanced: dict[str, float] = {}
+    n_configs: int | None = None
+    n_refs: int | None = None
+    delta: float | None = None
+    # Per-sample-gradient memory cap under DP-SGD. Lower it to fit a big model
+    # or a busy GPU; it changes speed only, never the privacy accounting.
+    max_physical_batch: int = 32
+
+
 class AttackParams(BaseModel):
     attack: str
     params: dict[str, Any] = {}
@@ -153,4 +170,37 @@ class ModelResult(BaseModel):
     model_class: str | None = None   # e.g. "ResNet18_DPsgd"
     job_id: str | None = None        # originating job, used for sample image URLs
     train_meta: dict | None = None   # epochs, lr, batch_size, optimizer, data info
+    num_train: int | None = None     # target training-set size, used to scale risk to the population
     attacks: list[AttackResult] = []
+
+
+# ---------------------------------------------------------------------------
+# Risk assessment — see leakpro/risk/. All scoring happens in the library; the
+# frontend posts a use-case profile and renders whatever comes back.
+# ---------------------------------------------------------------------------
+
+class RiskRequest(BaseModel):
+    """A use-case profile plus the model it applies to.
+
+    Field names and semantics mirror leakpro.risk.schemas.UseCaseProfile; validation happens there so
+    there is exactly one definition of a valid profile.
+    """
+
+    model_name: str | None = None    # None assesses every model in the job
+    tolerated_fpr: float             # required, deliberately no default
+    attacker_prior: float = 0.5
+    n_subjects: int | None = None
+    records_per_subject: float = 1.0
+    data_type_sensitivity: float = 1.0
+    subject_type_weight: float = 1.0
+    cost_per_exposed_subject: float | None = None
+    extrapolate_to_population: bool = False
+    notes: str = ""
+
+
+class RiskResponse(BaseModel):
+    """One assessment per model, plus any model that could not be assessed and why."""
+
+    job_id: str
+    assessments: dict[str, dict] = {}   # model_name -> RiskAssessment.model_dump()
+    unassessable: dict[str, str] = {}   # model_name -> reason

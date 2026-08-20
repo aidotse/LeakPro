@@ -49,9 +49,11 @@ class PETRecipe:
         make_loader: (indices, config) -> training DataLoader (reads e.g. ``batch_size``).
         criterion: loss module shared by target and reference models.
         epochs: fixed number of training epochs.
-        output_kind: "logits" for raw multiclass logits (CrossEntropyLoss models),
-            "binary_probs" for a single sigmoid output column (BCELoss models).
-            Decides how membership confidence is extracted.
+        output_kind: how membership confidence is read from the model output.
+            "logits" — raw multiclass logits (CrossEntropyLoss models);
+            "binary_probs" — a single sigmoid probability column (BCELoss models);
+            "binary_logits" — a single raw logit column (BCEWithLogitsLoss
+            models, e.g. GRU-D).
 
     """
 
@@ -64,8 +66,9 @@ class PETRecipe:
 
     def __post_init__(self) -> None:
         """Validate the output kind."""
-        if self.output_kind not in ("logits", "binary_probs"):
-            raise ValueError(f"output_kind must be 'logits' or 'binary_probs', got '{self.output_kind}'.")
+        valid = ("logits", "binary_probs", "binary_logits")
+        if self.output_kind not in valid:
+            raise ValueError(f"output_kind must be one of {valid}, got '{self.output_kind}'.")
 
 
 def _patch_residual_blocks(model: Module) -> None:
@@ -232,8 +235,11 @@ def _evaluate_utility(model: Module, metric: str | Callable, x: torch.Tensor,
     if metric == "accuracy":
         correct = 0
         for i in range(0, len(x), 1024):
-            pred = model(x[i:i + 1024].to(device)).argmax(dim=1).cpu()
-            correct += int((pred == y[i:i + 1024]).sum())
+            out = model(x[i:i + 1024].to(device)).cpu()
+            # A single-logit head is a binary classifier: threshold at 0, don't
+            # argmax (argmax over one column is always 0 — silently 0% or 100%).
+            pred = (out.reshape(-1) > 0).long() if (out.ndim == 1 or out.shape[-1] == 1) else out.argmax(dim=1)
+            correct += int((pred == y[i:i + 1024].reshape(-1).long()).sum())
         return correct / len(x)
     if metric == "auc":
         from sklearn.metrics import roc_auc_score
