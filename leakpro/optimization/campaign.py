@@ -37,6 +37,7 @@ import numpy as np
 from leakpro.optimization.knobs import KnobSpace
 from leakpro.optimization.objectives import AttackScores, clopper_pearson_ci, tpr_at_fpr
 from leakpro.utils.logger import logger
+from leakpro.utils.seed import seed_everything
 
 
 class EvaluationRecord(dict):
@@ -186,28 +187,17 @@ class Campaign:
         return self.records
 
     def _seed_for(self, index: int) -> None:
-        """Seed the global RNGs deterministically from (campaign seed, config index).
+        """Seed every RNG deterministically from (campaign seed, config index).
 
-        Seeding once per run is not enough: resume skips finished configurations,
-        so the RNG state reached at a given index depends on how many
-        configurations ran before it in *this* process. A fresh run and a
+        Seeding once per run is not enough: resume skips finished
+        configurations, so the RNG state reached at a given index depends on how
+        many configurations ran before it in *this* process. A fresh run and a
         resumed run would then train different models at the same index, and
         validation would retrain a different target than the one on the
         frontier. Deriving the seed from the index makes each configuration's
         training reproducible independently of run history.
         """
-        import random  # noqa: PLC0415
-
-        derived = (self.seed * 1_000_003 + index) % (2**31 - 1)
-        random.seed(derived)
-        np.random.seed(derived)  # noqa: NPY002 - legacy global, seeded for libraries that use it
-        try:
-            import torch  # noqa: PLC0415
-        except ImportError:
-            return
-        torch.manual_seed(derived)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(derived)
+        seed_everything((self.seed * 1_000_003 + index) % (2**31 - 1))
 
     def _evaluate(self, index: int, config: dict[str, float]) -> EvaluationRecord:
         logger.info(f"Evaluating config {index}: {config}")

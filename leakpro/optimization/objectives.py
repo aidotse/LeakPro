@@ -14,8 +14,11 @@ from dataclasses import dataclass
 from typing import NamedTuple
 
 import numpy as np
+import torch
 from scipy.stats import beta
 from sklearn.metrics import roc_curve
+
+from leakpro.signals.functional import rescaled_logits
 
 
 @dataclass(frozen=True)
@@ -75,7 +78,7 @@ def tpr_at_fpr(scores: AttackScores, fpr: float) -> TPRAtFPR:
 
     Interpolation rather than a discrete threshold, because tied scores are the
     normal case here, not an edge case: DP-SGD saturates model outputs and
-    ``confidence_logits`` clamps probabilities, so a degenerate model produces
+    the signal saturates, so a degenerate model can produce
     large exactly-tied blocks. A rule restricted to observed distinct values is
     a step function of the data — a tie block spanning the budget forces the
     threshold above it and discards every member inside, so two extra tied
@@ -122,6 +125,49 @@ def tpr_at_fpr(scores: AttackScores, fpr: float) -> TPRAtFPR:
 
     k = int(round(tpr * member.size))
     return TPRAtFPR(tpr, k, int(member.size), realized_fpr, threshold, warning)
+
+
+
+@torch.no_grad()
+def confidence_signal(  # noqa: PLR0913
+    model: "torch.nn.Module",
+    x: "torch.Tensor",
+    y: "torch.Tensor",
+    device: str,
+    output_kind: str = "logits",
+    batch: int = 1024,
+) -> np.ndarray:
+    """Per-point membership signal: LeakPro's ``rescaled_logits`` over batched inference.
+
+    The signal itself is not reimplemented here — it is
+    ``leakpro.signals.functional.rescaled_logits``, Carlini's phi from LiRA, so
+    the campaign and the attack stack score points identically. This function
+    only adds the batched forward pass and maps ``output_kind`` onto the shape
+    that function expects.
+
+    ``output_kind``:
+        "logits"        raw multiclass logits (CrossEntropyLoss models);
+        "binary_logits" one raw logit column (BCEWithLogitsLoss models);
+        "binary_probs"  one sigmoid probability column (BCELoss models) — the
+                        probability is converted back to a logit first, because
+                        ``rescaled_logits`` applies the sigmoid itself.
+    """
+    valid = ("logits", "binary_logits", "binary_probs")
+    if output_kind not in valid:
+        raise ValueError(f"output_kind must be one of {valid}, got '{output_kind}'.")
+
+    outs = []
+    for i in range(0, len(x), batch):
+        out = model(x[i:i + batch].to(device)).cpu().numpy()
+        labels = y[i:i + batch].reshape(-1).numpy().astype(np.int64)
+        if output_kind == "binary_probs":
+            # rescaled_logits sigmoids a single column, so hand it a logit.
+            p = np.clip(out.reshape(-1, 1), 1e-12, 1 - 1e-12)
+            out = np.log(p) - np.log1p(-p)
+        elif output_kind == "binary_logits":
+            out = out.reshape(-1, 1)
+        outs.append(rescaled_logits(out, labels))
+    return np.concatenate(outs)
 
 
 def clopper_pearson_ci(k: int, n: int, confidence: float = 0.95) -> tuple[float, float]:

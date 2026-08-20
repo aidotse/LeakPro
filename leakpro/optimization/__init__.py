@@ -7,7 +7,12 @@
 from leakpro.optimization.campaign import Campaign, EvaluationRecord
 from leakpro.optimization.frontier import pareto_front, plot_frontier
 from leakpro.optimization.knobs import Knob, KnobSpace, default_dpsgd_space
-from leakpro.optimization.objectives import AttackScores, clopper_pearson_ci, tpr_at_fpr
+from leakpro.optimization.objectives import (
+    AttackScores,
+    clopper_pearson_ci,
+    confidence_signal,
+    tpr_at_fpr,
+)
 from leakpro.optimization.validation import proxy_agreement, resolution_warning, validate_frontier
 
 __all__ = [
@@ -17,6 +22,7 @@ __all__ = [
     "Knob",
     "KnobSpace",
     "clopper_pearson_ci",
+    "confidence_signal",
     "default_dpsgd_space",
     "pareto_front",
     "plot_frontier",

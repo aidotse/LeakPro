@@ -28,9 +28,14 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from run_campaign import N_TARGET_TRAIN, load_splits, train_dpsgd_cnn  # noqa: E402
-from run_campaign import _confidence_logits as confidence_logits  # noqa: E402
 
-from leakpro.optimization import AttackScores, EvaluationRecord, proxy_agreement, validate_frontier  # noqa: E402
+from leakpro.optimization import (  # noqa: E402
+    AttackScores,
+    EvaluationRecord,
+    confidence_signal,
+    proxy_agreement,
+    validate_frontier,
+)
 from leakpro.optimization.validation import resolution_warning  # noqa: E402
 from leakpro.utils.logger import logger  # noqa: E402
 
@@ -57,15 +62,15 @@ def make_revalidate_fn(splits: dict, epochs: int, n_refs: int, device: str,
         for _ in range(n_refs):
             sub = rng.choice(splits["ref_pool"], size=N_TARGET_TRAIN, replace=False)
             ref = train_dpsgd_cnn(config, splits, sub, epochs, device)
-            ref_phi_m += confidence_logits(ref, x[members], y[members], device) / n_refs
-            ref_phi_n += confidence_logits(ref, x[nonmembers], y[nonmembers], device) / n_refs
+            ref_phi_m += confidence_signal(ref, x[members], y[members], device, "logits") / n_refs
+            ref_phi_n += confidence_signal(ref, x[nonmembers], y[nonmembers], device, "logits") / n_refs
             del ref
             if device.startswith("cuda"):
                 torch.cuda.empty_cache()
 
         scores = AttackScores(
-            member_scores=confidence_logits(target, x[members], y[members], device) - ref_phi_m,
-            nonmember_scores=confidence_logits(target, x[nonmembers], y[nonmembers], device) - ref_phi_n,
+            member_scores=confidence_signal(target, x[members], y[members], device, "logits") - ref_phi_m,
+            nonmember_scores=confidence_signal(target, x[nonmembers], y[nonmembers], device, "logits") - ref_phi_n,
         )
         del target
         if device.startswith("cuda"):

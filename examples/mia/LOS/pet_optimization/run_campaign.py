@@ -35,7 +35,14 @@ from torch.utils.data import DataLoader, TensorDataset
 EXAMPLE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(EXAMPLE_DIR))  # mimic_data_handler must be importable for unpickling
 
-from leakpro.optimization import AttackScores, Campaign, default_dpsgd_space, pareto_front, plot_frontier
+from leakpro.optimization import (
+    AttackScores,
+    Campaign,
+    confidence_signal,
+    default_dpsgd_space,
+    pareto_front,
+    plot_frontier,
+)
 from leakpro.utils.logger import logger
 
 DELTA = 1e-5
@@ -118,18 +125,6 @@ def train_dpsgd_lr(config: dict, splits: dict, train_indices: np.ndarray,
     return model.eval()
 
 
-@torch.no_grad()
-def _confidence_logits(model: nn.Module, x: torch.Tensor, y: torch.Tensor,
-                       device: str, batch: int = 4096) -> np.ndarray:
-    """Logit-scaled confidence in the TRUE label, phi = log p_true - log(1 - p_true)."""
-    outs = []
-    for i in range(0, len(x), batch):
-        p = model(x[i:i + batch].to(device)).cpu().clamp(1e-6, 1 - 1e-6)
-        p_true = torch.where(y[i:i + batch] > 0.5, p, 1 - p)
-        outs.append(torch.log(p_true) - torch.log1p(-p_true))
-    return torch.cat(outs).numpy().ravel()
-
-
 def make_fns(splits: dict, epochs: int, n_refs: int, device: str, ref_seed: int = 1) -> tuple:
     """Build the campaign's (train, utility, attack) callables."""
 
@@ -155,8 +150,8 @@ def make_fns(splits: dict, epochs: int, n_refs: int, device: str, ref_seed: int 
             ref_models.append(train_dpsgd_lr(config, splits, sub, epochs, device))
 
         def calibrated(idx: np.ndarray) -> np.ndarray:
-            target_phi = _confidence_logits(model, x[idx], y[idx], device)
-            ref_phi = np.mean([_confidence_logits(r, x[idx], y[idx], device) for r in ref_models], axis=0)
+            target_phi = confidence_signal(model, x[idx], y[idx], device, "binary_probs")
+            ref_phi = np.mean([confidence_signal(r, x[idx], y[idx], device, "binary_probs") for r in ref_models], axis=0)
             return target_phi - ref_phi
 
         return AttackScores(member_scores=calibrated(members), nonmember_scores=calibrated(nonmembers))

@@ -38,7 +38,15 @@ from torch.utils.data import DataLoader, TensorDataset
 EXAMPLE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(EXAMPLE_DIR))  # cifar_data_handler must be importable for unpickling
 
-from leakpro.optimization import AttackScores, Campaign, Knob, KnobSpace, pareto_front, plot_frontier
+from leakpro.optimization import (
+    AttackScores,
+    Campaign,
+    Knob,
+    KnobSpace,
+    confidence_signal,
+    pareto_front,
+    plot_frontier,
+)
 from leakpro.utils.logger import logger
 
 DELTA = 1e-5
@@ -150,18 +158,6 @@ def train_dpsgd_cnn(config: dict, splits: dict, train_indices: np.ndarray,
     return model.eval()
 
 
-@torch.no_grad()
-def _confidence_logits(model: nn.Module, x: torch.Tensor, y: torch.Tensor,
-                       device: str, batch: int = 1024) -> np.ndarray:
-    """Logit-scaled confidence in the TRUE class: phi = log p_y - log(1 - p_y) (Carlini scaling)."""
-    outs = []
-    for i in range(0, len(x), batch):
-        probs = torch.softmax(model(x[i:i + batch].to(device)), dim=1).cpu().clamp(1e-6, 1 - 1e-6)
-        p_true = probs.gather(1, y[i:i + batch].reshape(-1, 1)).squeeze(1)
-        outs.append(torch.log(p_true) - torch.log1p(-p_true))
-    return torch.cat(outs).numpy()
-
-
 def make_fns(splits: dict, epochs: int, n_refs: int, device: str, ref_seed: int = 1) -> tuple:
     """Build the campaign's (train, utility, attack) callables."""
 
@@ -193,15 +189,15 @@ def make_fns(splits: dict, epochs: int, n_refs: int, device: str, ref_seed: int 
         for _ in range(n_refs):
             sub = rng.choice(splits["ref_pool"], size=N_TARGET_TRAIN, replace=False)
             ref = train_dpsgd_cnn(config, splits, sub, epochs, device)
-            ref_phi_members += _confidence_logits(ref, x[members], y[members], device) / n_refs
-            ref_phi_nonmembers += _confidence_logits(ref, x[nonmembers], y[nonmembers], device) / n_refs
+            ref_phi_members += confidence_signal(ref, x[members], y[members], device, "logits") / n_refs
+            ref_phi_nonmembers += confidence_signal(ref, x[nonmembers], y[nonmembers], device, "logits") / n_refs
             del ref
             if device.startswith("cuda"):
                 torch.cuda.empty_cache()
 
         return AttackScores(
-            member_scores=_confidence_logits(model, x[members], y[members], device) - ref_phi_members,
-            nonmember_scores=_confidence_logits(model, x[nonmembers], y[nonmembers], device) - ref_phi_nonmembers,
+            member_scores=confidence_signal(model, x[members], y[members], device, "logits") - ref_phi_members,
+            nonmember_scores=confidence_signal(model, x[nonmembers], y[nonmembers], device, "logits") - ref_phi_nonmembers,
         )
 
     return train_fn, utility_fn, attack_fn
