@@ -2,32 +2,31 @@
 # Copyright 2023-2026 Lindholmen Science Park AB
 # SPDX-License-Identifier: Apache-2.0
 #
-"""PET optimization: trace the utility-vs-attack-success frontier over PET hyperparameters."""
+"""PET optimization: find the utility-vs-attack-success frontier over PET hyperparameters.
 
-from leakpro.optimization.campaign import Campaign, EvaluationRecord
-from leakpro.optimization.frontier import pareto_front, plot_frontier
+The search proposes DP-SGD configurations with Optuna (Bayesian optimization),
+trains a target for each, and measures its privacy with LeakPro's own RMIA attack
+via :func:`leakpro.optimization.audit.run_rmia_audit`. Nothing about the attack is
+reimplemented here — the privacy axis is the real RMIA result's TPR at a fixed FPR.
+"""
+
+from leakpro.optimization.audit import clopper_pearson_ci, run_rmia_audit, tpr_at_fixed_fpr
+from leakpro.optimization.frontier import pareto_trials, plot_frontier
 from leakpro.optimization.knobs import Knob, KnobSpace, default_dpsgd_space
-from leakpro.optimization.objectives import (
-    AttackScores,
-    clopper_pearson_ci,
-    confidence_signal,
-    tpr_at_fpr,
-)
-from leakpro.optimization.validation import proxy_agreement, resolution_warning, validate_frontier
+from leakpro.optimization.search import ObjectiveResult, optimize
+from leakpro.optimization.validation import proxy_agreement, validate_frontier
 
 __all__ = [
-    "AttackScores",
-    "Campaign",
-    "EvaluationRecord",
     "Knob",
     "KnobSpace",
+    "ObjectiveResult",
     "clopper_pearson_ci",
-    "confidence_signal",
     "default_dpsgd_space",
-    "pareto_front",
+    "optimize",
+    "pareto_trials",
     "plot_frontier",
     "proxy_agreement",
-    "resolution_warning",
-    "tpr_at_fpr",
+    "run_rmia_audit",
+    "tpr_at_fixed_fpr",
     "validate_frontier",
 ]

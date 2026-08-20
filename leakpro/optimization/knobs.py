@@ -2,9 +2,14 @@
 # Copyright 2023-2026 Lindholmen Science Park AB
 # SPDX-License-Identifier: Apache-2.0
 #
-"""Search-space definition for PET optimization campaigns.
+"""Search-space definition for privacy-utility optimization runs.
 
-A ``KnobSpace`` holds the tunable hyperparameters (knobs) of a PET configuration.
+A ``KnobSpace`` holds the tunable hyperparameters (knobs) of a PET configuration
+and knows how to offer them to an Optuna trial. The optimizer (see
+``leakpro.optimization.search``) proposes each next configuration from the
+results observed so far — the knob space only describes *what* may be searched,
+never *which* point comes next.
+
 Users may fix any knob to a constant or narrow its bounds; the default DP-SGD
 space searches {noise multiplier, clipping norm, learning rate, batch size}
 jointly — never utility knobs first, privacy knobs after.
@@ -12,8 +17,9 @@ jointly — never utility knobs first, privacy knobs after.
 
 from dataclasses import dataclass, replace
 
-import numpy as np
-from scipy.stats import qmc
+from optuna.trial import Trial
+
+from leakpro.schemas import KnobConfig
 
 
 @dataclass(frozen=True)
@@ -21,11 +27,11 @@ class Knob:
     """One tunable hyperparameter.
 
     Args:
-        name: Config key the sampled value is emitted under.
+        name: Config key the suggested value is emitted under.
         low: Lower bound (inclusive).
         high: Upper bound (inclusive).
-        log_scale: Sample uniformly in log10 space (bounds must be > 0).
-        integer: Round the sampled value to the nearest integer.
+        log_scale: Search on a log scale (bounds must be > 0).
+        integer: Suggest an integer value.
 
     """
 
@@ -42,22 +48,18 @@ class Knob:
         if self.log_scale and self.low <= 0:
             raise ValueError(f"Knob '{self.name}': log_scale requires positive bounds, got low={self.low}.")
 
-    def from_unit(self, u: float) -> float:
-        """Map a value in [0, 1] to the knob's native range."""
-        if self.log_scale:
-            value = 10 ** (np.log10(self.low) + u * (np.log10(self.high) - np.log10(self.low)))
-        else:
-            value = self.low + u * (self.high - self.low)
+    def suggest(self, trial: Trial) -> float:
+        """Ask an Optuna trial for a value of this knob within its range."""
         if self.integer:
-            return int(np.clip(round(value), self.low, self.high))
-        return float(value)
+            return trial.suggest_int(self.name, int(self.low), int(self.high), log=self.log_scale)
+        return trial.suggest_float(self.name, self.low, self.high, log=self.log_scale)
 
 
 class KnobSpace:
     """A set of knobs with optional user-fixed values.
 
-    Fixed knobs are emitted in every sampled configuration but consume no
-    search dimension.
+    Fixed knobs are emitted in every configuration but consume no search
+    dimension.
     """
 
     def __init__(self, knobs: list[Knob], fixed: dict[str, float] | None = None) -> None:
@@ -70,6 +72,11 @@ class KnobSpace:
             raise ValueError(f"Knobs {sorted(overlap)} are both searchable and fixed; pick one.")
         self.knobs = list(knobs)
 
+    @classmethod
+    def from_config(cls, knobs: list[KnobConfig], fixed: dict[str, float] | None = None) -> "KnobSpace":
+        """Build a knob space from validated config entries (see PrivacyUtilityConfig)."""
+        return cls([Knob(**k.model_dump()) for k in knobs], fixed=fixed)
+
     @property
     def dim(self) -> int:
         """Number of searched dimensions."""
@@ -77,9 +84,9 @@ class KnobSpace:
 
     def narrow(self, name: str, low: float, high: float) -> "KnobSpace":
         """Return a copy of the space with one knob's bounds narrowed."""
-        knobs = [replace(k, low=low, high=high) if k.name == name else k for k in self.knobs]
         if not any(k.name == name for k in self.knobs):
             raise KeyError(f"No searchable knob named '{name}'.")
+        knobs = [replace(k, low=low, high=high) if k.name == name else k for k in self.knobs]
         return KnobSpace(knobs, fixed=self.fixed)
 
     def fix(self, name: str, value: float) -> "KnobSpace":
@@ -89,8 +96,18 @@ class KnobSpace:
         knobs = [k for k in self.knobs if k.name != name]
         return KnobSpace(knobs, fixed={**self.fixed, name: value})
 
+    def suggest(self, trial: Trial) -> dict[str, float]:
+        """Build one configuration by asking ``trial`` for every searchable knob.
+
+        Fixed knobs are added verbatim so a configuration always carries the full
+        set of hyperparameters, whether searched or pinned.
+        """
+        config = {knob.name: knob.suggest(trial) for knob in self.knobs}
+        config.update(self.fixed)
+        return config
+
     def to_dict(self) -> dict:
-        """JSON-serializable description of the space, used to guard campaign resume."""
+        """JSON-serializable description of the space, stored on the study."""
         return {
             "knobs": [
                 {"name": k.name, "low": k.low, "high": k.high, "log_scale": k.log_scale, "integer": k.integer}
@@ -99,22 +116,9 @@ class KnobSpace:
             "fixed": dict(self.fixed),
         }
 
-    def sample_sobol(self, n: int, seed: int = 0) -> list[dict[str, float]]:
-        """Draw ``n`` configurations from a scrambled Sobol sequence (deterministic per seed)."""
-        if self.dim == 0:
-            return [dict(self.fixed) for _ in range(n)]
-        sampler = qmc.Sobol(d=self.dim, scramble=True, seed=seed)
-        unit = sampler.random(n)
-        configs = []
-        for row in unit:
-            config = {knob.name: knob.from_unit(u) for knob, u in zip(self.knobs, row)}
-            config.update(self.fixed)
-            configs.append(config)
-        return configs
-
 
 def default_dpsgd_space() -> KnobSpace:
-    """The plan's default joint DP-SGD search space.
+    """The default joint DP-SGD search space.
 
     Bounds follow published DP-SGD tuning practice: wide, log-scaled, and
     searched jointly because batch size enters the privacy accounting.
