@@ -88,7 +88,9 @@ def optimize(  # noqa: PLR0913
             lifetime (already-finished trials count toward this on resume).
         proxy_fpr: FPR level the optimizer minimizes TPR at (default 1%). Recorded
             on the study; the objective is responsible for reporting TPR here.
-        seed: Sampler seed; fixed seed + fixed space reproduces the run.
+        seed: Seeds the sampler, and every RNG (torch/numpy/random) per trial
+            from (seed, trial number) — so each trial's training is reproducible
+            independently of how many trials ran before it in the process.
         anchors: Explicit configurations evaluated first (e.g. a non-private
             reference point that continuous search would never land on exactly).
         study_name: Name of the Optuna study inside the database.
@@ -101,9 +103,8 @@ def optimize(  # noqa: PLR0913
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Seed torch/numpy/random once up front. Each trial's *training* is the
-    # objective's responsibility; this makes the sampler and any pre-loop setup
-    # reproducible.
+    # Seed torch/numpy/random for any pre-loop setup (e.g. split permutation).
+    # Each trial re-seeds from (seed, trial number) — see _objective.
     seed_everything(seed)
 
     storage = f"sqlite:///{output_dir / 'study.db'}"
@@ -130,6 +131,12 @@ def optimize(  # noqa: PLR0913
 
     def _objective(trial: optuna.trial.Trial) -> tuple[float, float]:
         config = knob_space.suggest(trial)
+        # Re-seed every RNG deterministically from (seed, trial number): the
+        # global RNG state at trial N otherwise depends on how many trials ran
+        # earlier in *this* process, so a resumed run would train different
+        # models than a fresh one at the same trial. (The TPE sampler carries
+        # its own seeded RNG and is unaffected by this.)
+        seed_everything((seed * 1_000_003 + trial.number) % (2**31 - 1))
         logger.info(f"Trial {trial.number}: {config}")
         result = objective_fn(config)
         trial.set_user_attr("utility", result.utility)

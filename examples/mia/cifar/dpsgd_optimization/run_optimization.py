@@ -237,9 +237,19 @@ def make_objective(cfg: PrivacyUtilityConfig, pop: dict, out_dir: Path, device: 
         degenerate = not result.fixed_fpr_table
         tpr = 0.0 if degenerate else tpr_at_fixed_fpr(result, cfg.proxy_fpr)
 
+        # The FPR actually achievable at or below the proxy level. A TPR of 0 at
+        # realized FPR 0 means the score distribution was too coarse to resolve
+        # the operating point — not evidence of privacy; record it so the two
+        # cases are distinguishable in the trial record.
+        realized_fpr = None
+        if result.fpr is not None:
+            at_or_below = result.fpr[result.fpr <= cfg.proxy_fpr]
+            realized_fpr = float(at_or_below.max()) if at_or_below.size else 0.0
+
         return ObjectiveResult(
             utility=utility, tpr=tpr,
             extras={"epsilon": epsilon, "roc_auc": result.roc_auc,
+                    "realized_fpr": realized_fpr,
                     "degenerate_audit": degenerate},
         )
 
