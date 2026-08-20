@@ -16,48 +16,36 @@ loop replaces. Anything whose training loop cannot be expressed as
 callables directly instead.
 """
 
-import importlib.util
-import sys
-import uuid
-from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
 import torch
-from torch import nn, optim
+from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 
+from leakpro.input_handler.user_imports import (
+    get_class_from_module,
+    get_optimizer_mapping,
+    import_module_from_file,
+)
 from leakpro.optimization.training import PETRecipe
 from leakpro.utils.logger import logger
 
-OPTIMIZERS: dict[str, Callable] = {"adam": optim.Adam, "sgd": optim.SGD, "adamw": optim.AdamW}
-
-
-def load_module(module_path: str | Path):  # noqa: ANN201
-    """Import a .py file under a unique name, so repeated loads never collide."""
-    module_path = Path(module_path)
-    if not module_path.exists():
-        raise FileNotFoundError(f"Architecture module not found: {module_path}")
-    name = f"leakpro_arch_{uuid.uuid4().hex}"
-    spec = importlib.util.spec_from_file_location(name, module_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Could not load a module from {module_path}.")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
 
 def find_model_class(module, model_class: str | None = None) -> type:  # noqa: ANN001
-    """Pick the nn.Module subclass to train, by name or as the only candidate."""
+    """Pick the nn.Module subclass to train, by name or as the only candidate.
+
+    Named lookup delegates to ``user_imports.get_class_from_module``, the
+    repo's existing helper. Only the "exactly one candidate, infer it" case is
+    added here, which the webapp needs because an uploaded arch.py usually
+    defines a single model and the user is not asked to name it.
+    """
+    if model_class:
+        return get_class_from_module(module, model_class)
     candidates = {
         name: obj for name, obj in vars(module).items()
         if isinstance(obj, type) and issubclass(obj, nn.Module) and obj.__module__ == module.__name__
     }
-    if model_class:
-        if model_class not in candidates:
-            raise KeyError(f"'{model_class}' is not an nn.Module defined in {module.__name__}; found {sorted(candidates)}.")
-        return candidates[model_class]
     if len(candidates) != 1:
         raise ValueError(
             f"Cannot choose a model class automatically: {sorted(candidates)}. Pass model_class explicitly."
@@ -78,7 +66,7 @@ def detect_binary(
     two-class problem may be modelled with one sigmoid output or two softmax
     ones. So instantiate the model once and look at what it produces.
     """
-    cls = find_model_class(load_module(module_path), model_class)
+    cls = find_model_class(import_module_from_file(str(module_path)), model_class)
     probe = cls(**dict(init_params or {}))
     probe.eval()
     with torch.no_grad():
@@ -111,13 +99,16 @@ def recipe_from_module(  # noqa: PLR0913
             what the attack reads confidences with.
 
     """
-    if optimizer_name not in OPTIMIZERS:
-        raise ValueError(f"Unknown optimizer '{optimizer_name}'; use one of {sorted(OPTIMIZERS)}.")
+    # torch.optim is the source of truth for what optimizers exist, via the
+    # repo's mapping — a hardcoded dict here would silently exclude the rest.
+    optimizers = get_optimizer_mapping()
+    if optimizer_name not in optimizers:
+        raise ValueError(f"Unknown optimizer '{optimizer_name}'; use one of {sorted(optimizers)}.")
 
-    module = load_module(module_path)
+    module = import_module_from_file(str(module_path))
     cls = find_model_class(module, model_class)
     kwargs = dict(init_params or {})
-    optimizer_cls = OPTIMIZERS[optimizer_name]
+    optimizer_cls = optimizers[optimizer_name]
 
     # A fresh model per config: the campaign must never resume a trained one.
     def make_model(_config: dict) -> nn.Module:

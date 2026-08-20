@@ -13,9 +13,9 @@ from leakpro.optimization.adapters import (
     carve_splits,
     detect_binary,
     find_model_class,
-    load_module,
     recipe_from_module,
 )
+from leakpro.input_handler.user_imports import import_module_from_file
 from leakpro.optimization.training import REQUIRED_SPLIT_KEYS
 
 MULTICLASS = """
@@ -66,25 +66,28 @@ def _xy(n=200, dim=6, classes=3, seed=0):
 
 class TestModelDiscovery:
     def test_single_class_is_found_without_naming_it(self, arch):
-        assert find_model_class(load_module(arch(MULTICLASS))).__name__ == "Net"
+        assert find_model_class(import_module_from_file(str(arch(MULTICLASS)))).__name__ == "Net"
 
     def test_ambiguous_module_requires_a_name(self, arch):
-        module = load_module(arch(TWO_MODELS))
+        module = import_module_from_file(str(arch(TWO_MODELS)))
         with pytest.raises(ValueError, match="Cannot choose a model class"):
             find_model_class(module)
         assert find_model_class(module, "Other").__name__ == "Other"
 
     def test_unknown_class_name_rejected(self, arch):
-        with pytest.raises(KeyError):
-            find_model_class(load_module(arch(MULTICLASS)), "Missing")
+        # user_imports.get_class_from_module raises ValueError, not KeyError.
+        with pytest.raises(ValueError, match="not found in module"):
+            find_model_class(import_module_from_file(str(arch(MULTICLASS))), "Missing")
 
     def test_missing_file_rejected(self, tmp_path):
         with pytest.raises(FileNotFoundError):
-            load_module(tmp_path / "nope.py")
+            import_module_from_file(str(tmp_path / "nope.py"))
 
-    def test_repeated_loads_do_not_collide(self, arch):
+    def test_repeated_loads_reuse_the_cached_module(self, arch):
+        # user_imports.import_module_from_file caches by module name and checks
+        # the path, so the same arch loaded twice is one import, not two.
         path = arch(MULTICLASS)
-        assert load_module(path).__name__ != load_module(path).__name__
+        assert import_module_from_file(str(path)) is import_module_from_file(str(path))
 
 
 class TestDetectBinary:
@@ -132,8 +135,12 @@ class TestRecipeFromModule:
 
     def test_unknown_optimizer_rejected(self, arch):
         x, y = _xy()
+        # Every torch.optim optimizer is valid now that the lookup comes from
+        # user_imports.get_optimizer_mapping, so "rmsprop" is accepted; only a
+        # name torch does not have is rejected.
+        assert recipe_from_module(arch(MULTICLASS), x, y.long(), epochs=1, optimizer_name="rmsprop")
         with pytest.raises(ValueError, match="Unknown optimizer"):
-            recipe_from_module(arch(MULTICLASS), x, y.long(), epochs=1, optimizer_name="rmsprop")
+            recipe_from_module(arch(MULTICLASS), x, y.long(), epochs=1, optimizer_name="not_an_optimizer")
 
 
 class TestCarveSplits:

@@ -49,9 +49,11 @@ class PETRecipe:
         make_loader: (indices, config) -> training DataLoader (reads e.g. ``batch_size``).
         criterion: loss module shared by target and reference models.
         epochs: fixed number of training epochs.
-        output_kind: "logits" for raw multiclass logits (CrossEntropyLoss models),
-            "binary_probs" for a single sigmoid output column (BCELoss models).
-            Decides how membership confidence is extracted.
+        output_kind: how membership confidence is read from the model output.
+            "logits" — raw multiclass logits (CrossEntropyLoss models);
+            "binary_probs" — a single sigmoid probability column (BCELoss models);
+            "binary_logits" — a single raw logit column (BCEWithLogitsLoss
+            models, e.g. GRU-D).
 
     """
 
@@ -64,8 +66,9 @@ class PETRecipe:
 
     def __post_init__(self) -> None:
         """Validate the output kind."""
-        if self.output_kind not in ("logits", "binary_probs"):
-            raise ValueError(f"output_kind must be 'logits' or 'binary_probs', got '{self.output_kind}'.")
+        valid = ("logits", "binary_probs", "binary_logits")
+        if self.output_kind not in valid:
+            raise ValueError(f"output_kind must be one of {valid}, got '{self.output_kind}'.")
 
 
 def _patch_residual_blocks(model: Module) -> None:
