@@ -5,7 +5,7 @@ import MetaPanel from "./MetaPanel";
 interface Props { results: ModelResult[] }
 
 function riskLevel(auc: number | undefined): { label: string; color: string; bg: string } {
-  if (auc === undefined) return { label: "N/A", color: "text-slate-400", bg: "bg-slate-100 dark:bg-slate-800" };
+  if (auc === undefined) return { label: "N/A", color: "text-slate-400", bg: "bg-slate-100 dark:bg-surface-2" };
   if (auc >= 0.75)        return { label: "HIGH",   color: "text-red-500",    bg: "bg-red-500/10 border border-red-500/30" };
   if (auc >= 0.60)        return { label: "MEDIUM", color: "text-orange-500", bg: "bg-orange-500/10 border border-orange-500/30" };
   return                         { label: "LOW",    color: "text-green-500",  bg: "bg-green-500/10 border border-green-500/30" };
@@ -80,19 +80,19 @@ export default function Summary({ results }: Props) {
       )}
 
       {/* Comparison table */}
-      <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
-        <div className="flex items-center justify-between px-3 py-2 bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
+      <div className="rounded-xl border border-slate-200 dark:border-surface-border overflow-hidden">
+        <div className="flex items-center justify-between px-3 py-2 bg-slate-50 dark:bg-surface border-b border-slate-200 dark:border-surface-border">
           <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Summary</span>
           <button
             onClick={downloadCSV}
-            className="flex items-center gap-1 px-2 py-1 rounded border border-slate-300 dark:border-slate-700 text-slate-500 text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            className="flex items-center gap-1 px-2 py-1 rounded border border-slate-300 dark:border-surface-border text-slate-500 text-xs font-bold hover:bg-slate-100 dark:hover:bg-surface-2 transition-colors"
           >
             <span className="material-symbols-outlined text-sm">download</span>
             CSV
           </button>
         </div>
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
+          <thead className="bg-slate-50 dark:bg-surface border-b border-slate-200 dark:border-surface-border">
             <tr>
               <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-500">Model</th>
               <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-500">TPR@0.1%FPR</th>
@@ -102,7 +102,7 @@ export default function Summary({ results }: Props) {
               <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-slate-500">Risk</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+          <tbody className="divide-y divide-slate-200 dark:divide-surface-border">
             {results.map((m) => {
               const key = `${m.job_id}/${m.model_name}`;
               const auc = bestAuc(m);
@@ -111,12 +111,12 @@ export default function Summary({ results }: Props) {
               const isOpen = openKey === key;
               return (
                 <React.Fragment key={key}>
-                  <tr className="hover:bg-slate-50/50 dark:hover:bg-slate-900/50 transition-colors">
+                  <tr className="hover:bg-slate-50/50 dark:hover:bg-surface/50 transition-colors">
                     <td className="px-4 py-3 font-semibold">
                       <div className="flex items-center gap-2 flex-wrap">
                         {m.model_name}
                         {m.model_class && (
-                          <span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 font-mono">
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 dark:bg-surface-2 text-slate-500 font-mono">
                             {m.model_class}
                           </span>
                         )}
@@ -140,7 +140,7 @@ export default function Summary({ results }: Props) {
                     <td className="px-4 py-3"><span className={`font-bold ${color}`}>{label}</span></td>
                   </tr>
                   {isOpen && (
-                    <tr className="bg-slate-50 dark:bg-slate-900/60">
+                    <tr className="bg-slate-50 dark:bg-surface/60">
                       <td colSpan={6} className="px-6 py-4">
                         <MetaPanel r={m} />
                       </td>

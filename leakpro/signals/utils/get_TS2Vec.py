@@ -11,7 +11,7 @@ from functools import partial
 from typing import Callable
 
 import numpy as np
-from torch import is_tensor
+from torch import cuda, is_tensor
 from ts2vec import TS2Vec
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
