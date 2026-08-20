@@ -11,14 +11,3 @@ To run the use case follow these stpes:<br>
 
 
 Once the dataset is ready, you can proceed to run any of the use case notebooks.
-
-
-
-
-## DP-SGD privacy-utility optimization
-
-The LOS DP-SGD optimization examples are pending migration to the integrated
-RMIA + Bayesian-optimization pipeline; see
-[`dpsgd_optimization/README.md`](dpsgd_optimization/README.md). The reference
-implementation lives in
-[`examples/mia/cifar/dpsgd_optimization`](../cifar/dpsgd_optimization/README.md).
