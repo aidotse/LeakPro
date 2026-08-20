@@ -306,22 +306,30 @@ def run_verification(job_dir: Path, model_name: str, index: int) -> None:
     def verify_once(train_fn, utility_fn, attack_fn):  # noqa: ANN001, ANN202
         model = train_fn(config)
         util = float(utility_fn(model))
-        tpr_val, _, _ = tpr_at_fpr(attack_fn(model, config), record.get("proxy_fpr", 0.01))
-        return util, tpr_val, getattr(model, "campaign_extras", {}).get("epsilon")
+        measured = tpr_at_fpr(attack_fn(model, config), record.get("proxy_fpr", PROXY_FPR))
+        return util, measured, getattr(model, "campaign_extras", {}).get("epsilon")
 
-    utility, tpr, epsilon = _run_with_oom_backoff(build_fns, verify_once, max_physical_batch)
+    utility, measured, epsilon = _run_with_oom_backoff(build_fns, verify_once, max_physical_batch)
 
     target.write_text(json.dumps(json_safe({
         "status": "done",
         "index": index,
         "estimated": estimated,
         "verified": {
-            "attack_tpr": tpr,
+            "attack_tpr": measured.tpr,
             "utility": utility,
             "epsilon": epsilon,
+            # The operating point behind the verified number. Without it the UI
+            # cannot tell a resolved measurement from one the audit set was too
+            # coarse to resolve — both arrive as a bare TPR.
+            "realized_fpr": measured.realized_fpr,
+            "resolution_warning": measured.warning,
         },
     }), indent=2))
-    logger.info(f"Verified setting {index}: TPR {tpr:.4f} (search estimated {estimated['attack_tpr']}).")
+    if measured.warning:
+        logger.warning(f"Verification of setting {index}: {measured.warning}")
+    logger.info(f"Verified setting {index}: TPR {measured.tpr:.4f} at realized FPR "
+                f"{measured.realized_fpr:.2%} (search estimated {estimated['attack_tpr']}).")
 
 
 def main() -> None:

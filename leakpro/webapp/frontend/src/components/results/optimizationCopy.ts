@@ -56,6 +56,10 @@ export const COPY = {
   adopted: "Added to your results as an optimized setting.",
 
   lowResolution: "These numbers rest on very few records.",
+  notMeasurable: "This result could not be measured directly.",
+  notMeasurableHelp:
+    "Too few records separated the protected model's answers, so this attack figure is estimated " +
+    "rather than observed. Treat it as unknown, not as proof of protection.",
   noResults: "No settings were tested successfully.",
   failed: "The optimization run failed.",
   retry: "Try again",

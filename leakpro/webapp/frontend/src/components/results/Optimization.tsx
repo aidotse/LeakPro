@@ -505,6 +505,14 @@ function SettingPanel({
                 {COPY.optimistic}
               </div>
             )}
+            {/* A low attack number can mean "well protected" or "we could not
+                measure it". Those must never look the same to the reader. */}
+            {verification.verified.resolution_warning && (
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400 flex items-start gap-2">
+                <span className="material-symbols-outlined text-sm shrink-0">help</span>
+                <span><span className="font-bold">{COPY.notMeasurable}</span> {COPY.notMeasurableHelp}</span>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <StatCard label={`${COPY.estimate} — attack`} value={`${(verification.estimated.attack_tpr * 100).toFixed(2)}%`} />
               <StatCard

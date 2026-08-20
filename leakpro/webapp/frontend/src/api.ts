@@ -249,6 +249,15 @@ export interface Setting {
   attack_tpr_ci95?: [number, number];
   /** False-alarm rate the attack figure was measured at (0.01 == 1%). */
   proxy_fpr?: number;
+  /** The false-alarm rate actually achievable in the data, which can be below
+   *  `proxy_fpr` when the score distribution is coarse. */
+  attack_realized_fpr?: number;
+  attack_threshold?: number;
+  /** Set when the reported TPR is interpolated rather than observed: the audit
+   *  set could not resolve this operating point. Not evidence of privacy. */
+  attack_resolution_warning?: string | null;
+  /** Distinct nonmember score values — few means a saturated model. */
+  attack_distinct_nonmember_scores?: number;
   epsilon?: number;
   delta?: number;
   /** Present when the run skipped the attack for this setting. */
@@ -282,6 +291,12 @@ export interface Verification {
   status: "running" | "done" | "failed";
   index: number;
   estimated: { attack_tpr: number; utility: number };
-  verified?: { attack_tpr: number; utility: number; epsilon?: number };
+  verified?: {
+    attack_tpr: number;
+    utility: number;
+    epsilon?: number;
+    realized_fpr?: number;
+    resolution_warning?: string | null;
+  };
   error?: string;
 }
