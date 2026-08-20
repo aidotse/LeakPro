@@ -2,26 +2,33 @@
 # Copyright 2023-2026 Lindholmen Science Park AB
 # SPDX-License-Identifier: Apache-2.0
 #
-"""PET optimization campaign on CIFAR-10 with a small CNN.
+"""DP-SGD privacy-utility optimization on CIFAR-10 with a small CNN.
 
-The leaky-by-design counterpart of the LOS campaign: a small convolutional
-network trained on a 15k subset of CIFAR-10 memorizes visibly, so the
-utility-vs-attack frontier has a real privacy axis to trace. Same design as
-the LOS example:
+Traces the privacy-utility frontier for DP-SGD by *optimizing*, not sweeping:
+Optuna proposes each next configuration of the DP-SGD knobs from the
+(utility, attack-TPR) results seen so far. Each configuration is evaluated by
 
-- Joint DP-SGD knobs {noise multiplier, clip norm, lr, batch size}; noise may
-  be swept down to (near) zero via --include-nonprivate to anchor the leaky end.
-- Utility: test accuracy.
-- Attack: matched-reference MIA, references trained with the candidate's
-  config on disjoint data (full mimicry).
-- Loop metric: TPR @ FPR = 1%.
+  1. training a target CNN under the knobs (DP-SGD, noise set directly), and
+  2. auditing it with LeakPro's own RMIA attack (``leakpro.attacks.mia_attacks.rmia``)
+     run through the ordinary LeakPro pipeline — the RMIA shadow models are
+     retrained under the candidate's exact configuration, so they mimic it.
+
+Objectives: maximize the configured utility metric, minimize RMIA TPR at the
+configured proxy FPR. Models that fail the utility gate ("did it learn at all?")
+are pruned: no attack is run and they can never sit on the frontier.
+
+All settings live in ``dpsgd_optimization.yaml`` (schema:
+``leakpro.schemas.PrivacyUtilityConfig``). The per-trial ``audit.yaml`` files are
+generated — they are output, not user input.
 
 Usage:
-    python run_campaign.py --smoke          # 2 configs, pipeline check
-    python run_campaign.py --n-configs 50   # real sweep
+    python run_optimization.py --smoke           # tiny end-to-end pipeline check
+    python run_optimization.py                   # dpsgd_optimization.yaml as-is
+    python run_optimization.py --config my_settings.yaml
 """
 
 import argparse
+import hashlib
 import json
 import pickle
 import sys
@@ -30,266 +37,275 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from opacus import PrivacyEngine
-from opacus.utils.batch_memory_manager import BatchMemoryManager
+import yaml
 from torch import nn, optim
+from torch.nn.functional import softmax
 from torch.utils.data import DataLoader, TensorDataset
 
 EXAMPLE_DIR = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(EXAMPLE_DIR))  # cifar_data_handler must be importable for unpickling
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # make dp_handler importable (also for unpickling)
+sys.path.insert(0, str(EXAMPLE_DIR))  # cifar_data_handler is needed to unpickle cifar10.pkl
 
-from leakpro.optimization import (
-    AttackScores,
-    Campaign,
-    Knob,
+from dp_handler import CifarDPHandler, SmallCNN, dp_train  # noqa: E402
+from sklearn.metrics import balanced_accuracy_score, roc_auc_score  # noqa: E402
+
+from leakpro import LeakPro  # noqa: E402
+from leakpro.optimization import (  # noqa: E402
     KnobSpace,
-    confidence_signal,
-    pareto_front,
+    ObjectiveResult,
+    optimize,
+    pareto_trials,
     plot_frontier,
+    run_rmia_audit,
+    tpr_at_fixed_fpr,
 )
-from leakpro.utils.logger import logger
+from leakpro.schemas import PrivacyUtilityConfig  # noqa: E402
+from leakpro.utils.logger import logger  # noqa: E402
 
-DELTA = 1e-5
-N_TARGET_TRAIN = 15000
-N_AUDIT = 2000
 NUM_CLASSES = 10
-N_UTILITY_EVAL = 5000
 
 
-class SmallCNN(nn.Module):
-    """Opacus-compatible CIFAR CNN (GroupNorm, no BatchNorm). Trains in ~1 min, memorizes visibly."""
+# --------------------------------------------------------------------------- #
+# Utility metric + gate
+# --------------------------------------------------------------------------- #
+def chance_level(metric: str, num_classes: int) -> float:
+    """The metric's value for a model that learned nothing.
 
-    def __init__(self, num_classes: int = 10) -> None:
-        super().__init__()
-        self.features = nn.Sequential(
-            nn.Conv2d(3, 32, 3, padding=1), nn.GroupNorm(8, 32), nn.ReLU(),
-            nn.Conv2d(32, 32, 3, padding=1), nn.GroupNorm(8, 32), nn.ReLU(), nn.MaxPool2d(2),
-            nn.Conv2d(32, 64, 3, padding=1), nn.GroupNorm(8, 64), nn.ReLU(),
-            nn.Conv2d(64, 64, 3, padding=1), nn.GroupNorm(8, 64), nn.ReLU(), nn.MaxPool2d(2),
-        )
-        self.classifier = nn.Sequential(nn.Flatten(), nn.Linear(64 * 8 * 8, 256), nn.ReLU(), nn.Linear(256, num_classes))
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.classifier(self.features(x))
+    Plain accuracy's chance level (1/num_classes) is only meaningful on
+    class-balanced data — on imbalanced data an always-majority model scores the
+    majority frequency; use balanced_accuracy or auc there instead.
+    """
+    return 0.5 if metric == "auc" else 1.0 / num_classes
 
 
-def load_splits(seed: int = 0, audit_size: int = N_AUDIT) -> dict:
-    """Load CIFAR-10 (60k) and carve disjoint roles: target train, reference pool, audit, utility.
+@torch.no_grad()
+def evaluate_utility(model: nn.Module, loader: DataLoader, metric: str, device: str) -> float:
+    """Compute the configured utility metric on a held-out split."""
+    model = model.to(device)
+    model.eval()
+    probs, labels = [], []
+    for xb, yb in loader:
+        probs.append(softmax(model(xb.to(device)), dim=1).cpu().numpy())
+        labels.append(yb.numpy().ravel())
+    p = np.concatenate(probs)
+    y = np.concatenate(labels)
+    if metric == "accuracy":
+        return float((p.argmax(1) == y).mean())
+    if metric == "balanced_accuracy":
+        return float(balanced_accuracy_score(y, p.argmax(1)))
+    if metric == "auc":
+        return float(roc_auc_score(y, p, multi_class="ovr"))
+    raise ValueError(f"Unknown utility metric: {metric}")
 
-    ``audit_size`` enlarges the audit sets for the validation pass (tail FPRs need
-    far more nonmembers than the loop does); the loop keeps the default.
+
+# --------------------------------------------------------------------------- #
+# Campaign plumbing
+# --------------------------------------------------------------------------- #
+def build_population(cfg: PrivacyUtilityConfig, out_dir: Path) -> dict:
+    """Normalize a CIFAR-10 subset, pickle it as the audit population, carve index roles.
+
+    The population is stored as a ``CifarDPHandler.UserDataset`` (normalized data),
+    which is what LeakPro loads via ``target.data_path``. Members are the target's
+    training indices; nonmembers/utility come from a disjoint test split. The whole
+    population is available to RMIA for training shadow models.
     """
     with (EXAMPLE_DIR / "data" / "cifar10.pkl").open("rb") as f:
         dataset = pickle.load(f)
-
     x = ((dataset.data - dataset.mean) / dataset.std).float()
     y = dataset.targets.long()
 
-    rng = np.random.default_rng(seed)
-    order = rng.permutation(len(x))
-    target_train = order[:N_TARGET_TRAIN]
-    ref_pool = order[N_TARGET_TRAIN:2 * N_TARGET_TRAIN + 10000]
-    rest = order[2 * N_TARGET_TRAIN + 10000:]
+    s = cfg.splits
+    if s.n_target + s.n_test > s.pop_size:
+        raise ValueError(f"pop_size={s.pop_size} too small for n_target={s.n_target} + n_test={s.n_test}.")
+    rng = np.random.default_rng(cfg.seed)
+    order = rng.permutation(len(x))[:s.pop_size]
 
-    # Nonmembers must not overlap the utility split; members are drawn from the
-    # target's own training set, so the cap is the training-set size.
-    n_audit = min(audit_size, len(target_train), len(rest) - N_UTILITY_EVAL)
-    if n_audit <= 0:
-        raise ValueError(f"Dataset too small: {len(rest)} samples left after target/ref splits "
-                         f"cannot fit an audit set plus {N_UTILITY_EVAL} utility samples.")
-    if n_audit < audit_size:
-        logger.warning(f"Audit size capped at {n_audit} (requested {audit_size}) by the available disjoint data.")
+    population = CifarDPHandler.UserDataset(x[order], y[order])
+    pop_path = out_dir / "population.pkl"
+    with pop_path.open("wb") as f:
+        pickle.dump(population, f)
+
     return {
-        "x": x,
-        "y": y,
-        "target_train": target_train,
-        "ref_pool": ref_pool,
-        "audit_members": target_train[:min(N_AUDIT, n_audit)],
-        "audit_nonmembers": rest[:min(N_AUDIT, n_audit)],
-        "audit_members_large": target_train[:n_audit],
-        "audit_nonmembers_large": rest[:n_audit],
-        "utility_eval": rest[n_audit:n_audit + N_UTILITY_EVAL],
+        "path": str(pop_path),
+        "train_indices": list(range(s.n_target)),
+        "test_indices": list(range(s.n_target, s.n_target + s.n_test)),
     }
 
 
-def train_dpsgd_cnn(config: dict, splits: dict, train_indices: np.ndarray,
-                    epochs: int, device: str) -> nn.Module:
-    """Train one SmallCNN with DP-SGD under the sampled config (noise 0 = non-private SGD baseline)."""
-    x, y = splits["x"], splits["y"]
-    loader = DataLoader(
-        TensorDataset(x[train_indices], y[train_indices]),
-        batch_size=int(config["batch_size"]), shuffle=True,
-    )
-    model = SmallCNN().to(device)
-    optimizer = optim.SGD(model.parameters(), lr=config["learning_rate"], momentum=0.9)
-    criterion = nn.CrossEntropyLoss()
+def _config_dir(out_dir: Path, config: dict) -> Path:
+    """Stable per-configuration directory (so resume reuses a config's artifacts)."""
+    key = json.dumps({k: round(float(v), 8) for k, v in sorted(config.items())})
+    tag = hashlib.sha1(key.encode()).hexdigest()[:10]  # noqa: S324 — not security, just a dir name
+    return out_dir / "trials" / f"config_{tag}"
 
-    epsilon = float("inf")
-    if config["noise_multiplier"] > 0:
-        engine = PrivacyEngine(accountant="rdp")
-        model, optimizer, loader = engine.make_private(
-            module=model,
-            optimizer=optimizer,
-            data_loader=loader,
-            noise_multiplier=config["noise_multiplier"],
-            max_grad_norm=config["max_grad_norm"],
+
+def _write_audit_yaml(path: Path, pop_path: str, target_folder: Path,  # noqa: PLR0913
+                      dpsgd_path: Path, audit_dir: Path, rmia_config: dict, seed: int) -> None:
+    """Write a per-config audit config that runs RMIA against the saved target."""
+    module_path = str(Path(__file__).resolve().parent / "dp_handler.py")
+    config = {
+        "audit": {
+            "random_seed": seed,
+            "attack_list": [{"attack": "rmia", **rmia_config}],
+            "output_dir": str(audit_dir),
+            "attack_type": "mia",
+            "data_modality": "image",
+        },
+        "target": {
+            "module_path": module_path,
+            "model_class": "SmallCNN",
+            "target_folder": str(target_folder),
+            "data_path": pop_path,
+            "dpsgd_path": str(dpsgd_path),
+        },
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w") as f:
+        yaml.safe_dump(config, f)
+
+
+def make_objective(cfg: PrivacyUtilityConfig, pop: dict, out_dir: Path, device: str):  # noqa: ANN201
+    """Build the optimization objective: train a target under a config, gate it, audit with real RMIA."""
+    with open(pop["path"], "rb") as f:
+        population = pickle.load(f)
+    x = population.data
+    y = population.targets
+    train_idx = np.array(pop["train_indices"])
+    test_idx = np.array(pop["test_indices"])
+    gate = cfg.utility.gate if cfg.utility.gate is not None else chance_level(cfg.utility.metric, NUM_CLASSES)
+
+    def objective_fn(config: dict) -> ObjectiveResult:
+        trial_dir = _config_dir(out_dir, config)
+        target_folder = trial_dir / "target"
+        target_folder.mkdir(parents=True, exist_ok=True)
+        epochs = int(config.get("epochs", cfg.epochs))  # epochs may itself be a knob
+
+        # 1. Write the direct DP-SGD knobs; both target and shadow training read these.
+        dpsgd_path = target_folder / "dpsgd_dic.pkl"
+        with dpsgd_path.open("wb") as f:
+            pickle.dump({"noise_multiplier": config["noise_multiplier"],
+                         "max_grad_norm": config["max_grad_norm"],
+                         "delta": cfg.delta}, f)
+
+        # 2. Train the target under the knobs (the same dp_train the shadow models use).
+        batch_size = int(config["batch_size"])
+        train_loader = DataLoader(TensorDataset(x[train_idx], y[train_idx]),
+                                  batch_size=batch_size, shuffle=True)
+        private = config["noise_multiplier"] > 0
+        model = SmallCNN(num_classes=NUM_CLASSES, dpsgd=private)
+        optimizer = optim.SGD(model.parameters(), lr=config["learning_rate"], momentum=0.9)
+        criterion = nn.CrossEntropyLoss()
+        train_result = dp_train(model, train_loader, criterion, optimizer, epochs, str(dpsgd_path), device)
+        epsilon = train_result.metrics.extra.get("epsilon")
+
+        # 3. Utility on the disjoint test split, then the gate: a model at or
+        # below chance level has not learned — attacking it spends a full audit
+        # to measure nothing, and its degenerate TPR would sit on the frontier
+        # looking like privacy. Prune instead.
+        test_loader = DataLoader(TensorDataset(x[test_idx], y[test_idx]), batch_size=512)
+        utility = evaluate_utility(train_result.model, test_loader, cfg.utility.metric, device)
+        if utility <= gate:
+            logger.warning(f"Utility {utility:.4f} ({cfg.utility.metric}) is at or below the gate "
+                           f"{gate:.4f}: this model did not learn, skipping the attack.")
+            return ObjectiveResult(utility=utility, tpr=None,
+                                   extras={"epsilon": epsilon, "gated": True})
+
+        # 4. Persist the target in the layout LeakPro's MIAHandler reads.
+        state_dict = {k.replace("_module.", "").replace("module.", ""): v
+                      for k, v in train_result.model.state_dict().items()}
+        with (target_folder / "target_model.pkl").open("wb") as f:
+            torch.save(state_dict, f)
+        test_result = CifarDPHandler().eval(test_loader, train_result.model, criterion)
+        metadata = LeakPro.make_mia_metadata(
+            train_result=train_result, optimizer=optimizer, loss_fn=criterion,
+            dataloader=train_loader, test_result=test_result, epochs=epochs,
+            train_indices=pop["train_indices"], test_indices=pop["test_indices"],
+            dataset_name="cifar10_pet")
+        with (target_folder / "model_metadata.pkl").open("wb") as f:
+            pickle.dump(metadata, f)
+
+        # 5. Audit the saved target with the real RMIA attack through the pipeline.
+        audit_dir = trial_dir / "audit"
+        config_path = trial_dir / "audit.yaml"
+        _write_audit_yaml(config_path, pop["path"], target_folder, dpsgd_path,
+                          audit_dir, cfg.rmia, cfg.seed)
+        result = run_rmia_audit(CifarDPHandler, str(config_path))
+
+        # A model that passed the gate can still saturate every RMIA score (no
+        # ROC). That is a measurable outcome — no membership signal resolvable —
+        # so report TPR 0 and flag it, rather than crashing the run.
+        degenerate = not result.fixed_fpr_table
+        tpr = 0.0 if degenerate else tpr_at_fixed_fpr(result, cfg.proxy_fpr)
+
+        return ObjectiveResult(
+            utility=utility, tpr=tpr,
+            extras={"epsilon": epsilon, "roc_auc": result.roc_auc,
+                    "degenerate_audit": degenerate},
         )
 
-    def run_epochs(epoch_loader) -> None:
-        for _ in range(epochs):
-            for xb, yb in epoch_loader:
-                optimizer.zero_grad()
-                loss = criterion(model(xb.to(device)), yb.to(device))
-                loss.backward()
-                optimizer.step()
-
-    model.train()
-    if config["noise_multiplier"] > 0:
-        # Cap the physical batch: per-example gradients cost batch x params memory.
-        # The sampled (logical) batch size, and hence the accounting, is unchanged.
-        with BatchMemoryManager(data_loader=loader, max_physical_batch_size=256,
-                                optimizer=optimizer) as mem_loader:
-            run_epochs(mem_loader)
-        epsilon = engine.get_epsilon(delta=DELTA)
-    else:
-        run_epochs(loader)
-    logger.info(f"Trained CNN: formal epsilon = {epsilon:.2f} (delta = {DELTA}).")
-    model.campaign_extras = {"epsilon": epsilon, "delta": DELTA}
-    return model.eval()
+    return objective_fn
 
 
-def make_fns(splits: dict, epochs: int, n_refs: int, device: str, ref_seed: int = 1) -> tuple:
-    """Build the campaign's (train, utility, attack) callables."""
-
-    def train_fn(config: dict) -> nn.Module:
-        if device.startswith("cuda"):
-            torch.cuda.empty_cache()  # models from the previous config are gone; release their cache
-        return train_dpsgd_cnn(config, splits, splits["target_train"], epochs, device)
-
-    @torch.no_grad()
-    def utility_fn(model: nn.Module) -> float:
-        idx = splits["utility_eval"]
-        correct, total = 0, 0
-        for i in range(0, len(idx), 1024):
-            batch = idx[i:i + 1024]
-            pred = model(splits["x"][batch].to(device)).argmax(dim=1).cpu()
-            correct += int((pred == splits["y"][batch]).sum())
-            total += len(batch)
-        return correct / total
-
-    def attack_fn(model: nn.Module, config: dict) -> AttackScores:
-        # Full mimicry: references share the candidate's config, on disjoint data.
-        rng = np.random.default_rng(ref_seed)
-        x, y = splits["x"], splits["y"]
-        members, nonmembers = splits["audit_members"], splits["audit_nonmembers"]
-
-        # Train references one at a time and free each after scoring (GPU memory).
-        ref_phi_members = np.zeros(len(members))
-        ref_phi_nonmembers = np.zeros(len(nonmembers))
-        for _ in range(n_refs):
-            sub = rng.choice(splits["ref_pool"], size=N_TARGET_TRAIN, replace=False)
-            ref = train_dpsgd_cnn(config, splits, sub, epochs, device)
-            ref_phi_members += confidence_signal(ref, x[members], y[members], device, "logits") / n_refs
-            ref_phi_nonmembers += confidence_signal(ref, x[nonmembers], y[nonmembers], device, "logits") / n_refs
-            del ref
-            if device.startswith("cuda"):
-                torch.cuda.empty_cache()
-
-        return AttackScores(
-            member_scores=confidence_signal(model, x[members], y[members], device, "logits") - ref_phi_members,
-            nonmember_scores=confidence_signal(model, x[nonmembers], y[nonmembers], device, "logits") - ref_phi_nonmembers,
-        )
-
-    return train_fn, utility_fn, attack_fn
+def load_settings(path: str, smoke: bool) -> PrivacyUtilityConfig:
+    """Load and validate the settings yaml; --smoke shrinks it to a minutes-long pipeline check."""
+    with open(path, "rb") as f:
+        cfg = PrivacyUtilityConfig(**yaml.safe_load(f))
+    if smoke:
+        update = {
+            "n_trials": 2, "epochs": 8,
+            "output_dir": cfg.output_dir + "_smoke",
+            "rmia": {**cfg.rmia, "num_shadow_models": 3},
+            # Small but overfitting: few members trained for several epochs so
+            # the target memorizes and RMIA has a real signal to find.
+            "splits": {"pop_size": 1500, "n_target": 300, "n_test": 300},
+        }
+        cfg = PrivacyUtilityConfig(**{**cfg.model_dump(), **update})
+    return cfg
 
 
+def run_optimization(config_path: str | None = None, smoke: bool = False, device: str | None = None):  # noqa: ANN201
+    """Run the CIFAR DP-SGD privacy-utility optimization end to end; returns the Optuna study.
 
-def above_chance(num_classes: int):  # noqa: ANN201
-    """Utility gate: only attack models that actually learned something.
-
-    A model at or below the chance floor is not a meaningful audit target — its
-    scores carry no signal, so the attack measures nothing while still paying
-    for the target plus every reference model. Worse, a degenerate model tends
-    to produce a chance-level TPR that is unbeatable on the privacy axis, so the
-    artifact lands on the Pareto front.
+    This is the single entry point for both the CLI (``main``) and the
+    ``cifar_dpsgd.ipynb`` notebook cell.
     """
-    floor = 1.0 / num_classes
+    config_path = config_path or str(Path(__file__).resolve().parent / "dpsgd_optimization.yaml")
+    device = device or ("cuda" if torch.cuda.is_available() else "cpu")
 
-    def gate(utility: float, _history) -> bool:  # noqa: ANN001
-        if utility <= floor:
-            logger.warning(
-                f"Utility {utility:.4f} is at or below the {floor:.4f} chance floor: "
-                "skipping the attack, this model did not learn."
-            )
-            return False
-        return True
+    cfg = load_settings(config_path, smoke)
+    out_dir = Path(cfg.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    pop = build_population(cfg, out_dir)
+    # The resolved settings are recorded so validate_frontier audits with the same recipe.
+    (out_dir / "resolved_config.json").write_text(json.dumps(cfg.model_dump(), indent=2))
 
-    return gate
+    objective_fn = make_objective(cfg, pop, out_dir, device)
 
+    start = time.time()
+    study = optimize(objective_fn, KnobSpace.from_config(cfg.knobs, cfg.fixed), out_dir,
+                     n_trials=cfg.n_trials, proxy_fpr=cfg.proxy_fpr, seed=cfg.seed)
+    logger.info(f"Optimization done: {len(study.trials)} trials in {time.time() - start:.0f}s.")
 
-def knob_space() -> KnobSpace:
-    """Joint DP-SGD space, log-scaled. The non-private anchor is never sampled
-    from this space: a continuous draw hits exactly 0 with probability zero, so
-    the anchor is passed to ``Campaign.run(anchors=...)`` instead."""
-    return KnobSpace([
-        Knob("noise_multiplier", 0.4, 4.0, log_scale=True),
-        Knob("max_grad_norm", 0.1, 10.0, log_scale=True),
-        Knob("learning_rate", 1e-3, 0.5, log_scale=True),
-        Knob("batch_size", 64, 1024, log_scale=True, integer=True),
-    ])
-
-
-# The epsilon = infinity end of the frontier: plain SGD with mid-range utility
-# knobs. Clipping is inactive at noise 0, so max_grad_norm is a placeholder.
-NONPRIVATE_ANCHOR = {"noise_multiplier": 0.0, "max_grad_norm": 10.0, "learning_rate": 0.05, "batch_size": 128}
+    front = sorted(pareto_trials(study), key=lambda t: t.values[0])
+    logger.info(f"Pareto front ({len(front)} points):")
+    for t in front:
+        eps = t.user_attrs.get("epsilon")
+        logger.info(f"  {cfg.utility.metric}={t.values[0]:.4f}  TPR@{cfg.proxy_fpr:.0%}={t.values[1]:.4f}  "
+                    f"eps={'inf' if eps is None else f'{eps:.2f}'}  config={t.params}")
+    plot_path = plot_frontier(study, out_dir / "frontier.png")
+    logger.info(f"Frontier plot: {plot_path}")
+    return study
 
 
 def main() -> None:
+    """CLI wrapper around :func:`run_optimization`."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--n-configs", type=int, default=50)
-    parser.add_argument("--epochs", type=int, default=15)
-    parser.add_argument("--n-refs", type=int, default=2)
-    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--out", default="leakpro_output/pet_optimization")
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--include-nonprivate", action="store_true",
-                        help="evaluate one explicit noise=0 configuration (index -1) to anchor the leaky end")
-    parser.add_argument("--smoke", action="store_true", help="2 configs, 2 epochs, 1 ref: pipeline check only")
+    parser.add_argument("--config", default=None,
+                        help="settings yaml (schema: leakpro.schemas.PrivacyUtilityConfig); default: ./dpsgd_optimization.yaml")
+    parser.add_argument("--device", default=None)
+    parser.add_argument("--smoke", action="store_true", help="tiny end-to-end check (2 trials, small data)")
     args = parser.parse_args()
-
-    if args.smoke:
-        args.n_configs, args.epochs, args.n_refs = 2, 2, 1
-        args.out = args.out + "_smoke"
-
-    # Campaign re-seeds torch per configuration from (seed, index), so training
-    # is reproducible regardless of how many configs ran before it in this
-    # process. This seeds only what happens before the loop.
-    torch.manual_seed(args.seed)
-    splits = load_splits(seed=args.seed)
-    train_fn, utility_fn, attack_fn = make_fns(splits, args.epochs, args.n_refs, args.device)
-
-    campaign = Campaign(
-        train_fn, utility_fn, attack_fn,
-        knob_space=knob_space(),
-        output_dir=args.out,
-        seed=args.seed,
-        utility_gate=above_chance(NUM_CLASSES),
-    )
-    # Recorded so validate_frontier can refuse to "validate" with a different recipe.
-    (Path(args.out) / "run_meta.json").write_text(
-        json.dumps({"epochs": args.epochs, "n_refs": args.n_refs, "seed": args.seed}))
-    start = time.time()
-    records = campaign.run(args.n_configs, anchors=[NONPRIVATE_ANCHOR] if args.include_nonprivate else None)
-    logger.info(f"Campaign done: {len(records)} configs in {time.time() - start:.0f}s.")
-
-    front = pareto_front(records)
-    logger.info(f"Pareto front ({len(front)} points):")
-    for r in front:
-        eps = r.get("epsilon")
-        logger.info(f"  utility={r['utility']:.4f}  TPR@1%={r['attack_tpr']:.4f}  "
-                    f"eps={'inf' if eps is None else f'{eps:.2f}'}  config={r['config']}")
-    plot_path = plot_frontier(records, Path(args.out) / "frontier.png")
-    logger.info(f"Frontier plot: {plot_path}")
+    run_optimization(args.config, args.smoke, args.device)
 
 
 if __name__ == "__main__":
