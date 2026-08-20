@@ -47,6 +47,7 @@ from leakpro.optimization import (
     tpr_at_fpr,
 )
 from leakpro.optimization.adapters import carve_splits, detect_binary, recipe_from_module
+from leakpro.webapp.backend.dataset_modules import register_job_dataset_modules
 from leakpro.utils.logger import logger
 
 DEFAULT_N_CONFIGS = 24
@@ -95,40 +96,10 @@ def write_status(out: Path, **fields: Any) -> None:
     (out / "status.json").write_text(json.dumps(json_safe(fields), indent=2))
 
 
-def _register_dataset_handler(job_dir: Path) -> None:
-    """Make a user-uploaded dataset_handler.py importable under its original name.
-
-    Population pickles reference the class path they were written with, so
-    unpickling fails unless that module name resolves. The audit worker solves
-    this the same way; the campaign has to, because it loads the same files.
-    """
-    path = job_dir / "dataset_handler.py"
-    if not path.exists():
-        return
-    spec = importlib.util.spec_from_file_location("dataset_handler", path)
-    if spec is None or spec.loader is None:
-        return
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    sys.modules.setdefault("dataset_handler", module)
-
-    # CelebADataHandler -> celebA_data_handler, CifarDataHandler -> cifar_data_handler
-    for attr in dir(module):
-        obj = getattr(module, attr, None)
-        if isinstance(obj, type) and hasattr(obj, "UserDataset") and attr != "AbstractInputHandler":
-            original = attr.replace("DataHandler", "_data_handler").replace("InputHandler", "_input_handler")
-            original = original[0].lower() + original[1:]
-            sys.modules.setdefault(original, module)
-            logger.info(f"Registered dataset_handler.py as '{original}' for unpickling.")
-
-
 def _load_dataset(data_path: str, job_dir: Path) -> tuple[torch.Tensor, torch.Tensor]:
     import joblib
 
-    _register_dataset_handler(job_dir)
-    # The job directory itself may hold the module a dataset was pickled from.
-    if str(job_dir) not in sys.path:
-        sys.path.insert(0, str(job_dir))
+    register_job_dataset_modules(job_dir)
     dataset = joblib.load(data_path)
     data = getattr(dataset, "data", None)
     targets = getattr(dataset, "targets", None)

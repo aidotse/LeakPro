@@ -250,6 +250,7 @@ from .models import (
     RiskResponse,
     TrainParams,
 )
+from .dataset_modules import register_job_dataset_modules
 from .worker import run_audit_job
 
 # ---------------------------------------------------------------------------
@@ -1202,40 +1203,6 @@ async def assess_job_risk(job_id: str, req: RiskRequest) -> RiskResponse:
     return RiskResponse(job_id=job_id, assessments=assessments, unassessable=unassessable)
 
 
-def _ensure_dataset_module(job_id: str) -> None:
-    """Make the job's dataset classes importable before unpickling its data.
-
-    Dataset pickles reference the module they were written from (e.g.
-    ``celebA_data_handler``). The audit worker and the PET runner register the
-    job's dataset_handler.py under that name before loading; these endpoints
-    must too, or a loaded model's Records tab 500s with "No module named ..."
-    on any backend that has not run an audit for the job yet.
-    """
-    import importlib.util  # noqa: PLC0415
-
-    job_dir = _job_dir(job_id)
-    if str(job_dir) not in sys.path:
-        sys.path.insert(0, str(job_dir))
-    path = job_dir / "dataset_handler.py"
-    if not path.exists():
-        return
-    spec = importlib.util.spec_from_file_location("dataset_handler", path)
-    if spec is None or spec.loader is None:
-        return
-    module = importlib.util.module_from_spec(spec)
-    try:
-        spec.loader.exec_module(module)
-    except Exception:  # noqa: BLE001 - a broken handler should not take the endpoint down
-        return
-    sys.modules.setdefault("dataset_handler", module)
-    # CelebADataHandler -> celebA_data_handler, CifarDataHandler -> cifar_data_handler
-    for attr in dir(module):
-        obj = getattr(module, attr, None)
-        if isinstance(obj, type) and hasattr(obj, "UserDataset") and attr != "AbstractInputHandler":
-            original = attr.replace("DataHandler", "_data_handler").replace("InputHandler", "_input_handler")
-            sys.modules.setdefault(original[0].lower() + original[1:], module)
-
-
 @app.get("/jobs/{job_id}/sample_data/{index}")
 async def get_sample_data(job_id: str, index: int):
     """Return tabular feature values for a single sample as JSON."""
@@ -1246,7 +1213,7 @@ async def get_sample_data(job_id: str, index: int):
     if not data_path or not Path(data_path).exists():
         raise HTTPException(status_code=404, detail="Dataset not found")
     try:
-        _ensure_dataset_module(job_id)
+        register_job_dataset_modules(_job_dir(job_id))
         dataset = joblib.load(data_path)
         row = dataset.data[index]
         if isinstance(row, torch.Tensor):
@@ -1279,7 +1246,7 @@ async def get_sample_image(job_id: str, index: int):
     if not data_path or not Path(data_path).exists():
         raise HTTPException(status_code=404, detail="Dataset not found")
 
-    _ensure_dataset_module(job_id)
+    register_job_dataset_modules(_job_dir(job_id))
     try:
         dataset = joblib.load(data_path)
     except Exception as e:  # noqa: BLE001 - a named 404 beats a bare 500 in the img tag
