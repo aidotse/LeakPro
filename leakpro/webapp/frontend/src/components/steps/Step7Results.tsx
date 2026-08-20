@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api, ModelResult, JobListItem, Setting, Verification } from "../../api";
-import Summary from "../results/Summary";
+import Summary, { RiskState, initialRiskState } from "../results/Summary";
 import Optimization from "../results/Optimization";
 import RocChart from "../results/RocChart";
 import Histograms from "../results/Histograms";
@@ -41,6 +41,10 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
 
   // Rename dialog state
   const [pendingRename, setPendingRename] = useState<PendingRename | null>(null);
+
+  // Risk assessment state. Held here rather than in Summary because the tab bar unmounts the tab
+  // components, which would throw away a completed assessment when the user looks at the ROC curves.
+  const [risk, setRisk] = useState<RiskState>(initialRiskState);
 
   useEffect(() => {
     api.getResults(jobId)
@@ -339,7 +343,7 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
           </div>
 
           <div>
-            {tab === "summary"    && <Summary    results={allResults} onOptimize={setOptimizing} />}
+            {tab === "summary"    && <Summary    results={allResults} onOptimize={setOptimizing} risk={risk} onRiskChange={setRisk} />}
             {tab === "roc"        && <RocChart   results={allResults} />}
             {tab === "histograms" && <Histograms results={allResults} />}
             {tab === "records"    && <Records    results={allResults} jobId={jobId} />}

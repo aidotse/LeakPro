@@ -246,6 +246,8 @@ from .models import (
     ModelAttackConfig,
     ModelInfo,
     PETStartParams,
+    RiskRequest,
+    RiskResponse,
     TrainParams,
 )
 from .worker import run_audit_job
@@ -1148,6 +1150,56 @@ async def get_results(job_id: str) -> dict:
     for r in results:
         r["job_id"] = job_id
     return {"job_id": job_id, "results": results}
+
+
+@app.post("/jobs/{job_id}/risk", response_model=RiskResponse)
+async def assess_job_risk(job_id: str, req: RiskRequest) -> RiskResponse:
+    """Assess use-case risk for a finished job's attack results.
+
+    All scoring lives in leakpro.risk: this endpoint adapts the stored results, calls the library once
+    per model, and returns the assessments untouched. Nothing here decides what is risky.
+    """
+    from leakpro.risk import UseCaseProfile, assess_risk, result_from_mapping  # noqa: PLC0415
+
+    job = _get_job(job_id)
+    if job["status"] != JobStatus.done:
+        raise HTTPException(status_code=425, detail=f"Job status: {job['status']}")
+
+    profile_fields = req.model_dump(exclude={"model_name"})
+    try:
+        profile = UseCaseProfile(**profile_fields)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Invalid use-case profile: {e}") from e
+
+    assessments: dict[str, dict] = {}
+    unassessable: dict[str, str] = {}
+    for model in job.get("results", []):
+        name = model.get("model_name", "?")
+        if req.model_name is not None and name != req.model_name:
+            continue
+        results = [result_from_mapping(a) for a in model.get("attacks", [])]
+        if not results:
+            unassessable[name] = "no attack results"
+            continue
+        try:
+            gap = None
+            if model.get("train_accuracy") is not None and model.get("test_accuracy") is not None:
+                gap = float(model["train_accuracy"]) - float(model["test_accuracy"])
+            assessment = assess_risk(
+                results,
+                profile,
+                num_train=model.get("num_train"),
+                train_test_gap=gap,
+                dp_epsilon=model.get("target_epsilon"),
+                strict=False,
+            )
+            assessments[name] = assessment.model_dump()
+        except Exception as e:  # noqa: BLE001 - surfaced per model rather than failing the request
+            unassessable[name] = str(e)
+
+    if not assessments and not unassessable:
+        raise HTTPException(status_code=404, detail="No models found for this job")
+    return RiskResponse(job_id=job_id, assessments=assessments, unassessable=unassessable)
 
 
 @app.get("/jobs/{job_id}/sample_data/{index}")
