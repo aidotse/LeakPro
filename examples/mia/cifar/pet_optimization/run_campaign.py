@@ -6,15 +6,11 @@
 
 The leaky-by-design counterpart of the LOS campaign: a small convolutional
 network trained on a 15k subset of CIFAR-10 memorizes visibly, so the
-utility-vs-attack frontier has a real privacy axis to trace. Same design as
-the LOS example:
+utility-vs-attack frontier has a real privacy axis to trace.
 
-- Joint DP-SGD knobs {noise multiplier, clip norm, lr, batch size}; noise may
-  be swept down to (near) zero via --include-nonprivate to anchor the leaky end.
-- Utility: test accuracy.
-- Attack: matched-reference MIA, references trained with the candidate's
-  config on disjoint data (full mimicry).
-- Loop metric: TPR @ FPR = 1%.
+The training loop, attack and utility evaluation all come from the shared
+``PETRecipe`` path in ``leakpro.optimization`` — this file only declares the
+recipe (model, optimizer, loader, loss) and the data splits.
 
 Usage:
     python run_campaign.py --smoke          # 2 configs, pipeline check
@@ -30,8 +26,6 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from opacus import PrivacyEngine
-from opacus.utils.batch_memory_manager import BatchMemoryManager
 from torch import nn, optim
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -39,17 +33,16 @@ EXAMPLE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(EXAMPLE_DIR))  # cifar_data_handler must be importable for unpickling
 
 from leakpro.optimization import (
-    AttackScores,
     Campaign,
     Knob,
     KnobSpace,
-    confidence_signal,
+    PETRecipe,
+    build_campaign_fns,
     pareto_front,
     plot_frontier,
 )
 from leakpro.utils.logger import logger
 
-DELTA = 1e-5
 N_TARGET_TRAIN = 15000
 N_AUDIT = 2000
 NUM_CLASSES = 10
@@ -112,95 +105,19 @@ def load_splits(seed: int = 0, audit_size: int = N_AUDIT) -> dict:
     }
 
 
-def train_dpsgd_cnn(config: dict, splits: dict, train_indices: np.ndarray,
-                    epochs: int, device: str) -> nn.Module:
-    """Train one SmallCNN with DP-SGD under the sampled config (noise 0 = non-private SGD baseline)."""
-    x, y = splits["x"], splits["y"]
-    loader = DataLoader(
-        TensorDataset(x[train_indices], y[train_indices]),
-        batch_size=int(config["batch_size"]), shuffle=True,
+def make_recipe(splits: dict, epochs: int) -> PETRecipe:
+    """The CIFAR training recipe: SmallCNN + SGD(momentum) + CrossEntropy."""
+    return PETRecipe(
+        make_model=lambda config: SmallCNN(),
+        make_optimizer=lambda params, config: optim.SGD(params, lr=config["learning_rate"], momentum=0.9),
+        make_loader=lambda indices, config: DataLoader(
+            TensorDataset(splits["x"][indices], splits["y"][indices]),
+            batch_size=int(config["batch_size"]), shuffle=True,
+        ),
+        criterion=nn.CrossEntropyLoss(),
+        epochs=epochs,
+        output_kind="logits",
     )
-    model = SmallCNN().to(device)
-    optimizer = optim.SGD(model.parameters(), lr=config["learning_rate"], momentum=0.9)
-    criterion = nn.CrossEntropyLoss()
-
-    epsilon = float("inf")
-    if config["noise_multiplier"] > 0:
-        engine = PrivacyEngine(accountant="rdp")
-        model, optimizer, loader = engine.make_private(
-            module=model,
-            optimizer=optimizer,
-            data_loader=loader,
-            noise_multiplier=config["noise_multiplier"],
-            max_grad_norm=config["max_grad_norm"],
-        )
-
-    def run_epochs(epoch_loader) -> None:
-        for _ in range(epochs):
-            for xb, yb in epoch_loader:
-                optimizer.zero_grad()
-                loss = criterion(model(xb.to(device)), yb.to(device))
-                loss.backward()
-                optimizer.step()
-
-    model.train()
-    if config["noise_multiplier"] > 0:
-        # Cap the physical batch: per-example gradients cost batch x params memory.
-        # The sampled (logical) batch size, and hence the accounting, is unchanged.
-        with BatchMemoryManager(data_loader=loader, max_physical_batch_size=256,
-                                optimizer=optimizer) as mem_loader:
-            run_epochs(mem_loader)
-        epsilon = engine.get_epsilon(delta=DELTA)
-    else:
-        run_epochs(loader)
-    logger.info(f"Trained CNN: formal epsilon = {epsilon:.2f} (delta = {DELTA}).")
-    model.campaign_extras = {"epsilon": epsilon, "delta": DELTA}
-    return model.eval()
-
-
-def make_fns(splits: dict, epochs: int, n_refs: int, device: str, ref_seed: int = 1) -> tuple:
-    """Build the campaign's (train, utility, attack) callables."""
-
-    def train_fn(config: dict) -> nn.Module:
-        if device.startswith("cuda"):
-            torch.cuda.empty_cache()  # models from the previous config are gone; release their cache
-        return train_dpsgd_cnn(config, splits, splits["target_train"], epochs, device)
-
-    @torch.no_grad()
-    def utility_fn(model: nn.Module) -> float:
-        idx = splits["utility_eval"]
-        correct, total = 0, 0
-        for i in range(0, len(idx), 1024):
-            batch = idx[i:i + 1024]
-            pred = model(splits["x"][batch].to(device)).argmax(dim=1).cpu()
-            correct += int((pred == splits["y"][batch]).sum())
-            total += len(batch)
-        return correct / total
-
-    def attack_fn(model: nn.Module, config: dict) -> AttackScores:
-        # Full mimicry: references share the candidate's config, on disjoint data.
-        rng = np.random.default_rng(ref_seed)
-        x, y = splits["x"], splits["y"]
-        members, nonmembers = splits["audit_members"], splits["audit_nonmembers"]
-
-        # Train references one at a time and free each after scoring (GPU memory).
-        ref_phi_members = np.zeros(len(members))
-        ref_phi_nonmembers = np.zeros(len(nonmembers))
-        for _ in range(n_refs):
-            sub = rng.choice(splits["ref_pool"], size=N_TARGET_TRAIN, replace=False)
-            ref = train_dpsgd_cnn(config, splits, sub, epochs, device)
-            ref_phi_members += confidence_signal(ref, x[members], y[members], device, "logits") / n_refs
-            ref_phi_nonmembers += confidence_signal(ref, x[nonmembers], y[nonmembers], device, "logits") / n_refs
-            del ref
-            if device.startswith("cuda"):
-                torch.cuda.empty_cache()
-
-        return AttackScores(
-            member_scores=confidence_signal(model, x[members], y[members], device, "logits") - ref_phi_members,
-            nonmember_scores=confidence_signal(model, x[nonmembers], y[nonmembers], device, "logits") - ref_phi_nonmembers,
-        )
-
-    return train_fn, utility_fn, attack_fn
 
 
 
@@ -261,12 +178,16 @@ def main() -> None:
         args.n_configs, args.epochs, args.n_refs = 2, 2, 1
         args.out = args.out + "_smoke"
 
-    # Campaign re-seeds torch per configuration from (seed, index), so training
-    # is reproducible regardless of how many configs ran before it in this
-    # process. This seeds only what happens before the loop.
+    # Seed torch too: the Sobol draw and the split permutation are numpy, but
+    # model init, DataLoader shuffling, Opacus Poisson sampling and the DP noise
+    # itself all run off torch's global RNG. Without this, --seed does not make
+    # a run reproducible and the resume/validation seed guards promise more than
+    # they deliver.
     torch.manual_seed(args.seed)
     splits = load_splits(seed=args.seed)
-    train_fn, utility_fn, attack_fn = make_fns(splits, args.epochs, args.n_refs, args.device)
+    recipe = make_recipe(splits, args.epochs)
+    train_fn, utility_fn, attack_fn = build_campaign_fns(
+        recipe, splits, n_refs=args.n_refs, device=args.device, utility_metric="accuracy")
 
     campaign = Campaign(
         train_fn, utility_fn, attack_fn,

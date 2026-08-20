@@ -13,6 +13,12 @@ from leakpro.optimization.objectives import (
     confidence_signal,
     tpr_at_fpr,
 )
+from leakpro.optimization.training import (
+    PETRecipe,
+    build_campaign_fns,
+    make_opacus_compatible,
+    train_with_dpsgd,
+)
 from leakpro.optimization.validation import proxy_agreement, resolution_warning, validate_frontier
 
 __all__ = [
@@ -21,13 +27,17 @@ __all__ = [
     "EvaluationRecord",
     "Knob",
     "KnobSpace",
+    "PETRecipe",
+    "build_campaign_fns",
     "clopper_pearson_ci",
     "confidence_signal",
     "default_dpsgd_space",
+    "make_opacus_compatible",
     "pareto_front",
     "plot_frontier",
     "proxy_agreement",
     "resolution_warning",
     "tpr_at_fpr",
+    "train_with_dpsgd",
     "validate_frontier",
 ]
