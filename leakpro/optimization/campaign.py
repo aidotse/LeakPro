@@ -32,6 +32,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from leakpro.optimization.knobs import KnobSpace
 from leakpro.optimization.objectives import AttackScores, clopper_pearson_ci, tpr_at_fpr
 from leakpro.utils.logger import logger
@@ -141,6 +143,16 @@ class Campaign:
             return None
         return value
 
+    def _save_scores(self, index: int, scores: AttackScores) -> None:
+        """Write one config's raw attack scores next to the evaluation log."""
+        out = self.output_dir / "scores"
+        out.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            out / f"config_{index}.npz",
+            member_scores=scores.member_scores,
+            nonmember_scores=scores.nonmember_scores,
+        )
+
     def _append(self, record: EvaluationRecord) -> None:
         record = EvaluationRecord(self._json_safe(record))
         self.records.append(record)
@@ -173,8 +185,33 @@ class Campaign:
             self._append(record)
         return self.records
 
+    def _seed_for(self, index: int) -> None:
+        """Seed the global RNGs deterministically from (campaign seed, config index).
+
+        Seeding once per run is not enough: resume skips finished configurations,
+        so the RNG state reached at a given index depends on how many
+        configurations ran before it in *this* process. A fresh run and a
+        resumed run would then train different models at the same index, and
+        validation would retrain a different target than the one on the
+        frontier. Deriving the seed from the index makes each configuration's
+        training reproducible independently of run history.
+        """
+        import random  # noqa: PLC0415
+
+        derived = (self.seed * 1_000_003 + index) % (2**31 - 1)
+        random.seed(derived)
+        np.random.seed(derived)  # noqa: NPY002 - legacy global, seeded for libraries that use it
+        try:
+            import torch  # noqa: PLC0415
+        except ImportError:
+            return
+        torch.manual_seed(derived)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(derived)
+
     def _evaluate(self, index: int, config: dict[str, float]) -> EvaluationRecord:
         logger.info(f"Evaluating config {index}: {config}")
+        self._seed_for(index)
         record = EvaluationRecord(index=index, config=config, seed=self.seed, proxy_fpr=self.proxy_fpr)
         model = self.train_fn(config)
         extras = getattr(model, "campaign_extras", None)
@@ -188,6 +225,11 @@ class Campaign:
             return record
 
         scores = self.attack_fn(model, config)
+        # Persist the scores the metric was computed from. Aggregates alone made
+        # the degenerate cases unauditable: establishing that a TPR of 0 came
+        # from a saturated, five-distinct-value score distribution rather than
+        # from real privacy required monkeypatching attack_fn.
+        self._save_scores(index, scores)
         measured = tpr_at_fpr(scores, self.proxy_fpr)
         lower, upper = clopper_pearson_ci(measured.events, measured.n_members)
         record.update(
@@ -201,6 +243,9 @@ class Campaign:
             attack_realized_fpr=measured.realized_fpr,
             attack_threshold=measured.threshold,
             attack_resolution_warning=measured.warning,
+            # Few distinct values means a saturated model; this is the cheap
+            # in-record diagnostic for the case that made a bare TPR misleading.
+            attack_distinct_nonmember_scores=int(np.unique(scores.nonmember_scores).size),
             # Binomial sampling error over audit points ONLY. It excludes
             # target-training randomness and the reference draw, which are
             # plausibly larger, so it is narrower than the true uncertainty on a

@@ -265,11 +265,9 @@ def main() -> None:
         args.n_configs, args.epochs, args.n_refs = 2, 2, 1
         args.out = args.out + "_smoke"
 
-    # Seed torch too: the Sobol draw and the split permutation are numpy, but
-    # model init, DataLoader shuffling, Opacus Poisson sampling and the DP noise
-    # itself all run off torch's global RNG. Without this, --seed does not make
-    # a run reproducible and the resume/validation seed guards promise more than
-    # they deliver.
+    # Campaign re-seeds torch per configuration from (seed, index), so training
+    # is reproducible regardless of how many configs ran before it in this
+    # process. This seeds only what happens before the loop.
     torch.manual_seed(args.seed)
     splits = load_splits(seed=args.seed)
     train_fn, utility_fn, attack_fn = make_fns(splits, args.epochs, args.n_refs, args.device)

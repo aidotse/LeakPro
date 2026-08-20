@@ -199,9 +199,8 @@ def main() -> None:
         args.n_configs, args.epochs, args.n_refs = 2, 2, 1
         args.out = args.out + "_smoke"
 
-    # Seed torch too: numpy covers the Sobol draw and the split permutation,
-    # but model init, shuffling, Poisson sampling and the DP noise run off
-    # torch's global RNG.
+    # Campaign re-seeds torch per configuration from (seed, index); this covers
+    # only what happens before the loop starts.
     torch.manual_seed(args.seed)
     splits = load_splits(seed=args.seed)
     train_fn, utility_fn, attack_fn = make_fns(splits, args.epochs, args.n_refs, args.device)
