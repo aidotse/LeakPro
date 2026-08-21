@@ -9,7 +9,7 @@ import pickle
 
 import numpy as np
 import torch.nn.functional as F  # noqa: N812
-from torch import cat, cuda, device, save, sigmoid
+from torch import cat, save, sigmoid
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, KLDivLoss, Module
 from tqdm import tqdm
 
