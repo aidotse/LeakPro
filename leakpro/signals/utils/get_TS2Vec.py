@@ -79,15 +79,10 @@ def get_ts2vec_model(
     if not os.path.exists(ts2vec_dir):
         os.makedirs(ts2vec_dir)
 
-    detected_device = get_device()
-    if detected_device.type == "hpu":
-        # ts2vec upstream has no HPU backend; fall back to CPU for representation fitting.
-        logger.warning("TS2Vec does not support HPU; falling back to CPU for representation fitting.")
-        device = "cpu"
-    elif detected_device.type == "cuda":
-        device = "cuda:0"
-    else:
-        device = "cpu"
+    # ts2vec upstream has no HPU backend, and running it on CPU instead does not reliably work
+    # around that: callers on HPU must drop "ts2vec" from their signal list themselves (see
+    # examples/mia/time_series_mia/audit.yaml).
+    device = "cuda:0" if get_device().type == "cuda" else "cpu"
 
     # Init TS2Vec
     model_loaded = False
