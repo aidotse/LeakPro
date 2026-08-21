@@ -17,11 +17,14 @@ def seed_everything(seed: int) -> None:
     torch.manual_seed(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+    # Unconditional: several modules still pick CUDA via their own torch.cuda.is_available()
+    # check rather than get_device(), so gating this on get_device() could leave CUDA's RNG
+    # unseeded while training still runs on it. torch.cuda.manual_seed is a documented no-op
+    # when CUDA isn't initialised, so this is harmless when nothing is actually on CUDA.
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
     device = get_device()
-    if device.type == "cuda":
-        torch.cuda.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)
-    elif device.type == "hpu":
+    if device.type == "hpu":
         try:
             import habana_frameworks.torch.hpu as hthpu  # type: ignore[import-not-found]  # noqa: PLC0415
             if hasattr(hthpu, "manual_seed_all"):

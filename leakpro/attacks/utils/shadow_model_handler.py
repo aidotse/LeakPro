@@ -461,9 +461,10 @@ class ShadowModelHandler(ModelHandler):
         # Convert to numpy array for easier manipulation
         models_in_indices = np.asarray(models_in_indices)
 
-        # Index membership lookup only; kept on CPU since the HPU graph compiler
-        # cannot compile the jit-scripted torch.isin call below.
-        device = torch.device("cpu")
+        # Index membership lookup only; kept on CPU for HPU specifically, since its graph
+        # compiler cannot compile the jit-scripted torch.isin call below. CUDA has no such
+        # restriction, so it keeps using get_device() rather than being pinned to CPU too.
+        device = torch.device("cpu") if get_device().type == "hpu" else get_device()
         model_indices_tensor = torch.from_numpy(models_in_indices).to(device=device)
         dataset_tensor = torch.from_numpy(dataset_indices).to(device=device)
         indice_masks_tensor = torch.zeros((len(dataset_indices), len(models_in_indices)), dtype=torch.bool, device=device)
