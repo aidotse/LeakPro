@@ -461,7 +461,9 @@ class ShadowModelHandler(ModelHandler):
         # Convert to numpy array for easier manipulation
         models_in_indices = np.asarray(models_in_indices)
 
-        device = get_device()
+        # Index membership lookup only; kept on CPU since the HPU graph compiler
+        # cannot compile the jit-scripted torch.isin call below.
+        device = torch.device("cpu")
         model_indices_tensor = torch.from_numpy(models_in_indices).to(device=device)
         dataset_tensor = torch.from_numpy(dataset_indices).to(device=device)
         indice_masks_tensor = torch.zeros((len(dataset_indices), len(models_in_indices)), dtype=torch.bool, device=device)
