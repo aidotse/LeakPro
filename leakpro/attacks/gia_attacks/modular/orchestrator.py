@@ -220,6 +220,13 @@ class ModularGIAOrchestrator:
 
         return label_result
 
+    def compute_reference_loss(self, reference_image: torch.Tensor) -> dict:
+        """Evaluate the loss components on a reference image (e.g. ground truth) via the optimizer.
+
+        Must be called after run_attack(). Diagnostic only (requires the ground-truth image).
+        """
+        return self.optimization.compute_reference_loss(reference_image)
+
     def _create_attack_config(
         self,
         input_shape: tuple[int, ...],
@@ -236,6 +243,7 @@ class ModularGIAOrchestrator:
             "iterations": optimization_state.iteration,
             "inferred_labels": label_result.labels.tolist() if label_result is not None else None,
             "true_labels": labels.tolist() if labels is not None else None,
+            "loss_history": optimization_state.metrics.get("loss_history", []),
         }
 
     def run_attack(
@@ -307,6 +315,11 @@ class ModularGIAOrchestrator:
         logger.info("="*60)
         logger.info("Attack complete - returning reconstruction to client")
         logger.info("="*60)
+
+        # Expose reconstruction snapshots (heavy tensors) on the instance rather than in the
+        # JSON-serializable attack_config. loss_history (scalars) goes into the config below.
+        self.reconstruction_snapshots = optimization_state.metrics.get("reconstruction_snapshots", [])
+        self.loss_history = optimization_state.metrics.get("loss_history", [])
 
         config = self._create_attack_config(
             input_shape, optimization_state, label_result, client_observations.labels

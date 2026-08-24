@@ -232,31 +232,7 @@ class FLClientSimulator:
             GIAResults with metrics computed against private data
 
         """
-        num_images = reconstruction.shape[0]
-
-        # Denormalize for metric computation
-        denorm_reconstruction = reconstruction * self.data_std.to(self.device) + self.data_mean.to(self.device)
-        denorm_original = self.original_inputs * self.data_std.to(self.device) + self.data_mean.to(self.device)
-        denorm_reconstruction = torch.clamp(denorm_reconstruction, 0.0, 1.0)
-        denorm_original = torch.clamp(denorm_original, 0.0, 1.0)
-
-        # Match reconstructions to ground truth (handles permutation invariance)
-        matched_indices = None
-        if num_images > 1:
-            matched_indices, _ = match_images(
-                denorm_reconstruction,
-                denorm_original,
-                metric="mse"
-            )
-            denorm_reconstruction = denorm_reconstruction[matched_indices]
-        else:
-            matched_indices = [0]
-
-        # Compute metrics
-        psnr = PeakSignalNoiseRatio(data_range=1.0).to(self.device)
-        ssim = StructuralSimilarityIndexMeasure(data_range=1.0).to(self.device)
-        psnr_score = psnr(denorm_reconstruction, denorm_original).item()
-        ssim_score = ssim(denorm_reconstruction, denorm_original).item()
+        psnr_score, ssim_score, matched_indices = self.compute_scores(reconstruction)
 
         return GIAResults(
             original_data=self.original_inputs,
@@ -265,6 +241,45 @@ class FLClientSimulator:
             ssim_score=ssim_score,
             config=attack_config,
             images=True,
+        )
+
+    def compute_scores(
+        self,
+        reconstruction: torch.Tensor,
+    ) -> Tuple[float, float, list]:
+        """Compute (PSNR, SSIM) of a reconstruction against the client's private data.
+
+        Handles denormalization, clamping, and permutation-invariant matching, so it can be reused
+        to score a whole series of reconstruction snapshots (e.g. one per loss improvement).
+
+        Args:
+            reconstruction: Reconstructed data [N, C, H, W] on any device.
+
+        Returns:
+            (psnr_score, ssim_score, matched_indices)
+
+        """
+        reconstruction = reconstruction.to(self.device)
+        num_images = reconstruction.shape[0]
+
+        denorm_reconstruction = reconstruction * self.data_std.to(self.device) + self.data_mean.to(self.device)
+        denorm_original = self.original_inputs * self.data_std.to(self.device) + self.data_mean.to(self.device)
+        denorm_reconstruction = torch.clamp(denorm_reconstruction, 0.0, 1.0)
+        denorm_original = torch.clamp(denorm_original, 0.0, 1.0)
+
+        # Match reconstructions to ground truth (handles permutation invariance)
+        if num_images > 1:
+            matched_indices, _ = match_images(denorm_reconstruction, denorm_original, metric="mse")
+            denorm_reconstruction = denorm_reconstruction[matched_indices]
+        else:
+            matched_indices = [0]
+
+        psnr = PeakSignalNoiseRatio(data_range=1.0).to(self.device)
+        ssim = StructuralSimilarityIndexMeasure(data_range=1.0).to(self.device)
+        return (
+            psnr(denorm_reconstruction, denorm_original).item(),
+            ssim(denorm_reconstruction, denorm_original).item(),
+            matched_indices,
         )
 
 

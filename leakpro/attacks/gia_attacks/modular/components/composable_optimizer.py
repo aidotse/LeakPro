@@ -216,9 +216,23 @@ class ComposableOptimizer(OptimizationStrategy):
             reconstruction, labels, client_observations
         )
 
+        # Stash context so a reference loss (e.g. on the ground-truth image) can be evaluated
+        # post-hoc through the exact same loss pipeline / targets. Diagnostic only.
+        self._reference_context = {
+            "model": target_model,
+            "target_gradients": target_gradients,
+            "loss_fn": self.loss_fn,
+            "labels": self.label_strategy.get_labels_for_forward(state.optimizable_params, state.labels),
+            "template": reconstruction,
+        }
+
         log_interval = self.log_interval if self.log_interval is not None else max(1, self.max_iterations // 10)
         logger.debug(f"Starting optimization: max_iters={self.max_iterations}, "
                      f"log_interval={log_interval}, patience={self.patience}")
+
+        # Per-iteration loss history (scalars) and reconstruction snapshots (on each improvement)
+        state.aux_data["loss_history"] = []
+        state.aux_data["reconstruction_snapshots"] = []
 
         # Main optimization loop
         for iteration in range(self.max_iterations):
@@ -237,6 +251,13 @@ class ComposableOptimizer(OptimizationStrategy):
             # Execute optimization step using strategy
             total_loss_value, losses = \
                 self.step_strategy.execute_step(state, compute_loss_fn, apply_constraints_fn)
+
+            # Record loss history (total + each component) for this iteration
+            state.aux_data["loss_history"].append({
+                "iteration": iteration,
+                "total": float(total_loss_value),
+                **{name: float(value) for name, value in losses.items()},
+            })
 
             # Check for best reconstruction and early stopping
             should_stop = self._check_early_stop(
@@ -287,6 +308,8 @@ class ComposableOptimizer(OptimizationStrategy):
             metrics={
                 "best_loss": state.best_loss,
                 **state.aux_data.get("best_losses", {}),
+                "loss_history": state.aux_data.get("loss_history", []),
+                "reconstruction_snapshots": state.aux_data.get("reconstruction_snapshots", []),
             },
         )
 
@@ -407,6 +430,41 @@ class ComposableOptimizer(OptimizationStrategy):
             aux_data={},
         )
 
+    def compute_reference_loss(self, reference_image: torch.Tensor) -> dict[str, float]:
+        """Evaluate the loss components on a fixed reference image (e.g. the ground truth).
+
+        Reuses the exact pipeline and targets from the most recent optimize() run, so the returned
+        values are directly comparable to the per-iteration loss history. The gradient-matching term
+        should be ~0 for the true image; the regularizers (TV, BN, ...) reveal their floor value.
+
+        Diagnostic only: it requires the ground-truth image, which a real attacker does not have.
+
+        Args:
+            reference_image: Reference image [N, C, H, W] (in the same normalized space as the
+                reconstruction).
+
+        Returns:
+            Dict of {"total": float, <component name>: float, ...}.
+
+        """
+        if getattr(self, "_reference_context", None) is None:
+            raise RuntimeError("compute_reference_loss() must be called after optimize().")
+        ctx = self._reference_context
+        template = ctx["template"]
+        reference = reference_image.to(template.device).reshape(template.shape)
+
+        losses = {}
+        for component in self.loss_components:
+            losses[component.name] = float(component.compute(
+                reconstruction=reference,
+                model=ctx["model"],
+                labels=ctx["labels"],
+                target_gradients=ctx["target_gradients"],
+                loss_fn=ctx["loss_fn"],
+            ))
+        losses["total"] = float(sum(losses.values()))
+        return losses
+
     def _compute_loss(
         self,
         state: InternalOptimizerState,
@@ -490,6 +548,15 @@ class ComposableOptimizer(OptimizationStrategy):
             # Store loss breakdown
             state.aux_data["best_losses"] = losses
             state.aux_data["stagnant_iterations"] = 0
+
+            # Snapshot the reconstruction whenever it improves (detached CPU copy).
+            # squeeze(0).squeeze(1) drops the epoch/seed dims -> [N, C, H, W], matching the
+            # shape of the final returned reconstruction so snapshots are directly comparable.
+            state.aux_data.setdefault("reconstruction_snapshots", []).append({
+                "iteration": state.iteration,
+                "loss": float(loss_value),
+                "reconstruction": state.reconstruction.detach().squeeze(0).squeeze(1).cpu().clone(),
+            })
             return False
 
         state.aux_data["stagnant_iterations"] = state.aux_data.get("stagnant_iterations", 0) + 1
