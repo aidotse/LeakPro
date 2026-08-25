@@ -20,6 +20,7 @@ target metadata, DP-SGD noise and clipping from the target's ``dpsgd`` config �
 so every reference model matches the candidate target it is used to attack.
 """
 
+import numpy as np
 from scipy.stats import beta
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
@@ -28,6 +29,11 @@ from leakpro.reporting.mia_result import MIAResult
 from leakpro.utils.logger import logger
 
 RMIA_RESULT_NAME = "RMIA"
+
+# The FPR levels MIAResult tabulates (its fixed_fpr_table also holds 0%, which
+# is not a usable operating point). A proxy_fpr outside this set cannot be read
+# back from the table at all.
+TABULATED_FPRS = (0.0001, 0.001, 0.01, 0.1)
 
 
 def run_rmia_audit(
@@ -101,6 +107,48 @@ def tpr_at_fixed_fpr(result: MIAResult, fpr: float = 0.01) -> float:
         f"No TPR at FPR={fpr:.4%} in the fixed-FPR table (available: {sorted(table)}). "
         "MIAResult reports TPR at FPR levels {0%, 0.01%, 0.1%, 1%, 10%}."
     )
+
+
+def resolved_proxy_tpr(
+    result: MIAResult,
+    proxy_fpr: float,
+    min_realized_fraction: float = 0.5,
+) -> tuple[float | None, float | None, bool]:
+    """TPR at the proxy FPR — but only when the audit actually resolved that operating point.
+
+    Two failure modes produce a TPR of 0 for reasons that are not privacy, and
+    both must prune the trial rather than enter the search as a legitimate
+    objective (0 is the global minimum of the minimized axis, so any such trial
+    is unconditionally Pareto-optimal and TPE is attracted to the region):
+
+    1. The attack produced no ROC at all (``fixed_fpr_table`` empty), e.g. every
+       score saturated to one value.
+    2. No threshold reaches the proxy FPR — the score distribution is too coarse
+       (DP-SGD saturation ties large blocks of scores), so the table honestly
+       reports the TPR of a much smaller realized FPR, down to 0 at FPR 0.
+
+    Args:
+        result: The audit's MIAResult.
+        proxy_fpr: The FPR level the optimizer minimizes TPR at.
+        min_realized_fraction: The realized FPR must reach at least this fraction
+            of ``proxy_fpr`` for the estimate to count as resolved.
+
+    Returns:
+        ``(tpr, realized_fpr, degenerate)`` — ``tpr`` is None when the operating
+        point is unresolved (caller should prune); ``realized_fpr`` is the
+        largest achievable FPR at or below ``proxy_fpr`` (None when there is no
+        ROC); ``degenerate`` flags case 1.
+
+    """
+    degenerate = not result.fixed_fpr_table
+    realized_fpr = None
+    if result.fpr is not None:
+        fpr = np.asarray(result.fpr, dtype=float)
+        at_or_below = fpr[fpr <= proxy_fpr]
+        realized_fpr = float(at_or_below.max()) if at_or_below.size else 0.0
+    if degenerate or realized_fpr is None or realized_fpr < min_realized_fraction * proxy_fpr:
+        return None, realized_fpr, degenerate
+    return tpr_at_fixed_fpr(result, proxy_fpr), realized_fpr, degenerate
 
 
 def clopper_pearson_ci(k: int, n: int, confidence: float = 0.95) -> tuple[float, float]:

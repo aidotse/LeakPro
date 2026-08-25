@@ -24,6 +24,7 @@ from leakpro.optimization import (
     pareto_trials,
     plot_frontier,
     proxy_agreement,
+    resolved_proxy_tpr,
     tpr_at_fixed_fpr,
     validate_frontier,
 )
@@ -172,6 +173,41 @@ class TestRmiaBridge:
     def test_unavailable_fpr_raises(self):
         with pytest.raises(ValueError, match="No TPR at FPR"):
             tpr_at_fixed_fpr(_mia_result(1.0), 0.5)  # 50% FPR is not in the table
+
+    def test_resolved_proxy_tpr_healthy_audit(self):
+        result = _mia_result(member_mu=1.5)
+        tpr, realized, degenerate = resolved_proxy_tpr(result, 0.01)
+        assert tpr == pytest.approx(result.fixed_fpr_table["TPR@1%FPR"])
+        assert realized == pytest.approx(0.01, rel=0.5)  # 500 nonmembers resolve 1% fine
+        assert not degenerate
+
+    def test_unresolved_operating_point_returns_none(self):
+        """Regression: saturated scores tie every nonmember, so no threshold
+        reaches the proxy FPR. The table honestly reads TPR 0, but 0 is the
+        global minimum of the minimized axis — returning it as an objective
+        put 'we could not measure it' on the Pareto front. Must be None."""
+        n = 500
+        true = np.concatenate([np.ones(n), np.zeros(n)])
+        # Saturation ties 490/500 nonmembers at the top score: the first
+        # admissible threshold already realizes FPR 0.98, so nothing between
+        # FPR 0 and the proxy 1% exists on the ROC.
+        members = np.full(n, 5.0)
+        nonmembers = np.concatenate([np.full(n - 10, 5.0), np.linspace(0.0, 1.0, 10)])
+        result = MIAResult.from_full_scores(true_membership=true,
+                                            signal_values=np.concatenate([members, nonmembers]),
+                                            result_name="RMIA", metadata={})
+        tpr, realized, degenerate = resolved_proxy_tpr(result, 0.01)
+        assert tpr is None
+        assert realized == 0.0
+        assert not degenerate  # a ROC exists; the operating point just isn't on it
+
+    def test_degenerate_audit_returns_none(self):
+        class NoRoc:  # MIAResult with no ROC at all (fixed_fpr_table empty/None)
+            fixed_fpr_table = None
+            fpr = None
+
+        tpr, realized, degenerate = resolved_proxy_tpr(NoRoc(), 0.01)
+        assert tpr is None and realized is None and degenerate
 
     def test_clopper_pearson_edges(self):
         assert clopper_pearson_ci(0, 100)[0] == 0.0

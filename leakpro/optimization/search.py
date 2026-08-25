@@ -50,11 +50,13 @@ class ObjectiveResult:
     Args:
         utility: Utility of the trained target (higher is better).
         tpr: Attack TPR at the run's proxy FPR (lower is safer). Must be the
-            TPR at the same FPR the search was created with. ``None`` means the
-            attack was skipped because the model failed the utility gate: the
-            trial is pruned — it consumes budget but can never sit on the
-            frontier, so a model that learned nothing cannot masquerade as
-            "perfectly private".
+            TPR at the same FPR the search was created with. ``None`` means no
+            valid measurement exists — the model failed the utility gate, or
+            the audit could not resolve the proxy operating point (see
+            :func:`leakpro.optimization.audit.resolved_proxy_tpr`). The trial
+            is pruned: it consumes budget but can never sit on the frontier, so
+            neither "it learned nothing" nor "we could not measure it" can
+            masquerade as "perfectly private".
         extras: Optional extra fields recorded on the trial (e.g. formal epsilon,
             attack ROC-AUC) for later inspection; they do not affect the search.
 
@@ -149,8 +151,8 @@ def optimize(  # noqa: PLR0913
             trial.set_user_attr(key, value)
         if result.tpr is None:
             logger.info(
-                f"Trial {trial.number}: utility={result.utility:.4f} failed the utility gate — "
-                "attack skipped, trial pruned (excluded from the frontier)."
+                f"Trial {trial.number}: utility={result.utility:.4f}, no valid TPR "
+                "(utility gate failed or audit unresolved) — trial pruned (excluded from the frontier)."
             )
             raise optuna.TrialPruned
         logger.info(

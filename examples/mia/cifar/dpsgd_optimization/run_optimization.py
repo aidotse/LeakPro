@@ -51,13 +51,14 @@ from sklearn.metrics import balanced_accuracy_score, roc_auc_score  # noqa: E402
 
 from leakpro import LeakPro  # noqa: E402
 from leakpro.optimization import (  # noqa: E402
+    TABULATED_FPRS,
     KnobSpace,
     ObjectiveResult,
     optimize,
     pareto_trials,
     plot_frontier,
+    resolved_proxy_tpr,
     run_rmia_audit,
-    tpr_at_fixed_fpr,
 )
 from leakpro.schemas import PrivacyUtilityConfig  # noqa: E402
 from leakpro.utils.logger import logger  # noqa: E402
@@ -231,20 +232,20 @@ def make_objective(cfg: PrivacyUtilityConfig, pop: dict, out_dir: Path, device: 
                           audit_dir, cfg.rmia, cfg.seed)
         result = run_rmia_audit(CifarDPHandler, str(config_path))
 
-        # A model that passed the gate can still saturate every RMIA score (no
-        # ROC). That is a measurable outcome — no membership signal resolvable —
-        # so report TPR 0 and flag it, rather than crashing the run.
-        degenerate = not result.fixed_fpr_table
-        tpr = 0.0 if degenerate else tpr_at_fixed_fpr(result, cfg.proxy_fpr)
-
-        # The FPR actually achievable at or below the proxy level. A TPR of 0 at
-        # realized FPR 0 means the score distribution was too coarse to resolve
-        # the operating point — not evidence of privacy; record it so the two
-        # cases are distinguishable in the trial record.
-        realized_fpr = None
-        if result.fpr is not None:
-            at_or_below = result.fpr[result.fpr <= cfg.proxy_fpr]
-            realized_fpr = float(at_or_below.max()) if at_or_below.size else 0.0
+        # A model that passed the gate can still saturate every RMIA score, or
+        # tie so many scores that no threshold reaches the proxy FPR. Both read
+        # as TPR 0 for reasons that are not privacy — an unresolved operating
+        # point must prune the trial (tpr=None), exactly like the utility gate,
+        # or "we could not measure it" masquerades as "perfectly private" and
+        # sits on the frontier. realized_fpr/degenerate_audit stay in the
+        # record so the pruning is auditable.
+        tpr, realized_fpr, degenerate = resolved_proxy_tpr(result, cfg.proxy_fpr)
+        if tpr is None:
+            logger.warning(
+                f"Audit unresolved at FPR {cfg.proxy_fpr:.2%} (realized "
+                f"{'none' if realized_fpr is None else f'{realized_fpr:.4%}'}, "
+                f"degenerate={degenerate}): not evidence of privacy, pruning the trial."
+            )
 
         return ObjectiveResult(
             utility=utility, tpr=tpr,
@@ -254,6 +255,32 @@ def make_objective(cfg: PrivacyUtilityConfig, pop: dict, out_dir: Path, device: 
         )
 
     return objective_fn
+
+
+MIN_PROXY_EVENTS = 10
+
+
+def check_proxy_resolution(cfg: PrivacyUtilityConfig) -> None:
+    """Fail fast when the proxy FPR cannot be measured with this audit set.
+
+    An FPR level outside ``fixed_fpr_table`` cannot be read back at all, and a
+    level allowing fewer than ~MIN_PROXY_EVENTS false positives (e.g. 0.01% on
+    2000 nonmembers = 0.2) reads 0 for every config — every trial would be
+    pruned as unresolved after paying for its training and audit.
+    """
+    if not any(abs(cfg.proxy_fpr - f) < 1e-12 for f in TABULATED_FPRS):
+        raise ValueError(
+            f"proxy_fpr={cfg.proxy_fpr} is not a tabulated FPR level {TABULATED_FPRS}: "
+            "TPR cannot be read from MIAResult.fixed_fpr_table at this level."
+        )
+    expected = cfg.splits.n_test * cfg.proxy_fpr
+    if expected < MIN_PROXY_EVENTS:
+        raise ValueError(
+            f"proxy_fpr={cfg.proxy_fpr:.2%} on n_test={cfg.splits.n_test} nonmembers allows "
+            f"~{expected:.1f} false positives — the operating point is unresolvable and every "
+            f"trial would be pruned. Use n_test >= {int(MIN_PROXY_EVENTS / cfg.proxy_fpr)}, "
+            "or a higher proxy_fpr."
+        )
 
 
 def load_settings(path: str, smoke: bool) -> PrivacyUtilityConfig:
@@ -268,8 +295,11 @@ def load_settings(path: str, smoke: bool) -> PrivacyUtilityConfig:
             # Small but overfitting: few members trained for several epochs so
             # the target memorizes and RMIA has a real signal to find.
             "splits": {"pop_size": 1500, "n_target": 300, "n_test": 300},
+            # 300 nonmembers resolve 10%, not the yaml's 1% (see check_proxy_resolution).
+            "proxy_fpr": 0.1,
         }
         cfg = PrivacyUtilityConfig(**{**cfg.model_dump(), **update})
+    check_proxy_resolution(cfg)
     return cfg
 
 

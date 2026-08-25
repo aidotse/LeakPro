@@ -8,7 +8,8 @@
 
 n_trials: 40          # total configurations to evaluate (resume counts finished ones)
 seed: 0               # sampler + splits + derived audit seeds
-proxy_fpr: 0.01       # FPR the loop minimizes TPR at; one of 0.0001, 0.001, 0.01, 0.1
+proxy_fpr: 0.01       # FPR the loop minimizes TPR at; one of 0.0001, 0.001, 0.01, 0.1,
+                      # and n_test * proxy_fpr must allow >= ~10 false positives
 delta: 1.0e-5         # DP delta for epsilon accounting; keep well below 1/n_target
 epochs: 15            # fixed training epochs (add an 'epochs' knob below to search it)
 output_dir: "leakpro_output/dpsgd_optimization"
