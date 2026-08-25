@@ -29,6 +29,18 @@ from leakpro.reporting.mia_result import MIAResult
 from leakpro.utils.logger import logger
 
 
+def _resolved_config(trial) -> dict:  # noqa: ANN001
+    """The trial's full configuration: searched + fixed knobs.
+
+    ``trial.params`` holds only the searched knobs — a knob pinned via
+    ``KnobSpace.fixed`` consumes no search dimension and is absent from it.
+    Anything keyed on the full configuration (per-trial artifact directories,
+    re-audits) must use the ``config`` user attribute the search recorded;
+    ``trial.params`` is only a fallback for studies from older runs.
+    """
+    return trial.user_attrs.get("config", trial.params)
+
+
 def validate_frontier(
     study: Study,
     revalidate_fn: Callable[[dict[str, float]], MIAResult],
@@ -55,12 +67,12 @@ def validate_frontier(
 
     validated = []
     for trial in front:
-        result = revalidate_fn(trial.params)
+        result = revalidate_fn(_resolved_config(trial))
         tprs = {f"tpr_at_{fpr}": tpr_at_fixed_fpr(result, fpr) for fpr in report_fprs}
         loop_tpr = float(trial.values[1])
         revalidated_at_proxy = tpr_at_fixed_fpr(result, proxy_fpr)
         validated.append({
-            "params": trial.params,
+            "config": _resolved_config(trial),
             "loop_utility": float(trial.values[0]),
             "loop_tpr": loop_tpr,
             "proxy_fpr": proxy_fpr,
@@ -104,7 +116,7 @@ def proxy_agreement(
 
     proxy_tprs, target_tprs, pairs = [], [], []
     for trial in picks:
-        result = revalidate_fn(trial.params)
+        result = revalidate_fn(_resolved_config(trial))
         proxy = tpr_at_fixed_fpr(result, proxy_fpr)
         target = tpr_at_fixed_fpr(result, target_fpr)
         proxy_tprs.append(proxy)

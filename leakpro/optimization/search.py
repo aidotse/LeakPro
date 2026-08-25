@@ -131,6 +131,10 @@ def optimize(  # noqa: PLR0913
 
     def _objective(trial: optuna.trial.Trial) -> tuple[float, float]:
         config = knob_space.suggest(trial)
+        # Record the *resolved* configuration (searched + fixed knobs): Optuna's
+        # trial.params holds only the searched ones, so anything keyed on the
+        # full config (per-trial artifact dirs, re-audits) must read this attr.
+        trial.set_user_attr("config", config)
         # Re-seed every RNG deterministically from (seed, trial number): the
         # global RNG state at trial N otherwise depends on how many trials ran
         # earlier in *this* process, so a resumed run would train different

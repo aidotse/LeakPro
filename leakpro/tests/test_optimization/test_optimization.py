@@ -228,6 +228,34 @@ class TestValidation:
             assert "tpr_at_0.001" in row["revalidated"]
             assert "selection_bias" in row
 
+    def test_revalidation_receives_the_full_config_with_fixed_knobs(self, tmp_path):
+        """Regression: trial.params lacks fixed knobs, so anything keyed on the
+        full configuration (per-trial dirs, re-audits) broke as soon as a knob
+        was pinned. Validation must hand revalidate_fn the resolved config."""
+        space = KnobSpace([Knob("a", 0.0, 1.0), Knob("batch_size", 32, 512)]).fix("batch_size", 128)
+
+        def objective_fn(config):
+            assert config["batch_size"] == 128
+            return ObjectiveResult(utility=config["a"], tpr=config["a"])
+
+        study = optimize(objective_fn, space, tmp_path / "f", n_trials=6, seed=0, study_name="f")
+        # The search records the resolved config on every trial...
+        for trial in study.trials:
+            assert trial.user_attrs["config"]["batch_size"] == 128
+            assert "batch_size" not in trial.params  # what made trial.params insufficient
+
+        # ...and validation passes that resolved config to the re-audit.
+        seen = []
+
+        def revalidate_fn(config):
+            seen.append(config)
+            return _mia_result(member_mu=0.5 + 3 * config["a"])
+
+        rows = validate_frontier(study, revalidate_fn)
+        proxy_agreement(study, revalidate_fn, n_configs=3)
+        assert seen and all(c["batch_size"] == 128 for c in seen)
+        assert all(row["config"]["batch_size"] == 128 for row in rows)
+
     def test_proxy_agreement_returns_rho(self, tmp_path):
         study = _study_with_front(tmp_path)
 
