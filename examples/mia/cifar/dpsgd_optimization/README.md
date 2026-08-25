@@ -94,6 +94,19 @@ The Pareto front is `study.best_trials`; each trial's `values` are
 `(utility, TPR@1%)` and `trial.user_attrs` carries `epsilon` (the formal DP
 budget) and the RMIA `roc_auc`. **Lower TPR is safer; higher utility is better.**
 
+> **⚠️ The epsilon shown is per-configuration and is NOT the guarantee of a
+> configuration chosen off this frontier.** Tuning hyperparameters against
+> private data and then selecting a winner is itself a private-data-dependent
+> mechanism, so the selected configuration carries a strictly larger budget
+> than its own training run's ε (Liu & Talwar, *Private Selection from Private
+> Candidates*, STOC 2019; Papernot & Steinke, *Hyperparameter Tuning with
+> Rényi Differential Privacy*, ICLR 2022). Do not report this ε in a DPIA or
+> compliance document as the guarantee of the deployed model. Each trial
+> records `tuning_accounted: false` alongside `epsilon` so the caveat travels
+> with the data. The **measured TPR axis has no such gap** — it is the
+> defensible output of this run, and `validate_frontier.py`'s `selection_bias`
+> quantifies the optimism the search introduces on it.
+
 ## Validating the frontier
 
 The loop uses a modest number of reference models. Before trusting a frontier

@@ -221,7 +221,7 @@ def make_objective(cfg: PrivacyUtilityConfig, pop: dict, out_dir: Path, device: 
             logger.warning(f"Utility {utility:.4f} ({cfg.utility.metric}) is at or below the gate "
                            f"{gate:.4f}: this model did not learn, skipping the attack.")
             return ObjectiveResult(utility=utility, tpr=None,
-                                   extras={"epsilon": epsilon, "gated": True})
+                                   extras={"epsilon": epsilon, "tuning_accounted": False, "gated": True})
 
         # 4. Persist the target in the layout LeakPro's MIAHandler reads.
         state_dict = {k.replace("_module.", "").replace("module.", ""): v
@@ -261,7 +261,16 @@ def make_objective(cfg: PrivacyUtilityConfig, pop: dict, out_dir: Path, device: 
 
         return ObjectiveResult(
             utility=utility, tpr=tpr,
-            extras={"epsilon": epsilon, "roc_auc": result.roc_auc,
+            extras={"epsilon": epsilon,
+                    # The accountant's epsilon covers ONE training run. Tuning
+                    # over many configurations on the same private data and
+                    # selecting off the frontier is itself a mechanism (Liu &
+                    # Talwar 2019; Papernot & Steinke 2022), and that cost is
+                    # not included — the flag travels with the number so a
+                    # report cannot silently present it as the procedure's
+                    # guarantee.
+                    "tuning_accounted": False,
+                    "roc_auc": result.roc_auc,
                     "realized_fpr": realized_fpr,
                     "degenerate_audit": degenerate},
         )
