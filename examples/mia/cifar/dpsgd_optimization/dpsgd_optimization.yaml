@@ -40,7 +40,12 @@ rmia:
   online: false
 
 # Population and audit-split sizes (members = n_target, nonmembers = n_test).
+# pop_size = 2 * n_target is DELIBERATE and enforced: RMIA's balanced shadow
+# sampling trains every reference model on half the population, and only
+# pop_size = 2 * n_target makes that equal the target's training-set size —
+# otherwise the references run DP-SGD at a different sampling rate q = B/N and
+# step count than the target they calibrate, and mimicry silently breaks.
 splits:
-  pop_size: 20000
+  pop_size: 10000
   n_target: 5000
   n_test: 2000

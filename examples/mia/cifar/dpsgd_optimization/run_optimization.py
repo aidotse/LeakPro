@@ -110,14 +110,26 @@ def build_population(cfg: PrivacyUtilityConfig, out_dir: Path) -> dict:
     training indices; nonmembers/utility come from a disjoint test split. The whole
     population is available to RMIA for training shadow models.
     """
+    s = cfg.splits
+    if s.n_target + s.n_test > s.pop_size:
+        raise ValueError(f"pop_size={s.pop_size} too small for n_target={s.n_target} + n_test={s.n_test}.")
+    # RMIA's balanced shadow sampling trains every reference model on
+    # len(population) // 2 points. Mimicry of the target's DP-SGD regime
+    # (sampling rate q = B/N and steps per epoch) therefore holds only when
+    # pop_size = 2 * n_target — enforce it rather than silently calibrating
+    # against references trained under a different noise-per-example regime.
+    if s.pop_size != 2 * s.n_target:
+        raise ValueError(
+            f"pop_size={s.pop_size} must be exactly 2 * n_target ({2 * s.n_target}): RMIA's balanced "
+            "shadow sampling trains each reference on pop_size // 2 points, and only this coupling "
+            "makes the references' training-set size match the target's (full mimicry)."
+        )
+
     with (EXAMPLE_DIR / "data" / "cifar10.pkl").open("rb") as f:
         dataset = pickle.load(f)
     x = ((dataset.data - dataset.mean) / dataset.std).float()
     y = dataset.targets.long()
 
-    s = cfg.splits
-    if s.n_target + s.n_test > s.pop_size:
-        raise ValueError(f"pop_size={s.pop_size} too small for n_target={s.n_target} + n_test={s.n_test}.")
     rng = np.random.default_rng(cfg.seed)
     order = rng.permutation(len(x))[:s.pop_size]
 
@@ -294,7 +306,8 @@ def load_settings(path: str, smoke: bool) -> PrivacyUtilityConfig:
             "rmia": {**cfg.rmia, "num_shadow_models": 3},
             # Small but overfitting: few members trained for several epochs so
             # the target memorizes and RMIA has a real signal to find.
-            "splits": {"pop_size": 1500, "n_target": 300, "n_test": 300},
+            # pop_size = 2 * n_target keeps shadow-size mimicry (see build_population).
+            "splits": {"pop_size": 600, "n_target": 300, "n_test": 300},
             # 300 nonmembers resolve 10%, not the yaml's 1% (see check_proxy_resolution).
             "proxy_fpr": 0.1,
         }

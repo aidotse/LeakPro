@@ -12,7 +12,12 @@ configuration is trained and then attacked with **LeakPro's own RMIA attack**
 - **Shadow models:** trained by LeakPro's `ShadowModelHandler` through the same
   handler and the same DP-SGD configuration as the candidate target, so every
   RMIA reference model mimics the target it attacks. This happens once per
-  configuration — new configuration, new shadow models.
+  configuration — new configuration, new shadow models. One part of mimicry is
+  a *split-size coupling*, not automatic: balanced shadow sampling trains each
+  reference on `pop_size // 2` points, so `splits.pop_size = 2 * n_target` is
+  deliberate and enforced — it is what makes the references' training-set size
+  (and therefore their DP-SGD sampling rate `q = B/N` and step count) match the
+  target's.
 
 ## How the pieces fit the library
 
@@ -51,7 +56,7 @@ parameters:
 | `utility.metric` | `accuracy`, `balanced_accuracy`, or `auc`. Plain accuracy is only meaningful on class-balanced data (CIFAR-10 is); use the others for imbalanced tasks. |
 | `utility.gate` | "did it learn" floor: at/below it the attack is skipped and the config is **pruned** (never on the frontier). `null` = the metric's chance level (auc: 0.5, others: 1/num_classes). |
 | `rmia` | the RMIA attack block, passed verbatim into every generated audit config — any `AttackRMIA` parameter works here (`num_shadow_models`, `online`, `gamma`, `offline_a`, ...). |
-| `splits` | population size, member (target-train) and nonmember/test sizes |
+| `splits` | population size, member (target-train) and nonmember/test sizes. `pop_size` must be exactly `2 * n_target` (see the shadow-model note above), and `n_test * proxy_fpr` must allow ≥ ~10 false positives or the run refuses to start. |
 
 ## Running it
 

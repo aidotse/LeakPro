@@ -16,8 +16,14 @@ Shadow-model mimicry is a property of that pipeline, not something added here:
 :class:`leakpro.attacks.utils.shadow_model_handler.ShadowModelHandler` trains the
 RMIA reference (shadow) models through the *same* input handler and the *same*
 stored training configuration as the target — optimizer and batch size from the
-target metadata, DP-SGD noise and clipping from the target's ``dpsgd`` config —
-so every reference model matches the candidate target it is used to attack.
+target metadata, DP-SGD noise and clipping from the target's ``dpsgd`` config.
+One dimension is NOT automatic: under balanced sampling every reference trains
+on ``len(shadow_population) // 2`` points, so the references match the target's
+training-set size — and hence its DP-SGD sampling rate ``q = B/N`` and step
+count — only when the audit population is exactly twice the target's training
+set. Callers must enforce that coupling (the CIFAR example does); otherwise the
+RMIA null distribution comes from a different noise-per-example regime than the
+candidate being measured.
 """
 
 import numpy as np
