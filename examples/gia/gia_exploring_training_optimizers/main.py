@@ -120,14 +120,21 @@ def plot_loss_history(loss_history, file, reference=None, start_iteration=0):
     print(f"Saved loss curve to: {file}")
 
 
-def plot_metric_history(iterations, psnr, ssim, file):
-    """Plot PSNR and SSIM (one point per loss improvement) on twin y-axes."""
+def plot_metric_history(iterations, psnr, ssim, file, lpips=None):
+    """Plot reconstruction quality per loss improvement.
+
+    Top panel: PSNR (left) and SSIM (right) on twin y-axes (both higher = better).
+    Bottom panel (only if `lpips` is given): LPIPS perceptual distance (lower = better).
+    """
     if not iterations:
         print("No metric history to plot.")
         return
-    fig, ax1 = plt.subplots(figsize=(9, 5))
+    has_lpips = lpips is not None
+    n_rows = 2 if has_lpips else 1
+    fig, axes = plt.subplots(n_rows, 1, figsize=(9, 4.5 * n_rows), squeeze=False)
+
+    ax1 = axes[0][0]
     ax1.plot(iterations, psnr, color="tab:blue", marker="o", label="PSNR (dB)")
-    ax1.set_xlabel("Iteration (at each loss improvement)")
     ax1.set_ylabel("PSNR (dB)", color="tab:blue")
     ax1.tick_params(axis="y", labelcolor="tab:blue")
     ax1.grid(True, alpha=0.3)
@@ -135,7 +142,17 @@ def plot_metric_history(iterations, psnr, ssim, file):
     ax2.plot(iterations, ssim, color="tab:red", marker="s", label="SSIM")
     ax2.set_ylabel("SSIM", color="tab:red")
     ax2.tick_params(axis="y", labelcolor="tab:red")
-    plt.title("Reconstruction quality per improvement")
+    ax1.set_title("Reconstruction quality per improvement (PSNR & SSIM: higher = better)")
+
+    if has_lpips:
+        axl = axes[1][0]
+        axl.plot(iterations, lpips, color="tab:green", marker="^", label="LPIPS")
+        axl.set_ylabel("LPIPS", color="tab:green")
+        axl.tick_params(axis="y", labelcolor="tab:green")
+        axl.grid(True, alpha=0.3)
+        axl.set_title("Perceptual distance (LPIPS: lower = better)")
+
+    axes[-1][0].set_xlabel("Iteration (at each loss improvement)")
     fig.tight_layout()
     plt.savefig(file, dpi=120)
     plt.close()
@@ -158,11 +175,13 @@ def save_reconstruction_series(snapshots, client_simulator, device, file):
     reconstructions = torch.stack([s["reconstruction"] for s in snapshots])  # [S, N, C, H, W]
     iterations = torch.tensor([s["iteration"] for s in snapshots])
     losses = torch.tensor([s["loss"] for s in snapshots])
-    psnr, ssim = [], []
+    psnr, ssim, lpips = [], [], []
     for s in snapshots:
-        psnr_score, ssim_score, _ = client_simulator.compute_scores(s["reconstruction"].to(device))
+        psnr_score, ssim_score, lpips_score, _ = client_simulator.compute_scores(s["reconstruction"].to(device))
         psnr.append(psnr_score)
         ssim.append(ssim_score)
+        lpips.append(lpips_score)
+    has_lpips = all(v is not None for v in lpips)
     series = {
         "reconstructions": reconstructions,
         "iterations": iterations,
@@ -175,9 +194,12 @@ def save_reconstruction_series(snapshots, client_simulator, device, file):
         "data_mean": client_simulator.data_mean.detach().cpu(),
         "data_std": client_simulator.data_std.detach().cpu(),
     }
+    if has_lpips:  # LPIPS is optional (only present if the `lpips` package is installed)
+        series["lpips"] = torch.tensor(lpips)
     torch.save(series, file)
-    print(f"Saved {len(snapshots)} reconstruction snapshots (with PSNR/SSIM) to: {file}  "
-          f"[final PSNR={psnr[-1]:.2f} dB, SSIM={ssim[-1]:.3f}]")
+    tail = f", LPIPS={lpips[-1]:.4f}]" if has_lpips else "]"
+    print(f"Saved {len(snapshots)} reconstruction snapshots to: {file}  "
+          f"[final PSNR={psnr[-1]:.2f} dB, SSIM={ssim[-1]:.3f}" + tail)
     return series
 
 
@@ -316,7 +338,8 @@ def main():
         )
         if series is not None:
             plot_metric_history(series["iterations"].tolist(), series["psnr"].tolist(),
-                                series["ssim"].tolist(), run_dir / f"metric_curve_{tag}.png")
+                                series["ssim"].tolist(), run_dir / f"metric_curve_{tag}.png",
+                                lpips=series["lpips"].tolist() if "lpips" in series else None)
 
         results.append(client_simulator.compute_metrics(reconstruction, attack_config))
 
