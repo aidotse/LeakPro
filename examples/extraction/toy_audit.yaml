@@ -1,0 +1,40 @@
+audit:
+  attack_type: extraction
+  attack_list:
+    - attack: carlini_diffusion
+      authorized_audit: true
+      overwrite_results: true
+      mode: conditional_black_box
+      image_range: zero_one
+      num_generations_per_condition: 8
+      generation_batch_size: 8
+      tile_grid: [2, 2]
+      tiled_l2_threshold: 0.01
+      min_clique_size: 6
+    - attack: side
+      authorized_audit: true
+      overwrite_results: true
+      image_range: zero_one
+      compute_device: cpu
+      distance_device: cpu
+      synthetic_samples: 8
+      synthetic_batch_size: 8
+      clusters: 2
+      cohesion_threshold: 0.9
+      min_cluster_size: 2
+      classifier_epochs: 1
+      classifier_batch_size: 4
+      classifier_learning_rate: 0.001
+      num_generations: 4
+      generation_batch_size: 4
+      guidance_scale: 1.0
+      l2_bands:
+        exact:
+          lower: 0.0
+          upper: 0.01
+  hyper_param_search: false
+  data_modality: image
+  output_dir: /tmp/leakpro_extraction_toy
+target:
+  name: toy_diffusion
+  fingerprint: toy-diffusion-provider-v1

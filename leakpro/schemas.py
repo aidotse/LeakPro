@@ -8,7 +8,7 @@ from typing import Annotated, Any, Callable, Dict, List, Literal, Optional, Unio
 
 import numpy as np
 import optuna
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from torch.nn import Module
 
 ArrayOrScalar = Union[np.ndarray, np.integer, int, list]
@@ -87,6 +87,12 @@ class AuditConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields
 
+class ExtractionAuditConfig(AuditConfig):
+    """Audit configuration for diffusion training-data extraction."""
+
+    attack_type: Literal["extraction"]
+    data_modality: Literal["image"] = "image"
+
 class TargetConfig(BaseModel):
     """Configuration for the target model."""
 
@@ -101,6 +107,28 @@ class TargetConfig(BaseModel):
     public_data_path: Optional[str] = Field(None, description="Path to the public dataset used for model inversion")
 
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields
+
+class ExtractionTargetConfig(BaseModel):
+    """Minimal target metadata for a handler-owned diffusion stack."""
+
+    name: str = Field(default="diffusion_target", description="Human-readable target identifier")
+    fingerprint: str = Field(
+        ...,
+        min_length=1,
+        description=(
+            "Stable identifier for the checkpoint and provider implementation, including target-specific callbacks."
+        ),
+    )
+
+    @field_validator("fingerprint")
+    @classmethod
+    def validate_fingerprint(cls, value: str) -> str:
+        """Reject identifiers that contain no visible characters."""
+        if not value.strip():
+            raise ValueError("target fingerprint must not be blank.")
+        return value
+
+    model_config = ConfigDict(extra="forbid")
 
 class ShadowModelConfig(BaseModel):
     """Configuration for the Shadow models."""
@@ -133,11 +161,21 @@ class DistillationModelConfig(BaseModel):
 class LeakProConfig(BaseModel):
     """Configuration for the LeakPro framework."""
 
-    audit: AuditConfig
-    target: TargetConfig
+    audit: Union[AuditConfig, ExtractionAuditConfig]
+    target: Union[TargetConfig, ExtractionTargetConfig]
     shadow_model: Optional[ShadowModelConfig] = Field(None, description="Shadow model config")
     distillation_model: Optional[DistillationModelConfig] = Field(None, description="Distillation model config")
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields
+
+    @model_validator(mode="after")
+    def validate_target_for_attack_type(self) -> "LeakProConfig":
+        """Match classifier and extraction target schemas to their attack families."""
+        is_extraction_target = isinstance(self.target, ExtractionTargetConfig)
+        if self.audit.attack_type == "extraction" and not is_extraction_target:
+            raise ValueError("extraction audits require ExtractionTargetConfig with a target name and fingerprint.")
+        if self.audit.attack_type != "extraction" and is_extraction_target:
+            raise ValueError("non-extraction audits require the standard TargetConfig.")
+        return self
 
 
 class EvalOutput(BaseModel):

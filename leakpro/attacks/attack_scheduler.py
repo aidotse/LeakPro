@@ -33,6 +33,7 @@ class AttackScheduler:
 
         # Create factory
         attack_type = configs.audit.attack_type
+        self.attack_type = attack_type
         self._initialize_factory(attack_type)
 
         self.attack_names = [entry["attack"] for entry in configs.audit.attack_list]
@@ -47,6 +48,8 @@ class AttackScheduler:
             except ValueError as e:
                 logger.info(e)
                 logger.info(f"Failed to create attack: {attack_name}, supported attacks: {self.attack_factory.attack_classes.keys()}")  # noqa: E501
+                if configs.audit.attack_type == "extraction":
+                    raise ValueError(f"Failed to create extraction attack {attack_name!r}: {e}") from e
 
         # Read all previous hashed attack objects from the report directory
         self.output_dir = output_dir
@@ -91,9 +94,18 @@ class AttackScheduler:
                 logger.error("Failed to import MINV attack module.")
                 raise ImportError("MINV attack module is not available.") from e
 
+        elif attack_type == "extraction":
+            try:
+                from leakpro.attacks.extraction_attacks.attack_factory_extraction import AttackFactoryExtraction  # noqa: I001, PLC0415, E501
+                self.attack_factory = AttackFactoryExtraction
+                logger.info("Extraction attack factory loaded.")
+            except ImportError as e:
+                logger.error("Failed to import extraction attack module.")
+                raise ImportError("Extraction attack module is not available.") from e
+
         else:
-            logger.error(f"Unsupported attack type: {self.attack_type}")
-            raise ValueError(f"Unsupported attack type: {self.attack_type}. Must be 'mia' or 'gia'.")
+            logger.error(f"Unsupported attack type: {attack_type}")
+            raise ValueError(f"Unsupported attack type: {attack_type}.")
 
     def add_attack(self:Self, attack: Any) -> None:
         """Add an attack to the list of attacks."""
@@ -101,6 +113,8 @@ class AttackScheduler:
 
     def run_attacks(self: Self, use_optuna:bool=False) -> Dict[str, Any]:
         """Run the attacks and return the results."""
+        if self.attack_type == "extraction":
+            self._preflight_extraction_results()
         results = []
         for attack_obj, attack_type in zip(self.attacks, self.attack_names):
             run_with_optuna = use_optuna and attack_obj.optuna_params > 0
@@ -127,6 +141,23 @@ class AttackScheduler:
             results.append({"attack_type": attack_type, "attack_object": attack_obj, "result_object": result})
 
         return results
+
+    def _preflight_extraction_results(self: Self) -> None:
+        """Reject known output collisions before preparing or running extraction attacks."""
+        result_ids = [attack.result_id for attack in self.attacks]
+        duplicate_ids = sorted({result_id for result_id in result_ids if result_ids.count(result_id) > 1})
+        if duplicate_ids:
+            raise ValueError(f"Duplicate extraction result IDs in one audit: {duplicate_ids}")
+        for attack in self.attacks:
+            if attack.config.overwrite_results:
+                continue
+            result_dir = self.report_dir / attack.result_id
+            data_path = self.data_object_dir / f"{attack.result_id}.json"
+            if result_dir.exists() or data_path.exists():
+                raise FileExistsError(
+                    f"Extraction result {attack.result_id!r} already exists. "
+                    "Set overwrite_results=true to replace it."
+                )
 
     def map_setting_to_attacks(self:Self) -> None:
         """Identify relevant attacks based on adversary setting."""

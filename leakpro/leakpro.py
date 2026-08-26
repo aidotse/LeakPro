@@ -4,6 +4,8 @@
 #
 """Main class for LeakPro."""
 
+from __future__ import annotations
+
 import inspect
 import types
 from pathlib import Path
@@ -14,21 +16,16 @@ from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 
 from leakpro.attacks.attack_scheduler import AttackScheduler
+from leakpro.input_handler.abstract_extraction_input_handler import AbstractExtractionInputHandler
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.extraction_handler import ExtractionHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.input_handler.minv_handler import MINVHandler
-from leakpro.input_handler.modality_extensions.image_extension import ImageAugmentor
-from leakpro.reporting.report_handler import ReportHandler
 from leakpro.schemas import EvalOutput, LeakProConfig, MIAMetaDataSchema, TrainingOutput
 from leakpro.utils.conversion import dataloader_to_config, get_model_init_params, loss_to_config, optimizer_to_config
 from leakpro.utils.import_helper import Any, Self
 from leakpro.utils.logger import add_file_handler, logger
 
-modality_extensions = {"tabular": None,
-                       "image":ImageAugmentor,
-                       "text":None,
-                       "graph":None,
-                       "timeseries":None}
 
 class LeakPro:
     """Main class for LeakPro."""
@@ -47,10 +44,6 @@ class LeakPro:
 
         """
 
-        assert issubclass(user_input_handler, AbstractInputHandler), "handler must be a subclass of AbstractInputHandler"
-        if model_handler is not None:
-            assert issubclass(model_handler, AbstractInputHandler), "model_handler must be a subclass of AbstractInputHandler"
-
         # Read configs from path and ensure it adheres to the schema
         try:
             with open(configs_path, "rb") as f:
@@ -58,6 +51,30 @@ class LeakPro:
                 configs = LeakProConfig(**configs)
         except FileNotFoundError as e:
             raise FileNotFoundError(f"File {configs_path} not found") from e
+
+        if configs.audit.attack_type == "extraction":
+            if not isinstance(user_input_handler, type) or not issubclass(
+                user_input_handler, AbstractExtractionInputHandler
+            ):
+                raise TypeError("handler must be a subclass of AbstractExtractionInputHandler for extraction audits")
+            if model_handler is not None:
+                raise ValueError("model_handler is not used for extraction audits.")
+            from leakpro.attacks.extraction_attacks.attack_factory_extraction import (  # noqa: PLC0415
+                AttackFactoryExtraction,
+            )
+
+            for entry in configs.audit.attack_list:
+                attack_name = entry.get("attack")
+                if not isinstance(attack_name, str):
+                    raise ValueError("Each extraction attack entry requires a string attack name.")
+                AttackFactoryExtraction.validate_config(
+                    attack_name,
+                    {key: value for key, value in entry.items() if key != "attack"},
+                )
+        else:
+            assert issubclass(user_input_handler, AbstractInputHandler), "handler must be a subclass of AbstractInputHandler"
+            if model_handler is not None:
+                assert issubclass(model_handler, AbstractInputHandler), "model_handler must be a subclass of AbstractInputHandler"
 
         # Create report directory
         self.report_dir = f"{configs.audit.output_dir}/results"
@@ -68,7 +85,10 @@ class LeakPro:
         add_file_handler(logger, log_path)
 
         # Initialize handler and attack scheduler
-        self.handler = self.setup_handler(user_input_handler, configs, model_handler)
+        if configs.audit.attack_type == "extraction":
+            self.handler = ExtractionHandler(configs, user_input_handler)
+        else:
+            self.handler = self.setup_handler(user_input_handler, configs, model_handler)
         self.attack_scheduler = AttackScheduler(self.handler, output_dir=configs.audit.output_dir)
 
     def setup_handler(self:Self, user_input_handler:AbstractInputHandler, configs:dict,
@@ -117,12 +137,21 @@ class LeakPro:
                 setattr(handler, name, attr)
 
         # Load extension class and initiate it using the handler (allows for two-way communication)
-        modality_extension_instance = modality_extensions[configs.audit.data_modality]
+        modality_extension_instance = self._get_modality_extension(configs.audit.data_modality)
         if modality_extension_instance is not None:
             handler.modality_extension = modality_extension_instance(handler)
         else:
             handler.modality_extension = None
         return handler
+
+    @staticmethod
+    def _get_modality_extension(data_modality:str) -> type | None:
+        """Load the optional modality extension only when it is needed."""
+        if data_modality == "image":
+            from leakpro.input_handler.modality_extensions.image_extension import ImageAugmentor  # noqa: PLC0415
+
+            return ImageAugmentor
+        return None
 
     @staticmethod
     def make_mia_metadata(train_result: TrainingOutput,
@@ -171,10 +200,15 @@ class LeakPro:
     def run_audit(self:Self, create_pdf: bool = False, use_optuna: bool = False) -> list[Any]:
         """Run the audit."""
 
+        if create_pdf and self.handler.configs.audit.attack_type == "extraction":
+            raise NotImplementedError("PDF reporting is not supported for extraction audits.")
+
         audit_results = self.attack_scheduler.run_attacks(use_optuna=use_optuna)
         results = [entry["result_object"] for entry in audit_results]
 
         if create_pdf:
+            from leakpro.reporting.report_handler import ReportHandler  # noqa: PLC0415
+
             logger.info("Creating PDF report")
             report_handler = ReportHandler(results=results, report_dir=self.report_dir)
             # Create the report by compiling the latex text
