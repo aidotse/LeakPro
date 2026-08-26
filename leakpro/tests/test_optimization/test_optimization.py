@@ -198,7 +198,10 @@ class TestRmiaBridge:
                                             result_name="RMIA", metadata={})
         tpr, realized, degenerate = resolved_proxy_tpr(result, 0.01)
         assert tpr is None
-        assert realized == 0.0
+        # The exact realized FPR depends on the sklearn/numpy version's ROC
+        # tie handling (0.0 or one grid step); the contract is only that it
+        # sits below half the proxy, the pruning threshold.
+        assert realized is not None and realized < 0.005
         assert not degenerate  # a ROC exists; the operating point just isn't on it
 
     def test_degenerate_audit_returns_none(self):
