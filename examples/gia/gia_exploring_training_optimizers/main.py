@@ -197,8 +197,8 @@ def main():
     # Data
     print("Loading CIFAR-10...")
     dataloader, data_mean, data_std = get_cifar10_loader(
-        num_images=2,
-        batch_size=2,
+        num_images=4,
+        batch_size=4,
         num_workers=0
     )
 
@@ -213,7 +213,7 @@ def main():
     data_std = data_std.to(device)
 
     optimizer_type = "sgd"
-    learning_rate = 0.001
+    learning_rate = 0.01
     loss_fn = nn.CrossEntropyLoss()
 
     # Scenario: the client's optimizer has already run for several rounds. Pretrain the model and
@@ -231,7 +231,7 @@ def main():
     training_settings = TrainingSettings(
         epochs=1,
         optimizer_type=optimizer_type,
-        training_batch_size=2,
+        training_batch_size=4,
         compute_mode="updates",
         model_mode="train",
         shuffle_mode="client",
@@ -284,7 +284,7 @@ def main():
 
     for attack_name, attack in attacks:
         print(f"\n{'='*20} Running {attack_name} Attack {'='*20}\n")
-        attack.max_iterations = 1000
+        attack.max_iterations = 4000
         attack.log_interval = 10
         attack = attack.build(client_observations=client_observation)
         reconstruction, attack_config = attack.run_attack(
