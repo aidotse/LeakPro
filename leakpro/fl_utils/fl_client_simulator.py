@@ -232,7 +232,7 @@ class FLClientSimulator:
             GIAResults with metrics computed against private data
 
         """
-        psnr_score, ssim_score, matched_indices = self.compute_scores(reconstruction)
+        psnr_score, ssim_score, _lpips_score, matched_indices = self.compute_scores(reconstruction)
 
         return GIAResults(
             original_data=self.original_inputs,
@@ -243,11 +243,27 @@ class FLClientSimulator:
             images=True,
         )
 
+    def _get_lpips_model(self):  # noqa: ANN202
+        """Lazily create and cache an LPIPS model, or None if the optional `lpips` package is absent.
+
+        LPIPS is an optional dependency (install with `pip install lpips`); if it is not available
+        the perceptual metric is simply skipped and PSNR/SSIM are still reported.
+        """
+        if getattr(self, "_lpips_model", "unset") == "unset":
+            try:
+                import lpips  # optional dependency
+
+                self._lpips_model = lpips.LPIPS(net="alex").to(self.device).eval()
+            except Exception as exc:  # noqa: BLE001
+                print(f"LPIPS unavailable ({exc}); skipping LPIPS metric. Install with `pip install lpips`.")
+                self._lpips_model = None
+        return self._lpips_model
+
     def compute_scores(
         self,
         reconstruction: torch.Tensor,
-    ) -> Tuple[float, float, list]:
-        """Compute (PSNR, SSIM) of a reconstruction against the client's private data.
+    ) -> Tuple[float, float, Optional[float], list]:
+        """Compute (PSNR, SSIM, LPIPS) of a reconstruction against the client's private data.
 
         Handles denormalization, clamping, and permutation-invariant matching, so it can be reused
         to score a whole series of reconstruction snapshots (e.g. one per loss improvement).
@@ -256,7 +272,9 @@ class FLClientSimulator:
             reconstruction: Reconstructed data [N, C, H, W] on any device.
 
         Returns:
-            (psnr_score, ssim_score, matched_indices)
+            (psnr_score, ssim_score, lpips_score, matched_indices). lpips_score is None when the
+            optional `lpips` package is not installed (PSNR/SSIM are still returned). Note LPIPS is
+            a perceptual *distance* (lower is better), unlike PSNR/SSIM (higher is better).
 
         """
         reconstruction = reconstruction.to(self.device)
@@ -276,11 +294,17 @@ class FLClientSimulator:
 
         psnr = PeakSignalNoiseRatio(data_range=1.0).to(self.device)
         ssim = StructuralSimilarityIndexMeasure(data_range=1.0).to(self.device)
-        return (
-            psnr(denorm_reconstruction, denorm_original).item(),
-            ssim(denorm_reconstruction, denorm_original).item(),
-            matched_indices,
-        )
+        psnr_score = psnr(denorm_reconstruction, denorm_original).item()
+        ssim_score = ssim(denorm_reconstruction, denorm_original).item()
+
+        # Optional LPIPS perceptual distance (expects images in [-1, 1])
+        lpips_score = None
+        lpips_model = self._get_lpips_model()
+        if lpips_model is not None:
+            with torch.no_grad():
+                lpips_score = lpips_model(denorm_reconstruction * 2 - 1, denorm_original * 2 - 1).mean().item()
+
+        return psnr_score, ssim_score, lpips_score, matched_indices
 
 
 __all__ = ["ClientObservations", "FLClientSimulator"]
