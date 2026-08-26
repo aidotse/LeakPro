@@ -40,6 +40,7 @@ def train(
         device = torch.device("cuda" if cuda.is_available() else "cpu")
     model.to(device)
     patched_model = MetaModule(model, device=device)
+
     outputs = None
     for _ in range(epochs):
         for inputs, labels in data:
