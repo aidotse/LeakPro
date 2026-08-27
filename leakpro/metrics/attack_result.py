@@ -543,12 +543,14 @@ class GIAResults:
             data_std: float = None,
             config: dict = None,
             images: bool = True,
+            lpips_score: float = None,
         ) -> None:
 
         self.original_data = original_data
         self.recreated_data = recreated_data
         self.PSNR_score = psnr_score
         self.SSIM_score = ssim_score
+        self.LPIPS_score = lpips_score  # optional perceptual distance (lower = better); None if unavailable
         self.data_mean = data_mean
         self.data_std = data_std
         self.config = config

@@ -233,6 +233,10 @@ class ComposableOptimizer(OptimizationStrategy):
         # Per-iteration loss history (scalars) and reconstruction snapshots (on each improvement)
         state.aux_data["loss_history"] = []
         state.aux_data["reconstruction_snapshots"] = []
+        # Separately track the best reconstruction by gradient-matching loss alone (the main
+        # returned reconstruction is the best by *total* loss).
+        state.aux_data["best_gradmatch_loss"] = float("inf")
+        state.aux_data["best_gradmatch_reconstruction"] = None
 
         # Main optimization loop
         for iteration in range(self.max_iterations):
@@ -258,6 +262,14 @@ class ComposableOptimizer(OptimizationStrategy):
                 "total": float(total_loss_value),
                 **{name: float(value) for name, value in losses.items()},
             })
+
+            # Track best reconstruction by gradient-matching loss alone (squeezed [N, C, H, W]
+            # to match the final returned reconstruction).
+            gm_key = next((k for k in losses if k.startswith("GradientMatchingLoss")), None)
+            if gm_key is not None and float(losses[gm_key]) < state.aux_data["best_gradmatch_loss"]:
+                state.aux_data["best_gradmatch_loss"] = float(losses[gm_key])
+                state.aux_data["best_gradmatch_reconstruction"] = \
+                    state.reconstruction.detach().squeeze(0).squeeze(1).cpu().clone()
 
             # Check for best reconstruction and early stopping
             should_stop = self._check_early_stop(
@@ -310,6 +322,8 @@ class ComposableOptimizer(OptimizationStrategy):
                 **state.aux_data.get("best_losses", {}),
                 "loss_history": state.aux_data.get("loss_history", []),
                 "reconstruction_snapshots": state.aux_data.get("reconstruction_snapshots", []),
+                "best_gradmatch_reconstruction": state.aux_data.get("best_gradmatch_reconstruction"),
+                "best_gradmatch_loss": state.aux_data.get("best_gradmatch_loss"),
             },
         )
 

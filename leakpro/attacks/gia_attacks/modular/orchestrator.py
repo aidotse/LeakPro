@@ -320,6 +320,9 @@ class ModularGIAOrchestrator:
         # JSON-serializable attack_config. loss_history (scalars) goes into the config below.
         self.reconstruction_snapshots = optimization_state.metrics.get("reconstruction_snapshots", [])
         self.loss_history = optimization_state.metrics.get("loss_history", [])
+        # Best reconstruction by gradient-matching loss alone (the returned `reconstruction` is
+        # the best by total loss). [N, C, H, W] or None.
+        self.best_gradmatch_reconstruction = optimization_state.metrics.get("best_gradmatch_reconstruction")
 
         config = self._create_attack_config(
             input_shape, optimization_state, label_result, client_observations.labels

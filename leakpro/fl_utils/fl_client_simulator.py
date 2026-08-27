@@ -232,13 +232,14 @@ class FLClientSimulator:
             GIAResults with metrics computed against private data
 
         """
-        psnr_score, ssim_score, _lpips_score, matched_indices = self.compute_scores(reconstruction)
+        psnr_score, ssim_score, lpips_score, matched_indices = self.compute_scores(reconstruction)
 
         return GIAResults(
             original_data=self.original_inputs,
             recreated_data=reconstruction[matched_indices],
             psnr_score=psnr_score,
             ssim_score=ssim_score,
+            lpips_score=lpips_score,
             config=attack_config,
             images=True,
         )

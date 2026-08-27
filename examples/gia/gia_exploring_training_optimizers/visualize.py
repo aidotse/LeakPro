@@ -23,6 +23,8 @@ def visualize_results(result, labels, data_mean, data_std, file):
         print(f"\n✓ Attack completed!")
         print(f"  PSNR: {result.PSNR_score:.2f} dB")
         print(f"  SSIM: {result.SSIM_score:.4f}")
+        if getattr(result, "LPIPS_score", None) is not None:
+            print(f"  LPIPS: {result.LPIPS_score:.4f}")
         
         # Save visualization
         output_dir = Path(__file__).parent / "outputs"
@@ -46,7 +48,10 @@ def visualize_results(result, labels, data_mean, data_std, file):
             axes[1, i].set_title(f"Reconstructed")
             axes[1, i].axis('off')
         
-        plt.suptitle(f"Geiping Attack (Oracle Labels) on CIFAR-10\nPSNR: {result.PSNR_score:.2f} dB | SSIM: {result.SSIM_score:.4f}")
+        suptitle = f"Geiping Attack (Oracle Labels) on CIFAR-10\nPSNR: {result.PSNR_score:.2f} dB | SSIM: {result.SSIM_score:.4f}"
+        if getattr(result, "LPIPS_score", None) is not None:
+            suptitle += f" | LPIPS: {result.LPIPS_score:.4f}"
+        plt.suptitle(suptitle)
         plt.tight_layout()
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
         print(f"Saved visualization to: {save_path}")
@@ -79,6 +84,8 @@ def visualize_multiple_attacks(results, labels, data_mean, data_std, file):
     
     for j in range(num_attacks):
         label_text = f"Attack {j+1}\n\nPSNR: {results[j].PSNR_score:.2f} dB\nSSIM: {results[j].SSIM_score:.4f}"
+        if getattr(results[j], "LPIPS_score", None) is not None:
+            label_text += f"\nLPIPS: {results[j].LPIPS_score:.4f}"
         axes[j+1, 0].text(0.5, 0.5, label_text, ha='center', va='center', fontsize=12)
         axes[j+1, 0].axis('off')
     

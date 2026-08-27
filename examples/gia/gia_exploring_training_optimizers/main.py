@@ -281,7 +281,8 @@ def main():
 
 
     attacks = []
-    results = []
+    results_total = []       # best reconstruction selected by total loss (the returned one)
+    results_gradmatch = []   # best reconstruction selected by gradient-matching loss alone
 
     #geiping = inverting_gradients_attack()
     #attacks.append(("Geiping", geiping))
@@ -306,7 +307,7 @@ def main():
 
     for attack_name, attack in attacks:
         print(f"\n{'='*20} Running {attack_name} Attack {'='*20}\n")
-        attack.max_iterations = 4000
+        attack.max_iterations = 40
         attack.log_interval = 10
         attack = attack.build(client_observations=client_observation)
         reconstruction, attack_config = attack.run_attack(
@@ -341,11 +342,20 @@ def main():
                                 series["ssim"].tolist(), run_dir / f"metric_curve_{tag}.png",
                                 lpips=series["lpips"].tolist() if "lpips" in series else None)
 
-        results.append(client_simulator.compute_metrics(reconstruction, attack_config))
+        # Score both "best" reconstructions against ground truth: the one selected by total loss
+        # (the returned reconstruction) and the one selected by gradient-matching loss alone.
+        results_total.append(client_simulator.compute_metrics(reconstruction, attack_config))
+        gm_recon = attack.best_gradmatch_reconstruction
+        results_gradmatch.append(
+            client_simulator.compute_metrics(gm_recon, attack_config)
+            if gm_recon is not None else results_total[-1]
+        )
 
-    
-    visualize_multiple_attacks(results, client_simulator.original_labels, data_mean, data_std,
-                               file=f"{run_name}/main_results.png")
+    # Two comparison figures: best-by-total-loss vs best-by-gradient-matching-loss.
+    visualize_multiple_attacks(results_total, client_simulator.original_labels, data_mean, data_std,
+                               file=f"{run_name}/main_results_tot_loss.png")
+    visualize_multiple_attacks(results_gradmatch, client_simulator.original_labels, data_mean, data_std,
+                               file=f"{run_name}/main_results_gradientmatch.png")
     
 
 if __name__ == "__main__":
