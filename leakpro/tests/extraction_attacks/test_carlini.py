@@ -182,6 +182,75 @@ def test_conditional_mode_rejects_none_before_sampling() -> None:
     assert sample_calls == 0
 
 
+@pytest.mark.parametrize("conditions", ["cat", b"cat", bytearray(b"cat"), memoryview(b"cat"), {"prompt": "cat"}])
+def test_direct_construction_rejects_ambiguous_condition_containers(conditions: Any) -> None:
+    adapter = CallableDiffusionAdapter(
+        image_shape=(1, 2, 2),
+        sample_fn=lambda batch_size, condition_batch, seed: torch.zeros((batch_size, 1, 2, 2)),
+    )
+
+    with pytest.raises(TypeError, match="ordered sequence"):
+        AttackCarliniExtraction(
+            adapter,
+            {"authorized_audit": True},
+            audit_fingerprint="ambiguous-condition-test",
+            conditions=conditions,
+        )
+
+
+def test_carlini_rejects_invalid_distance_device_before_sampling() -> None:
+    sample_calls = 0
+
+    def sample(batch_size: int, conditions: Sequence[Any] | None, seed: int) -> torch.Tensor:
+        nonlocal sample_calls
+        del conditions, seed
+        sample_calls += 1
+        return torch.zeros((batch_size, 1, 2, 2))
+
+    attack = AttackCarliniExtraction(
+        CallableDiffusionAdapter(image_shape=(1, 2, 2), sample_fn=sample),
+        {"authorized_audit": True, "distance_device": "not-a-device"},
+        audit_fingerprint="invalid-device-test",
+        conditions=["cat"],
+    )
+
+    with pytest.raises(ValueError, match="Invalid device string"):
+        attack.prepare_attack()
+    assert sample_calls == 0
+
+
+def test_conditional_attack_handles_a_dense_graph_beyond_the_recursion_limit() -> None:
+    sample_calls = 0
+
+    def sample(batch_size: int, conditions: Sequence[Any] | None, seed: int) -> torch.Tensor:
+        nonlocal sample_calls
+        del seed
+        sample_calls += 1
+        assert conditions == ["memorized"] * batch_size
+        return torch.zeros((batch_size, 1, 1, 1))
+
+    attack = AttackCarliniExtraction(
+        CallableDiffusionAdapter(image_shape=(1, 1, 1), sample_fn=sample),
+        {
+            "authorized_audit": True,
+            "num_generations_per_condition": 1_100,
+            "generation_batch_size": 1_100,
+            "distance_block_size": 1_100,
+            "tile_grid": (1, 1),
+            "tiled_l2_threshold": 0.01,
+            "min_clique_size": 10,
+        },
+        audit_fingerprint="dense-graph-test",
+        conditions=["memorized"],
+    )
+
+    attack.prepare_attack()
+    result = attack.run_attack()
+
+    assert sample_calls == 1
+    assert result.candidates[0].metadata["largest_clique_size"] == 1_100
+
+
 def test_failed_carlini_run_cannot_reuse_partial_state() -> None:
     sample_calls = 0
 

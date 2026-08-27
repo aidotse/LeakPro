@@ -10,7 +10,12 @@ from leakpro.attacks.extraction_attacks.abstract_extraction import AbstractExtra
 from leakpro.attacks.extraction_attacks.carlini import AttackCarliniExtraction
 from leakpro.attacks.extraction_attacks.configs import CarliniConfig, SIDEConfig
 from leakpro.attacks.extraction_attacks.side import AttackSIDEExtraction
-from leakpro.attacks.extraction_attacks.utils import extraction_audit_fingerprint, require_authorized, resolve_device
+from leakpro.attacks.extraction_attacks.utils import (
+    extraction_audit_fingerprint,
+    normalize_conditions,
+    require_authorized,
+    resolve_device,
+)
 from leakpro.input_handler.extraction_handler import ExtractionHandler
 
 
@@ -49,7 +54,7 @@ class AttackFactoryExtraction:
         if name == "carlini_diffusion":
             if not isinstance(config, CarliniConfig):
                 raise RuntimeError("Carlini configuration dispatch failed.")
-            conditions = handler.get_extraction_conditions()
+            conditions = normalize_conditions(handler.get_extraction_conditions())
             reference_images = handler.get_extraction_reference_images()
             audit_fingerprint = extraction_audit_fingerprint(
                 handler.configs.target.fingerprint,

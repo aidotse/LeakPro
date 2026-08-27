@@ -69,6 +69,14 @@ def test_maximum_clique_matches_brute_force_on_random_graphs() -> None:
         assert maximum_clique(adjacency) == _brute_maximum_clique(adjacency)
 
 
+def test_maximum_clique_handles_a_dense_graph_beyond_the_recursion_limit() -> None:
+    vertex_count = 1_100
+    adjacency = torch.ones((vertex_count, vertex_count), dtype=torch.bool)
+    adjacency.fill_diagonal_(False)
+
+    assert maximum_clique(adjacency) == list(range(vertex_count))
+
+
 def test_clique_medoid_uses_lowest_index_for_a_tie() -> None:
     distances = torch.tensor(
         [

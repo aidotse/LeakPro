@@ -205,6 +205,7 @@ def test_carlini_public_path_persists_trace(tmp_path: Any) -> None:
     result = LeakPro(CarliniProvider, config_path).run_audit()[0]
 
     assert result.metrics["candidate_count"] == 1
+    assert result.metrics["conditions_audited"] == 1
     assert [event["phase"] for event in result.execution_trace] == [
         "prepared",
         "condition_complete",
@@ -213,6 +214,33 @@ def test_carlini_public_path_persists_trace(tmp_path: Any) -> None:
     assert result.execution_trace[-1]["sampling_calls"] == 2
     assert (tmp_path / "output" / "results" / result.id / "result.json").exists()
     assert (tmp_path / "output" / "results" / result.id / "candidates.npz").exists()
+
+
+def test_public_path_rejects_a_scalar_string_condition_before_adapter_access(tmp_path: Any) -> None:
+    class ScalarStringProvider(AbstractExtractionInputHandler):
+        adapter_requested = False
+
+        def get_diffusion_adapter(self) -> CallableDiffusionAdapter:
+            type(self).adapter_requested = True
+            return CallableDiffusionAdapter(image_shape=(1, 4, 4), sample_fn=_alternating_samples)
+
+        def get_extraction_conditions(self) -> Any:
+            return "cat"
+
+    config_path = _write_config(
+        tmp_path,
+        "carlini_diffusion",
+        {
+            "authorized_audit": True,
+            "num_generations_per_condition": 2,
+            "min_clique_size": 2,
+        },
+    )
+
+    with pytest.raises(TypeError, match="ordered sequence"):
+        LeakPro(ScalarStringProvider, config_path)
+
+    assert ScalarStringProvider.adapter_requested is False
 
 
 def test_side_public_path_records_training_and_guidance(tmp_path: Any) -> None:

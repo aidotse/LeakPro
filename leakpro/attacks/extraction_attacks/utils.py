@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from typing import Any, Literal
 
@@ -163,6 +163,15 @@ def condition_fingerprint(condition: object) -> str:
         allow_nan=False,
     ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+def normalize_conditions(conditions: Sequence[Any] | None) -> list[Any] | None:
+    """Copy an ordered condition collection without splitting scalar values."""
+    if conditions is None:
+        return None
+    if isinstance(conditions, (str, bytes, bytearray, memoryview, Mapping)) or not isinstance(conditions, Sequence):
+        raise TypeError("Extraction conditions must be an ordered sequence of prompts or labels.")
+    return list(conditions)
 
 
 def _canonical_condition(value: object) -> object:

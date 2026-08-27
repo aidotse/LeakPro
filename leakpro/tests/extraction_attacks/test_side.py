@@ -261,6 +261,24 @@ def test_side_rejects_mixed_feature_extractor_dtypes_before_sampling() -> None:
     assert sample_calls == []
 
 
+def test_side_rejects_invalid_distance_device_before_sampling() -> None:
+    sample_calls: list[int] = []
+    config = _small_side_config()
+    config["distance_device"] = "not-a-device"
+    attack = AttackSIDEExtraction(
+        _small_side_adapter(sample_calls=sample_calls),
+        TwoFeatureExtractor(),
+        config,
+        audit_fingerprint="invalid-distance-device-test",
+        classifier_factory=TinyTimeClassifier,
+    )
+
+    with pytest.raises(ValueError, match="Invalid device string"):
+        attack.prepare_attack()
+
+    assert sample_calls == []
+
+
 def test_failed_side_preparation_cannot_reuse_partial_sampling_state() -> None:
     sample_calls: list[int] = []
 

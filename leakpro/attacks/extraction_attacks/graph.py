@@ -12,11 +12,7 @@ from torch import Tensor
 
 def _population_count(value: int) -> int:
     """Count set bits without relying on Python 3.10's int.bit_count()."""
-    count = 0
-    while value:
-        value &= value - 1
-        count += 1
-    return count
+    return bin(value).count("1")
 
 
 def adjacency_to_bitsets(adjacency: Tensor) -> list[int]:
@@ -30,8 +26,8 @@ def adjacency_to_bitsets(adjacency: Tensor) -> list[int]:
     masks: list[int] = []
     for row_index in range(adjacency.shape[0]):
         mask = 0
-        for column_index in torch.nonzero(adjacency[row_index], as_tuple=False).flatten().tolist():
-            if column_index != row_index:
+        for column_index, connected in enumerate(adjacency[row_index].tolist()):
+            if connected and column_index != row_index:
                 mask |= 1 << column_index
         masks.append(mask)
     return masks
@@ -47,27 +43,29 @@ def maximum_clique(adjacency: Tensor) -> list[int]:
         vertices = [index for index in range(vertex_count) if candidates & (1 << index)]
         return min(vertices, key=lambda index: (-_population_count(candidates & neighbors[index]), index))
 
-    def expand(candidates: int, clique: tuple[int, ...]) -> None:
-        nonlocal best
+    stack = [((1 << vertex_count) - 1, ())]
+    while stack:
+        candidates, clique = stack.pop()
         if len(clique) + _population_count(candidates) < len(best):
-            return
+            continue
         if candidates == 0:
             canonical = tuple(sorted(clique))
             if len(canonical) > len(best) or (len(canonical) == len(best) and canonical < best):
                 best = canonical
-            return
+            continue
         pivot = choose_pivot(candidates)
         extensions = candidates & ~neighbors[pivot]
+        children: list[tuple[int, tuple[int, ...]]] = []
         while extensions:
             bit = extensions & -extensions
             vertex = bit.bit_length() - 1
-            expand(candidates & neighbors[vertex], clique + (vertex,))
+            children.append((candidates & neighbors[vertex], clique + (vertex,)))
             candidates &= ~bit
             extensions &= ~bit
             if len(clique) + _population_count(candidates) < len(best):
-                return
+                break
+        stack.extend(reversed(children))
 
-    expand((1 << vertex_count) - 1, ())
     return list(best)
 
 

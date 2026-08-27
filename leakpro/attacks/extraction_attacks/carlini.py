@@ -25,7 +25,9 @@ from leakpro.attacks.extraction_attacks.protocols import SamplingAdapter
 from leakpro.attacks.extraction_attacks.utils import (
     batch_ranges,
     condition_fingerprint,
+    normalize_conditions,
     require_authorized,
+    resolve_device,
     stable_hash,
     to_zero_one,
     validate_image_batch,
@@ -56,7 +58,7 @@ class AttackCarliniExtraction(AbstractExtraction):
         self.configs = self.config
         self.optuna_params = 0
         self.audit_fingerprint = audit_fingerprint
-        self.conditions = list(conditions) if conditions is not None else None
+        self.conditions = normalize_conditions(conditions)
         self.reference_images = reference_images
         self.state = AttackState.CREATED
         identity_config = self.config.model_dump(mode="json", exclude={"overwrite_results"})
@@ -98,6 +100,7 @@ class AttackCarliniExtraction(AbstractExtraction):
     def _prepare_attack(self) -> None:
         """Validate authorization, model surface, conditions, and reference data."""
         require_authorized(self.config.authorized_audit)
+        resolve_device(self.config.distance_device)
         if not isinstance(self.adapter, SamplingAdapter):
             raise TypeError("adapter does not satisfy the SamplingAdapter protocol.")
         if len(self.adapter.image_shape) != 3 or any(size < 1 for size in self.adapter.image_shape):

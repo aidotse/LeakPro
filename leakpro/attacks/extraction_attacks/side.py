@@ -146,6 +146,7 @@ class AttackSIDEExtraction(AbstractExtraction):
 
     def _validate_preparation_inputs(self) -> None:
         """Reject malformed white-box components before target sampling."""
+        resolve_device(self.config.distance_device)
         if not isinstance(self.adapter, DiffusionAdapter):
             raise TypeError("adapter does not satisfy the DiffusionAdapter protocol.")
         self.adapter.validate_side_capabilities()
