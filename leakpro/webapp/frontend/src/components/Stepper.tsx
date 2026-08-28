@@ -17,7 +17,7 @@ export default function Stepper({ current }: StepperProps) {
   return (
     <nav className="flex justify-between items-start w-full relative">
       {/* Progress line background */}
-      <div className="absolute top-5 left-0 w-full h-0.5 bg-slate-200 dark:bg-slate-800 -z-10" />
+      <div className="absolute top-5 left-0 w-full h-0.5 bg-slate-200 dark:bg-surface-2 -z-10" />
 
       {STEPS.map((step, i) => {
         const done = i < current;
@@ -29,7 +29,7 @@ export default function Stepper({ current }: StepperProps) {
           >
             <div
               className={`size-10 rounded-full flex items-center justify-center ring-4 ring-background-light dark:ring-background-dark transition-all
-                ${active ? "bg-primary text-white" : done ? "bg-primary/20 text-primary" : "bg-slate-200 dark:bg-slate-800 text-slate-500"}`}
+                ${active ? "bg-slate-700 text-cream border border-primary" : done ? "bg-primary/20 text-primary" : "bg-slate-200 dark:bg-surface-2 text-slate-500"}`}
             >
               {done ? (
                 <span className="material-symbols-outlined text-xl">check</span>
