@@ -1,9 +1,15 @@
 # Diffusion extraction example
 
-For a real-data walkthrough, open [`cifar10_extraction.ipynb`](cifar10_extraction.ipynb). It downloads CIFAR-10,
-trains or reloads a small unconditional DDPM, runs Carlini's reference-assisted CIFAR-10 audit and SIDE's small-model
-white-box attack, visualizes nearest training references, and saves a reproducibility manifest. The default smoke
-profile runs the complete pipeline with reduced budgets; it is not evidence of paper-scale extraction performance.
+The [`cifar10`](cifar10) directory follows the same layout as the MIA and model-inversion examples. Use
+[`train_config.yaml`](cifar10/train_config.yaml) to select the target data, model, and training profile. The selected
+[`audit.yaml`](cifar10/audit.yaml) or [`audit_demonstration.yaml`](cifar10/audit_demonstration.yaml) owns every Carlini
+and SIDE parameter, including generation budgets. Then run
+[`main.ipynb`](cifar10/main.ipynb). The notebook downloads CIFAR-10, trains or reloads an unconditional DDPM, runs both
+attacks, visualizes nearest training references, and saves the resolved config and run manifest under the ignored
+`target/` and `leakpro_output/` directories.
+
+The default smoke profile runs the complete workflow with reduced budgets. It is not evidence of paper-scale
+extraction performance.
 
 The notebook needs torchvision in addition to the extraction dependencies:
 

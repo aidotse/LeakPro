@@ -2,7 +2,7 @@
 # Copyright 2023-2026 Lindholmen Science Park AB
 # SPDX-License-Identifier: Apache-2.0
 #
-"""Small CIFAR-10 DDPM used by the extraction notebook."""
+"""CIFAR-10 target model and data helpers for the extraction example."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import math
 import random
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, ClassVar, Sequence
+from typing import Any, Sequence
 
 import numpy as np
 import torch
@@ -25,7 +25,6 @@ from torchvision.datasets import CIFAR10
 from torchvision.models import ResNet18_Weights, resnet18
 from tqdm.auto import tqdm
 
-from leakpro import AbstractExtractionInputHandler
 from leakpro.attacks.extraction_attacks.adapters import CallableDiffusionAdapter
 from leakpro.attacks.extraction_attacks.protocols import ConditionGradient, FeatureTransform
 
@@ -44,61 +43,15 @@ class RunProfile:
     sampling_steps: int
     model_channels: int
     reference_size: int
-    carlini_generations: int
-    side_synthetic_samples: int
-    side_clusters: int
-    side_classifier_epochs: int
-    side_generations: int
-    side_guidance_scale: float
-    side_cohesion_threshold: float
 
-
-RUN_PROFILES = {
-    "smoke": RunProfile(
-        name="smoke",
-        seed=2026,
-        train_size=256,
-        epochs=1,
-        train_batch_size=64,
-        learning_rate=2e-4,
-        timesteps=1_000,
-        sampling_steps=20,
-        model_channels=32,
-        reference_size=256,
-        carlini_generations=32,
-        side_synthetic_samples=64,
-        side_clusters=4,
-        side_classifier_epochs=1,
-        side_generations=16,
-        side_guidance_scale=1.0,
-        side_cohesion_threshold=-1.0,
-    ),
-    "demonstration": RunProfile(
-        name="demonstration",
-        seed=2026,
-        train_size=1_024,
-        epochs=100,
-        train_batch_size=128,
-        learning_rate=2e-4,
-        timesteps=1_000,
-        sampling_steps=50,
-        model_channels=64,
-        reference_size=1_024,
-        carlini_generations=4_096,
-        side_synthetic_samples=4_096,
-        side_clusters=32,
-        side_classifier_epochs=10,
-        side_generations=4_096,
-        side_guidance_scale=10.0,
-        side_cohesion_threshold=0.5,
-    ),
-}
 
 MODEL_FORMAT_VERSION = 2
 
 
-def select_device() -> torch.device:
-    """Select one accelerator when available."""
+def select_device(requested: str = "auto") -> torch.device:
+    """Resolve the device name from ``train_config.yaml``."""
+    if requested != "auto":
+        return torch.device(requested)
     if torch.cuda.is_available():
         return torch.device("cuda")
     if torch.backends.mps.is_available():
@@ -454,51 +407,3 @@ def sha256_mapping(value: dict[str, str]) -> str:
     """Hash a string mapping using one canonical JSON representation."""
     payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(payload).hexdigest()
-
-
-class CIFAR10ExtractionHandler(AbstractExtractionInputHandler):
-    """Provide notebook-owned DDPM objects to LeakPro's extraction scheduler."""
-
-    adapter: ClassVar[CallableDiffusionAdapter | None] = None
-    references: ClassVar[Tensor | None] = None
-    feature_extractor: ClassVar[nn.Module | None] = None
-    feature_transform: ClassVar[FeatureTransform | None] = None
-
-    @classmethod
-    def configure(
-        cls,
-        *,
-        adapter: CallableDiffusionAdapter,
-        references: Tensor,
-        feature_extractor: nn.Module,
-        feature_transform: FeatureTransform,
-    ) -> None:
-        """Set the four runtime objects required by the public handler API."""
-        cls.adapter = adapter
-        cls.references = references
-        cls.feature_extractor = feature_extractor
-        cls.feature_transform = feature_transform
-
-    def get_diffusion_adapter(self) -> CallableDiffusionAdapter:
-        """Return the trained CIFAR-10 DDPM adapter."""
-        if self.adapter is None:
-            raise RuntimeError("Call CIFAR10ExtractionHandler.configure() before creating LeakPro.")
-        return self.adapter
-
-    def get_extraction_reference_images(self) -> Tensor:
-        """Return the authorized target training subset."""
-        if self.references is None:
-            raise RuntimeError("Call CIFAR10ExtractionHandler.configure() before creating LeakPro.")
-        return self.references
-
-    def get_side_feature_extractor(self) -> nn.Module:
-        """Return the frozen feature extractor used for surrogate labels."""
-        if self.feature_extractor is None:
-            raise RuntimeError("Call CIFAR10ExtractionHandler.configure() before creating LeakPro.")
-        return self.feature_extractor
-
-    def get_side_feature_transform(self) -> FeatureTransform:
-        """Return the preprocessing paired with the frozen feature extractor."""
-        if self.feature_transform is None:
-            raise RuntimeError("Call CIFAR10ExtractionHandler.configure() before creating LeakPro.")
-        return self.feature_transform

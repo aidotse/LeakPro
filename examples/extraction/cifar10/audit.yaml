@@ -1,0 +1,58 @@
+##
+## Copyright 2023-2026 Lindholmen Science Park AB
+## SPDX-License-Identifier: Apache-2.0
+##
+
+audit:
+  random_seed: 2026
+  attack_type: extraction
+  data_modality: image
+  output_dir: ./leakpro_output/smoke
+  hyper_param_search: false
+  attack_list:
+    - attack: carlini_diffusion
+      random_seed: 2026
+      authorized_audit: true
+      overwrite_results: true
+      mode: unconditional_reference_audit
+      image_range: minus_one_one
+      num_unconditional_generations: 32
+      generation_batch_size: 32
+      reference_neighbors: 50
+      reference_alpha: 0.5
+      ratio_threshold: 1.0
+      verification_l2_threshold: 0.15
+      max_extractions: 32
+      distance_block_size: 64
+      distance_device: cpu
+
+    - attack: side
+      random_seed: 2026
+      authorized_audit: true
+      overwrite_results: true
+      image_range: minus_one_one
+      compute_device: auto
+      distance_device: cpu
+      synthetic_samples: 64
+      synthetic_batch_size: 64
+      clusters: 4
+      cohesion_threshold: -1.0
+      min_cluster_size: 2
+      kmeans_n_init: 5
+      classifier_epochs: 1
+      classifier_batch_size: 32
+      classifier_learning_rate: 0.0001
+      classifier_base_width: 16
+      classifier_blocks: [1, 1, 1, 1]
+      timestep_embedding_dim: 64
+      guidance_scale: 1.0
+      num_generations: 16
+      generation_batch_size: 16
+      l2_bands:
+        near_copy:
+          lower: 0.0
+          upper: 0.3
+
+target:
+  name: cifar10_unconditional_ddim
+  fingerprint: set-by-notebook
