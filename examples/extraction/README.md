@@ -1,5 +1,16 @@
 # Diffusion extraction example
 
+For a real-data walkthrough, open [`cifar10_extraction.ipynb`](cifar10_extraction.ipynb). It downloads CIFAR-10,
+trains or reloads a small unconditional DDPM, runs Carlini's reference-assisted CIFAR-10 audit and SIDE's small-model
+white-box attack, visualizes nearest training references, and saves a reproducibility manifest. The default smoke
+profile runs the complete pipeline with reduced budgets; it is not evidence of paper-scale extraction performance.
+
+The notebook needs torchvision in addition to the extraction dependencies:
+
+```bash
+pip install -e '.[extraction]' torchvision
+```
+
 The toy provider exercises Carlini and SIDE through LeakPro without downloads or a GPU:
 
 ```python
