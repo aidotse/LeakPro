@@ -4,6 +4,7 @@
 #
 """Parent class for user inputs."""
 
+import inspect
 import pickle
 
 import joblib
