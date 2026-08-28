@@ -279,6 +279,92 @@ def test_side_public_path_records_training_and_guidance(tmp_path: Any) -> None:
     assert result.metrics["retained_clusters"] == 2
 
 
+@pytest.mark.parametrize(("classifier_batch_size", "expected_singletons"), [(1, 3), (2, 1)])
+def test_side_public_path_trains_singleton_batches_without_dropping_them(
+    tmp_path: Any,
+    classifier_batch_size: int,
+    expected_singletons: int,
+) -> None:
+    class DefaultClassifierProvider(SIDEProvider):
+        def get_side_classifier_factory(self) -> None:
+            return None
+
+    config_path = _write_config(
+        tmp_path,
+        "side",
+        {
+            "random_seed": 42,
+            "authorized_audit": True,
+            "compute_device": "cpu",
+            "synthetic_samples": 3,
+            "synthetic_batch_size": 3,
+            "clusters": 2,
+            "cohesion_threshold": -1.0,
+            "min_cluster_size": 1,
+            "classifier_epochs": 1,
+            "classifier_batch_size": classifier_batch_size,
+            "classifier_base_width": 4,
+            "classifier_blocks": [1, 1, 1, 1],
+            "timestep_embedding_dim": 8,
+            "num_generations": 2,
+            "generation_batch_size": 2,
+            "guidance_scale": 1.0,
+        },
+    )
+
+    result = LeakPro(DefaultClassifierProvider, config_path).run_audit()[0]
+    training_event = next(
+        event for event in result.execution_trace if event["phase"] == "classifier_training_complete"
+    )
+
+    assert training_event["singleton_batches"] == expected_singletons
+    assert len(result.metrics["classifier_epoch_losses"]) == 1
+    assert torch.isfinite(torch.tensor(result.metrics["classifier_epoch_losses"])).all()
+    assert result.metrics["images_generated"] == 2
+
+
+def test_side_classifier_factory_is_seeded_independently_of_ambient_rng(tmp_path: Any) -> None:
+    attack_config = {
+        "random_seed": 42,
+        "authorized_audit": True,
+        "compute_device": "cpu",
+        "synthetic_samples": 8,
+        "synthetic_batch_size": 4,
+        "clusters": 2,
+        "cohesion_threshold": 0.9,
+        "min_cluster_size": 2,
+        "classifier_epochs": 1,
+        "classifier_batch_size": 4,
+        "classifier_learning_rate": 0.001,
+        "num_generations": 4,
+        "generation_batch_size": 2,
+        "guidance_scale": 1.0,
+    }
+    first_config = _write_config(
+        tmp_path,
+        "side",
+        attack_config,
+        config_name="side-first.yaml",
+        output_dir=tmp_path / "first-output",
+    )
+    second_config = _write_config(
+        tmp_path,
+        "side",
+        attack_config,
+        config_name="side-second.yaml",
+        output_dir=tmp_path / "second-output",
+    )
+
+    torch.manual_seed(1)
+    first = LeakPro(SIDEProvider, first_config).run_audit()[0]
+    torch.manual_seed(999)
+    second = LeakPro(SIDEProvider, second_config).run_audit()[0]
+
+    assert first.id == second.id
+    assert first.metrics["classifier_epoch_losses"] == second.metrics["classifier_epoch_losses"]
+    torch.testing.assert_close(first.images, second.images, rtol=0, atol=0)
+
+
 def test_public_path_rejects_nonfinite_generated_images(tmp_path: Any) -> None:
     class NonfiniteProvider(AbstractExtractionInputHandler):
         def get_diffusion_adapter(self) -> CallableDiffusionAdapter:

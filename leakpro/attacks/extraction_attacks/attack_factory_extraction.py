@@ -87,7 +87,6 @@ class AttackFactoryExtraction:
                 audit_fingerprint=audit_fingerprint,
                 reference_images=reference_images,
                 feature_transform=handler.get_side_feature_transform(),
-                classifier=handler.get_side_classifier(),
                 classifier_factory=handler.get_side_classifier_factory(),
                 reference_score_fn=handler.get_extraction_reference_score(),
             )

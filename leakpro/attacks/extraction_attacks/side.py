@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any, Callable
 
 import numpy as np
@@ -41,6 +43,27 @@ from leakpro.reporting.extraction_result import CandidateRecord, ExtractionResul
 ClassifierFactory = Callable[[int, int], nn.Module]
 
 
+@contextmanager
+def _batch_norm_eval_for_singleton(classifier: nn.Module, batch_size: int) -> Iterator[None]:
+    """Use stored BatchNorm statistics for a one-sample training batch."""
+    if batch_size != 1:
+        yield
+        return
+    batch_norm_types = (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d, nn.SyncBatchNorm)
+    batch_norm_modes = [
+        (module, module.training)
+        for module in classifier.modules()
+        if isinstance(module, batch_norm_types)
+    ]
+    try:
+        for module, _training in batch_norm_modes:
+            module.training = False
+        yield
+    finally:
+        for module, training in batch_norm_modes:
+            module.training = training
+
+
 class AttackSIDEExtraction(AbstractExtraction):
     """White-box SIDE attack using synthetic clusters and classifier guidance.
 
@@ -59,7 +82,6 @@ class AttackSIDEExtraction(AbstractExtraction):
         audit_fingerprint: str,
         reference_images: Tensor | None = None,
         feature_transform: FeatureTransform | None = None,
-        classifier: nn.Module | None = None,
         classifier_factory: ClassifierFactory | None = None,
         reference_score_fn: PairwiseScore | None = None,
     ) -> None:
@@ -71,7 +93,7 @@ class AttackSIDEExtraction(AbstractExtraction):
         self.audit_fingerprint = audit_fingerprint
         self.reference_images = reference_images
         self.feature_transform = feature_transform or identity_feature_transform
-        self.classifier = classifier
+        self.classifier: nn.Module | None = None
         self.classifier_factory = classifier_factory
         self.reference_score_fn = reference_score_fn
         self.state = AttackState.CREATED
@@ -92,6 +114,7 @@ class AttackSIDEExtraction(AbstractExtraction):
         self._references_metric: Tensor | None = None
         self._sampling_calls = 0
         self._guidance_calls = 0
+        self._singleton_classifier_batches = 0
         self._initialize_trace()
 
     def description(self) -> dict[str, str]:
@@ -107,7 +130,8 @@ class AttackSIDEExtraction(AbstractExtraction):
             "scope": (
                 "Implements Algorithm 1's time-dependent classifier branch for small DPMs. Classifier epochs and the "
                 "concrete timestep-conditioned ResNet are recorded implementation choices because the paper does not "
-                "fully specify them. The separate Stable-Diffusion LoRA branch is excluded because its conditioning "
+                "fully specify them. Singleton classifier batches use stored BatchNorm statistics so no synthetic "
+                "sample is discarded. The separate Stable-Diffusion LoRA branch is excluded because its conditioning "
                 "and code details are insufficient for a model-agnostic faithful implementation."
             ),
         }
@@ -141,6 +165,7 @@ class AttackSIDEExtraction(AbstractExtraction):
             "classifier_training_complete",
             epochs=self.config.classifier_epochs,
             final_loss=self.training_history[-1],
+            singleton_batches=self._singleton_classifier_batches,
         )
         self._record_trace("prepared")
 
@@ -167,10 +192,6 @@ class AttackSIDEExtraction(AbstractExtraction):
         self._feature_extractor_dtype()
         if not callable(self.feature_transform):
             raise TypeError("feature_transform must be callable.")
-        if self.classifier is not None and not isinstance(self.classifier, nn.Module):
-            raise TypeError("classifier must be a torch.nn.Module.")
-        if self.classifier is not None:
-            self._classifier_dtype()
         if self.classifier_factory is not None and not callable(self.classifier_factory):
             raise TypeError("classifier_factory must be callable.")
         if self.reference_score_fn is not None and not callable(self.reference_score_fn):
@@ -268,8 +289,10 @@ class AttackSIDEExtraction(AbstractExtraction):
             raise RuntimeError("Surrogate clusters were not prepared.")
         num_classes = self.cluster_centroids.shape[0]
         in_channels = self.adapter.image_shape[0]
-        if self.classifier is None and self.classifier_factory is not None:
+        if self.classifier_factory is not None:
             self.classifier = self.classifier_factory(in_channels, num_classes)
+            if not isinstance(self.classifier, nn.Module):
+                raise TypeError("classifier_factory must return a torch.nn.Module.")
         if self.classifier is None:
             self.classifier = TimeConditionedResNet(
                 in_channels=in_channels,
@@ -328,7 +351,10 @@ class AttackSIDEExtraction(AbstractExtraction):
                 noisy = validate_image_batch(noisy, self.adapter.image_shape, expected_count=clean.shape[0])
                 classifier_inputs = noisy.to(device=self.device, dtype=classifier_dtype)
                 classifier_timesteps = self.adapter.classifier_timesteps(timesteps).to(self.device)
-                logits = self.classifier(classifier_inputs, classifier_timesteps)
+                if clean.shape[0] == 1:
+                    self._singleton_classifier_batches += 1
+                with _batch_norm_eval_for_singleton(self.classifier, clean.shape[0]):
+                    logits = self.classifier(classifier_inputs, classifier_timesteps)
                 loss = functional.cross_entropy(logits, target_labels)
                 if not torch.isfinite(loss):
                     raise RuntimeError("SIDE classifier training produced NaN or infinity.")

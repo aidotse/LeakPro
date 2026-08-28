@@ -43,12 +43,8 @@ class AbstractExtractionInputHandler(ABC):
         """Return preprocessing compatible with the feature extractor."""
         return None
 
-    def get_side_classifier(self) -> nn.Module | None:
-        """Return an optional preconstructed time-dependent classifier."""
-        return None
-
     def get_side_classifier_factory(self) -> Callable[[int, int], nn.Module] | None:
-        """Return an optional time-dependent classifier factory."""
+        """Return a factory that creates a new time-dependent classifier."""
         return None
 
     def get_extraction_reference_score(self) -> PairwiseScore | None:

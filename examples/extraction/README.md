@@ -42,6 +42,9 @@ preprocessing, reference-set hash, dependency versions, and paper-omitted thresh
 SIDE moves classifier inputs to `compute_device` and the classifier parameter dtype, then returns guidance gradients
 to the reverse sampler's original device and dtype. The adapter's forward-noising operation must accept tensors on
 `compute_device`; cross-device guidance transfers can be expensive and should be recorded in paper-scale runs.
+Custom SIDE classifiers follow the same blueprint pattern as LeakPro's MIA and model-inversion models: provide a
+factory that creates a new classifier when called. LeakPro invokes that factory inside the attack's seeded preparation
+phase; do not return a cached or already-trained module.
 
 Conditions must have a stable canonical form: strings, finite scalars, bytes, nested lists or tuples, string-keyed
 dictionaries, Pydantic models, NumPy arrays, and torch tensors are supported. Custom objects are rejected; encode them

@@ -63,6 +63,25 @@ class MixedDtypeFeatureExtractor(nn.Module):
         return images.mean(dim=(1, 2, 3)).unsqueeze(1)
 
 
+def test_singleton_batchnorm_guard_restores_mixed_modes_after_failure() -> None:
+    classifier = nn.Sequential(
+        nn.BatchNorm2d(2),
+        nn.Sequential(nn.BatchNorm2d(2), nn.SyncBatchNorm(2)),
+    )
+    classifier.train()
+    classifier[0].eval()
+    classifier[1][1].eval()
+    batch_norms = [module for module in classifier.modules() if "BatchNorm" in type(module).__name__]
+    original_modes = [module.training for module in batch_norms]
+
+    with pytest.raises(RuntimeError, match="training failed"):
+        with side_module._batch_norm_eval_for_singleton(classifier, batch_size=1):  # noqa: SLF001
+            assert not any(module.training for module in batch_norms)
+            raise RuntimeError("training failed")
+
+    assert [module.training for module in batch_norms] == original_modes
+
+
 def _small_side_adapter(
     *,
     image_range: str = "zero_one",
@@ -478,8 +497,8 @@ def test_side_guidance_reconciles_classifier_and_sampler_dtypes() -> None:
         TwoFeatureExtractor(),
         {"authorized_audit": True, "compute_device": "cpu", "guidance_scale": 1.0},
         audit_fingerprint="guidance-dtype-test",
-        classifier=classifier,
     )
+    attack.classifier = classifier
     sampler_images = torch.zeros((2, 1, 4, 4), dtype=torch.float32)
 
     gradient = attack._condition_gradient(  # noqa: SLF001 - direct device/dtype boundary regression
@@ -504,8 +523,8 @@ def test_side_guidance_returns_accelerator_gradient_to_cpu_sampler() -> None:
         TwoFeatureExtractor(),
         {"authorized_audit": True, "compute_device": "cuda", "guidance_scale": 1.0},
         audit_fingerprint="guidance-cross-device-test",
-        classifier=classifier,
     )
+    attack.classifier = classifier
     sampler_images = torch.zeros((2, 1, 4, 4), device="cpu")
 
     gradient = attack._condition_gradient(  # noqa: SLF001 - direct cross-device boundary regression
