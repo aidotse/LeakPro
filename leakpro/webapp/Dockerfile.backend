@@ -14,4 +14,9 @@ RUN pip install --no-cache-dir -e ".[dev]" \
 
 EXPOSE 8000
 
+# The container binds 0.0.0.0 because it has its own network namespace; the
+# host-side exposure is controlled by docker-compose, which publishes this port
+# on 127.0.0.1 only. Do not publish it on a public interface: this backend
+# deserializes user models and executes user-supplied Python by design.
+# See leakpro/webapp/SECURITY.md.
 CMD ["uvicorn", "leakpro.webapp.backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # ---------------------------------------------------------------------------
@@ -68,13 +68,15 @@ class ArchConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 class TrainParams(BaseModel):
-    name: str
-    epochs: int = 50
-    learning_rate: float = 0.001
-    batch_size: int = 128
+    # `name` becomes a directory name on disk; the pattern is enforced again
+    # server-side by security.safe_name.
+    name: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+    epochs: int = Field(default=50, ge=1, le=1000)
+    learning_rate: float = Field(default=0.001, gt=0, le=10)
+    batch_size: int = Field(default=128, ge=1, le=16384)
     optimizer: str = "adam"       # "adam" | "sgd"
-    f_train: float = 0.5          # fraction of dataset used for training
-    f_test: float = 0.5           # fraction of dataset used for testing
+    f_train: float = Field(default=0.5, gt=0, le=1)   # fraction used for training
+    f_test: float = Field(default=0.5, gt=0, le=1)    # fraction used for testing
     dpsgd: bool = False
     target_epsilon: float | None = None
     target_delta: float | None = None
