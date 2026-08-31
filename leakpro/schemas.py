@@ -149,6 +149,10 @@ class ShadowModelConfig(BaseModel):
     criterion: Optional[LossConfig] = Field(default=None, description="Loss function configuration")
     batch_size: Optional[int] = Field(default=None, ge=1, description="Batch size used during training")
     epochs: Optional[int] = Field(default=None, ge=1, description="Number of training epochs")
+    sampling_method: str = Field(
+        default="balanced",
+        description="Method for sampling shadow model training data: 'balanced' or 'random'"
+    )
 
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields
 
@@ -237,7 +241,6 @@ class ShadowModelTrainingSchema(BaseModel):
     batch_size: Optional[int] = Field(default=None, ge=1, description="Batch size used during training")
     train_result: EvalOutput = Field(..., description="Evaluation output for the training set")
     test_result: EvalOutput = Field(..., description="Evaluation output for the test set")
-    online: bool = Field(..., description="Online vs. offline training")
     model_class: str = Field(..., description="Model class name")
     model_module_path: Optional[str] = Field(default=None, description="Path to the model module")
     target_model_hash: str = Field(..., description="Hash of target model")

@@ -162,16 +162,17 @@ def _train_dpsgd(dataloader, model, criterion, optimizer, epochs,
         cfg = pickle.load(f)
 
     sample_rate = 1 / len(dataloader)
+    _accountant = cfg.get("accountant", "prv")
     noise_multiplier = get_noise_multiplier(
         target_epsilon=cfg["target_epsilon"],
         target_delta=cfg["target_delta"],
         sample_rate=sample_rate,
         epochs=cfg["epochs"],
-        epsilon_tolerance=cfg["epsilon_tolerance"],
-        accountant="prv",
-        eps_error=cfg["eps_error"],
+        epsilon_tolerance=cfg.get("epsilon_tolerance", 0.01),
+        accountant=_accountant,
+        eps_error=cfg.get("eps_error", 0.01),
     )
-    privacy_engine = PrivacyEngine(accountant="prv")
+    privacy_engine = PrivacyEngine(accountant=_accountant)
     model, optimizer, dataloader = privacy_engine.make_private(
         module=model, optimizer=optimizer, data_loader=dataloader,
         noise_multiplier=noise_multiplier, max_grad_norm=cfg["max_grad_norm"],
