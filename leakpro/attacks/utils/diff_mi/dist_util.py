@@ -14,6 +14,8 @@ import blobfile as bf
 import torch as th
 import torch.distributed as dist
 
+from leakpro.utils.device import get_device
+
 try:
     from mpi4py import MPI
 except Exception:  # pragma: no cover - optional dependency
@@ -45,13 +47,14 @@ def setup_dist() -> None:
 
 def dev() -> th.device:
     """Get the device to use for torch.distributed."""
-    if th.cuda.is_available():
+    device = get_device()
+    if device.type == "cuda":
         if MPI is not None:
             return th.device(f"cuda:{MPI.COMM_WORLD.Get_rank() % GPUS_PER_NODE}")
         if dist.is_initialized():
             return th.device(f"cuda:{th.cuda.current_device()}")
         return th.device("cuda:0")
-    return th.device("cpu")
+    return device
 
 
 def load_state_dict(path: str, **kwargs: object) -> object:
@@ -103,7 +106,7 @@ def barrier() -> None:
 
 def sync_params(params: Iterable[th.Tensor]) -> None:
     """Synchronize a sequence of Tensors across ranks from rank 0."""
-    if not dist.is_initialized():
+    if not dist.is_initialized() or get_world_size() <= 1:
         return
     for p in params:
         with th.no_grad():

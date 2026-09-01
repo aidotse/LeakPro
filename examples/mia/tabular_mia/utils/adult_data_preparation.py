@@ -9,7 +9,6 @@ import urllib.request
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
 from torch import float32, tensor
 from torch.utils.data import DataLoader, Dataset, Subset
@@ -24,6 +23,14 @@ class AdultDataset(Dataset):
         # For example: cols 1,2 continuous and col 3 categorical with 3 categories will be mapped to {1:1,2:2,3:[3,4,5]}
         self.dec_to_onehot = dec_to_onehot
         self.one_hot_encoded = one_hot_encoded
+
+    @property
+    def data(self):
+        return self.x
+
+    @property
+    def targets(self):
+        return self.y
 
     def __len__(self):
         return len(self.y)
@@ -123,15 +130,25 @@ def preprocess_adult_dataset(path):
 
     return dataset
 
-def get_adult_dataloaders(dataset, train_fraction=0.3, test_fraction=0.3):
+def get_adult_dataloaders(dataset, train_fraction=0.3, test_fraction=0.3, seed=1234):
+    """Split dataset into train/test loaders using a seeded random split.
 
+    preprocess_adult_dataset concatenates adult.data then adult.test before
+    this function ever sees the data, so a sequential (prefix-based) split
+    would draw train/test/population unevenly from the two source files. A
+    seeded random split keeps the three sets i.i.d. while staying
+    reproducible. `seed` should match audit.yaml's `random_seed`.
+    """
     dataset_size = len(dataset)
     train_size = int(train_fraction * dataset_size)
     test_size = int(test_fraction * dataset_size)
 
-    # Use sklearn's train_test_split to split into train and test indices
-    selected_index = np.random.choice(np.arange(dataset_size), train_size + test_size, replace=False)
-    train_indices, test_indices = train_test_split(selected_index, test_size=test_size)
+    if train_size + test_size > dataset_size:
+        raise ValueError("train_fraction + test_fraction must be <= 1.0")
+
+    indices = np.random.default_rng(seed).permutation(dataset_size)
+    train_indices = indices[:train_size]
+    test_indices = indices[train_size:train_size + test_size]
 
     train_subset = Subset(dataset, train_indices)
     test_subset = Subset(dataset, test_indices)

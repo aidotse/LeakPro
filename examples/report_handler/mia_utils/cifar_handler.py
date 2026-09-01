@@ -5,7 +5,9 @@
 """Module containing the class to handle the user input for the CIFAR100 dataset."""
 
 import torch
-from torch import cuda, device, optim, sigmoid
+from torch import optim, sigmoid
+
+from leakpro.utils.device import get_device
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -45,7 +47,7 @@ class CifarInputHandler(AbstractInputHandler):
             raise ValueError("epochs not found in configs")
 
         # prepare training
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         model.to(gpu_or_cpu)
 
         # training loop

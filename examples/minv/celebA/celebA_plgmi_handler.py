@@ -4,7 +4,9 @@
 #
 import os
 import torch
-from torch import cuda, device, optim
+from torch import optim
+
+from leakpro.utils.device import get_device
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -12,6 +14,15 @@ from leakpro import AbstractInputHandler
 from leakpro.schemas import TrainingOutput
 import kornia
 import time
+
+
+def _cpu_state_dict(model: torch.nn.Module) -> dict:
+    """Move each tensor in a state dict to CPU individually.
+
+    Avoids letting torch.save() copy the whole storage from device to CPU in
+    one raw operation, which triggers a permute bug in the Habana HPU backend.
+    """
+    return {k: v.detach().to("cpu") for k, v in model.state_dict().items()}
 
 
 class CelebA_InputHandler(AbstractInputHandler):
@@ -42,7 +53,7 @@ class CelebA_InputHandler(AbstractInputHandler):
         if not epochs:
             raise ValueError("Epochs not found in configurations")
 
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         model.to(gpu_or_cpu)
 
         for epoch in range(epochs):
@@ -73,7 +84,7 @@ class CelebA_InputHandler(AbstractInputHandler):
     
     def eval(self, dataloader: DataLoader, model: torch.nn.Module, criterion: torch.nn.Module) -> dict:
         """Evaluate the model."""
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         model.to(gpu_or_cpu)
         model.eval()
 
@@ -218,8 +229,8 @@ class CelebA_InputHandler(AbstractInputHandler):
                 
                 if not os.path.exists('./gan_checks'):
                     os.makedirs('./gan_checks')
-                torch.save(gen.state_dict(), f'./gan_checks/gen_checkpoint_{i}.pth')
-                torch.save(dis.state_dict(), f'./gan_checks/dis_checkpoint_{i}.pth')
+                torch.save(_cpu_state_dict(gen), f'./gan_checks/gen_checkpoint_{i}.pth')
+                torch.save(_cpu_state_dict(dis), f'./gan_checks/dis_checkpoint_{i}.pth')
 
-        torch.save(gen.state_dict(), './gen.pth')
-        torch.save(dis.state_dict(), './dis.pth')
+        torch.save(_cpu_state_dict(gen), './gen.pth')
+        torch.save(_cpu_state_dict(dis), './dis.pth')

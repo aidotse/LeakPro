@@ -135,16 +135,22 @@ class ModelHandler():
         """Cache the target model logits."""
         cache_file = f"{self.attack_cache_folder_path}/{name}_logits.npy"
         indices_file = f"{self.attack_cache_folder_path}/{name}_indices.npy"
+        data_indices = np.concatenate((self.handler.train_indices, self.handler.test_indices))
 
         # Require BOTH files to exist. If only logits exist (old cache without companion),
-        # treat as miss so both are rewritten with a correct index record.
+        # treat as miss so both are rewritten with a correct index record. If both exist but
+        # were cached for a different sample set (e.g. the audit config changed since the last
+        # run), also treat as a miss so the stale pair gets overwritten instead of silently
+        # reused — load_logits() would otherwise never be able to load them.
         if os.path.exists(cache_file) and os.path.exists(indices_file):
-            logger.info(f"Logits already cached at {cache_file}")
-            return
+            cached_indices = set(np.load(indices_file).tolist())
+            if cached_indices == set(data_indices.tolist()):
+                logger.info(f"Logits already cached at {cache_file}")
+                return
+            logger.info(f"Cached indices at {indices_file} no longer match the current run — recomputing")
 
         if not isinstance(model, list):
             model = [model]
-        data_indices = np.concatenate((self.handler.train_indices, self.handler.test_indices))
         # ModelLogits returns one (N, num_classes) entry per model; cache_logits always
         # caches a single model, so drop only the leading model-list axis. A bare
         # .squeeze() would also collapse the class axis of a single-logit binary head
