@@ -1,0 +1,20 @@
+# AGNews • GPT-J • Base reference
+dataset: ag_news
+ref_variant: base
+seed: 1337
+
+# Target training
+train_total: 20000
+val_total: 500
+eval_total: 20000
+epochs: 3
+batch_size: 16
+lr: 0.0001
+sequence_length: 128
+
+# Model
+model_name: EleutherAI/gpt-j-6B
+finetune_method: lora
+lora_target_modules: [q_proj, k_proj, v_proj, out_proj, fc_in, fc_out]
+
+save_artifacts_path: ""

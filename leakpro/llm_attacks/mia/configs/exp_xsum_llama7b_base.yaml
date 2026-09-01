@@ -1,0 +1,22 @@
+# XSum • LLaMA-7B • Base reference
+dataset: xsum
+ref_variant: base
+seed: 1337
+
+# Target training
+train_total: 20000
+eval_total: 20000
+epochs: 3
+batch_size: 16
+lr: 0.0001
+sequence_length: 128
+
+# Model
+model_name: meta-llama/Llama-2-7b-hf
+finetune_method: lora
+lora_target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
+
+save_artifacts_path: ""
+
+# Validation
+val_total: 500
