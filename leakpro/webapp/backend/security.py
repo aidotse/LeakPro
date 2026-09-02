@@ -315,8 +315,9 @@ def startup_banner(host: str | None = None) -> str:
         ]
     lines += [
         "",
-        "  This backend loads user pickles and executes user-supplied Python by",
-        "  design. Treat every uploaded file as trusted input and do NOT expose",
+        "  This backend executes user-supplied Python by design; pickled uploads",
+        "  (.pkl/.pt) also run code on load, so only use them for files you made",
+        "  yourself — prefer .npz/Parquet for third-party data. Do NOT expose",
         "  this port to an untrusted network. See leakpro/webapp/SECURITY.md.",
     ]
     return "\n".join(lines)
