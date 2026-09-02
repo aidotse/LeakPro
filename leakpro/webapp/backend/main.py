@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import logging
 import queue
 import shutil
@@ -297,7 +298,10 @@ from .worker import run_audit_job
 
 _logger = logging.getLogger("leakpro.webapp")
 
-JOBS_ROOT = Path(__file__).parents[3] / "webapp_jobs"
+# Overridable so containers can point at a mounted volume (docker-compose
+# mounts leakpro_jobs at /data/jobs); default keeps the repo-local layout.
+JOBS_ROOT = Path(os.environ.get("LEAKPRO_WEBAPP_JOBS_DIR")
+                 or Path(__file__).parents[3] / "webapp_jobs")
 JOBS_ROOT.mkdir(parents=True, exist_ok=True)
 
 # In-memory job registry  { job_id: { status, created_at, models, ... } }

@@ -31,6 +31,7 @@ mia = ["torch", "torchvision", "optuna", "opacus"]
 synthetic = ["numba", "pydantic", "transformers", "sentence-transformers"]
 federated = ["torch", "torchvision", "torchmetrics", "pytorch-ignite", "optuna", "albumentations"]
 minv = ["torch", "torchvision", "optuna", "kornia", "blobfile", "lpips", "robustness", "mpi4py"]
+webapp = ["fastapi", "uvicorn[standard]", "python-multipart", "httpx"]
 dev = [
   "pytest",
   "pytest-cov",
