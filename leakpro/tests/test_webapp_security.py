@@ -16,7 +16,12 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from fastapi import HTTPException
+
+# The webapp is optional tooling with its own dependencies (see the webapp
+# READMEs); skip these tests entirely where fastapi is not installed, e.g. CI.
+pytest.importorskip("fastapi", reason="webapp extras (fastapi) not installed")
+
+from fastapi import HTTPException  # noqa: E402
 
 from leakpro.utils.import_helper import Self
 
