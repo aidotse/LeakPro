@@ -101,12 +101,12 @@ class TestMIAResult:
         """Test load and save functionality."""
 
         name = "lira"
-        save_path = f"{self.temp_dir}/results/{self.miaresult_full.id}"
-        data_storage_path = f"{self.temp_dir}/data_objects/"
+        save_path = f"{self.temp_dir.name}/results/{self.miaresult_full.id}"
+        data_storage_path = f"{self.temp_dir.name}/data_objects/"
 
         # Test saving
         attack_mock = mocker.Mock(attack_id=self.miaresult_full.id)
-        self.miaresult_full.save(attack_mock, self.temp_dir)
+        self.miaresult_full.save(attack_mock, self.temp_dir.name)
 
         assert os.path.isdir(save_path)
         assert os.path.exists(data_storage_path)
