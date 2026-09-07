@@ -105,6 +105,13 @@ class TestConvertUpload:
 class TestUploadEndpoint:
     """The upload endpoint converts safe formats at the trust boundary."""
 
+    @pytest.fixture(autouse=True)
+    def _isolated_jobs_root(self: Self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Keep test jobs out of the real webapp_jobs/ (and out of _load_jobs)."""
+        from leakpro.webapp.backend import main as backend_main
+
+        monkeypatch.setattr(backend_main, "JOBS_ROOT", tmp_path)
+
     def _client(self: Self) -> tuple:
         from fastapi.testclient import TestClient
 
