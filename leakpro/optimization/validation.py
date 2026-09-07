@@ -9,9 +9,10 @@ of shadow models the loop can afford. Two questions remain once it finishes, and
 both are answered here by re-auditing the frontier configurations with a stronger
 attack (more shadow models):
 
-1. **What is the risk at the FPR levels we actually report?** Read at the
-   validation FPRs straight from the re-audit's ``fixed_fpr_table`` — the same
-   reporting path the loop used, so the numbers are directly comparable.
+1. **What is the risk at the FPR levels we actually report?** Measured on the
+   re-audit's ROC with the same interpolated-at-exact-FPR rule the loop's
+   objective uses (:func:`leakpro.optimization.audit.interpolated_tpr_at_fpr`),
+   so loop and validation numbers are directly comparable operating points.
 2. **Was the proxy legitimate?** If ranking configurations by TPR@1% disagrees
    with ranking them by a tail FPR, the loop optimized the wrong thing.
    ``proxy_agreement`` measures that rank correlation on the re-audited points.
@@ -23,7 +24,7 @@ import numpy as np
 from optuna.study import Study
 from scipy.stats import spearmanr
 
-from leakpro.optimization.audit import tpr_at_fixed_fpr
+from leakpro.optimization.audit import interpolated_tpr_at_fpr
 from leakpro.optimization.frontier import pareto_trials
 from leakpro.reporting.mia_result import MIAResult
 from leakpro.utils.logger import logger
@@ -68,9 +69,9 @@ def validate_frontier(
     validated = []
     for trial in front:
         result = revalidate_fn(_resolved_config(trial))
-        tprs = {f"tpr_at_{fpr}": tpr_at_fixed_fpr(result, fpr) for fpr in report_fprs}
+        tprs = {f"tpr_at_{fpr}": interpolated_tpr_at_fpr(result, fpr) for fpr in report_fprs}
         loop_tpr = float(trial.values[1])
-        revalidated_at_proxy = tpr_at_fixed_fpr(result, proxy_fpr)
+        revalidated_at_proxy = interpolated_tpr_at_fpr(result, proxy_fpr)
         validated.append({
             "config": _resolved_config(trial),
             "loop_utility": float(trial.values[0]),
@@ -117,8 +118,8 @@ def proxy_agreement(
     proxy_tprs, target_tprs, pairs = [], [], []
     for trial in picks:
         result = revalidate_fn(_resolved_config(trial))
-        proxy = tpr_at_fixed_fpr(result, proxy_fpr)
-        target = tpr_at_fixed_fpr(result, target_fpr)
+        proxy = interpolated_tpr_at_fpr(result, proxy_fpr)
+        target = interpolated_tpr_at_fpr(result, target_fpr)
         proxy_tprs.append(proxy)
         target_tprs.append(target)
         pairs.append({

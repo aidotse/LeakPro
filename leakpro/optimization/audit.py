@@ -115,35 +115,48 @@ def tpr_at_fixed_fpr(result: MIAResult, fpr: float = 0.01) -> float:
     )
 
 
-def resolved_proxy_tpr(
-    result: MIAResult,
-    proxy_fpr: float,
-    min_realized_fraction: float = 0.5,
-) -> tuple[float | None, float | None, bool]:
-    """TPR at the proxy FPR — but only when the audit actually resolved that operating point.
+def interpolated_tpr_at_fpr(result: MIAResult, fpr: float) -> float | None:
+    """Randomized-threshold TPR at exactly ``fpr``, by linear interpolation on the ROC.
 
-    Two failure modes produce a TPR of 0 for reasons that are not privacy, and
-    both must prune the trial rather than enter the search as a legitimate
-    objective (0 is the global minimum of the minimized axis, so any such trial
-    is unconditionally Pareto-optimal and TPE is attracted to the region):
+    The fixed-FPR table reports the TPR at the largest *achievable* FPR at or
+    below the target — under tied scores that operating point can sit well below
+    the requested one, and the TPR shortfall from reading the curve there is
+    unbounded (it is the member mass inside the ROC segment straddling the
+    target). Interpolating across that segment is the conventional randomized-
+    threshold reading of "TPR at x% FPR": continuous in the scores, evaluated at
+    the same FPR for every result, and identical to the vertex value whenever a
+    vertex exists at ``fpr``. The trivial endpoints (0, 0) and (1, 1) — always
+    reject, always admit — are added before interpolating.
 
-    1. The attack produced no ROC at all (``fixed_fpr_table`` empty), e.g. every
-       score saturated to one value.
-    2. No threshold reaches the proxy FPR — the score distribution is too coarse
-       (DP-SGD saturation ties large blocks of scores), so the table honestly
-       reports the TPR of a much smaller realized FPR, down to 0 at FPR 0.
+    Returns None when the result has no ROC.
+    """
+    if result.fpr is None or result.tpr is None:
+        return None
+    f = np.r_[0.0, np.asarray(result.fpr, dtype=float), 1.0]
+    t = np.r_[0.0, np.asarray(result.tpr, dtype=float), 1.0]
+    return float(np.interp(fpr, f, t))
 
-    Args:
-        result: The audit's MIAResult.
-        proxy_fpr: The FPR level the optimizer minimizes TPR at.
-        min_realized_fraction: The realized FPR must reach at least this fraction
-            of ``proxy_fpr`` for the estimate to count as resolved.
+
+def resolved_proxy_tpr(result: MIAResult, proxy_fpr: float) -> tuple[float | None, float | None, bool]:
+    """The search objective: TPR measured at exactly the proxy FPR, or None to prune.
+
+    The objective is the *interpolated* TPR (see :func:`interpolated_tpr_at_fpr`)
+    so that every trial is measured at the same operating point. Reading the
+    fixed-FPR table instead would report each trial at its own realized FPR
+    anywhere below the proxy — an error that only points down, on a minimized
+    axis, and that grows with the noise multiplier being searched, so TPE would
+    treat the most-saturated (worst-measured) trials as the most private ones.
+    Callers wanting parity with LeakPro reports should record
+    :func:`tpr_at_fixed_fpr` alongside, as an extra field, not as the objective.
+
+    A degenerate audit (no ROC at all — every score saturated to one value)
+    still returns ``tpr=None``: there is no measurement to interpolate, and the
+    trial must be pruned rather than scored.
 
     Returns:
-        ``(tpr, realized_fpr, degenerate)`` — ``tpr`` is None when the operating
-        point is unresolved (caller should prune); ``realized_fpr`` is the
-        largest achievable FPR at or below ``proxy_fpr`` (None when there is no
-        ROC); ``degenerate`` flags case 1.
+        ``(tpr, realized_fpr, degenerate)`` — ``realized_fpr`` is the largest
+        achievable FPR at or below ``proxy_fpr`` (None when there is no ROC),
+        recorded so the resolution behind each number stays auditable.
 
     """
     degenerate = not result.fixed_fpr_table
@@ -152,9 +165,9 @@ def resolved_proxy_tpr(
         fpr = np.asarray(result.fpr, dtype=float)
         at_or_below = fpr[fpr <= proxy_fpr]
         realized_fpr = float(at_or_below.max()) if at_or_below.size else 0.0
-    if degenerate or realized_fpr is None or realized_fpr < min_realized_fraction * proxy_fpr:
+    if degenerate:
         return None, realized_fpr, degenerate
-    return tpr_at_fixed_fpr(result, proxy_fpr), realized_fpr, degenerate
+    return interpolated_tpr_at_fpr(result, proxy_fpr), realized_fpr, degenerate
 
 
 def clopper_pearson_ci(k: int, n: int, confidence: float = 0.95) -> tuple[float, float]:

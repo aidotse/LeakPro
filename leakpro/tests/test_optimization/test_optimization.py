@@ -177,32 +177,56 @@ class TestRmiaBridge:
     def test_resolved_proxy_tpr_healthy_audit(self):
         result = _mia_result(member_mu=1.5)
         tpr, realized, degenerate = resolved_proxy_tpr(result, 0.01)
-        assert tpr == pytest.approx(result.fixed_fpr_table["TPR@1%FPR"])
+        # On distinct scores a vertex exists at the proxy FPR, so the
+        # interpolated objective coincides with the fixed-FPR table.
+        assert tpr == pytest.approx(result.fixed_fpr_table["TPR@1%FPR"], abs=1e-6)
         assert realized == pytest.approx(0.01, rel=0.5)  # 500 nonmembers resolve 1% fine
         assert not degenerate
 
-    def test_unresolved_operating_point_returns_none(self):
-        """Regression: saturated scores tie every nonmember, so no threshold
-        reaches the proxy FPR. The table honestly reads TPR 0, but 0 is the
-        global minimum of the minimized axis — returning it as an objective
-        put 'we could not measure it' on the Pareto front. Must be None."""
+    def test_saturated_ties_interpolate_instead_of_reading_zero(self):
+        """Regression: saturated scores tie most nonmembers, so no ROC vertex
+        sits near the proxy FPR and the table reads the TPR of a much smaller
+        realized FPR (down to 0 — the global minimum of the minimized axis).
+        The objective must instead interpolate across the straddling segment:
+        members and nonmembers share the same tie block here, so the attack has
+        no signal and the interpolated TPR sits near chance, not at 0."""
         n = 500
         true = np.concatenate([np.ones(n), np.zeros(n)])
-        # Saturation ties 490/500 nonmembers at the top score: the first
-        # admissible threshold already realizes FPR 0.98, so nothing between
-        # FPR 0 and the proxy 1% exists on the ROC.
         members = np.full(n, 5.0)
         nonmembers = np.concatenate([np.full(n - 10, 5.0), np.linspace(0.0, 1.0, 10)])
         result = MIAResult.from_full_scores(true_membership=true,
                                             signal_values=np.concatenate([members, nonmembers]),
                                             result_name="RMIA", metadata={})
         tpr, realized, degenerate = resolved_proxy_tpr(result, 0.01)
-        assert tpr is None
-        # The exact realized FPR depends on the sklearn/numpy version's ROC
-        # tie handling (0.0 or one grid step); the contract is only that it
-        # sits below half the proxy, the pruning threshold.
+        assert not degenerate  # a ROC exists; no vertex is near the proxy
         assert realized is not None and realized < 0.005
-        assert not degenerate  # a ROC exists; the operating point just isn't on it
+        assert tpr is not None and 0.0 < tpr < 0.05  # ~chance, never a hard 0
+
+    def test_straddling_member_mass_is_not_understated(self):
+        """Regression: the fixed-FPR table reads each result at its own realized
+        FPR, and member mass tied inside the segment straddling the proxy is
+        then invisible — an unbounded, always-downward error on a minimized
+        axis. The interpolated objective must see that mass."""
+        rng = np.random.default_rng(0)
+        n = 2000
+        tie_value = 3.0
+        # 12 distinct nonmembers above the tie (realized FPR 0.6%), a 10-wide
+        # nonmember tie block (admitting it lands at 1.1%), the rest far below.
+        nonmembers = np.concatenate([
+            tie_value + 1.0 + rng.random(12),
+            np.full(10, tie_value),
+            rng.random(n - 22),
+        ])
+        # 40% of members sit exactly on the tie block, straddling the 1% proxy.
+        members = np.concatenate([np.full(800, tie_value), rng.random(n - 800)])
+        true = np.concatenate([np.ones(n), np.zeros(n)])
+        result = MIAResult.from_full_scores(true_membership=true,
+                                            signal_values=np.concatenate([members, nonmembers]),
+                                            result_name="RMIA", metadata={})
+        table = tpr_at_fixed_fpr(result, 0.01)
+        tpr, realized, _ = resolved_proxy_tpr(result, 0.01)
+        assert realized == pytest.approx(0.006, abs=0.002)  # short of the proxy
+        assert tpr > 5 * max(table, 1e-9)  # the objective sees the tied member mass
 
     def test_degenerate_audit_returns_none(self):
         class NoRoc:  # MIAResult with no ROC at all (fixed_fpr_table empty/None)

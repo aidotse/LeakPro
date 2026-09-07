@@ -13,6 +13,7 @@ reimplemented here — the privacy axis is the real RMIA result's TPR at a fixed
 from leakpro.optimization.audit import (
     TABULATED_FPRS,
     clopper_pearson_ci,
+    interpolated_tpr_at_fpr,
     resolved_proxy_tpr,
     run_rmia_audit,
     tpr_at_fixed_fpr,
@@ -29,6 +30,7 @@ __all__ = [
     "ObjectiveResult",
     "clopper_pearson_ci",
     "default_dpsgd_space",
+    "interpolated_tpr_at_fpr",
     "optimize",
     "pareto_trials",
     "plot_frontier",

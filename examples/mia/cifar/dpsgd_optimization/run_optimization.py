@@ -59,6 +59,7 @@ from leakpro.optimization import (  # noqa: E402
     plot_frontier,
     resolved_proxy_tpr,
     run_rmia_audit,
+    tpr_at_fixed_fpr,
 )
 from leakpro.schemas import PrivacyUtilityConfig  # noqa: E402
 from leakpro.utils.logger import logger  # noqa: E402
@@ -244,24 +245,22 @@ def make_objective(cfg: PrivacyUtilityConfig, pop: dict, out_dir: Path, device: 
                           audit_dir, cfg.rmia, cfg.seed)
         result = run_rmia_audit(CifarDPHandler, str(config_path))
 
-        # A model that passed the gate can still saturate every RMIA score, or
-        # tie so many scores that no threshold reaches the proxy FPR. Both read
-        # as TPR 0 for reasons that are not privacy — an unresolved operating
-        # point must prune the trial (tpr=None), exactly like the utility gate,
-        # or "we could not measure it" masquerades as "perfectly private" and
-        # sits on the frontier. realized_fpr/degenerate_audit stay in the
-        # record so the pruning is auditable.
+        # The objective is the TPR *interpolated* at exactly proxy_fpr, so every
+        # trial is measured at the same operating point regardless of how DP-SGD
+        # saturation tied its scores (the fixed-FPR table reads each trial at
+        # its own realized FPR, an error that only points down on a minimized
+        # axis). A degenerate audit — no ROC at all — still prunes (tpr=None),
+        # exactly like the utility gate: nothing was measured. The table value
+        # is recorded alongside for parity with LeakPro reports.
         tpr, realized_fpr, degenerate = resolved_proxy_tpr(result, cfg.proxy_fpr)
         if tpr is None:
-            logger.warning(
-                f"Audit unresolved at FPR {cfg.proxy_fpr:.2%} (realized "
-                f"{'none' if realized_fpr is None else f'{realized_fpr:.4%}'}, "
-                f"degenerate={degenerate}): not evidence of privacy, pruning the trial."
-            )
+            logger.warning("Degenerate audit (no ROC; every score saturated): "
+                           "not evidence of privacy, pruning the trial.")
 
         return ObjectiveResult(
             utility=utility, tpr=tpr,
             extras={"epsilon": epsilon,
+                    "tpr_fixed_fpr_table": None if degenerate else tpr_at_fixed_fpr(result, cfg.proxy_fpr),
                     # The accountant's epsilon covers ONE training run. Tuning
                     # over many configurations on the same private data and
                     # selecting off the frontier is itself a mechanism (Liu &
