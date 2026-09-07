@@ -15,12 +15,12 @@ Configuration (all optional, read from the environment at import time):
     Bearer token required on every API request. If unset, a random token is
     generated at startup and printed to the server log.
 ``LEAKPRO_WEBAPP_ORIGINS``
-    Comma-separated CORS/WebSocket origin allowlist.
-    Default: ``http://localhost:5173,http://127.0.0.1:5173``.
+    Comma-separated CORS/WebSocket origin allowlist. Default: localhost and
+    127.0.0.1 on ports 5173 (Vite dev server) and 8000 (backend-served SPA).
 ``LEAKPRO_WEBAPP_DATA_ROOTS``
     Comma-separated directories the server-side ``*-path`` endpoints may read
-    from. Default: the job directory plus the LeakPro repo root (so the bundled
-    ``examples/`` datasets keep working).
+    from. Default: the LeakPro repo root (so the bundled ``examples/``
+    datasets keep working).
 ``LEAKPRO_WEBAPP_MAX_UPLOAD_MB``
     Per-file upload cap in megabytes. Default 2048.
 """
@@ -65,8 +65,11 @@ DATA_ROOTS = [Path(p).expanduser().resolve()
 
 MAX_UPLOAD_BYTES = int(float(os.environ.get("LEAKPRO_WEBAPP_MAX_UPLOAD_MB", "2048")) * 1024 * 1024)
 
-#: Only these URL prefixes require authentication — the rest is the static SPA.
-PROTECTED_PREFIXES = ("/jobs",)
+#: The only paths served without authentication: the static SPA shell and its
+#: build assets. Everything else requires the bearer token, so a route added
+#: later is protected by default (fail closed).
+PUBLIC_PATHS = frozenset({"/", "/index.html", "/logo.jpg"})
+PUBLIC_PREFIXES = ("/assets/",)
 
 
 # ---------------------------------------------------------------------------
@@ -74,10 +77,14 @@ PROTECTED_PREFIXES = ("/jobs",)
 # ---------------------------------------------------------------------------
 
 def token_is_valid(presented: str | None) -> bool:
-    """Constant-time comparison of a presented token against the configured one."""
+    """Constant-time comparison of a presented token against the configured one.
+
+    Compared as bytes: ``compare_digest`` raises ``TypeError`` on non-ASCII
+    *strings*, which would turn a garbage token into an unauthenticated 500.
+    """
     if not presented:
         return False
-    return secrets.compare_digest(presented, API_TOKEN)
+    return secrets.compare_digest(presented.encode("utf-8"), API_TOKEN.encode("utf-8"))
 
 
 def bearer_from_header(header: str | None) -> str | None:
@@ -91,9 +98,9 @@ def bearer_from_header(header: str | None) -> str | None:
 
 
 def path_is_protected(path: str) -> bool:
-    """True when the URL path belongs to the authenticated API surface."""
-    return any(path == p or path.startswith(p + "/") or path.startswith(p + "?")
-               for p in PROTECTED_PREFIXES)
+    """True unless the path is explicitly public (the static SPA)."""
+    return not (path in PUBLIC_PATHS
+                or any(path.startswith(prefix) for prefix in PUBLIC_PREFIXES))
 
 
 def origin_is_allowed(origin: str | None) -> bool:
@@ -112,7 +119,8 @@ def origin_is_allowed(origin: str | None) -> bool:
 # ---------------------------------------------------------------------------
 
 #: A single filesystem path component: no separators, no traversal, no dotfiles.
-_SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+#: Matched with fullmatch — `$` under match() accepts a trailing newline.
+_SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 
 def safe_name(value: str, field: str = "name") -> str:
@@ -122,7 +130,7 @@ def safe_name(value: str, field: str = "name") -> str:
     files. Without this, ``model_name=/etc/cron.d`` overrides the join entirely
     (``Path('/a/b') / '/etc'`` is ``/etc``) and ``../../`` escapes upward.
     """
-    if not isinstance(value, str) or not _SAFE_NAME.match(value):
+    if not isinstance(value, str) or not _SAFE_NAME.fullmatch(value):
         raise HTTPException(
             status_code=400,
             detail=(f"Invalid {field}: must be 1-64 characters of letters, digits, "
@@ -132,7 +140,7 @@ def safe_name(value: str, field: str = "name") -> str:
 
 
 #: File extension of an upload, used to name the file we write.
-_SAFE_SUFFIX = re.compile(r"^\.[A-Za-z0-9]{1,12}$")
+_SAFE_SUFFIX = re.compile(r"\.[A-Za-z0-9]{1,12}")
 
 
 def safe_suffix(filename: str | None) -> str:
@@ -144,7 +152,7 @@ def safe_suffix(filename: str | None) -> str:
     if not filename:
         return ""
     suffix = Path(str(filename)).suffix
-    return suffix if _SAFE_SUFFIX.match(suffix) else ""
+    return suffix if _SAFE_SUFFIX.fullmatch(suffix) else ""
 
 
 def confine(candidate: str | Path, roots: Iterable[Path] | None = None) -> Path:
@@ -299,7 +307,7 @@ def startup_banner(host: str | None = None) -> str:
     """Human-readable security posture, printed once at startup."""
     lines = [
         "LeakPro webapp backend — security posture",
-        f"  auth      : bearer token required on {', '.join(PROTECTED_PREFIXES)}",
+        "  auth      : bearer token required (fail closed; only the SPA is public)",
         f"  origins   : {', '.join(ALLOWED_ORIGINS)}",
         f"  data roots: {', '.join(str(p) for p in DATA_ROOTS)}",
         f"  max upload: {MAX_UPLOAD_BYTES // (1024 * 1024)} MB",

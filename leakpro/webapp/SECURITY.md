@@ -59,10 +59,18 @@ server process. That is the tool working as intended. It also means:
 - Treat the job directory as trusted-input storage.
 
 `security.RestrictedUnpickler` is used where only field names are needed
-(metadata validation) and never resolves an attacker-chosen callable. The
-`_LenientUnpickler` in `inspector.py` and `checker.py` is a **compatibility
-shim, not a security boundary** — it resolves real classes whenever the import
-succeeds, and is safe only because it now sits behind authentication.
+(metadata validation) and never resolves an attacker-chosen callable. Its scope
+is that one endpoint: the compatibility check, the audit worker and the sample
+endpoints load the same files with full (code-executing) deserialization, behind
+authentication. The `_LenientUnpickler` in `inspector.py` and `checker.py` is a
+**compatibility shim, not a security boundary** — it resolves real classes
+whenever the import succeeds, and is safe only because it now sits behind
+authentication.
+
+The WebSocket log stream authenticates via a `?token=` query parameter (browsers
+cannot set headers on a WebSocket), so the token can appear in server access
+logs for that one route. HTTP routes accept the token only in the
+`Authorization` header for exactly this reason.
 
 ## Reporting a vulnerability
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +83,12 @@ class TrainParams(BaseModel):
     max_grad_norm: float | None = None
     virtual_batch_size: int | None = None
     accountant: str = "prv"          # "prv" | "rdp"
+
+    @model_validator(mode="after")
+    def _fractions_fit(self) -> "TrainParams":
+        if self.f_train + self.f_test > 1:
+            raise ValueError("f_train + f_test must not exceed 1")
+        return self
 
 
 class ModelInfo(BaseModel):
