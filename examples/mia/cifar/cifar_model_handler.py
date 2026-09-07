@@ -15,7 +15,7 @@ from tqdm import tqdm
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.schemas import EvalOutput, TrainingOutput
-from leakpro.utils.device import get_device
+from leakpro.utils.device import get_device, mark_step
 
 
 class CifarModelHandler(AbstractInputHandler, role="model"):
@@ -74,6 +74,7 @@ class CifarModelHandler(AbstractInputHandler, role="model"):
                 pred = outputs.argmax(dim=1)
                 loss.backward()
                 optimizer.step()
+                mark_step(gpu_or_cpu)
                 train_acc += pred.eq(labels.view_as(pred)).sum().item()
                 total_samples += labels.size(0)
                 train_loss += loss.item() * labels.size(0)
@@ -91,6 +92,7 @@ class CifarModelHandler(AbstractInputHandler, role="model"):
                 for inputs, labels in val_loader:
                     inputs, labels = inputs.to(gpu_or_cpu), labels.to(gpu_or_cpu)
                     outputs = model(inputs)
+                    mark_step(gpu_or_cpu)
                     loss = criterion(outputs, labels)
                     val_loss += loss.item() * labels.size(0)
                     val_acc += outputs.argmax(dim=1).eq(labels).sum().item()
@@ -131,6 +133,7 @@ class CifarModelHandler(AbstractInputHandler, role="model"):
                 data, target = data.to(gpu_or_cpu), target.to(gpu_or_cpu)
                 target = target.view(-1)
                 output = model(data)
+                mark_step(gpu_or_cpu)
                 loss += criterion(output, target).item() * target.size(0)
                 acc += output.argmax(dim=1).eq(target).sum().item()
                 total_samples += target.size(0)

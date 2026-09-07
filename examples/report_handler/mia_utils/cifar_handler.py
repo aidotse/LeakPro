@@ -7,7 +7,7 @@
 import torch
 from torch import optim, sigmoid
 
-from leakpro.utils.device import get_device
+from leakpro.utils.device import get_device, mark_step
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -63,6 +63,7 @@ class CifarInputHandler(AbstractInputHandler):
                 pred = outputs.data.max(1, keepdim=True)[1]
                 loss.backward()
                 optimizer.step()
+                mark_step(gpu_or_cpu)
 
                 # Accumulate performance of shadow model
                 train_acc += pred.eq(labels.data.view_as(pred)).sum()

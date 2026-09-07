@@ -6,7 +6,7 @@ import os
 import torch
 from torch import optim
 
-from leakpro.utils.device import get_device
+from leakpro.utils.device import get_device, mark_step
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -67,6 +67,7 @@ class CelebA_InputHandler(AbstractInputHandler):
                 loss = criterion(outputs, labels)
                 loss.backward()
                 optimizer.step()
+                mark_step(gpu_or_cpu)
 
                 # Performance metrics
                 preds = outputs.argmax(dim=1)
@@ -93,6 +94,7 @@ class CelebA_InputHandler(AbstractInputHandler):
             for inputs, labels in tqdm(dataloader, desc="Evaluating"):
                 inputs, labels = inputs.to(gpu_or_cpu), labels.to(gpu_or_cpu)
                 outputs = model(inputs)
+                mark_step(gpu_or_cpu)
                 loss = criterion(outputs, labels)
 
                 preds = outputs.argmax(dim=1)
@@ -188,6 +190,7 @@ class CelebA_InputHandler(AbstractInputHandler):
                     gen.zero_grad()
                     loss_all.backward()
                     opt_gen.step()
+                    mark_step(device)
                     _l_g += loss_gen.item()
                     cumulative_inv_loss += inv_loss.item()
                 
@@ -206,6 +209,7 @@ class CelebA_InputHandler(AbstractInputHandler):
             
                 loss_dis.backward()
                 opt_dis.step()
+                mark_step(device)
 
                 cumulative_loss_dis += loss_dis.item()
                 dis_losses.append(cumulative_loss_dis/n_dis)

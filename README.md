@@ -149,12 +149,15 @@ Our [example portfolio](https://github.com/aidotse/LeakPro/tree/readme/examples)
    > before running the steps above.
    >
    > **HPU validation scope:** the device abstraction (`get_device()` / `mark_step()`)
-   > is wired through the MIA and MInvA attack families and has been validated on
-   > physical Gaudi hardware in Habana's eager-mode default (the shipped default;
-   > lazy mode is not yet validated, tracked in #449). The time-series MIA example
-   > now uses the same device abstraction but has not yet been run on physical HPU
-   > hardware. GIA remains **not** part of this PR's HPU support and stays
-   > CUDA/CPU-only.
+   > is wired through the MIA and MInvA attack families, including the LOS, CIFAR,
+   > celebA-HQ, celebA PLG-MI, and report-handler examples (and their webapp
+   > handler copies), and has been validated on physical Gaudi hardware in
+   > Habana's eager-mode default (the shipped default; lazy mode is not yet
+   > validated, tracked in #449). The time-series MIA example now uses the same
+   > device abstraction but has not yet been run on physical HPU hardware; the
+   > `ts2vec` signal has no HPU backend upstream and always falls back to CPU on
+   > non-CUDA hosts regardless of `LEAKPRO_DEVICE`. GIA remains **not** part of
+   > this PR's HPU support and stays CUDA/CPU-only.
 
 ## How to run
 

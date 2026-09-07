@@ -20,7 +20,7 @@ from opacus.accountants.utils import get_noise_multiplier
 
 from leakpro import AbstractInputHandler
 from leakpro.schemas import TrainingOutput, EvalOutput
-from leakpro.utils.device import get_device
+from leakpro.utils.device import get_device, mark_step
 from mimic_data_handler import MIMICUserDataset
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
@@ -85,6 +85,7 @@ class LRHandler(BaseMIMICHandler):
                 pred = outputs >= 0.5
                 loss.backward()
                 optimizer.step()
+                mark_step(device_name)
 
                 train_acc += pred.eq(labels.view_as(pred)).sum().item()
                 total_samples += labels.size(0)
@@ -115,6 +116,7 @@ class LRHandler(BaseMIMICHandler):
                 data, target = data.to(device_name), target.to(device_name)
                 target = target.float().unsqueeze(1)
                 output = model(data)
+                mark_step(device_name)
                 loss += criterion(output, target).item()
                 pred = (output) >= 0.5
                 acc += pred.eq(target).sum().item()
@@ -199,6 +201,7 @@ class GRUHandler(BaseMIMICHandler):
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
+                mark_step(device_name)
 
                 total_loss += loss.item() * labels.size(0)
                 total_samples += labels.size(0)
@@ -225,6 +228,7 @@ class GRUHandler(BaseMIMICHandler):
                         val_data = val_data.to(device_name)
                         val_target = val_target.to(device_name).float()
                         val_output = model(val_data)
+                        mark_step(device_name)
                         val_loss += criterion(val_output.squeeze(), val_target.squeeze()).item()
                         val_pred = sigmoid(val_output).squeeze().round()
                         val_acc += val_pred.eq(val_target.squeeze()).sum().item()
@@ -270,6 +274,7 @@ class GRUHandler(BaseMIMICHandler):
                 data, target = data.to(device_name), target.to(device_name)
                 target = target.float()
                 output = model(data)
+                mark_step(device_name)
                 loss += criterion(output.squeeze(), target.squeeze()).item()
                 pred = sigmoid(output).squeeze().round()
                 acc += pred.eq(target.squeeze()).sum().item()

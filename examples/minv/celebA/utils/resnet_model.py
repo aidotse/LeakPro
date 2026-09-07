@@ -12,7 +12,7 @@ import pickle
 
 from torch import nn, no_grad, optim, save
 
-from leakpro.utils.device import get_device
+from leakpro.utils.device import get_device, mark_step
 from torchvision.models import resnet18, resnet50, resnet152
 from torchvision.models import ResNet18_Weights, ResNet50_Weights, ResNet152_Weights
 from tqdm import tqdm
@@ -83,6 +83,7 @@ def evaluate(model, loader, criterion, device):
             data, target = data.to(device), target.to(device)
             target = target.view(-1)
             output = model(data)
+            mark_step(device)
             loss += criterion(output, target).item()
             pred = output.argmax(dim=1)
             acc += pred.eq(target).sum().item()
@@ -126,6 +127,7 @@ def create_trained_model_and_metadata(model, train_loader, test_loader, train_co
 
             loss.backward()
             optimizer.step()
+            mark_step(device_name)
             train_loss += loss.item()
 
         train_loss /= len(train_loader)

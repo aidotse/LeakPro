@@ -13,7 +13,7 @@ from pathlib import Path
 import torch
 from torch import no_grad, optim
 
-from leakpro.utils.device import get_device
+from leakpro.utils.device import get_device, mark_step
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -152,6 +152,7 @@ class CifarModelHandlerDPsgd(AbstractInputHandler, role="model"):
                 data, target = data.to(gpu_or_cpu), target.to(gpu_or_cpu)
                 target = target.view(-1)
                 output = model(data)
+                mark_step(gpu_or_cpu)
                 loss += criterion(output, target).item() * target.size(0)
                 acc += output.argmax(dim=1).eq(target).sum().item()
                 total_samples += target.size(0)
@@ -170,6 +171,7 @@ def _train_loop(dataloader, model, criterion, optimizer, dev, epoch, epochs):
         pred = outputs.argmax(dim=1)
         loss.backward()
         optimizer.step()
+        mark_step(dev)
         train_acc += pred.eq(labels.view_as(pred)).sum().item()
         train_loss += loss.item() * labels.size(0)
     return train_loss, train_acc
