@@ -8,7 +8,7 @@ import random
 import numpy as np
 import torch
 
-from leakpro.utils.device import get_device
+from leakpro.utils.device import hpu_is_installed
 from leakpro.utils.logger import logger
 
 
@@ -23,8 +23,10 @@ def seed_everything(seed: int) -> None:
     # when CUDA isn't initialised, so this is harmless when nothing is actually on CUDA.
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    device = get_device()
-    if device.type == "hpu":
+    # Checked directly via hpu_is_installed() rather than get_device(): seeding must not fail
+    # just because a card can't be acquired right now (get_device() raises HPUAcquisitionError
+    # in that case) — we only need to know the Habana library is present.
+    if hpu_is_installed():
         try:
             import habana_frameworks.torch.hpu as hthpu  # type: ignore[import-not-found]  # noqa: PLC0415
             if hasattr(hthpu, "manual_seed_all"):

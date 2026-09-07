@@ -31,8 +31,13 @@ from leakpro.utils.device import (
 
 
 @pytest.fixture(autouse=True)
-def clear_device_cache():
-    """Clear the lru_cache on get_device before and after every test."""
+def clear_device_cache(monkeypatch):
+    """Clear the lru_cache on get_device before and after every test.
+
+    Also clears LEAKPRO_DEVICE so a value exported in the shell (or left over from
+    an override test) can't leak into unrelated tests that assert real detection.
+    """
+    monkeypatch.delenv("LEAKPRO_DEVICE", raising=False)
     get_device.cache_clear()
     yield
     get_device.cache_clear()
@@ -150,14 +155,42 @@ class TestGetDevice:
 
     def test_override_cuda(self, monkeypatch):
         monkeypatch.setenv("LEAKPRO_DEVICE", "cuda")
-        with patch.object(device_module, "_hthpu", None):
+        with patch.object(device_module, "_hthpu", None), \
+             patch("torch.cuda.is_available", return_value=True):
             device = get_device()
         assert device == torch.device("cuda")
 
-    def test_override_hpu(self, monkeypatch):
+    def test_override_cuda_raises_when_unavailable(self, monkeypatch):
+        """An explicit request must never be silently downgraded."""
+        monkeypatch.setenv("LEAKPRO_DEVICE", "cuda")
+        with patch.object(device_module, "_hthpu", None), \
+             patch("torch.cuda.is_available", return_value=False), \
+             pytest.raises(RuntimeError):
+            get_device()
+
+    def test_override_hpu_raises_when_not_installed(self, monkeypatch):
+        """habana_frameworks missing entirely must raise, not silently fall through."""
         monkeypatch.setenv("LEAKPRO_DEVICE", "hpu")
         with patch.object(device_module, "_hthpu", None), \
-             patch("torch.cuda.is_available", return_value=False):
+             patch("torch.cuda.is_available", return_value=False), \
+             pytest.raises(HPUAcquisitionError):
+            get_device()
+
+    def test_override_hpu_raises_when_unusable(self, monkeypatch):
+        """habana_frameworks installed but the card can't be acquired must raise."""
+        monkeypatch.setenv("LEAKPRO_DEVICE", "hpu")
+        mock_hthpu = MagicMock()
+        mock_hthpu.is_available.return_value = False
+        with patch.object(device_module, "_hthpu", mock_hthpu), \
+             pytest.raises(HPUAcquisitionError):
+            get_device()
+
+    def test_override_hpu_succeeds_when_available(self, monkeypatch):
+        monkeypatch.setenv("LEAKPRO_DEVICE", "hpu")
+        mock_hthpu = MagicMock()
+        mock_hthpu.is_available.return_value = True
+        with patch.object(device_module, "_hthpu", mock_hthpu), \
+             patch.object(device_module, "_probe_hpu_acquisition"):
             device = get_device()
         assert device == torch.device("hpu")
 

@@ -145,19 +145,36 @@ def get_device() -> torch.device:
 
         LEAKPRO_DEVICE=cpu pytest ...
 
-    Accepted values (case-insensitive): ``cpu``, ``cuda``, ``hpu``.
-    An unrecognised value is ignored with a warning and normal detection runs.
+    Accepted values (case-insensitive): ``cpu``, ``cuda``, ``hpu``. An explicit
+    override is never silently downgraded: if the requested device isn't actually
+    usable, this raises immediately instead of returning a device that would fail
+    later inside a ``.to()`` call. An unrecognised value is ignored with a warning
+    and normal detection runs.
 
     Raises:
-        HPUAcquisitionError: ``habana_frameworks`` is installed but no usable HPU
-            could be acquired. This is deliberate — see that class's docstring.
-            Set ``LEAKPRO_DEVICE=cpu`` to opt into CPU instead.
+        HPUAcquisitionError: ``LEAKPRO_DEVICE=hpu`` was requested but
+            ``habana_frameworks`` isn't installed, or is installed but no usable
+            HPU could be acquired — see that class's docstring. Also raised by
+            normal (non-override) detection when the Habana stack is installed
+            but unusable.
+        RuntimeError: ``LEAKPRO_DEVICE=cuda`` was requested but
+            ``torch.cuda.is_available()`` is ``False``.
 
     """
     override = os.environ.get("LEAKPRO_DEVICE", "").strip().lower()
     if override:
         if override in _VALID_OVERRIDE_DEVICES:
             logger.info("Hardware detection: device overridden by LEAKPRO_DEVICE=%s.", override)
+            if override == "hpu":
+                if _hthpu is None:
+                    raise HPUAcquisitionError(
+                        "LEAKPRO_DEVICE=hpu was requested but habana_frameworks is not installed.",
+                    )
+                require_hpu()  # raises HPUAcquisitionError if installed but unusable
+            elif override == "cuda" and not torch.cuda.is_available():
+                raise RuntimeError(
+                    "LEAKPRO_DEVICE=cuda was requested but torch.cuda.is_available() is False.",
+                )
             return torch.device(override)
         logger.warning(
             "LEAKPRO_DEVICE=%r is not a recognised device (valid: %s); ignoring override.",
@@ -192,3 +209,15 @@ def mark_step(device: Optional[torch.device] = None) -> None:
 def hpu_import_error() -> Optional[str]:
     """Return the captured import error string for diagnostics, if any."""
     return _HPU_IMPORT_ERROR
+
+
+def hpu_is_installed() -> bool:
+    """Return whether the ``habana_frameworks`` package was importable at process start.
+
+    Unlike :func:`require_hpu`, this never raises and says nothing about whether a
+    physical HPU can actually be acquired right now — it only checks that the
+    Habana *library* is present. Intended for callers that must not fail just
+    because a card can't be acquired (e.g. RNG seeding), and so shouldn't go
+    through :func:`get_device`'s acquisition probe.
+    """
+    return _hthpu is not None
