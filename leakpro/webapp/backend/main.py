@@ -388,7 +388,8 @@ async def _require_auth(request, call_next):
 
     The backend deserializes user pickles and executes user-supplied Python by
     design, so every route that can reach those sinks must be authenticated.
-    The static SPA is left open so the UI can load and prompt for the token.
+    Fail closed: only the static SPA paths are exempt, so the UI can load and
+    prompt for the token; any route added later is protected by default.
     """
     if request.method == "OPTIONS" or not path_is_protected(request.url.path):
         return await call_next(request)
@@ -398,9 +399,10 @@ async def _require_auth(request, call_next):
     if not origin_is_allowed(request.headers.get("origin")):
         return JSONResponse({"detail": "Origin not allowed"}, status_code=403)
 
+    # Header only: a ?token= fallback here would land the secret in the access
+    # log on every request, and HTTP middleware never sees WebSocket scopes —
+    # the WS route does its own query-parameter check.
     presented = bearer_from_header(request.headers.get("authorization"))
-    if presented is None:
-        presented = request.query_params.get("token")
     if not token_is_valid(presented):
         return JSONResponse({"detail": "Unauthorized"}, status_code=401)
 

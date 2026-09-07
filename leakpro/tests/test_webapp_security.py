@@ -10,6 +10,7 @@ unauthenticated access, cross-site requests, path traversal through
 metadata deserialization.
 """
 
+import contextlib
 import os
 import pickle
 import tempfile
@@ -17,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-# The webapp is optional tooling with its own dependencies (see the webapp
-# READMEs); skip these tests entirely where fastapi is not installed, e.g. CI.
+# Webapp tests: run wherever the webapp extras are installed
+# (pip install -e ".[webapp]"); skipped elsewhere.
 pytest.importorskip("fastapi", reason="webapp extras (fastapi) not installed")
 
 from fastapi import HTTPException  # noqa: E402
@@ -67,6 +68,20 @@ class TestPathValidation:
         assert safe_suffix("../../evil") == ""
         assert safe_suffix(None) == ""
 
+    def test_trailing_newline_rejected(self: Self) -> None:
+        """`$` under match() accepts a trailing newline; fullmatch must not."""
+        from leakpro.webapp.backend.security import safe_name, safe_suffix
+
+        with pytest.raises(HTTPException):
+            safe_name("model1\n")
+        assert safe_suffix("x.pkl\n") == ""
+
+    def test_non_ascii_token_is_invalid_not_error(self: Self) -> None:
+        """compare_digest raises TypeError on non-ASCII str; must return False."""
+        from leakpro.webapp.backend.security import token_is_valid
+
+        assert token_is_valid("\u00fc") is False
+
 
 class _Canary:
     """Pickle payload that would run a command on a vulnerable loader."""
@@ -77,6 +92,15 @@ class _Canary:
     def __reduce__(self: Self) -> tuple:
         """Return the os.system call a vulnerable unpickler would execute."""
         return (os.system, (f"touch {self.marker}",))
+
+
+class _FakeMetadata:
+    """Stand-in for a real metadata object of a non-allowlisted class."""
+
+    def __init__(self: Self) -> None:
+        self.train_indices = [1, 2]
+        self.optimizer = "adam"
+        self.epochs = 5
 
 
 class TestRestrictedUnpickler:
@@ -97,11 +121,9 @@ class TestRestrictedUnpickler:
             assert marker.exists(), "payload should execute under plain pickle.load"
             marker.unlink()
 
-            with open(payload, "rb") as handle:
-                try:
-                    RestrictedUnpickler(handle).load()
-                except Exception:  # noqa: BLE001, S110 - refusing to load is fine
-                    pass
+            # Refusing to load (raising) is an acceptable outcome; executing is not.
+            with open(payload, "rb") as handle, contextlib.suppress(Exception):
+                RestrictedUnpickler(handle).load()
             assert not marker.exists(), "RestrictedUnpickler must not execute the payload"
 
     def test_preserves_field_names(self: Self) -> None:
@@ -115,9 +137,34 @@ class TestRestrictedUnpickler:
                 loaded = RestrictedUnpickler(handle).load()
             assert set(loaded) == {"epochs", "train_indices"}
 
+    def test_preserves_field_names_of_custom_class(self: Self) -> None:
+        """A non-allowlisted class becomes a stub whose __dict__ keeps the fields.
+
+        This is the case validate_model_metadata actually depends on: real
+        metadata is a ModelMetadata *object*, and its field names survive only
+        through the stub's __setstate__.
+        """
+        from leakpro.webapp.backend.security import RestrictedUnpickler
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "meta.pkl"
+            path.write_bytes(pickle.dumps(_FakeMetadata()))
+            with open(path, "rb") as handle:
+                loaded = RestrictedUnpickler(handle).load()
+            assert type(loaded).__name__ == "Stub__FakeMetadata"
+            assert set(loaded.__dict__) == {"train_indices", "optimizer", "epochs"}
+
 
 class TestApiBoundary:
-    """Every /jobs route requires a valid token and an allowlisted origin."""
+    """Every route except the static SPA requires a valid token and origin."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_jobs_root(self: Self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Keep test jobs out of the real webapp_jobs/ (and out of _load_jobs)."""
+        from leakpro.webapp.backend import main as backend_main
+
+        monkeypatch.setattr(backend_main, "JOBS_ROOT", tmp_path)
+        self.jobs_root = tmp_path
 
     def _client(self: Self) -> tuple:
         from fastapi.testclient import TestClient
@@ -145,7 +192,8 @@ class TestApiBoundary:
         client, auth = self._client()
         job_id = client.post("/jobs", headers=auth).json()["job_id"]
 
-        for hostile in ["../../../../tmp/pwned", "/tmp/pwned_abs"]:
+        escape_target = self.jobs_root.parent / "pwned_abs"
+        for hostile in ["../../../../escaped/pwned", str(escape_target)]:
             res = client.post(
                 f"/jobs/{job_id}/upload/weights",
                 params={"model_name": hostile},
@@ -153,7 +201,27 @@ class TestApiBoundary:
                 headers=auth,
             )
             assert res.status_code == 400
-        assert not Path("/tmp/pwned_abs").exists()
+        assert not escape_target.exists()
+
+    def test_query_token_not_accepted_on_http(self: Self) -> None:
+        """?token= must not authenticate HTTP routes — it lands in access logs."""
+        from leakpro.webapp.backend import security
+
+        client, _ = self._client()
+        assert client.get("/jobs", params={"token": security.API_TOKEN}).status_code == 401
+
+    def test_non_ascii_credentials_get_401_not_500(self: Self) -> None:
+        """Garbage credentials must be rejected, not crash the auth path."""
+        client, _ = self._client()
+        assert client.get("/jobs", params={"token": "\u00fc"}).status_code == 401
+
+    def test_static_spa_paths_stay_public(self: Self) -> None:
+        """Fail-closed auth must still leave the SPA shell reachable."""
+        client, _ = self._client()
+        for path in ["/", "/index.html", "/assets/anything.js"]:
+            assert client.get(path).status_code not in (401, 403), path
+        # Anything else is protected by default
+        assert client.get("/some/future/route").status_code == 401
 
     def test_server_side_path_confined(self: Self) -> None:
         """An arbitrary absolute path cannot be read through data-path."""
