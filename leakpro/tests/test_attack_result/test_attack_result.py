@@ -149,3 +149,65 @@ class TestMIAResult:
 
         # Ensure the LaTeX content ends properly
         assert "\\newline\n"  in latex_content
+
+class TestTiedScoreROC:
+    """Regression tests: ROC vertices must sit at the END of each tie block.
+
+    A threshold at value v admits every point scoring >= v, so a tie block is
+    admitted whole or not at all. The old code snapshotted the block START
+    (np.unique first occurrence), counting exactly one arbitrary element per
+    block — an operating point no threshold can realize. Consequences: phantom
+    vertices near the origin, curves that never reach (1, 1), and headline
+    TPRs (e.g. TPR@0%FPR) that depended on argsort tie order. Invisible on
+    all-distinct scores; bites on clamped/quantized signals such as DP-SGD
+    saturation.
+    """
+
+    @staticmethod
+    def _full(scores, labels) -> MIAResult:
+        return MIAResult.from_full_scores(true_membership=np.asarray(labels, dtype=bool),
+                                          signal_values=np.asarray(scores, dtype=float),
+                                          result_name="tied")
+
+    def test_minimal_tied_case_counts_whole_blocks(self:Self) -> None:
+        """Scores [9,9,5,5], labels [1,0,1,0]: threshold 9 admits one member AND
+        one nonmember (they are tied); threshold 5 admits everything."""
+        result = self._full([9, 9, 5, 5], [1, 0, 1, 0])
+        np.testing.assert_array_equal(result.tp, [1, 2])
+        np.testing.assert_array_equal(result.fp, [1, 2])
+        assert np.allclose(result.fpr, [0.5, 1.0])
+        assert np.allclose(result.tpr, [0.5, 1.0])
+        # The old block-start rule reported fp=[0,1], i.e. a phantom vertex at
+        # FPR 0 for an attack that cannot tell members from nonmembers.
+
+    def test_vertices_match_sklearn_on_heavy_ties(self:Self) -> None:
+        """Randomized heavy-tie cases: the (fpr, tpr) vertex set must equal
+        sklearn's roc_curve(..., drop_intermediate=False) minus its (0,0) anchor."""
+        from sklearn.metrics import roc_curve
+        rng = np.random.default_rng(0)
+        for _ in range(50):
+            n = int(rng.integers(20, 300))
+            # Quantized scores -> plenty of ties, including at the extremes.
+            scores = rng.integers(0, 6, size=n).astype(float)
+            labels = rng.integers(0, 2, size=n).astype(bool)
+            if labels.all() or not labels.any():
+                continue
+            result = self._full(scores, labels)
+            fpr_sk, tpr_sk, _ = roc_curve(labels, scores, drop_intermediate=False)
+            np.testing.assert_allclose(result.fpr, fpr_sk[1:], atol=1e-12)
+            np.testing.assert_allclose(result.tpr, tpr_sk[1:], atol=1e-12)
+
+    def test_result_is_invariant_to_input_order(self:Self) -> None:
+        """The old rule made TPR at low FPR depend on which tied point argsort
+        happened to place first. Reshuffling the inputs must not change anything."""
+        rng = np.random.default_rng(1)
+        n = 2000
+        # Saturation shape: a shared tie block at the top score.
+        scores = np.concatenate([np.full(120, 5.0), rng.random(n - 120),      # members
+                                 np.full(60, 5.0), rng.random(n - 60)])        # nonmembers
+        labels = np.concatenate([np.ones(n, dtype=bool), np.zeros(n, dtype=bool)])
+        tables = []
+        for _ in range(6):
+            perm = rng.permutation(2 * n)
+            tables.append(self._full(scores[perm], labels[perm]).fixed_fpr_table)
+        assert all(t == tables[0] for t in tables[1:])
