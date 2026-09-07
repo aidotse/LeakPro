@@ -574,7 +574,13 @@ class HopSkipJumpDistance:
 
         """
         dist = self.compute_distance(samples, perturbed )
-        batch_epsilon = dist / np.sqrt(current_iteration)
+        # Kept on CPU: this loop only does per-sample scalar comparisons and halving,
+        # never device tensor math directly. Doing that on-device (a Python int 0 written
+        # into a device Float tensor below) confuses Habana's op-fusion graph compiler
+        # ("Schema not found for node" on the following comparison). Only the small
+        # `active_epsilon` slice actually needs to be on-device, at the point it's
+        # broadcast-multiplied against a device tensor.
+        batch_epsilon = (dist / np.sqrt(current_iteration)).cpu()
 
         success = np.zeros(len(samples), dtype=bool)
         batch_active_indices = np.arange(len(samples))
@@ -584,7 +590,7 @@ class HopSkipJumpDistance:
 
             active_disturbed = perturbed[batch_active_indices]
             active_updates = updates[batch_active_indices]
-            active_epsilon = batch_epsilon[batch_active_indices].view(len(batch_active_indices), 1, 1, 1)
+            active_epsilon = batch_epsilon[batch_active_indices].view(len(batch_active_indices), 1, 1, 1).to(self.device)
 
             active_updateed_samples = active_disturbed + active_epsilon * active_updates
             active_updateed_samples = self.clamping(active_updateed_samples)
