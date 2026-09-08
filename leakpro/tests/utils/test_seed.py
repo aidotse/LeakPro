@@ -37,9 +37,16 @@ class TestSeedEverything:
     def test_does_not_call_get_device(self):
         """Seeding must not go through get_device(), which can raise HPUAcquisitionError
         on a host where habana_frameworks is installed but no card can be acquired.
+
+        Patches leakpro.utils.device.get_device to raise -- not just checking that
+        hpu_is_installed() was called, which only shows seeding takes that path, not
+        that it avoids get_device() entirely. If seed_everything() ever went through
+        get_device() as well, this would surface as seed_everything() propagating the
+        RuntimeError below instead of returning normally.
         """
-        with patch.object(seed_module, "hpu_is_installed", return_value=False) as mock_installed:
-            seed_everything(0)
+        with patch.object(seed_module, "hpu_is_installed", return_value=False) as mock_installed, \
+             patch("leakpro.utils.device.get_device", side_effect=RuntimeError("must not be called")):
+            seed_everything(0)  # must not raise
         mock_installed.assert_called_once()
 
     def test_skips_hpu_seeding_when_not_installed(self):
