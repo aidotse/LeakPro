@@ -9,13 +9,13 @@ Usage:
 import copy
 
 import torch
-from torch import cuda, device, no_grad, optim
+from torch import no_grad, optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from copy import deepcopy
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.schemas import EvalOutput, TrainingOutput
+from leakpro.utils.device import get_device, mark_step
 
 
 class CifarModelHandler(AbstractInputHandler, role="model"):
@@ -51,7 +51,7 @@ class CifarModelHandler(AbstractInputHandler, role="model"):
         if epochs is None:
             raise ValueError("epochs not found in configs")
 
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         model.to(gpu_or_cpu)
 
         accuracy_history, loss_history = [], []
@@ -74,6 +74,7 @@ class CifarModelHandler(AbstractInputHandler, role="model"):
                 pred = outputs.argmax(dim=1)
                 loss.backward()
                 optimizer.step()
+                mark_step(gpu_or_cpu)
                 train_acc += pred.eq(labels.view_as(pred)).sum().item()
                 total_samples += labels.size(0)
                 train_loss += loss.item() * labels.size(0)
@@ -91,6 +92,7 @@ class CifarModelHandler(AbstractInputHandler, role="model"):
                 for inputs, labels in val_loader:
                     inputs, labels = inputs.to(gpu_or_cpu), labels.to(gpu_or_cpu)
                     outputs = model(inputs)
+                    mark_step(gpu_or_cpu)
                     loss = criterion(outputs, labels)
                     val_loss += loss.item() * labels.size(0)
                     val_acc += outputs.argmax(dim=1).eq(labels).sum().item()
@@ -102,7 +104,7 @@ class CifarModelHandler(AbstractInputHandler, role="model"):
 
             if avg_val_loss < best_val_loss:
                 best_val_loss = avg_val_loss
-                best_model_state = deepcopy(model.state_dict())
+                best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
                 patience_counter = 0
             else:
                 patience_counter += 1
@@ -120,7 +122,7 @@ class CifarModelHandler(AbstractInputHandler, role="model"):
         return TrainingOutput(model=model, metrics=results)
 
     def eval(self, loader, model, criterion) -> EvalOutput:
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         model.to(gpu_or_cpu)
         model.eval()
         loss, acc, total_samples = 0, 0, 0
@@ -131,6 +133,7 @@ class CifarModelHandler(AbstractInputHandler, role="model"):
                 data, target = data.to(gpu_or_cpu), target.to(gpu_or_cpu)
                 target = target.view(-1)
                 output = model(data)
+                mark_step(gpu_or_cpu)
                 loss += criterion(output, target).item() * target.size(0)
                 acc += output.argmax(dim=1).eq(target).sum().item()
                 total_samples += target.size(0)

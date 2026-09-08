@@ -3,7 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 import torch.nn as nn
-from torch import device, optim, cuda, no_grad, save, sigmoid
+from torch import optim, no_grad, save, sigmoid
+
+from leakpro.utils.device import get_device, mark_step
 import torchvision.models as models
 import pickle
 from tqdm import tqdm
@@ -26,8 +28,9 @@ def evaluate(model, loader, criterion, device):
             data, target = data.to(device), target.to(device)
             target = target.view(-1) 
             output = model(data)
+            mark_step(device)
             loss += criterion(output, target).item()
-            pred = output.argmax(dim=1) 
+            pred = output.argmax(dim=1)
             acc += pred.eq(target).sum().item()
         loss /= len(loader)
         acc = float(acc) / len(loader.dataset)
@@ -41,7 +44,7 @@ def create_trained_model_and_metadata(model,
     momentum = train_config["train"]["momentum"]
     epochs = train_config["train"]["epochs"]
     
-    device_name = device("cuda" if cuda.is_available() else "cpu")
+    device_name = get_device()
     model.to(device_name)
     model.train()
 
@@ -66,6 +69,7 @@ def create_trained_model_and_metadata(model,
             
             loss.backward()
             optimizer.step()
+            mark_step(device_name)
             train_loss += loss.item()
         
         train_loss /= len(train_loader)

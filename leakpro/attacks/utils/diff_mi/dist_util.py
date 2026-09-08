@@ -14,6 +14,8 @@ import blobfile as bf
 import torch as th
 import torch.distributed as dist
 
+from leakpro.utils.device import get_device
+
 try:
     from mpi4py import MPI
 except Exception:  # pragma: no cover - optional dependency
@@ -45,13 +47,25 @@ def setup_dist() -> None:
 
 def dev() -> th.device:
     """Get the device to use for torch.distributed."""
-    if th.cuda.is_available():
+    device = get_device()
+    if device.type == "cuda":
         if MPI is not None:
             return th.device(f"cuda:{MPI.COMM_WORLD.Get_rank() % GPUS_PER_NODE}")
         if dist.is_initialized():
             return th.device(f"cuda:{th.cuda.current_device()}")
         return th.device("cuda:0")
-    return th.device("cpu")
+    if device.type == "hpu" and MPI is not None and MPI.COMM_WORLD.Get_size() > 1:
+        # Unlike the CUDA branch above, plain torch.device("hpu") carries no
+        # per-rank index, so every MPI rank would silently collide on the same
+        # physical card instead of getting its own. Fail loudly rather than
+        # let multiple ranks train against one device.
+        raise NotImplementedError(
+            "Multi-rank distributed training is not supported on HPU: every MPI "
+            "rank would collide on the same device. Run with a single rank "
+            "(WORLD_SIZE=1), or add per-rank HPU device selection before enabling "
+            "multi-rank here.",
+        )
+    return device
 
 
 def load_state_dict(path: str, **kwargs: object) -> object:
