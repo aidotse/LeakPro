@@ -104,5 +104,4 @@ class AdultInputHandler(AbstractInputHandler):
                 pred = output >= 0
                 acc += pred.eq(target).sum().item()
                 total_samples += target.size(0)
-        model.to("cpu")
         return EvalOutput(accuracy=float(acc) / total_samples, loss=loss / total_samples)

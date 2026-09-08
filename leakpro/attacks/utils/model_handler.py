@@ -143,8 +143,12 @@ class ModelHandler():
         # run), also treat as a miss so the stale pair gets overwritten instead of silently
         # reused — load_logits() would otherwise never be able to load them.
         if os.path.exists(cache_file) and os.path.exists(indices_file):
-            cached_indices = set(np.load(indices_file).tolist())
-            if cached_indices == set(data_indices.tolist()):
+            cached_indices = np.load(indices_file)
+            # np.array_equal on sorted arrays, not a set comparison: a set comparison
+            # would treat two index arrays as equal even if one had a duplicate and the
+            # other didn't (multiplicity is invisible to sets), silently reusing a cache
+            # of the wrong length if train/test indices ever overlap.
+            if np.array_equal(np.sort(cached_indices), np.sort(data_indices)):
                 logger.info(f"Logits already cached at {cache_file}")
                 return
             logger.info(f"Cached indices at {indices_file} no longer match the current run — recomputing")

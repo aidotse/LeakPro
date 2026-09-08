@@ -122,8 +122,12 @@ def softmax_logits(logits: np.ndarray, temp:float=1.0, dimension:int=-1) -> np.n
         dimension (int): Dimension to apply softmax.
 
     """
-    # 1D logits from BCEWithLogitsLoss: .squeeze() in cache_logits collapses [N,1] → [N].
-    # Reshape to [N, 1] so the single-class branch below handles it correctly.
+    # Defensive guard, not a fix for something that currently happens: no caller today
+    # passes 1D logits (cache_logits' .squeeze(axis=0) only drops the model-list axis,
+    # never the class axis), but if a 1D array ever did arrive, shape[-1] would equal
+    # N and the multi-class branch below would silently softmax across samples instead
+    # of classes. Reshaping to [N, 1] first makes that case go through the intended
+    # single-class branch instead of producing garbage.
     if logits.ndim == 1:
         logits = logits.reshape(-1, 1)
 

@@ -356,7 +356,7 @@ class MIAResult:
         plt.legend()
         plt.tight_layout()
         plt.savefig(fname=filename + ".png", dpi=1000)
-        plt.clf()
+        plt.close()
 
     @classmethod
     def load(cls, data_path:str) -> Self:
