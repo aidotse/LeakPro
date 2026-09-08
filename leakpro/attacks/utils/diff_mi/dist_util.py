@@ -54,6 +54,17 @@ def dev() -> th.device:
         if dist.is_initialized():
             return th.device(f"cuda:{th.cuda.current_device()}")
         return th.device("cuda:0")
+    if device.type == "hpu" and MPI is not None and MPI.COMM_WORLD.Get_size() > 1:
+        # Unlike the CUDA branch above, plain torch.device("hpu") carries no
+        # per-rank index, so every MPI rank would silently collide on the same
+        # physical card instead of getting its own. Fail loudly rather than
+        # let multiple ranks train against one device.
+        raise NotImplementedError(
+            "Multi-rank distributed training is not supported on HPU: every MPI "
+            "rank would collide on the same device. Run with a single rank "
+            "(WORLD_SIZE=1), or add per-rank HPU device selection before enabling "
+            "multi-rank here.",
+        )
     return device
 
 

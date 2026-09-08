@@ -41,8 +41,14 @@ def _tensor_tree_to_cpu(obj: Any) -> Any:  # noqa: ANN401
         return obj.detach().to("cpu")
     if isinstance(obj, dict):
         return {k: _tensor_tree_to_cpu(v) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple)):
-        return type(obj)(_tensor_tree_to_cpu(v) for v in obj)
+    if isinstance(obj, list):
+        return [_tensor_tree_to_cpu(v) for v in obj]
+    if isinstance(obj, tuple):
+        # Plain tuple() rather than type(obj)(...): a namedtuple's constructor takes
+        # positional fields, not a single iterable, so type(obj)(genexpr) raises
+        # TypeError for one. Falling back to a plain tuple loses the namedtuple's
+        # specific type but never raises.
+        return tuple(_tensor_tree_to_cpu(v) for v in obj)
     return obj
 
 

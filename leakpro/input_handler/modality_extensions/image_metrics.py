@@ -180,7 +180,6 @@ class ImageMetrics:
         inception_model.fc = torch.nn.Identity()  # Remove final classification layer
         inception_model.eval()
         inception_model.to(self.device)
-        logger.info("FID: InceptionV3 loaded on device.")
 
         # Image transformation for InceptionV3 input
         transform = transforms.Compose([
@@ -190,20 +189,15 @@ class ImageMetrics:
         ])
 
         # Extract features from real and generated images
-        logger.info("FID: extracting real features.")
         real_features = self.get_features(self.private_dataloader, inception_model, transform).detach().cpu().numpy()
-        logger.info(f"FID: real features extracted, shape={real_features.shape}.")
         fake_features = self.get_generated_features(inception_model, transform).detach().cpu().numpy()
-        logger.info(f"FID: fake features extracted, shape={fake_features.shape}.")
 
         # Compute mean and covariance of features
         mu_real, sigma_real = real_features.mean(axis=0), np.cov(real_features, rowvar=False)
         mu_fake, sigma_fake = fake_features.mean(axis=0), np.cov(fake_features, rowvar=False)
-        logger.info("FID: mean/covariance computed.")
 
         # Calculate FID score
         diff = mu_real - mu_fake
-        logger.info("FID: starting sqrtm.")
         # scipy.linalg.sqrtm's LAPACK call can segfault when the process also has the
         # Habana HPU runtime loaded: Habana ships its own OpenMP thread pool, which
         # corrupts OpenBLAS's thread pool state when both fire in the same process.
@@ -214,7 +208,6 @@ class ImageMetrics:
                 covmean, _ = sqrtm(sigma_real @ sigma_fake, disp=False)
         else:
             covmean, _ = sqrtm(sigma_real @ sigma_fake, disp=False)
-        logger.info("FID: sqrtm done.")
         if np.iscomplexobj(covmean):
             covmean = covmean.real
 

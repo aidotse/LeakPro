@@ -231,12 +231,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         prog="python -m leakpro.utils.hardware_setup",
         description="Detect the local accelerator and report or install its required packages.",
     )
-    parser.add_argument(
+    # Mutually exclusive rather than two independent flags: --install and
+    # --print-only used to combine into a silent no-op (--print-only quietly won),
+    # even though --print-only is documented as the default behaviour and a
+    # plausible thing to pass alongside --install out of habit. This makes that
+    # combination a hard argparse error instead.
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
         "--install",
         action="store_true",
         help="Actually run `pip install` for the detected platform.",
     )
-    parser.add_argument(
+    group.add_argument(
         "--print-only",
         action="store_true",
         help="Just print the detection report (default behaviour).",
@@ -246,7 +252,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     profile = detect_profile()
     sys.stdout.write(format_report(profile) + "\n")
 
-    if args.install and not args.print_only:
+    if args.install:
         return install_profile(profile)
     return 0
 

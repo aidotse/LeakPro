@@ -9,7 +9,7 @@ import yaml
 import torch
 import random
 import numpy as np
-from torch import cuda, optim
+from torch import optim
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 from leakpro.schemas import TrainingOutput, EvalOutput
