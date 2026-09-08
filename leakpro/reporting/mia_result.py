@@ -434,7 +434,7 @@ class MIAResult:
         plt.ylabel("True positive rate (TPR)")
         plt.title("ROC Curve")
         plt.savefig(fname=f"{filename}.png", dpi=1000, bbox_inches="tight")
-        plt.close()
+        plt.clf()
 
     @staticmethod
     def create_results(
