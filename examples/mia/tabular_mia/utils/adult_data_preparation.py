@@ -133,11 +133,12 @@ def preprocess_adult_dataset(path):
 def get_adult_dataloaders(dataset, train_fraction=0.3, test_fraction=0.3, seed=1234):
     """Split dataset into train/test loaders using a seeded random split.
 
-    preprocess_adult_dataset concatenates adult.data then adult.test before
-    this function ever sees the data, so a sequential (prefix-based) split
-    would draw train/test/population unevenly from the two source files. A
-    seeded random split keeps the three sets i.i.d. while staying
-    reproducible. `seed` should match audit.yaml's `random_seed`.
+    The previous version drew indices with np.random.choice() without a seed,
+    reading numpy's global RNG state -- so the same audit.yaml config could
+    produce a different train/test split (and therefore a different,
+    unaudited population) on every run. This uses a seeded
+    np.random.default_rng() permutation instead, so the split is reproducible
+    across runs. `seed` should match audit.yaml's `random_seed`.
     """
     dataset_size = len(dataset)
     train_size = int(train_fraction * dataset_size)
