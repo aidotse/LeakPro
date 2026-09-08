@@ -8,16 +8,24 @@ Run interactively via ``python -m leakpro.utils.hardware_setup`` (use
 ``--install`` to actually install the detected platform's extras, or
 ``--print-only`` for a dry-run listing).
 
-This module is intentionally torch-free at import time. It probes the
-filesystem for the Habana plugin's pinned torch version and reports actionable
-install commands even when torch itself can't be imported (the common case
-when a previous ``pip install`` pulled in a torch incompatible with the
-installed Habana stack).
+This module's own code is torch-free at import time — it probes the filesystem
+for the Habana plugin's pinned torch version and only imports torch lazily,
+inside functions, so it can report actionable install commands even when torch
+itself can't be imported (the common case when a previous ``pip install``
+pulled in a torch incompatible with the installed Habana stack).
+
+That guarantee does NOT cover ``import leakpro`` itself: importing this module
+as ``leakpro.utils.hardware_setup`` first runs the parent ``leakpro`` package's
+``__init__.py``, whose startup banner imports ``leakpro.utils.device`` (and
+therefore torch) unless suppressed. When diagnosing a broken torch/Habana
+install, silence that banner first so this module's own torch-free detection
+actually runs before torch does::
+
+    LEAKPRO_QUIET_DEVICE_BANNER=1 python -m leakpro.utils.hardware_setup
 """
 from __future__ import annotations
 
 import argparse
-import os
 import site
 import subprocess
 import sys
@@ -244,7 +252,10 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 
 if __name__ == "__main__":
-    # Avoid triggering torch's autoload hook when imported as a script on a
-    # mismatched Habana env -- the detection logic below does its own probing.
-    os.environ.setdefault("TORCH_DEVICE_BACKEND_AUTOLOAD", "0")
+    # NOTE: setting TORCH_DEVICE_BACKEND_AUTOLOAD=0 here used to be attempted as a
+    # way to avoid triggering torch's autoload hook on a mismatched Habana env, but
+    # it's too late by this point: `python -m leakpro.utils.hardware_setup` first
+    # runs the parent `leakpro` package's __init__.py, whose device-detection banner
+    # already imports torch before this line ever executes. See the module
+    # docstring for the actual way to avoid that (LEAKPRO_QUIET_DEVICE_BANNER=1).
     raise SystemExit(main())

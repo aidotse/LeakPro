@@ -143,6 +143,25 @@ class TestGetDevice:
         # function body runs exactly once regardless of call count.
         assert mock_cuda.call_count == 1
 
+    def test_override_set_after_first_call_is_not_ignored(self, monkeypatch):
+        """Regression test: LEAKPRO_DEVICE set *after* the first get_device() call.
+
+        This mirrors ``import leakpro`` calling get_device() once via its startup
+        banner before user code has a chance to set LEAKPRO_DEVICE. A plain
+        parameter-less ``@lru_cache`` on get_device() would return the stale
+        pre-override result here instead of picking up the override.
+        """
+        with patch.object(device_module, "_hthpu", None), \
+             patch("torch.cuda.is_available", return_value=False):
+            first = get_device()  # no override yet -> normal detection -> cpu
+        assert first == torch.device("cpu")
+
+        monkeypatch.setenv("LEAKPRO_DEVICE", "cuda")
+        with patch.object(device_module, "_hthpu", None), \
+             patch("torch.cuda.is_available", return_value=True):
+            second = get_device()
+        assert second == torch.device("cuda")
+
     def test_override_cpu(self, monkeypatch):
         monkeypatch.setenv("LEAKPRO_DEVICE", "cpu")
         # Even with HPU and CUDA available, the override wins.

@@ -133,35 +133,18 @@ def require_hpu() -> bool:
 _VALID_OVERRIDE_DEVICES = {"cpu", "cuda", "hpu"}
 
 
-@lru_cache(maxsize=1)
-def get_device() -> torch.device:
-    """Return the best available ``torch.device`` for this host.
+@lru_cache(maxsize=None)
+def _detect_device(override: str) -> torch.device:
+    """Do the actual detection/override work for a given ``LEAKPRO_DEVICE`` value.
 
-    The result is cached for the lifetime of the process; call
-    :func:`get_device.cache_clear` if you need to re-detect (e.g. in tests).
-
-    The environment variable ``LEAKPRO_DEVICE`` can pin the device without
-    code changes — useful in CI or when debugging on a mixed HPU+CUDA machine::
-
-        LEAKPRO_DEVICE=cpu pytest ...
-
-    Accepted values (case-insensitive): ``cpu``, ``cuda``, ``hpu``. An explicit
-    override is never silently downgraded: if the requested device isn't actually
-    usable, this raises immediately instead of returning a device that would fail
-    later inside a ``.to()`` call. An unrecognised value is ignored with a warning
-    and normal detection runs.
-
-    Raises:
-        HPUAcquisitionError: ``LEAKPRO_DEVICE=hpu`` was requested but
-            ``habana_frameworks`` isn't installed, or is installed but no usable
-            HPU could be acquired — see that class's docstring. Also raised by
-            normal (non-override) detection when the Habana stack is installed
-            but unusable.
-        RuntimeError: ``LEAKPRO_DEVICE=cuda`` was requested but
-            ``torch.cuda.is_available()`` is ``False``.
-
+    Cached per distinct ``override`` string (``""`` means "no override, run normal
+    detection"). Keying the cache on ``override`` — rather than the parameter-less
+    ``@lru_cache`` this used to carry directly on :func:`get_device` — means a
+    ``LEAKPRO_DEVICE`` set *after* the first call (e.g. after ``import leakpro``,
+    whose banner already calls :func:`get_device` once) still takes effect: it's a
+    cache miss on a new key instead of silently returning whatever was cached under
+    the old value. Call :func:`get_device.cache_clear` to drop all cached values.
     """
-    override = os.environ.get("LEAKPRO_DEVICE", "").strip().lower()
     if override:
         if override in _VALID_OVERRIDE_DEVICES:
             logger.info("Hardware detection: device overridden by LEAKPRO_DEVICE=%s.", override)
@@ -189,6 +172,49 @@ def get_device() -> torch.device:
         return torch.device("cuda")
     logger.info("Hardware detection: using CPU.")
     return torch.device("cpu")
+
+
+def get_device() -> torch.device:
+    """Return the best available ``torch.device`` for this host.
+
+    Reads ``LEAKPRO_DEVICE`` fresh on every call and dispatches to
+    :func:`_detect_device`, which caches per distinct override value. This means the
+    result is stable within a given ``LEAKPRO_DEVICE`` setting (detection only runs
+    once per value) but a *change* to the env var — e.g. code that sets it after
+    ``import leakpro`` has already run detection once via its startup banner —
+    is picked up on the next call rather than silently ignored.
+
+    The environment variable ``LEAKPRO_DEVICE`` can pin the device without
+    code changes — useful in CI or when debugging on a mixed HPU+CUDA machine::
+
+        LEAKPRO_DEVICE=cpu pytest ...
+
+    Accepted values (case-insensitive): ``cpu``, ``cuda``, ``hpu``. An explicit
+    override is never silently downgraded: if the requested device isn't actually
+    usable, this raises immediately instead of returning a device that would fail
+    later inside a ``.to()`` call. An unrecognised value is ignored with a warning
+    and normal detection runs.
+
+    Raises:
+        HPUAcquisitionError: ``LEAKPRO_DEVICE=hpu`` was requested but
+            ``habana_frameworks`` isn't installed, or is installed but no usable
+            HPU could be acquired — see that class's docstring. Also raised by
+            normal (non-override) detection when the Habana stack is installed
+            but unusable.
+        RuntimeError: ``LEAKPRO_DEVICE=cuda`` was requested but
+            ``torch.cuda.is_available()`` is ``False``.
+
+    """
+    override = os.environ.get("LEAKPRO_DEVICE", "").strip().lower()
+    return _detect_device(override)
+
+
+# Forward the full lru_cache introspection API so get_device keeps behaving like a
+# directly-decorated lru_cache function (callers/diagnostics may reasonably use any
+# of these, not just cache_clear).
+get_device.cache_clear = _detect_device.cache_clear  # type: ignore[attr-defined]
+get_device.cache_info = _detect_device.cache_info  # type: ignore[attr-defined]
+get_device.cache_parameters = _detect_device.cache_parameters  # type: ignore[attr-defined]
 
 
 def mark_step(device: Optional[torch.device] = None) -> None:
