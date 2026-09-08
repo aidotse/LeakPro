@@ -20,7 +20,7 @@ audit: # Configurations for auditing
       
       clf_batch_size: 512
       clf_max_epochs: 5
-  
+
     # MS-lira
     # ts2vec is not supported on HPU; to run this attack on HPU, remove "ts2vec" from the signal list below.
     - attack: multi_signal_lira
