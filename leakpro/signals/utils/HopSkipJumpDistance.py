@@ -615,7 +615,12 @@ class HopSkipJumpDistance:
 
                 batch_active_indices = np.delete(batch_active_indices, positions_to_delete)
             num_evals += 1
-        return batch_epsilon
+        # batch_epsilon was kept on CPU for the whole loop above (see the comment where
+        # it's created) -- move it back to self.device before returning, or the caller's
+        # epsilon.view(...) * update breaks with a device mismatch against update, which
+        # is still resident on self.device. A CPU-only test run can't catch this: the
+        # bug only reproduces when self.device is a non-CPU device.
+        return batch_epsilon.to(self.device)
 
 
     def select_delta(self: Self,
