@@ -43,8 +43,19 @@ class TestSeedEverything:
         mock_installed.assert_called_once()
 
     def test_skips_hpu_seeding_when_not_installed(self):
+        """habana_frameworks must never even be imported when hpu_is_installed() is False.
+
+        Uses the same sys.modules-injection helper as the tests below (rather than
+        ``patch("habana_frameworks.torch.hpu", create=True)``) because a string-target
+        patch still has to import the parent ``habana_frameworks.torch`` module to
+        resolve where to patch -- ``create=True`` only permits creating the final
+        attribute, not skipping that import. That's harmless on a host with the real
+        package installed, but raises ModuleNotFoundError on CI runners that
+        (correctly) don't have it, which is exactly the case this test means to cover.
+        """
+        modules, mock_hthpu = _mock_habana_hpu_module()
         with patch.object(seed_module, "hpu_is_installed", return_value=False), \
-             patch("habana_frameworks.torch.hpu", create=True) as mock_hthpu:
+             patch.dict("sys.modules", modules):
             seed_everything(0)
         mock_hthpu.manual_seed_all.assert_not_called()
 
