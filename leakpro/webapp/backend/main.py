@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import queue
 import shutil
 import threading
@@ -16,6 +17,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from leakpro.schemas import EvalOutput, TrainingOutput
@@ -260,6 +262,21 @@ _PRESET_ARCHS: dict[str, str] = {
 
 from .checker import run_check
 from .inspector import inspect
+from .security import (
+    ALLOWED_ORIGINS,
+    bearer_from_header,
+    confine,
+    load_metadata_fields,
+    origin_is_allowed,
+    path_is_protected,
+    safe_copy,
+    safe_detail,
+    safe_name,
+    safe_suffix,
+    save_upload,
+    startup_banner,
+    token_is_valid,
+)
 from .models import (
     ArchConfig,
     AttackParams,
@@ -277,6 +294,8 @@ from .worker import run_audit_job
 # ---------------------------------------------------------------------------
 # App setup
 # ---------------------------------------------------------------------------
+
+_logger = logging.getLogger("leakpro.webapp")
 
 JOBS_ROOT = Path(__file__).parents[3] / "webapp_jobs"
 JOBS_ROOT.mkdir(parents=True, exist_ok=True)
@@ -356,16 +375,45 @@ def _load_jobs() -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     _load_jobs()
+    _logger.info("\n%s", startup_banner())
     yield
 
 
 app = FastAPI(title="LeakPro Webapp API", version="0.1.0", lifespan=lifespan)
 
+
+@app.middleware("http")
+async def _require_auth(request, call_next):
+    """Gate the API surface behind a bearer token and an origin allowlist.
+
+    The backend deserializes user pickles and executes user-supplied Python by
+    design, so every route that can reach those sinks must be authenticated.
+    Fail closed: only the static SPA paths are exempt, so the UI can load and
+    prompt for the token; any route added later is protected by default.
+    """
+    if request.method == "OPTIONS" or not path_is_protected(request.url.path):
+        return await call_next(request)
+
+    # A browser attaches Origin on cross-site requests; the token alone already
+    # blocks them, this rejects them earlier and covers DNS-rebinding attempts.
+    if not origin_is_allowed(request.headers.get("origin")):
+        return JSONResponse({"detail": "Origin not allowed"}, status_code=403)
+
+    # Header only: a ?token= fallback here would land the secret in the access
+    # log on every request, and HTTP middleware never sees WebSocket scopes —
+    # the WS route does its own query-parameter check.
+    presented = bearer_from_header(request.headers.get("authorization"))
+    if not token_is_valid(presented):
+        return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+
+    return await call_next(request)
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 
@@ -423,9 +471,8 @@ async def get_status(job_id: str) -> dict:
 @app.post("/jobs/{job_id}/upload/data", response_model=DataMeta)
 async def upload_data(job_id: str, file: UploadFile) -> DataMeta:
     job = _get_job(job_id)
-    dest = _job_dir(job_id) / f"data{Path(file.filename).suffix}"
-    with open(dest, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    dest = _job_dir(job_id) / f"data{safe_suffix(file.filename)}"
+    save_upload(file.file, dest)
     meta = inspect(dest)
     job["data_path"] = str(dest)
     job["data_meta"] = meta.model_dump()
@@ -437,16 +484,16 @@ async def upload_data(job_id: str, file: UploadFile) -> DataMeta:
 async def set_data_path(job_id: str, body: dict) -> DataMeta:
     """Use a dataset already on the server by absolute path."""
     job = _get_job(job_id)
-    path = Path(body.get("path", ""))
+    path = confine(body.get("path", ""))
     if not path.exists():
-        raise HTTPException(status_code=400, detail=f"Path does not exist: {path}")
+        raise HTTPException(status_code=400, detail="Path does not exist")
     if not path.is_file():
-        raise HTTPException(status_code=400, detail=f"Path is not a file: {path}")
+        raise HTTPException(status_code=400, detail="Path is not a file")
     try:
         meta = inspect(path)
     except Exception as e:
-        import traceback
-        raise HTTPException(status_code=400, detail=f"Failed to inspect file: {e}\n{traceback.format_exc()}") from e
+        _logger.exception("inspect failed for job %s", job_id)
+        raise HTTPException(status_code=400, detail=safe_detail(e, "Failed to inspect file")) from e
     job["data_path"] = str(path)
     job["data_meta"] = meta.model_dump()
     _save_job(job_id)
@@ -458,8 +505,7 @@ async def upload_dataset_handler(job_id: str, file: UploadFile) -> dict:
     """Upload a custom dataset_handler.py defining UserDataset."""
     _get_job(job_id)
     dest = _job_dir(job_id) / "dataset_handler.py"
-    with open(dest, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    save_upload(file.file, dest)
     return {"ok": True, "filename": file.filename}
 
 
@@ -467,13 +513,13 @@ async def upload_dataset_handler(job_id: str, file: UploadFile) -> dict:
 async def set_dataset_handler_path(job_id: str, body: dict) -> dict:
     """Use a dataset_handler.py already on the server by absolute path."""
     _get_job(job_id)
-    path = Path(body.get("path", ""))
+    path = confine(body.get("path", ""))
     if not path.exists():
-        raise HTTPException(status_code=400, detail=f"Path does not exist: {path}")
+        raise HTTPException(status_code=400, detail="Path does not exist")
     if not path.suffix == ".py":
         raise HTTPException(status_code=400, detail="Path must point to a .py file")
     dest = _job_dir(job_id) / "dataset_handler.py"
-    shutil.copy2(path, dest)
+    safe_copy(path, dest)
     return {"ok": True, "filename": path.name}
 
 
@@ -497,20 +543,19 @@ async def set_handler_config(job_id: str, config: HandlerConfig) -> dict:
 async def upload_arch(job_id: str, file: UploadFile) -> dict:
     _get_job(job_id)
     dest = _job_dir(job_id) / "arch.py"
-    with open(dest, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    save_upload(file.file, dest)
     return {"ok": True, "filename": file.filename}
 
 
 @app.post("/jobs/{job_id}/arch-path")
 async def set_arch_path(job_id: str, body: dict) -> dict:
     _get_job(job_id)
-    path = Path(body.get("path", ""))
+    path = confine(body.get("path", ""))
     if not path.exists():
-        raise HTTPException(status_code=400, detail=f"Path does not exist: {path}")
-    # Symlink or copy into job dir
+        raise HTTPException(status_code=400, detail="Path does not exist")
+    # Copy into job dir
     dest = _job_dir(job_id) / "arch.py"
-    shutil.copy2(path, dest)
+    safe_copy(path, dest)
     return {"ok": True, "filename": path.name}
 
 
@@ -518,19 +563,18 @@ async def set_arch_path(job_id: str, body: dict) -> dict:
 async def upload_handler(job_id: str, file: UploadFile) -> dict:
     _get_job(job_id)
     dest = _job_dir(job_id) / "handler.py"
-    with open(dest, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    save_upload(file.file, dest)
     return {"ok": True, "filename": file.filename}
 
 
 @app.post("/jobs/{job_id}/handler-path")
 async def set_handler_path(job_id: str, body: dict) -> dict:
     _get_job(job_id)
-    path = Path(body.get("path", ""))
+    path = confine(body.get("path", ""))
     if not path.exists():
-        raise HTTPException(status_code=400, detail=f"Path does not exist: {path}")
+        raise HTTPException(status_code=400, detail="Path does not exist")
     dest = _job_dir(job_id) / "handler.py"
-    shutil.copy2(path, dest)
+    safe_copy(path, dest)
     return {"ok": True, "filename": path.name}
 
 
@@ -553,22 +597,20 @@ async def set_arch_config(job_id: str, config: ArchConfig) -> dict:
 @app.post("/jobs/{job_id}/upload/weights")
 async def upload_weights(job_id: str, model_name: str, file: UploadFile) -> dict:
     _get_job(job_id)
-    model_dir = _job_dir(job_id) / "models" / model_name
+    model_dir = _job_dir(job_id) / "models" / safe_name(model_name, "model_name")
     model_dir.mkdir(exist_ok=True)
     dest = model_dir / "target_model.pkl"
-    with open(dest, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    save_upload(file.file, dest)
     return {"ok": True, "path": str(dest)}
 
 
 @app.post("/jobs/{job_id}/upload/model-metadata")
 async def upload_model_metadata(job_id: str, model_name: str, file: UploadFile) -> dict:
     _get_job(job_id)
-    model_dir = _job_dir(job_id) / "models" / model_name
+    model_dir = _job_dir(job_id) / "models" / safe_name(model_name, "model_name")
     model_dir.mkdir(exist_ok=True)
     dest = model_dir / "model_metadata.pkl"
-    with open(dest, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    save_upload(file.file, dest)
     return {"ok": True, "path": str(dest)}
 
 
@@ -576,14 +618,14 @@ async def upload_model_metadata(job_id: str, model_name: str, file: UploadFile) 
 async def set_model_metadata_path(job_id: str, body: dict) -> dict:
     """Copy a metadata file already on the server into the job directory."""
     _get_job(job_id)
-    path = Path(body.get("path", ""))
-    model_name = body.get("model_name", "uploaded_model")
+    path = confine(body.get("path", ""))
+    model_name = safe_name(body.get("model_name", "uploaded_model"), "model_name")
     if not path.exists():
-        raise HTTPException(status_code=400, detail=f"Path does not exist: {path}")
+        raise HTTPException(status_code=400, detail="Path does not exist")
     model_dir = _job_dir(job_id) / "models" / model_name
     model_dir.mkdir(exist_ok=True)
     dest = model_dir / "model_metadata.pkl"
-    shutil.copy2(path, dest)
+    safe_copy(path, dest)
     return {"ok": True, "path": str(dest)}
 
 
@@ -591,51 +633,43 @@ async def set_model_metadata_path(job_id: str, body: dict) -> dict:
 async def validate_model_metadata(job_id: str, model_name: str) -> dict:
     """Check that an uploaded model_metadata.pkl has all required MIA fields."""
     _get_job(job_id)
+    model_name = safe_name(model_name, "model_name")
     meta_path = _job_dir(job_id) / "models" / model_name / "model_metadata.pkl"
     if not meta_path.exists():
         raise HTTPException(status_code=400, detail="No metadata file uploaded yet")
 
     required = ["train_indices", "test_indices", "optimizer", "criterion",
                 "data_loader", "epochs", "train_result", "test_result", "dataset"]
-    import pickle
-
-    class _SafeUnpickler(pickle.Unpickler):
-        def find_class(self, module, name):
-            try:
-                return super().find_class(module, name)
-            except (ImportError, AttributeError):
-                return type(name, (), {})
-
     try:
-        with open(meta_path, "rb") as f:
-            raw = _SafeUnpickler(f).load()
+        raw = load_metadata_fields(meta_path)
         attrs: dict = raw.__dict__ if hasattr(raw, "__dict__") else (raw if isinstance(raw, dict) else {})
         present = [k for k in required if k in attrs]
         missing = [k for k in required if k not in attrs]
         return {"ok": not missing, "present_fields": present, "missing_fields": missing}
     except Exception as e:
-        import traceback
+        _logger.exception("metadata validation failed for job %s", job_id)
         return {"ok": False, "present_fields": [], "missing_fields": required,
-                "error": f"{e}\n{traceback.format_exc()}"}
+                "error": safe_detail(e, "Failed to read metadata")}
 
 
 @app.post("/jobs/{job_id}/weights-path")
 async def set_weights_path(job_id: str, body: dict) -> dict:
     _get_job(job_id)
-    path = Path(body.get("path", ""))
-    model_name = body.get("model_name", "uploaded_model")
+    path = confine(body.get("path", ""))
+    model_name = safe_name(body.get("model_name", "uploaded_model"), "model_name")
     if not path.exists():
-        raise HTTPException(status_code=400, detail=f"Path does not exist: {path}")
+        raise HTTPException(status_code=400, detail="Path does not exist")
     model_dir = _job_dir(job_id) / "models" / model_name
     model_dir.mkdir(exist_ok=True)
     dest = model_dir / "target_model.pkl"
-    shutil.copy2(path, dest)
+    safe_copy(path, dest)
     return {"ok": True, "path": str(dest)}
 
 
 @app.post("/jobs/{job_id}/check", response_model=CompatResult)
 async def check_compat(job_id: str, model_name: str) -> CompatResult:
     job = _get_job(job_id)
+    model_name = safe_name(model_name, "model_name")
     job_dir = _job_dir(job_id)
     arch_path = job_dir / "arch.py"
     weights_path = job_dir / "models" / model_name / "target_model.pkl"
@@ -710,6 +744,8 @@ async def remove_model(job_id: str, model_name: str) -> dict:
 async def train_model(job_id: str, params: TrainParams) -> dict:
     """Enqueue a training job. Progress streams via WS /jobs/{id}/logs."""
     job = _get_job(job_id)
+    # params.name becomes a directory created with parents=True further down.
+    params.name = safe_name(params.name, "name")
     log_q = _log_queues[job_id]
 
     def _train() -> None:
@@ -793,15 +829,17 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                             return pickle.load(_f)
                     except Exception:
                         pass
-                    # Fall back: stub out missing classes, then reconstruct as TensorDataset
-                    class _SafeUnpickler(pickle.Unpickler):
+                    # Fall back: stub out missing classes, then reconstruct as TensorDataset.
+                    # NOTE: compatibility shim, not a security boundary — it resolves real
+                    # classes whenever the import succeeds (see security.RestrictedUnpickler).
+                    class _LenientUnpickler(pickle.Unpickler):
                         def find_class(self, module, name):
                             try:
                                 return super().find_class(module, name)
                             except (ImportError, AttributeError):
                                 return type(name, (), {})
                     with open(path, "rb") as _f:
-                        raw = _SafeUnpickler(_f).load()
+                        raw = _LenientUnpickler(_f).load()
                     import numpy as np
                     # Use __dict__ directly — bypasses any descriptor protocol on the stub class
                     attrs = getattr(raw, "__dict__", {})
@@ -1121,7 +1159,8 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
 @app.post("/jobs/{job_id}/attack-config")
 async def set_attack_config(job_id: str, configs: list[ModelAttackConfig]) -> dict:
     job = _get_job(job_id)
-    cfg_map = {c.model_name: c.attacks for c in configs}
+    # model_name is persisted as target_folder and joined into paths by the worker.
+    cfg_map = {safe_name(c.model_name, "model_name"): c.attacks for c in configs}
     existing_names = {m["name"] for m in job.get("models", [])}
 
     # Upsert any model the frontend knows about that isn't in the backend state yet
@@ -1152,6 +1191,10 @@ async def start_audit(job_id: str) -> dict:
     job = _get_job(job_id)
     if job["status"] == JobStatus.running:
         raise HTTPException(status_code=409, detail="Audit already running")
+    # Claim the job synchronously: the worker only sets `running` once it starts,
+    # so without this, rapid repeat calls all pass the check and all get queued.
+    job["status"] = JobStatus.running
+    _save_job(job_id)
     log_q = _log_queues[job_id]
     _executor.submit(run_audit_job, job_id, _job_dir(job_id), job, log_q, _save_job)
     return {"ok": True}
@@ -1248,6 +1291,14 @@ async def get_sample_image(job_id: str, index: int):
 
 @app.websocket("/jobs/{job_id}/logs")
 async def log_stream(websocket: WebSocket, job_id: str) -> None:
+    # WebSockets bypass CORS entirely and browsers cannot set an Authorization
+    # header on them, so both checks have to happen here, before accept().
+    if not origin_is_allowed(websocket.headers.get("origin")):
+        await websocket.close(code=4403)
+        return
+    if not token_is_valid(websocket.query_params.get("token")):
+        await websocket.close(code=4401)
+        return
     if job_id not in _jobs:
         await websocket.close(code=4004)
         return

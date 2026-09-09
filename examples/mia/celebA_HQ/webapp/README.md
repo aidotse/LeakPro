@@ -16,10 +16,15 @@ cd leakpro/webapp/frontend && npm install
 
 **Backend** (from repo root):
 ```bash
-uvicorn leakpro.webapp.backend.main:app --reload --port 8000
+uvicorn leakpro.webapp.backend.main:app --reload --host 127.0.0.1 --port 8000
 # To use a different port:
-uvicorn leakpro.webapp.backend.main:app --reload --port 8001
+uvicorn leakpro.webapp.backend.main:app --reload --host 127.0.0.1 --port 8001
 ```
+
+The backend prints an API token at startup; paste it into the UI when prompted.
+Set `LEAKPRO_WEBAPP_TOKEN` to pin your own instead. Keep the bind address on
+`127.0.0.1`: this backend loads user model files and runs user-supplied Python
+by design. See [`leakpro/webapp/SECURITY.md`](../../../../leakpro/webapp/SECURITY.md).
 
 **Frontend** (from `leakpro/webapp/frontend/`):
 ```bash

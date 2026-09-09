@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { api } from "../../api";
+import { api, getToken } from "../../api";
 import { ModelEntry } from "./Step4Models";
 
 interface Props {
@@ -37,7 +37,11 @@ export default function Step6Run({ jobId, models, onDone, onRestart }: Props) {
 
     await api.startAudit(jobId);
 
-    const wsUrl = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/jobs/${jobId}/logs`;
+    // Browsers cannot set an Authorization header on a WebSocket, so the
+    // backend accepts the token as a query parameter for this route only.
+    const wsUrl =
+      `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}` +
+      `/jobs/${jobId}/logs?token=${encodeURIComponent(getToken())}`;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 

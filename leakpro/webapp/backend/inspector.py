@@ -12,8 +12,15 @@ import numpy as np
 from .models import DataMeta
 
 
-class _SafeUnpickler(pickle.Unpickler):
-    """Unpickler that returns a placeholder for unknown classes instead of raising."""
+class _LenientUnpickler(pickle.Unpickler):
+    """Unpickler that substitutes a placeholder for classes that fail to import.
+
+    NOTE: this is a *compatibility* shim, not a security boundary. It resolves
+    real classes whenever the import succeeds, so it offers no protection
+    against a malicious pickle. Reaching it requires an authenticated request;
+    see ``security.RestrictedUnpickler`` for the hardened variant used where
+    only field names are needed.
+    """
     def find_class(self, module: str, name: str):
         try:
             return super().find_class(module, name)
@@ -25,7 +32,11 @@ class _SafeUnpickler(pickle.Unpickler):
 def _try_load(path: Path) -> Any:
     suffix = path.suffix.lower()
     if suffix == ".npy":
-        return np.load(path, allow_pickle=True)
+        # Plain arrays load without pickle; only object arrays need the fallback.
+        try:
+            return np.load(path, allow_pickle=False)
+        except ValueError:
+            return np.load(path, allow_pickle=True)
     if suffix in {".pkl", ".pickle"}:
         # Add common LeakPro handler directories to sys.path so custom
         # classes (e.g. cifar_handler.UserDataset) can be unpickled.
@@ -43,12 +54,16 @@ def _try_load(path: Path) -> Any:
             with open(path, "rb") as f:
                 return pickle.load(f)  # noqa: S301
         except Exception:
-            # Fall back to safe unpickler if import still fails
+            # Fall back to the lenient unpickler if a custom class won't import
             with open(path, "rb") as f:
-                return _SafeUnpickler(f).load()  # noqa: S301
+                return _LenientUnpickler(f).load()  # noqa: S301
     if suffix == ".pt":
         import torch
-        return torch.load(path, map_location="cpu", weights_only=False)
+        # Tensors and state dicts load without executing pickled code.
+        try:
+            return torch.load(path, map_location="cpu", weights_only=True)
+        except Exception:
+            return torch.load(path, map_location="cpu", weights_only=False)
     if suffix == ".csv":
         import pandas as pd
         return pd.read_csv(path)
