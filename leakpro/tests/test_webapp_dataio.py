@@ -92,6 +92,35 @@ class TestConvertUpload:
                 convert_upload(src, Path(tmp))
             assert exc.value.status_code == 400
 
+    def test_corrupt_uploads_rejected_with_400(self: Self) -> None:
+        """Truncated/empty/malformed files get a clean 400, never a raw error.
+
+        These raise non-ValueError exceptions from the underlying readers
+        (zipfile.BadZipFile for a truncated .npz, EOFError for an empty .npy,
+        pandas parse errors for a bad table), and upload_data() has no
+        surrounding try/except — so anything unhandled here is a 500 on the
+        primary upload flow.
+        """
+        from leakpro.webapp.backend.dataio import convert_upload
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # Truncated .npz (broken zip structure)
+            whole = Path(tmp) / "ok.npz"
+            np.savez(whole, data=np.random.rand(4, 2), targets=np.zeros(4))
+            truncated = Path(tmp) / "trunc.npz"
+            truncated.write_bytes(whole.read_bytes()[:40])
+            # Empty .npy
+            empty = Path(tmp) / "empty.npy"
+            empty.write_bytes(b"")
+            # Malformed parquet
+            bad_parquet = Path(tmp) / "bad.parquet"
+            bad_parquet.write_bytes(b"not parquet at all")
+
+            for src in (truncated, empty, bad_parquet):
+                with pytest.raises(HTTPException) as exc:
+                    convert_upload(src, Path(tmp))
+                assert exc.value.status_code == 400, src.name
+
     def test_unknown_format_falls_through(self: Self) -> None:
         """Legacy formats return None so callers use the existing loaders."""
         from leakpro.webapp.backend.dataio import convert_upload
@@ -142,6 +171,20 @@ class TestUploadEndpoint:
         sample = client.get(f"/jobs/{job_id}/sample_data/0", headers=auth)
         assert sample.status_code == 200, sample.text
         assert len(sample.json()["features"]) == 4
+
+    def test_truncated_npz_upload_rejected(self: Self) -> None:
+        """A corrupt upload gets 400 through the endpoint, not an unhandled 500."""
+        import io
+
+        client, auth = self._client()
+        job_id = client.post("/jobs", headers=auth).json()["job_id"]
+
+        buf = io.BytesIO()
+        np.savez(buf, data=np.random.rand(4, 2), targets=np.zeros(4))
+        res = client.post(f"/jobs/{job_id}/upload/data",
+                          files={"file": ("d.npz", buf.getvalue()[:40], "application/octet-stream")},
+                          headers=auth)
+        assert res.status_code == 400, res.text
 
     def test_hostile_npz_upload_rejected(self: Self) -> None:
         """A pickled-object .npz is rejected with 400 at upload time."""

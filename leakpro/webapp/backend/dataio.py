@@ -21,6 +21,7 @@ class; the user-supplied bytes are never unpickled by anyone.
 
 from __future__ import annotations
 
+import zipfile
 from pathlib import Path
 from typing import Any, Optional
 
@@ -87,11 +88,13 @@ def _from_npz(path: Path) -> tuple[np.ndarray, np.ndarray, None]:
             data = _pick(npz, _DATA_KEYS)
             targets = _pick(npz, _TARGET_KEYS)
             names = list(npz.files)
-    except ValueError as e:
-        # Raised for object (pickled) arrays — refuse rather than fall back.
+    except (ValueError, zipfile.BadZipFile, OSError, EOFError) as e:
+        # ValueError: pickled/object arrays. BadZipFile/OSError/EOFError: a
+        # truncated or otherwise corrupt upload, not necessarily malicious —
+        # either way this boundary must reject with 400, never raise raw.
         raise HTTPException(
             status_code=400,
-            detail="The .npz contains pickled objects; only plain arrays are accepted.",
+            detail="Could not read the .npz file (corrupt, or contains pickled objects).",
         ) from e
     if data is None:
         raise HTTPException(
@@ -112,11 +115,11 @@ def _from_npz(path: Path) -> tuple[np.ndarray, np.ndarray, None]:
 def _from_npy(path: Path) -> tuple[np.ndarray, np.ndarray, None]:
     try:
         data = np.load(path, allow_pickle=False)
-    except ValueError as e:
+    except (ValueError, OSError, EOFError) as e:
         raise HTTPException(
             status_code=400,
-            detail="The .npy contains pickled objects; only plain arrays are accepted "
-                   "(or use .npz with data + targets entries).",
+            detail="Could not read the .npy file (corrupt, empty, or contains pickled "
+                   "objects); or use .npz with data + targets entries.",
         ) from e
     return data, np.zeros(len(data), dtype=np.int64), None
 
@@ -124,13 +127,19 @@ def _from_npy(path: Path) -> tuple[np.ndarray, np.ndarray, None]:
 def _from_table(path: Path) -> tuple[np.ndarray, np.ndarray, list]:
     import pandas as pd
     suffix = path.suffix.lower()
-    if suffix == ".parquet":
-        df = pd.read_parquet(path)
-    elif suffix == ".csv":
-        df = pd.read_csv(path)
-    else:
-        df = pd.read_json(path, lines=(suffix == ".jsonl"))
+    try:
+        if suffix == ".parquet":
+            df = pd.read_parquet(path)
+        elif suffix == ".csv":
+            df = pd.read_csv(path)
+        else:
+            df = pd.read_json(path, lines=(suffix == ".jsonl"))
+    except Exception as e:  # noqa: BLE001 - pandas/pyarrow raise many types here
+        raise HTTPException(status_code=400,
+                            detail=f"Could not parse {suffix} file: {e}") from e
 
+    if df.shape[1] == 0:
+        raise HTTPException(status_code=400, detail="File has no columns.")
     label_col = next((c for c in _LABEL_COLUMNS if c in df.columns), None)
     if label_col is None:
         label_col = df.columns[-1]
