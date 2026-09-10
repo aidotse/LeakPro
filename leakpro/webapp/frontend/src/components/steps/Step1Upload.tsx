@@ -272,7 +272,9 @@ export default function Step1Upload({ jobId, onDone, initialMeta }: Props) {
         <h2 className="text-4xl font-black tracking-tight">Load Dataset</h2>
         <p className="text-slate-600 dark:text-slate-200 text-lg max-w-2xl">
           Point to your training dataset on the server, or upload a file from your local machine.
-          Supports CSV, JSONL, Parquet, NumPy (.npy), or PyTorch (.pkl / .pt).
+          Prefer NumPy (.npz with data + targets), Parquet, CSV, or JSONL — these cannot
+          execute code when loaded. Pickled formats (.pkl / .pt) also work but run code on
+          load, so only use them for files you created yourself.
         </p>
       </div>
 
@@ -392,6 +394,8 @@ function UploadForm({ jobId, onDone, initialMeta }: { jobId: string; onDone: (m:
   const [meta, setMeta] = useState<DataMeta | null>(initialMeta ?? null);
   const [handlerUploaded, setHandlerUploaded] = useState(!!initialMeta);
 
+  const isPickleBased = (name: string) => /\.(pkl|pickle|pt)$/i.test(name);
+
   const handleFile = useCallback(async (f: File) => {
     setFile(f);
     setError(null);
@@ -454,6 +458,16 @@ function UploadForm({ jobId, onDone, initialMeta }: { jobId: string; onDone: (m:
       {error && <p className="mt-4 text-sm text-red-500">{error}</p>}
     </label>
 
+    {file && isPickleBased(file.name) && (
+      <div className="flex items-start gap-2 p-4 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300 text-sm">
+        <span className="material-symbols-outlined text-base mt-0.5">warning</span>
+        <span>
+          Pickled files (<code>.pkl</code>/<code>.pt</code>) execute code when the server loads
+          them. Only upload files you created or fully trust — for third-party datasets,
+          export to <code>.npz</code> or Parquet instead.
+        </span>
+      </div>
+    )}
     {meta && (
       <>
         <div className="flex flex-col gap-4 p-5 rounded-xl border border-green-500/30 bg-green-500/5">

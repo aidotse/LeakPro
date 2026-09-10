@@ -262,6 +262,7 @@ _PRESET_ARCHS: dict[str, str] = {
 }
 
 from .checker import run_check
+from .dataio import convert_upload
 from .inspector import inspect
 from .security import (
     ALLOWED_ORIGINS,
@@ -477,7 +478,21 @@ async def upload_data(job_id: str, file: UploadFile) -> DataMeta:
     job = _get_job(job_id)
     dest = _job_dir(job_id) / f"data{safe_suffix(file.filename)}"
     save_upload(file.file, dest)
-    meta = inspect(dest)
+    # Safe formats (.npz/.parquet/.csv/...) are converted here, at the trust
+    # boundary, into a server-generated pickle — the uploaded bytes are never
+    # unpickled. Legacy pickle formats fall through to inspect().
+    try:
+        converted = convert_upload(dest, _job_dir(job_id))
+    except HTTPException:
+        raise
+    except Exception as e:
+        _logger.exception("convert_upload failed for job %s", job_id)
+        raise HTTPException(status_code=400,
+                            detail=safe_detail(e, "Failed to convert upload")) from e
+    if converted is not None:
+        dest, meta = converted
+    else:
+        meta = inspect(dest)
     job["data_path"] = str(dest)
     job["data_meta"] = meta.model_dump()
     _save_job(job_id)
@@ -494,7 +509,13 @@ async def set_data_path(job_id: str, body: dict) -> DataMeta:
     if not path.is_file():
         raise HTTPException(status_code=400, detail="Path is not a file")
     try:
-        meta = inspect(path)
+        converted = convert_upload(path, _job_dir(job_id))
+        if converted is not None:
+            path, meta = converted
+        else:
+            meta = inspect(path)
+    except HTTPException:
+        raise
     except Exception as e:
         _logger.exception("inspect failed for job %s", job_id)
         raise HTTPException(status_code=400, detail=safe_detail(e, "Failed to inspect file")) from e

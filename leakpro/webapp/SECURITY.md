@@ -56,7 +56,24 @@ server process. That is the tool working as intended. It also means:
 
 - Do not hand the token to anyone you would not give a shell to.
 - Do not run this on a shared machine, a jump host, or anything internet-facing.
-- Treat the job directory as trusted-input storage.
+
+## Untrusted model and dataset files
+
+Authentication decides *who* may call the server. It does nothing about *what*
+a file does when loaded — and auditing a model you did not train (a model-zoo
+or Kaggle download, a vendor's checkpoint) is a core LeakPro use case, so "only
+upload trusted files" is not an answer on its own.
+
+- **Datasets**: upload `.npz` (with `data` + `targets` entries), Parquet, CSV,
+  or JSONL. These are converted at the upload boundary into a server-generated
+  object; the uploaded bytes are never unpickled and structurally cannot
+  execute code. Pickled datasets (`.pkl`) remain supported for files you
+  created yourself, and the UI warns when one is selected.
+- **Weights**: `.pt` files are loaded with `weights_only=True` first, which
+  cannot execute code; only files that fail that path fall back to a full
+  (code-executing) load. A plain state dict from a third party loads safely.
+- **Architecture / handler code** (`arch.py`, `handler.py`): always executes —
+  that is its purpose. Never upload third-party Python you have not read.
 
 `security.RestrictedUnpickler` is used where only field names are needed
 (metadata validation) and never resolves an attacker-chosen callable. Its scope
