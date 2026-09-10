@@ -1,0 +1,31 @@
+##
+## Copyright 2023-2026 Lindholmen Science Park AB
+## SPDX-License-Identifier: Apache-2.0
+##
+# Config for leakpro.llm_attacks.mia.config.AttackConfig, loaded via
+# load_attack_config_from_yaml(). Unlike the other examples' train_config.yaml
+# (which feed that example's own model-preparation script), this one is
+# consumed directly by the attack itself — see leakpro/llm_attacks/mia/README.md
+# for the full field reference, and leakpro/llm_attacks/mia/configs/ for more
+# dataset/model/reference-variant combinations.
+
+# Dataset and reference strategy
+dataset: ag_news        # ag_news | xsum | wikitext | tokyotech-llm/swallow-code
+ref_variant: base        # base | distillation | sft
+seed: 1337
+
+# Target training
+train_total: 20000
+val_total: 500
+eval_total: 20000
+epochs: 3
+batch_size: 16
+lr: 0.0001
+sequence_length: 128
+
+# Model
+model_name: gpt2          # gpt2 | EleutherAI/gpt-j-6B | meta-llama/Llama-2-7b-hf | codellama/CodeLlama-7b-hf
+finetune_method: full     # auto | full | lora
+
+# Optional: save the trained target/reference models and data for later inspection
+save_artifacts_path: ""

@@ -1,0 +1,30 @@
+# WikiText-103 • GPT-2 • Distillation reference • Full fine-tuning
+dataset: wikitext
+ref_variant: distillation
+seed: 1337
+
+# Target training
+train_total: 20000
+val_total: 500
+eval_total: 20000
+epochs: 3
+batch_size: 16
+lr: 0.0001
+sequence_length: 128
+
+# Model
+model_name: gpt2
+finetune_method: full
+
+# Distillation settings
+distil_max_prompts: 10000
+distil_completions: 1
+distil_max_new_tokens: 112
+distil_temperature: 0.9
+distil_top_p: 0.9
+distil_input_max_tokens: 16
+distil_train_epochs: 4
+distil_train_batch: 16
+distil_train_lr: 0.0001
+
+save_artifacts_path: spvmia/mia_run_artefacts/exp_wikitext_gpt2_distil
