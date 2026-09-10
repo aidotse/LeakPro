@@ -121,6 +121,20 @@ class TestConvertUpload:
                     convert_upload(src, Path(tmp))
                 assert exc.value.status_code == 400, src.name
 
+    def test_scalar_arrays_rejected(self: Self) -> None:
+        """0-d arrays load fine but len() would TypeError — must be a clean 400."""
+        from leakpro.webapp.backend.dataio import convert_upload
+
+        with tempfile.TemporaryDirectory() as tmp:
+            scalar_npy = Path(tmp) / "s.npy"
+            np.save(scalar_npy, np.array(5))
+            scalar_npz = Path(tmp) / "s.npz"
+            np.savez(scalar_npz, data=np.array(5), targets=np.array(1))
+            for src in (scalar_npy, scalar_npz):
+                with pytest.raises(HTTPException) as exc:
+                    convert_upload(src, Path(tmp))
+                assert exc.value.status_code == 400, src.name
+
     def test_unknown_format_falls_through(self: Self) -> None:
         """Legacy formats return None so callers use the existing loaders."""
         from leakpro.webapp.backend.dataio import convert_upload
@@ -185,6 +199,30 @@ class TestUploadEndpoint:
                           files={"file": ("d.npz", buf.getvalue()[:40], "application/octet-stream")},
                           headers=auth)
         assert res.status_code == 400, res.text
+
+    def test_unexpected_converter_error_becomes_400(self: Self) -> None:
+        """An unforeseen converter exception is a 400, not an unhandled 500.
+
+        upload_data guards convert_upload the same way set_data_path does.
+        """
+        from leakpro.webapp.backend import main as backend_main
+
+        client, auth = self._client()
+        job_id = client.post("/jobs", headers=auth).json()["job_id"]
+
+        def _boom(*_a: object, **_k: object) -> None:
+            raise RuntimeError("unforeseen converter failure")
+
+        original = backend_main.convert_upload
+        backend_main.convert_upload = _boom
+        try:
+            res = client.post(f"/jobs/{job_id}/upload/data",
+                              files={"file": ("d.npz", b"whatever", "application/octet-stream")},
+                              headers=auth)
+        finally:
+            backend_main.convert_upload = original
+        assert res.status_code == 400, res.text
+        assert "unforeseen" not in res.text  # safe_detail hides internals
 
     def test_hostile_npz_upload_rejected(self: Self) -> None:
         """A pickled-object .npz is rejected with 400 at upload time."""

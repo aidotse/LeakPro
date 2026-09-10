@@ -477,7 +477,14 @@ async def upload_data(job_id: str, file: UploadFile) -> DataMeta:
     # Safe formats (.npz/.parquet/.csv/...) are converted here, at the trust
     # boundary, into a server-generated pickle — the uploaded bytes are never
     # unpickled. Legacy pickle formats fall through to inspect().
-    converted = convert_upload(dest, _job_dir(job_id))
+    try:
+        converted = convert_upload(dest, _job_dir(job_id))
+    except HTTPException:
+        raise
+    except Exception as e:
+        _logger.exception("convert_upload failed for job %s", job_id)
+        raise HTTPException(status_code=400,
+                            detail=safe_detail(e, "Failed to convert upload")) from e
     if converted is not None:
         dest, meta = converted
     else:

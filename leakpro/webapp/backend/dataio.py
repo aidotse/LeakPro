@@ -106,6 +106,9 @@ def _from_npz(path: Path) -> tuple[np.ndarray, np.ndarray, None]:
             status_code=400,
             detail=f"No target array found in .npz (looked for {_TARGET_KEYS}; file has {names}).",
         )
+    if data.ndim == 0 or targets.ndim == 0:
+        raise HTTPException(status_code=400,
+                            detail="Expected arrays in the .npz, got a 0-dimensional scalar.")
     if len(targets) != len(data):
         raise HTTPException(status_code=400,
                             detail=f"data has {len(data)} rows but targets has {len(targets)}.")
@@ -121,6 +124,10 @@ def _from_npy(path: Path) -> tuple[np.ndarray, np.ndarray, None]:
             detail="Could not read the .npy file (corrupt, empty, or contains pickled "
                    "objects); or use .npz with data + targets entries.",
         ) from e
+    if data.ndim == 0:
+        # np.load succeeds on a scalar array, but len() below would TypeError.
+        raise HTTPException(status_code=400,
+                            detail="Expected an array, got a scalar .npy file.")
     return data, np.zeros(len(data), dtype=np.int64), None
 
 
