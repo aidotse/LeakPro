@@ -37,7 +37,7 @@ minv = ["torch", "torchvision", "optuna", "kornia", "blobfile", "lpips", "robust
 # resolves cleanly from PyPI. Run `python -m leakpro.utils.hardware_setup
 # --install` after installing the Habana SDK to pull these in.
 hpu = ["lightning-habana"]
-
+webapp = ["fastapi", "uvicorn[standard]", "python-multipart", "httpx"]
 dev = [
   "pytest",
   "pytest-cov",

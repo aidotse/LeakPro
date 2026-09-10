@@ -13,6 +13,7 @@ services:
       - leakpro_jobs:/data/jobs
     environment:
       - PYTHONUNBUFFERED=1
+      - LEAKPRO_WEBAPP_JOBS_DIR=/data/jobs
       # Set a fixed token to pin it; otherwise one is generated and logged.
       - LEAKPRO_WEBAPP_TOKEN=${LEAKPRO_WEBAPP_TOKEN:-}
     restart: unless-stopped

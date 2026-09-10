@@ -8,9 +8,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /
 # Copy repo
 COPY . .
 
-# Install LeakPro + webapp backend deps
-RUN pip install --no-cache-dir -e ".[dev]" \
-    fastapi uvicorn[standard] python-multipart pyyaml
+# Install LeakPro + webapp backend deps. Use the [webapp] extras group so this
+# list cannot drift from pyproject.toml (pyyaml is already a base dependency).
+RUN pip install --no-cache-dir -e ".[dev,webapp]"
 
 EXPOSE 8000
 
