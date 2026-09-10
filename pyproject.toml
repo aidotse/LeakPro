@@ -21,16 +21,22 @@ dependencies = [
   "joblib",
   "pyyaml",
   "scikit-learn",
+  "threadpoolctl",
   "pydantic",
   "ts2vec",
   "umap-learn"
 ]
 
 [project.optional-dependencies]
-mia = ["torch", "torchvision", "optuna", "opacus"]
+mia = ["torch", "torchvision", "optuna", "opacus", "mne", "pytorch-tcn"]
 synthetic = ["numba", "pydantic", "transformers", "sentence-transformers"]
 federated = ["torch", "torchvision", "torchmetrics", "pytorch-ignite", "optuna", "albumentations"]
 minv = ["torch", "torchvision", "optuna", "kornia", "blobfile", "lpips", "robustness", "mpi4py"]
+# Habana Gaudi (HPU) extras. `habana-torch-plugin` itself must be pulled from
+# Habana's index (see docs.habana.ai); we list `lightning-habana` here as it
+# resolves cleanly from PyPI. Run `python -m leakpro.utils.hardware_setup
+# --install` after installing the Habana SDK to pull these in.
+hpu = ["lightning-habana"]
 webapp = ["fastapi", "uvicorn[standard]", "python-multipart", "httpx"]
 dev = [
   "pytest",
@@ -38,25 +44,34 @@ dev = [
   "pytest-mock",
   "coverage-badge",
   "ruff",
-  "torch >= 2.6.0",  # from mia & federated
-  "torchvision",  # from mia & federated
-  "torchmetrics",  # from federated
-  "numba",  # from synthetic
-  "transformers",  # from synthetic
+  "torch>=2.6.0",    # from mia & federated
+  "torchvision",     # matches torch series chosen by the resolver
+  "torchmetrics",    # from federated
+  "numba",           # from synthetic
+  "transformers",    # from synthetic
   "sentence-transformers",  # from synthetic
-  "pytorch-ignite", # from federated
-  "optuna", # federated and mia
-  "kornia", # from minv
-  "opacus", # from mia
-  "albumentations", # federated example
-  "transformers", # federated example
+  "pytorch-ignite",  # from federated
+  "optuna",          # federated and mia
+  "kornia",          # from minv
+  "blobfile",        # from minv
+  "lpips",           # from minv
+  "robustness",      # from minv
+  "mpi4py",          # from minv
+  "opacus",          # from mia
+  "albumentations",  # federated example
+  "ipywidgets",      # notebook progress bars for examples
   "requests",
   "pip-licenses",
   "licenseheaders",
-  "blobfile", 
-  "lpips", 
-  "robustness", 
-  "mpi4py"
+]
+
+# Habana Gaudi development extras. Pins torch to the 2.10.x series because
+# habana-torch-plugin 1.24.0.1007 hard-asserts torch's major.minor at runtime.
+# Bump these pins only when the Habana plugin is updated to match.
+dev-hpu = [
+  "leakpro[dev]",
+  "torch>=2.10,<2.11",
+  "torchvision>=0.25,<0.26",
 ]
 
 [project.urls]

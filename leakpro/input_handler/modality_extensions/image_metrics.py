@@ -11,6 +11,7 @@ import numpy as np
 import torch
 from pydantic import BaseModel
 from scipy.linalg import sqrtm
+from threadpoolctl import threadpool_limits
 from torch.utils.data import DataLoader
 from torchvision import models, transforms
 
@@ -18,6 +19,7 @@ from leakpro.attacks.utils.generator_handler import GeneratorHandler
 from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.input_handler.user_imports import get_class_from_module, import_module_from_file
 from leakpro.schemas import MIAMetaDataSchema
+from leakpro.utils.device import get_device
 from leakpro.utils.logger import logger
 from leakpro.utils.save_load import hash_config
 
@@ -69,7 +71,7 @@ class ImageMetrics:
         self.batch_size = configs.batch_size
         self.num_class_samples = configs.num_class_samples
         self.num_audited_classes = configs.num_audited_classes
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = get_device()
 
     def load_evaluation_model(self) -> None:
         """Load the evaluation model."""
@@ -196,7 +198,16 @@ class ImageMetrics:
 
         # Calculate FID score
         diff = mu_real - mu_fake
-        covmean, _ = sqrtm(sigma_real @ sigma_fake, disp=False)
+        # scipy.linalg.sqrtm's LAPACK call can segfault when the process also has the
+        # Habana HPU runtime loaded: Habana ships its own OpenMP thread pool, which
+        # corrupts OpenBLAS's thread pool state when both fire in the same process.
+        # Forcing single-threaded BLAS for just this call avoids the conflict. Only HPU
+        # is affected, so CUDA/CPU keep full multithreaded BLAS performance here.
+        if self.device.type == "hpu":
+            with threadpool_limits(limits=1):
+                covmean, _ = sqrtm(sigma_real @ sigma_fake, disp=False)
+        else:
+            covmean, _ = sqrtm(sigma_real @ sigma_fake, disp=False)
         if np.iscomplexobj(covmean):
             covmean = covmean.real
 
@@ -297,7 +308,10 @@ class ImageMetrics:
                 transformed_images = torch.stack([transform(img) for img in pil_images]).to(self.device)
 
                 feats = model(transformed_images)
-                features.append(feats)
+                # Move off-device per batch: a bulk .cpu() on one large HPU-resident
+                # concatenated tensor can hit a Habana storage-copy bug (see the identical
+                # fix applied to checkpoint saving in gan_handler.py/generator_handler.py).
+                features.append(feats.detach().cpu())
         return torch.cat(features, dim=0)
 
     def get_generated_features(self, model: torch.nn.Module, transform: transforms.Compose) -> torch.tensor:
@@ -325,7 +339,7 @@ class ImageMetrics:
                 transformed_images = torch.stack([transform(img) for img in pil_images]).to(self.device)
 
                 feats = model(transformed_images)
-                features.append(feats)
+                features.append(feats.detach().cpu())
         return torch.cat(features, dim=0)
 
     pass

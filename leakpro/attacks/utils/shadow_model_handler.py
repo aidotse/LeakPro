@@ -17,6 +17,7 @@ from leakpro.attacks.utils.model_handler import ModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.schemas import ShadowModelTrainingSchema, TrainingOutput
 from leakpro.signals.signal_extractor import PytorchModel
+from leakpro.utils.device import get_device
 from leakpro.utils.import_helper import Any, Dict, List, Self, Tuple, Union
 from leakpro.utils.logger import logger
 
@@ -69,7 +70,7 @@ class ShadowModelHandler(ModelHandler):
         self.model_storage_name = "shadow_model"
         self.metadata_storage_name = "metadata"
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = get_device()
 
     def _freeze_value(self:Self, value: Union[List, Dict, Any]) -> Union[tuple, Any]:
         """Convert nested config values to a stable, comparable structure.
@@ -220,11 +221,12 @@ class ShadowModelHandler(ModelHandler):
         return A
 
 
-    def create_shadow_models(
+    def create_shadow_models(  # noqa: PLR0915
         self:Self,
         num_models:int,
         shadow_population: list,
         training_fraction:float=0.1,
+        sampling_method:str=None
     ) -> list[int]:
         """Create and train shadow models based on the blueprint.
 
@@ -233,14 +235,29 @@ class ShadowModelHandler(ModelHandler):
             num_models (int): The number of shadow models to create.
             shadow_population (list): The indices in population eligible for training the shadow models.
             training_fraction (float): The fraction of the shadow population to use for training of a shadow model.
+            sampling_method (str): Method for sampling training data. Options:
+                - "balanced": Each data point appears in exactly half the shadow models.
+                - "random": Random sampling, can be overridden by handler for custom behavior.
+                If None, reads from config (shadow_model.sampling_method), defaulting to "balanced".
 
         Returns:
         -------
-            None
+            list[int]: Indices of the shadow models (existing + newly created).
 
         """
         if num_models < 0:
             raise ValueError("Number of models cannot be negative")
+
+        # Get sampling_method from config if not explicitly provided
+        if sampling_method is None:
+            shadow_config = getattr(self.handler.configs, "shadow_model", None)
+            method = getattr(shadow_config, "sampling_method", None) if shadow_config is not None else None
+            sampling_method = method if isinstance(method, str) else "balanced"
+
+        if sampling_method not in ("balanced", "random"):
+            raise ValueError(f"Invalid sampling_method: {sampling_method}. Must be 'balanced' or 'random'.")
+
+        logger.info(f"Using '{sampling_method}' sampling method for shadow model training data")
 
         # Get the size of the dataset
         data_size = int(len(shadow_population)*training_fraction)
@@ -267,9 +284,13 @@ class ShadowModelHandler(ModelHandler):
         if not np.all(np.sum(A, axis=1) == expected_size):
             raise ValueError("Balanced shadow assignments must contain half of the shadow population per model")
         shadow_population = np.array(shadow_population)
+
         for i, indx in enumerate(indices_to_use):
-            # Get dataloader
-            data_indices = shadow_population[np.where(A[i,:] == 1)]
+            # Get dataloader based on sampling method
+            if sampling_method == "balanced":
+                data_indices = shadow_population[np.where(A[i,:] == 1)]
+            else:  # random sampling (can be overridden by handler)
+                data_indices = self.handler.sample_shadow_indices(shadow_population.tolist(), training_fraction)
             data_loader = self.handler.get_dataloader(data_indices, params=None, batch_size=self.batch_size)
 
             # Get shadow model blueprint
@@ -440,7 +461,10 @@ class ShadowModelHandler(ModelHandler):
         # Convert to numpy array for easier manipulation
         models_in_indices = np.asarray(models_in_indices)
 
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Index membership lookup only; kept on CPU for HPU specifically, since its graph
+        # compiler cannot compile the jit-scripted torch.isin call below. CUDA has no such
+        # restriction, so it keeps using get_device() rather than being pinned to CPU too.
+        device = torch.device("cpu") if get_device().type == "hpu" else get_device()
         model_indices_tensor = torch.from_numpy(models_in_indices).to(device=device)
         dataset_tensor = torch.from_numpy(dataset_indices).to(device=device)
         indice_masks_tensor = torch.zeros((len(dataset_indices), len(models_in_indices)), dtype=torch.bool, device=device)

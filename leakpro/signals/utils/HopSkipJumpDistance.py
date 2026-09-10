@@ -13,8 +13,6 @@ from torch import (
     amax,
     cat,
     clamp,
-    cuda,
-    device,
     float32,
     long,
     max,
@@ -36,6 +34,7 @@ from torch.nn import Module
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from leakpro.utils.device import get_device
 from leakpro.utils.import_helper import List, Self, Tuple
 from leakpro.utils.logger import logger
 
@@ -132,7 +131,7 @@ class HopSkipJumpDistance:
         self.verbose = verbose
         self.clip_min = -1
         self.clip_max = 1
-        self.device = device("cuda" if cuda.is_available() else "cpu")
+        self.device = get_device()
         self.image_shape = self.data_loader.dataset[0][0].shape
         self.batch_shape = (self.batch_size, self.image_shape[0], self.image_shape[1], self.image_shape[2])
         d = int(np.prod(self.image_shape))
@@ -575,7 +574,13 @@ class HopSkipJumpDistance:
 
         """
         dist = self.compute_distance(samples, perturbed )
-        batch_epsilon = dist / np.sqrt(current_iteration)
+        # Kept on CPU: this loop only does per-sample scalar comparisons and halving,
+        # never device tensor math directly. Doing that on-device (a Python int 0 written
+        # into a device Float tensor below) confuses Habana's op-fusion graph compiler
+        # ("Schema not found for node" on the following comparison). Only the small
+        # `active_epsilon` slice actually needs to be on-device, at the point it's
+        # broadcast-multiplied against a device tensor.
+        batch_epsilon = (dist / np.sqrt(current_iteration)).cpu()
 
         success = np.zeros(len(samples), dtype=bool)
         batch_active_indices = np.arange(len(samples))
@@ -585,7 +590,7 @@ class HopSkipJumpDistance:
 
             active_disturbed = perturbed[batch_active_indices]
             active_updates = updates[batch_active_indices]
-            active_epsilon = batch_epsilon[batch_active_indices].view(len(batch_active_indices), 1, 1, 1)
+            active_epsilon = batch_epsilon[batch_active_indices].view(len(batch_active_indices), 1, 1, 1).to(self.device)
 
             active_updateed_samples = active_disturbed + active_epsilon * active_updates
             active_updateed_samples = self.clamping(active_updateed_samples)
@@ -610,7 +615,12 @@ class HopSkipJumpDistance:
 
                 batch_active_indices = np.delete(batch_active_indices, positions_to_delete)
             num_evals += 1
-        return batch_epsilon
+        # batch_epsilon was kept on CPU for the whole loop above (see the comment where
+        # it's created) -- move it back to self.device before returning, or the caller's
+        # epsilon.view(...) * update breaks with a device mismatch against update, which
+        # is still resident on self.device. A CPU-only test run can't catch this: the
+        # bug only reproduces when self.device is a non-CPU device.
+        return batch_epsilon.to(self.device)
 
 
     def select_delta(self: Self,
