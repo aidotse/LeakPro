@@ -68,22 +68,26 @@ class AttackFactoryMIA:
 
         """
 
-        if AttackFactoryMIA.shadow_model_handler is None:
-            logger.info("Creating shadow model handler singleton")
-            AttackFactoryMIA.shadow_model_handler = ShadowModelHandler(handler)
-        else:
-            logger.info("Shadow model handler singleton already exists, updating state")
+        attack_cls = cls.attack_classes.get(name)
+        if attack_cls is None:
+            raise ValueError(f"Unknown attack type: {name}")
+
+        # Auxiliary-model handlers are only built for attacks that declare they need them.
+        # Every pre-existing attack inherits True from AbstractMIA, so their behaviour is unchanged.
+        if getattr(attack_cls, "requires_shadow_models", True):
+            if AttackFactoryMIA.shadow_model_handler is None:
+                logger.info("Creating shadow model handler singleton")
+            else:
+                logger.info("Shadow model handler singleton already exists, updating state")
             AttackFactoryMIA.shadow_model_handler = ShadowModelHandler(handler)
 
-        if AttackFactoryMIA.distillation_model_handler is None:
-            logger.info("Creating distillation model handler singleton")
-            AttackFactoryMIA.distillation_model_handler = DistillationModelHandler(handler)
-        else:
-            logger.info("Distillation model handler singleton already exists, updating state")
+        if getattr(attack_cls, "requires_distillation_models", True):
+            if AttackFactoryMIA.distillation_model_handler is None:
+                logger.info("Creating distillation model handler singleton")
+            else:
+                logger.info("Distillation model handler singleton already exists, updating state")
             AttackFactoryMIA.distillation_model_handler = DistillationModelHandler(handler)
 
-        if name in cls.attack_classes:
-            attack_object = cls.attack_classes[name](handler, attack_config)
-            attack_object.set_effective_optuna_metadata(attack_config) # remove optuna metadata if params not will be optimized
-            return attack_object
-        raise ValueError(f"Unknown attack type: {name}")
+        attack_object = attack_cls(handler, attack_config)
+        attack_object.set_effective_optuna_metadata(attack_config) # remove optuna metadata if params not will be optimized
+        return attack_object
