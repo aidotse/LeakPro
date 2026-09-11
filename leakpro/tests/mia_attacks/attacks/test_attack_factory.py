@@ -19,6 +19,7 @@ from pydantic import BaseModel
 import leakpro.attacks.mia_attacks.attack_factory_mia as factory_module
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
+from leakpro.attacks.mia_attacks.llm.abstract_llm_mia import AbstractLLMMIA
 from leakpro.attacks.mia_attacks.rmia import AttackRMIA
 from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.tests.input_handler.image_input_handler import ImageInputHandler
@@ -65,9 +66,9 @@ def _reset_factory_singletons(image_handler: ImageInputHandler) -> None:  # noqa
 
 
 def test_all_registered_attacks_require_both_handlers() -> None:
-    """The gate must be a no-op for every attack that existed before it."""
+    """The gate must be a no-op for every attack that existed before it (LLM attacks opt out by design)."""
     for name, attack_cls in AttackFactoryMIA.attack_classes.items():
-        if issubclass(attack_cls, _NoAuxAttack):
+        if issubclass(attack_cls, (_NoAuxAttack, AbstractLLMMIA)):
             continue
         assert attack_cls.requires_shadow_models is True, name
         assert attack_cls.requires_distillation_models is True, name
