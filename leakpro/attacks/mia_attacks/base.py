@@ -135,13 +135,13 @@ class AttackBASE(AbstractMIA):
         ground_truth_indices = dataloader.dataset.targets.numpy()
         assert n_points == len(ground_truth_indices), "Number of points and labels must be the same"
         logger.info(f"Scoring {n_points} points with BASE attack")
-        logits_target = np.array(ModelLogits()([self.target_model], None, None, dataloader)).squeeze(axis=0)
-        log_conf_target = self._log_conf(logits_target, ground_truth_indices)
+        target_outputs = np.array(ModelLogits()([self.target_model], None, None, dataloader)).squeeze(axis=0)
+        log_conf_target = self._log_conf(target_outputs, ground_truth_indices)
         # run points through shadow models and collect the log confidence values
-        logits_sm = []
+        shadow_outputs = []
         for m in tqdm(self.shadow_models, desc="Scoring with shadow models"):
-            logits_sm.append( np.array(ModelLogits()([m], self.handler, None, dataloader)).squeeze(axis=0) )
-        log_conf_shadow_models = np.array([self._log_conf(x, ground_truth_indices) for x in logits_sm])
+            shadow_outputs.append( np.array(ModelLogits()([m], self.handler, None, dataloader)).squeeze(axis=0) )
+        log_conf_shadow_models = np.array([self._log_conf(x, ground_truth_indices) for x in shadow_outputs])
 
         if self.online is True:
             threshold = logsumexp(log_conf_shadow_models, axis=0) - np.log(self.num_shadow_models)
@@ -177,16 +177,16 @@ class AttackBASE(AbstractMIA):
 
         # Load the logits for the target model and shadow models
         ground_truth_indices = self.handler.get_labels(self.audit_dataset["data"])
-        logits_target = ShadowModelHandler().load_logits(name=f"target_{ShadowModelHandler().target_model_hash}")
-        logits_shadow_models = []
+        target_outputs = ShadowModelHandler().load_logits(name=f"target_{ShadowModelHandler().target_model_hash}")
+        shadow_outputs = []
         for indx in self.shadow_model_indices:
-            logits_shadow_models.append(ShadowModelHandler().load_logits(indx=indx))
+            shadow_outputs.append(ShadowModelHandler().load_logits(indx=indx))
 
         # collect the log confidence output of the correct class (which is the negative cross-entropy loss)
-        log_conf_target = self._log_conf(logits_target, ground_truth_indices)
+        log_conf_target = self._log_conf(target_outputs, ground_truth_indices)
 
         # run points through shadow models and collect the log confidence values
-        log_conf_shadow_models = np.array([self._log_conf(x, ground_truth_indices) for x in logits_shadow_models])
+        log_conf_shadow_models = np.array([self._log_conf(x, ground_truth_indices) for x in shadow_outputs])
 
         if self.online is True:
             threshold = logsumexp(log_conf_shadow_models, axis=0) - np.log(self.num_shadow_models)
