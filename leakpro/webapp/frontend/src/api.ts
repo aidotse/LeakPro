@@ -117,6 +117,9 @@ export const api = {
 
   // Step 7
   getResults: (id: string) => get<{ job_id: string; results: ModelResult[] }>(`/jobs/${id}/results`),
+  // Risk assessment. All scoring happens in leakpro/risk on the backend; this posts the declared
+  // use-case profile and renders whatever comes back.
+  assessRisk: (id: string, profile: RiskRequest) => post<RiskResponse>(`/jobs/${id}/risk`, profile),
   getSampleData: (jobId: string, index: number) =>
     get<{ index: number; label: number; features: number[]; feature_names?: string[] }>(`/jobs/${jobId}/sample_data/${index}`),
 };
@@ -237,5 +240,67 @@ export interface ModelResult {
   model_class?: string;
   job_id?: string;
   train_meta?: TrainMeta;
+  num_train?: number;
   attacks: AttackResult[];
+}
+
+// ---------------------------------------------------------------------------
+// Risk assessment (mirrors leakpro/risk/schemas.py and backend models.py)
+// ---------------------------------------------------------------------------
+
+/** Declared harm parameters. Field names follow Sion et al.'s Loss Magnitude decomposition. */
+export interface RiskRequest {
+  model_name?: string;
+  tolerated_fpr: number;          // alpha; required on purpose, no default
+  attacker_prior?: number;        // pi
+  n_subjects?: number;            // NDS
+  records_per_subject?: number;   // NR
+  data_type_sensitivity?: number; // DTS
+  subject_type_weight?: number;   // DST
+  cost_per_exposed_subject?: number;
+  extrapolate_to_population?: boolean;
+  notes?: string;
+}
+
+export interface RiskMeasured {
+  attack_name: string;
+  operating_point: number;
+  success_rate: number;
+  advantage: number;
+  lift: number;
+  resolvable: boolean;
+  roc_auc?: number;
+  n_members_audit: number;
+  n_non_members_audit: number;
+  n_exposed_audit?: number;
+  min_resolvable_fpr: number;
+}
+
+export interface RiskCombined {
+  ppv?: number;
+  ppv_balanced?: number;
+  gamma: number;
+  loss_magnitude?: number;
+  loss_event_frequency: number;
+  risk?: number;
+  expected_exposed_subjects?: number;
+  expected_cost?: number;
+  extrapolated_exposed_records?: number;
+  vulnerability_band?: string;
+}
+
+export interface RiskAssessment {
+  measured: RiskMeasured;
+  declared: Record<string, unknown> & { n_subjects?: number; n_subjects_source: string; attacker_prior: number };
+  combined: RiskCombined;
+  assumptions: string[];
+  warnings: string[];
+  policy_version: string;
+  leakpro_version: string;
+}
+
+export interface RiskResponse {
+  job_id: string;
+  assessments: Record<string, RiskAssessment>;
+  unassessable: Record<string, string>;
 }
