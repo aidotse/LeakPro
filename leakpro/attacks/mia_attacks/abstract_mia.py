@@ -41,6 +41,15 @@ class AbstractMIA(AbstractAttack):
 
     AttackConfig: type[BaseModel]  # Subclasses must define an attack config
 
+    # Auxiliary-model requirements. AttackFactoryMIA reads these off the *class* before
+    # instantiating it and only builds the ShadowModelHandler / DistillationModelHandler
+    # singletons when they are True. Building them is not free: ModelHandler.__init__ hashes
+    # the full target state dict and caches a dense forward pass over the audit set, which is
+    # prohibitive for large models. Attacks that train nothing (e.g. the LLM reference-model
+    # attacks) set both to False. The default keeps every existing attack unchanged.
+    requires_shadow_models: bool = True
+    requires_distillation_models: bool = True
+
     def __init__(
         self:Self,
         handler: AbstractInputHandler,
@@ -60,7 +69,7 @@ class AbstractMIA(AbstractAttack):
         # These objects are shared and should be initialized only once
         AbstractMIA.population = handler.population
         AbstractMIA.population_size = handler.population_size
-        AbstractMIA.target_model = PytorchModel(handler.target_model, handler.get_criterion())
+        AbstractMIA.target_model = self._wrap_target_model(handler)
         AbstractMIA.audit_dataset = {
             # Assuming train_indices and test_indices are arrays of indices, not the actual data
             "data": np.concatenate((handler.train_indices, handler.test_indices)),
@@ -78,8 +87,20 @@ class AbstractMIA(AbstractAttack):
         # Create an ID for the attack based on config + target model
         self._hash_attack()
 
+    @staticmethod
+    def _wrap_target_model(handler: AbstractInputHandler) -> PytorchModel:
+        """Wrap the handler's raw target module in the signal-extractor interface.
+
+        Subclasses whose target is not a classifier (e.g. a causal language model) override this
+        to return a different :class:`leakpro.signals.signal_extractor.Model` implementation.
+        """
+        return PytorchModel(handler.target_model, handler.get_criterion())
+
     def _hash_attack(self:Self)->None:
-        """Hash the attack based on the config and target model."""
+        """Hash the attack based on the config and target model.
+
+        Overridable: subclasses auditing very large models may substitute a cheaper fingerprint.
+        """
         self.attack_id = hash_attack(self.configs.model_dump(), AbstractMIA.handler.target_model)
 
     @classmethod

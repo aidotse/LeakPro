@@ -1,0 +1,41 @@
+##
+## Copyright 2023-2026 Lindholmen Science Park AB
+## SPDX-License-Identifier: Apache-2.0
+##
+audit:
+  random_seed: 1234
+  attack_type: mia
+  data_modality: text
+  output_dir: ./leakpro_output_full     # run_audit.py rewrites this per target when sweeping
+  attack_list:
+    # Both attacks compare the fine-tuned target against the frozen base checkpoint it was
+    # fine-tuned from (the papers' default reference). Two forward passes per sequence, no training.
+    - attack: ez_mia
+      aggregation: ratio                # paper score P/N; log_ratio / positive_fraction / ... are ablations
+      batch_size: 16
+      pad_token_id: 50256               # GPT-2 has no pad token; eos is used and masked out
+      references:
+        - source: pretrained
+          pretrained_name_or_path: gpt2
+          dtype: float32
+    - attack: wbc
+      w_min: 2                          # paper defaults
+      w_max: 40
+      n_windows: 10
+      aggregation: sign
+      batch_size: 16
+      pad_token_id: 50256
+      references:
+        - source: pretrained
+          pretrained_name_or_path: gpt2
+          dtype: float32
+
+target:
+  module_path: ./hf_wrapper.py
+  model_class: HFCausalLMWrapper
+  target_folder: ./target_full          # prepare_target.py --finetune-method full|lora → target_full|target_lora
+  data_path: ./data/wikitext_gpt2_128.pkl
+
+shadow_model:
+
+distillation_model:

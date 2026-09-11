@@ -1,0 +1,36 @@
+##
+## Copyright 2023-2026 Lindholmen Science Park AB
+## SPDX-License-Identifier: Apache-2.0
+##
+# Target preparation for the LLM MIA example (prepare_target.py). Defaults reproduce the EZ-MIA
+# paper's WikiText / GPT-2 / full fine-tuning setting (arXiv:2601.12104, §4 and appendix A).
+run:
+  random_seed: 1234
+  # {finetune_method} is substituted, so the LoRA-vs-full sweep writes two targets side by side.
+  log_dir: ./target_{finetune_method}
+
+train:
+  model_name: gpt2            # HF hub id; GPT-2 (124M) is fully fine-tuned in the paper, larger models use LoRA
+  dtype: float32
+  finetune_method: full       # full | lora   (override with --finetune-method)
+  epochs: 3
+  batch_size: 16
+  learning_rate: 1.0e-4
+  weight_decay: 0.0
+  lora:                       # used only when finetune_method == lora (paper: r=16, alpha=32, dropout=0.05)
+    r: 16
+    alpha: 32
+    dropout: 0.05
+    target_modules: [c_attn, c_proj, c_fc]   # GPT-2 module names; adjust for other architectures
+
+data:
+  hf_dataset: wikitext
+  hf_config: wikitext-103-raw-v1
+  split: train
+  text_field: text
+  chunking: fixed             # fixed: concatenate and cut into max_length-token chunks (paper) | variable
+  max_length: 128
+  n_sequences: 20000          # population size; members + non-members must fit inside it
+  n_members: 10000
+  n_nonmembers: 10000
+  data_path: ./data/wikitext_gpt2_128.pkl
