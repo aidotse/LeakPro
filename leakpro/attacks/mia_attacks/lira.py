@@ -250,8 +250,11 @@ class AttackLiRA(AbstractMIA):
                 pr_in = norm.logpdf(target_signal, in_mean, in_std + 1e-30)
                 pr_out = norm.logpdf(target_signal, out_mean, out_std + 1e-30)
             else:
+                # Offline attack scores by how unlikely the target signal is under the
+                # OUT distribution, matching the reference implementation
+                # (tensorflow/privacy mi_lira_2021: score = logpdf(out), negated at ROC time).
                 pr_in = 0
-                pr_out = -norm.logcdf(target_signal, out_mean, out_std + 1e-30)
+                pr_out = norm.logpdf(target_signal, out_mean, out_std + 1e-30)
 
             score[i] = (pr_in - pr_out)  # Append the calculated probability density value to the score list
             if np.isnan(score[i]):
