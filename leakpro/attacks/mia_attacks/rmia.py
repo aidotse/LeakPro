@@ -157,19 +157,19 @@ shadow-model residuals on the z-population. Ignored for classification models, w
             "detailed": detailed_str,
         }
 
-    def _get_z_logits(self:Self,
-                      logits_cached: np.ndarray,
+    def _get_z_outputs(self:Self,
+                      outputs_cached: np.ndarray,
                       model,  # noqa: ANN001
                       z_indices: np.ndarray,
                       cached_mask: np.ndarray,
                       logit_row: dict) -> np.ndarray:
-        """Return logits for z_indices, reading from cache where available and computing on-the-fly otherwise."""
+        """Return outputs for z_indices, reading from cache where available and computing on-the-fly otherwise."""
         n = len(z_indices)
-        logits = np.zeros((n, *logits_cached.shape[1:]))
+        outputs = np.zeros((n, *outputs_cached.shape[1:]))
 
         if cached_mask.any():
             rows = np.array([logit_row[int(idx)] for idx in z_indices[cached_mask]])
-            logits[cached_mask] = logits_cached[rows]
+            outputs[cached_mask] = outputs_cached[rows]
 
         if (~cached_mask).any():
             # Shadow models are already PytorchModel wrappers; target model is a raw nn.Module.
@@ -184,11 +184,11 @@ shadow-model residuals on the z-population. Ignored for classification models, w
                 self.handler,
                 z_indices[~cached_mask],
             )).squeeze(axis=0)
-            logits[~cached_mask] = unc
+            outputs[~cached_mask] = unc
 
-        return logits
+        return outputs
 
-    def _resolve_scale(self:Self, shadow_logits_z: list, z_labels: np.ndarray) -> None:
+    def _resolve_scale(self:Self, shadow_outputs_z: list, z_labels: np.ndarray) -> None:
         """Resolve the residual-likelihood scale used by the regression signal probability.
 
         With a user-provided sigma (residual std), it is mapped to the scale of the resolved
@@ -201,7 +201,7 @@ shadow-model residuals on the z-population. Ignored for classification models, w
 
         Args:
         ----
-            shadow_logits_z (list): Per-shadow-model predictions on the z-points.
+            shadow_outputs_z (list): Per-shadow-model predictions on the z-points.
             z_labels (np.ndarray): True outputs for the z-points, same shape as each prediction.
 
         """
@@ -213,20 +213,20 @@ shadow-model residuals on the z-population. Ignored for classification models, w
             return
 
         if self.likelihood_family == "gaussian":
-            energies = [np.mean(mse(logits_z, z_labels)) for logits_z in shadow_logits_z]
+            energies = [np.mean(mse(outputs_z, z_labels)) for outputs_z in shadow_outputs_z]
         elif self.likelihood_family == "laplace":
-            energies = [np.mean(mae(logits_z, z_labels)) for logits_z in shadow_logits_z]
+            energies = [np.mean(mae(outputs_z, z_labels)) for outputs_z in shadow_outputs_z]
         else:
-            energies = [np.mean(huber_energy(logits_z, z_labels, self._huber_delta)) for logits_z in shadow_logits_z]
+            energies = [np.mean(huber_energy(outputs_z, z_labels, self._huber_delta)) for outputs_z in shadow_outputs_z]
 
         self._scale = float(np.mean(energies))
         if self._scale <= 0.0:
             # Degenerate case: shadow models reproduce all z-targets exactly.
             self._scale = self.epsilon
         logger.info(f"Estimated {self.likelihood_family} residual scale = {self._scale:.6g} "
-                    f"from {len(shadow_logits_z)} shadow model(s) on {len(z_labels)} z-points")
+                    f"from {len(shadow_outputs_z)} shadow model(s) on {len(z_labels)} z-points")
 
-    def _signal_probability(self:Self, logits: np.ndarray, labels: np.ndarray) -> np.ndarray:
+    def _signal_probability(self:Self, outputs: np.ndarray, labels: np.ndarray) -> np.ndarray:
         """Compute the per-point probability of the true output given a model.
 
         Classification: temperature softmax indexed at the true class (RMIA paper, Sec. 3).
@@ -236,7 +236,7 @@ shadow-model residuals on the z-population. Ignored for classification models, w
 
         Args:
         ----
-            logits ( len(dataset) x ... ): Model outputs (class logits or forecasts).
+            outputs ( len(dataset) x ... ): Model outputs (class logits or forecasts).
             labels ( len(dataset) x ... ): True classes (int) or true outputs (float).
 
         Returns:
@@ -248,11 +248,11 @@ shadow-model residuals on the z-population. Ignored for classification models, w
             if self._scale is None:
                 raise RuntimeError("Residual likelihood scale is unresolved — prepare_attack must run first.")
             if self.likelihood_family == "gaussian":
-                return gaussian_residual_probability(logits, labels, self._scale)
+                return gaussian_residual_probability(outputs, labels, self._scale)
             if self.likelihood_family == "laplace":
-                return laplace_residual_probability(logits, labels, self._scale)
-            return huber_residual_probability(logits, labels, self._scale, self._huber_delta)
-        return softmax_logits(logits, self.temperature)[np.arange(len(labels)), labels]
+                return laplace_residual_probability(outputs, labels, self._scale)
+            return huber_residual_probability(outputs, labels, self._scale, self._huber_delta)
+        return softmax_logits(outputs, self.temperature)[np.arange(len(labels)), labels]
 
     def _prepare_shadow_models(self:Self) -> None:
 
@@ -279,15 +279,15 @@ shadow-model residuals on the z-population. Ignored for classification models, w
         """
         logger.info("Preparing shadow models for RMIA attack")
 
-        # If we already have one run, we dont need to check for shadow models as logits are stored
+        # If we already have one run, we dont need to check for shadow models as outputs are stored
         if not self.load_for_optuna:
             self._prepare_shadow_models()
 
             self.ground_truth = self.handler.get_labels(self.audit_dataset["data"])
-            self.logits_theta = ShadowModelHandler().load_logits(name=f"target_{ShadowModelHandler().target_model_hash}")
-            self.logits_shadow_models = []
+            self.target_outputs = ShadowModelHandler().load_logits(name=f"target_{ShadowModelHandler().target_model_hash}")
+            self.shadow_outputs = []
             for indx in self.shadow_model_indices:
-                self.logits_shadow_models.append(ShadowModelHandler().load_logits(indx=indx))
+                self.shadow_outputs.append(ShadowModelHandler().load_logits(indx=indx))
 
         # Sample z from full population per Algorithm 1 of the RMIA paper.
         # Build a cache lookup (global index → row) once — identical for target and all shadow models.
@@ -312,22 +312,22 @@ shadow-model residuals on the z-population. Ignored for classification models, w
         cached_mask = np.array([int(idx) in logit_row for idx in z_indices])
 
         # Collect raw model outputs on the z-points for the target and all shadow models
-        logits_z_theta = self._get_z_logits(
-            self.logits_theta, self.handler.target_model, z_indices, cached_mask, logit_row)
-        logits_z_shadow_models = [
-            self._get_z_logits(sm_logits, sm, z_indices, cached_mask, logit_row)
-            for sm, sm_logits in zip(self.shadow_models, self.logits_shadow_models)
+        target_outputs_z = self._get_z_outputs(
+            self.target_outputs, self.handler.target_model, z_indices, cached_mask, logit_row)
+        shadow_outputs_z = [
+            self._get_z_outputs(sm_outputs, sm, z_indices, cached_mask, logit_row)
+            for sm, sm_outputs in zip(self.shadow_models, self.shadow_outputs)
         ]
 
         if self.is_regression:
-            self._resolve_scale(logits_z_shadow_models, z_labels)
+            self._resolve_scale(shadow_outputs_z, z_labels)
 
         # p(z | target model)
-        p_z_given_theta = np.atleast_2d(self._signal_probability(logits_z_theta, z_labels))
+        p_z_given_theta = np.atleast_2d(self._signal_probability(target_outputs_z, z_labels))
 
         # p(z | each shadow model)
         p_z_given_shadow_models = np.array(
-            [self._signal_probability(logits_z, z_labels) for logits_z in logits_z_shadow_models])
+            [self._signal_probability(outputs_z, z_labels) for outputs_z in shadow_outputs_z])
 
         # evaluate the marginal p(z)
         if self.online is True:
@@ -345,11 +345,11 @@ shadow-model residuals on the z-population. Ignored for classification models, w
 
         # probability of the true output for each audit point given the target model
         n_audit_points = len(self.ground_truth)
-        p_x_given_theta = np.atleast_2d(self._signal_probability(self.logits_theta, self.ground_truth))
+        p_x_given_theta = np.atleast_2d(self._signal_probability(self.target_outputs, self.ground_truth))
 
         # same per shadow model, to compute the marginal p(x)
         p_x_given_shadow_models = np.array(
-            [self._signal_probability(x, self.ground_truth) for x in self.logits_shadow_models])
+            [self._signal_probability(x, self.ground_truth) for x in self.shadow_outputs])
 
         if self.online is True:
             p_x = np.mean(p_x_given_shadow_models, axis=0, keepdims=True)
