@@ -291,8 +291,15 @@ class CausalLMModel(Model):
         """
         if isinstance(loader, DataLoader) and getattr(loader.sampler, "shuffle", False):
             raise ValueError("DataLoader must not shuffle: row order must match the indices it was built from")
+        self.model_obj.to(self.device)  # no-op unless offload() was called
         parts: List[TokenEvidence] = [self.token_evidence(ids, mask, request) for ids, mask in loader]
         return TokenEvidence.concatenate(parts)
+
+    def offload(self: Self) -> None:
+        """Move the model to CPU and release cached device memory; the next evidence call moves it back."""
+        self.model_obj.to("cpu")
+        if self.device.type == "cuda":
+            torch.cuda.empty_cache()
 
     def get_loss(self: Self, batch_samples: Tensor, batch_labels: Tensor, per_point: bool = True) -> np.ndarray:
         """Mean next-token negative log-likelihood over the valid positions of each sequence.
