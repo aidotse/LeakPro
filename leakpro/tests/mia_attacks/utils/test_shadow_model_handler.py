@@ -327,3 +327,67 @@ def test_filter_rejects_shadow_models_from_different_population(image_handler: I
 
     assert all_indices == [0]
     assert filtered_indices == []
+
+
+def test_construct_balanced_assignments_respects_points_per_model(image_handler: ImageInputHandler) -> None:
+    """Every dataset must get exactly points_per_model points, with per-point counts balanced within 1."""
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+    sm = ShadowModelHandler(image_handler)
+
+    m, n = 100, 7
+    for fraction in [0.3, 0.5, 0.72, 1.0]:
+        points_per_model = int(m * fraction)
+        A = sm.construct_balanced_assignments(m, n, points_per_model=points_per_model)
+        assert A.shape == (n, m)
+        assert np.all(A.sum(axis=1) == points_per_model)
+        inclusion_counts = A.sum(axis=0)
+        assert inclusion_counts.max() - inclusion_counts.min() <= 1
+
+    # Default keeps the historical behavior of half the population per model
+    A = sm.construct_balanced_assignments(101, 4)
+    assert np.all(A.sum(axis=1) == 101 // 2)
+
+    with raises(ValueError):
+        sm.construct_balanced_assignments(m, n, points_per_model=0)
+    with raises(ValueError):
+        sm.construct_balanced_assignments(m, n, points_per_model=m + 1)
+
+
+def test_shadow_model_training_fraction_is_used_and_cached(
+    image_handler: ImageInputHandler,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Shadow models must train on training_fraction of the population and be reused for that fraction."""
+    shadow_config = ShadowModelConfig(**get_shadow_model_config())
+    image_handler.configs.shadow_model = shadow_config
+
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+    sm = ShadowModelHandler(image_handler)
+    sm.storage_path = str(tmp_path / "attack_objects")
+    os.makedirs(sm.storage_path, exist_ok=True)
+    sm.attack_cache_folder_path = str(tmp_path / "attack_cache")
+    os.makedirs(sm.attack_cache_folder_path, exist_ok=True)
+
+    trained_sizes = []
+
+    def fake_train(data_loader, model, criterion, optimizer, epochs):
+        trained_sizes.append(len(data_loader.dataset))
+        return TrainingOutput(model=model, metrics=EvalOutput(accuracy=0.0, loss=0.0))
+
+    monkeypatch.setattr(image_handler, "train", fake_train)
+    monkeypatch.setattr(image_handler, "eval", lambda *args, **kwargs: EvalOutput(accuracy=0.0, loss=0.0))
+    monkeypatch.setattr(sm, "cache_logits", lambda *args, **kwargs: None)
+
+    population = image_handler.test_indices
+    training_fraction = 0.75
+    expected_size = int(len(population) * training_fraction)
+
+    sm.create_shadow_models(num_models=2, shadow_population=population, training_fraction=training_fraction)
+    assert trained_sizes == [expected_size, expected_size]
+
+    # Re-running with the same fraction must reuse the cached models, not retrain (issue #345)
+    sm.create_shadow_models(num_models=2, shadow_population=population, training_fraction=training_fraction)
+    assert trained_sizes == [expected_size, expected_size]
