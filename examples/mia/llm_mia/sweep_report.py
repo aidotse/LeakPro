@@ -20,8 +20,9 @@ def load_run(run_dir: Path, label: str) -> list:
     results = []
     for path in sorted((run_dir / "data_objects").glob("*.json")):
         res = MIAResult.load(str(path))
-        # reduce_to_unique_labels() splits the id on "-" and uses the first part as the series name.
-        name = res.result_name.replace("-", "") + f"[{label}]"
+        # reduce_to_unique_labels() splits the id on "-" and uses the first part as the series name,
+        # so neither the attack name nor the run label may contain a hyphen.
+        name = res.result_name.replace("-", "") + f"[{label.replace('-', '_')}]"
         config_hash = res.id.split("-")[-1]
         res.id = f"{name}-{config_hash}"
         res.result_name = name
