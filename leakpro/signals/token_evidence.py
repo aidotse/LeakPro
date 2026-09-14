@@ -35,7 +35,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F  # noqa: N812
 from torch import Tensor, nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, RandomSampler
 
 from leakpro.signals.signal_extractor import Model
 from leakpro.utils.device import get_device, mark_step
@@ -289,7 +289,7 @@ class CausalLMModel(Model):
             TokenEvidence over all rows, padded to the longest batch.
 
         """
-        if isinstance(loader, DataLoader) and getattr(loader.sampler, "shuffle", False):
+        if isinstance(loader, DataLoader) and isinstance(loader.sampler, RandomSampler):
             raise ValueError("DataLoader must not shuffle: row order must match the indices it was built from")
         self.model_obj.to(self.device)  # no-op unless offload() was called
         parts: List[TokenEvidence] = [self.token_evidence(ids, mask, request) for ids, mask in loader]

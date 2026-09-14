@@ -181,6 +181,14 @@ def test_evidence_from_loader_matches_single_batch(wrapped: CausalLMModel) -> No
     np.testing.assert_array_equal(streamed.lengths, [4, 2, 7, 3, 5])
 
 
+def test_evidence_from_loader_rejects_shuffled_loader(wrapped: CausalLMModel) -> None:
+    """A shuffled loader would silently misalign rows with population indices."""
+    dataset = [(torch.tensor([1, 2, 3]), torch.tensor([1, 2, 3]))] * 4
+    loader = DataLoader(dataset, batch_size=2, shuffle=True, collate_fn=CausalLMCollate(pad_token_id=0))
+    with pytest.raises(ValueError, match="must not shuffle"):
+        wrapped.evidence_from_loader(loader)
+
+
 def test_concatenate_pads_and_validates() -> None:
     """Concatenate right-pads to the longest T and rejects mismatched moments."""
     a = TokenEvidence(

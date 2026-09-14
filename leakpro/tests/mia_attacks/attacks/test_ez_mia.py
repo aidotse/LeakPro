@@ -74,8 +74,11 @@ def test_log_ratio_and_ratio_rank_identically() -> None:
     rng = np.random.default_rng(0)
     delta = rng.normal(size=(50, 30))
     error = rng.random((50, 30)) < 0.6
+    delta[:5] = -np.abs(delta[:5])          # P == 0, N > 0: ratio 0, log_ratio -inf — must rank lowest in both
     a, b = ez_scores(delta, error, "ratio"), ez_scores(delta, error, "log_ratio")
     np.testing.assert_array_equal(np.argsort(a, kind="stable"), np.argsort(b, kind="stable"))
+    assert np.all(a[:5] <= a[5:].min())
+    assert np.all(b[:5] <= b[5:].min())
 
 
 def test_padding_positions_do_not_contribute() -> None:

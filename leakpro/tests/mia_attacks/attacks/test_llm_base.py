@@ -5,8 +5,9 @@
 """Unit tests for leakpro.attacks.mia_attacks.llm.abstract_llm_mia.
 
 Tests cover:
-- rank_top(): forced and non-finite rows end up strictly above every ordinary row, ordered by the
-  tiebreak, all outputs finite, ordinary rows untouched; all-forced and none-forced cases
+- rank_top(): forced and +inf rows end up strictly above every ordinary row, ordered by the
+  tiebreak; -inf rows go below every ordinary row; unforced nan raises; all outputs finite,
+  ordinary rows untouched; all-forced and none-forced cases
 - ReferenceModelConfig / LLMAttackConfig validation (extra="forbid", source literal)
 - load_reference(): `self` wraps the handler's target; `random_init` re-initialises the blueprint
   so it differs from the target; `pretrained` without a path raises
@@ -42,17 +43,38 @@ def test_rank_top_leaves_ordinary_rows_alone_when_nothing_forced() -> None:
 
 
 def test_rank_top_places_forced_rows_above_all_others_ordered_by_tiebreak() -> None:
-    """Forced rows beat the max ordinary score; among themselves larger tiebreak ranks higher."""
+    """Forced rows and +inf beat the max ordinary score; among themselves larger tiebreak ranks higher."""
     s = np.array([0.5, 9.0, 0.1, 2.0, np.inf, np.nan])
-    force = np.array([True, False, False, True, False, False])
+    force = np.array([True, False, False, True, False, True])   # the nan row must be explicitly forced
     tb = np.array([1.0, 0.0, 0.0, 5.0, 3.0, 2.0])
     out = rank_top(s, force, tb)
     assert np.all(np.isfinite(out))
-    forced_rows = force | ~np.isfinite(s)  # rows 0, 3, 4, 5
+    forced_rows = force | np.isposinf(s)  # rows 0, 3, 4, 5
     assert out[forced_rows].min() > out[~forced_rows].max()
     np.testing.assert_array_equal(out[~forced_rows], s[~forced_rows])
     # tiebreak order among forced: row3 (5) > row4 (3) > row5 (2) > row0 (1)
     assert out[3] > out[4] > out[5] > out[0]
+
+
+def test_rank_top_neg_inf_goes_to_bottom_and_only_pos_inf_is_forced() -> None:
+    """-inf is the weakest signal (log(P/N) with P == 0) and must rank below every ordinary row."""
+    s = np.array([0.5, -np.inf, 2.0, np.inf, -np.inf])
+    out = rank_top(s, np.zeros(5, bool), np.zeros(5))
+    assert np.all(np.isfinite(out))
+    assert out[3] > max(out[0], out[2])           # +inf forced to the top
+    assert out[1] < min(out[0], out[2])           # -inf below the ordinary rows
+    assert out[1] == out[4]                       # ties preserved
+    np.testing.assert_array_equal(out[[0, 2]], s[[0, 2]])
+
+
+def test_rank_top_rejects_nan_outside_forced_rows() -> None:
+    """A nan in an ordinary row is a caller bug, not something to silently rank."""
+    with pytest.raises(ValueError, match="nan"):
+        rank_top(np.array([1.0, np.nan]), np.array([False, False]), np.zeros(2))
+    # nan in a forced row is fine
+    out = rank_top(np.array([1.0, np.nan]), np.array([False, True]), np.zeros(2))
+    assert np.all(np.isfinite(out))
+    assert out[1] > out[0]
 
 
 def test_rank_top_all_forced_is_finite_and_ordered() -> None:
@@ -174,6 +196,31 @@ def test_load_reference_random_init_differs_from_target_and_is_deterministic() -
     assert torch.equal(a.model_obj.head.weight, b.model_obj.head.weight)
 
 
+class _Conv1DLike(torch.nn.Module):
+    """Mimics HuggingFace's Conv1D: owns parameters, defines no reset_parameters."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.ones(4, 3))
+        self.bias = torch.nn.Parameter(torch.ones(3))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x @ self.weight + self.bias
+
+
+def test_reinitialise_randomises_modules_without_reset_parameters() -> None:
+    """GPT-2's Conv1D has no reset_parameters; its weights must still change (and biases zero)."""
+    from leakpro.attacks.mia_attacks.llm.abstract_llm_mia import _reinitialise
+
+    model = torch.nn.Sequential(torch.nn.Linear(2, 4), _Conv1DLike())
+    torch.manual_seed(0)
+    _reinitialise(model)
+    conv = model[1]
+    assert not torch.equal(conv.weight, torch.ones(4, 3))
+    assert torch.equal(conv.bias, torch.zeros(3))
+    assert conv.weight.std().item() < 0.1                    # N(0, 0.02), not ones
+
+
 def test_load_reference_pretrained_requires_path() -> None:
     """source=pretrained without a checkpoint name is a config error, not a transformers error."""
     with pytest.raises(ValueError, match="pretrained_name_or_path"):
@@ -216,6 +263,31 @@ def test_evidence_rows_align_with_indices_and_references(monkeypatch: pytest.Mon
     # random-init reference: same rows, same masks, different numbers
     np.testing.assert_array_equal(ev.ref(1).mask, ev.target.mask)
     assert not np.allclose(ev.ref(1).logprob, ev.target.logprob)
+
+
+def test_evidence_is_memoised_per_handler_across_attacks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Two attacks on the same handler and indices share forward passes; different indices do not."""
+    monkeypatch.setattr("leakpro.signals.token_evidence.get_device", lambda: torch.device("cpu"))
+    calls = {"n": 0}
+    original = CausalLMModel.evidence_from_loader
+
+    def counting(self, loader, request=None):  # noqa: ANN001, ANN202
+        calls["n"] += 1
+        return original(self, loader, request)
+
+    monkeypatch.setattr(CausalLMModel, "evidence_from_loader", counting)
+    handler = _fake_handler(n_train=4, n_test=3)
+    a = _Probe(handler, {"references": [{"source": "self"}]})
+    b = _Probe(handler, {"references": [{"source": "self"}]})
+    idx = a.audit_dataset["data"]
+
+    ev_a = a.evidence(idx)
+    assert calls["n"] == 2                                   # target + reference
+    ev_b = b.evidence(idx)
+    assert calls["n"] == 2                                   # both reused
+    assert ev_b.target is ev_a.target
+    b.evidence(idx[:3])
+    assert calls["n"] == 4                                   # different rows → recomputed
 
 
 def test_require_references_gives_actionable_error(monkeypatch: pytest.MonkeyPatch) -> None:

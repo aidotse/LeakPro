@@ -20,6 +20,7 @@ None of these attacks train anything, so they opt out of the shadow/distillation
 """
 
 import functools
+import hashlib
 import json
 from dataclasses import dataclass
 from typing import List, Literal, Optional, Tuple
@@ -94,15 +95,18 @@ def rank_top(scores: np.ndarray, force_top: np.ndarray, tiebreak: np.ndarray) ->
     """Return finite scores where forced rows sit strictly above every ordinary row.
 
     Several attacks have configurations the paper says must be classified as members regardless of
-    the numeric score (EZ-MIA: ``N == 0`` or no error positions). Those rows — and any row whose
-    score is not finite — are placed above the highest ordinary score, ordered among themselves by
-    ``tiebreak`` (larger = higher). All returned values are finite, which
+    the numeric score (EZ-MIA: ``N == 0`` or no error positions). Those rows, and any row whose
+    score is ``+inf``, are placed above the highest ordinary score, ordered among themselves by
+    ``tiebreak`` (larger = higher). A ``-inf`` score is a legitimately *weakest* signal (e.g.
+    ``log(P/N)`` with ``P == 0``) and is placed just below the lowest ordinary score, so monotone
+    transforms of the same statistic keep the same ranking. ``nan`` outside the forced rows is a
+    caller bug and raises. All returned values are finite, which
     :meth:`~leakpro.reporting.mia_result.MIAResult.from_full_scores` requires: its descending-sort
     monotonicity assert fails on ``nan`` and on two or more ``inf`` values.
 
     Args:
     ----
-        scores: ``(N,)`` raw scores, higher = more likely member. May contain nan/inf.
+        scores: ``(N,)`` raw scores, higher = more likely member. May contain ±inf; nan only where forced.
         force_top: ``(N,)`` bool, rows that must rank as members.
         tiebreak: ``(N,)`` values ordering the forced rows among themselves.
 
@@ -112,12 +116,17 @@ def rank_top(scores: np.ndarray, force_top: np.ndarray, tiebreak: np.ndarray) ->
 
     """
     scores = np.asarray(scores, dtype=np.float64)
-    forced = np.asarray(force_top, dtype=bool) | ~np.isfinite(scores)
+    forced = np.asarray(force_top, dtype=bool) | np.isposinf(scores)
+    bottom = np.isneginf(scores) & ~forced
+    if np.isnan(scores[~forced]).any():
+        raise ValueError("rank_top: nan score in a row that is not forced to the top")
     out = scores.copy()
+    ordinary = out[~forced & ~bottom]
+    if bottom.any():
+        out[bottom] = (ordinary.min() if ordinary.size else 0.0) - 1.0
     if not forced.any():
         return out
-    ordinary = out[~forced]
-    base = ordinary.max() if ordinary.size else 0.0
+    base = out[~forced].max() if (~forced).any() else 0.0
     tb = np.asarray(tiebreak, dtype=np.float64)[forced]
     tb = np.where(np.isfinite(tb), tb, 0.0)
     order = np.argsort(tb, kind="stable")
@@ -127,12 +136,30 @@ def rank_top(scores: np.ndarray, force_top: np.ndarray, tiebreak: np.ndarray) ->
     return out
 
 
-def _reinitialise(module: nn.Module) -> None:
-    """Re-run ``reset_parameters`` on every submodule that defines it (random-init reference)."""
-    for child in module.modules():
-        reset = getattr(child, "reset_parameters", None)
-        if callable(reset):
-            reset()
+def _reinitialise(module: nn.Module, std: float = 0.02) -> None:
+    """Randomise every parameter of ``module`` in place (random-init reference).
+
+    Submodules that define ``reset_parameters`` (``nn.Linear``, ``nn.Embedding``, ``nn.LayerNorm``, ...)
+    use it. Submodules that own parameters but define no reset — HuggingFace's ``Conv1D``, which is
+    GPT-2's attention and MLP projections — get ``N(0, std)`` weights and zero biases, the GPT-2
+    initialisation. Without this fallback a "random" GPT-2 reference would silently keep its pretrained
+    attention and MLP weights.
+    """
+    fallback_types = set()
+    with torch.no_grad():
+        for child in module.modules():
+            reset = getattr(child, "reset_parameters", None)
+            if callable(reset):
+                reset()
+                continue
+            for name, param in child.named_parameters(recurse=False):
+                fallback_types.add(type(child).__name__)
+                if param.dim() >= 2 or "weight" in name:
+                    nn.init.normal_(param, mean=0.0, std=std)
+                else:
+                    nn.init.zeros_(param)
+    if fallback_types:
+        logger.info(f"random_init reference: no reset_parameters on {sorted(fallback_types)}; used N(0, {std}) / zeros")
 
 
 @functools.lru_cache(maxsize=4)
@@ -227,11 +254,46 @@ class AbstractLLMMIA(AbstractMIA):
         return DataLoader(dataset, batch_size=self.configs.batch_size, shuffle=False,
                           collate_fn=CausalLMCollate(pad_token_id=self.configs.pad_token_id))
 
+    def _memo(self: Self) -> dict:
+        """Per-handler memo of extracted evidence, shared by every LLM attack built on that handler.
+
+        Attacks in one ``attack_list`` audit the same target on the same indices, and usually the same
+        reference; the forward passes are identical, so the second attack reuses the first's arrays.
+        Lives on the handler (not the class) so it dies with the run and cannot collide across runs.
+        """
+        memo = getattr(self.handler, "_llm_evidence_memo", None)
+        if memo is None:
+            memo = {}
+            self.handler._llm_evidence_memo = memo
+        return memo
+
+    def _score_model(
+        self: Self,
+        model: CausalLMModel,
+        model_key: str,
+        loader: DataLoader,
+        indices_key: str,
+        request: EvidenceRequest,
+        label: str,
+    ) -> TokenEvidence:
+        """Run ``model`` over ``loader`` unless identical evidence is already memoised; offload afterwards."""
+        key = (model_key, request.need_moments, indices_key)
+        memo = self._memo()
+        if key in memo:
+            logger.info(f"Reusing memoised evidence for {label}")
+            return memo[key]
+        logger.info(f"Scoring {label}")
+        evidence = model.evidence_from_loader(loader, request)
+        model.offload()
+        memo[key] = evidence
+        return evidence
+
     def evidence(self: Self, indices: np.ndarray, request: Optional[EvidenceRequest] = None) -> TokenEvidenceSet:
         """Run the target and every configured reference over ``indices``.
 
-        Models are run one after another; each reference is offloaded to CPU after its pass so at most
-        one large model is resident on the device at a time.
+        Models are run one after another and each — the target included — is offloaded to CPU after
+        its pass, so at most one model is resident on the device at a time. Results are memoised per
+        handler (see :meth:`_memo`), so several LLM attacks in one audit share the forward passes.
 
         Args:
         ----
@@ -244,16 +306,23 @@ class AbstractLLMMIA(AbstractMIA):
 
         """
         request = request if request is not None else EvidenceRequest(need_moments=self.configs.need_moments)
+        indices = np.asarray(indices)
+        indices_key = hashlib.sha256(indices.astype(np.int64).tobytes()).hexdigest()
         loader = self._make_loader(indices)
         device = self.target_model.device
+        n = len(indices)
 
-        logger.info(f"Scoring {len(indices)} sequences with the target model")
-        target = self.target_model.evidence_from_loader(loader, request)
+        target = self._score_model(self.target_model, "target", loader, indices_key, request,
+                                   label=f"{n} sequences with the target model")
 
         references: List[TokenEvidence] = []
         for i, cfg in enumerate(self.configs.references):
+            key = (cfg.key(), request.need_moments, indices_key)
+            if key in self._memo():
+                references.append(self._memo()[key])
+                logger.info(f"Reusing memoised evidence for reference model {i} (source={cfg.source})")
+                continue
             ref = load_reference(cfg, self.handler, device)
-            logger.info(f"Scoring {len(indices)} sequences with reference model {i} (source={cfg.source})")
-            references.append(ref.evidence_from_loader(loader, request))
-            ref.offload()
-        return TokenEvidenceSet(target=target, references=tuple(references), indices=np.asarray(indices))
+            references.append(self._score_model(ref, cfg.key(), loader, indices_key, request,
+                                                label=f"{n} sequences with reference model {i} (source={cfg.source})"))
+        return TokenEvidenceSet(target=target, references=tuple(references), indices=indices)
