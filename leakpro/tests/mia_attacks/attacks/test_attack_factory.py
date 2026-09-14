@@ -121,6 +121,25 @@ def test_unknown_attack_raises_before_building_handlers(
         AttackFactoryMIA.create_attack("does_not_exist", {}, image_handler)
 
 
+def test_mixed_llm_and_classifier_attacks_keep_their_own_target_wrapper(
+    image_handler: ImageInputHandler, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Constructing an LLM attack after a classifier attack must not swap the classifier's wrapper."""
+    from leakpro.signals.token_evidence import CausalLMModel
+    from leakpro.tests.mia_attacks.attacks.test_llm_base import _Probe
+
+    monkeypatch.setattr("leakpro.signals.token_evidence.get_device", lambda: __import__("torch").device("cpu"))
+    classifier = AttackRMIA(image_handler, {})
+    llm = _Probe(image_handler, {})
+    assert isinstance(classifier.target_model, PytorchModel)
+    assert isinstance(llm.target_model, CausalLMModel)
+    # and in the other order
+    llm2 = _Probe(image_handler, {})
+    classifier2 = AttackRMIA(image_handler, {})
+    assert isinstance(llm2.target_model, CausalLMModel)
+    assert isinstance(classifier2.target_model, PytorchModel)
+
+
 def test_wrap_target_model_default_is_pytorch_model(image_handler: ImageInputHandler) -> None:
     """The base hook preserves the original PytorchModel wrapping."""
     wrapped = AbstractMIA._wrap_target_model(image_handler)

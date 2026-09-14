@@ -34,7 +34,6 @@ class AbstractMIA(AbstractAttack):
     # Class attributes for sharing between the different attacks
     population = None
     population_size = None
-    target_model = None
     audit_dataset = None
     handler = None
     _initialized = False
@@ -69,7 +68,11 @@ class AbstractMIA(AbstractAttack):
         # These objects are shared and should be initialized only once
         AbstractMIA.population = handler.population
         AbstractMIA.population_size = handler.population_size
-        AbstractMIA.target_model = self._wrap_target_model(handler)
+        # Per-instance wrapper: attacks in one run may wrap the same target differently (a classifier
+        # attack needs PytorchModel, an LLM attack needs CausalLMModel), so it is never stored on the
+        # class. Assigning ``AbstractMIA.target_model = ...`` here would also replace the ``target_model``
+        # property object on the class with a plain value, which is what made it shared before.
+        self._target_model = self._wrap_target_model(handler)
         AbstractMIA.audit_dataset = {
             # Assuming train_indices and test_indices are arrays of indices, not the actual data
             "data": np.concatenate((handler.train_indices, handler.test_indices)),
@@ -130,7 +133,7 @@ class AbstractMIA(AbstractAttack):
             raise ValueError("Train indices must be provided.")
         if len(AbstractMIA.audit_dataset["out_members"]) == 0:
             raise ValueError("Test indices must be provided.")
-        if AbstractMIA.target_model is None:
+        if getattr(self, "_target_model", None) is None:
             raise ValueError("Target model not found.")
         if AbstractMIA.audit_dataset is None:
             raise ValueError("Audit dataset not found.")
@@ -338,7 +341,7 @@ class AbstractMIA(AbstractAttack):
         Union[Self, List[Self]]: The target model used for the attack.
 
         """
-        return AbstractMIA.target_model
+        return self._target_model
 
     @property
     def audit_dataset(self:Self)-> Self:
