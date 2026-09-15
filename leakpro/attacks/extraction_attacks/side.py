@@ -16,6 +16,7 @@ from sklearn.cluster import KMeans
 from torch import Tensor, nn
 from torch.nn import functional
 from torch.utils.data import DataLoader, TensorDataset
+from tqdm.auto import tqdm
 
 from leakpro.attacks.extraction_attacks.abstract_extraction import AbstractExtraction, AttackState
 from leakpro.attacks.extraction_attacks.classifier import TimeConditionedResNet
@@ -31,6 +32,7 @@ from leakpro.attacks.extraction_attacks.utils import (
     batch_ranges,
     decode_uint8,
     encode_uint8,
+    progress_batches,
     require_authorized,
     resolve_device,
     seeded_torch_rng,
@@ -216,7 +218,7 @@ class AttackSIDEExtraction(AbstractExtraction):
         for parameter in self.feature_extractor.parameters():
             parameter.requires_grad_(False)
         for batch_index, (start, end) in enumerate(
-            batch_ranges(self.config.synthetic_samples, self.config.synthetic_batch_size)
+            progress_batches(self.config.synthetic_samples, self.config.synthetic_batch_size, "SIDE synthetic generation")
         ):
             batch = self.adapter.sample(
                 end - start,
@@ -333,39 +335,44 @@ class AttackSIDEExtraction(AbstractExtraction):
         noise_generator = torch.Generator(device="cpu").manual_seed(self.config.random_seed + 17)
         classifier_dtype = self._classifier_dtype()
         self.classifier.train()
-        for _epoch in range(self.config.classifier_epochs):
-            loss_sum = 0.0
-            sample_count = 0
-            for encoded_images, batch_labels in loader:
-                clean = decode_uint8(encoded_images, self.config.image_range).to(self.device)
-                target_labels = batch_labels.to(self.device)
-                timesteps = torch.randint(
-                    0,
-                    self.adapter.num_timesteps,
-                    (clean.shape[0],),
-                    generator=noise_generator,
-                    device="cpu",
-                ).to(self.device)
-                noise = torch.randn(clean.shape, generator=noise_generator, device="cpu").to(self.device)
-                noisy = self.adapter.q_sample(clean, timesteps, noise)
-                noisy = validate_image_batch(noisy, self.adapter.image_shape, expected_count=clean.shape[0])
-                classifier_inputs = noisy.to(device=self.device, dtype=classifier_dtype)
-                classifier_timesteps = self.adapter.classifier_timesteps(timesteps).to(self.device)
-                if clean.shape[0] == 1:
-                    self._singleton_classifier_batches += 1
-                with _batch_norm_eval_for_singleton(self.classifier, clean.shape[0]):
-                    logits = self.classifier(classifier_inputs, classifier_timesteps)
-                loss = functional.cross_entropy(logits, target_labels)
-                if not torch.isfinite(loss):
-                    raise RuntimeError("SIDE classifier training produced NaN or infinity.")
-                optimizer.zero_grad(set_to_none=True)
-                loss.backward()
-                optimizer.step()
-                loss_sum += float(loss.detach()) * clean.shape[0]
-                sample_count += clean.shape[0]
-            if sample_count == 0:
-                raise RuntimeError("Synthetic classifier loader produced no samples.")
-            self.training_history.append(loss_sum / sample_count)
+        with tqdm(total=self.config.classifier_epochs * len(loader), desc="SIDE classifier training",
+                  unit="batch", dynamic_ncols=True) as progress:
+            for epoch in range(self.config.classifier_epochs):
+                loss_sum = 0.0
+                sample_count = 0
+                for encoded_images, batch_labels in loader:
+                    clean = decode_uint8(encoded_images, self.config.image_range).to(self.device)
+                    target_labels = batch_labels.to(self.device)
+                    timesteps = torch.randint(
+                        0,
+                        self.adapter.num_timesteps,
+                        (clean.shape[0],),
+                        generator=noise_generator,
+                        device="cpu",
+                    ).to(self.device)
+                    noise = torch.randn(clean.shape, generator=noise_generator, device="cpu").to(self.device)
+                    noisy = self.adapter.q_sample(clean, timesteps, noise)
+                    noisy = validate_image_batch(noisy, self.adapter.image_shape, expected_count=clean.shape[0])
+                    classifier_inputs = noisy.to(device=self.device, dtype=classifier_dtype)
+                    classifier_timesteps = self.adapter.classifier_timesteps(timesteps).to(self.device)
+                    if clean.shape[0] == 1:
+                        self._singleton_classifier_batches += 1
+                    with _batch_norm_eval_for_singleton(self.classifier, clean.shape[0]):
+                        logits = self.classifier(classifier_inputs, classifier_timesteps)
+                    loss = functional.cross_entropy(logits, target_labels)
+                    if not torch.isfinite(loss):
+                        raise RuntimeError("SIDE classifier training produced NaN or infinity.")
+                    optimizer.zero_grad(set_to_none=True)
+                    loss.backward()
+                    optimizer.step()
+                    loss_sum += float(loss.detach()) * clean.shape[0]
+                    sample_count += clean.shape[0]
+                    progress.set_postfix(epoch=f"{epoch + 1}/{self.config.classifier_epochs}",
+                                         loss=f"{loss_sum / sample_count:.4f}", refresh=False)
+                    progress.update(1)
+                if sample_count == 0:
+                    raise RuntimeError("Synthetic classifier loader produced no samples.")
+                self.training_history.append(loss_sum / sample_count)
         self.classifier.eval()
 
     def _condition_gradient(self, noisy_images: Tensor, timesteps: Tensor, labels: Tensor) -> Tensor:
@@ -464,7 +471,7 @@ class AttackSIDEExtraction(AbstractExtraction):
         generated_labels: list[Tensor] = []
         label_generator = torch.Generator(device="cpu").manual_seed(self.config.random_seed + 29)
         for batch_index, (start, end) in enumerate(
-            batch_ranges(self.config.num_generations, self.config.generation_batch_size)
+            progress_batches(self.config.num_generations, self.config.generation_batch_size, "SIDE guided generation")
         ):
             labels = torch.randint(
                 0,

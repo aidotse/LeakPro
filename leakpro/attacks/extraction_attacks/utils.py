@@ -17,6 +17,7 @@ import numpy as np
 import torch
 from pydantic import BaseModel
 from torch import Tensor
+from tqdm.auto import tqdm
 
 
 @contextmanager
@@ -145,6 +146,14 @@ def batch_ranges(total: int, batch_size: int) -> Iterator[tuple[int, int]]:
     """Yield half-open deterministic batch ranges."""
     for start in range(0, total, batch_size):
         yield start, min(start + batch_size, total)
+
+
+def progress_batches(total: int, batch_size: int, description: str) -> Iterator[tuple[int, int]]:
+    """Count completed samples, including a final partial batch."""
+    with tqdm(total=total, desc=description, unit="sample", dynamic_ncols=True) as progress:
+        for start, end in batch_ranges(total, batch_size):
+            yield start, end
+            progress.update(end - start)
 
 
 def stable_hash(value: BaseModel | dict[str, Any], length: int = 12) -> str:

@@ -4,18 +4,25 @@ The [`cifar10`](cifar10) directory follows the same layout as the MIA and model-
 [`train_config.yaml`](cifar10/train_config.yaml) to select the target data, model, and training profile. The selected
 [`audit.yaml`](cifar10/audit.yaml) or [`audit_demonstration.yaml`](cifar10/audit_demonstration.yaml) owns every Carlini
 and SIDE parameter, including generation budgets. Then run
-[`main.ipynb`](cifar10/main.ipynb). The notebook downloads CIFAR-10, trains or reloads an unconditional DDPM, runs both
-attacks, visualizes nearest training references, and saves the resolved config and run manifest under the ignored
-`target/` and `leakpro_output/` directories.
+[`main.ipynb`](cifar10/main.ipynb). The notebook downloads CIFAR-10, loads and audits the official released checkpoint, then trains or
+reloads a separate target trained from scratch and audits it. Each stage visualizes nearest training
+references and saves its own resolved config, results, and run manifest under the configured
+target and audit-output directories.
 
 The default smoke profile runs the complete workflow with reduced budgets. It is not evidence of paper-scale
 extraction performance.
 
-The notebook needs torchvision in addition to the extraction dependencies:
+The CIFAR-10 notebook uses the official OpenAI Improved DDPM implementation. Install the example dependency
+from the repository root. Upstream packaging requires an editable install; keep its pinned source directory
+on persistent storage:
 
 ```bash
 pip install -e '.[extraction]' torchvision
+pip install --src ./examples/extraction/cifar10/target/dependencies -r examples/extraction/cifar10/requirements.txt
 ```
+
+See [CIFAR-10 training and sampling](cifar10/README.md) for the published recipe, experiment differences,
+checkpoint behavior, and sample-quality checks.
 
 The toy provider exercises Carlini and SIDE through LeakPro without downloads or a GPU:
 

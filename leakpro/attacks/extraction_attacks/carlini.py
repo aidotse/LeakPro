@@ -23,9 +23,9 @@ from leakpro.attacks.extraction_attacks.metrics import (
 )
 from leakpro.attacks.extraction_attacks.protocols import SamplingAdapter
 from leakpro.attacks.extraction_attacks.utils import (
-    batch_ranges,
     condition_fingerprint,
     normalize_conditions,
+    progress_batches,
     require_authorized,
     resolve_device,
     stable_hash,
@@ -151,7 +151,9 @@ class AttackCarliniExtraction(AbstractExtraction):
 
     def _generate(self, count: int, condition: object | None, seed_offset: int) -> Tensor:
         generated: list[Tensor] = []
-        for batch_index, (start, end) in enumerate(batch_ranges(count, self.config.generation_batch_size)):
+        for batch_index, (start, end) in enumerate(
+            progress_batches(count, self.config.generation_batch_size, "Carlini generation")
+        ):
             batch_size = end - start
             conditions = [condition] * batch_size if condition is not None else None
             batch = self.adapter.sample(
@@ -286,7 +288,8 @@ class AttackCarliniExtraction(AbstractExtraction):
         best_by_reference: dict[int, tuple[float, Tensor, CandidateRecord]] = {}
         total_generated = 0
         for batch_index, (start, end) in enumerate(
-            batch_ranges(self.config.num_unconditional_generations, self.config.generation_batch_size)
+            progress_batches(self.config.num_unconditional_generations, self.config.generation_batch_size,
+                             "Carlini generation and reference scoring")
         ):
             batch = self.adapter.sample(
                 end - start,
