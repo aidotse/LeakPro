@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
-import io
 import json
 from collections.abc import Callable
 from dataclasses import replace
-from email.message import Message
 from pathlib import Path
 
 import pytest
@@ -26,70 +23,14 @@ from examples.extraction.cifar10 import cifar10_model
 from examples.extraction.cifar10.cifar10_handler import load_audit_config
 from examples.extraction.cifar10.cifar10_model import (
     GaussianDiffusion,
-    RunProfile,
+    TrainConfig,
     make_adapter,
-    sha256_mapping,
     sha256_module_state,
     sha256_tensor,
     train_or_load_target,
 )
 from leakpro.attacks.extraction_attacks.configs import CarliniConfig, SIDEConfig
-
-
-def test_released_checkpoint_cache_checks_integrity_without_network(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A valid cached release is reused; corrupt cached files are left intact and rejected."""
-    path = tmp_path / "released.pt"
-    weights = b"release weights"
-    path.write_bytes(weights)
-    monkeypatch.setattr(cifar10_model, "RELEASED_CHECKPOINT_SHA256", hashlib.sha256(weights).hexdigest())
-
-    def reject_network(*_args: object, **_kwargs: object) -> None:
-        pytest.fail("A cached checkpoint must not trigger a download.")
-
-    monkeypatch.setattr(torch.hub, "download_url_to_file", reject_network)
-    assert cifar10_model.ensure_released_checkpoint(path) == path
-    path.write_bytes(b"corrupt")
-    with pytest.raises(ValueError, match="SHA-256 mismatch"):
-        cifar10_model.ensure_released_checkpoint(path)
-    assert path.read_bytes() == b"corrupt"
-
-
-@pytest.mark.parametrize("failure", [None, "hash", "interrupted"])
-def test_released_checkpoint_download_verifies_before_publishing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str | None,
-) -> None:
-    """Exercise the real torch downloader without network or a large checkpoint."""
-    path = tmp_path / "checkpoints" / "released.pt"
-    weights = b"release weights"
-    monkeypatch.setattr(cifar10_model, "RELEASED_CHECKPOINT_SHA256", hashlib.sha256(weights).hexdigest())
-
-    class DownloadResponse(io.BytesIO):
-        def info(self) -> Message:
-            headers = Message()
-            headers["Content-Length"] = str(len(self.getvalue()))
-            return headers
-
-        def read(self, size: int = -1) -> bytes:
-            if failure == "interrupted" and self.tell():
-                raise OSError("download interrupted")
-            return super().read(size)
-
-    def open_release(request: object) -> DownloadResponse:
-        assert request.full_url == cifar10_model.RELEASED_CHECKPOINT_URL
-        return DownloadResponse(b"wrong weights" if failure == "hash" else weights)
-
-    monkeypatch.setattr(torch.hub, "urlopen", open_release)
-    if failure is None:
-        assert cifar10_model.ensure_released_checkpoint(path) == path
-        assert path.read_bytes() == weights
-    else:
-        exception = RuntimeError if failure == "hash" else OSError
-        with pytest.raises(exception, match="invalid hash value|download interrupted"):
-            cifar10_model.ensure_released_checkpoint(path)
-        assert not path.exists()
-    assert not list(path.parent.glob("*.partial"))
+from leakpro.utils.save_load import hash_config
 
 
 def test_mac_auto_device_uses_cpu_for_the_official_backend(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -105,9 +46,8 @@ def test_mac_auto_device_uses_cpu_for_the_official_backend(monkeypatch: pytest.M
     assert cifar10_model.select_device("auto") == torch.device("cuda")
 
 
-def _test_profile() -> RunProfile:
-    return RunProfile(
-        name="test",
+def _test_train_config() -> TrainConfig:
+    return TrainConfig(
         seed=7,
         train_size=8,
         epochs=1,
@@ -139,13 +79,12 @@ def test_forward_noising_matches_the_closed_form() -> None:
 
 
 def test_shipped_schedules_reach_the_gaussian_prior() -> None:
-    """Every notebook profile must train at a near-noise terminal timestep."""
+    """The configured schedule must reach a near-noise terminal timestep."""
     example_dir = Path(__file__).parents[3] / "examples" / "extraction" / "cifar10"
     train_config = yaml.safe_load((example_dir / "train_config.yaml").read_text(encoding="utf-8"))
-    for name, values in train_config["profiles"].items():
-        profile = RunProfile(name=name, seed=train_config["run"]["random_seed"], **values)
-        diffusion = GaussianDiffusion(profile.timesteps, profile.sampling_steps, torch.device("cpu"))
-        assert float(diffusion.alpha_bars[-1].sqrt()) < 0.01
+    train = TrainConfig(seed=train_config["run"]["random_seed"], **train_config["train"])
+    diffusion = GaussianDiffusion(train.timesteps, train.sampling_steps, torch.device("cpu"))
+    assert float(diffusion.alpha_bars[-1].sqrt()) < 0.01
 
 
 class _TinyLearnedVarianceModel(torch.nn.Module):
@@ -326,15 +265,15 @@ def test_training_loss_matches_the_published_hybrid_objective() -> None:
 def test_microbatches_preserve_the_effective_batch_update(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Uneven microbatches and a partial final batch must retain sample weights."""
     monkeypatch.setattr(
-        cifar10_model, "create_target_model", lambda _profile, device: _TinyLearnedVarianceModel().to(device)
+        cifar10_model, "create_target_model", lambda _train, device: _TinyLearnedVarianceModel().to(device)
     )
-    profile = replace(_test_profile(), train_size=130, train_batch_size=128, microbatch=128)
+    train = replace(_test_train_config(), train_size=130, train_batch_size=128, microbatch=128)
     generator = torch.Generator().manual_seed(8)
     images = torch.rand((130, 3, 4, 4), generator=generator).mul(2).sub(1)
     dataset = TensorDataset(images, torch.zeros(130, dtype=torch.long))
-    full, _, _, full_losses = train_or_load_target(profile, dataset, tmp_path / "full", torch.device("cpu"))
+    full, _, _, full_losses = train_or_load_target(train, dataset, tmp_path / "full", torch.device("cpu"))
     accumulated, _, _, accumulated_losses = train_or_load_target(
-        replace(profile, microbatch=17), dataset, tmp_path / "micro", torch.device("cpu")
+        replace(train, microbatch=17), dataset, tmp_path / "micro", torch.device("cpu")
     )
 
     torch.testing.assert_close(torch.tensor(full_losses), torch.tensor(accumulated_losses))
@@ -343,19 +282,19 @@ def test_microbatches_preserve_the_effective_batch_update(tmp_path: Path, monkey
 
 def test_train_then_reload_preserves_the_target_checkpoint(tmp_path: Path) -> None:
     """A matching checkpoint must reproduce the trained sampling weights."""
-    profile = _test_profile()
-    generator = torch.Generator(device="cpu").manual_seed(profile.seed)
+    train = _test_train_config()
+    generator = torch.Generator(device="cpu").manual_seed(train.seed)
     images = torch.rand((8, 3, 32, 32), generator=generator).mul(2.0).sub(1.0)
     dataset = TensorDataset(images, torch.zeros(8, dtype=torch.long))
 
     trained, _diffusion, checkpoint_path, losses = train_or_load_target(
-        profile,
+        train,
         dataset,
         tmp_path,
         torch.device("cpu"),
     )
     loaded, _diffusion, loaded_path, loaded_losses = train_or_load_target(
-        profile,
+        train,
         dataset,
         tmp_path,
         torch.device("cpu"),
@@ -369,19 +308,19 @@ def test_train_then_reload_preserves_the_target_checkpoint(tmp_path: Path) -> No
         torch.testing.assert_close(trained_parameter, loaded_parameter)
 
     resampled, resampled_diffusion, resampled_path, _ = train_or_load_target(
-        replace(profile, sampling_steps=2), dataset, tmp_path, torch.device("cpu")
+        replace(train, sampling_steps=2), dataset, tmp_path, torch.device("cpu")
     )
     assert resampled_path == checkpoint_path
     assert resampled_diffusion.sampling_steps == 2
     assert sha256_module_state(resampled) == sha256_module_state(trained)
     with pytest.raises(ValueError, match="metadata does not match"):
-        train_or_load_target(replace(profile, learning_rate=2e-3), dataset, tmp_path, torch.device("cpu"))
+        train_or_load_target(replace(train, learning_rate=2e-3), dataset, tmp_path, torch.device("cpu"))
 
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     checkpoint["metadata"]["format_version"] -= 1
     torch.save(checkpoint, checkpoint_path)
     with pytest.raises(ValueError, match="metadata does not match"):
-        train_or_load_target(profile, dataset, tmp_path, torch.device("cpu"))
+        train_or_load_target(train, dataset, tmp_path, torch.device("cpu"))
 
 
 def test_interrupted_training_resumes_optimizer_ema_and_random_state(
@@ -394,13 +333,13 @@ def test_interrupted_training_resumes_optimizer_ema_and_random_state(
             images = torch.nn.functional.dropout(images, p=0.2, training=self.training)
             return super().forward(images, timesteps)
 
-    monkeypatch.setattr(cifar10_model, "create_target_model", lambda _profile, device: DropoutModel().to(device))
+    monkeypatch.setattr(cifar10_model, "create_target_model", lambda _train, device: DropoutModel().to(device))
     monkeypatch.setattr(cifar10_model, "CHECKPOINT_EVERY_EPOCHS", 1)
-    profile = replace(_test_profile(), train_size=5, reference_size=5, epochs=3, dropout=0.2)
+    train = replace(_test_train_config(), train_size=5, reference_size=5, epochs=3, dropout=0.2)
     images = torch.rand((5, 3, 4, 4), generator=torch.Generator().manual_seed(9)).mul(2).sub(1)
     dataset = TensorDataset(images, torch.zeros(5, dtype=torch.long))
     continuous, _, _, continuous_losses = train_or_load_target(
-        profile, dataset, tmp_path / "continuous", torch.device("cpu")
+        train, dataset, tmp_path / "continuous", torch.device("cpu")
     )
     save_checkpoint = cifar10_model._save_checkpoint
 
@@ -411,13 +350,13 @@ def test_interrupted_training_resumes_optimizer_ema_and_random_state(
 
     monkeypatch.setattr(cifar10_model, "_save_checkpoint", save_then_interrupt)
     with pytest.raises(RuntimeError, match="simulated interruption"):
-        train_or_load_target(profile, dataset, tmp_path / "interrupted", torch.device("cpu"))
-    assert not (tmp_path / "interrupted" / "cifar10_ddpm_test.pt").exists()
-    assert (tmp_path / "interrupted" / "cifar10_ddpm_test.resume.pt").exists()
+        train_or_load_target(train, dataset, tmp_path / "interrupted", torch.device("cpu"))
+    assert not (tmp_path / "interrupted" / "cifar10_ddpm.pt").exists()
+    assert (tmp_path / "interrupted" / "cifar10_ddpm.resume.pt").exists()
 
     monkeypatch.setattr(cifar10_model, "_save_checkpoint", save_checkpoint)
     resumed, _, checkpoint_path, resumed_losses = train_or_load_target(
-        profile, dataset, tmp_path / "interrupted", torch.device("cpu")
+        train, dataset, tmp_path / "interrupted", torch.device("cpu")
     )
     assert resumed_losses == continuous_losses
     torch.testing.assert_close(resumed.output_scale, continuous.output_scale, rtol=0, atol=0)
@@ -436,17 +375,17 @@ def test_composite_identity_tracks_each_output_determining_component() -> None:
         "side_feature_transform": "transform-a",
         "authorized_references_sha256": sha256_tensor(torch.zeros(2, 3, 4, 4)),
     }
-    baseline = sha256_mapping(components)
+    baseline = hash_config(components)
     for name in components:
         changed = dict(components)
         changed[name] += "-changed"
-        assert sha256_mapping(changed) != baseline
+        assert hash_config(changed) != baseline
 
     notebook_path = Path(__file__).parents[3] / "examples" / "extraction" / "cifar10" / "main.ipynb"
     notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
     notebook_source = "".join("".join(cell["source"]) for cell in notebook["cells"])
     assert "'identity_components': identity_components" in notebook_source
-    assert "'target_fingerprint': target_fingerprint" in notebook_source
+    assert "'target_hash': target_hash" in notebook_source
 
 
 def test_example_uses_leakpro_config_and_handler_layout(tmp_path: Path) -> None:
@@ -469,7 +408,7 @@ def test_example_uses_leakpro_config_and_handler_layout(tmp_path: Path) -> None:
         "side",
     ]
     train_config = yaml.safe_load((example_dir / "train_config.yaml").read_text(encoding="utf-8"))
-    target_profile_keys = {
+    target_train_keys = {
         "train_size",
         "epochs",
         "train_batch_size",
@@ -483,7 +422,8 @@ def test_example_uses_leakpro_config_and_handler_layout(tmp_path: Path) -> None:
         "microbatch",
         "ema_decay",
     }
-    assert all(set(profile) == target_profile_keys for profile in train_config["profiles"].values())
+    assert set(train_config) == {"run", "train"}
+    assert set(train_config["train"]) == target_train_keys
     assert (example_dir / train_config["run"]["audit_config"]).is_file()
 
     changed_config = yaml.safe_load((example_dir / "audit.yaml").read_text(encoding="utf-8"))
@@ -491,10 +431,10 @@ def test_example_uses_leakpro_config_and_handler_layout(tmp_path: Path) -> None:
     changed_config["audit"]["attack_list"][1]["guidance_scale"] = 3.5
     changed_path = tmp_path / "audit.yaml"
     changed_path.write_text(yaml.safe_dump(changed_config), encoding="utf-8")
-    resolved_config = load_audit_config(changed_path, target_fingerprint="sha256:test")
+    resolved_config = load_audit_config(changed_path, target_hash="sha256:test")
     assert resolved_config["audit"]["attack_list"][0]["num_unconditional_generations"] == 777
     assert resolved_config["audit"]["attack_list"][1]["guidance_scale"] == 3.5
-    assert resolved_config["target"]["fingerprint"] == "sha256:test"
+    assert resolved_config["target"]["hash"] == "sha256:test"
 
     notebook = json.loads((example_dir / "main.ipynb").read_text(encoding="utf-8"))
     notebook_source = "".join("".join(cell["source"]) for cell in notebook["cells"])

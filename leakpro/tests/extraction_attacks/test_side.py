@@ -13,7 +13,7 @@ import leakpro.attacks.extraction_attacks.side as side_module
 from leakpro.attacks.extraction_attacks.abstract_extraction import AttackState
 from leakpro.attacks.extraction_attacks.adapters import CallableDiffusionAdapter
 from leakpro.attacks.extraction_attacks.side import AttackSIDEExtraction
-from leakpro.attacks.extraction_attacks.utils.side_classifier import TimeConditionedResNet
+from leakpro.attacks.extraction_attacks.utils_generative.side_classifier import TimeConditionedResNet
 
 
 class TwoFeatureExtractor(nn.Module):
@@ -168,7 +168,7 @@ def test_side_default_uses_raw_feature_space_kmeans() -> None:
             "min_cluster_size": 1,
             "cohesion_threshold": -1.0,
         },
-        audit_fingerprint="raw-kmeans-test",
+        audit_hash="raw-kmeans-test",
     )
     attack._synthetic_features = torch.tensor(  # noqa: SLF001 - direct algorithm boundary test
         [[1.0, 0.0], [2.0, 0.0], [100.0, 0.0], [0.0, 1.0], [0.0, 2.0], [0.0, 3.0]]
@@ -233,7 +233,7 @@ def test_side_end_to_end_with_toy_diffusion_adapter() -> None:
             "guidance_scale": 1.0,
             "l2_bands": {"high": {"lower": 0.0, "upper": 0.01}},
         },
-        audit_fingerprint="side-test",
+        audit_hash="side-test",
         reference_images=references,
         classifier_factory=TinyTimeClassifier,
     )
@@ -255,7 +255,7 @@ def test_side_converts_features_to_extractor_dtype_before_inference() -> None:
         _small_side_adapter(),
         extractor,
         _small_side_config(),
-        audit_fingerprint="feature-extractor-dtype-test",
+        audit_hash="feature-extractor-dtype-test",
         classifier_factory=TinyTimeClassifier,
     )
 
@@ -270,7 +270,7 @@ def test_side_rejects_mixed_feature_extractor_dtypes_before_sampling() -> None:
         _small_side_adapter(sample_calls=sample_calls),
         MixedDtypeFeatureExtractor(),
         _small_side_config(),
-        audit_fingerprint="mixed-feature-extractor-dtype-test",
+        audit_hash="mixed-feature-extractor-dtype-test",
         classifier_factory=TinyTimeClassifier,
     )
 
@@ -288,7 +288,7 @@ def test_side_rejects_invalid_distance_device_before_sampling() -> None:
         _small_side_adapter(sample_calls=sample_calls),
         TwoFeatureExtractor(),
         config,
-        audit_fingerprint="invalid-distance-device-test",
+        audit_hash="invalid-distance-device-test",
         classifier_factory=TinyTimeClassifier,
     )
 
@@ -309,7 +309,7 @@ def test_failed_side_preparation_cannot_reuse_partial_sampling_state() -> None:
         _small_side_adapter(sample_calls=sample_calls),
         NonfiniteFeatureExtractor(),
         _small_side_config(),
-        audit_fingerprint="failed-preparation-lifecycle-test",
+        audit_hash="failed-preparation-lifecycle-test",
         classifier_factory=TinyTimeClassifier,
     )
 
@@ -330,7 +330,7 @@ def test_reference_free_side_does_not_concatenate_raw_metric_images(
         _small_side_adapter(image_range="minus_one_one"),
         TwoFeatureExtractor(),
         _small_side_config(image_range="minus_one_one"),
-        audit_fingerprint="reference-free-allocation-test",
+        audit_hash="reference-free-allocation-test",
         classifier_factory=TinyTimeClassifier,
     )
     attack.prepare_attack()
@@ -358,7 +358,7 @@ def test_zero_one_reference_metrics_reuse_persisted_image_storage(
         _small_side_adapter(),
         TwoFeatureExtractor(),
         _small_side_config(),
-        audit_fingerprint="zero-one-reference-allocation-test",
+        audit_hash="zero-one-reference-allocation-test",
         reference_images=torch.stack((torch.zeros((1, 4, 4)), torch.ones((1, 4, 4)))),
         classifier_factory=TinyTimeClassifier,
     )
@@ -411,7 +411,7 @@ def test_side_rejects_missing_white_box_capability_before_sampling(missing: str)
             "min_cluster_size": 1,
             "cohesion_threshold": -1.0,
         },
-        audit_fingerprint=f"missing-{missing}",
+        audit_hash=f"missing-{missing}",
     )
 
     with pytest.raises(ValueError, match=missing):
@@ -459,7 +459,7 @@ def test_side_rejects_noncallable_adapter_operations_before_sampling(malformed: 
             "min_cluster_size": 1,
             "cohesion_threshold": -1.0,
         },
-        audit_fingerprint=f"malformed-{malformed}",
+        audit_hash=f"malformed-{malformed}",
     )
 
     with pytest.raises(ValueError, match=malformed):
@@ -477,7 +477,7 @@ def test_side_provenance_discloses_small_dpm_engineering_choices() -> None:
         adapter,
         TwoFeatureExtractor(),
         {"authorized_audit": True},
-        audit_fingerprint="side-provenance-test",
+        audit_hash="side-provenance-test",
     )
 
     scope = attack.description()["scope"]
@@ -496,7 +496,7 @@ def test_side_guidance_reconciles_classifier_and_sampler_dtypes() -> None:
         ),
         TwoFeatureExtractor(),
         {"authorized_audit": True, "compute_device": "cpu", "guidance_scale": 1.0},
-        audit_fingerprint="guidance-dtype-test",
+        audit_hash="guidance-dtype-test",
     )
     attack.classifier = classifier
     sampler_images = torch.zeros((2, 1, 4, 4), dtype=torch.float32)
@@ -522,7 +522,7 @@ def test_side_guidance_returns_accelerator_gradient_to_cpu_sampler() -> None:
         ),
         TwoFeatureExtractor(),
         {"authorized_audit": True, "compute_device": "cuda", "guidance_scale": 1.0},
-        audit_fingerprint="guidance-cross-device-test",
+        audit_hash="guidance-cross-device-test",
     )
     attack.classifier = classifier
     sampler_images = torch.zeros((2, 1, 4, 4), device="cpu")
@@ -583,7 +583,7 @@ def test_side_l2_bands_use_configured_minus_one_one_coordinates() -> None:
             "generation_batch_size": 1,
             "l2_bands": {"paper_range": {"lower": 1.35, "upper": 1.4}},
         },
-        audit_fingerprint="side-minus-one-one-range",
+        audit_hash="side-minus-one-one-range",
         reference_images=torch.full((1, 1, 4, 4), -1.0),
         classifier_factory=TinyTimeClassifier,
     )

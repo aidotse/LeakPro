@@ -12,7 +12,7 @@ import torch
 from pydantic import ValidationError
 
 from leakpro.attacks.extraction_attacks.configs import CarliniConfig, SIDEConfig, SimilarityBand
-from leakpro.attacks.extraction_attacks.utils import condition_fingerprint
+from leakpro.attacks.extraction_attacks.utils_generative import condition_hash
 from leakpro.reporting.extraction_result import CandidateRecord, ExtractionResult
 
 
@@ -312,17 +312,17 @@ def test_configs_reject_nonfinite_attack_parameters(value: float) -> None:
         SIDEConfig(classifier_learning_rate=value)
 
 
-def test_condition_fingerprint_rejects_process_dependent_objects() -> None:
+def test_condition_hash_rejects_process_dependent_objects() -> None:
     class UnsupportedCondition:
         pass
 
     with pytest.raises(TypeError, match="Unsupported extraction condition type"):
-        condition_fingerprint(UnsupportedCondition())
+        condition_hash(UnsupportedCondition())
     with pytest.raises(TypeError, match="Unsupported extraction condition type"):
-        condition_fingerprint(UnsupportedCondition())
+        condition_hash(UnsupportedCondition())
 
 
-def test_condition_fingerprint_is_stable_for_canonical_scientific_values() -> None:
+def test_condition_hash_is_stable_for_canonical_scientific_values() -> None:
     first = {
         "label": "class-a",
         "embedding": torch.tensor(2.0),
@@ -334,7 +334,7 @@ def test_condition_fingerprint_is_stable_for_canonical_scientific_values() -> No
         "label": "class-a",
     }
 
-    assert condition_fingerprint(first) == condition_fingerprint(second)
+    assert condition_hash(first) == condition_hash(second)
 
 
 def test_result_rejects_invalid_sample_index() -> None:

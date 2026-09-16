@@ -125,7 +125,7 @@ def _write_config(
     attack: str,
     attack_config: dict[str, Any],
     *,
-    target_fingerprint: str = "toy-diffusion-v1",
+    target_hash: str = "toy-diffusion-v1",
     config_name: str = "audit.yaml",
     output_dir: Any = None,
 ) -> str:
@@ -136,7 +136,7 @@ def _write_config(
             "data_modality": "image",
             "output_dir": str(output_dir or (tmp_path / "output")),
         },
-        "target": {"name": "toy-diffusion", "fingerprint": target_fingerprint},
+        "target": {"name": "toy-diffusion", "hash": target_hash},
     }
     config_path = tmp_path / config_name
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
@@ -151,7 +151,7 @@ def test_extraction_schema_does_not_change_standard_target_parsing(tmp_path: Any
     }
     extraction = LeakProConfig(
         audit={**common_audit, "attack_type": "extraction"},
-        target={"name": "generator", "fingerprint": "generator-v1"},
+        target={"name": "generator", "hash": "generator-v1"},
     )
     mia = LeakProConfig(
         audit={**common_audit, "attack_type": "mia"},
@@ -166,10 +166,10 @@ def test_extraction_schema_does_not_change_standard_target_parsing(tmp_path: Any
     assert isinstance(extraction.target, ExtractionTargetConfig)
     assert isinstance(mia.target, TargetConfig)
 
-    with pytest.raises(ValueError, match="fingerprint"):
+    with pytest.raises(ValueError, match="hash"):
         LeakProConfig(
             audit={**common_audit, "attack_type": "extraction"},
-            target={"name": "generator", "fingerprint": "   "},
+            target={"name": "generator", "hash": "   "},
         )
 
 
@@ -183,7 +183,7 @@ def test_extraction_schema_rejects_non_image_modalities(tmp_path: Any, modality:
                 "data_modality": modality,
                 "output_dir": str(tmp_path),
             },
-            target={"name": "generator", "fingerprint": "generator-v1"},
+            target={"name": "generator", "hash": "generator-v1"},
         )
 
 
@@ -663,7 +663,7 @@ def test_public_side_path_rejects_ignored_guidance_without_persisting(tmp_path: 
     assert not data_objects.exists() or not any(data_objects.iterdir())
 
 
-def test_result_identity_separates_target_fingerprints(tmp_path: Any) -> None:
+def test_result_identity_separates_target_hashes(tmp_path: Any) -> None:
     output_dir = tmp_path / "shared-output"
     attack_config = {
         "authorized_audit": True,
@@ -676,7 +676,7 @@ def test_result_identity_separates_target_fingerprints(tmp_path: Any) -> None:
         tmp_path,
         "carlini_diffusion",
         attack_config,
-        target_fingerprint="checkpoint-a",
+        target_hash="checkpoint-a",
         config_name="audit-a.yaml",
         output_dir=output_dir,
     )
@@ -684,7 +684,7 @@ def test_result_identity_separates_target_fingerprints(tmp_path: Any) -> None:
         tmp_path,
         "carlini_diffusion",
         attack_config,
-        target_fingerprint="checkpoint-b",
+        target_hash="checkpoint-b",
         config_name="audit-b.yaml",
         output_dir=output_dir,
     )
@@ -695,7 +695,7 @@ def test_result_identity_separates_target_fingerprints(tmp_path: Any) -> None:
     assert first.id != second.id
     assert (output_dir / "results" / first.id / "result.json").exists()
     assert (output_dir / "results" / second.id / "result.json").exists()
-    assert first.provenance["audit_fingerprint"] != second.provenance["audit_fingerprint"]
+    assert first.provenance["audit_hash"] != second.provenance["audit_hash"]
 
 
 def test_duplicate_result_requires_explicit_overwrite(tmp_path: Any) -> None:
@@ -867,7 +867,7 @@ def test_same_instance_replay_fails_before_sampling_and_preserves_bundle(tmp_pat
     assert persisted.read_bytes() == first_bundle
 
 
-def test_conditions_are_fingerprinted_not_persisted(tmp_path: Any) -> None:
+def test_conditions_are_hashed_not_persisted(tmp_path: Any) -> None:
     secret = "private-prompt-marker-7f42"
 
     class SecretProvider(CarliniProvider):
@@ -895,7 +895,7 @@ def test_conditions_are_fingerprinted_not_persisted(tmp_path: Any) -> None:
 
     persisted_json = "\n".join(path.read_text(encoding="utf-8") for path in (tmp_path / "output").rglob("*.json"))
     assert secret not in persisted_json
-    assert "condition_fingerprint" in persisted_json
+    assert "condition_hash" in persisted_json
 
 
 def test_public_path_rejects_noncanonical_condition_objects(tmp_path: Any) -> None:
@@ -944,3 +944,23 @@ def test_extraction_requires_explicit_handler_type(tmp_path: Any) -> None:
 
     with pytest.raises(TypeError, match="AbstractExtractionInputHandler"):
         LeakPro(object, config_path)
+
+
+@pytest.mark.parametrize("attack_name,provider", [("carlini_diffusion", CarliniProvider), ("side", SIDEProvider)])
+def test_attack_hash_tracks_target_and_configuration(tmp_path: Path, attack_name: str, provider: type) -> None:
+    """Both public attack paths distinguish target and configuration changes."""
+    config = {"authorized_audit": True, "generation_batch_size": 4}
+    config_path = _write_config(tmp_path, attack_name, config, target_hash="target-a")
+    first = LeakPro(provider, config_path).attack_scheduler.attacks[0]
+    repeated = LeakPro(provider, config_path).attack_scheduler.attacks[0]
+    assert first.attack_id == repeated.attack_id
+
+    config_path = _write_config(tmp_path, attack_name, {**config, "generation_batch_size": 8}, target_hash="target-a")
+    changed_config = LeakPro(provider, config_path).attack_scheduler.attacks[0]
+    assert changed_config.audit_hash == first.audit_hash
+    assert changed_config.attack_id != first.attack_id
+
+    config_path = _write_config(tmp_path, attack_name, config, target_hash="target-b")
+    changed_target = LeakPro(provider, config_path).attack_scheduler.attacks[0]
+    assert changed_target.audit_hash != first.audit_hash
+    assert changed_target.attack_id != first.attack_id

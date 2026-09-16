@@ -8,7 +8,8 @@ import pytest
 import torch
 
 from leakpro.attacks.extraction_attacks.configs import SimilarityBand
-from leakpro.attacks.extraction_attacks.metrics import (
+from leakpro.attacks.extraction_attacks.utils_generative.carlini_graph import clique_medoid, maximum_clique
+from leakpro.attacks.extraction_attacks.utils_generative.image_metrics import (
     carlini_reference_scores,
     l2_band_scores,
     nearest_reference,
@@ -16,7 +17,6 @@ from leakpro.attacks.extraction_attacks.metrics import (
     pairwise_band_scores,
     tiled_l2_pairwise,
 )
-from leakpro.attacks.extraction_attacks.utils.carlini_graph import clique_medoid, maximum_clique
 
 
 def _brute_maximum_clique(adjacency: torch.Tensor) -> list[int]:

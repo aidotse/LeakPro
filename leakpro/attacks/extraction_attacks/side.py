@@ -20,14 +20,13 @@ from tqdm.auto import tqdm
 
 from leakpro.attacks.extraction_attacks.abstract_extraction import AbstractExtraction, AttackState
 from leakpro.attacks.extraction_attacks.configs import SIDEConfig
-from leakpro.attacks.extraction_attacks.metrics import l2_band_scores, nearest_reference, pairwise_band_scores
 from leakpro.attacks.extraction_attacks.protocols import (
     DiffusionAdapter,
     FeatureTransform,
     PairwiseScore,
     identity_feature_transform,
 )
-from leakpro.attacks.extraction_attacks.utils import (
+from leakpro.attacks.extraction_attacks.utils_generative import (
     batch_ranges,
     decode_uint8,
     encode_uint8,
@@ -35,12 +34,17 @@ from leakpro.attacks.extraction_attacks.utils import (
     require_authorized,
     resolve_device,
     seeded_torch_rng,
-    stable_hash,
     to_zero_one,
     validate_image_batch,
 )
-from leakpro.attacks.extraction_attacks.utils.side_classifier import TimeConditionedResNet
+from leakpro.attacks.extraction_attacks.utils_generative.image_metrics import (
+    l2_band_scores,
+    nearest_reference,
+    pairwise_band_scores,
+)
+from leakpro.attacks.extraction_attacks.utils_generative.side_classifier import TimeConditionedResNet
 from leakpro.reporting.extraction_result import CandidateRecord, ExtractionResult
+from leakpro.utils.save_load import hash_config
 
 ClassifierFactory = Callable[[int, int], nn.Module]
 
@@ -81,7 +85,7 @@ class AttackSIDEExtraction(AbstractExtraction):
         feature_extractor: nn.Module,
         configs: SIDEConfig | dict[str, Any],
         *,
-        audit_fingerprint: str,
+        audit_hash: str,
         reference_images: Tensor | None = None,
         feature_transform: FeatureTransform | None = None,
         classifier_factory: ClassifierFactory | None = None,
@@ -92,7 +96,7 @@ class AttackSIDEExtraction(AbstractExtraction):
         self.config = configs if isinstance(configs, SIDEConfig) else SIDEConfig(**configs)
         self.configs = self.config
         self.optuna_params = 0
-        self.audit_fingerprint = audit_fingerprint
+        self.audit_hash = audit_hash
         self.reference_images = reference_images
         self.feature_transform = feature_transform or identity_feature_transform
         self.classifier: nn.Module | None = None
@@ -100,10 +104,7 @@ class AttackSIDEExtraction(AbstractExtraction):
         self.reference_score_fn = reference_score_fn
         self.state = AttackState.CREATED
         identity_config = self.config.model_dump(mode="json", exclude={"overwrite_results"})
-        result_hash = stable_hash(
-            {"audit_fingerprint": self.audit_fingerprint, "config": identity_config},
-            length=16,
-        )
+        result_hash = hash_config({"audit_hash": self.audit_hash, "config": identity_config})[:16]
         self.result_id = f"side-extraction-{result_hash}"
         self.attack_id = self.result_id
         self.device = resolve_device(self.config.compute_device)
@@ -570,7 +571,7 @@ class AttackSIDEExtraction(AbstractExtraction):
             images=images,
             candidates=records,
             metrics=metrics,
-            provenance={**self.description(), "audit_fingerprint": self.audit_fingerprint},
+            provenance={**self.description(), "audit_hash": self.audit_hash},
             execution_trace=self.execution_trace,
             overwrite=self.config.overwrite_results,
         )

@@ -7,8 +7,7 @@ audit:
   random_seed: 2026
   attack_type: extraction
   data_modality: image
-  output_dir: ./leakpro_output/demonstration
-  hyper_param_search: false
+  output_dir: ./leakpro_output/
   attack_list:
     - attack: carlini_diffusion
       random_seed: 2026
@@ -55,4 +54,4 @@ audit:
 
 target:
   name: cifar10_unconditional_ddim
-  fingerprint: set-by-notebook
+  hash: set-by-notebook

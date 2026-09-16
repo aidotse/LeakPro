@@ -20,7 +20,7 @@ import torch
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from torch import Tensor
 
-from leakpro.attacks.extraction_attacks.utils import json_safe
+from leakpro.attacks.extraction_attacks.utils_generative import json_safe
 
 
 @dataclass

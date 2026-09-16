@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import torch
 
-from leakpro.attacks.extraction_attacks.metrics import (
+from leakpro.attacks.extraction_attacks.utils_generative.image_metrics import (
     carlini_reference_scores,
     normalized_l2_pairwise,
     tiled_l2_pairwise,

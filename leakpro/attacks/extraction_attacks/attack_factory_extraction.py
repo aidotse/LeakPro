@@ -10,8 +10,8 @@ from leakpro.attacks.extraction_attacks.abstract_extraction import AbstractExtra
 from leakpro.attacks.extraction_attacks.carlini import AttackCarliniExtraction
 from leakpro.attacks.extraction_attacks.configs import CarliniConfig, SIDEConfig
 from leakpro.attacks.extraction_attacks.side import AttackSIDEExtraction
-from leakpro.attacks.extraction_attacks.utils import (
-    extraction_audit_fingerprint,
+from leakpro.attacks.extraction_attacks.utils_generative import (
+    extraction_audit_hash,
     normalize_conditions,
     require_authorized,
     resolve_device,
@@ -56,15 +56,15 @@ class AttackFactoryExtraction:
                 raise RuntimeError("Carlini configuration dispatch failed.")
             conditions = normalize_conditions(handler.get_extraction_conditions())
             reference_images = handler.get_extraction_reference_images()
-            audit_fingerprint = extraction_audit_fingerprint(
-                handler.configs.target.fingerprint,
+            audit_hash = extraction_audit_hash(
+                handler.configs.target.hash,
                 conditions=conditions,
                 reference_images=reference_images,
             )
             return AttackCarliniExtraction(
                 handler.get_diffusion_adapter(),
                 config,
-                audit_fingerprint=audit_fingerprint,
+                audit_hash=audit_hash,
                 conditions=conditions,
                 reference_images=reference_images,
             )
@@ -72,8 +72,8 @@ class AttackFactoryExtraction:
             if not isinstance(config, SIDEConfig):
                 raise RuntimeError("SIDE configuration dispatch failed.")
             reference_images = handler.get_extraction_reference_images()
-            audit_fingerprint = extraction_audit_fingerprint(
-                handler.configs.target.fingerprint,
+            audit_hash = extraction_audit_hash(
+                handler.configs.target.hash,
                 conditions=None,
                 reference_images=reference_images,
             )
@@ -84,7 +84,7 @@ class AttackFactoryExtraction:
                 handler.get_diffusion_adapter(),
                 feature_extractor,
                 config,
-                audit_fingerprint=audit_fingerprint,
+                audit_hash=audit_hash,
                 reference_images=reference_images,
                 feature_transform=handler.get_side_feature_transform(),
                 classifier_factory=handler.get_side_classifier_factory(),

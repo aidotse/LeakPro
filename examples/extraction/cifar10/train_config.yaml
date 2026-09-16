@@ -5,42 +5,22 @@
 
 run:
   random_seed: 2026
-  profile: smoke
   audit_config: ./audit.yaml
   device: auto
   force_retrain: false
   data_dir: ./data
   target_dir: ./target
 
-profiles:
-  smoke:
-    train_size: 256
-    epochs: 1
-    train_batch_size: 64
-    learning_rate: 0.0001
-    timesteps: 1000
-    sampling_steps: 20
-    model_channels: 32
-    reference_size: 256
-    num_res_blocks: 1
-    dropout: 0.0
-    microbatch: 4
-    ema_decay: 0.9999
-
-  demonstration:
-    train_size: 1024
-    epochs: 1400
-    train_batch_size: 128
-    learning_rate: 0.0001
-    timesteps: 4000
-    sampling_steps: 100
-    model_channels: 128
-    reference_size: 1024
-    num_res_blocks: 3
-    dropout: 0.3
-    microbatch: 32
-    ema_decay: 0.999
-
-released:
-  checkpoint_path: ./target/released/cifar10_uncond_50M_500K.pt
+train:
+  train_size: 1024
+  epochs: 1400
+  train_batch_size: 128
+  learning_rate: 0.0001
+  timesteps: 4000
   sampling_steps: 100
+  model_channels: 128
+  reference_size: 1024
+  num_res_blocks: 3
+  dropout: 0.3
+  microbatch: 32
+  ema_decay: 0.999

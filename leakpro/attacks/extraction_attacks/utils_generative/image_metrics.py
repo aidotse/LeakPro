@@ -14,7 +14,7 @@ from torch import Tensor
 
 from leakpro.attacks.extraction_attacks.configs import SimilarityBand
 from leakpro.attacks.extraction_attacks.protocols import PairwiseScore
-from leakpro.attacks.extraction_attacks.utils import batch_ranges, resolve_device
+from leakpro.attacks.extraction_attacks.utils_generative import batch_ranges, resolve_device
 
 
 @dataclass(frozen=True)

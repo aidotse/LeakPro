@@ -156,14 +156,7 @@ def progress_batches(total: int, batch_size: int, description: str) -> Iterator[
             progress.update(end - start)
 
 
-def stable_hash(value: BaseModel | dict[str, Any], length: int = 12) -> str:
-    """Hash a validated config using canonical JSON."""
-    payload = value.model_dump(mode="json") if isinstance(value, BaseModel) else value
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
-    return hashlib.sha256(encoded).hexdigest()[:length]
-
-
-def condition_fingerprint(condition: object) -> str:
+def condition_hash(condition: object) -> str:
     """Return a non-reversible identifier for a condition without storing it."""
     payload = json.dumps(
         _canonical_condition(condition),
@@ -254,15 +247,15 @@ def _canonical_scalar_condition(value: object) -> dict[str, object]:
     )
 
 
-def extraction_audit_fingerprint(
-    target_fingerprint: str,
+def extraction_audit_hash(
+    target_hash: str,
     *,
     conditions: Sequence[Any] | None,
     reference_images: Tensor | None,
 ) -> str:
     """Hash target identity and attack inputs without persisting their contents."""
-    if not target_fingerprint.strip():
-        raise ValueError("target fingerprint must not be empty.")
+    if not target_hash.strip():
+        raise ValueError("target hash must not be empty.")
     digest = hashlib.sha256()
 
     def update(tag: str, payload: bytes) -> None:
@@ -270,12 +263,12 @@ def extraction_audit_fingerprint(
         digest.update(len(payload).to_bytes(8, "big"))
         digest.update(payload)
 
-    update("target", target_fingerprint.encode("utf-8"))
+    update("target", target_hash.encode("utf-8"))
     if conditions is None:
         update("conditions", b"none")
     else:
         for index, condition in enumerate(conditions):
-            update(f"condition:{index}", condition_fingerprint(condition).encode("ascii"))
+            update(f"condition:{index}", condition_hash(condition).encode("ascii"))
     if reference_images is None:
         update("references", b"none")
     else:

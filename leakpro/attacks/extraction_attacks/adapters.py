@@ -14,7 +14,7 @@ import torch
 from torch import Tensor, nn
 
 from leakpro.attacks.extraction_attacks.protocols import ConditionGradient
-from leakpro.attacks.extraction_attacks.utils import seeded_torch_rng
+from leakpro.attacks.extraction_attacks.utils_generative import seeded_torch_rng
 
 SampleFunction = Callable[[int, Optional[Sequence[Any]], int], Tensor]
 QSampleFunction = Callable[[Tensor, Tensor, Tensor], Tensor]

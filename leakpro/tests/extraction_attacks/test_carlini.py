@@ -34,7 +34,7 @@ def test_conditional_black_box_retains_repeatability_clique() -> None:
             "tiled_l2_threshold": 0.01,
             "min_clique_size": 6,
         },
-        audit_fingerprint="conditional-test",
+        audit_hash="conditional-test",
         conditions=["memorized"],
         reference_images=torch.zeros((1, 1, 4, 4)),
     )
@@ -67,7 +67,7 @@ def test_unconditional_reference_mode_deduplicates_reference_matches() -> None:
             "ratio_threshold": 1.0,
             "tile_grid": (1, 1),
         },
-        audit_fingerprint="unconditional-test",
+        audit_hash="unconditional-test",
         reference_images=references,
     )
     attack.prepare_attack()
@@ -98,7 +98,7 @@ def test_tile_grid_divisibility_applies_only_to_conditional_mode() -> None:
             "reference_neighbors": 2,
             "ratio_threshold": 1.0,
         },
-        audit_fingerprint="unconditional-non-tiled-shape-test",
+        audit_hash="unconditional-non-tiled-shape-test",
         reference_images=references,
     )
 
@@ -117,7 +117,7 @@ def test_tile_grid_divisibility_applies_only_to_conditional_mode() -> None:
             "generation_batch_size": 2,
             "min_clique_size": 2,
         },
-        audit_fingerprint="conditional-non-tiled-shape-test",
+        audit_hash="conditional-non-tiled-shape-test",
         conditions=["condition"],
     )
 
@@ -131,7 +131,7 @@ def test_attack_fails_closed_without_authorization() -> None:
         image_shape=(1, 2, 2),
         sample_fn=lambda batch_size, conditions, seed: torch.zeros((batch_size, 1, 2, 2)),
     )
-    attack = AttackCarliniExtraction(adapter, {}, audit_fingerprint="authorization-test", conditions=["x"])
+    attack = AttackCarliniExtraction(adapter, {}, audit_hash="authorization-test", conditions=["x"])
     with pytest.raises(PermissionError, match="authorized_audit"):
         attack.prepare_attack()
 
@@ -144,7 +144,7 @@ def test_carlini_provenance_names_the_canonical_paper() -> None:
     attack = AttackCarliniExtraction(
         adapter,
         {"authorized_audit": True},
-        audit_fingerprint="citation-test",
+        audit_hash="citation-test",
         conditions=["x"],
     )
 
@@ -168,7 +168,7 @@ def test_conditional_mode_rejects_none_before_sampling() -> None:
     attack = AttackCarliniExtraction(
         CallableDiffusionAdapter(image_shape=(1, 2, 2), sample_fn=sample),
         {"authorized_audit": True},
-        audit_fingerprint="none-condition-test",
+        audit_hash="none-condition-test",
         conditions=[None],
     )
 
@@ -193,7 +193,7 @@ def test_direct_construction_rejects_ambiguous_condition_containers(conditions: 
         AttackCarliniExtraction(
             adapter,
             {"authorized_audit": True},
-            audit_fingerprint="ambiguous-condition-test",
+            audit_hash="ambiguous-condition-test",
             conditions=conditions,
         )
 
@@ -210,7 +210,7 @@ def test_carlini_rejects_invalid_distance_device_before_sampling() -> None:
     attack = AttackCarliniExtraction(
         CallableDiffusionAdapter(image_shape=(1, 2, 2), sample_fn=sample),
         {"authorized_audit": True, "distance_device": "not-a-device"},
-        audit_fingerprint="invalid-device-test",
+        audit_hash="invalid-device-test",
         conditions=["cat"],
     )
 
@@ -240,7 +240,7 @@ def test_conditional_attack_handles_a_dense_graph_beyond_the_recursion_limit() -
             "tiled_l2_threshold": 0.01,
             "min_clique_size": 10,
         },
-        audit_fingerprint="dense-graph-test",
+        audit_hash="dense-graph-test",
         conditions=["memorized"],
     )
 
@@ -271,7 +271,7 @@ def test_failed_carlini_run_cannot_reuse_partial_state() -> None:
             "tile_grid": (2, 2),
             "min_clique_size": 2,
         },
-        audit_fingerprint="failed-run-lifecycle-test",
+        audit_hash="failed-run-lifecycle-test",
         conditions=["first", "second"],
     )
     attack.prepare_attack()

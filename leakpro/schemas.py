@@ -112,7 +112,7 @@ class ExtractionTargetConfig(BaseModel):
     """Minimal target metadata for a handler-owned diffusion stack."""
 
     name: str = Field(default="diffusion_target", description="Human-readable target identifier")
-    fingerprint: str = Field(
+    hash: str = Field(
         ...,
         min_length=1,
         description=(
@@ -120,12 +120,12 @@ class ExtractionTargetConfig(BaseModel):
         ),
     )
 
-    @field_validator("fingerprint")
+    @field_validator("hash")
     @classmethod
-    def validate_fingerprint(cls, value: str) -> str:
+    def validate_hash(cls, value: str) -> str:
         """Reject identifiers that contain no visible characters."""
         if not value.strip():
-            raise ValueError("target fingerprint must not be blank.")
+            raise ValueError("target hash must not be blank.")
         return value
 
     model_config = ConfigDict(extra="forbid")
@@ -176,7 +176,7 @@ class LeakProConfig(BaseModel):
         """Match classifier and extraction target schemas to their attack families."""
         is_extraction_target = isinstance(self.target, ExtractionTargetConfig)
         if self.audit.attack_type == "extraction" and not is_extraction_target:
-            raise ValueError("extraction audits require ExtractionTargetConfig with a target name and fingerprint.")
+            raise ValueError("extraction audits require ExtractionTargetConfig with a target name and hash.")
         if self.audit.attack_type != "extraction" and is_extraction_target:
             raise ValueError("non-extraction audits require the standard TargetConfig.")
         return self

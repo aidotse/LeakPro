@@ -297,7 +297,7 @@ def test_side_rejects_improved_diffusion_loop_before_sampling() -> None:
             "clusters": 2,
             "min_cluster_size": 1,
         },
-        audit_fingerprint="improved-only-test",
+        audit_hash="improved-only-test",
     )
 
     with pytest.raises(ValueError, match="cond_fn"):
@@ -322,7 +322,7 @@ def test_side_rejects_positional_only_cond_fn_before_sampling() -> None:
             "clusters": 2,
             "min_cluster_size": 1,
         },
-        audit_fingerprint="positional-only-guidance-test",
+        audit_hash="positional-only-guidance-test",
     )
 
     with pytest.raises(ValueError, match="cond_fn"):

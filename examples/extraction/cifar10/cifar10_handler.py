@@ -17,10 +17,10 @@ from leakpro.attacks.extraction_attacks.adapters import CallableDiffusionAdapter
 from leakpro.attacks.extraction_attacks.protocols import FeatureTransform
 
 
-def load_audit_config(path: Path, *, target_fingerprint: str) -> dict:
+def load_audit_config(path: Path, *, target_hash: str) -> dict:
     """Load attack settings and set the runtime target identity."""
     config = yaml.safe_load(path.read_text(encoding="utf-8"))
-    config["target"]["fingerprint"] = target_fingerprint
+    config["target"]["hash"] = target_hash
     return config
 
 

@@ -14,25 +14,25 @@ from torch import Tensor
 
 from leakpro.attacks.extraction_attacks.abstract_extraction import AbstractExtraction, AttackState
 from leakpro.attacks.extraction_attacks.configs import CarliniConfig
-from leakpro.attacks.extraction_attacks.metrics import (
+from leakpro.attacks.extraction_attacks.protocols import SamplingAdapter
+from leakpro.attacks.extraction_attacks.utils_generative import (
+    condition_hash,
+    normalize_conditions,
+    progress_batches,
+    require_authorized,
+    resolve_device,
+    to_zero_one,
+    validate_image_batch,
+)
+from leakpro.attacks.extraction_attacks.utils_generative.carlini_graph import clique_medoid, maximum_clique
+from leakpro.attacks.extraction_attacks.utils_generative.image_metrics import (
     carlini_reference_scores,
     nearest_reference,
     reference_neighborhood_means,
     tiled_l2_pairwise,
 )
-from leakpro.attacks.extraction_attacks.protocols import SamplingAdapter
-from leakpro.attacks.extraction_attacks.utils import (
-    condition_fingerprint,
-    normalize_conditions,
-    progress_batches,
-    require_authorized,
-    resolve_device,
-    stable_hash,
-    to_zero_one,
-    validate_image_batch,
-)
-from leakpro.attacks.extraction_attacks.utils.carlini_graph import clique_medoid, maximum_clique
 from leakpro.reporting.extraction_result import CandidateRecord, ExtractionResult
+from leakpro.utils.save_load import hash_config
 
 
 class AttackCarliniExtraction(AbstractExtraction):
@@ -49,7 +49,7 @@ class AttackCarliniExtraction(AbstractExtraction):
         adapter: SamplingAdapter,
         configs: CarliniConfig | dict[str, Any],
         *,
-        audit_fingerprint: str,
+        audit_hash: str,
         conditions: Sequence[Any] | None = None,
         reference_images: Tensor | None = None,
     ) -> None:
@@ -57,15 +57,12 @@ class AttackCarliniExtraction(AbstractExtraction):
         self.config = configs if isinstance(configs, CarliniConfig) else CarliniConfig(**configs)
         self.configs = self.config
         self.optuna_params = 0
-        self.audit_fingerprint = audit_fingerprint
+        self.audit_hash = audit_hash
         self.conditions = normalize_conditions(conditions)
         self.reference_images = reference_images
         self.state = AttackState.CREATED
         identity_config = self.config.model_dump(mode="json", exclude={"overwrite_results"})
-        result_hash = stable_hash(
-            {"audit_fingerprint": self.audit_fingerprint, "config": identity_config},
-            length=16,
-        )
+        result_hash = hash_config({"audit_hash": self.audit_hash, "config": identity_config})[:16]
         self.result_id = f"carlini-diffusion-extraction-{result_hash}"
         self.attack_id = self.result_id
         self._references_zero_one: Tensor | None = None
@@ -173,8 +170,8 @@ class AttackCarliniExtraction(AbstractExtraction):
         if self.conditions is None:
             raise RuntimeError("Conditional inputs were not prepared.")
         for condition_index, condition in enumerate(self.conditions):
-            fingerprint = condition_fingerprint(condition)
-            condition_id = f"condition:{condition_index}:{fingerprint[:12]}"
+            hash = condition_hash(condition)
+            condition_id = f"condition:{condition_index}:{hash[:12]}"
             images = self._generate(
                 self.config.num_generations_per_condition,
                 condition,
@@ -191,7 +188,7 @@ class AttackCarliniExtraction(AbstractExtraction):
             clique = maximum_clique(adjacency)
             summary = {
                 "condition_index": condition_index,
-                "condition_fingerprint": fingerprint,
+                "condition_hash": hash,
                 "largest_clique_size": len(clique),
                 "qualified": len(clique) >= self.config.min_clique_size,
             }
@@ -207,7 +204,7 @@ class AttackCarliniExtraction(AbstractExtraction):
                         support_indices=clique,
                         metadata={
                             "condition_index": condition_index,
-                            "condition_fingerprint": fingerprint,
+                            "condition_hash": hash,
                             "medoid_generation_index": medoid_index,
                             "largest_clique_size": len(clique),
                             "tiled_l2_threshold": self.config.tiled_l2_threshold,
@@ -275,7 +272,7 @@ class AttackCarliniExtraction(AbstractExtraction):
                 "verified_count": verified_count if self._references_zero_one is not None else None,
                 "condition_summaries": condition_summaries,
             },
-            provenance={**self.description(), "audit_fingerprint": self.audit_fingerprint},
+            provenance={**self.description(), "audit_hash": self.audit_hash},
             execution_trace=self.execution_trace,
             overwrite=self.config.overwrite_results,
         )
@@ -360,7 +357,7 @@ class AttackCarliniExtraction(AbstractExtraction):
                 "unique_reference_matches": len(records),
                 "ratio_threshold": self.config.ratio_threshold,
             },
-            provenance={**self.description(), "audit_fingerprint": self.audit_fingerprint},
+            provenance={**self.description(), "audit_hash": self.audit_hash},
             execution_trace=self.execution_trace,
             overwrite=self.config.overwrite_results,
         )

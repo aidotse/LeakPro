@@ -35,10 +35,9 @@ from leakpro.attacks.extraction_attacks.protocols import ConditionGradient, Feat
 
 
 @dataclass(frozen=True)
-class RunProfile:
+class TrainConfig:
     """Training and audit sizes for one notebook run."""
 
-    name: str
     seed: int
     train_size: int
     epochs: int
@@ -76,8 +75,6 @@ class RunProfile:
 
 MODEL_FORMAT_VERSION = 3
 CHECKPOINT_EVERY_EPOCHS = 100
-RELEASED_CHECKPOINT_URL = "https://openaipublic.blob.core.windows.net/diffusion/march-2021/cifar10_uncond_50M_500K.pt"
-RELEASED_CHECKPOINT_SHA256 = "351ef8b22e54e0eb2f8ef70389e101ef67e313f8fda41b46139575b3ce042cec"
 
 
 def select_device(requested: str = "auto") -> torch.device:
@@ -99,16 +96,16 @@ def seed_everything(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
-def _model_options(profile: RunProfile) -> dict[str, Any]:
-    """Use the released Improved DDPM CIFAR-10 L_hybrid model configuration."""
+def _model_options(train: TrainConfig) -> dict[str, Any]:
+    """Use the Improved DDPM CIFAR-10 L_hybrid model configuration."""
     options = model_and_diffusion_defaults()
     options.update(
         image_size=32,
-        num_channels=profile.model_channels,
-        num_res_blocks=profile.num_res_blocks,
-        dropout=profile.dropout,
+        num_channels=train.model_channels,
+        num_res_blocks=train.num_res_blocks,
+        dropout=train.dropout,
         learn_sigma=True,
-        diffusion_steps=profile.timesteps,
+        diffusion_steps=train.timesteps,
         noise_schedule="cosine",
         attention_resolutions="16,8",
         num_heads=4,
@@ -119,10 +116,10 @@ def _model_options(profile: RunProfile) -> dict[str, Any]:
     return options
 
 
-def create_target_model(profile: RunProfile, device: torch.device) -> nn.Module:
-    """Construct the official U-Net, with reduced dimensions only for smoke runs."""
+def create_target_model(train: TrainConfig, device: torch.device) -> nn.Module:
+    """Construct the official U-Net."""
     device = select_device(str(device))
-    model, _diffusion = create_model_and_diffusion(**_model_options(profile))
+    model, _diffusion = create_model_and_diffusion(**_model_options(train))
     return model.to(device)
 
 
@@ -209,33 +206,8 @@ class GaussianDiffusion:
         return images.clamp(-1.0, 1.0).detach()
 
 
-def ensure_released_checkpoint(path: Path) -> Path:
-    """Cache the official CIFAR-10 L_hybrid weights after verifying their SHA-256."""
-    if path.exists():
-        if sha256_file(path) != RELEASED_CHECKPOINT_SHA256:
-            raise ValueError(f"Released checkpoint SHA-256 mismatch: {path}. Remove the invalid file and retry.")
-        return path
-    path.parent.mkdir(parents=True, exist_ok=True)
-    torch.hub.download_url_to_file(RELEASED_CHECKPOINT_URL, str(path), hash_prefix=RELEASED_CHECKPOINT_SHA256)
-    return path
-
-
-def load_pretrained_target(
-    profile: RunProfile,
-    checkpoint_path: Path,
-    device: torch.device,
-) -> tuple[nn.Module, GaussianDiffusion]:
-    """Load a locally supplied official CIFAR-10 L_hybrid checkpoint without training."""
-    if (profile.model_channels, profile.num_res_blocks, profile.dropout, profile.timesteps) != (128, 3, 0.3, 4000):
-        raise ValueError("The released CIFAR-10 checkpoint requires channels=128, blocks=3, dropout=0.3, timesteps=4000.")
-    model = create_target_model(profile, device)
-    model.load_state_dict(torch.load(checkpoint_path, map_location="cpu", weights_only=True), strict=True)
-    model.eval()
-    return model, GaussianDiffusion(profile.timesteps, profile.sampling_steps, device)
-
-
 def load_cifar10(
-    profile: RunProfile,
+    train: TrainConfig,
     work_dir: Path,
     data_dir: Path | None = None,
 ) -> tuple[Dataset, Tensor]:
@@ -248,12 +220,12 @@ def load_cifar10(
     )
     dataset_root = data_dir if data_dir is not None else work_dir / "data"
     full_train = CIFAR10(root=str(dataset_root), train=True, download=True, transform=transform)
-    if profile.train_size > len(full_train):
+    if train.train_size > len(full_train):
         raise ValueError("The requested CIFAR-10 training subset is too large.")
-    if profile.reference_size > profile.train_size:
+    if train.reference_size > train.train_size:
         raise ValueError("reference_size must not exceed the audited training subset size.")
-    audited_train = Subset(full_train, range(profile.train_size))
-    references = torch.stack([audited_train[index][0] for index in range(profile.reference_size)])
+    audited_train = Subset(full_train, range(train.train_size))
+    references = torch.stack([audited_train[index][0] for index in range(train.reference_size)])
     return audited_train, references
 
 
@@ -290,7 +262,7 @@ def _train_epoch(
     loader: DataLoader,
     optimizer: torch.optim.Optimizer,
     noise_generator: torch.Generator,
-    profile: RunProfile,
+    train: TrainConfig,
     device: torch.device,
 ) -> float:
     """Accumulate each effective batch before updating AdamW and EMA."""
@@ -301,7 +273,7 @@ def _train_epoch(
         clean_images = clean_images.to(device)
         timesteps = torch.randint(
             0,
-            profile.timesteps,
+            train.timesteps,
             (clean_images.shape[0],),
             generator=noise_generator,
             device="cpu",
@@ -309,8 +281,8 @@ def _train_epoch(
         noise = torch.randn(clean_images.shape, generator=noise_generator, device="cpu").to(device)
         optimizer.zero_grad(set_to_none=True)
         batch_count = clean_images.shape[0]
-        for start in range(0, batch_count, profile.microbatch):
-            stop = min(start + profile.microbatch, batch_count)
+        for start in range(0, batch_count, train.microbatch):
+            stop = min(start + train.microbatch, batch_count)
             losses = diffusion.process.training_losses(
                 model,
                 clean_images[start:stop],
@@ -323,13 +295,13 @@ def _train_epoch(
             (losses.sum() / batch_count).backward()
             loss_sum += float(losses.detach().sum())
         optimizer.step()
-        _update_ema(ema_model, model, decay=profile.ema_decay)
+        _update_ema(ema_model, model, decay=train.ema_decay)
         image_count += batch_count
     return loss_sum / image_count
 
 
 def train_or_load_target(
-    profile: RunProfile,
+    train: TrainConfig,
     train_dataset: Dataset,
     work_dir: Path,
     device: torch.device,
@@ -341,39 +313,39 @@ def train_or_load_target(
     A separate resume file preserves training state every 100 epochs. Only the
     final checkpoint is returned as an audit target.
     """
-    checkpoint_path = work_dir / f"cifar10_ddpm_{profile.name}.pt"
+    checkpoint_path = work_dir / "cifar10_ddpm.pt"
     resume_path = checkpoint_path.with_suffix(".resume.pt")
-    if len(train_dataset) != profile.train_size:
-        raise ValueError("The training dataset length must match profile.train_size.")
+    if len(train_dataset) != train.train_size:
+        raise ValueError("The training dataset length must match train.train_size.")
     if force_retrain:
         checkpoint_path.unlink(missing_ok=True)
         resume_path.unlink(missing_ok=True)
     training_settings = {
-        key: value for key, value in asdict(profile).items()
-        if key not in ("name", "sampling_steps", "reference_size")
+        key: value for key, value in asdict(train).items()
+        if key not in ("sampling_steps", "reference_size")
     }
     expected_metadata = {"format_version": MODEL_FORMAT_VERSION, "training": training_settings}
-    seed_everything(profile.seed)
-    model = create_target_model(profile, device)
-    diffusion = GaussianDiffusion(profile.timesteps, profile.sampling_steps, device)
+    seed_everything(train.seed)
+    model = create_target_model(train, device)
+    diffusion = GaussianDiffusion(train.timesteps, train.sampling_steps, device)
     if checkpoint_path.exists():
         checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
         if checkpoint.get("metadata") != expected_metadata:
-            raise ValueError(f"Checkpoint metadata does not match the {profile.name!r} profile: {checkpoint_path}")
+            raise ValueError(f"Checkpoint metadata does not match the training configuration: {checkpoint_path}")
         model.load_state_dict(checkpoint["model"])
         model.eval()
         return model, diffusion, checkpoint_path, list(checkpoint.get("epoch_losses", []))
 
-    loader_generator = torch.Generator(device="cpu").manual_seed(profile.seed)
+    loader_generator = torch.Generator(device="cpu").manual_seed(train.seed)
     loader = DataLoader(
         train_dataset,
-        batch_size=profile.train_batch_size,
+        batch_size=train.train_batch_size,
         shuffle=True,
         num_workers=0,
         generator=loader_generator,
     )
-    noise_generator = torch.Generator(device="cpu").manual_seed(profile.seed + 1)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=profile.learning_rate, weight_decay=0.0)
+    noise_generator = torch.Generator(device="cpu").manual_seed(train.seed + 1)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=train.learning_rate, weight_decay=0.0)
     ema_model = copy.deepcopy(model).eval()
     epoch_losses: list[float] = []
     if resume_path.exists():
@@ -381,7 +353,7 @@ def train_or_load_target(
         if resume.get("metadata") != expected_metadata or resume.get("device_type") != device.type:
             raise ValueError(f"Resume metadata or device does not match this training run: {resume_path}")
         epoch_losses = list(resume["epoch_losses"])
-        if not 0 < len(epoch_losses) <= profile.epochs:
+        if not 0 < len(epoch_losses) <= train.epochs:
             raise ValueError(f"Resume checkpoint has an invalid completed epoch count: {resume_path}")
         model.load_state_dict(resume["model"])
         ema_model.load_state_dict(resume["ema_model"])
@@ -390,11 +362,11 @@ def train_or_load_target(
         noise_generator.set_state(resume["noise_rng"])
         torch.set_rng_state(resume["torch_rng"])
         _restore_device_rng(device, resume["device_rng"])
-    progress = tqdm(range(len(epoch_losses), profile.epochs), desc="DDPM training epochs",
-                    initial=len(epoch_losses), total=profile.epochs)
+    progress = tqdm(range(len(epoch_losses), train.epochs), desc="DDPM training epochs",
+                    initial=len(epoch_losses), total=train.epochs)
     for _epoch in progress:
         epoch_losses.append(_train_epoch(model, ema_model, diffusion, loader, optimizer,
-                                        noise_generator, profile, device))
+                                        noise_generator, train, device))
         progress.set_postfix(loss=f"{epoch_losses[-1]:.4f}")
         if len(epoch_losses) % CHECKPOINT_EVERY_EPOCHS == 0:
             _save_checkpoint(resume_path, {
@@ -478,7 +450,7 @@ def make_feature_extractor() -> tuple[nn.Module, FeatureTransform]:
 
 
 def sha256_file(path: Path) -> str:
-    """Return a checkpoint fingerprint for the extraction result identity."""
+    """Return a checkpoint hash for the extraction result identity."""
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
@@ -511,9 +483,3 @@ def sha256_module_state(module: nn.Module) -> str:
         digest.update(len(raw_value).to_bytes(8, "big"))
         digest.update(raw_value)
     return digest.hexdigest()
-
-
-def sha256_mapping(value: dict[str, str]) -> str:
-    """Hash a string mapping using one canonical JSON representation."""
-    payload = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(payload).hexdigest()
