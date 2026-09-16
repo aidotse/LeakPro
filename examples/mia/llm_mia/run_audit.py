@@ -41,6 +41,13 @@ def main() -> None:
     results = leakpro.run_audit(create_pdf=args.pdf)
     for res in results:
         print(f"{res.result_name}: AUC {res.roc_auc:.4f}  " + "  ".join(f"{k} {v}" for k, v in res.fixed_fpr_table.items()))
+        boot = getattr(res, "bootstrap", None)
+        if boot:
+            auc = boot["roc_auc"]
+            print(f"  bootstrap ({boot['n_bootstrap_samples']} resamples): AUC {auc['mean']:.4f} "
+                  f"[{auc['ci_low']:.4f}, {auc['ci_high']:.4f}]  "
+                  + "  ".join(f"{k} {v['mean']:.4f} [{v['ci_low']:.4f}, {v['ci_high']:.4f}]"
+                              for k, v in boot["fixed_fpr_table"].items()))
 
 
 if __name__ == "__main__":

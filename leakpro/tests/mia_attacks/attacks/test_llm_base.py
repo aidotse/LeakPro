@@ -16,6 +16,7 @@ Tests cover:
   indices and references are scored on the same rows
 """
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -27,7 +28,6 @@ from leakpro.attacks.mia_attacks.llm.abstract_llm_mia import (
     AbstractLLMMIA,
     LLMAttackConfig,
     ReferenceModelConfig,
-    bootstrap_auc_and_tpr,
     load_reference,
     rank_top,
 )
@@ -405,32 +405,44 @@ def test_max_samples_is_stratified_deterministic_and_smaller_than_max_samples_is
 # ------------------------------------------------------------------------------ n_bootstrap_samples
 
 
-def test_bootstrap_auc_and_tpr_reports_mean_and_ci() -> None:
-    """A clearly-separable score distribution bootstraps to a high AUC with a sane confidence interval."""
+def test_bootstrap_metrics_uses_mia_result_definitions_and_reports_ci() -> None:
+    """Bootstrap AUC/TPR come from MIAResult itself: same keys and definitions as the point estimate."""
     rng = np.random.RandomState(0)
     labels = np.array([1] * 50 + [0] * 50)
     scores = np.concatenate([rng.normal(1.0, 1.0, 50), rng.normal(0.0, 1.0, 50)])
-    result = bootstrap_auc_and_tpr(labels, scores, n_bootstrap_samples=20, seed=0)
-    assert result["n_bootstrap_samples"] == 20
-    assert result["auc"]["n"] == 20
-    assert 0.5 < result["auc"]["mean"] <= 1.0
-    assert result["auc"]["ci_low"] <= result["auc"]["mean"] <= result["auc"]["ci_high"]
-    assert set(result["tpr_at_fpr"]) == {"0", "0.0001", "0.001", "0.01", "0.1"}
+    point = MIAResult.from_full_scores(true_membership=labels, signal_values=scores, result_name="p")
+    block = MIAResult.bootstrap_metrics(labels, scores, n_resamples=20, seed=0)
+    assert block["n_bootstrap_samples"] == 20
+    assert block["n_used"] == 20
+    assert 0.5 < block["roc_auc"]["mean"] <= 1.0
+    assert block["roc_auc"]["ci_low"] <= block["roc_auc"]["mean"] <= block["roc_auc"]["ci_high"]
+    assert set(block["fixed_fpr_table"]) == set(point.fixed_fpr_table)          # identical metric keys
+    # the point estimate lies inside (or at the edge of) its own bootstrap interval
+    assert block["roc_auc"]["ci_low"] - 0.05 <= point.roc_auc <= block["roc_auc"]["ci_high"] + 0.05
+    # a one-class resample contributes nothing rather than crashing
+    degenerate = MIAResult.bootstrap_metrics(np.ones(6), np.arange(6.0), n_resamples=3, seed=0)
+    assert degenerate["n_used"] == 0
+    assert degenerate["roc_auc"]["mean"] is None
 
 
-def test_bootstrap_is_opt_in_and_attaches_to_the_result(monkeypatch: pytest.MonkeyPatch) -> None:
-    """n_bootstrap_samples unset attaches nothing; set, it attaches result.bootstrap."""
+def test_bootstrap_is_opt_in_and_round_trips_through_save_and_load(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """n_bootstrap_samples unset attaches nothing; set, it is persisted in the result JSON and restored by load()."""
     monkeypatch.setattr("leakpro.signals.token_evidence.get_device", lambda: torch.device("cpu"))
     handler = _fake_handler(n_train=6, n_test=6, n_extra=2)
+    labels, scores = np.array([1, 0, 1, 0, 1, 0]), np.array([0.9, 0.1, 0.8, 0.2, 0.7, 0.3])
 
     plain = _Probe(handler, {})
-    result = MIAResult.from_full_scores(
-        true_membership=[1, 0, 1, 0], signal_values=[0.9, 0.1, 0.8, 0.2], result_name="probe")
-    assert plain._attach_bootstrap_if_configured(result, np.array([1, 0, 1, 0]), np.array([0.9, 0.1, 0.8, 0.2])) is result
-    assert not hasattr(result, "bootstrap")
+    result = MIAResult.from_full_scores(true_membership=labels, signal_values=scores, result_name="probe")
+    assert plain._attach_bootstrap_if_configured(result, labels, scores) is result
+    assert getattr(result, "bootstrap", None) is None
+    assert result.result.bootstrap is None
 
     boot = _Probe(handler, {"n_bootstrap_samples": 5})
-    result2 = MIAResult.from_full_scores(
-        true_membership=[1, 0, 1, 0], signal_values=[0.9, 0.1, 0.8, 0.2], result_name="probe")
-    boot._attach_bootstrap_if_configured(result2, np.array([1, 0, 1, 0]), np.array([0.9, 0.1, 0.8, 0.2]))
+    result2 = MIAResult.from_full_scores(true_membership=labels, signal_values=scores, result_name="probe")
+    boot._attach_bootstrap_if_configured(result2, labels, scores)
     assert result2.bootstrap["n_bootstrap_samples"] == 5
+    assert result2.result.bootstrap == result2.bootstrap                          # in the schema object
+
+    result2.save(attack_obj=boot, output_dir=str(tmp_path))
+    loaded = MIAResult.load(str(tmp_path / "data_objects" / f"{boot.attack_id}.json"))
+    assert loaded.bootstrap == result2.bootstrap                                   # survives the JSON round trip
