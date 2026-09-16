@@ -12,6 +12,8 @@ so the saved state dict matches this plain wrapper.
 import torch
 from torch import nn
 
+from leakpro.attacks.mia_attacks.llm.abstract_llm_mia import load_pretrained_causal_lm
+
 
 class HFCausalLMWrapper(nn.Module):
     """Load an ``AutoModelForCausalLM`` and expose the ``(input_ids, attention_mask)`` forward LeakPro expects."""
@@ -20,13 +22,8 @@ class HFCausalLMWrapper(nn.Module):
         super().__init__()
         self.pretrained_name_or_path = pretrained_name_or_path
         self.dtype = dtype
-        from transformers import AutoModelForCausalLM
-
-        torch_dtype = getattr(torch, dtype)
-        try:
-            self.model = AutoModelForCausalLM.from_pretrained(pretrained_name_or_path, dtype=torch_dtype)
-        except TypeError:  # transformers < 5 spells the argument torch_dtype
-            self.model = AutoModelForCausalLM.from_pretrained(pretrained_name_or_path, torch_dtype=torch_dtype)
+        # Uncached loader (this module gets fine-tuned); the transformers version shim lives in one place.
+        self.model = load_pretrained_causal_lm(pretrained_name_or_path, dtype)
 
     def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor = None):  # noqa: ANN201
         """Return the HF output object; ``CausalLMModel`` reads ``.logits`` from it."""

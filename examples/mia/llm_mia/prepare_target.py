@@ -125,7 +125,6 @@ def main() -> None:
     criterion = nn.CrossEntropyLoss(ignore_index=-100)
     optimizer = optim.AdamW(model.parameters(), lr=train_cfg["learning_rate"], weight_decay=train_cfg.get("weight_decay", 0.0))
 
-    LLMModelHandler.pad_token_id = pad_token_id
     LLMModelHandler.lora = train_cfg["lora"] if train_cfg["finetune_method"] == "lora" else None
     handler = LLMModelHandler()
     print(f"fine-tuning {train_cfg['model_name']} ({train_cfg['finetune_method']}) on {n_members} members")

@@ -24,7 +24,7 @@ train:
     target_modules: [c_attn, c_proj, c_fc]   # GPT-2 module names; adjust for other architectures
 
 data:
-  hf_dataset: wikitext
+  hf_dataset: Salesforce/wikitext   # full repo id; newer `datasets` no longer resolves the bare name
   hf_config: wikitext-103-raw-v1
   split: train
   text_field: text

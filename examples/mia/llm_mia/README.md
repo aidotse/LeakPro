@@ -24,7 +24,8 @@ python prepare_target.py --config train_config.yaml --finetune-method lora # →
 ```
 
 Defaults reproduce the EZ-MIA paper's WikiText-103 / GPT-2 / 128-token / 3-epoch setting: 10k member
-and 10k non-member chunks. The script tokenises once (`data/wikitext_gpt2_128.pkl`), fine-tunes with
+and 10k non-member chunks. The dataset is referenced by its full hub id (`Salesforce/wikitext`);
+recent `datasets` releases no longer resolve the bare `wikitext` name. The script tokenises once (`data/wikitext_gpt2_128.pkl`), fine-tunes with
 `LLMModelHandler.train`, and writes `target_model.pkl` + `model_metadata.pkl` through
 `LeakPro.make_mia_metadata` — the same files every other LeakPro MIA example produces. The metadata's
 `accuracy` is next-token top-1 accuracy.

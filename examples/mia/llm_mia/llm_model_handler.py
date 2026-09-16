@@ -7,8 +7,7 @@ Usage:
 
 ``train`` / ``eval`` are only used by ``prepare_target.py`` to build the target; the LLM attacks
 themselves train nothing. Both accept the ``(input_ids, input_ids)`` batches the data handler yields
-(via default collate for fixed-length data, or ``CausalLMCollate`` for variable length, which yields
-``(input_ids, attention_mask)``).
+(always built with ``CausalLMCollate`` in ``prepare_target.py``, so batches are ``(input_ids, attention_mask)``).
 """
 
 import torch
@@ -21,12 +20,10 @@ from leakpro.schemas import EvalOutput, TrainingOutput
 from leakpro.utils.device import get_device, mark_step
 
 
-def _unpack(batch: tuple, pad_token_id: int) -> tuple:
-    """Return (input_ids, attention_mask) from either (ids, ids) or (ids, mask) batches."""
-    first, second = batch
-    if second.dtype == torch.bool or (second.max() <= 1 and second.min() >= 0 and not torch.equal(first, second)):
-        return first, second.long()
-    return first, (first != pad_token_id).long()
+def _unpack(batch: tuple) -> tuple:
+    """Return (input_ids, attention_mask). Every loader in this example uses CausalLMCollate, which yields exactly that."""
+    input_ids, attention_mask = batch
+    return input_ids, attention_mask.long()
 
 
 def _next_token_loss_and_acc(logits: torch.Tensor, input_ids: torch.Tensor, mask: torch.Tensor,
@@ -44,8 +41,7 @@ def _next_token_loss_and_acc(logits: torch.Tensor, input_ids: torch.Tensor, mask
 class LLMModelHandler(AbstractInputHandler, role="model"):
     """Fine-tuning and evaluation for a HuggingFace causal LM behind ``HFCausalLMWrapper``."""
 
-    pad_token_id: int = 50256  # GPT-2 eos; prepare_target.py overrides this class attribute
-    lora: dict = None          # {"r": 16, "alpha": 32, "dropout": 0.05, "target_modules": [...]} or None
+    lora: dict = None  # {"r": 16, "alpha": 32, "dropout": 0.05, "target_modules": [...]} or None
 
     def train(
         self,
@@ -74,7 +70,7 @@ class LLMModelHandler(AbstractInputHandler, role="model"):
             model.train()
             tot_loss, tot_correct, tot_tokens = 0.0, 0, 0
             for batch in tqdm(dataloader, desc=f"Epoch {epoch + 1}/{epochs}"):
-                ids, mask = _unpack(batch, self.pad_token_id)
+                ids, mask = _unpack(batch)
                 ids, mask = ids.to(device), mask.to(device)
                 optimizer.zero_grad(set_to_none=True)
                 out = model(input_ids=ids, attention_mask=mask)
@@ -105,7 +101,7 @@ class LLMModelHandler(AbstractInputHandler, role="model"):
         tot_loss, tot_correct, tot_tokens = 0.0, 0, 0
         with torch.no_grad():
             for batch in dataloader:
-                ids, mask = _unpack(batch, self.pad_token_id)
+                ids, mask = _unpack(batch)
                 ids, mask = ids.to(device), mask.to(device)
                 out = model(input_ids=ids, attention_mask=mask)
                 loss, correct, n_tok = _next_token_loss_and_acc(out.logits, ids, mask, criterion)
