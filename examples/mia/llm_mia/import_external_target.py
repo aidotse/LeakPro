@@ -89,7 +89,6 @@ def main() -> None:  # noqa: PLR0915
     print(f"loading real weights from {args.target_model}")
     model = HFCausalLMWrapper(args.target_model, dtype=args.dtype)
 
-    LLMModelHandler.pad_token_id = pad_token_id
     LLMModelHandler.lora = None
     handler = LLMModelHandler()
     collate = CausalLMCollate(pad_token_id=pad_token_id)

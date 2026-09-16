@@ -16,14 +16,13 @@ quantity EZ-MIA calls ``delta``. Then (paper §4.1.3–4.1.4):
     w_k       = round( w_min * (w_max / w_min)^((k-1)/(|W|-1)) )   geometric grid, duplicates kept
     S_WBC     = mean_k T_sign(w_k)                            in [0, 1], higher = member
 
-Paper defaults: ``w_min = 2``, ``w_max = 40``, ``|W| = 10``, sign aggregation. **Caution:**
-``geometric_windows(2, 40, 10)`` does *not* reproduce the paper's own published window list
-(``[2, 3, 4, 6, 9, 13, 18, 25, 32, 40]``) — it computes ``[2, 3, 4, 5, 8, 11, 15, 21, 29, 40]``.
-Neither ``round``, ``floor`` nor ``ceil`` on this exact formula reproduces the paper's list, so this
-is not a rounding difference; the published list likely wasn't generated purely from eq. 12 (in fact
-the reference codebase, github.com/Stry233/WBC's ``attacks/wbc.py``, has no formula at all — window
-sizes are always a plain list straight from config). Set ``window_lengths`` explicitly (below) to
-reproduce the paper's exact numbers rather than relying on the formula to match them.
+Paper defaults: ``w_min = 2``, ``w_max = 40``, ``|W| = 10``, sign aggregation. **Caution:** the paper
+*text* gives eq. 12, but the reference codebase (github.com/Stry233/WBC) has no formula at all — its
+``configs/example.yaml`` lists the window sizes verbatim: ``[2, 3, 4, 6, 9, 13, 18, 25, 32, 40]``.
+``geometric_windows(2, 40, 10)`` computes ``[2, 3, 4, 5, 8, 11, 15, 21, 29, 40]`` instead, and neither
+``round``, ``floor`` nor ``ceil`` on eq. 12 reproduces the config list, so this is not a rounding
+difference. Set ``window_lengths`` explicitly (below) to reproduce the reference implementation's exact
+numbers rather than relying on the formula to match them.
 
 **Short sequences — matches the reference codebase's clamping, not a skip-then-fallback:**
 ``attacks/wbc.py``'s ``_compute_window_score`` in github.com/Stry233/WBC clamps
@@ -58,8 +57,8 @@ class WBCConfig(LLMAttackConfig):
     window_lengths: Optional[List[int]] = Field(
         default=None,
         description="Explicit window sizes, used verbatim instead of w_min/w_max/n_windows's geometric "
-                    "formula. Set this to a paper's own published list (e.g. [2,3,4,6,9,13,18,25,32,40]) "
-                    "to reproduce its exact numbers -- the formula does not.",
+                    "formula. Set this to a reference implementation's config list (WBC: "
+                    "[2,3,4,6,9,13,18,25,32,40]) to reproduce its exact numbers -- the formula does not.",
     )
     aggregation: Aggregation = Field(default="sign", description="Per-window statistic; the paper's ablation (§5.3.3)")
 

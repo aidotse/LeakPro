@@ -88,15 +88,17 @@ A few knobs exist specifically to match a paper's own reference config rather th
 defaults:
 
 - **`window_lengths`** (WBC only) — an explicit list of window sizes, used verbatim instead of
-  `w_min`/`w_max`/`n_windows`'s geometric formula. Needed for exact reproduction: the formula does
-  *not* reproduce the WBC paper's own published grid (`geometric_windows(2, 40, 10)` gives
-  `[2, 3, 4, 5, 8, 11, 15, 21, 29, 40]`, not the paper's `[2, 3, 4, 6, 9, 13, 18, 25, 32, 40]`).
+  `w_min`/`w_max`/`n_windows`'s geometric formula. Needed for exact reproduction: the paper *text*
+  gives the formula, but the reference codebase's `configs/example.yaml` lists
+  `[2, 3, 4, 6, 9, 13, 18, 25, 32, 40]`, which `geometric_windows(2, 40, 10)` does not produce
+  (`[2, 3, 4, 5, 8, 11, 15, 21, 29, 40]`).
 - **`max_samples`** — caps how many audit rows are actually scored (the papers' `test_samples`),
   stratified to keep the member/non-member ratio, seeded by `audit.random_seed`. Independent of
   `n_members`/`n_nonmembers` in `train_config_ez-mia.yaml`, which fix the population size at data-prep time.
 - **`n_bootstrap_samples`** — bootstrap-resamples the audit rows this many times and reports mean/95%
-  CI for AUC and TPR-at-fixed-FPR, attached to the result as `result.bootstrap` (a plain attribute,
-  not part of `MIAResult`'s serialized schema). `None` (default) reports only the point estimate.
+  CI for AUC and the fixed-FPR TPR table. Computed with `MIAResult` itself on each resample, so the
+  numbers use exactly the same definitions as the point estimate; saved in the result JSON under
+  `bootstrap` and printed by `run_audit.py`. `None` (default) reports only the point estimate.
 - **Auditing an already-trained checkpoint** (not one `prepare_target.py` fine-tunes itself), e.g.
   from pre-split member/non-member JSON files: use `import_external_target.py` instead of
   `prepare_target.py` — see its docstring. Produces the same `target_model.pkl`/`model_metadata.pkl`/

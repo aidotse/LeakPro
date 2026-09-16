@@ -26,8 +26,11 @@ from leakpro.reporting.mia_result import MIAResult
 from leakpro.tests.mia_attacks.attacks.test_llm_base import _fake_handler
 
 
-def test_geometric_windows_matches_paper_defaults_and_keeps_duplicates() -> None:
-    """w_min=2, w_max=40, |W|=10 → the paper's grid; a degenerate range yields repeated sizes."""
+def test_geometric_windows_spans_the_range_and_keeps_duplicates() -> None:
+    """Eq. 12 with the paper's w_min/w_max/|W| spans [2, 40] in 10 sizes (it does not reproduce the reference
+    codebase's config list — see test_window_lengths_override_bypasses_geometric_formula); a degenerate range
+    yields repeated sizes.
+    """
     ws = geometric_windows(2, 40, 10)
     assert len(ws) == 10
     assert ws[0] == 2

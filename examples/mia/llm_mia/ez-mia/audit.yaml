@@ -9,9 +9,9 @@ audit:
   output_dir: ./leakpro_output_full     # run_audit.py rewrites this per target when sweeping
   attack_list:
     # Compares the fine-tuned target against the frozen base checkpoint it was fine-tuned from
-    # (the paper's default reference). Two forward passes per sequence, no training. The reference's
-    # dtype must match the target's own fine-tuning dtype (train_config_ez-mia.yaml's train.dtype) --
-    # a mismatch would introduce a spurious bias into every delta = lp^T - lp^R below.
+    # (the paper's default reference). Two forward passes per sequence, no training. Keep the reference
+    # dtype equal to train_config_ez-mia.yaml's train.dtype unless you are reproducing a reference
+    # implementation that does otherwise (../wbc/ deliberately leaves the reference at float32).
     # WBC lives in ../wbc/ (Pythia-2.8B / Khan Academy), not here -- this folder is EZ-MIA only.
     - attack: ez_mia
       aggregation: ratio                # paper score P/N; log_ratio / positive_fraction / ... are ablations

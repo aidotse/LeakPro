@@ -7,8 +7,8 @@
 # target_pythia_external/ and the data_path below from your checkpoint + JSON train/test files.
 #
 # Not covered by any config here -- needs code beyond this example (see the #461 review):
-#   - n_bootstrap_samples is a real, implemented option (bootstrap_auc_and_tpr); the paper's
-#     `n_bootstrap_samples: 100` is honored below.
+#   - n_bootstrap_samples is a real, implemented option (MIAResult.bootstrap_metrics); the value below is
+#     honored and persisted in the saved result JSON (`bootstrap` field) and printed by run_audit.py.
 #   - multi-GPU ("device: cuda # uses all available GPUs" in the paper's config) is NOT supported --
 #     this runs on exactly one device (set via the LEAKPRO_DEVICE env var, e.g. LEAKPRO_DEVICE=hpu).
 #   - `fpr_thresholds` needs no setting here: MIAResult's fixed table (0%, 0.01%, 0.1%, 1%, 10%)
@@ -20,7 +20,7 @@ audit:
   output_dir: ./leakpro_output_wbc_pythia
   attack_list:
     - attack: wbc
-      window_lengths: [2, 3, 4, 6, 9, 13, 18, 25, 32, 40]   # the paper's own published grid, used verbatim
+      window_lengths: [2, 3, 4, 6, 9, 13, 18, 25, 32, 40]   # the reference codebase's configs/example.yaml list, verbatim
       aggregation: sign
       batch_size: 1                      # matches the paper's config -- 2.8B params x 512 tokens
       pad_token_id: 0                    # Pythia/GPT-NeoX: check your tokenizer's actual pad/eos id
