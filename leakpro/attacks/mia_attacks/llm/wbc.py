@@ -60,7 +60,18 @@ def geometric_windows(w_min: int, w_max: int, n_windows: int) -> List[int]:
     return [int(w) for w in ws]
 
 
-def window_stat(delta: np.ndarray, lengths: np.ndarray, w: Optional[int], aggregation: str) -> np.ndarray:
+def _prefix_sums(delta: np.ndarray) -> np.ndarray:
+    """``(N, T+1)`` cumulative sums with a leading zero column, so ``csum[:, i+w] - csum[:, i]`` is a window sum."""
+    return np.concatenate([np.zeros((delta.shape[0], 1)), np.cumsum(delta, axis=1)], axis=1)
+
+
+def window_stat(
+    delta: np.ndarray,
+    lengths: np.ndarray,
+    w: Optional[int],
+    aggregation: str,
+    csum: Optional[np.ndarray] = None,
+) -> np.ndarray:
     """Per-sequence statistic over all length-``w`` windows that fit inside each sequence.
 
     Args:
@@ -70,6 +81,8 @@ def window_stat(delta: np.ndarray, lengths: np.ndarray, w: Optional[int], aggreg
         w: Window size. ``None`` means one window spanning the whole valid prefix of each row.
         aggregation: ``sign`` (fraction of windows with positive sum), ``mean``, ``median`` or ``min``
             of the window sums.
+        csum: Optional precomputed :func:`_prefix_sums` of ``delta``; callers that evaluate several
+            window sizes pass it once instead of recomputing an O(N·T) cumsum per size.
 
     Returns:
     -------
@@ -84,7 +97,8 @@ def window_stat(delta: np.ndarray, lengths: np.ndarray, w: Optional[int], aggreg
 
     if w > t:
         return np.full(n, np.nan)
-    csum = np.concatenate([np.zeros((n, 1)), np.cumsum(delta, axis=1)], axis=1)  # (N, T+1)
+    if csum is None:
+        csum = _prefix_sums(delta)
     sums = csum[:, w:] - csum[:, :-w]                                           # (N, T-w+1), start i covers i..i+w-1
     starts = np.arange(t - w + 1)
     valid = starts[None, :] <= (lengths - w)[:, None]                            # window must end inside the sequence
@@ -106,7 +120,8 @@ def window_stat(delta: np.ndarray, lengths: np.ndarray, w: Optional[int], aggreg
 
 def wbc_scores(delta: np.ndarray, lengths: np.ndarray, windows: List[int], aggregation: str) -> np.ndarray:
     """Ensemble the per-window statistics (paper eq. 13), with the short-sequence rule from the module docstring."""
-    per_window = np.stack([window_stat(delta, lengths, w, aggregation) for w in windows])  # (|W|, N)
+    csum = _prefix_sums(delta)
+    per_window = np.stack([window_stat(delta, lengths, w, aggregation, csum=csum) for w in windows])  # (|W|, N)
     with np.errstate(invalid="ignore"):
         scores = np.nanmean(per_window, axis=0)  # windows that don't fit a row are skipped for that row
     short = np.isnan(scores)
