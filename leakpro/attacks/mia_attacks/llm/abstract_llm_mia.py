@@ -19,7 +19,6 @@ NumPy reduction they apply to per-token evidence. Everything else is here:
 None of these attacks train anything, so they opt out of the shadow/distillation handlers.
 """
 
-import functools
 import hashlib
 import json
 from dataclasses import dataclass
@@ -37,6 +36,7 @@ from leakpro.signals.token_evidence import CausalLMCollate, CausalLMModel, Evide
 from leakpro.utils.device import get_device
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
+from leakpro.utils.save_load import fingerprint_model, hash_attack
 from leakpro.utils.seed import seed_everything
 
 
@@ -136,42 +136,59 @@ def rank_top(scores: np.ndarray, force_top: np.ndarray, tiebreak: np.ndarray) ->
     return out
 
 
-def _reinitialise(module: nn.Module, std: float = 0.02) -> None:
-    """Randomise every parameter of ``module`` in place (random-init reference).
+def gpt2_style_init_(module: nn.Module, std: float = 0.02) -> None:
+    """Re-initialise every parameter of ``module`` in place at GPT-2's scale (random-init reference).
 
-    Submodules that define ``reset_parameters`` (``nn.Linear``, ``nn.Embedding``, ``nn.LayerNorm``, ...)
-    use it. Submodules that own parameters but define no reset — HuggingFace's ``Conv1D``, which is
-    GPT-2's attention and MLP projections — get ``N(0, std)`` weights and zero biases, the GPT-2
-    initialisation. Without this fallback a "random" GPT-2 reference would silently keep its pretrained
-    attention and MLP weights.
+    Weights with two or more dimensions (``Linear``, HF ``Conv1D``, ``Embedding``) get ``N(0, std)``;
+    one-dimensional weights (``LayerNorm``) get ones; biases get zeros. This deliberately does *not*
+    go through each module's ``reset_parameters``: HF ``Conv1D`` has none, and ``nn.Embedding``'s is
+    ``N(0, 1)`` — fifty times GPT-2's scale — so the paper's random-reference ablation would not be
+    representative.
     """
-    fallback_types = set()
     with torch.no_grad():
-        for child in module.modules():
-            reset = getattr(child, "reset_parameters", None)
-            if callable(reset):
-                reset()
-                continue
-            for name, param in child.named_parameters(recurse=False):
-                fallback_types.add(type(child).__name__)
-                if param.dim() >= 2 or "weight" in name:
-                    nn.init.normal_(param, mean=0.0, std=std)
-                else:
-                    nn.init.zeros_(param)
-    if fallback_types:
-        logger.info(f"random_init reference: no reset_parameters on {sorted(fallback_types)}; used N(0, {std}) / zeros")
+        for name, param in module.named_parameters():
+            leaf = name.rsplit(".", 1)[-1]
+            if param.dim() >= 2:
+                nn.init.normal_(param, mean=0.0, std=std)
+            elif leaf == "bias":
+                nn.init.zeros_(param)
+            else:
+                nn.init.ones_(param)
 
 
-@functools.lru_cache(maxsize=4)
-def _load_pretrained(name_or_path: str, dtype: str) -> nn.Module:
-    """Load a HuggingFace causal LM. Imported lazily: leakpro core does not depend on transformers."""
+def load_pretrained_causal_lm(name_or_path: str, dtype: str = "float32") -> nn.Module:
+    """Load a HuggingFace ``AutoModelForCausalLM``.
+
+    Uncached on purpose: the example's target wrapper fine-tunes what it loads, so it must get a fresh
+    module. The reference path memoises per run via :func:`_run_memo`. ``transformers`` is imported
+    lazily so leakpro core does not depend on it; both argument spellings (``dtype`` in >= 5,
+    ``torch_dtype`` before) are handled here and nowhere else.
+    """
     from transformers import AutoModelForCausalLM  # noqa: PLC0415
 
     torch_dtype = getattr(torch, dtype)
     try:
         return AutoModelForCausalLM.from_pretrained(name_or_path, dtype=torch_dtype)
-    except TypeError:  # transformers < 5 spells the argument torch_dtype
+    except TypeError:
         return AutoModelForCausalLM.from_pretrained(name_or_path, torch_dtype=torch_dtype)
+
+
+def _run_memo(handler: AbstractInputHandler) -> dict:
+    """Per-handler memo shared by every LLM attack built on that handler.
+
+    Holds extracted evidence (key: ``(model_key, need_moments, indices_hash)``) and loaded reference
+    modules (key: ``("module", cfg.key())``). Attacks in one ``attack_list`` share a handler, so the
+    second attack reuses the first's forward passes and models; the memo dies with the handler, i.e.
+    with the run, so nothing is shared across audits in one process.
+
+    ``batch_size`` is deliberately not part of the evidence key: per-sequence evidence is independent
+    of how sequences were batched (padding is masked out; pinned by the token_evidence tests).
+    """
+    memo = getattr(handler, "_llm_run_memo", None)
+    if memo is None:
+        memo = {}
+        handler._llm_run_memo = memo
+    return memo
 
 
 def load_reference(
@@ -184,7 +201,8 @@ def load_reference(
     Args:
     ----
         cfg: Which reference to build.
-        handler: The MIA handler; supplies the target module and blueprint for ``self`` / ``random_init``.
+        handler: The MIA handler; supplies the target module and replica constructor for ``self`` /
+            ``random_init`` and hosts the per-run memo for ``pretrained`` modules.
         device: Device to place the model on. Defaults to :func:`leakpro.utils.device.get_device`.
 
     Returns:
@@ -197,12 +215,16 @@ def load_reference(
         module = handler.target_model
     elif cfg.source == "random_init":
         seed_everything(handler.configs.audit.random_seed)
-        module = handler.target_model_blueprint(**handler.target_model_metadata.init_params)
-        _reinitialise(module)
+        module, _, _ = handler.get_target_replica()  # same construction path (and GroupNorm fix-up) as shadow models
+        gpt2_style_init_(module)
     else:
         if not cfg.pretrained_name_or_path:
             raise ValueError("reference_model.source='pretrained' requires pretrained_name_or_path")
-        module = _load_pretrained(cfg.pretrained_name_or_path, cfg.dtype)
+        memo = _run_memo(handler)
+        module = memo.get(("module", cfg.key()))
+        if module is None:
+            module = load_pretrained_causal_lm(cfg.pretrained_name_or_path, cfg.dtype)
+            memo[("module", cfg.key())] = module
     module.requires_grad_(False)
     logger.info(f"Loaded reference model (source={cfg.source}) onto {device}")
     return CausalLMModel(module, device=device)
@@ -225,12 +247,19 @@ class AbstractLLMMIA(AbstractMIA):
         super().__init__(handler)
         for key, value in self.configs.model_dump().items():
             setattr(self, key, value)
-        self._references: List[CausalLMModel] = []
 
     @staticmethod
     def _wrap_target_model(handler: AbstractInputHandler) -> CausalLMModel:
         """Wrap the target as a causal LM instead of a classifier."""
         return CausalLMModel(handler.target_model)
+
+    def _hash_attack(self: Self) -> None:
+        """Attack id from the config and a cheap target fingerprint.
+
+        The default hashes every weight, which for a multi-billion-parameter target reads tens of GB
+        per attack construction — the cost opting out of the shadow handlers was meant to avoid.
+        """
+        self.attack_id = hash_attack(self.configs.model_dump(), self.handler.target_model, model_hasher=fingerprint_model)
 
     @property
     def membership_labels(self: Self) -> np.ndarray:
@@ -254,19 +283,6 @@ class AbstractLLMMIA(AbstractMIA):
         return DataLoader(dataset, batch_size=self.configs.batch_size, shuffle=False,
                           collate_fn=CausalLMCollate(pad_token_id=self.configs.pad_token_id))
 
-    def _memo(self: Self) -> dict:
-        """Per-handler memo of extracted evidence, shared by every LLM attack built on that handler.
-
-        Attacks in one ``attack_list`` audit the same target on the same indices, and usually the same
-        reference; the forward passes are identical, so the second attack reuses the first's arrays.
-        Lives on the handler (not the class) so it dies with the run and cannot collide across runs.
-        """
-        memo = getattr(self.handler, "_llm_evidence_memo", None)
-        if memo is None:
-            memo = {}
-            self.handler._llm_evidence_memo = memo
-        return memo
-
     def _score_model(
         self: Self,
         model: CausalLMModel,
@@ -278,7 +294,7 @@ class AbstractLLMMIA(AbstractMIA):
     ) -> TokenEvidence:
         """Run ``model`` over ``loader`` unless identical evidence is already memoised; offload afterwards."""
         key = (model_key, request.need_moments, indices_key)
-        memo = self._memo()
+        memo = _run_memo(self.handler)
         if key in memo:
             logger.info(f"Reusing memoised evidence for {label}")
             return memo[key]
@@ -293,7 +309,8 @@ class AbstractLLMMIA(AbstractMIA):
 
         Models are run one after another and each — the target included — is offloaded to CPU after
         its pass, so at most one model is resident on the device at a time. Results are memoised per
-        handler (see :meth:`_memo`), so several LLM attacks in one audit share the forward passes.
+        handler (see :func:`_run_memo`), so several LLM attacks in one audit share the forward passes.
+        A ``source: self`` reference *is* the target and reuses its evidence without a second pass.
 
         Args:
         ----
@@ -317,9 +334,14 @@ class AbstractLLMMIA(AbstractMIA):
 
         references: List[TokenEvidence] = []
         for i, cfg in enumerate(self.configs.references):
+            if cfg.source == "self":
+                logger.info(f"Reference model {i} is the target itself; reusing its evidence")
+                references.append(target)
+                continue
             key = (cfg.key(), request.need_moments, indices_key)
-            if key in self._memo():
-                references.append(self._memo()[key])
+            memo = _run_memo(self.handler)
+            if key in memo:
+                references.append(memo[key])
                 logger.info(f"Reusing memoised evidence for reference model {i} (source={cfg.source})")
                 continue
             ref = load_reference(cfg, self.handler, device)

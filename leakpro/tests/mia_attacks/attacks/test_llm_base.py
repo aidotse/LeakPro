@@ -150,6 +150,7 @@ def _fake_handler(n_train: int = 4, n_test: int = 3, n_extra: int = 2, seed: int
     )
     handler.get_dataset = lambda idx, params=None: _ListDataset(population.data[idx], population.targets[idx])  # noqa: ARG005
     handler.get_criterion = lambda: None
+    handler.get_target_replica = lambda: (TinyCausalLM(), None, None)
     return handler
 
 
@@ -208,17 +209,25 @@ class _Conv1DLike(torch.nn.Module):
         return x @ self.weight + self.bias
 
 
-def test_reinitialise_randomises_modules_without_reset_parameters() -> None:
-    """GPT-2's Conv1D has no reset_parameters; its weights must still change (and biases zero)."""
-    from leakpro.attacks.mia_attacks.llm.abstract_llm_mia import _reinitialise
+def test_gpt2_style_init_covers_every_parameter_at_one_scale() -> None:
+    """Conv1D (no reset_parameters), Embedding (torch default N(0,1)) and LayerNorm all land at GPT-2's scale."""
+    from leakpro.attacks.mia_attacks.llm.abstract_llm_mia import gpt2_style_init_
 
-    model = torch.nn.Sequential(torch.nn.Linear(2, 4), _Conv1DLike())
+    model = torch.nn.Sequential(torch.nn.Embedding(5000, 64), torch.nn.Linear(64, 64), _Conv1DLike(), torch.nn.LayerNorm(3))
+    with torch.no_grad():
+        model[3].weight.fill_(7.0)
+        model[3].bias.fill_(7.0)
     torch.manual_seed(0)
-    _reinitialise(model)
-    conv = model[1]
+    gpt2_style_init_(model)
+    emb, lin, conv, ln = model
+    assert abs(emb.weight.std().item() - 0.02) < 0.003        # torch's own reset would give ~1.0
+    assert abs(lin.weight.std().item() - 0.02) < 0.005
     assert not torch.equal(conv.weight, torch.ones(4, 3))
+    assert abs(conv.weight.std().item() - 0.02) < 0.01
     assert torch.equal(conv.bias, torch.zeros(3))
-    assert conv.weight.std().item() < 0.1                    # N(0, 0.02), not ones
+    assert torch.equal(lin.bias, torch.zeros(64))
+    assert torch.equal(ln.weight, torch.ones(3))
+    assert torch.equal(ln.bias, torch.zeros(3))
 
 
 def test_load_reference_pretrained_requires_path() -> None:
@@ -277,8 +286,8 @@ def test_evidence_is_memoised_per_handler_across_attacks(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(CausalLMModel, "evidence_from_loader", counting)
     handler = _fake_handler(n_train=4, n_test=3)
-    a = _Probe(handler, {"references": [{"source": "self"}]})
-    b = _Probe(handler, {"references": [{"source": "self"}]})
+    a = _Probe(handler, {"references": [{"source": "random_init"}]})
+    b = _Probe(handler, {"references": [{"source": "random_init"}]})
     idx = a.audit_dataset["data"]
 
     ev_a = a.evidence(idx)
@@ -288,6 +297,64 @@ def test_evidence_is_memoised_per_handler_across_attacks(monkeypatch: pytest.Mon
     assert ev_b.target is ev_a.target
     b.evidence(idx[:3])
     assert calls["n"] == 4                                   # different rows → recomputed
+
+
+def test_self_reference_reuses_target_evidence_without_a_pass(monkeypatch: pytest.MonkeyPatch) -> None:
+    """source=self is the target: delta ≡ 0 must not cost a second forward pass."""
+    monkeypatch.setattr("leakpro.signals.token_evidence.get_device", lambda: torch.device("cpu"))
+    calls = {"n": 0}
+    original = CausalLMModel.evidence_from_loader
+
+    def counting(self, loader, request=None):  # noqa: ANN001, ANN202
+        calls["n"] += 1
+        return original(self, loader, request)
+
+    monkeypatch.setattr(CausalLMModel, "evidence_from_loader", counting)
+    attack = _Probe(_fake_handler(), {"references": [{"source": "self"}]})
+    ev = attack.evidence(attack.audit_dataset["data"])
+    assert calls["n"] == 1
+    assert ev.ref(0) is ev.target
+
+
+def test_attacks_on_different_handlers_do_not_share_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The #462 reproduction: building a second attack on another handler must not touch the first."""
+    monkeypatch.setattr("leakpro.signals.token_evidence.get_device", lambda: torch.device("cpu"))
+    h1 = _fake_handler(n_train=4, n_test=3, n_extra=1, seed=1)
+    h2 = _fake_handler(n_train=2, n_test=5, n_extra=3, seed=2)
+    a = _Probe(h1, {"references": [{"source": "random_init"}]})
+    b = _Probe(h2, {})
+    assert a.handler is h1
+    assert b.handler is h2
+    assert a.population is h1.population
+    assert a.population_size == 8
+    assert b.population_size == 10
+    np.testing.assert_array_equal(a.membership_labels, [1, 1, 1, 1, 0, 0, 0])
+    np.testing.assert_array_equal(b.membership_labels, [1, 1, 0, 0, 0, 0, 0])
+    a.evidence(a.audit_dataset["data"])
+    assert hasattr(h1, "_llm_run_memo")
+    assert not hasattr(h2, "_llm_run_memo")                  # the memo landed on the right handler
+
+
+def test_llm_attack_id_uses_cheap_fingerprint(monkeypatch: pytest.MonkeyPatch) -> None:
+    """LLM attacks must not hash the full state dict; the id still separates configs and targets."""
+    import leakpro.attacks.mia_attacks.llm.abstract_llm_mia as base_module
+    import leakpro.utils.save_load as save_load
+
+    monkeypatch.setattr("leakpro.signals.token_evidence.get_device", lambda: torch.device("cpu"))
+
+    def boom(model):  # noqa: ANN001, ANN202, ARG001
+        raise AssertionError("hash_model must not run for LLM attacks")
+
+    monkeypatch.setattr(save_load, "hash_model", boom)
+    # hash_attack's default `model_hasher=hash_model` was bound at import; the LLM override passes its own.
+    handler = _fake_handler()
+    a = _Probe(handler, {"batch_size": 2})
+    b = _Probe(handler, {"batch_size": 4})
+    c = _Probe(_fake_handler(seed=9), {"batch_size": 2})
+    assert len(a.attack_id) == 64
+    assert a.attack_id != b.attack_id                        # config differs
+    assert a.attack_id != c.attack_id                        # target weights differ
+    assert base_module.fingerprint_model(handler.target_model) == base_module.fingerprint_model(handler.target_model)
 
 
 def test_require_references_gives_actionable_error(monkeypatch: pytest.MonkeyPatch) -> None:
