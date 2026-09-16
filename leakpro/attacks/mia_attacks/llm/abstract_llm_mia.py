@@ -27,11 +27,13 @@ from typing import List, Literal, Optional, Tuple
 import numpy as np
 import torch
 from pydantic import BaseModel, ConfigDict, Field
+from sklearn.metrics import roc_auc_score, roc_curve
 from torch import nn
 from torch.utils.data import DataLoader
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.reporting.mia_result import MIAResult
 from leakpro.signals.token_evidence import CausalLMCollate, CausalLMModel, EvidenceRequest, TokenEvidence
 from leakpro.utils.device import get_device
 from leakpro.utils.import_helper import Self
@@ -66,6 +68,16 @@ class LLMAttackConfig(BaseModel):
     batch_size: int = Field(default=8, ge=1, description="Sequences per forward pass")
     pad_token_id: int = Field(default=0, ge=0, description="Id used to right-pad; masked out of every reduction")
     need_moments: bool = Field(default=False, description="Extract per-position vocab mean/std of log p (Min-K%++)")
+    max_samples: Optional[int] = Field(
+        default=None, ge=1,
+        description="Cap on audited rows (paper configs' `test_samples`), stratified to keep the "
+                    "member/non-member ratio and seeded by `audit.random_seed`. None audits everything.",
+    )
+    n_bootstrap_samples: Optional[int] = Field(
+        default=None, ge=1,
+        description="If set, resample the audit rows with replacement this many times and report "
+                    "mean/CI for AUC and the fixed-FPR TPRs alongside the point estimate.",
+    )
 
     model_config = ConfigDict(extra="forbid")
 
@@ -230,6 +242,73 @@ def load_reference(
     return CausalLMModel(module, device=device)
 
 
+def bootstrap_auc_and_tpr(
+    true_membership: np.ndarray,
+    signal_values: np.ndarray,
+    n_bootstrap_samples: int,
+    fpr_thresholds: Optional[List[float]] = None,
+    seed: Optional[int] = None,
+) -> dict:
+    """Bootstrap-resample rows with replacement and report mean/95% CI for AUC and TPR at fixed FPRs.
+
+    Matches the shape of the paper reference configs' ``n_bootstrap_samples`` field, which this repo's
+    :class:`~leakpro.reporting.mia_result.MIAResult` does not otherwise compute (it reports a single
+    point estimate). Returned as a plain ``dict`` rather than folded into ``MIAResult`` so it does not
+    change that class's schema/serialization — attach it manually if wanted, e.g.
+    ``result.bootstrap = bootstrap_auc_and_tpr(...)``.
+
+    Args:
+    ----
+        true_membership: ``(N,)`` 1/0 ground truth, same order as ``signal_values``.
+        signal_values: ``(N,)`` attack scores, higher = more likely member.
+        n_bootstrap_samples: Number of resamples (the papers typically use 10-100).
+        fpr_thresholds: FPRs to report TPR at; defaults to the same five
+            :meth:`~leakpro.reporting.mia_result.MIAResult._compute_metrics` uses.
+        seed: Seeds the resampling for reproducibility.
+
+    Returns:
+    -------
+        ``{"n_bootstrap_samples", "auc": {mean, ci_low, ci_high, n}, "tpr_at_fpr": {"<fpr>": {...}, ...}}``.
+        A resample that draws only one class contributes to no metric (no ROC curve exists); ``n`` in
+        each entry is how many of the ``n_bootstrap_samples`` draws actually contributed.
+
+    """
+    fpr_thresholds = fpr_thresholds if fpr_thresholds is not None else [0.0, 0.0001, 0.001, 0.01, 0.1]
+    true_membership = np.asarray(true_membership)
+    signal_values = np.asarray(signal_values)
+    n = len(true_membership)
+    rng = np.random.RandomState(seed)
+
+    aucs: List[float] = []
+    tprs: dict = {t: [] for t in fpr_thresholds}
+    for _ in range(n_bootstrap_samples):
+        idx = rng.choice(n, size=n, replace=True)
+        y, s = true_membership[idx], signal_values[idx]
+        if len(np.unique(y)) < 2:
+            continue
+        aucs.append(roc_auc_score(y, s))
+        fpr, tpr, _ = roc_curve(y, s)
+        for t in fpr_thresholds:
+            tprs[t].append(float(np.interp(t, fpr, tpr)))
+
+    def _mean_ci(values: List[float]) -> dict:
+        arr = np.asarray(values)
+        if arr.size == 0:
+            return {"mean": float("nan"), "ci_low": float("nan"), "ci_high": float("nan"), "n": 0}
+        return {
+            "mean": float(arr.mean()),
+            "ci_low": float(np.percentile(arr, 2.5)),
+            "ci_high": float(np.percentile(arr, 97.5)),
+            "n": int(arr.size),
+        }
+
+    return {
+        "n_bootstrap_samples": n_bootstrap_samples,
+        "auc": _mean_ci(aucs),
+        "tpr_at_fpr": {f"{t:g}": _mean_ci(v) for t, v in tprs.items()},
+    }
+
+
 class AbstractLLMMIA(AbstractMIA):
     """Base class for LLM membership-inference attacks.
 
@@ -263,10 +342,55 @@ class AbstractLLMMIA(AbstractMIA):
 
     @property
     def membership_labels(self: Self) -> np.ndarray:
-        """1 for audit rows that are training members, 0 otherwise, in ``audit_dataset["data"]`` order."""
+        """1 for audit rows that are training members, 0 otherwise, in ``audit_dataset["data"]`` order.
+
+        Reflects the *full* audit set regardless of ``max_samples``; use :meth:`_audit_indices_and_labels`
+        for the (possibly subsampled) rows an attack should actually score.
+        """
         n_in = len(self.audit_dataset["in_members"])
         n_out = len(self.audit_dataset["out_members"])
         return np.concatenate([np.ones(n_in), np.zeros(n_out)])
+
+    def _audit_indices_and_labels(self: Self) -> Tuple[np.ndarray, np.ndarray]:
+        """Population indices to audit and their true membership labels, aligned 1:1.
+
+        With ``max_samples`` unset (the default) this is just ``(audit_dataset["data"], membership_labels)``
+        — everything. When set (the papers' ``test_samples``), it is a stratified subsample: the
+        member/non-member ratio of the full audit set is preserved, and the draw is seeded by
+        ``handler.configs.audit.random_seed`` so it is reproducible across runs and across attacks in one
+        ``attack_list`` (they draw independently but from the same seed and the same full set).
+        """
+        indices = np.asarray(self.audit_dataset["data"])
+        labels = self.membership_labels
+        max_samples = self.configs.max_samples
+        if max_samples is None or max_samples >= len(indices):
+            return indices, labels
+
+        rng = np.random.RandomState(self.handler.configs.audit.random_seed)
+        n_in = len(self.audit_dataset["in_members"])
+        n_out = len(indices) - n_in
+        keep_in = int(round(max_samples * n_in / len(indices)))
+        keep_in = max(1, min(keep_in, n_in)) if n_in else 0
+        keep_out = max(0, min(max_samples - keep_in, n_out))
+
+        in_pos = rng.choice(n_in, size=keep_in, replace=False) if keep_in else np.array([], dtype=np.int64)
+        out_pos = (rng.choice(np.arange(n_in, len(indices)), size=keep_out, replace=False)
+                  if keep_out else np.array([], dtype=np.int64))
+        keep_pos = np.concatenate([in_pos, out_pos]).astype(np.int64)
+        return indices[keep_pos], labels[keep_pos]
+
+    def _attach_bootstrap_if_configured(self: Self, result: MIAResult, labels: np.ndarray, scores: np.ndarray) -> MIAResult:
+        """Attach ``result.bootstrap`` (see :func:`bootstrap_auc_and_tpr`) when ``n_bootstrap_samples`` is set.
+
+        A plain-attribute addition, not a new ``MIAResult`` field: it does not round-trip through
+        ``to_json``/``from_json``. No-op (returns ``result`` unchanged) when not configured.
+        """
+        if self.configs.n_bootstrap_samples:
+            result.bootstrap = bootstrap_auc_and_tpr(
+                labels, scores, self.configs.n_bootstrap_samples,
+                seed=self.handler.configs.audit.random_seed,
+            )
+        return result
 
     def _require_references(self: Self, n: int) -> None:
         """Raise a clear error if the config declares fewer than ``n`` reference models."""

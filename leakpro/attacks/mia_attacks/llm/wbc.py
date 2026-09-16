@@ -16,11 +16,22 @@ quantity EZ-MIA calls ``delta``. Then (paper §4.1.3–4.1.4):
     w_k       = round( w_min * (w_max / w_min)^((k-1)/(|W|-1)) )   geometric grid, duplicates kept
     S_WBC     = mean_k T_sign(w_k)                            in [0, 1], higher = member
 
-Paper defaults: ``w_min = 2``, ``w_max = 40``, ``|W| = 10``, sign aggregation.
+Paper defaults: ``w_min = 2``, ``w_max = 40``, ``|W| = 10``, sign aggregation. **Caution:**
+``geometric_windows(2, 40, 10)`` does *not* reproduce the paper's own published window list
+(``[2, 3, 4, 6, 9, 13, 18, 25, 32, 40]``) — it computes ``[2, 3, 4, 5, 8, 11, 15, 21, 29, 40]``.
+Neither ``round``, ``floor`` nor ``ceil`` on this exact formula reproduces the paper's list, so this
+is not a rounding difference; the published list likely wasn't generated purely from eq. 12 (in fact
+the reference codebase, github.com/Stry233/WBC's ``attacks/wbc.py``, has no formula at all — window
+sizes are always a plain list straight from config). Set ``window_lengths`` explicitly (below) to
+reproduce the paper's exact numbers rather than relying on the formula to match them.
 
-The paper evaluates on sequences of >= 512 tokens and never defines the case ``n < w``. Here a
-window size that does not fit a sequence contributes nothing to that sequence's mean; if *no*
-configured window fits, the sequence is scored with a single window of size ``n``.
+**Short sequences — matches the reference codebase's clamping, not a skip-then-fallback:**
+``attacks/wbc.py``'s ``_compute_window_score`` in github.com/Stry233/WBC clamps
+``effective_window_size = min(window_size, min_length)`` per sequence, so *every* configured window
+size always contributes a score for every sequence — never skipped, and no separate whole-sequence
+fallback exists. Implemented the same way here: distinct configured window sizes can clamp to the
+same effective size for a short row (contributing the same value more than once to that row's mean
+over window sizes) — that duplication is intentional, matching the reference behaviour exactly.
 """
 
 from typing import List, Literal, Optional
@@ -39,16 +50,29 @@ Aggregation = Literal["sign", "mean", "median", "min"]
 class WBCConfig(LLMAttackConfig):
     """Configuration for WBC. Defaults are the paper's (§5.1, §5.3.2)."""
 
-    w_min: int = Field(default=2, ge=1, description="Smallest window size")
-    w_max: int = Field(default=40, ge=1, description="Largest window size")
-    n_windows: int = Field(default=10, ge=2, description="Number of geometrically spaced window sizes |W|")
+    w_min: int = Field(default=2, ge=1, description="Smallest window size (ignored if window_lengths is set)")
+    w_max: int = Field(default=40, ge=1, description="Largest window size (ignored if window_lengths is set)")
+    n_windows: int = Field(
+        default=10, ge=2, description="Number of geometrically spaced window sizes |W| (ignored if window_lengths is set)"
+    )
+    window_lengths: Optional[List[int]] = Field(
+        default=None,
+        description="Explicit window sizes, used verbatim instead of w_min/w_max/n_windows's geometric "
+                    "formula. Set this to a paper's own published list (e.g. [2,3,4,6,9,13,18,25,32,40]) "
+                    "to reproduce its exact numbers -- the formula does not.",
+    )
     aggregation: Aggregation = Field(default="sign", description="Per-window statistic; the paper's ablation (§5.3.3)")
 
     model_config = ConfigDict(extra="forbid")
 
     @model_validator(mode="after")
     def _check_grid(self: Self) -> Self:
-        if self.w_max < self.w_min:
+        if self.window_lengths is not None:
+            if len(self.window_lengths) == 0:
+                raise ValueError("window_lengths, if given, must be non-empty")
+            if any(w < 1 for w in self.window_lengths):
+                raise ValueError(f"window_lengths must all be >= 1, got {self.window_lengths}")
+        elif self.w_max < self.w_min:
             raise ValueError(f"w_max ({self.w_max}) must be >= w_min ({self.w_min})")
         return self
 
@@ -60,73 +84,54 @@ def geometric_windows(w_min: int, w_max: int, n_windows: int) -> List[int]:
     return [int(w) for w in ws]
 
 
-def _prefix_sums(delta: np.ndarray) -> np.ndarray:
-    """``(N, T+1)`` cumulative sums with a leading zero column, so ``csum[:, i+w] - csum[:, i]`` is a window sum."""
-    return np.concatenate([np.zeros((delta.shape[0], 1)), np.cumsum(delta, axis=1)], axis=1)
+def _reduce_window_sums(sums: np.ndarray, aggregation: str) -> float:
+    """One row's sliding-window sums (already sized to that row's own clamped window) -> one statistic."""
+    if aggregation == "sign":
+        return float(np.mean(sums > 0))
+    if aggregation == "mean":
+        return float(np.mean(sums))
+    if aggregation == "median":
+        return float(np.median(sums))
+    if aggregation == "min":
+        return float(np.min(sums))
+    raise ValueError(f"Unknown WBC aggregation: {aggregation}")
 
 
-def window_stat(
-    delta: np.ndarray,
-    lengths: np.ndarray,
-    w: Optional[int],
-    aggregation: str,
-    csum: Optional[np.ndarray] = None,
-) -> np.ndarray:
-    """Per-sequence statistic over all length-``w`` windows that fit inside each sequence.
+def window_stat(delta_row: np.ndarray, length: int, w: int, aggregation: str) -> float:
+    """One row, one window size -> one statistic (paper's ``S_i(w)``, reduced by ``aggregation``).
+
+    ``w`` is clamped down to ``length`` when the row is shorter than the configured window size --
+    matches the reference codebase's ``_compute_window_score`` (github.com/Stry233/WBC,
+    ``attacks/wbc.py``): every configured window size always contributes a score, never skipped.
 
     Args:
     ----
-        delta: ``(N, T)`` per-token ``lp^T - lp^R`` with 0 at invalid positions.
-        lengths: ``(N,)`` number of valid positions per row.
-        w: Window size. ``None`` means one window spanning the whole valid prefix of each row.
-        aggregation: ``sign`` (fraction of windows with positive sum), ``mean``, ``median`` or ``min``
-            of the window sums.
-        csum: Optional precomputed :func:`_prefix_sums` of ``delta``; callers that evaluate several
-            window sizes pass it once instead of recomputing an O(N·T) cumsum per size.
+        delta_row: ``(T,)`` per-token ``lp^T - lp^R`` for one sequence; only the first ``length``
+            positions are read (later ones may be arbitrary padding).
+        length: Number of valid positions in `delta_row`.
+        w: Configured window size (clamped to `length` internally if too large).
+        aggregation: ``sign`` (fraction of windows with positive sum), ``mean``, ``median`` or ``min``.
 
     Returns:
     -------
-        ``(N,)`` statistic, ``nan`` for rows in which no window of size ``w`` fits.
+        One float statistic for this row and window size.
 
     """
-    n, t = delta.shape
-    if w is None:
-        in_range = np.arange(t)[None, :] < lengths[:, None]
-        total = np.where(in_range, delta, 0.0).sum(axis=1)
-        return (total > 0).astype(np.float64) if aggregation == "sign" else total.astype(np.float64)
-
-    if w > t:
-        return np.full(n, np.nan)
-    if csum is None:
-        csum = _prefix_sums(delta)
-    sums = csum[:, w:] - csum[:, :-w]                                           # (N, T-w+1), start i covers i..i+w-1
-    starts = np.arange(t - w + 1)
-    valid = starts[None, :] <= (lengths - w)[:, None]                            # window must end inside the sequence
-    count = valid.sum(axis=1)
-
-    with np.errstate(divide="ignore", invalid="ignore"):
-        if aggregation == "sign":
-            stat = ((sums > 0) & valid).sum(axis=1) / count
-        elif aggregation == "mean":
-            stat = np.where(valid, sums, 0.0).sum(axis=1) / count
-        elif aggregation == "median":
-            stat = np.nanmedian(np.where(valid, sums, np.nan), axis=1)
-        elif aggregation == "min":
-            stat = np.nanmin(np.where(valid, sums, np.nan), axis=1)
-        else:
-            raise ValueError(f"Unknown WBC aggregation: {aggregation}")
-    return np.where(count > 0, stat, np.nan)
+    if length == 0:
+        return 0.0
+    eff_w = min(w, length)
+    csum = np.concatenate([[0.0], np.cumsum(delta_row[:length])])
+    sums = csum[eff_w:] - csum[:-eff_w]                     # (length-eff_w+1,) window sums, start i covers i..i+eff_w-1
+    return _reduce_window_sums(sums, aggregation)
 
 
 def wbc_scores(delta: np.ndarray, lengths: np.ndarray, windows: List[int], aggregation: str) -> np.ndarray:
-    """Ensemble the per-window statistics (paper eq. 13), with the short-sequence rule from the module docstring."""
-    csum = _prefix_sums(delta)
-    per_window = np.stack([window_stat(delta, lengths, w, aggregation, csum=csum) for w in windows])  # (|W|, N)
-    with np.errstate(invalid="ignore"):
-        scores = np.nanmean(per_window, axis=0)  # windows that don't fit a row are skipped for that row
-    short = np.isnan(scores)
-    if short.any():
-        scores[short] = window_stat(delta[short], lengths[short], None, aggregation)
+    """Ensemble the per-window-size statistics (paper eq. 13): the mean of `window_stat` over `windows`, per row."""
+    n = delta.shape[0]
+    scores = np.empty(n, dtype=np.float64)
+    for i in range(n):
+        length = int(lengths[i])
+        scores[i] = float(np.mean([window_stat(delta[i], length, w, aggregation) for w in windows]))
     return scores
 
 
@@ -152,25 +157,28 @@ class AttackWBC(AbstractLLMMIA):
         }
 
     def prepare_attack(self: Self) -> None:
-        """Run the two forward passes over the audit set."""
+        """Run the two forward passes over the (possibly `max_samples`-subsampled) audit set."""
         self._require_references(1)
-        logger.info("WBC: extracting per-token evidence for target and reference")
-        self.evidence_set = self.evidence(self.audit_dataset["data"])
+        indices, self._audit_labels = self._audit_indices_and_labels()
+        logger.info(f"WBC: extracting per-token evidence for target and reference ({len(indices)} sequences)")
+        self.evidence_set = self.evidence(indices)
 
     def run_attack(self: Self) -> MIAResult:
         """Reduce the stored evidence to WBC scores and package them as a MIAResult."""
         target, reference = self.evidence_set.target, self.evidence_set.ref(0)
         delta = np.where(target.mask, target.logprob - reference.logprob, 0.0)
-        windows = geometric_windows(self.configs.w_min, self.configs.w_max, self.configs.n_windows)
+        windows = (self.configs.window_lengths if self.configs.window_lengths is not None
+                  else geometric_windows(self.configs.w_min, self.configs.w_max, self.configs.n_windows))
         logger.info(f"WBC: window sizes {windows}, aggregation={self.configs.aggregation}")
 
         scores = wbc_scores(delta, target.lengths, windows, self.configs.aggregation)
         if not np.all(np.isfinite(scores)):
             raise RuntimeError("WBC produced non-finite scores; this is a bug in the window handling")
 
-        return MIAResult.from_full_scores(
-            true_membership=self.membership_labels,
+        result = MIAResult.from_full_scores(
+            true_membership=self._audit_labels,
             signal_values=scores,
             result_name="WBC",
             metadata=self.configs.model_dump(),
         )
+        return self._attach_bootstrap_if_configured(result, self._audit_labels, scores)

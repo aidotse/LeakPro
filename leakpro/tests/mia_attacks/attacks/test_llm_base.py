@@ -27,9 +27,11 @@ from leakpro.attacks.mia_attacks.llm.abstract_llm_mia import (
     AbstractLLMMIA,
     LLMAttackConfig,
     ReferenceModelConfig,
+    bootstrap_auc_and_tpr,
     load_reference,
     rank_top,
 )
+from leakpro.reporting.mia_result import MIAResult
 from leakpro.signals.token_evidence import CausalLMModel
 from leakpro.tests.signals.test_token_evidence import VOCAB, TinyCausalLM
 
@@ -363,3 +365,72 @@ def test_require_references_gives_actionable_error(monkeypatch: pytest.MonkeyPat
     attack = _Probe(_fake_handler(), {})
     with pytest.raises(ValueError, match="references"):
         attack._require_references(1)
+
+
+# --------------------------------------------------------------------------------- max_samples
+
+
+def test_audit_indices_and_labels_defaults_to_everything(monkeypatch: pytest.MonkeyPatch) -> None:
+    """max_samples unset (the default) audits the whole set, unchanged from membership_labels."""
+    monkeypatch.setattr("leakpro.signals.token_evidence.get_device", lambda: torch.device("cpu"))
+    handler = _fake_handler(n_train=4, n_test=3)
+    attack = _Probe(handler, {})
+    indices, labels = attack._audit_indices_and_labels()
+    np.testing.assert_array_equal(indices, handler.train_indices.tolist() + handler.test_indices.tolist())
+    np.testing.assert_array_equal(labels, attack.membership_labels)
+
+
+def test_max_samples_is_stratified_deterministic_and_smaller_than_max_samples_is_a_no_op(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """max_samples keeps the member/non-member ratio, is seeded (reproducible), and never grows the set."""
+    monkeypatch.setattr("leakpro.signals.token_evidence.get_device", lambda: torch.device("cpu"))
+    handler = _fake_handler(n_train=40, n_test=30, n_extra=5)
+    attack = _Probe(handler, {"max_samples": 20})
+    indices, labels = attack._audit_indices_and_labels()
+    assert len(indices) == 20
+    assert len(labels) == 20
+    assert 0 < labels.sum() < 20  # both classes present -- stratified, not all-members or all-non-members
+
+    indices2, labels2 = attack._audit_indices_and_labels()
+    np.testing.assert_array_equal(indices, indices2)  # seeded by handler.configs.audit.random_seed -> reproducible
+    np.testing.assert_array_equal(labels, labels2)
+
+    # max_samples >= population size is a no-op, same as unset
+    attack_noop = _Probe(handler, {"max_samples": 10_000})
+    indices3, labels3 = attack_noop._audit_indices_and_labels()
+    assert len(indices3) == 70
+
+
+# ------------------------------------------------------------------------------ n_bootstrap_samples
+
+
+def test_bootstrap_auc_and_tpr_reports_mean_and_ci() -> None:
+    """A clearly-separable score distribution bootstraps to a high AUC with a sane confidence interval."""
+    rng = np.random.RandomState(0)
+    labels = np.array([1] * 50 + [0] * 50)
+    scores = np.concatenate([rng.normal(1.0, 1.0, 50), rng.normal(0.0, 1.0, 50)])
+    result = bootstrap_auc_and_tpr(labels, scores, n_bootstrap_samples=20, seed=0)
+    assert result["n_bootstrap_samples"] == 20
+    assert result["auc"]["n"] == 20
+    assert 0.5 < result["auc"]["mean"] <= 1.0
+    assert result["auc"]["ci_low"] <= result["auc"]["mean"] <= result["auc"]["ci_high"]
+    assert set(result["tpr_at_fpr"]) == {"0", "0.0001", "0.001", "0.01", "0.1"}
+
+
+def test_bootstrap_is_opt_in_and_attaches_to_the_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    """n_bootstrap_samples unset attaches nothing; set, it attaches result.bootstrap."""
+    monkeypatch.setattr("leakpro.signals.token_evidence.get_device", lambda: torch.device("cpu"))
+    handler = _fake_handler(n_train=6, n_test=6, n_extra=2)
+
+    plain = _Probe(handler, {})
+    result = MIAResult.from_full_scores(
+        true_membership=[1, 0, 1, 0], signal_values=[0.9, 0.1, 0.8, 0.2], result_name="probe")
+    assert plain._attach_bootstrap_if_configured(result, np.array([1, 0, 1, 0]), np.array([0.9, 0.1, 0.8, 0.2])) is result
+    assert not hasattr(result, "bootstrap")
+
+    boot = _Probe(handler, {"n_bootstrap_samples": 5})
+    result2 = MIAResult.from_full_scores(
+        true_membership=[1, 0, 1, 0], signal_values=[0.9, 0.1, 0.8, 0.2], result_name="probe")
+    boot._attach_bootstrap_if_configured(result2, np.array([1, 0, 1, 0]), np.array([0.9, 0.1, 0.8, 0.2]))
+    assert result2.bootstrap["n_bootstrap_samples"] == 5

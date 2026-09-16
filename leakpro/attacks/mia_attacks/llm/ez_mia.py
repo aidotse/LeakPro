@@ -113,10 +113,11 @@ class AttackEZMIA(AbstractLLMMIA):
         }
 
     def prepare_attack(self: Self) -> None:
-        """Run the two forward passes over the audit set."""
+        """Run the two forward passes over the (possibly `max_samples`-subsampled) audit set."""
         self._require_references(1)
-        logger.info("EZ-MIA: extracting per-token evidence for target and reference")
-        self.evidence_set = self.evidence(self.audit_dataset["data"])
+        indices, self._audit_labels = self._audit_indices_and_labels()
+        logger.info(f"EZ-MIA: extracting per-token evidence for target and reference ({len(indices)} sequences)")
+        self.evidence_set = self.evidence(indices)
 
     def run_attack(self: Self) -> MIAResult:
         """Reduce the stored evidence to EZ scores and package them as a MIAResult."""
@@ -129,9 +130,10 @@ class AttackEZMIA(AbstractLLMMIA):
         if n_forced:
             logger.info(f"EZ-MIA: {n_forced}/{len(scores)} sequences had N = 0 or no error positions; ranked as members")
 
-        return MIAResult.from_full_scores(
-            true_membership=self.membership_labels,
+        result = MIAResult.from_full_scores(
+            true_membership=self._audit_labels,
             signal_values=scores,
             result_name="EZ-MIA",
             metadata=self.configs.model_dump(),
         )
+        return self._attach_bootstrap_if_configured(result, self._audit_labels, scores)
