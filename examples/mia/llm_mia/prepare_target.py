@@ -24,6 +24,7 @@ from torch import nn, optim
 from torch.utils.data import DataLoader
 
 from hf_wrapper import HFCausalLMWrapper
+from json_dataset import load_json_texts, tokenise_one_per_text
 from llm_data_handler import LLMDataHandler
 from llm_model_handler import LLMModelHandler
 
@@ -64,6 +65,29 @@ def _tokenise(texts: list, tokenizer, cfg: dict) -> list:
     return seqs
 
 
+def _build_population_from_local_json(data_cfg: dict, tokenizer) -> tuple:
+    """`data.source: local` -- pre-split member/non-member JSON files (the WBC paper's own config shape).
+
+    Unlike the `hf` path, the member/non-member split is already decided by which file a sequence came
+    from -- `train_path` sequences are members, `test_path` sequences are the non-member/held-out set --
+    so there is no population-wide permutation here, and `n_members`/`n_nonmembers` do not apply.
+
+    Each JSON entry becomes exactly one (possibly truncated, never concatenated) sequence -- see
+    `json_dataset.tokenise_one_per_text` -- so rows are ragged/variable-length, not a dense tensor.
+    """
+    train_chunks = tokenise_one_per_text(load_json_texts(data_cfg["train_path"], data_cfg.get("text_field", "text")),
+                                        tokenizer, int(data_cfg["max_length"]))
+    test_chunks = tokenise_one_per_text(load_json_texts(data_cfg["test_path"], data_cfg.get("text_field", "text")),
+                                       tokenizer, int(data_cfg["max_length"]))
+    if not train_chunks or not test_chunks:
+        raise ValueError(f"no chunks produced from {data_cfg['train_path']} / {data_cfg['test_path']} "
+                         "-- check text_field / JSON shape against json_dataset.load_json_texts")
+    train_indices = list(range(len(train_chunks)))
+    test_indices = list(range(len(train_chunks), len(train_chunks) + len(test_chunks)))
+    ids = LLMDataHandler.as_object_array(train_chunks + test_chunks)
+    return ids, train_indices, test_indices
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="train_config.yaml")
@@ -87,9 +111,28 @@ def main() -> None:
 
     # ---- population -------------------------------------------------------------------------------
     data_path = Path(data_cfg["data_path"])
+    source = data_cfg.get("source", "hf")
     if data_path.exists():
         population = joblib.load(data_path)
         print(f"loaded population from {data_path} ({len(population)} sequences)")
+        # Re-derive the split rather than trusting a second copy of it: for `local` it must match
+        # exactly which file each row came from, which only `_build_population_from_local_json` knows.
+        if source == "local":
+            _, train_indices, test_indices = _build_population_from_local_json(data_cfg, tokenizer)
+        else:
+            n = len(population)
+            n_members, n_nonmembers = data_cfg["n_members"], data_cfg["n_nonmembers"]
+            perm = np.random.RandomState(run["random_seed"]).permutation(n)
+            train_indices = perm[:n_members].tolist()
+            test_indices = perm[n_members:n_members + n_nonmembers].tolist()
+    elif source == "local":
+        ids, train_indices, test_indices = _build_population_from_local_json(data_cfg, tokenizer)
+        population = LLMDataHandler.UserDataset(ids, ids, pad_token_id=pad_token_id)
+        data_path.parent.mkdir(parents=True, exist_ok=True)
+        joblib.dump(population, data_path)
+        print(f"saved population to {data_path} ({len(population)} sequences: "
+              f"{len(train_indices)} members from {data_cfg['train_path']}, "
+              f"{len(test_indices)} non-members from {data_cfg['test_path']})")
     else:
         texts = _load_texts(data_cfg)
         random.shuffle(texts)
@@ -105,12 +148,12 @@ def main() -> None:
         joblib.dump(population, data_path)
         print(f"saved population to {data_path} ({len(population)} sequences)")
 
-    n = len(population)
-    n_members, n_nonmembers = data_cfg["n_members"], data_cfg["n_nonmembers"]
-    assert n_members + n_nonmembers <= n, "population too small for the requested member/non-member split"
-    perm = np.random.RandomState(run["random_seed"]).permutation(n)
-    train_indices = perm[:n_members].tolist()
-    test_indices = perm[n_members:n_members + n_nonmembers].tolist()
+        n = len(population)
+        n_members, n_nonmembers = data_cfg["n_members"], data_cfg["n_nonmembers"]
+        assert n_members + n_nonmembers <= n, "population too small for the requested member/non-member split"
+        perm = np.random.RandomState(run["random_seed"]).permutation(n)
+        train_indices = perm[:n_members].tolist()
+        test_indices = perm[n_members:n_members + n_nonmembers].tolist()
 
     collate = CausalLMCollate(pad_token_id=pad_token_id)
     train_loader = DataLoader(LLMDataHandler.UserDataset(population.data[train_indices], population.targets[train_indices],
@@ -127,8 +170,15 @@ def main() -> None:
 
     LLMModelHandler.lora = train_cfg["lora"] if train_cfg["finetune_method"] == "lora" else None
     handler = LLMModelHandler()
-    print(f"fine-tuning {train_cfg['model_name']} ({train_cfg['finetune_method']}) on {n_members} members")
-    train_result = handler.train(train_loader, model, criterion, optimizer, epochs=train_cfg["epochs"])
+    print(f"fine-tuning {train_cfg['model_name']} ({train_cfg['finetune_method']}) on {len(train_indices)} members")
+    train_result = handler.train(
+        train_loader, model, criterion, optimizer, epochs=train_cfg["epochs"],
+        gradient_accumulation_steps=train_cfg.get("gradient_accumulation_steps", 1),
+        warmup_steps=train_cfg.get("warmup_steps", 0),
+        eval_dataloader=test_loader if train_cfg.get("eval_strategy") == "epoch" else None,
+        checkpoint_dir=str(log_dir / "ckpts") if train_cfg.get("save_strategy") == "epoch" else None,
+        save_total_limit=train_cfg.get("save_total_limit", 1),
+    )
     test_result = handler.eval(test_loader, train_result.model, criterion)
     print(f"held-out next-token acc {test_result.accuracy:.4f}  loss {test_result.loss:.4f}")
 
@@ -140,7 +190,7 @@ def main() -> None:
     metadata = LeakPro.make_mia_metadata(
         train_result=train_result, optimizer=optimizer, loss_fn=criterion, dataloader=train_loader,
         test_result=test_result, epochs=train_cfg["epochs"], train_indices=train_indices,
-        test_indices=test_indices, dataset_name=data_cfg["hf_dataset"],
+        test_indices=test_indices, dataset_name=data_cfg.get("hf_dataset", data_cfg.get("train_path", "local")),
     )
     with open(log_dir / "model_metadata.pkl", "wb") as f:
         pickle.dump(metadata, f)
