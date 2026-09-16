@@ -13,7 +13,7 @@ from typing import Any, Callable, Dict, Optional, Sequence
 import torch
 from torch import Tensor, nn
 
-from leakpro.attacks.extraction_attacks.protocols import ConditionGradient
+from leakpro.attacks.extraction_attacks.protocols import ConditionGradient, DiffusionAdapter
 from leakpro.attacks.extraction_attacks.utils_generative import seeded_torch_rng
 
 SampleFunction = Callable[[int, Optional[Sequence[Any]], int], Tensor]
@@ -24,7 +24,7 @@ ConditionEncoder = Callable[[Sequence[Any]], Dict[str, Any]]
 
 
 @dataclass
-class CallableDiffusionAdapter:
+class CallableDiffusionAdapter(DiffusionAdapter):
     """Bind simple callables to the attack adapter contract."""
 
     image_shape: tuple[int, int, int]
@@ -82,7 +82,7 @@ class CallableDiffusionAdapter:
         return self.guided_sample_fn(batch_size, labels, classifier_gradient, seed)
 
 
-class OpenAIDiffusionAdapter:
+class OpenAIDiffusionAdapter(DiffusionAdapter):
     """Adapter for OpenAI Improved/Guided Diffusion compatible objects.
 
     Basic sampling supports Improved Diffusion's loop. SIDE additionally

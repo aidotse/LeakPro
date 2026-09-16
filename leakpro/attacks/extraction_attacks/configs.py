@@ -26,7 +26,7 @@ class SimilarityBand(BaseModel):
         return self
 
 
-class CommonExtractionConfig(BaseModel):
+class ExtractionConfig(BaseModel):
     """Shared runtime and authorization settings."""
 
     random_seed: int = 42
@@ -34,16 +34,21 @@ class CommonExtractionConfig(BaseModel):
         default=False,
         description="Must be true to confirm authorization to audit the model and referenced data.",
     )
-    image_range: Literal["zero_one", "minus_one_one"] = "zero_one"
-    generation_batch_size: int = Field(default=64, ge=1)
-    distance_block_size: int = Field(default=64, ge=1)
-    distance_device: str = "cpu"
-    compute_device: str = "auto"
     overwrite_results: bool = Field(
         default=False,
         description="Allow an existing result with the same audit identity to be replaced.",
     )
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+
+class CommonExtractionConfig(ExtractionConfig):
+    """Shared settings for image generation and comparison."""
+
+    image_range: Literal["zero_one", "minus_one_one"] = "zero_one"
+    generation_batch_size: int = Field(default=64, ge=1)
+    distance_block_size: int = Field(default=64, ge=1)
+    distance_device: str = "cpu"
+    compute_device: str = "auto"
 
 
 class CarliniConfig(CommonExtractionConfig):

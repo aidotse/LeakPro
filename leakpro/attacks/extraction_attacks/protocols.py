@@ -7,18 +7,19 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, Callable, Protocol, runtime_checkable
+from typing import Any, Callable, Protocol, TypeVar, runtime_checkable
 
 from torch import Tensor
 
 ConditionGradient = Callable[[Tensor, Tensor, Tensor], Tensor]
 
 
-@runtime_checkable
-class SamplingAdapter(Protocol):
-    """Minimum black-box generation surface required by Carlini extraction."""
+SampleBatch_co = TypeVar("SampleBatch_co", covariant=True)
 
-    image_shape: tuple[int, int, int]
+
+@runtime_checkable
+class ExtractionAdapter(Protocol[SampleBatch_co]):
+    """Sampling contract independent of data modality."""
 
     def sample(
         self,
@@ -26,8 +27,15 @@ class SamplingAdapter(Protocol):
         *,
         conditions: Sequence[Any] | None,
         seed: int,
-    ) -> Tensor:
-        """Generate a BCHW image batch using the requested conditions and seed."""
+    ) -> SampleBatch_co:
+        """Generate a batch using the requested conditions and seed."""
+
+
+@runtime_checkable
+class SamplingAdapter(ExtractionAdapter[Tensor], Protocol):
+    """Image sampling contract for Carlini extraction; batches use BCHW layout."""
+
+    image_shape: tuple[int, int, int]
 
 
 @runtime_checkable

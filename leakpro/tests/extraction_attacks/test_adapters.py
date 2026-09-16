@@ -9,6 +9,7 @@ import torch
 from torch import nn
 
 from leakpro.attacks.extraction_attacks.adapters import CallableDiffusionAdapter, OpenAIDiffusionAdapter
+from leakpro.attacks.extraction_attacks.protocols import ExtractionAdapter, SamplingAdapter
 from leakpro.attacks.extraction_attacks.side import AttackSIDEExtraction
 
 
@@ -329,3 +330,18 @@ def test_side_rejects_positional_only_cond_fn_before_sampling() -> None:
         attack.prepare_attack()
 
     assert diffusion.sample_calls == 0
+
+
+def test_generic_adapter_does_not_require_image_layout() -> None:
+    """A sampling implementation can return non-tensor batches."""
+    class ScalarAdapter(ExtractionAdapter[list[int]]):
+        def sample(self, batch_size: int, *, conditions: Sequence[object] | None, seed: int) -> list[int]:
+            del conditions
+            return [seed] * batch_size
+
+    adapter = ScalarAdapter()
+    assert adapter.sample(2, conditions=None, seed=7) == [7, 7]
+    assert isinstance(adapter, ExtractionAdapter)
+    assert not isinstance(adapter, SamplingAdapter)
+    assert ExtractionAdapter in CallableDiffusionAdapter.__mro__
+    assert ExtractionAdapter in OpenAIDiffusionAdapter.__mro__

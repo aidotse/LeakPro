@@ -11,7 +11,7 @@ import pytest
 import torch
 from pydantic import ValidationError
 
-from leakpro.attacks.extraction_attacks.configs import CarliniConfig, SIDEConfig, SimilarityBand
+from leakpro.attacks.extraction_attacks.configs import CarliniConfig, ExtractionConfig, SIDEConfig, SimilarityBand
 from leakpro.attacks.extraction_attacks.utils_generative import condition_hash
 from leakpro.reporting.extraction_result import CandidateRecord, ExtractionResult
 
@@ -345,3 +345,20 @@ def test_result_rejects_invalid_sample_index() -> None:
             name="test", result_id="generic", config={}, samples=torch.zeros((1, 2)),
             candidates=[CandidateRecord(sample_index=1, source="unit")], metrics={}, provenance={},
         )
+
+
+def test_generic_config_keeps_image_settings_in_subclasses() -> None:
+    """Shared validation is inherited without imposing image settings."""
+    config = ExtractionConfig(random_seed=7, authorized_audit=True)
+    assert config.model_dump() == {
+        "random_seed": 7, "authorized_audit": True, "overwrite_results": False,
+    }
+    with pytest.raises(ValidationError):
+        ExtractionConfig(image_range="zero_one")
+    for config_type in (CarliniConfig, SIDEConfig):
+        specialized = config_type(**config.model_dump(), image_range="minus_one_one")
+        assert isinstance(specialized, ExtractionConfig)
+        assert specialized.random_seed == 7
+        assert specialized.image_range == "minus_one_one"
+        with pytest.raises(ValidationError):
+            config_type(image_range="invalid")
