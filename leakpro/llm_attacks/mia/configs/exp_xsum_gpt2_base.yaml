@@ -1,0 +1,19 @@
+# XSum • GPT-2 • Base reference
+dataset: xsum
+ref_variant: base
+seed: 1337
+
+# Target training
+train_total: 20000
+val_total: 500
+eval_total: 20000
+epochs: 3
+batch_size: 16
+lr: 0.0001
+sequence_length: 128
+
+# Model
+model_name: gpt2
+finetune_method: full
+
+save_artifacts_path: ""
