@@ -455,7 +455,6 @@ def test_example_uses_leakpro_config_and_handler_layout(tmp_path: Path) -> None:
     required_files = {
         ".gitignore",
         "audit.yaml",
-        "audit_demonstration.yaml",
         "cifar10_handler.py",
         "cifar10_model.py",
         "main.ipynb",
@@ -485,7 +484,7 @@ def test_example_uses_leakpro_config_and_handler_layout(tmp_path: Path) -> None:
         "ema_decay",
     }
     assert all(set(profile) == target_profile_keys for profile in train_config["profiles"].values())
-    assert set(train_config["run"]["audit_configs"]) == set(train_config["profiles"])
+    assert (example_dir / train_config["run"]["audit_config"]).is_file()
 
     changed_config = yaml.safe_load((example_dir / "audit.yaml").read_text(encoding="utf-8"))
     changed_config["audit"]["attack_list"][0]["num_unconditional_generations"] = 777
@@ -506,11 +505,10 @@ def test_example_uses_leakpro_config_and_handler_layout(tmp_path: Path) -> None:
     assert "Path('train_config.yaml')" in notebook_source
 
 
-@pytest.mark.parametrize("config_name", ["audit.yaml", "audit_demonstration.yaml"])
-def test_attack_random_seeds_are_explicit(config_name: str) -> None:
+def test_attack_random_seeds_are_explicit() -> None:
     """The root seed must also reach each independently validated attack config."""
     example_dir = Path(__file__).parents[3] / "examples" / "extraction" / "cifar10"
-    audit_config = yaml.safe_load((example_dir / config_name).read_text(encoding="utf-8"))
+    audit_config = yaml.safe_load((example_dir / "audit.yaml").read_text(encoding="utf-8"))
     root_seed = audit_config["audit"]["random_seed"]
     attack_entries = {entry["attack"]: entry for entry in audit_config["audit"]["attack_list"]}
     config_types = {"carlini_diffusion": CarliniConfig, "side": SIDEConfig}

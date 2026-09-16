@@ -6,13 +6,11 @@
 run:
   random_seed: 2026
   profile: smoke
-  audit_configs:
-    smoke: ./audit.yaml
-    demonstration: ./audit_demonstration.yaml
+  audit_config: ./audit.yaml
   device: auto
   force_retrain: false
   data_dir: ./data
-  target_dir: ./target_four_hour
+  target_dir: ./target
 
 profiles:
   smoke:
@@ -31,7 +29,6 @@ profiles:
 
   demonstration:
     train_size: 1024
-    # 11,200 updates; measured about 3.2-3.4 hours on the remote RTX 2080 Ti.
     epochs: 1400
     train_batch_size: 128
     learning_rate: 0.0001

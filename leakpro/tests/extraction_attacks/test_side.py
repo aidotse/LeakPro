@@ -12,8 +12,8 @@ from torch import nn
 import leakpro.attacks.extraction_attacks.side as side_module
 from leakpro.attacks.extraction_attacks.abstract_extraction import AttackState
 from leakpro.attacks.extraction_attacks.adapters import CallableDiffusionAdapter
-from leakpro.attacks.extraction_attacks.classifier import TimeConditionedResNet
 from leakpro.attacks.extraction_attacks.side import AttackSIDEExtraction
+from leakpro.attacks.extraction_attacks.utils.side_classifier import TimeConditionedResNet
 
 
 class TwoFeatureExtractor(nn.Module):

@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, TextIO
 
 import numpy as np
 import torch
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from torch import Tensor
 
 from leakpro.attacks.extraction_attacks.utils import json_safe
@@ -30,9 +30,11 @@ class _BundlePaths:
 
 
 class CandidateRecord(BaseModel):
-    """Metadata for one retained image candidate."""
+    """Metadata for one retained candidate."""
 
-    image_index: int = Field(ge=0)
+    image_index: int = Field(
+        ge=0, validation_alias=AliasChoices("image_index", "sample_index"), serialization_alias="sample_index"
+    )
     source: str
     score: Optional[float] = None
     support_indices: List[int] = Field(default_factory=list)
@@ -42,9 +44,14 @@ class CandidateRecord(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
     model_config = ConfigDict(extra="forbid")
 
+    @property
+    def sample_index(self) -> int:
+        """Return the retained sample's index."""
+        return self.image_index
+
 
 class ExtractionResult:
-    """LeakPro-compatible result containing images, metrics, and provenance."""
+    """LeakPro-compatible result containing samples, metrics, and provenance."""
 
     def __init__(
         self,
@@ -52,7 +59,8 @@ class ExtractionResult:
         name: str,
         result_id: str,
         config: BaseModel | dict[str, Any],
-        images: Tensor,
+        images: Tensor | None = None,
+        samples: Tensor | None = None,
         candidates: list[CandidateRecord],
         metrics: dict[str, Any],
         provenance: dict[str, Any],
@@ -61,16 +69,25 @@ class ExtractionResult:
     ) -> None:
         if re.fullmatch(r"[A-Za-z0-9._-]+", result_id) is None:
             raise ValueError("result_id contains unsafe path characters.")
-        if images.ndim != 4:
-            raise ValueError("ExtractionResult.images must be BCHW.")
-        if not torch.isfinite(images).all():
-            raise ValueError("ExtractionResult.images contains NaN or infinity.")
-        if len(candidates) != images.shape[0]:
-            raise ValueError("Candidate metadata count must match the number of images.")
+        if (images is None) == (samples is None):
+            raise ValueError("Provide exactly one of images or samples.")
+        if images is not None:
+            if images.ndim != 4:
+                raise ValueError("ExtractionResult.images must be BCHW.")
+            samples = images.to(dtype=torch.float32)
+        if samples.ndim < 1:
+            raise ValueError("ExtractionResult.samples must have a batch dimension.")
+        if not torch.isfinite(samples).all():
+            raise ValueError("ExtractionResult.samples contains NaN or infinity.")
+        if len(candidates) != samples.shape[0]:
+            raise ValueError("Candidate metadata count must match the number of samples.")
+        if any(candidate.sample_index >= samples.shape[0] for candidate in candidates):
+            raise ValueError("Candidate sample index is outside the sample batch.")
         self.name = name
         self.id = result_id
         self.config = config.model_dump(mode="json") if isinstance(config, BaseModel) else dict(config)
-        self.images = images.detach().to(device="cpu", dtype=torch.float32).contiguous()
+        self.samples = samples.detach().cpu().contiguous()
+        self._array_key = "images" if images is not None else "samples"
         self.candidates = candidates
         self.metrics = json_safe(metrics)
         self.provenance = json_safe(provenance)
@@ -78,8 +95,15 @@ class ExtractionResult:
         self.overwrite = overwrite
 
     @property
+    def images(self) -> Tensor:
+        """Return image samples for existing image consumers."""
+        if self.samples.ndim != 4:
+            raise ValueError("ExtractionResult.images must be BCHW.")
+        return self.samples
+
+    @property
     def result(self) -> dict[str, Any]:
-        """Return a report-friendly metadata view without embedding image pixels."""
+        """Return a report-friendly metadata view without embedding samples."""
         return {
             "name": self.name,
             "id": self.id,
@@ -88,7 +112,9 @@ class ExtractionResult:
             "provenance": self.provenance,
             "execution_trace": self.execution_trace,
             "candidate_count": len(self.candidates),
-            "candidates": [candidate.model_dump(mode="json") for candidate in self.candidates],
+            "candidates": [
+                candidate.model_dump(mode="json", by_alias=self._array_key == "samples") for candidate in self.candidates
+            ],
         }
 
     def save(self, attack_obj: object | None = None, output_dir: str | os.PathLike[str] = "./leakpro_output") -> None:  # noqa: ARG002
@@ -122,7 +148,7 @@ class ExtractionResult:
         staged_data_path: Optional[Path] = None
         try:
             self._write_json(staged_result_dir / "result.json", metadata)
-            np.savez_compressed(staged_result_dir / "candidates.npz", images=self.images.numpy())
+            np.savez_compressed(staged_result_dir / "candidates.npz", **{self._array_key: self.samples.numpy()})
             with tempfile.NamedTemporaryFile(
                 mode="w",
                 encoding="utf-8",

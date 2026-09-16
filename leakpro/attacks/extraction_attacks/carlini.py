@@ -14,7 +14,6 @@ from torch import Tensor
 
 from leakpro.attacks.extraction_attacks.abstract_extraction import AbstractExtraction, AttackState
 from leakpro.attacks.extraction_attacks.configs import CarliniConfig
-from leakpro.attacks.extraction_attacks.graph import clique_medoid, maximum_clique
 from leakpro.attacks.extraction_attacks.metrics import (
     carlini_reference_scores,
     nearest_reference,
@@ -32,6 +31,7 @@ from leakpro.attacks.extraction_attacks.utils import (
     to_zero_one,
     validate_image_batch,
 )
+from leakpro.attacks.extraction_attacks.utils.carlini_graph import clique_medoid, maximum_clique
 from leakpro.reporting.extraction_result import CandidateRecord, ExtractionResult
 
 

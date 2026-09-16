@@ -43,9 +43,55 @@ def test_result_save_round_trip(tmp_path: pytest.TempPathFactory) -> None:
     result.save(output_dir=tmp_path)
     metadata_path = tmp_path / "results" / "safe-id" / "result.json"
     array_path = tmp_path / "results" / "safe-id" / "candidates.npz"
-    assert json.loads(metadata_path.read_text())["candidate_count"] == 1
+    metadata = json.loads(metadata_path.read_text())
+    assert metadata["candidate_count"] == 1
+    assert metadata["candidates"][0]["image_index"] == 0
+    assert result.images is result.samples
     with np.load(array_path) as archive:
         assert archive["images"].shape == (1, 1, 2, 2)
+
+
+@pytest.mark.parametrize("dtype", [torch.int64, torch.float64])
+def test_generic_samples_round_trip(tmp_path: Path, dtype: torch.dtype) -> None:
+    samples = torch.tensor([[16777217, 2], [3, 4]], dtype=dtype)
+    result = ExtractionResult(
+        name="test",
+        result_id="generic",
+        config={},
+        samples=samples,
+        candidates=[CandidateRecord(sample_index=index, source="unit") for index in range(2)],
+        metrics={"count": np.int64(2)},
+        provenance={},
+    )
+    result.save(output_dir=tmp_path)
+    with np.load(tmp_path / "results" / "generic" / "candidates.npz") as archive:
+        assert archive.files == ["samples"]
+        assert archive["samples"].dtype == samples.numpy().dtype
+        np.testing.assert_array_equal(archive["samples"], samples.numpy())
+    metadata = json.loads((tmp_path / "results" / "generic" / "result.json").read_text())
+    assert metadata["metrics"] == {"count": 2}
+    assert [candidate["sample_index"] for candidate in metadata["candidates"]] == [0, 1]
+    assert result.candidates[1].sample_index == result.candidates[1].image_index == 1
+    with pytest.raises(ValueError, match="BCHW"):
+        _ = result.images
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ({}, "exactly one"),
+        ({"images": torch.zeros((0, 1, 2, 2)), "samples": torch.zeros((0, 2))}, "exactly one"),
+        ({"samples": torch.tensor(1)}, "batch dimension"),
+        ({"samples": torch.zeros((1, 2))}, "metadata count"),
+        ({"samples": torch.tensor([[float("nan")]])}, "NaN or infinity"),
+        ({"images": torch.zeros((0, 2))}, "BCHW"),
+    ],
+)
+def test_result_validates_sample_payload(payload: dict, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        ExtractionResult(
+            name="test", result_id="generic", config={}, candidates=[], metrics={}, provenance={}, **payload
+        )
 
 
 @pytest.mark.parametrize("failure", ["json", "npz"])
@@ -289,3 +335,13 @@ def test_condition_fingerprint_is_stable_for_canonical_scientific_values() -> No
     }
 
     assert condition_fingerprint(first) == condition_fingerprint(second)
+
+
+def test_result_rejects_invalid_sample_index() -> None:
+    with pytest.raises(ValidationError):
+        CandidateRecord(sample_index=-1, source="unit")
+    with pytest.raises(ValueError, match="outside the sample batch"):
+        ExtractionResult(
+            name="test", result_id="generic", config={}, samples=torch.zeros((1, 2)),
+            candidates=[CandidateRecord(sample_index=1, source="unit")], metrics={}, provenance={},
+        )

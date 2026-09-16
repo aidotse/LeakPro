@@ -19,7 +19,6 @@ from torch.utils.data import DataLoader, TensorDataset
 from tqdm.auto import tqdm
 
 from leakpro.attacks.extraction_attacks.abstract_extraction import AbstractExtraction, AttackState
-from leakpro.attacks.extraction_attacks.classifier import TimeConditionedResNet
 from leakpro.attacks.extraction_attacks.configs import SIDEConfig
 from leakpro.attacks.extraction_attacks.metrics import l2_band_scores, nearest_reference, pairwise_band_scores
 from leakpro.attacks.extraction_attacks.protocols import (
@@ -40,6 +39,7 @@ from leakpro.attacks.extraction_attacks.utils import (
     to_zero_one,
     validate_image_batch,
 )
+from leakpro.attacks.extraction_attacks.utils.side_classifier import TimeConditionedResNet
 from leakpro.reporting.extraction_result import CandidateRecord, ExtractionResult
 
 ClassifierFactory = Callable[[int, int], nn.Module]
