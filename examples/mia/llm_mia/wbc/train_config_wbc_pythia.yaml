@@ -1,0 +1,45 @@
+##
+## Copyright 2023-2026 Lindholmen Science Park AB
+## SPDX-License-Identifier: Apache-2.0
+##
+# Fine-tunes the WBC paper's own target: Pythia-2.8B on a local cosmopedia/Khan Academy subset,
+# matching its reference training config as closely as this repo currently allows. Produces the same
+# artifacts train_config.yaml (the EZ-MIA/WikiText example) does, under a different log_dir/data_path
+# -- running this does not touch or conflict with that config.
+#
+# NOT covered here, needs infrastructure beyond this repo:
+#   - multi-GPU / DeepSpeed (the paper's "2 HPU cards", `deepspeed_config`) -- this trains on exactly
+#     one device (LEAKPRO_DEVICE env var). Effective batch size is batch_size * gradient_accumulation_steps
+#     on that one device, not `* num_cards`.
+#   - wandb tracking (`run_name`/`wandb_project`/`wandb_group`) -- no experiment-tracking integration
+#     exists here; training progress prints per-epoch to stdout only.
+run:
+  random_seed: 42   # matches this WBC reference config
+  log_dir: ./pythia-2.8b-pretrained-cosmopedia-khanacademy-2hpucards-1   # matches the paper's own output_dir name
+
+train:
+  model_name: EleutherAI/pythia-2.8b
+  dtype: bfloat16                  # bf16: True, fp16: False
+  finetune_method: full
+  epochs: 5                        # num_train_epochs: 1 (max_steps: -1 means "rely on epochs", already the only mode here)
+  batch_size: 8
+  gradient_accumulation_steps: 1   # effective batch = 8 on this one device; the paper's 2-card total (16) needs multi-GPU
+  warmup_steps: 500
+  eval_strategy: epoch             # held-out eval after every epoch (test.json doubles as the paper's "val")
+  save_strategy: epoch             # checkpoint after every epoch, under log_dir/ckpts/checkpoint-<step>
+  save_total_limit: 1
+  learning_rate: 5.0e-5
+  weight_decay: 0.1
+  lora:                            # unused (finetune_method: full), present only because the shared config expects the key
+    r: 16
+    alpha: 32
+    dropout: 0.05
+    target_modules: [query_key_value, dense, dense_h_to_4h, dense_4h_to_h]   # Pythia/GPT-NeoX module names, if you switch to lora
+
+data:
+  source: local
+  train_path: /home/muhaddisah/project/Window_based_MIA_LLMs/cosmopedia-khanacademy-subset/train.json
+  test_path: /home/muhaddisah/project/Window_based_MIA_LLMs/cosmopedia-khanacademy-subset/test.json
+  text_field: text   # adjust to match your JSON's actual key (see json_dataset.load_json_texts)
+  max_length: 512    # tokenizer.max_length
+  data_path: ./data/pythia_cosmopedia_khanacademy_512.pkl

@@ -1,0 +1,45 @@
+##
+## Copyright 2023-2026 Lindholmen Science Park AB
+## SPDX-License-Identifier: Apache-2.0
+##
+# WBC against an externally-trained Pythia-2.8B checkpoint, matching the WBC paper's own reference
+# config as closely as this repo currently allows. Run `import_external_target.py` first to build
+# target_pythia_external/ and the data_path below from your checkpoint + JSON train/test files.
+#
+# Not covered by any config here -- needs code beyond this example (see the #461 review):
+#   - n_bootstrap_samples is a real, implemented option (MIAResult.bootstrap_metrics); the value below is
+#     honored and persisted in the saved result JSON (`bootstrap` field) and printed by run_audit.py.
+#   - multi-GPU ("device: cuda # uses all available GPUs" in the paper's config) is NOT supported --
+#     this runs on exactly one device (set via the LEAKPRO_DEVICE env var, e.g. LEAKPRO_DEVICE=hpu).
+#   - `fpr_thresholds` needs no setting here: MIAResult's fixed table (0%, 0.01%, 0.1%, 1%, 10%)
+#     already covers the paper's [0.1, 0.01, 0.001].
+audit:
+  random_seed: 42   # matches this WBC reference config
+  attack_type: mia
+  data_modality: text
+  output_dir: ./leakpro_output_wbc_pythia
+  attack_list:
+    - attack: wbc
+      window_lengths: [2, 3, 4, 6, 9, 13, 18, 25, 32, 40]   # the reference codebase's configs/example.yaml list, verbatim
+      aggregation: sign
+      batch_size: 1                      # matches the paper's config -- 2.8B params x 512 tokens
+      pad_token_id: 0                    # Pythia/GPT-NeoX: check your tokenizer's actual pad/eos id
+      n_bootstrap_samples: 100           # matches the paper's config
+      references:
+        - source: pretrained
+          pretrained_name_or_path: "EleutherAI/pythia-2.8b"
+          dtype: float32                 # the reference WBC codebase's `init_model` (utils.py) never
+                                          # forces a dtype on the reference model, unlike the target
+                                          # (trainer/misc/models.py hardcodes torch.bfloat16 there) --
+                                          # float32 is what a plain from_pretrained gives for this
+                                          # checkpoint. Target/reference are NOT dtype-matched upstream.
+
+target:
+  module_path: ../hf_wrapper.py   # shared code stays one level up, in examples/mia/llm_mia/
+  model_class: HFCausalLMWrapper
+  target_folder: ./target_pythia_external
+  data_path: ./data/pythia_external_512.pkl
+
+shadow_model:
+
+distillation_model:

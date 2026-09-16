@@ -43,6 +43,11 @@ RMIA_TRAIN_INDICES = list(range(0, RMIA_N_TRAIN))
 RMIA_TEST_INDICES = list(range(RMIA_N_TRAIN, N_SAMPLES))
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
+# LLM attacks audit a tiny causal LM over token sequences instead of the image population.
+LLM_E2E_ATTACKS = ("ez_mia", "wbc")
+TEXT_VOCAB = 16
+TEXT_SEQ_LEN = 12
+
 
 class TinyImageTargetModel(nn.Module):
     """Tiny image classifier for E2E tests."""
@@ -71,6 +76,28 @@ class TinyTimeSeriesTargetModel(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         last_step = x[:, -1:, :].repeat(1, self.horizon, 1)
         return self.linear(last_step)
+
+
+class TinyCausalLMTargetModel(nn.Module):
+    """Tiny causal LM for LLM E2E tests: embedding -> causal prefix-sum -> vocab head.
+
+    Returns the bare (B, L, vocab) logits tensor, which CausalLMModel duck-types like an HF
+    output with ``.logits``. Constructor args are stored under their own names so
+    get_model_init_params can round-trip them through model_metadata.pkl.
+    """
+
+    def __init__(self, vocab_size: int = TEXT_VOCAB, dim: int = 8) -> None:
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.dim = dim
+        self.embed = nn.Embedding(vocab_size, dim)
+        self.head = nn.Linear(dim, vocab_size)
+
+    def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor | None = None) -> torch.Tensor:
+        emb = self.embed(input_ids)
+        if attention_mask is not None:
+            emb = emb * attention_mask.unsqueeze(-1).to(emb.dtype)
+        return self.head(torch.cumsum(emb, dim=1))
 
 
 class TinyImageInputHandler(AbstractInputHandler):
@@ -225,6 +252,38 @@ class TinyTimeSeriesInputHandler(AbstractInputHandler):
             return len(self.targets)
 
 
+class TinyTextInputHandler(AbstractInputHandler):
+    """Minimal token-sequence handler for LLM attacks. train/eval are never called: these attacks train nothing."""
+
+    def train(
+        self,
+        dataloader: DataLoader,
+        model: nn.Module = None,
+        criterion: nn.Module = None,
+        optimizer: optim.Optimizer = None,
+        epochs: int = None,
+    ) -> TrainingOutput:
+        return TrainingOutput(model=model, metrics=EvalOutput(accuracy=0.5, loss=1.0))
+
+    def eval(self, dataloader: DataLoader, model: nn.Module, criterion: nn.Module) -> EvalOutput:
+        return EvalOutput(accuracy=0.5, loss=1.0)
+
+    class UserDataset(AbstractInputHandler.UserDataset):
+        """Fixed-length token-id sequences; labels are the ids themselves (causal-LM convention)."""
+
+        def __init__(self, data: torch.Tensor, targets: torch.Tensor, **kwargs: dict) -> None:
+            self.data = data.long()
+            self.targets = targets.long()
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+
+        def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
+            return self.data[idx], self.targets[idx]
+
+        def __len__(self) -> int:
+            return len(self.targets)
+
+
 def _set_seed(seed: int = 1234) -> None:
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -273,6 +332,11 @@ def _build_tiny_timeseries_population() -> TinyTimeSeriesInputHandler.UserDatase
     data = torch.rand(N_SAMPLES, 4, 2)
     targets = torch.rand(N_SAMPLES, 2, 2)
     return TinyTimeSeriesInputHandler.UserDataset(data, targets)
+
+
+def _build_tiny_text_population() -> TinyTextInputHandler.UserDataset:
+    ids = torch.randint(0, TEXT_VOCAB, (N_SAMPLES, TEXT_SEQ_LEN))
+    return TinyTextInputHandler.UserDataset(ids, ids)
 
 
 def _get_schema_floor(field_schema: dict[str, Any], default_value: Any) -> Any:
@@ -412,6 +476,16 @@ def _build_attack_config(attack_name: str) -> dict:
         if candidate["n_audits"] % 2 != 0:
             candidate["n_audits"] += 1
 
+    if attack_name in LLM_E2E_ATTACKS:
+        # A frozen reference is required and cannot be derived from the schema. random_init (not
+        # self) so delta != 0 and the ROC is non-degenerate.
+        candidate["references"] = [{"source": "random_init"}]
+        candidate["batch_size"] = 4
+        candidate["pad_token_id"] = 0
+    if attack_name == "wbc":
+        # Sequences are TEXT_SEQ_LEN tokens (11 scored positions): keep a small, valid window grid.
+        candidate["w_min"], candidate["w_max"], candidate["n_windows"] = 2, 4, 3
+
     validated_config = config_cls(**candidate)
     return validated_config.model_dump()
 
@@ -529,6 +603,22 @@ def _create_timeseries_e2e_config(run_dir: Path, attack_name: str) -> Path:
     return _create_audit_yaml(run_dir, attack_name, "timeseries", "TinyTimeSeriesTargetModel", data_path, target_dir)
 
 
+def _create_text_e2e_config(run_dir: Path, attack_name: str) -> Path:
+    population = _build_tiny_text_population()
+    target_model = TinyCausalLMTargetModel()
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(target_model.parameters(), lr=0.01)
+    data_path, target_dir = _create_target_artifacts(
+        run_dir=run_dir,
+        population=population,
+        target_model=target_model,
+        criterion=criterion,
+        optimizer=optimizer,
+        dataset_name="tiny_text",
+    )
+    return _create_audit_yaml(run_dir, attack_name, "text", "TinyCausalLMTargetModel", data_path, target_dir)
+
+
 E2E_TESTED_MIA_ATTACKS = (
     "population",
     "rmia",
@@ -543,6 +633,8 @@ E2E_TESTED_MIA_ATTACKS = (
     "multi_signal_lira",
     "dts",
     "oslo",
+    "ez_mia",
+    "wbc",
 )
 
 ATTACK_PARAMETERS = [
@@ -592,6 +684,9 @@ def test_all_attacks_end_to_end(attack_name: str, monkeypatch: pytest.MonkeyPatc
             if attack_name == "dts":
                 config_path = _create_timeseries_e2e_config(run_dir, attack_name)
                 user_handler = TinyTimeSeriesInputHandler
+            elif attack_name in LLM_E2E_ATTACKS:
+                config_path = _create_text_e2e_config(run_dir, attack_name)
+                user_handler = TinyTextInputHandler
             else:
                 config_path = _create_image_e2e_config(run_dir, attack_name)
                 user_handler = TinyImageInputHandler

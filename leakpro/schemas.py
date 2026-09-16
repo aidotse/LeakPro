@@ -257,6 +257,9 @@ class MIAResultSchema(BaseModel):
     fp: Union[ArrayOrScalar, None] = Field(None, description="FP values")
     tn: Union[ArrayOrScalar, None] = Field(None, description="TN values")
     fn: Union[ArrayOrScalar, None] = Field(None, description="FN values")
+    bootstrap: Optional[Dict[str, Any]] = Field(
+        None, description="Optional bootstrap mean/CI for roc_auc and the fixed-FPR table (see MIAResult.bootstrap_metrics)"
+    )
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # Prevent extra fields
 

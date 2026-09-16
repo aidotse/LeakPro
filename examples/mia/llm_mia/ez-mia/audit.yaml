@@ -1,0 +1,33 @@
+##
+## Copyright 2023-2026 Lindholmen Science Park AB
+## SPDX-License-Identifier: Apache-2.0
+##
+audit:
+  random_seed: 1337   # matches the EZ-MIA paper's own WikiText/GPT-2/full reference config
+  attack_type: mia
+  data_modality: text
+  output_dir: ./leakpro_output_full     # run_audit.py rewrites this per target when sweeping
+  attack_list:
+    # Compares the fine-tuned target against the frozen base checkpoint it was fine-tuned from
+    # (the paper's default reference). Two forward passes per sequence, no training. Keep the reference
+    # dtype equal to train_config_ez-mia.yaml's train.dtype unless you are reproducing a reference
+    # implementation that does otherwise (../wbc/ deliberately leaves the reference at float32).
+    # WBC lives in ../wbc/ (Pythia-2.8B / Khan Academy), not here -- this folder is EZ-MIA only.
+    - attack: ez_mia
+      aggregation: ratio                # paper score P/N; log_ratio / positive_fraction / ... are ablations
+      batch_size: 16
+      pad_token_id: 50256               # GPT-2 has no pad token; eos is used and masked out
+      references:
+        - source: pretrained
+          pretrained_name_or_path: gpt2
+          dtype: float32                # must match train_config_ez-mia.yaml's train.dtype
+
+target:
+  module_path: ../hf_wrapper.py   # shared code stays one level up, in examples/mia/llm_mia/
+  model_class: HFCausalLMWrapper
+  target_folder: ./target_full          # prepare_target.py --finetune-method full|lora → target_full|target_lora
+  data_path: ./data/wikitext_gpt2_128.pkl
+
+shadow_model:
+
+distillation_model:
