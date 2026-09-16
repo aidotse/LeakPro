@@ -31,11 +31,6 @@ class AbstractMIA(AbstractAttack):
     This serves as a guideline for implementing a metric to be used for measuring the privacy leakage of a target model.
     """
 
-    # Class attributes for sharing between the different attacks
-    population = None
-    population_size = None
-    audit_dataset = None
-    handler = None
     _initialized = False
 
     AttackConfig: type[BaseModel]  # Subclasses must define an attack config
@@ -65,15 +60,16 @@ class AbstractMIA(AbstractAttack):
         if not isinstance(self.configs, BaseModel):
             raise TypeError(f"{self.__class__.__name__}.configs must be a subclass of Pydantic's BaseModel.")
 
-        # These objects are shared and should be initialized only once
-        AbstractMIA.population = handler.population
-        AbstractMIA.population_size = handler.population_size
-        # Per-instance wrapper: attacks in one run may wrap the same target differently (a classifier
-        # attack needs PytorchModel, an LLM attack needs CausalLMModel), so it is never stored on the
-        # class. Assigning ``AbstractMIA.target_model = ...`` here would also replace the ``target_model``
-        # property object on the class with a plain value, which is what made it shared before.
+        # Everything the attack reads from the handler is stored on the *instance*. Assigning to
+        # ``AbstractMIA.<name>`` here (as this code once did) replaces the property object of the same
+        # name on the class with a plain value, after which every attack in the process — including
+        # ones built on another handler — reads whichever value was written last.
+        self._handler = handler
+        self._population = handler.population
+        self._population_size = handler.population_size
+        # Attacks in one run may wrap the same target differently (PytorchModel vs CausalLMModel).
         self._target_model = self._wrap_target_model(handler)
-        AbstractMIA.audit_dataset = {
+        self._audit_dataset = {
             # Assuming train_indices and test_indices are arrays of indices, not the actual data
             "data": np.concatenate((handler.train_indices, handler.test_indices)),
             # in_members will be an array from 0 to the number of training indices - 1
@@ -81,7 +77,6 @@ class AbstractMIA(AbstractAttack):
             # out_members will start after the last training index and go up to the number of test indices - 1
             "out_members": np.arange(len(handler.train_indices),len(handler.train_indices)+len(handler.test_indices)),
         }
-        AbstractMIA.handler = handler
         self._validate_shared_quantities()
 
         # These objects are instance specific
@@ -104,7 +99,7 @@ class AbstractMIA(AbstractAttack):
 
         Overridable: subclasses auditing very large models may substitute a cheaper fingerprint.
         """
-        self.attack_id = hash_attack(self.configs.model_dump(), AbstractMIA.handler.target_model)
+        self.attack_id = hash_attack(self.configs.model_dump(), self.handler.target_model)
 
     @classmethod
     def get_default_attack_config(cls) -> BaseModel:
@@ -123,21 +118,21 @@ class AbstractMIA(AbstractAttack):
 
     def _validate_shared_quantities(self:Self)->None:
         """Validate the shared quantities used by the attack."""
-        if AbstractMIA.population is None:
+        if self._population is None:
             raise ValueError("Population dataset not found.")
-        if AbstractMIA.population_size is None:
+        if self._population_size is None:
             raise ValueError("Population size not found.")
-        if AbstractMIA.population_size != len(AbstractMIA.population):
+        if self._population_size != len(self._population):
             raise ValueError("Population size does not match the population dataset.")
-        if len(AbstractMIA.audit_dataset["in_members"]) == 0:
+        if len(self._audit_dataset["in_members"]) == 0:
             raise ValueError("Train indices must be provided.")
-        if len(AbstractMIA.audit_dataset["out_members"]) == 0:
+        if len(self._audit_dataset["out_members"]) == 0:
             raise ValueError("Test indices must be provided.")
-        if getattr(self, "_target_model", None) is None:
+        if self._target_model is None:
             raise ValueError("Target model not found.")
-        if AbstractMIA.audit_dataset is None:
+        if self._audit_dataset is None:
             raise ValueError("Audit dataset not found.")
-        if len(AbstractMIA.audit_dataset["data"]) > AbstractMIA.population_size:
+        if len(self._audit_dataset["data"]) > self._population_size:
             raise ValueError("Audit dataset is larger than the entire population dataset.")
 
     def sample_indices_from_population(
@@ -158,7 +153,7 @@ class AbstractMIA(AbstractAttack):
             np.ndarray: The selected attack data indices.
 
         """
-        all_index = np.arange(AbstractMIA.population_size)
+        all_index = np.arange(self._population_size)
 
         not_allowed_indices = np.array([])
         if not include_train_indices:
@@ -319,7 +314,7 @@ class AbstractMIA(AbstractAttack):
         List: The population used for the attack.
 
         """
-        return AbstractMIA.population
+        return self._population
 
     @property
     def population_size(self:Self)-> int:
@@ -330,7 +325,12 @@ class AbstractMIA(AbstractAttack):
         int: The size of the population used for the attack.
 
         """
-        return AbstractMIA.population_size
+        return self._population_size
+
+    @property
+    def handler(self:Self) -> AbstractInputHandler:
+        """Get the input handler this attack was built on."""
+        return self._handler
 
     @property
     def target_model(self:Self)-> Union[Self, List[Self] ]:
@@ -352,7 +352,7 @@ class AbstractMIA(AbstractAttack):
         Self: The audit dataset used for the attack.
 
         """
-        return AbstractMIA.audit_dataset
+        return self._audit_dataset
 
     @property
     def train_indices(self:Self)-> np.ndarray:
@@ -363,7 +363,7 @@ class AbstractMIA(AbstractAttack):
         np.ndarray: The training indices of the audit dataset.
 
         """
-        return AbstractMIA.audit_dataset["in_members"]
+        return self._audit_dataset["in_members"]
 
 
     @property
@@ -375,7 +375,7 @@ class AbstractMIA(AbstractAttack):
         np.ndarray: The test indices of the audit dataset.
 
         """
-        return AbstractMIA.audit_dataset["out_members"]
+        return self._audit_dataset["out_members"]
 
     @property
     def audit_size(self:Self)-> int:
@@ -386,7 +386,7 @@ class AbstractMIA(AbstractAttack):
         int: The size of the audit dataset.
 
         """
-        return len(AbstractMIA.audit_dataset["data"])
+        return len(self._audit_dataset["data"])
 
     @abstractmethod
     def description(self:Self) -> dict:
