@@ -20,7 +20,7 @@ import pytest
 import torch
 from torch import nn
 
-from leakpro.utils.save_load import hash_attack, hash_config, hash_indices, hash_model
+from leakpro.utils.save_load import fingerprint_model, hash_attack, hash_config, hash_indices, hash_model
 
 
 def _legacy_hash_model(model: nn.Module) -> str:
@@ -85,6 +85,35 @@ def test_hash_model_distinguishes_weights(linear_model: nn.Module) -> None:
     with torch.no_grad():
         linear_model[0].weight[0, 0] += 1.0
     assert hash_model(linear_model) != before
+
+
+def test_fingerprint_model_is_cheap_deterministic_and_discriminating(linear_model: nn.Module) -> None:
+    """Fingerprint changes with weights, shapes and the pretrained name, but reads only a sample of each tensor."""
+    base = fingerprint_model(linear_model)
+    assert len(base) == 64
+    assert fingerprint_model(linear_model) == base
+    with torch.no_grad():
+        linear_model[0].weight[0, 0] += 1.0                    # inside the sampled prefix
+    assert fingerprint_model(linear_model) != base
+    linear_model.pretrained_name_or_path = "gpt2"
+    named = fingerprint_model(linear_model)
+    linear_model.pretrained_name_or_path = "gpt2-medium"
+    assert fingerprint_model(linear_model) != named
+
+    big = nn.Linear(4096, 4096)                                # 16M params: sampled, not read in full
+    with torch.no_grad():
+        before = fingerprint_model(big)
+        big.weight[2048, 2048] += 1.0                          # middle of the tensor, outside the sample
+    assert fingerprint_model(big) == before                    # documents the deliberate trade-off
+    assert fingerprint_model(nn.Linear(4, 3).to(torch.bfloat16))  # bf16 works
+
+
+def test_hash_attack_accepts_alternative_model_hasher(linear_model: nn.Module) -> None:
+    """hash_attack composes the config hash with whichever model hasher is passed."""
+    full = hash_attack({"x": 1}, linear_model)
+    cheap = hash_attack({"x": 1}, linear_model, model_hasher=fingerprint_model)
+    assert full != cheap
+    assert cheap == hash_attack({"x": 1}, linear_model, model_hasher=fingerprint_model)
 
 
 def test_hash_config_is_key_order_independent() -> None:
