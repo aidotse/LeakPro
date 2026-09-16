@@ -5,7 +5,7 @@
 # Target preparation for the LLM MIA example (prepare_target.py). Defaults reproduce the EZ-MIA
 # paper's WikiText / GPT-2 / full fine-tuning setting (arXiv:2601.12104, §4 and appendix A).
 run:
-  random_seed: 1234
+  random_seed: 1337   # matches the EZ-MIA paper's own WikiText/GPT-2/full reference config
   # {finetune_method} is substituted, so the LoRA-vs-full sweep writes two targets side by side.
   log_dir: ./target_{finetune_method}
 
@@ -15,6 +15,8 @@ train:
   finetune_method: full       # full | lora   (override with --finetune-method)
   epochs: 3
   batch_size: 16
+  gradient_accumulation_steps: 1   # raise for big models (GPT-J-6B, Llama) to keep this effective batch
+                                    # size at a smaller per-step memory cost: batch_size 4 x steps 4 == 16
   learning_rate: 1.0e-4
   weight_decay: 0.0
   lora:                       # used only when finetune_method == lora (paper: r=16, alpha=32, dropout=0.05)
