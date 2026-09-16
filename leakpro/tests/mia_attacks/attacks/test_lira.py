@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 from dotmap import DotMap
 from pydantic import ValidationError
+from scipy.stats import norm
 
 from leakpro.attacks.mia_attacks.lira import AttackLiRA
 from leakpro.reporting.mia_result import MIAResult
@@ -179,3 +180,33 @@ def test_lira_rejects_non_scalar_signal(image_handler:ImageInputHandler) -> None
 
     with pytest.raises(ValueError, match="one scalar per audit point"):
         lira_obj.prepare_attack()
+
+def test_lira_offline_score_matches_reference_implementation(image_handler:ImageInputHandler) -> None:
+    """Offline LiRA must score -logpdf under the OUT distribution, per tensorflow/privacy mi_lira_2021.
+
+    The reference implementation predicts logpdf(signal; mean_out, std_out) and negates
+    at ROC time; LeakPro folds the negation into the score so that higher means member,
+    consistent with the online attack. It must NOT use the logcdf (issue #378).
+    """
+    audit_config = get_audit_config()
+    lira_params = DotMap({k: v for k, v in audit_config.attack_list[0].items() if k != "attack"})
+    lira_params.online = False
+    image_handler.configs.shadow_model = get_shadow_model_config()
+    lira_obj = AttackLiRA(image_handler, lira_params)
+    if ShadowModelHandler.is_created() == False:
+        ShadowModelHandler(image_handler)
+    lira_obj.prepare_attack()
+    lira_obj.run_attack()
+
+    n_audit_samples = lira_obj.shadow_models_signals.shape[1]
+    actual = np.zeros(n_audit_samples)
+    actual[lira_obj.audit_dataset["in_members"]] = lira_obj.in_member_signals.flatten()
+    actual[lira_obj.audit_dataset["out_members"]] = lira_obj.out_member_signals.flatten()
+
+    for i in range(n_audit_samples):
+        out_mask = lira_obj.out_indices[:, i]
+        sm_signals = lira_obj.shadow_models_signals[:, i]
+        out_mean = np.mean(sm_signals[out_mask])
+        out_std = lira_obj.get_std(sm_signals, out_mask, False, lira_obj.var_calculation)
+        expected = -norm.logpdf(lira_obj.target_signals[i], out_mean, out_std + 1e-30)
+        assert np.isclose(actual[i], expected), f"sample {i}: got {actual[i]}, reference gives {expected}"
