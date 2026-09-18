@@ -187,13 +187,18 @@ class ShadowModelHandler(ModelHandler):
 
         return all_indices, filtered_indices
 
-    def construct_balanced_assignments(self, m: int, n: int, seed: int = None) -> np.ndarray:
-        """Assigns each of m data points to approximately n/2 out of n datasets by partitioning.
+    def construct_balanced_assignments(self, m: int, n: int, points_per_model: int = None, seed: int = None) -> np.ndarray:
+        """Assigns each of m data points to n datasets of points_per_model points each, keeping per-point balance.
+
+        Every dataset gets exactly points_per_model points, and each point ends up
+        in an equal number of datasets (within 1), so each point has both IN and
+        OUT models regardless of the training fraction.
 
         Args:
         ----
             m (int): The number of data points.
             n (int): The number of datasets.
+            points_per_model (int, optional): Number of points per dataset. Defaults to m // 2.
             seed (int, optional): Random seed for reproducibility. Defaults to None.
 
         Returns:
@@ -204,19 +209,23 @@ class ShadowModelHandler(ModelHandler):
         if seed is not None:
             np.random.seed(seed)
 
+        if points_per_model is None:
+            points_per_model = m // 2
+        if not 0 < points_per_model <= m:
+            raise ValueError(f"points_per_model must be in [1, {m}], got {points_per_model}")
+
         A = np.zeros((n, m), dtype=np.uint8)  # noqa: N806
-        all_indices = np.arange(m)
+        inclusion_counts = np.zeros(m, dtype=np.int64)
 
-        for i in range(0, n - 1, 2):
-            permuted = np.random.permutation(all_indices)
-            half = m // 2
-            A[i, permuted[:half]] = 1       # First half to dataset i
-            A[i+1, permuted[half:]] = 1     # Second half to dataset i+1
-
-        if n % 2 == 1:
-            permuted = np.random.permutation(all_indices)
-            half = m // 2
-            A[n - 1, permuted[:half]] = 1   # Last dataset gets half for odd n
+        # Greedy least-loaded assignment: each dataset takes the points that are
+        # currently members of the fewest datasets (random tie-breaking), which
+        # keeps the per-point inclusion counts within 1 of each other.
+        for i in range(n):
+            tie_breaker = np.random.permutation(m)
+            order = np.lexsort((tie_breaker, inclusion_counts))
+            chosen = order[:points_per_model]
+            A[i, chosen] = 1
+            inclusion_counts[chosen] += 1
 
         return A
 
@@ -279,10 +288,11 @@ class ShadowModelHandler(ModelHandler):
             indices_to_use.append(next_index)
             next_index += 1
 
-        A = self.construct_balanced_assignments(len(shadow_population), num_models)  # noqa: N806
-        expected_size = len(shadow_population) // 2
-        if not np.all(np.sum(A, axis=1) == expected_size):
-            raise ValueError("Balanced shadow assignments must contain half of the shadow population per model")
+        # data_size is also what the cache signature records, so the trained size
+        # must match it exactly or cached models are never reused (issue #345).
+        A = self.construct_balanced_assignments(len(shadow_population), num_models, points_per_model=data_size)  # noqa: N806
+        if not np.all(np.sum(A, axis=1) == data_size):
+            raise ValueError("Balanced shadow assignments must contain data_size points per model")
         shadow_population = np.array(shadow_population)
 
         for i, indx in enumerate(indices_to_use):
