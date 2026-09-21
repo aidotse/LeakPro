@@ -9,14 +9,14 @@ import yaml
 import torch
 import random
 import numpy as np
-from torch import cuda, optim
-from torch.nn import MSELoss
+from torch import optim
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 from leakpro.schemas import TrainingOutput, EvalOutput
+from leakpro.utils.device import get_device, mark_step
 
 from leakpro import AbstractInputHandler
-from utils.model_preparation import evaluate
+from utils.model_preparation import evaluate, get_criterion
 from utils.data_preparation import IndividualizedDataset
 
 class IndividualizedInputHandler(AbstractInputHandler):
@@ -27,8 +27,16 @@ class IndividualizedInputHandler(AbstractInputHandler):
         print(configs)
 
     def get_criterion(self)->None:
-        """Set the MSELoss for the model."""
-        return MSELoss()
+        """Return the criterion named by `train.loss` in train_config.yaml.
+
+        This must match what the target was actually trained with: shadow models are trained with
+        it, and RMIA reads it to pick the residual likelihood family (MSE -> Gaussian,
+        L1 -> Laplace). Hardcoding MSELoss here scored an MAE-trained target as if it were
+        Gaussian.
+        """
+        with open("train_config.yaml", 'r') as file:
+            train_config = yaml.safe_load(file)
+        return get_criterion(train_config["train"]["loss"])
 
     def get_optimizer(self, model:torch.nn.Module) -> None:
         """Set the optimizer for the model."""
@@ -63,7 +71,7 @@ class IndividualizedInputHandler(AbstractInputHandler):
             best_state_dict = copy.deepcopy(model.state_dict())
 
         # prepare training
-        device = torch.device("cuda" if cuda.is_available() else "cpu")
+        device = get_device()
         model.to(device)
 
         # training loop
@@ -77,6 +85,7 @@ class IndividualizedInputHandler(AbstractInputHandler):
                 loss = criterion(preds, targets)
                 loss.backward()
                 optimizer.step()
+                mark_step(device)
 
                 # Accumulate performance of shadow model
                 train_loss += loss.item()
@@ -111,7 +120,7 @@ class IndividualizedInputHandler(AbstractInputHandler):
         criterion: torch.nn.Module = None,
     ) -> EvalOutput:
         """Model evaluation procedure."""
-        device = torch.device("cuda" if cuda.is_available() else "cpu")
+        device = get_device()
         eval_loss = evaluate(model, dataloader, criterion, device)
         output_dict = {"accuracy": 1.0, "loss": eval_loss}     # TODO: accuracy should be an optional metric!
         eval_output = EvalOutput(**output_dict)

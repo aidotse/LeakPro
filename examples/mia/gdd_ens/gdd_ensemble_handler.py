@@ -19,12 +19,13 @@ Training notes:
   comes from the 10 distinct architectures + random init/dropout.
 """
 
-from torch import cuda, device, nn, no_grad, optim
+from torch import nn, no_grad, optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.schemas import EvalOutput, TrainingOutput
+from leakpro.utils.device import get_device, mark_step
 
 from utils.gdd_ensemble import TABLE_S6
 
@@ -45,7 +46,7 @@ class GddEnsembleModelHandler(AbstractInputHandler, role="model"):
         if not hasattr(model, "members"):
             raise ValueError("GddEnsembleModelHandler expects a GddEnsemble (model.members missing)")
 
-        dev = device("cuda" if cuda.is_available() else "cpu")
+        dev = get_device()
         model.to(dev)
         crit = criterion if criterion is not None else nn.CrossEntropyLoss()
 
@@ -68,6 +69,7 @@ class GddEnsembleModelHandler(AbstractInputHandler, role="model"):
                     loss = crit(member(inputs), labels)
                     loss.backward()
                     opt.step()
+                mark_step(dev)
 
         train_metrics = self.eval(dataloader, model, crit)
         model.to("cpu")
@@ -77,7 +79,7 @@ class GddEnsembleModelHandler(AbstractInputHandler, role="model"):
         # ``criterion`` is intentionally unused: the ensemble ``forward`` already returns
         # log(mean softmax), so the metric is NLL on those log-probs directly. Applying the passed
         # CrossEntropyLoss (used to train the raw-logit members) would log-softmax a second time.
-        dev = device("cuda" if cuda.is_available() else "cpu")
+        dev = get_device()
         model.to(dev)
         model.eval()
         loss, correct, total = 0.0, 0, 0

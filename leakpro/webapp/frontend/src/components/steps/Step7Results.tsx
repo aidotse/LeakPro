@@ -140,7 +140,7 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-1">
           <h2 className="text-4xl font-black tracking-tight">Results</h2>
-          <p className="text-slate-600 dark:text-slate-400 text-lg">
+          <p className="text-slate-600 dark:text-slate-200 text-lg">
             {hasResults
               ? `${allResults.length} model${allResults.length !== 1 ? "s" : ""}${sessionCount > 1 ? ` across ${sessionCount} sessions` : ""}`
               : "No results for this session yet"}
@@ -156,7 +156,7 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
           </button>
           <button
             onClick={onRestart}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-700 text-sm font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-300 dark:border-surface-border text-sm font-bold hover:bg-slate-100 dark:hover:bg-surface-2 transition-colors"
           >
             <span className="material-symbols-outlined text-base">restart_alt</span>
             New Audit
@@ -166,7 +166,7 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
 
       {/* Compare panel */}
       {showCompare && (
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 p-4 flex flex-col gap-3">
+        <div className="rounded-xl border border-slate-200 dark:border-surface-border bg-slate-50 dark:bg-surface p-4 flex flex-col gap-3">
           <div className="flex items-center justify-between">
             <p className="font-bold text-sm">Load results from a previous session</p>
             <button onClick={() => setShowCompare(false)} className="material-symbols-outlined text-base text-slate-400 hover:text-slate-600">close</button>
@@ -186,7 +186,7 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
                     return atks.length ? `${name}: ${atks.join(", ")}` : name;
                   }).join(" · ");
                   return (
-                    <div key={j.job_id} className="flex items-center justify-between gap-3 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3 py-2">
+                    <div key={j.job_id} className="flex items-center justify-between gap-3 rounded-lg bg-white dark:bg-surface-2 border border-slate-200 dark:border-surface-border px-3 py-2">
                       <div className="min-w-0">
                         <p className="text-xs font-mono text-slate-400 truncate">{j.job_id.slice(0, 12)}…</p>
                         <p className="text-sm font-semibold text-slate-700 dark:text-slate-300 truncate">
@@ -212,7 +212,7 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
                         <button
                           onClick={() => loadPastJob(j.job_id)}
                           disabled={loadingJobId === j.job_id}
-                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-bold hover:bg-primary/90 disabled:opacity-50 shrink-0"
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-700 text-cream border border-primary text-xs font-bold hover:bg-slate-600 disabled:opacity-50 shrink-0"
                         >
                           {loadingJobId === j.job_id
                             ? <span className="material-symbols-outlined text-sm animate-spin">sync</span>
@@ -233,7 +233,7 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
       {pendingRename && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setPendingRename(null)} />
-          <div className="relative bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 p-6 w-full max-w-md mx-4 flex flex-col gap-5">
+          <div className="relative bg-white dark:bg-surface rounded-2xl shadow-2xl border border-slate-200 dark:border-surface-border p-6 w-full max-w-md mx-4 flex flex-col gap-5">
             <div className="flex items-start gap-3">
               <span className="material-symbols-outlined text-orange-500 mt-0.5">edit</span>
               <div>
@@ -253,7 +253,7 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
                     onChange={(e) => setPendingRename((prev) =>
                       prev ? { ...prev, renames: { ...prev.renames, [original]: e.target.value } } : prev
                     )}
-                    className="flex-1 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm px-3 py-2 font-mono focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    className="flex-1 rounded-lg border border-slate-300 dark:border-surface-border bg-white dark:bg-surface-2 text-sm px-3 py-2 font-mono focus:outline-none focus:ring-2 focus:ring-primary/50"
                   />
                 </div>
               ))}
@@ -261,12 +261,12 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
             <div className="flex gap-2 justify-end pt-1">
               <button
                 onClick={() => setPendingRename(null)}
-                className="px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-700 text-sm font-bold hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                className="px-4 py-2 rounded-lg border border-slate-300 dark:border-surface-border text-sm font-bold hover:bg-slate-100 dark:hover:bg-surface-2 transition-colors"
               >Cancel</button>
               <button
                 onClick={confirmRename}
                 disabled={Object.values(pendingRename.renames).some((v) => !v.trim())}
-                className="px-4 py-2 rounded-lg bg-primary text-white text-sm font-bold hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                className="px-4 py-2 rounded-lg bg-slate-700 text-cream border border-primary text-sm font-bold hover:bg-slate-600 disabled:opacity-50 transition-colors"
               >Confirm &amp; Load</button>
             </div>
           </div>
@@ -275,7 +275,7 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
 
       {/* No results empty state */}
       {noResults && !hasResults && (
-        <div className="flex flex-col items-center gap-3 py-12 text-center rounded-xl border border-dashed border-slate-300 dark:border-slate-700">
+        <div className="flex flex-col items-center gap-3 py-12 text-center rounded-xl border border-dashed border-slate-300 dark:border-surface-border">
           <span className="material-symbols-outlined text-4xl text-slate-300 dark:text-slate-600">bar_chart</span>
           <p className="text-slate-500 font-semibold">No audit results for this session yet.</p>
           <p className="text-slate-400 text-sm">Load a previous session using "Compare Sessions" above, or run a new audit.</p>
@@ -285,7 +285,7 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
       {/* Tab bar + content — only when there are results */}
       {hasResults && (
         <>
-          <div className="flex gap-1 border-b border-slate-200 dark:border-slate-800">
+          <div className="flex gap-1 border-b border-slate-200 dark:border-surface-border">
             {TABS.map((t) => (
               <button
                 key={t.id}

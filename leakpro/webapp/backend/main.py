@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import logging
 import queue
 import shutil
 import threading
@@ -16,6 +18,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from leakpro.schemas import EvalOutput, TrainingOutput
@@ -25,7 +28,7 @@ from leakpro.schemas import EvalOutput, TrainingOutput
 # ---------------------------------------------------------------------------
 
 def _default_train(loader, model, criterion, optimizer, epochs,
-                   dpsgd_metadata_path=None, virtual_batch_size=16):
+                   dpsgd_metadata_path=None, virtual_batch_size=16, binary=False):
     """Built-in training loop. Pass dpsgd_metadata_path to activate DP-SGD."""
     import os, pickle
     import torch
@@ -109,14 +112,16 @@ def _default_train(loader, model, criterion, optimizer, epochs,
                 model.train()
                 train_loss, train_acc = 0.0, 0.0
                 for inputs, labels in tqdm(mem_loader, desc=f"Epoch {epoch+1}/{epochs}"):
-                    labels = labels.long().view(-1)
+                    labels = labels.float().view(-1) if binary else labels.long().view(-1)
                     inputs, labels = inputs.to(dev), labels.to(dev)
                     optimizer.zero_grad()
                     outputs = model(inputs)
+                    if binary: outputs = outputs.squeeze(1)
                     loss = criterion(outputs, labels)
                     loss.backward()
                     optimizer.step()
-                    train_acc += outputs.argmax(1).eq(labels).sum().item()
+                    preds = (outputs.sigmoid() > 0.5).float() if binary else outputs.argmax(1).float()
+                    train_acc += preds.eq(labels).sum().item()
                     train_loss += loss.item() * labels.size(0)
                 n = len(mem_loader.dataset)
                 accuracy_history.append(train_acc / n)
@@ -133,14 +138,16 @@ def _default_train(loader, model, criterion, optimizer, epochs,
             model.train()
             train_loss, train_acc, total = 0.0, 0.0, 0
             for inputs, labels in tqdm(loader, desc=f"Epoch {epoch+1}/{epochs}"):
-                labels = labels.long().view(-1)
+                labels = labels.float().view(-1) if binary else labels.long().view(-1)
                 inputs, labels = inputs.to(dev), labels.to(dev)
                 optimizer.zero_grad()
                 outputs = model(inputs)
+                if binary: outputs = outputs.squeeze(1)
                 loss = criterion(outputs, labels)
                 loss.backward()
                 optimizer.step()
-                train_acc += outputs.argmax(1).eq(labels).sum().item()
+                preds = (outputs.sigmoid() > 0.5).float() if binary else outputs.argmax(1).float()
+                train_acc += preds.eq(labels).sum().item()
                 train_loss += loss.item() * labels.size(0)
                 total += labels.size(0)
             accuracy_history.append(train_acc / total)
@@ -155,7 +162,7 @@ def _default_train(loader, model, criterion, optimizer, epochs,
     return TrainingOutput(model=model, metrics=metrics)
 
 
-def _default_eval(loader, model, criterion):
+def _default_eval(loader, model, criterion, binary=False):
     """Built-in eval loop."""
     import torch
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -164,11 +171,13 @@ def _default_eval(loader, model, criterion):
     loss, acc, total = 0.0, 0.0, 0
     with torch.no_grad():
         for data, target in loader:
-            target = target.long().view(-1).to(dev)
+            target = target.float().view(-1).to(dev) if binary else target.long().view(-1).to(dev)
             data = data.to(dev)
             output = model(data)
+            if binary: output = output.squeeze(1)
             loss += criterion(output, target).item() * target.size(0)
-            acc += output.argmax(1).eq(target).sum().item()
+            preds = (output.sigmoid() > 0.5).float() if binary else output.argmax(1).float()
+            acc += preds.eq(target).sum().item()
             total += target.size(0)
     model.to("cpu")
     return EvalOutput(accuracy=acc / total if total else 0.0, loss=loss / total if total else 0.0)
@@ -224,14 +233,52 @@ class ResNet18Pretrained(nn.Module):
         return self.model(x)
 '''
 
+_PRESET_ARCH_TABULAR = '''\
+"""Preset MLP for tabular data. num_features and num_classes are auto-detected."""
+import torch.nn as nn
+
+
+class MLP(nn.Module):
+    def __init__(self, num_features=10, num_classes=2):
+        super().__init__()
+        self.num_features = num_features
+        self.num_classes = num_classes
+        self.net = nn.Sequential(
+            nn.Linear(num_features, 256), nn.ReLU(), nn.Dropout(0.3),
+            nn.Linear(256, 128), nn.ReLU(), nn.Dropout(0.3),
+            nn.Linear(128, 64),  nn.ReLU(), nn.Dropout(0.3),
+            nn.Linear(64, num_classes),
+        )
+
+    def forward(self, x):
+        return self.net(x)
+'''
+
 _PRESET_ARCHS: dict[str, str] = {
     "cifar_wrn":        _PRESET_ARCH_IMAGE,
     "cifar_image":      _PRESET_ARCH_IMAGE,
     "image_pretrained": _PRESET_ARCH_IMAGE_PRETRAINED,
+    "tabular_mlp":      _PRESET_ARCH_TABULAR,
 }
 
 from .checker import run_check
+from .dataio import convert_upload
 from .inspector import inspect
+from .security import (
+    ALLOWED_ORIGINS,
+    bearer_from_header,
+    confine,
+    load_metadata_fields,
+    origin_is_allowed,
+    path_is_protected,
+    safe_copy,
+    safe_detail,
+    safe_name,
+    safe_suffix,
+    save_upload,
+    startup_banner,
+    token_is_valid,
+)
 from .models import (
     ArchConfig,
     AttackParams,
@@ -250,7 +297,12 @@ from .worker import run_audit_job
 # App setup
 # ---------------------------------------------------------------------------
 
-JOBS_ROOT = Path(__file__).parents[3] / "webapp_jobs"
+_logger = logging.getLogger("leakpro.webapp")
+
+# Overridable so containers can point at a mounted volume (docker-compose
+# mounts leakpro_jobs at /data/jobs); default keeps the repo-local layout.
+JOBS_ROOT = Path(os.environ.get("LEAKPRO_WEBAPP_JOBS_DIR")
+                 or Path(__file__).parents[3] / "webapp_jobs")
 JOBS_ROOT.mkdir(parents=True, exist_ok=True)
 
 # In-memory job registry  { job_id: { status, created_at, models, ... } }
@@ -258,6 +310,11 @@ _jobs: dict[str, dict[str, Any]] = {}
 # Per-job log queues
 _log_queues: dict[str, queue.Queue] = {}
 _executor = ThreadPoolExecutor(max_workers=4)
+# Training mutates process-global state (sys.stdout capture + log_q.put wrapping),
+# so only one model trains at a time across the whole server. Without this,
+# concurrent _train() threads clobber each other's stdout and cross-write into
+# each other's train.log, and can leave log_q.put pointing at a closed file.
+_train_lock = threading.Lock()
 
 
 def _job_dir(job_id: str) -> Path:
@@ -323,16 +380,45 @@ def _load_jobs() -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     _load_jobs()
+    _logger.info("\n%s", startup_banner())
     yield
 
 
 app = FastAPI(title="LeakPro Webapp API", version="0.1.0", lifespan=lifespan)
 
+
+@app.middleware("http")
+async def _require_auth(request, call_next):
+    """Gate the API surface behind a bearer token and an origin allowlist.
+
+    The backend deserializes user pickles and executes user-supplied Python by
+    design, so every route that can reach those sinks must be authenticated.
+    Fail closed: only the static SPA paths are exempt, so the UI can load and
+    prompt for the token; any route added later is protected by default.
+    """
+    if request.method == "OPTIONS" or not path_is_protected(request.url.path):
+        return await call_next(request)
+
+    # A browser attaches Origin on cross-site requests; the token alone already
+    # blocks them, this rejects them earlier and covers DNS-rebinding attempts.
+    if not origin_is_allowed(request.headers.get("origin")):
+        return JSONResponse({"detail": "Origin not allowed"}, status_code=403)
+
+    # Header only: a ?token= fallback here would land the secret in the access
+    # log on every request, and HTTP middleware never sees WebSocket scopes —
+    # the WS route does its own query-parameter check.
+    presented = bearer_from_header(request.headers.get("authorization"))
+    if not token_is_valid(presented):
+        return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+
+    return await call_next(request)
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 
@@ -390,10 +476,23 @@ async def get_status(job_id: str) -> dict:
 @app.post("/jobs/{job_id}/upload/data", response_model=DataMeta)
 async def upload_data(job_id: str, file: UploadFile) -> DataMeta:
     job = _get_job(job_id)
-    dest = _job_dir(job_id) / f"data{Path(file.filename).suffix}"
-    with open(dest, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-    meta = inspect(dest)
+    dest = _job_dir(job_id) / f"data{safe_suffix(file.filename)}"
+    save_upload(file.file, dest)
+    # Safe formats (.npz/.parquet/.csv/...) are converted here, at the trust
+    # boundary, into a server-generated pickle — the uploaded bytes are never
+    # unpickled. Legacy pickle formats fall through to inspect().
+    try:
+        converted = convert_upload(dest, _job_dir(job_id))
+    except HTTPException:
+        raise
+    except Exception as e:
+        _logger.exception("convert_upload failed for job %s", job_id)
+        raise HTTPException(status_code=400,
+                            detail=safe_detail(e, "Failed to convert upload")) from e
+    if converted is not None:
+        dest, meta = converted
+    else:
+        meta = inspect(dest)
     job["data_path"] = str(dest)
     job["data_meta"] = meta.model_dump()
     _save_job(job_id)
@@ -404,16 +503,22 @@ async def upload_data(job_id: str, file: UploadFile) -> DataMeta:
 async def set_data_path(job_id: str, body: dict) -> DataMeta:
     """Use a dataset already on the server by absolute path."""
     job = _get_job(job_id)
-    path = Path(body.get("path", ""))
+    path = confine(body.get("path", ""))
     if not path.exists():
-        raise HTTPException(status_code=400, detail=f"Path does not exist: {path}")
+        raise HTTPException(status_code=400, detail="Path does not exist")
     if not path.is_file():
-        raise HTTPException(status_code=400, detail=f"Path is not a file: {path}")
+        raise HTTPException(status_code=400, detail="Path is not a file")
     try:
-        meta = inspect(path)
+        converted = convert_upload(path, _job_dir(job_id))
+        if converted is not None:
+            path, meta = converted
+        else:
+            meta = inspect(path)
+    except HTTPException:
+        raise
     except Exception as e:
-        import traceback
-        raise HTTPException(status_code=400, detail=f"Failed to inspect file: {e}\n{traceback.format_exc()}") from e
+        _logger.exception("inspect failed for job %s", job_id)
+        raise HTTPException(status_code=400, detail=safe_detail(e, "Failed to inspect file")) from e
     job["data_path"] = str(path)
     job["data_meta"] = meta.model_dump()
     _save_job(job_id)
@@ -425,8 +530,7 @@ async def upload_dataset_handler(job_id: str, file: UploadFile) -> dict:
     """Upload a custom dataset_handler.py defining UserDataset."""
     _get_job(job_id)
     dest = _job_dir(job_id) / "dataset_handler.py"
-    with open(dest, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    save_upload(file.file, dest)
     return {"ok": True, "filename": file.filename}
 
 
@@ -434,13 +538,13 @@ async def upload_dataset_handler(job_id: str, file: UploadFile) -> dict:
 async def set_dataset_handler_path(job_id: str, body: dict) -> dict:
     """Use a dataset_handler.py already on the server by absolute path."""
     _get_job(job_id)
-    path = Path(body.get("path", ""))
+    path = confine(body.get("path", ""))
     if not path.exists():
-        raise HTTPException(status_code=400, detail=f"Path does not exist: {path}")
+        raise HTTPException(status_code=400, detail="Path does not exist")
     if not path.suffix == ".py":
         raise HTTPException(status_code=400, detail="Path must point to a .py file")
     dest = _job_dir(job_id) / "dataset_handler.py"
-    shutil.copy2(path, dest)
+    safe_copy(path, dest)
     return {"ok": True, "filename": path.name}
 
 
@@ -464,20 +568,19 @@ async def set_handler_config(job_id: str, config: HandlerConfig) -> dict:
 async def upload_arch(job_id: str, file: UploadFile) -> dict:
     _get_job(job_id)
     dest = _job_dir(job_id) / "arch.py"
-    with open(dest, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    save_upload(file.file, dest)
     return {"ok": True, "filename": file.filename}
 
 
 @app.post("/jobs/{job_id}/arch-path")
 async def set_arch_path(job_id: str, body: dict) -> dict:
     _get_job(job_id)
-    path = Path(body.get("path", ""))
+    path = confine(body.get("path", ""))
     if not path.exists():
-        raise HTTPException(status_code=400, detail=f"Path does not exist: {path}")
-    # Symlink or copy into job dir
+        raise HTTPException(status_code=400, detail="Path does not exist")
+    # Copy into job dir
     dest = _job_dir(job_id) / "arch.py"
-    shutil.copy2(path, dest)
+    safe_copy(path, dest)
     return {"ok": True, "filename": path.name}
 
 
@@ -485,19 +588,18 @@ async def set_arch_path(job_id: str, body: dict) -> dict:
 async def upload_handler(job_id: str, file: UploadFile) -> dict:
     _get_job(job_id)
     dest = _job_dir(job_id) / "handler.py"
-    with open(dest, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    save_upload(file.file, dest)
     return {"ok": True, "filename": file.filename}
 
 
 @app.post("/jobs/{job_id}/handler-path")
 async def set_handler_path(job_id: str, body: dict) -> dict:
     _get_job(job_id)
-    path = Path(body.get("path", ""))
+    path = confine(body.get("path", ""))
     if not path.exists():
-        raise HTTPException(status_code=400, detail=f"Path does not exist: {path}")
+        raise HTTPException(status_code=400, detail="Path does not exist")
     dest = _job_dir(job_id) / "handler.py"
-    shutil.copy2(path, dest)
+    safe_copy(path, dest)
     return {"ok": True, "filename": path.name}
 
 
@@ -520,22 +622,20 @@ async def set_arch_config(job_id: str, config: ArchConfig) -> dict:
 @app.post("/jobs/{job_id}/upload/weights")
 async def upload_weights(job_id: str, model_name: str, file: UploadFile) -> dict:
     _get_job(job_id)
-    model_dir = _job_dir(job_id) / "models" / model_name
+    model_dir = _job_dir(job_id) / "models" / safe_name(model_name, "model_name")
     model_dir.mkdir(exist_ok=True)
     dest = model_dir / "target_model.pkl"
-    with open(dest, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    save_upload(file.file, dest)
     return {"ok": True, "path": str(dest)}
 
 
 @app.post("/jobs/{job_id}/upload/model-metadata")
 async def upload_model_metadata(job_id: str, model_name: str, file: UploadFile) -> dict:
     _get_job(job_id)
-    model_dir = _job_dir(job_id) / "models" / model_name
+    model_dir = _job_dir(job_id) / "models" / safe_name(model_name, "model_name")
     model_dir.mkdir(exist_ok=True)
     dest = model_dir / "model_metadata.pkl"
-    with open(dest, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    save_upload(file.file, dest)
     return {"ok": True, "path": str(dest)}
 
 
@@ -543,14 +643,14 @@ async def upload_model_metadata(job_id: str, model_name: str, file: UploadFile) 
 async def set_model_metadata_path(job_id: str, body: dict) -> dict:
     """Copy a metadata file already on the server into the job directory."""
     _get_job(job_id)
-    path = Path(body.get("path", ""))
-    model_name = body.get("model_name", "uploaded_model")
+    path = confine(body.get("path", ""))
+    model_name = safe_name(body.get("model_name", "uploaded_model"), "model_name")
     if not path.exists():
-        raise HTTPException(status_code=400, detail=f"Path does not exist: {path}")
+        raise HTTPException(status_code=400, detail="Path does not exist")
     model_dir = _job_dir(job_id) / "models" / model_name
     model_dir.mkdir(exist_ok=True)
     dest = model_dir / "model_metadata.pkl"
-    shutil.copy2(path, dest)
+    safe_copy(path, dest)
     return {"ok": True, "path": str(dest)}
 
 
@@ -558,51 +658,43 @@ async def set_model_metadata_path(job_id: str, body: dict) -> dict:
 async def validate_model_metadata(job_id: str, model_name: str) -> dict:
     """Check that an uploaded model_metadata.pkl has all required MIA fields."""
     _get_job(job_id)
+    model_name = safe_name(model_name, "model_name")
     meta_path = _job_dir(job_id) / "models" / model_name / "model_metadata.pkl"
     if not meta_path.exists():
         raise HTTPException(status_code=400, detail="No metadata file uploaded yet")
 
     required = ["train_indices", "test_indices", "optimizer", "criterion",
                 "data_loader", "epochs", "train_result", "test_result", "dataset"]
-    import pickle
-
-    class _SafeUnpickler(pickle.Unpickler):
-        def find_class(self, module, name):
-            try:
-                return super().find_class(module, name)
-            except (ImportError, AttributeError):
-                return type(name, (), {})
-
     try:
-        with open(meta_path, "rb") as f:
-            raw = _SafeUnpickler(f).load()
+        raw = load_metadata_fields(meta_path)
         attrs: dict = raw.__dict__ if hasattr(raw, "__dict__") else (raw if isinstance(raw, dict) else {})
         present = [k for k in required if k in attrs]
         missing = [k for k in required if k not in attrs]
         return {"ok": not missing, "present_fields": present, "missing_fields": missing}
     except Exception as e:
-        import traceback
+        _logger.exception("metadata validation failed for job %s", job_id)
         return {"ok": False, "present_fields": [], "missing_fields": required,
-                "error": f"{e}\n{traceback.format_exc()}"}
+                "error": safe_detail(e, "Failed to read metadata")}
 
 
 @app.post("/jobs/{job_id}/weights-path")
 async def set_weights_path(job_id: str, body: dict) -> dict:
     _get_job(job_id)
-    path = Path(body.get("path", ""))
-    model_name = body.get("model_name", "uploaded_model")
+    path = confine(body.get("path", ""))
+    model_name = safe_name(body.get("model_name", "uploaded_model"), "model_name")
     if not path.exists():
-        raise HTTPException(status_code=400, detail=f"Path does not exist: {path}")
+        raise HTTPException(status_code=400, detail="Path does not exist")
     model_dir = _job_dir(job_id) / "models" / model_name
     model_dir.mkdir(exist_ok=True)
     dest = model_dir / "target_model.pkl"
-    shutil.copy2(path, dest)
+    safe_copy(path, dest)
     return {"ok": True, "path": str(dest)}
 
 
 @app.post("/jobs/{job_id}/check", response_model=CompatResult)
 async def check_compat(job_id: str, model_name: str) -> CompatResult:
     job = _get_job(job_id)
+    model_name = safe_name(model_name, "model_name")
     job_dir = _job_dir(job_id)
     arch_path = job_dir / "arch.py"
     weights_path = job_dir / "models" / model_name / "target_model.pkl"
@@ -677,6 +769,8 @@ async def remove_model(job_id: str, model_name: str) -> dict:
 async def train_model(job_id: str, params: TrainParams) -> dict:
     """Enqueue a training job. Progress streams via WS /jobs/{id}/logs."""
     job = _get_job(job_id)
+    # params.name becomes a directory created with parents=True further down.
+    params.name = safe_name(params.name, "name")
     log_q = _log_queues[job_id]
 
     def _train() -> None:
@@ -695,6 +789,10 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                 pass
 
         old_stdout = _sys.stdout
+        _train_log_file = None  # default so the finally below never NameErrors
+        # Serialize: stdout + log_q.put patching mutate process-global state.
+        _train_lock.acquire()
+        _orig_log_q_put = log_q.put  # capture the real put while holding the lock
         _sys.stdout = _StdoutCapture()
 
         try:
@@ -710,7 +808,6 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
             # Save training log to file
             _train_log_path = target_folder / "train.log"
             _train_log_file = open(_train_log_path, "w")
-            _orig_log_q_put = log_q.put
             def _log_and_save(msg):
                 _orig_log_q_put(msg)
                 if not msg.startswith("__"):
@@ -723,7 +820,9 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                 "source": "trained",
                 "target_folder": str(target_folder),
                 "dpsgd": params.dpsgd,
-                "target_epsilon": params.target_epsilon,
+                # Store the effective epsilon (default 5.0) so the UI never shows
+                # "ε=undefined" when DP-SGD is enabled without an explicit value.
+                "target_epsilon": (params.target_epsilon or 5.0) if params.dpsgd else params.target_epsilon,
                 "train_params": params.model_dump(),
                 "status": "training",
             }
@@ -755,15 +854,17 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                             return pickle.load(_f)
                     except Exception:
                         pass
-                    # Fall back: stub out missing classes, then reconstruct as TensorDataset
-                    class _SafeUnpickler(pickle.Unpickler):
+                    # Fall back: stub out missing classes, then reconstruct as TensorDataset.
+                    # NOTE: compatibility shim, not a security boundary — it resolves real
+                    # classes whenever the import succeeds (see security.RestrictedUnpickler).
+                    class _LenientUnpickler(pickle.Unpickler):
                         def find_class(self, module, name):
                             try:
                                 return super().find_class(module, name)
                             except (ImportError, AttributeError):
                                 return type(name, (), {})
                     with open(path, "rb") as _f:
-                        raw = _SafeUnpickler(_f).load()
+                        raw = _LenientUnpickler(_f).load()
                     import numpy as np
                     # Use __dict__ directly — bypasses any descriptor protocol on the stub class
                     attrs = getattr(raw, "__dict__", {})
@@ -863,26 +964,36 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                 _num_classes_data = int(torch.cat(_all_labels).max().item()) + 1
                 log_q.put(f"[train] Detected {_num_classes_data} classes from dataset labels")
 
-                # Instantiate model, passing num_classes if the constructor accepts it
-                def _make_model(cls, num_classes, dpsgd=False):
+                # Detect num_features for tabular models
+                _sample_x = train_subset[0][0]
+                _num_features_data = int(_sample_x.shape[0]) if _sample_x.ndim == 1 else None
+
+                # Binary tasks get a single-logit head trained with BCEWithLogitsLoss;
+                # the kwarg only reaches constructors that accept num_classes.
+                _model_num_classes = 1 if _num_classes_data == 2 else _num_classes_data
+
+                # Instantiate model, passing num_classes and num_features if accepted
+                def _make_model(cls, num_classes, num_features=None, dpsgd=False):
                     sig = _inspect2.signature(cls.__init__)
                     kwargs = {}
                     if "num_classes" in sig.parameters:
                         kwargs["num_classes"] = num_classes
+                    if num_features is not None and "num_features" in sig.parameters:
+                        kwargs["num_features"] = num_features
                     if dpsgd and "dpsgd" in sig.parameters:
                         kwargs["dpsgd"] = True
                     return cls(**kwargs)
 
                 if params.dpsgd:
-                    model = _make_model(_arch_cls, _num_classes_data, dpsgd=True)
+                    model = _make_model(_arch_cls, _model_num_classes, _num_features_data, dpsgd=True)
                     if not hasattr(model, "dpsgd") or not model.dpsgd:
                         from opacus.validators import ModuleValidator as _MV  # noqa: PLC0415
                         model = _MV.fix(model)
                         log_q.put(f"[train] Applied ModuleValidator.fix() to {_arch_cls.__name__} for DP-SGD")
                     else:
-                        log_q.put(f"[train] Instantiated {_arch_cls.__name__}(dpsgd=True, num_classes={_num_classes_data})")
+                        log_q.put(f"[train] Instantiated {_arch_cls.__name__}(dpsgd=True, num_classes={_model_num_classes})")
                 else:
-                    model = _make_model(_arch_cls, _num_classes_data)
+                    model = _make_model(_arch_cls, _model_num_classes, _num_features_data)
                 # Check if arch uses pretrained weights
                 _arch_src = (job_dir / "arch.py").read_text()
                 _pretrained = (
@@ -891,11 +1002,27 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                     ('weights="IMAGENET' in _arch_src) or
                     ("weights='IMAGENET" in _arch_src)
                 )
-                log_q.put(f"[train] Model: {_arch_cls.__name__}(num_classes={_num_classes_data}, pretrained={'yes' if _pretrained else 'no'})")
+                _feat_info = f", num_features={_num_features_data}" if _num_features_data else ""
+                log_q.put(f"[train] Model: {_arch_cls.__name__}(num_classes={_model_num_classes}{_feat_info}, pretrained={'yes' if _pretrained else 'no'})")
                 if params.dpsgd:
                     log_q.put(f"[train] DP-SGD: epsilon={params.target_epsilon}, delta={params.target_delta}, max_grad_norm={params.max_grad_norm}, virtual_batch_size={params.virtual_batch_size or 16}")
 
-            criterion = nn.CrossEntropyLoss()
+            # A custom arch may ignore num_classes and keep a 2-logit head, so derive
+            # binary-ness from the actual model output rather than the label count.
+            _was_training = model.training
+            with torch.no_grad():
+                model.eval()
+                _probe_out = model(_sample_x.unsqueeze(0))
+            # Restore training mode: the DP-SGD path validates with Opacus before the
+            # training loop runs, and Opacus rejects a model left in eval mode.
+            model.train(_was_training)
+            _is_binary = (_probe_out.ndim == 2 and _probe_out.shape[1] == 1)
+            if _is_binary:
+                criterion = nn.BCEWithLogitsLoss()
+                log_q.put("[train] Loss: BCEWithLogitsLoss (binary, single-logit head)")
+            else:
+                criterion = nn.CrossEntropyLoss()
+                log_q.put(f"[train] Loss: CrossEntropyLoss ({_num_classes_data} classes, {_probe_out.shape[1]} logits)")
             if params.optimizer == "sgd":
                 optimizer = optim.SGD(model.parameters(), lr=params.learning_rate, momentum=0.9, weight_decay=5e-4)
             else:
@@ -908,7 +1035,7 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                 import pickle as _pkl
                 _accountant = params.accountant if params.accountant in ("prv", "rdp") else "prv"
                 _dpsgd_meta = {
-                    "target_epsilon":    params.target_epsilon or 10.0,
+                    "target_epsilon":    params.target_epsilon or 5.0,
                     "target_delta":      params.target_delta if params.target_delta is not None else 1e-5,
                     "sample_rate":       1.0 / len(loader),
                     "epochs":            params.epochs,
@@ -964,8 +1091,9 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                     loader, model, criterion, optimizer, epochs=params.epochs,
                     dpsgd_metadata_path=str(_dpsgd_path) if _dpsgd_path else None,
                     virtual_batch_size=_vbs,
+                    binary=_is_binary,
                 )
-                test_eval = _default_eval(test_loader, result.model, criterion)
+                test_eval = _default_eval(test_loader, result.model, criterion, binary=_is_binary)
 
             # Restore tqdm
             if _orig_tqdm:
@@ -1040,7 +1168,9 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
         finally:
             _sys.stdout = old_stdout
             log_q.put = _orig_log_q_put
-            _train_log_file.close()
+            if _train_log_file is not None:
+                _train_log_file.close()
+            _train_lock.release()
             log_q.put("__TRAIN_DONE__")
 
     _executor.submit(_train)
@@ -1054,7 +1184,8 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
 @app.post("/jobs/{job_id}/attack-config")
 async def set_attack_config(job_id: str, configs: list[ModelAttackConfig]) -> dict:
     job = _get_job(job_id)
-    cfg_map = {c.model_name: c.attacks for c in configs}
+    # model_name is persisted as target_folder and joined into paths by the worker.
+    cfg_map = {safe_name(c.model_name, "model_name"): c.attacks for c in configs}
     existing_names = {m["name"] for m in job.get("models", [])}
 
     # Upsert any model the frontend knows about that isn't in the backend state yet
@@ -1085,6 +1216,10 @@ async def start_audit(job_id: str) -> dict:
     job = _get_job(job_id)
     if job["status"] == JobStatus.running:
         raise HTTPException(status_code=409, detail="Audit already running")
+    # Claim the job synchronously: the worker only sets `running` once it starts,
+    # so without this, rapid repeat calls all pass the check and all get queued.
+    job["status"] = JobStatus.running
+    _save_job(job_id)
     log_q = _log_queues[job_id]
     _executor.submit(run_audit_job, job_id, _job_dir(job_id), job, log_q, _save_job)
     return {"ok": True}
@@ -1105,6 +1240,34 @@ async def get_results(job_id: str) -> dict:
     for r in results:
         r["job_id"] = job_id
     return {"job_id": job_id, "results": results}
+
+
+@app.get("/jobs/{job_id}/sample_data/{index}")
+async def get_sample_data(job_id: str, index: int):
+    """Return tabular feature values for a single sample as JSON."""
+    import joblib, torch
+    import numpy as np
+    job = _get_job(job_id)
+    data_path = job.get("data_path")
+    if not data_path or not Path(data_path).exists():
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    try:
+        dataset = joblib.load(data_path)
+        row = dataset.data[index]
+        if isinstance(row, torch.Tensor):
+            row = row.tolist()
+        else:
+            row = np.asarray(row, dtype=float).tolist()
+        label = dataset.targets[index]
+        if hasattr(label, "item"):
+            label = label.item()
+        feature_names = getattr(dataset, "feature_names", None)
+        if feature_names is not None and not isinstance(feature_names, list):
+            feature_names = list(feature_names)
+        return {"index": index, "label": int(label), "features": row,
+                "feature_names": feature_names}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/jobs/{job_id}/sample_image/{index}")
@@ -1153,6 +1316,14 @@ async def get_sample_image(job_id: str, index: int):
 
 @app.websocket("/jobs/{job_id}/logs")
 async def log_stream(websocket: WebSocket, job_id: str) -> None:
+    # WebSockets bypass CORS entirely and browsers cannot set an Authorization
+    # header on them, so both checks have to happen here, before accept().
+    if not origin_is_allowed(websocket.headers.get("origin")):
+        await websocket.close(code=4403)
+        return
+    if not token_is_valid(websocket.query_params.get("token")):
+        await websocket.close(code=4401)
+        return
     if job_id not in _jobs:
         await websocket.close(code=4004)
         return

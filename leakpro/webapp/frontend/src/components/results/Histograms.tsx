@@ -67,18 +67,18 @@ export default function Histograms({ results }: Props) {
               {
                 x: members, type: "histogram", name: "Members", nbinsx: 100,
                 marker: { color: "rgba(76, 155, 232, 0.6)" },
-              },
+              } as Plotly.Data,
               {
                 x: nonMembers, type: "histogram", name: "Non-members", nbinsx: 100,
                 marker: { color: "rgba(232, 76, 76, 0.6)" },
-              },
+              } as Plotly.Data,
             ]}
             layout={{
               barmode: "overlay",
               paper_bgcolor: "transparent",
               plot_bgcolor: "transparent",
-              xaxis: { title: "Attack signal score", gridcolor: "#334155" },
-              yaxis: { title: "Count", gridcolor: "#334155" },
+              xaxis: { title: { text: "Attack signal score" }, gridcolor: "#334155" },
+              yaxis: { title: { text: "Count" }, gridcolor: "#334155" },
               legend: { orientation: "h", y: -0.2 },
               shapes: [{
                 type: "line", x0: t, x1: t, y0: 0, y1: 1, yref: "paper",
@@ -140,7 +140,7 @@ function Selector({ label, value, options, onChange }: {
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm px-3 py-2 min-w-[10rem] pr-8"
+        className="rounded border-slate-300 dark:border-surface-border bg-white dark:bg-surface-2 text-sm px-3 py-2 min-w-[10rem] pr-8"
       >
         {options.map((o) => <option key={o} value={o}>{o}</option>)}
       </select>
@@ -150,7 +150,7 @@ function Selector({ label, value, options, onChange }: {
 
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="bg-slate-50 dark:bg-slate-900 rounded-lg p-3 border border-slate-200 dark:border-slate-800">
+    <div className="bg-slate-50 dark:bg-surface rounded-lg p-3 border border-slate-200 dark:border-surface-border">
       <p className="text-xs text-slate-500 mb-1">{label}</p>
       <p className="font-mono font-bold text-sm">{value}</p>
     </div>

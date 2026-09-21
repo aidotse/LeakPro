@@ -8,10 +8,11 @@ from abc import ABC, abstractmethod
 from copy import deepcopy
 
 import numpy as np
-from torch import IntTensor, Tensor, cat, cuda, exp, flatten, log, max, nn, no_grad, sigmoid, sum, tensor
+from torch import IntTensor, Tensor, cat, exp, flatten, log, max, nn, no_grad, sigmoid, sum, tensor
 from torch.utils.data import DataLoader
 
 from leakpro.signals.utils.HopSkipJumpDistance import HopSkipJumpDistance
+from leakpro.utils.device import get_device
 from leakpro.utils.import_helper import Callable, List, Optional, Self, Tuple
 
 
@@ -142,7 +143,7 @@ class PytorchModel(Model):
 
         """
 
-        device = "cuda:0" if cuda.is_available() else "cpu"
+        device = get_device()
         self.model_obj.to(device)
         self.model_obj.eval()
 
@@ -177,12 +178,17 @@ class PytorchModel(Model):
 
         if num_classes <= 2 and batch_labels_tensor.dim() == 1:
             batch_labels_tensor = batch_labels_tensor.unsqueeze(1)
+        if num_classes == 1:
+            # Single-logit binary head (BCE-style loss): targets must be float
+            batch_labels_tensor = batch_labels_tensor.float()
 
         if per_point:
-            return (self.loss_fn_no_reduction(self.model_obj(batch_samples_tensor),batch_labels_tensor,)
+            losses = (self.loss_fn_no_reduction(self.model_obj(batch_samples_tensor),batch_labels_tensor,)
                 .detach()
                 .numpy()
             )
+            # BCE no-reduction returns (B, 1) — flatten to (B,) like CrossEntropy
+            return losses.reshape(-1) if losses.ndim == 2 and losses.shape[1] == 1 else losses
         return self.loss_fn(self.model_obj(Tensor(batch_samples_tensor)),Tensor(batch_labels_tensor),).item()
 
     def get_grad(self:Self, batch_samples:np.ndarray, batch_labels:np.ndarray)->np.ndarray:
@@ -267,7 +273,7 @@ class PytorchModel(Model):
 
             """
 
-            device = "cuda:0" if cuda.is_available() else "cpu"
+            device = get_device()
             self.model_obj.to(device)
             self.model_obj.eval()
             with no_grad():

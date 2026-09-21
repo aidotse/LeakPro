@@ -25,7 +25,7 @@ import pickle
 from pathlib import Path
 
 import torch
-from torch import cuda, no_grad, optim
+from torch import no_grad, optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -36,6 +36,7 @@ from opacus.validators import ModuleValidator
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.schemas import EvalOutput, TrainingOutput
+from leakpro.utils.device import get_device, mark_step
 from leakpro.utils.logger import logger
 
 DEFAULT_ACCOUNTANT = "rdp"
@@ -102,7 +103,7 @@ class GddModelHandlerDPsgd(AbstractInputHandler, role="model"):
         if not hasattr(model, "dpsgd"):
             raise ValueError("Model is missing required 'dpsgd' attribute")
 
-        dev = torch.device("cuda" if cuda.is_available() else "cpu")
+        dev = get_device()
         run_dpsgd = bool(model.dpsgd)
         virtual_batch_size = min(dataloader.batch_size, virtual_batch_size)
 
@@ -155,7 +156,7 @@ class GddModelHandlerDPsgd(AbstractInputHandler, role="model"):
         return TrainingOutput(model=model, metrics=results)
 
     def eval(self, loader, model, criterion) -> EvalOutput:
-        gpu_or_cpu = torch.device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         model.to(gpu_or_cpu)
         model.eval()
         loss, correct, total = 0.0, 0, 0
@@ -182,6 +183,7 @@ def _train_loop(dataloader, model, criterion, optimizer, dev, epoch, epochs):
         pred = outputs.argmax(dim=1)
         loss.backward()
         optimizer.step()
+        mark_step(dev)
         train_acc += pred.eq(labels.view_as(pred)).sum().item()
         train_loss += loss.item() * labels.size(0)
     return train_loss, train_acc

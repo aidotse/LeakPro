@@ -52,6 +52,8 @@ def _build_default_handler():
         def train(self, dataloader, model, criterion, optimizer, epochs=None, **kwargs):
             if epochs is None:
                 raise ValueError("epochs must be provided")
+            # Binary jobs carry BCEWithLogitsLoss in their metadata (single-logit head)
+            binary = isinstance(criterion, torch.nn.BCEWithLogitsLoss)
             dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             model.to(dev)
             accuracy_history, loss_history = [], []
@@ -59,14 +61,17 @@ def _build_default_handler():
                 model.train()
                 train_loss, train_acc, total = 0.0, 0.0, 0
                 for inputs, labels in tqdm(dataloader, desc=f"Epoch {epoch+1}/{epochs}"):
-                    labels = labels.long().view(-1)
+                    labels = labels.float().view(-1) if binary else labels.long().view(-1)
                     inputs, labels = inputs.to(dev), labels.to(dev)
                     optimizer.zero_grad()
                     outputs = model(inputs)
+                    if binary:
+                        outputs = outputs.squeeze(1)
                     loss = criterion(outputs, labels)
                     loss.backward()
                     optimizer.step()
-                    train_acc += outputs.argmax(1).eq(labels).sum().item()
+                    preds = (outputs.sigmoid() > 0.5).float() if binary else outputs.argmax(1).float()
+                    train_acc += preds.eq(labels).sum().item()
                     train_loss += loss.item() * labels.size(0)
                     total += labels.size(0)
                 accuracy_history.append(train_acc / total)
@@ -79,17 +84,21 @@ def _build_default_handler():
             return TrainingOutput(model=model, metrics=metrics)
 
         def eval(self, loader, model, criterion, device=None):
+            binary = isinstance(criterion, torch.nn.BCEWithLogitsLoss)
             dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             model.to(dev)
             model.eval()
             loss, acc, total = 0.0, 0.0, 0
             with torch.no_grad():
                 for data, target in loader:
-                    target = target.long().view(-1).to(dev)
+                    target = (target.float() if binary else target.long()).view(-1).to(dev)
                     data = data.to(dev)
                     output = model(data)
+                    if binary:
+                        output = output.squeeze(1)
                     loss += criterion(output, target).item() * target.size(0)
-                    acc += output.argmax(1).eq(target).sum().item()
+                    preds = (output.sigmoid() > 0.5).float() if binary else output.argmax(1).float()
+                    acc += preds.eq(target).sum().item()
                     total += target.size(0)
             model.to("cpu")
             return EvalOutput(
@@ -199,7 +208,8 @@ def run_audit_job(
                     "attack_list": [],
                     "output_dir": str(job_dir / "leakpro_output" / model_name),
                     "attack_type": "mia",
-                    "data_modality": "image",
+                    "data_modality": {"tabular": "tabular", "time_series": "timeseries"}.get(
+                        handler_config.get("data_type"), "image"),
                 },
                 "target": {
                     "module_path": str(arch_py),

@@ -182,6 +182,9 @@ env.yml
 # Webapp runtime
 webapp_jobs/
 
+# Webapp upload helpers + local datasets (not part of the library; like webapp_celebA_files / webapp_cifar_files)
+webapp_los_files/
+
 # Vite build cache
 leakpro/webapp/frontend/.vite/
 
