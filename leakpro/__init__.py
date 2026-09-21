@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     # Visible to type checkers (so `from leakpro import LeakPro` resolves) but
     # not executed at runtime, keeping the lazy-import contract intact.
     from .input_handler.abstract_input_handler import AbstractInputHandler  # noqa: F401
+    from .input_handler.abstract_extraction_input_handler import AbstractExtractionInputHandler  # noqa: F401
     from .leakpro import LeakPro  # noqa: F401
 
 
