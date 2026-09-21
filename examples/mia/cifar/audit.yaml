@@ -65,3 +65,45 @@ target:
 shadow_model:
 
 distillation_model:
+
+# Optional. Declares the deployment context so `leakpro.risk.assess_risk` can turn measured attack
+# success into a risk statement. Omitting the block changes nothing: the audit runs as before and
+# `leakpro.use_case_profile` is simply None. Declaring it does NOT run an assessment either — that is
+# an explicit call after run_audit, see the notebook.
+#
+# Factor names follow the Loss Magnitude decomposition of Sion et al. (IWPE 2019),
+# LM = DTS x NR x DST x NDS. LeakPro measures the Vulnerability term; you supply the rest.
+use_case:
+  # Operating point: the false-positive rate the attacker is assumed to tolerate. Required, no
+  # default. Keep 0.01 unless you have a reason to go lower — a stricter FPR needs a larger audit
+  # set to be measurable at all (you need at least 1/alpha non-members).
+  tolerated_fpr: 0.01
+
+  # pi: share of the attacker's candidate pool that really are members. 0.5 is the balanced-audit
+  # assumption behind every TPR and AUC LeakPro reports, and it overstates precision badly for
+  # realistic pools. Declare what your threat model actually implies.
+  attacker_prior: 0.01
+
+  # NDS: data subjects in the training population. Commented out here so the assessment falls back
+  # to the target's num_train. Set it when subjects and training records are not the same thing.
+  # n_subjects: 50000
+
+  # NR: records of this data type per subject. Fractions are allowed.
+  records_per_subject: 1.0
+
+  # DTS: sensitivity of the leaked data type, on a scale you choose. 1.0 is neutral. The CNIL PIA
+  # severity levels are a defensible starting point: 1 negligible, 2 limited, 3 significant,
+  # 4 maximum. CIFAR-10 is public benchmark data, so 1.0 is honest here.
+  data_type_sensitivity: 1.0
+
+  # DST: weight for the data subject type. Raise it for vulnerable subjects such as minors.
+  subject_type_weight: 1.0
+
+  # Optional. Left unset, no monetary figure is reported at all, rather than a fabricated one.
+  # cost_per_exposed_subject: 250.0
+
+  # Scale the exposed-record count from the audit set up to the training population. Off by default:
+  # per-record vulnerability is strongly non-uniform, so it is an estimate, not a measurement.
+  extrapolate_to_population: false
+
+  notes: "CIFAR-10 benchmark run. Public data, so sensitivity is neutral."
