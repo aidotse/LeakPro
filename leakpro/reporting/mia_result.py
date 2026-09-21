@@ -177,19 +177,23 @@ class MIAResult:
 
         assert np.all(np.diff(sorted_scores) <= 0), "sorted_scores are not in descending order"
 
-        # check that sorted_scores are descending
-        assert np.all(np.diff(sorted_scores) <= 0), "sorted_scores are not in descending order"
-
         tp_cumsum = np.cumsum(sorted_labels == 1)
         fp_cumsum = np.cumsum(sorted_labels == 0)
 
-        # Remove duplicates in sorted_scores and keep the first occurrence
+        # One ROC vertex per distinct score, snapshotted at the END of each tie
+        # block: a threshold at value v admits every point scoring >= v (the
+        # same rule _compute_fixed_threshold_confusions applies), so a tie
+        # block is admitted whole or not at all. Snapshotting the block start
+        # instead would count exactly one arbitrary element of the block — an
+        # operating point no threshold can realize, whose value depends on
+        # argsort tie order.
         _, first_indices = np.unique(sorted_scores, return_index=True)
-        first_indices = first_indices[::-1]
+        first_indices = first_indices[::-1]  # block starts, in descending-score order
+        last_indices = np.r_[first_indices[1:] - 1, len(sorted_scores) - 1]
 
-        self.tp = tp_cumsum[first_indices]
-        self.fp = fp_cumsum[first_indices]
-        self.thresholds = sorted_scores[first_indices]
+        self.tp = tp_cumsum[last_indices]
+        self.fp = fp_cumsum[last_indices]
+        self.thresholds = sorted_scores[last_indices]
 
         self.fn = np.sum(sorted_labels == 1) - self.tp
         self.tn = np.sum(sorted_labels == 0) - self.fp
