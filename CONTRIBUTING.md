@@ -23,3 +23,11 @@ To maintain our Apache 2.0 compliance, every Pull Request must meet these criter
 * **No Incompatible Licenses:** Do not introduce dependencies with GPL, AGPL, or "Non-Commercial" licenses.
 * **Header Requirement:** New source files should include the standard Apache 2.0 boilerplate header.
 * **Third-party attribution:** If you are adding code from another source, you must declare it so we can update the `NOTICE` file.
+
+## 4. Development Setup
+For local development on a CPU or CUDA machine, `pip install -e .[dev]` is
+sufficient — it leaves `torch`/`torchvision` unpinned so pip resolves whatever
+version fits your platform. Developing against Habana Gaudi (HPU) hardware uses a
+separate `dev-hpu` extra instead, which pins `torch` to the 2.10.x series required
+by the Habana plugin; see the [README's install section](README.md#to-install) for
+the full HPU setup steps.

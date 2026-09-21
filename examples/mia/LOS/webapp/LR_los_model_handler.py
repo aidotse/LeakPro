@@ -10,12 +10,13 @@ import os
 import pickle
 
 import torch
-from torch import cuda, device, no_grad, optim
+from torch import no_grad, optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from leakpro import AbstractInputHandler
 from leakpro.schemas import EvalOutput, TrainingOutput
+from leakpro.utils.device import get_device, mark_step
 
 
 class LRModelHandler(AbstractInputHandler, role="model"):
@@ -38,7 +39,7 @@ class LRModelHandler(AbstractInputHandler, role="model"):
         return _train_standard(dataloader, model, optimizer, epochs)
 
     def eval(self, loader: DataLoader, model: torch.nn.Module, criterion=None) -> EvalOutput:
-        dev = device("cuda" if cuda.is_available() else "cpu")
+        dev = get_device()
         model.to(dev)
         model.eval()
         loss_fn = torch.nn.BCEWithLogitsLoss()
@@ -48,6 +49,7 @@ class LRModelHandler(AbstractInputHandler, role="model"):
                 target = target.float().view(-1).to(dev)
                 data = data.to(dev)
                 output = model(data).squeeze(1)
+                mark_step(dev)
                 loss += loss_fn(output, target).item() * target.size(0)
                 acc += (output.sigmoid() >= 0.5).float().eq(target).sum().item()
                 total += target.size(0)
@@ -67,7 +69,7 @@ def _train_standard(dataloader, model, optimizer, epochs):
         raise ValueError("epochs must be provided")
 
     criterion = torch.nn.BCEWithLogitsLoss()
-    dev = device("cuda" if cuda.is_available() else "cpu")
+    dev = get_device()
     model.to(dev)
     accuracy_history, loss_history = [], []
 
@@ -82,6 +84,7 @@ def _train_standard(dataloader, model, optimizer, epochs):
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
+            mark_step(dev)
             train_acc += (outputs.sigmoid() >= 0.5).float().eq(labels).sum().item()
             train_loss += loss.item() * labels.size(0)
             total += labels.size(0)
@@ -140,7 +143,7 @@ def _train_dpsgd(dataloader, model, optimizer, epochs,
     )
 
     criterion = torch.nn.BCEWithLogitsLoss()
-    dev = torch.device("cuda" if cuda.is_available() else "cpu")
+    dev = get_device()
     model.to(dev)
     accuracy_history, loss_history = [], []
 
@@ -158,6 +161,7 @@ def _train_dpsgd(dataloader, model, optimizer, epochs,
                 loss = criterion(outputs, labels)
                 loss.backward()
                 optimizer.step()
+                mark_step(dev)
                 train_acc += (outputs.sigmoid() >= 0.5).float().eq(labels).sum().item()
                 train_loss += loss.item() * labels.size(0)
             n = len(mem_loader.dataset)

@@ -127,8 +127,14 @@ class AttackLiRA(AbstractMIA):
 
         # The signal is applied to the cached logits, so these hold signal values (rescaled logits,
         # an error, a distance, ...) rather than logits; named accordingly, as in MS-LiRA.
-        true_labels = self.handler.get_labels(self.audit_dataset["data"]).squeeze()
+        true_labels = self.handler.get_labels(self.audit_dataset["data"])
         target_logits = ShadowModelHandler().load_logits(name="target")
+        # Classification labels arrive with a spurious singleton axis (e.g. (N, 1)) that must be
+        # dropped before rescaled_logits/loss index them as (N,). Forecasting targets, though,
+        # already match the cached logits' shape (N, horizon, num_variables) — squeezing them
+        # would strip the real num_variables axis and break the mse/dtw/msm/... shape assert.
+        if true_labels.shape != target_logits.shape:
+            true_labels = true_labels.squeeze()
         self.target_signals = self._check_signal_shape(self.signal(target_logits, true_labels),
                                                        n_audit_points=target_logits.shape[0])
         self.shadow_models_signals = []
@@ -244,8 +250,11 @@ class AttackLiRA(AbstractMIA):
                 pr_in = norm.logpdf(target_signal, in_mean, in_std + 1e-30)
                 pr_out = norm.logpdf(target_signal, out_mean, out_std + 1e-30)
             else:
+                # Offline attack scores by how unlikely the target signal is under the
+                # OUT distribution, matching the reference implementation
+                # (tensorflow/privacy mi_lira_2021: score = logpdf(out), negated at ROC time).
                 pr_in = 0
-                pr_out = -norm.logcdf(target_signal, out_mean, out_std + 1e-30)
+                pr_out = norm.logpdf(target_signal, out_mean, out_std + 1e-30)
 
             score[i] = (pr_in - pr_out)  # Append the calculated probability density value to the score list
             if np.isnan(score[i]):

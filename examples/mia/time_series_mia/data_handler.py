@@ -9,10 +9,11 @@ import yaml
 import torch
 import random
 import numpy as np
-from torch import cuda, optim
+from torch import optim
 from torch.utils.data import DataLoader, Subset
 from tqdm import tqdm
 from leakpro.schemas import TrainingOutput, EvalOutput
+from leakpro.utils.device import get_device, mark_step
 
 from leakpro import AbstractInputHandler
 from utils.model_preparation import evaluate, get_criterion
@@ -70,7 +71,7 @@ class IndividualizedInputHandler(AbstractInputHandler):
             best_state_dict = copy.deepcopy(model.state_dict())
 
         # prepare training
-        device = torch.device("cuda" if cuda.is_available() else "cpu")
+        device = get_device()
         model.to(device)
 
         # training loop
@@ -84,6 +85,7 @@ class IndividualizedInputHandler(AbstractInputHandler):
                 loss = criterion(preds, targets)
                 loss.backward()
                 optimizer.step()
+                mark_step(device)
 
                 # Accumulate performance of shadow model
                 train_loss += loss.item()
@@ -118,7 +120,7 @@ class IndividualizedInputHandler(AbstractInputHandler):
         criterion: torch.nn.Module = None,
     ) -> EvalOutput:
         """Model evaluation procedure."""
-        device = torch.device("cuda" if cuda.is_available() else "cpu")
+        device = get_device()
         eval_loss = evaluate(model, dataloader, criterion, device)
         output_dict = {"accuracy": 1.0, "loss": eval_loss}     # TODO: accuracy should be an optional metric!
         eval_output = EvalOutput(**output_dict)
