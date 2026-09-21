@@ -32,7 +32,7 @@ def __getattr__(name: str) -> object:
     if name == "AbstractExtractionInputHandler":
         from .input_handler.abstract_extraction_input_handler import AbstractExtractionInputHandler  # noqa: PLC0415
 
-    return AbstractExtractionInputHandler
+        return AbstractExtractionInputHandler
     if name == "LeakPro":
         from .leakpro import LeakPro  # noqa: PLC0415
 
