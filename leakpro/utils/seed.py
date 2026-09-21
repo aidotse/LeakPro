@@ -13,10 +13,15 @@ from leakpro.utils.logger import logger
 
 
 def seed_everything(seed: int) -> None:
-    """Set the seed for different libraries."""
+    """Set the seed for different libraries.
+
+    Deliberately does not touch the cuDNN flags: forcing
+    torch.backends.cudnn.deterministic slows training/inference
+    substantially, and benchmark mode is a performance setting unrelated
+    to seeding (issue #325). Users who need bit-exact GPU reproducibility
+    can set those flags themselves.
+    """
     torch.manual_seed(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
     # Unconditional: several modules still pick CUDA via their own torch.cuda.is_available()
     # check rather than get_device(), so gating this on get_device() could leave CUDA's RNG
     # unseeded while training still runs on it. torch.cuda.manual_seed is a documented no-op

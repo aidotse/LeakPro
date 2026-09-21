@@ -8,10 +8,20 @@ Covers:
 - seed_everything() does not depend on get_device()/HPU acquisition succeeding
 - HPU RNG seeding is attempted only when habana_frameworks is installed
 - a failure inside HPU seeding is caught and logged, not raised
+- seeding is reproducible and leaves the cuDNN flags alone (issue #325)
+- AttackScheduler applies audit.random_seed at audit start and before every attack
 """
+import random
 from unittest.mock import MagicMock, patch
 
+import numpy as np
+import torch
+from dotmap import DotMap
+from pytest import LogCaptureFixture, MonkeyPatch
+
 import leakpro.utils.seed as seed_module
+from leakpro.attacks.attack_scheduler import AttackScheduler
+from leakpro.tests.input_handler.image_input_handler import ImageInputHandler
 from leakpro.utils.seed import seed_everything
 
 
@@ -79,3 +89,106 @@ class TestSeedEverything:
         with patch.object(seed_module, "hpu_is_installed", return_value=True), \
              patch.dict("sys.modules", modules):
             seed_everything(0)  # must not raise
+
+
+    def test_is_reproducible(self) -> None:
+        """The same seed must reproduce the same numpy, torch and random draws."""
+        seed_everything(1234)
+        first = (np.random.rand(3).tolist(), torch.rand(3).tolist(), random.random())
+        seed_everything(1234)
+        second = (np.random.rand(3).tolist(), torch.rand(3).tolist(), random.random())
+        assert first == second
+
+    def test_leaves_cudnn_flags_alone(self) -> None:
+        """Seeding must not force deterministic cuDNN or clear benchmark mode (issue #325)."""
+        prev_deterministic = torch.backends.cudnn.deterministic
+        prev_benchmark = torch.backends.cudnn.benchmark
+        try:
+            torch.backends.cudnn.deterministic = False
+            torch.backends.cudnn.benchmark = True
+            seed_everything(1234)
+            assert torch.backends.cudnn.deterministic is False
+            assert torch.backends.cudnn.benchmark is True
+        finally:
+            torch.backends.cudnn.deterministic = prev_deterministic
+            torch.backends.cudnn.benchmark = prev_benchmark
+
+
+class _DummyResult:
+    def save(self, **kwargs) -> None:  # noqa: ANN003
+        pass
+
+
+class _DummyAttack:
+    optuna_params = 0
+    bayesian_optimization = False
+
+    def prepare_attack(self) -> None:
+        pass
+
+    def run_attack(self) -> _DummyResult:
+        return _DummyResult()
+
+
+class TestAuditSeeding:
+    """The audit random_seed must reach the scheduler, not just sit in the config."""
+
+    def test_seeds_audit_and_each_attack(
+        self,
+        image_handler: ImageInputHandler,
+        monkeypatch: MonkeyPatch,
+        tmp_path,  # noqa: ANN001
+    ) -> None:
+        """audit.random_seed is applied once at audit start and again before every attack."""
+        image_handler.configs.audit.random_seed = 777
+
+        seeds_applied = []
+        monkeypatch.setattr("leakpro.attacks.attack_scheduler.seed_everything", seeds_applied.append)
+
+        scheduler = AttackScheduler(image_handler, output_dir=str(tmp_path))
+        assert seeds_applied == [777], "audit start must seed with audit.random_seed"
+
+        scheduler.attacks = [_DummyAttack(), _DummyAttack()]
+        scheduler.attack_names = ["dummy_a", "dummy_b"]
+        scheduler.run_attacks()
+        assert seeds_applied == [777, 777, 777], "every attack must re-seed with audit.random_seed"
+
+    def test_defaults_seed_when_config_lacks_one(
+        self,
+        image_handler: ImageInputHandler,
+        monkeypatch: MonkeyPatch,
+        tmp_path,  # noqa: ANN001
+    ) -> None:
+        """Without random_seed in the config (e.g. a raw DotMap), fall back to the AuditConfig default."""
+        audit_dict = image_handler.configs.audit.model_dump()
+        audit_dict.pop("random_seed", None)
+        image_handler.configs.audit = DotMap(audit_dict)
+
+        seeds_applied = []
+        monkeypatch.setattr("leakpro.attacks.attack_scheduler.seed_everything", seeds_applied.append)
+
+        scheduler = AttackScheduler(image_handler, output_dir=str(tmp_path))
+        assert scheduler.random_seed == 42
+        assert seeds_applied == [42]
+
+    def test_warns_and_defaults_on_non_int_seed(
+        self,
+        image_handler: ImageInputHandler,
+        monkeypatch: MonkeyPatch,
+        caplog: LogCaptureFixture,
+        tmp_path,  # noqa: ANN001
+    ) -> None:
+        """A non-int random_seed (config typo) must warn rather than silently default."""
+        audit_dict = image_handler.configs.audit.model_dump()
+        audit_dict["random_seed"] = "42"
+        image_handler.configs.audit = DotMap(audit_dict)
+
+        seeds_applied = []
+        monkeypatch.setattr("leakpro.attacks.attack_scheduler.seed_everything", seeds_applied.append)
+
+        with caplog.at_level("WARNING"):
+            scheduler = AttackScheduler(image_handler, output_dir=str(tmp_path))
+
+        assert scheduler.random_seed == 42
+        assert seeds_applied == [42]
+        assert any("random_seed" in record.message and "42" in record.message for record in caplog.records)
