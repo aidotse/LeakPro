@@ -356,7 +356,7 @@ class MIAResult:
         plt.legend()
         plt.tight_layout()
         plt.savefig(fname=filename + ".png", dpi=1000)
-        plt.clf()
+        plt.close()
 
     @classmethod
     def load(cls, data_path:str) -> Self:
@@ -434,7 +434,7 @@ class MIAResult:
         plt.ylabel("True positive rate (TPR)")
         plt.title("ROC Curve")
         plt.savefig(fname=f"{filename}.png", dpi=1000, bbox_inches="tight")
-        plt.clf()
+        plt.close()
 
     @staticmethod
     def create_results(

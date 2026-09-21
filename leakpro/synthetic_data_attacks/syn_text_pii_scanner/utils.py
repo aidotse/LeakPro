@@ -16,20 +16,32 @@ from transformers import PreTrainedTokenizerFast
 import leakpro.synthetic_data_attacks.syn_text_pii_scanner.data_handling as dh
 from leakpro.synthetic_data_attacks.syn_text_pii_scanner.pii_token_classif_models import ner_longformer_model as lgfm
 from leakpro.synthetic_data_attacks.syn_text_pii_scanner.sentence_transformers_models.model import model_sen_trans
+from leakpro.utils.device import get_device as _platform_get_device
 from leakpro.utils.logger import logger
 
 
 def get_device() -> str:
-    """Auxiliary function that returns the device as a string."""
-    dev = "cpu"
-    if torch.cuda.is_available():
-        dev = "cuda"
-    elif torch.backends.mps.is_available():
-        dev = "mps"
-    return dev
+    """Auxiliary function that returns the device as a string.
 
-# Set device to CUDA or MPS if available, otherwise use CPU
-device: torch.device = torch.device(get_device())
+    Selection order: Habana HPU -> CUDA -> Apple MPS -> CPU.
+    """
+    platform = _platform_get_device()
+    if platform.type != "cpu":
+        return platform.type
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+def __getattr__(name: str) -> object:
+    """Lazily resolve ``device`` on access instead of at import time (PEP 562).
+
+    Keeps ``utils.device`` as a valid public attribute for existing callers while
+    ensuring importing this module can't fail on a broken HPU box -- the resolution
+    (and any ``HPUAcquisitionError``) only happens when something actually reads it.
+    """
+    if name == "device":
+        return torch.device(get_device())
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 def load_json_data(*, file_path: str) -> List[Dict[str, Any]]:
     """Function to load data from json file in given file path."""
@@ -143,6 +155,9 @@ def forward_pass(*, # noqa: C901
             If True, prints progress of forward pass.
 
     """
+    #Resolve device lazily (at call time, not import time) so importing this
+    #module can't fail on a broken HPU box.
+    device: torch.device = torch.device(get_device())
     #Assert input
     assert isinstance(data, Data), "Input data must be of type Data."
     assert isinstance(model, lgfm.NERLongformerModel), "Model must be of type NERLongformerModel."

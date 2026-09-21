@@ -122,6 +122,15 @@ def softmax_logits(logits: np.ndarray, temp:float=1.0, dimension:int=-1) -> np.n
         dimension (int): Dimension to apply softmax.
 
     """
+    # Defensive guard, not a fix for something that currently happens: no caller today
+    # passes 1D logits (cache_logits' .squeeze(axis=0) only drops the model-list axis,
+    # never the class axis), but if a 1D array ever did arrive, shape[-1] would equal
+    # N and the multi-class branch below would silently softmax across samples instead
+    # of classes. Reshaping to [N, 1] first makes that case go through the intended
+    # single-class branch instead of producing garbage.
+    if logits.ndim == 1:
+        logits = logits.reshape(-1, 1)
+
     # If the number of classes is 1, apply sigmoid to return a matrix of [1 - p, p]
     if logits.shape[dimension] == 1:
         logits = from_numpy(logits)

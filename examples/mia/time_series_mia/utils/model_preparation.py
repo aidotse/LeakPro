@@ -9,8 +9,9 @@ import pickle
 import numpy as np
 
 from tqdm import tqdm
-from torch import nn, optim, cuda, no_grad, save
+from torch import nn, optim, no_grad, save
 from leakpro.schemas import MIAMetaDataSchema, OptimizerConfig, LossConfig, DataLoaderConfig, EvalOutput
+from leakpro.utils.device import get_device, mark_step
 
 def predict(model, loader, device, scaler=None, original_scale=False):
     model.eval()
@@ -73,7 +74,7 @@ def get_criterion(loss_fn):
 
 
 def create_trained_model_and_metadata(model, train_loader, test_loader, epochs, optimizer_name, loss_fn, dataset_name, val_loader, early_stopping, patience):
-    device = torch.device("cuda" if cuda.is_available() else "cpu")
+    device = get_device()
     model.to(device)
     model.train()
 
@@ -104,6 +105,7 @@ def create_trained_model_and_metadata(model, train_loader, test_loader, epochs, 
             
             loss.backward()
             optimizer.step()
+            mark_step(device)
             train_loss += loss.item()
         
         train_loss /= len(train_loader)

@@ -151,10 +151,16 @@ class AttackMSLiRA(AbstractMIA):
         # get_labels returns the dataset targets: int64 class labels for classification, the
         # continuous target series for forecasting. One call serves every signal; each functional
         # signal interprets it (rescaled_logits/loss expect int64 labels; mse/mae/... expect a
-        # series matching the (already squeezed) cached logits).
-        targets = np.asarray(self.handler.get_labels(audit_indices)).squeeze()
+        # series matching the cached logits' shape).
+        targets = np.asarray(self.handler.get_labels(audit_indices))
         target_logits = ShadowModelHandler().load_logits(name="target")
         shadow_logits = [ShadowModelHandler().load_logits(indx=indx) for indx in self.shadow_model_indices]
+        # Classification labels arrive with a spurious singleton axis that must be dropped before
+        # rescaled_logits/loss index them as (N,). Forecasting targets already match target_logits'
+        # shape (N, horizon, num_variables) — squeezing them would strip the real num_variables axis
+        # and break the mse/dtw/msm/... shape assert.
+        if targets.shape != target_logits.shape:
+            targets = targets.squeeze()
 
         shadow_models_signals = []
         target_signals = []
