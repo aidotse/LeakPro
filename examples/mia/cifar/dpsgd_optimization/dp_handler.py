@@ -7,27 +7,25 @@
 This is *training* code, which LeakPro always leaves to the user's handler — the
 attack is not here. The one thing it does specially is read the DP-SGD noise
 multiplier and clipping norm *directly* from the ``dpsgd_dic.pkl`` the optimization run
-writes, because those two are optimization knobs. A single DP-SGD training
-function (:func:`dp_train`) is used for both the target and, through
-:meth:`CifarDPHandler.train`, the RMIA shadow models — so shadow models are
-trained under exactly the candidate target's configuration.
+writes, because those two are optimization knobs. Training itself is the
+library's one DP-SGD loop, :func:`leakpro.optimization.fit_dpsgd`, reached from
+:func:`dp_train` for the target and, through :meth:`CifarDPHandler.train`, for the
+RMIA shadow models — so shadow models are trained by exactly the code and
+configuration that trained the candidate target.
 """
 
 import pickle
 from pathlib import Path
 
 import torch
-from opacus import PrivacyEngine
-from opacus.utils.batch_memory_manager import BatchMemoryManager
 from torch import nn
 from torch.utils.data import DataLoader
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.optimization import fit_dpsgd
+from leakpro.optimization.training import DEFAULT_ACCOUNTANT, DEFAULT_DELTA
 from leakpro.schemas import EvalOutput, TrainingOutput
 from leakpro.utils.logger import logger
-
-_DEFAULT_DELTA = 1e-5
-_MAX_PHYSICAL_BATCH = 256
 
 
 class SmallCNN(nn.Module):
@@ -63,6 +61,23 @@ def _load_dpsgd_config(dpsgd_path: str) -> dict:
         return pickle.load(f)
 
 
+def evaluate(dataloader: DataLoader, model: nn.Module, criterion: nn.Module,
+             device: str | None = None) -> EvalOutput:
+    """Accuracy and mean loss over ``dataloader``; shared by the handler and :func:`dp_train`."""
+    device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    model = model.to(device)
+    model.eval()
+    total_loss, correct, seen = 0.0, 0, 0
+    with torch.no_grad():
+        for xb, yb in dataloader:
+            xb, yb = xb.to(device), yb.to(device).long().view(-1)
+            out = model(xb)
+            total_loss += criterion(out, yb).item() * yb.size(0)
+            correct += (out.argmax(1) == yb).sum().item()
+            seen += yb.size(0)
+    return EvalOutput(accuracy=correct / max(seen, 1), loss=total_loss / max(seen, 1))
+
+
 def dp_train(  # noqa: PLR0913
     model: nn.Module,
     dataloader: DataLoader,
@@ -76,57 +91,33 @@ def dp_train(  # noqa: PLR0913
 
     The noise multiplier and clipping norm come straight from ``dpsgd_path``; the
     learning rate and batch size are already baked into ``optimizer`` and
-    ``dataloader``. This is the single training path shared by the target and the
-    RMIA reference models, which is what makes the references mimic the target.
+    ``dataloader``. Everything else is :func:`leakpro.optimization.fit_dpsgd`, the
+    single loop shared by the target and the RMIA reference models, which is what
+    makes the references mimic the target.
+
+    The accountant is read from the config too (default PRV) and reported next to
+    ε: PRV and RDP epsilons are not comparable, so a number without its
+    accountant cannot be compared across runs.
     """
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     cfg = _load_dpsgd_config(dpsgd_path)
-    noise_multiplier = float(cfg["noise_multiplier"])
-    max_grad_norm = float(cfg["max_grad_norm"])
-    delta = float(cfg.get("delta", _DEFAULT_DELTA))
+    delta = float(cfg.get("delta", DEFAULT_DELTA))
+    accountant = str(cfg.get("accountant", DEFAULT_ACCOUNTANT))
 
-    model = model.to(device)
-    engine = None
-    if noise_multiplier > 0:
-        engine = PrivacyEngine(accountant="rdp")
-        model, optimizer, dataloader = engine.make_private(
-            module=model, optimizer=optimizer, data_loader=dataloader,
-            noise_multiplier=noise_multiplier, max_grad_norm=max_grad_norm,
-        )
-
-    def _epochs(loader: DataLoader) -> tuple[float, float]:
-        last_acc, last_loss = 0.0, 0.0
-        model.train()
-        for _ in range(epochs):
-            total_loss, correct, seen = 0.0, 0, 0
-            for xb, yb in loader:
-                xb, yb = xb.to(device), yb.to(device).long().view(-1)
-                optimizer.zero_grad()
-                out = model(xb)
-                loss = criterion(out, yb)
-                loss.backward()
-                optimizer.step()
-                total_loss += loss.item() * yb.size(0)
-                correct += (out.argmax(1) == yb).sum().item()
-                seen += yb.size(0)
-            last_acc, last_loss = correct / max(seen, 1), total_loss / max(seen, 1)
-        return last_acc, last_loss
-
-    if noise_multiplier > 0:
-        with BatchMemoryManager(data_loader=dataloader, max_physical_batch_size=_MAX_PHYSICAL_BATCH,
-                                optimizer=optimizer) as mem_loader:
-            acc, loss = _epochs(mem_loader)
-        epsilon = engine.get_epsilon(delta=delta)
-    else:
-        acc, loss = _epochs(dataloader)
-        epsilon = float("inf")
-
+    model = fit_dpsgd(
+        model, dataloader, criterion, optimizer, epochs,
+        noise_multiplier=float(cfg["noise_multiplier"]),
+        max_grad_norm=float(cfg["max_grad_norm"]),
+        device=device, delta=delta, accountant=accountant,
+    )
+    # Training-set fit after the last epoch, measured on the logical loader (the
+    # Poisson-sampled private loader does not visit every example exactly once).
+    fit = evaluate(dataloader, model, criterion, device)
     model.to("cpu")
-    if hasattr(model, "_module"):  # unwrap Opacus GradSampleModule before saving
-        model = model._module
-    logger.info(f"Trained CNN: acc={acc:.4f}, formal epsilon={epsilon:.2f} (delta={delta}).")
-    return TrainingOutput(model=model, metrics=EvalOutput(accuracy=acc, loss=loss,
-                                                          extra={"epsilon": epsilon, "delta": delta}))
+    epsilon = model.dp_accounting["epsilon"]
+    logger.info(f"Trained CNN: acc={fit.accuracy:.4f}, formal epsilon={epsilon:.2f} (delta={delta}).")
+    return TrainingOutput(model=model, metrics=EvalOutput(accuracy=fit.accuracy, loss=fit.loss,
+                                                          extra=dict(model.dp_accounting)))
 
 
 class CifarDPHandler(AbstractInputHandler, role="full"):
@@ -148,18 +139,7 @@ class CifarDPHandler(AbstractInputHandler, role="full"):
 
     def eval(self, dataloader: DataLoader, model: nn.Module, criterion: nn.Module) -> EvalOutput:
         """Accuracy and mean loss over ``dataloader``."""
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        model = model.to(device)
-        model.eval()
-        total_loss, correct, seen = 0.0, 0, 0
-        with torch.no_grad():
-            for xb, yb in dataloader:
-                xb, yb = xb.to(device), yb.to(device).long().view(-1)
-                out = model(xb)
-                total_loss += criterion(out, yb).item() * yb.size(0)
-                correct += (out.argmax(1) == yb).sum().item()
-                seen += yb.size(0)
-        return EvalOutput(accuracy=correct / max(seen, 1), loss=total_loss / max(seen, 1))
+        return evaluate(dataloader, model, criterion)
 
     class UserDataset(AbstractInputHandler.UserDataset):
         """CIFAR images already normalized to standard scores; stores mean/std for reconstruction."""
