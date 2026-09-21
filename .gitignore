@@ -173,7 +173,8 @@ cython_debug/
 .vscode/
 
 # Temp directories
-"<TemporaryDirectory*
+<TemporaryDirectory*
+leakpro/tests/tmp/
 
 # Env files
 env.yml

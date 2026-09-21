@@ -32,6 +32,9 @@ mia = ["torch", "torchvision", "optuna", "opacus", "mne", "pytorch-tcn"]
 synthetic = ["numba", "pydantic", "transformers", "sentence-transformers"]
 federated = ["torch", "torchvision", "torchmetrics", "pytorch-ignite", "optuna", "albumentations"]
 minv = ["torch", "torchvision", "optuna", "kornia", "blobfile", "lpips", "robustness", "mpi4py"]
+# Standalone LLM membership-inference attack (leakpro/llm_attacks/mia); not part of the
+# AbstractMIA plugin system, so it pulls in its own model/data stack independently of `mia`.
+llm-mia = ["torch", "transformers", "datasets", "accelerate", "peft", "safetensors", "omegaconf"]
 # Habana Gaudi (HPU) extras. `habana-torch-plugin` itself must be pulled from
 # Habana's index (see docs.habana.ai); we list `lightning-habana` here as it
 # resolves cleanly from PyPI. Run `python -m leakpro.utils.hardware_setup
@@ -101,6 +104,7 @@ exclude = [
   "./leakpro/tests",
   "./examples",
   "./leakpro/webapp",
+  "./leakpro/llm_attacks",
 ]
 
 lint.ignore = [
