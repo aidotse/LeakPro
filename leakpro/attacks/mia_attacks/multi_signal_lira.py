@@ -12,7 +12,7 @@ from scipy.stats import norm
 from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
-from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
+from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler, audit_points_with_reference_models
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.reporting.mia_result import MIAResult
 from leakpro.signals import functional
@@ -31,7 +31,7 @@ class AttackMSLiRA(AbstractMIA):
         signals: list[str] = Field(default=["ModelRescaledLogits"], min_length=1,
                                    description="What signals to use.")
         num_shadow_models: int = Field(default=2, ge=1, description="Number of shadow models")
-        training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow models")  # noqa: E501
+        training_data_fraction: float = Field(default=0.5, gt=0.0, lt=1.0, description="Part of available attack data to use for shadow models. Must be < 1: at 1 every shadow model trains on every point, leaving no OUT reference models.")  # noqa: E501
         online: bool = Field(default=False, description="Online vs offline attack")
         var_calculation: Literal["carlini", "individual_carlini", "fixed"] = Field(default="carlini", description="Variance estimation method to use [carlini, individual_carlini, fixed]")  # noqa: E501
         std_eps: float = Field(default=1e-30, gt=0.0, le=0.001, description="Small value to add to the standard deviations when estimating Gaussians (for numerical stability).")  # noqa: E501
@@ -183,32 +183,42 @@ class AttackMSLiRA(AbstractMIA):
         self.shadow_models_signals = np.stack(shadow_models_signals, axis=-1)
         self.target_signals = np.stack(target_signals, axis=-1)
 
-        if self.online:
-            # Exclude all audit points that have either no IN or OUT samples
-            num_shadow_models_seen_points = np.sum(self.in_indices_masks, axis=1)
-            mask = (num_shadow_models_seen_points > 0) & (num_shadow_models_seen_points < self.num_shadow_models)
+        # Exclude audit points without the reference models this variant needs: the OUT Gaussian is
+        # fitted on models that did not train on the point, the IN Gaussian (online only) on models
+        # that did, and a missing side makes the per-point mean NaN. Offline needed this filter too
+        # and did not have it, so a point in every shadow model reached scoring and raised a bare
+        # ValueError("Score is NaN").
+        mask = audit_points_with_reference_models(~self.in_indices_masks.T, require_in_models=self.online)
+        n_dropped = int(np.sum(~mask))
 
-            # Filter the audit data
-            self.audit_data_indices = audit_indices[mask]
-            self.in_indices_masks = self.in_indices_masks[mask, :]
-            self.shadow_models_signals = self.shadow_models_signals[mask]
-            self.target_signals = self.target_signals[mask]
+        if n_dropped > 0:
+            side = "IN and OUT" if self.online else "OUT"
+            logger.warning(
+                f"MS-LiRA: {n_dropped} of {mask.size} audit points have no {side} shadow model and cannot "
+                f"be scored; dropping them. With num_shadow_models={self.num_shadow_models} and "
+                f"training_data_fraction={self.training_data_fraction}, every point is expected in about "
+                f"{self.num_shadow_models * self.training_data_fraction:.1f} shadow model(s). Move the "
+                "fraction towards 0.5, or raise num_shadow_models, to score the full audit set."
+            )
 
-            # Filter IN and OUT members
-            self.in_members = np.arange(np.sum(mask[self.audit_dataset["in_members"]]))
-            num_out_members = np.sum(mask[self.audit_dataset["out_members"]])
-            self.out_members = np.arange(len(self.in_members), len(self.in_members) + num_out_members)
+        # Filter the audit data
+        self.audit_data_indices = audit_indices[mask]
+        self.in_indices_masks = self.in_indices_masks[mask, :]
+        self.shadow_models_signals = self.shadow_models_signals[mask]
+        self.target_signals = self.target_signals[mask]
 
-            assert len(self.audit_data_indices) == len(self.in_members) + len(self.out_members)
+        # in_members/out_members index the audit set, which is ordered [in_members..., out_members...],
+        # so the surviving points keep that order and can be renumbered contiguously.
+        self.in_members = np.arange(np.sum(mask[self.audit_dataset["in_members"]]))
+        num_out_members = np.sum(mask[self.audit_dataset["out_members"]])
+        self.out_members = np.arange(len(self.in_members), len(self.in_members) + num_out_members)
 
-            if len(self.audit_data_indices) == 0:
-                raise ValueError("No points in the audit dataset are used for the shadow models")
+        assert len(self.audit_data_indices) == len(self.in_members) + len(self.out_members)
 
-        else:
-            self.audit_data_indices = audit_indices
-            self.in_members = self.audit_dataset["in_members"]
-            self.out_members = self.audit_dataset["out_members"]
+        if len(self.audit_data_indices) == 0:
+            raise ValueError("No points in the audit dataset are used for the shadow models")
 
+        if not self.online:
             # Check offline attack for possible IN- sample(s)
             count_in_samples = np.count_nonzero(self.in_indices_masks)
             if count_in_samples > 0:
