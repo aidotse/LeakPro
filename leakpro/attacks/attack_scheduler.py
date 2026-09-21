@@ -4,6 +4,7 @@
 #
 """Module that contains the AttackScheduler class, which is responsible for creating and executing attacks."""
 
+from collections.abc import Mapping
 from pathlib import Path
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
@@ -34,9 +35,21 @@ class AttackScheduler:
         configs = handler.configs
 
         # Seed once at audit start so attack construction (e.g. audit-data sampling)
-        # is reproducible. Non-int guard keeps DotMap-based test configs working.
+        # is reproducible. Non-int guard keeps DotMap-based configs working: a DotMap
+        # yields an empty DotMap for a missing key instead of raising. A value that is
+        # present but not an int is a config error, so it warns rather than defaulting
+        # silently.
         seed = getattr(configs.audit, "random_seed", None)
-        self.random_seed = seed if isinstance(seed, int) else AuditConfig.model_fields["random_seed"].default
+        default_seed = AuditConfig.model_fields["random_seed"].default
+        if isinstance(seed, int) and not isinstance(seed, bool):
+            self.random_seed = seed
+        else:
+            seed_is_absent = seed is None or (isinstance(seed, Mapping) and len(seed) == 0)
+            if not seed_is_absent:
+                logger.warning(
+                    f"audit.random_seed={seed!r} is not an integer; falling back to the default seed {default_seed}."
+                )
+            self.random_seed = default_seed
         seed_everything(self.random_seed)
 
         # Create factory
