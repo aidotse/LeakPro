@@ -354,6 +354,20 @@ class AbstractMIA(AbstractAttack):
         """
         return self._audit_dataset
 
+    @audit_dataset.setter
+    def audit_dataset(self:Self, value: dict)-> None:
+        """Set the audit dataset used for the attack.
+
+        Instance-only, unlike the class-attribute assignment this replaced: it never affects any
+        other attack instance.
+
+        Args:
+        ----
+            value (dict): The new audit dataset, keyed by "data", "in_members", "out_members".
+
+        """
+        self._audit_dataset = value
+
     @property
     def train_indices(self:Self)-> np.ndarray:
         """Get the training indices of the audit dataset.
