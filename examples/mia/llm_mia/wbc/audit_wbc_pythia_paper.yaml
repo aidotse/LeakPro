@@ -37,8 +37,11 @@ audit:
 target:
   module_path: ../hf_wrapper.py   # shared code stays one level up, in examples/mia/llm_mia/
   model_class: HFCausalLMWrapper
-  target_folder: ./target_pythia_external
-  data_path: ./data/pythia_external_512.pkl
+  # Matches train_config_wbc_pythia.yaml's run.log_dir/data.data_path (prepare_target.py output).
+  # If you instead used import_external_target.py, point these at whatever --out-dir/--data-path
+  # you passed it there.
+  target_folder: ./pythia-2.8b-pretrained-cosmopedia-khanacademy-2hpucards-1
+  data_path: ./data/pythia_cosmopedia_khanacademy_512.pkl
 
 shadow_model:
 

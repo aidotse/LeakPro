@@ -7,6 +7,20 @@
 # artifacts train_config.yaml (the EZ-MIA/WikiText example) does, under a different log_dir/data_path
 # -- running this does not touch or conflict with that config.
 #
+# data.train_path/test_path below are relative to THIS folder (wbc/) -- you need to generate them
+# first. This repo doesn't ship a prep script for this; the reference codebase's does
+# (github.com/Stry233/WBC, `dataset/prep.py`, per its README):
+#
+#   git clone https://github.com/Stry233/WBC && cd WBC && pip install -r requirements.txt
+#   python dataset/prep.py \
+#       --dataset_name "HuggingFaceTB/cosmopedia" --config "khanacademy" \
+#       --num_samples 20000 --min_length 512 \
+#       --output_dir "cosmopedia-khanacademy-subset"
+#
+# This downloads HuggingFaceTB/cosmopedia (config khanacademy), keeps only entries >= 512 tokens,
+# shuffles (seed 42), and writes a 50/50 train.json/test.json split. Copy (or symlink) the resulting
+# `cosmopedia-khanacademy-subset/` directory next to this file so the relative paths below resolve.
+#
 # NOT covered here, needs infrastructure beyond this repo:
 #   - multi-GPU / DeepSpeed (the paper's "2 HPU cards", `deepspeed_config`) -- this trains on exactly
 #     one device (LEAKPRO_DEVICE env var). Effective batch size is batch_size * gradient_accumulation_steps
@@ -21,25 +35,28 @@ train:
   model_name: EleutherAI/pythia-2.8b
   dtype: bfloat16                  # bf16: True, fp16: False
   finetune_method: full
-  epochs: 5                        # num_train_epochs: 1 (max_steps: -1 means "rely on epochs", already the only mode here)
+  epochs: 10                        # paper's reference config uses num_train_epochs: 1 -- raised here on request
   batch_size: 8
-  gradient_accumulation_steps: 1   # effective batch = 8 on this one device; the paper's 2-card total (16) needs multi-GPU
+  gradient_accumulation_steps: 2   # effective batch = 8 on this one device; the paper's 2-card total (16) needs multi-GPU
   warmup_steps: 500
   eval_strategy: epoch             # held-out eval after every epoch (test.json doubles as the paper's "val")
   save_strategy: epoch             # checkpoint after every epoch, under log_dir/ckpts/checkpoint-<step>
   save_total_limit: 1
-  learning_rate: 5.0e-5
+  learning_rate: 1.0e-5
   weight_decay: 0.1
-  lora:                            # unused (finetune_method: full), present only because the shared config expects the key
-    r: 16
-    alpha: 32
+  lora:                            # only read when finetune_method: lora (prepare_target.py:171's
+                                    # `train_cfg["lora"] if finetune_method == "lora" else None` never
+                                    # even accesses this key otherwise) -- kept as a ready-to-use
+                                    # template; Pythia/GPT-NeoX's own attention/MLP module names
+    r: 32
+    alpha: 64
     dropout: 0.05
-    target_modules: [query_key_value, dense, dense_h_to_4h, dense_4h_to_h]   # Pythia/GPT-NeoX module names, if you switch to lora
+    target_modules: ["query_key_value"]
 
 data:
   source: local
-  train_path: /home/muhaddisah/project/Window_based_MIA_LLMs/cosmopedia-khanacademy-subset/train.json
-  test_path: /home/muhaddisah/project/Window_based_MIA_LLMs/cosmopedia-khanacademy-subset/test.json
+  train_path: ./cosmopedia-khanacademy-subset/train.json
+  test_path: ./cosmopedia-khanacademy-subset/test.json
   text_field: text   # adjust to match your JSON's actual key (see json_dataset.load_json_texts)
   max_length: 512    # tokenizer.max_length
   data_path: ./data/pythia_cosmopedia_khanacademy_512.pkl
