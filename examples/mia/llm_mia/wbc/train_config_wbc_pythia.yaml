@@ -32,6 +32,12 @@ run:
   log_dir: ./pythia-2.8b-pretrained-cosmopedia-khanacademy-2hpucards-1   # matches the paper's own output_dir name
 
 train:
+  # Other models the WBC paper evaluates (untested here -- see issue #463): other Pythia sizes
+  # (EleutherAI/pythia-{160m,410m,1.4b,2.8b,6.9b}), gpt2, EleutherAI/gpt-j-6b, meta-llama/Llama-3.2-3B.
+  # Mamba-1.4b (state-spaces/mamba-1.4b-hf) is also in the paper but NEEDS A COMPATIBILITY CHECK
+  # first: it's not attention-based, so whether CausalLMModel's attention_mask handling is even valid for
+  # it is unverified. Changing this also needs `lora.target_modules` below (if finetune_method: lora) and
+  # audit_wbc_pythia_paper.yaml's `references[].pretrained_name_or_path` updated to match.
   model_name: EleutherAI/pythia-2.8b
   dtype: bfloat16                  # bf16: True, fp16: False
   finetune_method: full
@@ -51,9 +57,14 @@ train:
     r: 32
     alpha: 64
     dropout: 0.05
+    # Pythia/GPT-NeoX module name. Other architectures need their own list -- e.g. Llama-family (Llama-3.2):
+    # [q_proj, k_proj, v_proj, o_proj]; GPT-2: [c_attn, c_proj, c_fc]; GPT-J: [q_proj, v_proj, k_proj, out_proj].
     target_modules: ["query_key_value"]
 
 data:
+  # This example uses HuggingFaceTB/cosmopedia's khanacademy config. Other WBC paper dataset configs
+  # (untested here -- see issue #463), all valid --config values for prepare_json_subset.py against the
+  # same HuggingFaceTB/cosmopedia dataset: stanford, stories, web_samples_v2, auto_math_text, wikihow.
   source: local
   train_path: ./cosmopedia-khanacademy-subset/train.json
   test_path: ./cosmopedia-khanacademy-subset/test.json

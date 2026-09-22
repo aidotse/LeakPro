@@ -10,7 +10,12 @@ run:
   log_dir: ./target_{finetune_method}
 
 train:
-  model_name: gpt2            # HF hub id; GPT-2 (124M) is fully fine-tuned in the paper, larger models use LoRA
+  # HF hub id; GPT-2 (124M) is fully fine-tuned in the paper, larger models use LoRA. Other models the
+  # EZ-MIA paper evaluates (untested here -- see issue #463): EleutherAI/gpt-j-6b, meta-llama/Llama-2-7b-hf
+  # (LoRA r=16/alpha=32), bigcode/stable-code-3b; also distilgpt2, google/gemma-3-1b,
+  # deepseek-ai/DeepSeek-R1-Distill-Llama-8B, Qwen/Qwen3-14B. Changing this also needs `lora.target_modules`
+  # below (if finetune_method: lora) and audit.yaml's `references[].pretrained_name_or_path` updated to match.
+  model_name: gpt2
   dtype: float32
   finetune_method: full       # full | lora   (override with --finetune-method)
   epochs: 3
@@ -23,10 +28,15 @@ train:
     r: 16
     alpha: 32
     dropout: 0.05
-    target_modules: [c_attn, c_proj, c_fc]   # GPT-2 module names; adjust for other architectures
+    # GPT-2/GPT-NeoX-family module names. Other architectures need their own list -- e.g. Llama-family
+    # (Llama-2/3, Mistral): [q_proj, k_proj, v_proj, o_proj]; GPT-J: [q_proj, v_proj, k_proj, out_proj].
+    target_modules: [c_attn, c_proj, c_fc]
 
 data:
-  hf_dataset: Salesforce/wikitext   # full repo id; newer `datasets` no longer resolves the bare name
+  # Full repo id; newer `datasets` no longer resolves the bare name. Other datasets the EZ-MIA paper
+  # evaluates (untested here -- see issue #463): ag_news, EdinburghNLP/xsum; also enron_emails, pubmed,
+  # allenai/c4 (mC4-German config). Each needs its own `hf_config`/`text_field` below to match.
+  hf_dataset: Salesforce/wikitext
   hf_config: wikitext-103-raw-v1
   split: train
   text_field: text

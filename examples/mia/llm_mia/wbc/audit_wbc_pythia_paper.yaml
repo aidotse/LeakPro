@@ -27,6 +27,8 @@ audit:
       n_bootstrap_samples: 100           # matches the paper's config
       references:
         - source: pretrained
+          # Must be the same base checkpoint as train_config_wbc_pythia.yaml's train.model_name (the
+          # paper's default reference is the target's own unfine-tuned base) -- change both together.
           pretrained_name_or_path: "EleutherAI/pythia-2.8b"
           dtype: float32                 # the reference WBC codebase's `init_model` (utils.py) never
                                           # forces a dtype on the reference model, unlike the target

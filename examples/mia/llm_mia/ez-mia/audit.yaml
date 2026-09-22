@@ -19,6 +19,8 @@ audit:
       pad_token_id: 50256               # GPT-2 has no pad token; eos is used and masked out
       references:
         - source: pretrained
+          # Must be the same base checkpoint as train_config_ez-mia.yaml's train.model_name (the paper's
+          # default reference is the target's own unfine-tuned base) -- change both together.
           pretrained_name_or_path: gpt2
           dtype: float32                # must match train_config_ez-mia.yaml's train.dtype
 
