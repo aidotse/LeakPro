@@ -26,7 +26,7 @@ class AttackOSLO(AbstractMIA):
     class AttackConfig(BaseModel):
         """Configuration for the OSLO attack."""
 
-        training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Fraction of auxilary dataset to use for each shadow model training")  # noqa: E501
+        training_data_fraction: float = Field(default=0.5, gt=0.0, lt=1.0, description="Fraction of auxilary dataset to use for each shadow model training. Must be < 1: at 1 every shadow model trains on every point, leaving no OUT reference models.")  # noqa: E501
         online: bool = Field(default=False, description="Perform online or offline attack")
         num_source_models: int = Field(default=9, ge=1, description="Number of source shadow models to train")
         num_validation_models: int = Field(default=3, ge=1, description="Number of validation shadow models to train")
