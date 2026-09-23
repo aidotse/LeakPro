@@ -37,7 +37,8 @@ real finding.
 
 ## WBC — Pythia-2.8B / Khan Academy
 
-A bigger fine-tune (real time and memory, not a quick demo) — three steps, in order.
+A bigger fine-tune (real time and memory, not a quick demo) — three steps, in order. Device
+(HPU/CUDA/CPU) auto-detects; set `LEAKPRO_DEVICE=hpu` (or `cuda`/`cpu`) only if you need to pin one.
 
 **1. Get the data** (a third-party HF dataset, not shipped here):
 ```bash
@@ -51,16 +52,16 @@ python prepare_json_subset.py \
 **2. Fine-tune the target:**
 ```bash
 cd wbc
-LEAKPRO_DEVICE=hpu python ../prepare_target.py --config train_config_wbc_pythia.yaml
+python ../prepare_target.py --config train_config.yaml
 ```
 
 **3. Run the audit:**
 ```bash
-LEAKPRO_DEVICE=hpu python ../run_audit.py --audit audit_wbc_pythia_paper.yaml
+python ../run_audit.py --audit wbc_audit.yaml
 ```
 Results land in `./leakpro_output_wbc_pythia/`.
 
-**Out of memory in step 2?** Lower `train.batch_size` in `train_config_wbc_pythia.yaml` and raise
+**Out of memory in step 2?** Lower `train.batch_size` in `train_config.yaml` and raise
 `train.gradient_accumulation_steps` by the same factor (keeps the effective batch size the same,
 trades memory for time).
 
@@ -70,5 +71,5 @@ Every other option — `window_lengths`, `max_samples`, `n_bootstrap_samples`, `
 `warmup_steps`, `eval_strategy`/`save_strategy`, auditing an already-trained checkpoint via
 `import_external_target.py`, comparing LoRA vs. full fine-tuning via `sweep_report.py` — is
 documented inline as comments in the relevant `.yaml` file or script docstring. Start from
-`train_config_wbc_pythia.yaml`/`audit_wbc_pythia_paper.yaml` (or their `ez-mia/` equivalents) and
+`train_config.yaml`/`wbc_audit.yaml` (or their `ez-mia/` equivalents) and
 read the comments next to the setting you want to change.

@@ -22,7 +22,7 @@ audit:
           # Must be the same base checkpoint as train_config_ez-mia.yaml's train.model_name (the paper's
           # default reference is the target's own unfine-tuned base) -- change both together.
           pretrained_name_or_path: gpt2
-          dtype: float32                # must match train_config_ez-mia.yaml's train.dtype
+          dtype: float32                # matches train_config_ez-mia.yaml's train.dtype by default (see the note above)
 
 target:
   module_path: ../hf_wrapper.py   # shared code stays one level up, in examples/mia/llm_mia/

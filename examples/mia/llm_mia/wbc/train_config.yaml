@@ -8,18 +8,19 @@
 # -- running this does not touch or conflict with that config.
 #
 # data.train_path/test_path below are relative to THIS folder (wbc/) -- you need to generate them
-# first. This repo doesn't ship a prep script for this; the reference codebase's does
-# (github.com/Stry233/WBC, `dataset/prep.py`, per its README):
+# first, from this repo's own self-contained prep script (see ../prepare_json_subset.py; run it
+# from examples/mia/llm_mia/, its --output-dir already points at wbc/cosmopedia-khanacademy-subset):
 #
-#   git clone https://github.com/Stry233/WBC && cd WBC && pip install -r requirements.txt
-#   python dataset/prep.py \
-#       --dataset_name "HuggingFaceTB/cosmopedia" --config "khanacademy" \
-#       --num_samples 20000 --min_length 512 \
-#       --output_dir "cosmopedia-khanacademy-subset"
+#   cd examples/mia/llm_mia
+#   python prepare_json_subset.py \
+#       --dataset-name HuggingFaceTB/cosmopedia --config khanacademy \
+#       --num-samples 20000 --min-length 512 --tokenizer-name EleutherAI/pythia-2.8b \
+#       --output-dir wbc/cosmopedia-khanacademy-subset
 #
 # This downloads HuggingFaceTB/cosmopedia (config khanacademy), keeps only entries >= 512 tokens,
-# shuffles (seed 42), and writes a 50/50 train.json/test.json split. Copy (or symlink) the resulting
-# `cosmopedia-khanacademy-subset/` directory next to this file so the relative paths below resolve.
+# shuffles (seed 42), and writes a 50/50 train.json/test.json split -- the same recipe as the WBC
+# paper's own data prep (github.com/Stry233/WBC, `dataset/prep.py`), ported here so this repo has
+# no external, GPU-pinned dependency.
 #
 # NOT covered here, needs infrastructure beyond this repo:
 #   - multi-GPU / DeepSpeed (the paper's "2 HPU cards", `deepspeed_config`) -- this trains on exactly
@@ -37,13 +38,13 @@ train:
   # Mamba-1.4b (state-spaces/mamba-1.4b-hf) is also in the paper but NEEDS A COMPATIBILITY CHECK
   # first: it's not attention-based, so whether CausalLMModel's attention_mask handling is even valid for
   # it is unverified. Changing this also needs `lora.target_modules` below (if finetune_method: lora) and
-  # audit_wbc_pythia_paper.yaml's `references[].pretrained_name_or_path` updated to match.
+  # wbc_audit.yaml's `references[].pretrained_name_or_path` updated to match.
   model_name: EleutherAI/pythia-2.8b
   dtype: bfloat16                  # bf16: True, fp16: False
   finetune_method: full
-  epochs: 10                        # paper's reference config uses num_train_epochs: 1 -- raised here on request
-  batch_size: 8
-  gradient_accumulation_steps: 2   # effective batch = 8 on this one device; the paper's 2-card total (16) needs multi-GPU
+  epochs: 10                        # reference: num_train_epochs: 1 -- 10 verified (on real HPU hardware) 
+  batch_size: 8                    # per-step batch that fits one HPU card at this length/dtype
+  gradient_accumulation_steps: 2   # effective batch = 16 on this one device 
   warmup_steps: 500
   eval_strategy: epoch             # held-out eval after every epoch (test.json doubles as the paper's "val")
   save_strategy: epoch             # checkpoint after every epoch, under log_dir/ckpts/checkpoint-<step>
@@ -52,13 +53,15 @@ train:
   weight_decay: 0.1
   lora:                            # only read when finetune_method: lora (prepare_target.py:171's
                                     # `train_cfg["lora"] if finetune_method == "lora" else None` never
-                                    # even accesses this key otherwise) -- kept as a ready-to-use
-                                    # template; Pythia/GPT-NeoX's own attention/MLP module names
-    r: 32
-    alpha: 64
+                                    # even accesses this key otherwise) -- inert while finetune_method: full
+                                    # above; kept as a ready-to-use template if you switch to lora.
+    r: 32       # reference config: 16 -- untested here, no LoRA run has been done on this example yet
+    alpha: 64   # reference config: 32 -- same caveat as r above
     dropout: 0.05
-    # Pythia/GPT-NeoX module name. Other architectures need their own list -- e.g. Llama-family (Llama-3.2):
-    # [q_proj, k_proj, v_proj, o_proj]; GPT-2: [c_attn, c_proj, c_fc]; GPT-J: [q_proj, v_proj, k_proj, out_proj].
+    # Pythia/GPT-NeoX module name. The reference codebase's own trainer default is ["q_proj", "v_proj"],
+    # which doesn't apply here -- GPT-NeoX fuses Q/K/V into one "query_key_value" projection, it has no
+    # separate q_proj/v_proj to target. Other architectures need their own list -- e.g. Llama-family
+    # (Llama-3.2): [q_proj, k_proj, v_proj, o_proj]; GPT-2: [c_attn, c_proj, c_fc]; GPT-J: [q_proj, v_proj, k_proj, out_proj].
     target_modules: ["query_key_value"]
 
 data:

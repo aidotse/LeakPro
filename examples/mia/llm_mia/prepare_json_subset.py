@@ -20,6 +20,10 @@ identically on CPU/GPU/HPU machines. Needs only `datasets`/`transformers` (leakp
 Reproduces the WBC paper's own Khan Academy subset command with the values above. Change
 --dataset-name/--config for a different HF dataset (any of cosmopedia's other configs -- stanford,
 stories, web_samples_v2, wikihow, auto_math_text -- work the same way).
+
+--trust-remote-code defaults to off: it executes arbitrary Python fetched from the dataset/tokenizer
+repo on the Hub, which neither HuggingFaceTB/cosmopedia nor EleutherAI/pythia-2.8b's tokenizer needs.
+Only pass it for a dataset or tokenizer whose HF page says it requires custom loading code.
 """
 
 import argparse
@@ -38,14 +42,15 @@ def build_subset(
     min_length: int,
     member_ratio: float,
     tokenizer_name: str,
+    trust_remote_code: bool = False,
 ) -> Tuple[List[dict], List[dict]]:
     """Filter by token length, shuffle (seed 42), and split into (member_rows, non_member_rows)."""
     from datasets import load_dataset
     from transformers import AutoTokenizer
 
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=trust_remote_code)
 
-    dataset = load_dataset(dataset_name, config, split=split, trust_remote_code=True)
+    dataset = load_dataset(dataset_name, config, split=split, trust_remote_code=trust_remote_code)
 
     if min_length > 0:
         def is_long_enough(example: dict) -> bool:
@@ -75,11 +80,17 @@ def main() -> None:
     ap.add_argument("--member-ratio", type=float, default=0.5)
     ap.add_argument("--tokenizer-name", default="gpt2", help="Used only for length filtering, not for training")
     ap.add_argument("--output-dir", required=True)
+    ap.add_argument(
+        "--trust-remote-code", action="store_true",
+        help="Allow the dataset/tokenizer to run custom code from the Hub. Off by default; only needed "
+             "for a dataset or tokenizer whose HF page explicitly requires it.",
+    )
     args = ap.parse_args()
 
     member_rows, non_member_rows = build_subset(
         args.dataset_name, args.config, args.split, args.text_column,
         args.num_samples, args.min_length, args.member_ratio, args.tokenizer_name,
+        args.trust_remote_code,
     )
 
     out_dir = Path(args.output_dir)
