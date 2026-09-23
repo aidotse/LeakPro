@@ -283,3 +283,19 @@ def test_failed_carlini_run_cannot_reuse_partial_state() -> None:
     with pytest.raises(RuntimeError, match="run only once"):
         attack.run_attack()
     assert sample_calls == 2
+
+
+def test_unconditional_candidate_neighborhood_changes_acceptance() -> None:
+    """The generated-image denominator accepts this outlier; the old one rejected it."""
+    adapter = CallableDiffusionAdapter((1, 1, 1), lambda count, conditions, seed: torch.full((count, 1, 1, 1), 0.14))
+    attack = AttackCarliniExtraction(
+        adapter,
+        {"authorized_audit": True, "mode": "unconditional_reference_audit",
+         "num_unconditional_generations": 1, "reference_neighbors": 2},
+        audit_hash="candidate-neighborhood", reference_images=torch.tensor([0.0, 0.1, 1.0]).reshape(3, 1, 1, 1),
+    )
+    attack.prepare_attack()
+    result = attack.run_attack()
+    assert len(result.candidates) == 1
+    assert result.candidates[0].nearest_reference_index == 1
+    assert result.candidates[0].score == pytest.approx(8 / 9)

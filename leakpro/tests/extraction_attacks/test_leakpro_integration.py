@@ -964,3 +964,66 @@ def test_attack_hash_tracks_target_and_configuration(tmp_path: Path, attack_name
     changed_target = LeakPro(provider, config_path).attack_scheduler.attacks[0]
     assert changed_target.audit_hash != first.audit_hash
     assert changed_target.attack_id != first.attack_id
+
+
+def test_core_import_does_not_load_extraction_attacks() -> None:
+    """Extraction remains optional until an extraction API is requested."""
+    script = """
+import builtins
+real_import = builtins.__import__
+def guarded_import(name, *args, **kwargs):
+    if name.startswith('leakpro.attacks.extraction_attacks') or name == 'leakpro.input_handler.extraction_handler':
+        raise ImportError('extraction must stay lazy')
+    return real_import(name, *args, **kwargs)
+builtins.__import__ = guarded_import
+from leakpro import LeakPro, AbstractInputHandler
+assert LeakPro is not None
+assert AbstractInputHandler is not None
+"""
+    completed = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=False)
+    assert completed.returncode == 0, completed.stderr
+
+
+@pytest.mark.parametrize("with_references", [False, True])
+def test_handler_reuses_shared_inputs_and_digest(monkeypatch: pytest.MonkeyPatch, with_references: bool) -> None:
+    """Two factory calls load and hash shared inputs once; a new audit reloads them."""
+    from types import SimpleNamespace
+
+    from leakpro.attacks.extraction_attacks.attack_factory_extraction import AttackFactoryExtraction
+    from leakpro.input_handler import extraction_handler
+
+    calls = {"adapter": 0, "references": 0, "hash": 0}
+    references = torch.stack((torch.zeros(1, 4, 4), torch.ones(1, 4, 4))) if with_references else None
+    original_adapter = SIDEProvider.get_diffusion_adapter
+    original_hash = extraction_handler.extraction_audit_hash
+
+    def adapter(provider: SIDEProvider) -> CallableDiffusionAdapter:
+        calls["adapter"] += 1
+        return original_adapter(provider)
+
+    def reference_images(provider: SIDEProvider) -> torch.Tensor | None:
+        calls["references"] += 1
+        return references
+
+    def digest(*args: Any, **kwargs: Any) -> str:
+        calls["hash"] += 1
+        return original_hash(*args, **kwargs)
+
+    monkeypatch.setattr(SIDEProvider, "get_diffusion_adapter", adapter)
+    monkeypatch.setattr(SIDEProvider, "get_extraction_reference_images", reference_images)
+    monkeypatch.setattr(extraction_handler, "extraction_audit_hash", digest)
+    configs = SimpleNamespace(target=SimpleNamespace(hash="shared-target"))
+    handler = extraction_handler.ExtractionHandler(configs, SIDEProvider)
+    config = {"authorized_audit": True}
+    carlini = AttackFactoryExtraction.create_attack("carlini_diffusion", config, handler)
+    side = AttackFactoryExtraction.create_attack("side", config, handler)
+    assert calls == {"adapter": 1, "references": 1, "hash": 1}
+    assert carlini.adapter is side.adapter
+    assert carlini.reference_images is side.reference_images
+    assert carlini.audit_hash == side.audit_hash
+    assert handler.get_audit_hash(["a"]) != handler.get_audit_hash(["b"])
+    assert calls["hash"] == 1
+    fresh = extraction_handler.ExtractionHandler(configs, SIDEProvider)
+    repeated = AttackFactoryExtraction.create_attack("side", config, fresh)
+    assert repeated.audit_hash == side.audit_hash
+    assert calls == {"adapter": 2, "references": 2, "hash": 2}

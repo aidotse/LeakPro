@@ -28,7 +28,6 @@ from leakpro.attacks.extraction_attacks.utils_generative.carlini_graph import cl
 from leakpro.attacks.extraction_attacks.utils_generative.image_metrics import (
     carlini_reference_scores,
     nearest_reference,
-    reference_neighborhood_means,
     tiled_l2_pairwise,
 )
 from leakpro.reporting.extraction_result import CandidateRecord, ExtractionResult
@@ -62,11 +61,12 @@ class AttackCarliniExtraction(AbstractExtraction):
         self.reference_images = reference_images
         self.state = AttackState.CREATED
         identity_config = self.config.model_dump(mode="json", exclude={"overwrite_results"})
+        if self.config.mode == "unconditional_reference_audit":
+            identity_config["reference_score"] = "candidate_neighbors"
         result_hash = hash_config({"audit_hash": self.audit_hash, "config": identity_config})[:16]
         self.result_id = f"carlini-diffusion-extraction-{result_hash}"
         self.attack_id = self.result_id
         self._references_zero_one: Tensor | None = None
-        self._reference_neighbor_means: Tensor | None = None
         self._sampling_calls = 0
         self._initialize_trace()
 
@@ -120,30 +120,11 @@ class AttackCarliniExtraction(AbstractExtraction):
             _channels, height, width = self.adapter.image_shape
             if height % self.config.tile_grid[0] or width % self.config.tile_grid[1]:
                 raise ValueError("adapter image dimensions must be divisible by tile_grid.")
-        self._prepare_reference_neighborhoods()
         self._record_trace(
             "prepared",
             mode=self.config.mode,
             condition_count=len(self.conditions or []),
             reference_count=0 if self._references_zero_one is None else int(self._references_zero_one.shape[0]),
-        )
-
-    def _prepare_reference_neighborhoods(self) -> None:
-        """Precompute Carlini's reference-centric denominator once per audit."""
-        if self.config.mode != "unconditional_reference_audit":
-            return
-        if self._references_zero_one is None:
-            raise RuntimeError("Reference images were not prepared.")
-        self._reference_neighbor_means = reference_neighborhood_means(
-            self._references_zero_one,
-            neighbors=self.config.reference_neighbors,
-            block_size=self.config.distance_block_size,
-            device=self.config.distance_device,
-        )
-        self._record_trace(
-            "reference_neighborhoods_complete",
-            reference_count=int(self._references_zero_one.shape[0]),
-            neighbors=self.config.reference_neighbors,
         )
 
     def _generate(self, count: int, condition: object | None, seed_offset: int) -> Tensor:
@@ -280,8 +261,6 @@ class AttackCarliniExtraction(AbstractExtraction):
     def _unconditional_reference_attack(self) -> ExtractionResult:
         if self._references_zero_one is None:
             raise RuntimeError("Reference images were not prepared.")
-        if self._reference_neighbor_means is None:
-            raise RuntimeError("Reference neighborhoods were not prepared.")
         best_by_reference: dict[int, tuple[float, Tensor, CandidateRecord]] = {}
         total_generated = 0
         for batch_index, (start, end) in enumerate(
@@ -305,7 +284,6 @@ class AttackCarliniExtraction(AbstractExtraction):
                 alpha=self.config.reference_alpha,
                 block_size=self.config.distance_block_size,
                 device=self.config.distance_device,
-                reference_neighbor_means=self._reference_neighbor_means,
             )
             for local_index in torch.nonzero(scores.ratios.le(self.config.ratio_threshold), as_tuple=False).flatten().tolist():
                 reference_index = int(scores.nearest_indices[local_index])

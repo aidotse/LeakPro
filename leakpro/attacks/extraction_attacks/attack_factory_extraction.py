@@ -11,7 +11,6 @@ from leakpro.attacks.extraction_attacks.carlini import AttackCarliniExtraction
 from leakpro.attacks.extraction_attacks.configs import CarliniConfig, SIDEConfig
 from leakpro.attacks.extraction_attacks.side import AttackSIDEExtraction
 from leakpro.attacks.extraction_attacks.utils_generative import (
-    extraction_audit_hash,
     normalize_conditions,
     require_authorized,
     resolve_device,
@@ -56,11 +55,7 @@ class AttackFactoryExtraction:
                 raise RuntimeError("Carlini configuration dispatch failed.")
             conditions = normalize_conditions(handler.get_extraction_conditions())
             reference_images = handler.get_extraction_reference_images()
-            audit_hash = extraction_audit_hash(
-                handler.configs.target.hash,
-                conditions=conditions,
-                reference_images=reference_images,
-            )
+            audit_hash = handler.get_audit_hash(conditions)
             return AttackCarliniExtraction(
                 handler.get_diffusion_adapter(),
                 config,
@@ -72,11 +67,7 @@ class AttackFactoryExtraction:
             if not isinstance(config, SIDEConfig):
                 raise RuntimeError("SIDE configuration dispatch failed.")
             reference_images = handler.get_extraction_reference_images()
-            audit_hash = extraction_audit_hash(
-                handler.configs.target.hash,
-                conditions=None,
-                reference_images=reference_images,
-            )
+            audit_hash = handler.get_audit_hash()
             feature_extractor = handler.get_side_feature_extractor()
             if feature_extractor is None:
                 raise ValueError("SIDE requires get_side_feature_extractor() to return a torch module.")

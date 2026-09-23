@@ -28,6 +28,9 @@ def test_reference_scoring_handles_nondivisible_stress_blocks() -> None:
 
     assert torch.equal(scores.nearest_indices, expected_indices)
     assert torch.allclose(scores.nearest_distances, expected_distances, atol=1e-6)
+    expected_means = dense.topk(17, dim=1, largest=False).values.mean(dim=1)
+    torch.testing.assert_close(scores.neighbor_mean_distances, expected_means)
+    torch.testing.assert_close(scores.ratios, expected_distances / (0.5 * expected_means))
     assert scores.ratios.shape == (37,)
     assert torch.isfinite(scores.ratios).all()
 

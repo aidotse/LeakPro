@@ -35,14 +35,14 @@ from leakpro.utils.save_load import hash_config
 
 def test_mac_auto_device_uses_cpu_for_the_official_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     """Upstream float64 coefficient transfers are unsupported by MPS."""
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(cifar10_model, "get_device", lambda: torch.device("cpu"))
     monkeypatch.setattr(torch.backends.mps, "is_available", lambda: True)
     assert cifar10_model.select_device("auto") == torch.device("cpu")
     with pytest.raises(ValueError, match="supports CPU and CUDA"):
         cifar10_model.select_device("mps")
     with pytest.raises(ValueError, match="supports CPU and CUDA"):
         GaussianDiffusion(4, 4, torch.device("mps"))
-    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(cifar10_model, "get_device", lambda: torch.device("cuda"))
     assert cifar10_model.select_device("auto") == torch.device("cuda")
 
 
@@ -455,3 +455,18 @@ def test_attack_random_seeds_are_explicit() -> None:
     for name, entry in attack_entries.items():
         values = {key: value for key, value in entry.items() if key != "attack"}
         assert config_types[name](**values).random_seed == root_seed
+
+
+def test_example_uses_shared_seeding(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The shared helper controls backend determinism as well as RNG seeds."""
+    from leakpro.utils.seed import seed_everything
+
+    assert cifar10_model.seed_everything is seed_everything
+    monkeypatch.setattr(torch.backends.cudnn, "deterministic", False)
+    monkeypatch.setattr(torch.backends.cudnn, "benchmark", True)
+    cifar10_model.seed_everything(7)
+    first = torch.rand(3)
+    cifar10_model.seed_everything(7)
+    torch.testing.assert_close(first, torch.rand(3))
+    assert torch.backends.cudnn.deterministic
+    assert not torch.backends.cudnn.benchmark

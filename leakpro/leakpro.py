@@ -16,9 +16,7 @@ from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 
 from leakpro.attacks.attack_scheduler import AttackScheduler
-from leakpro.input_handler.abstract_extraction_input_handler import AbstractExtractionInputHandler
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
-from leakpro.input_handler.extraction_handler import ExtractionHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.schemas import EvalOutput, LeakProConfig, MIAMetaDataSchema, TrainingOutput
@@ -53,6 +51,9 @@ class LeakPro:
             raise FileNotFoundError(f"File {configs_path} not found") from e
 
         if configs.audit.attack_type == "extraction":
+            from leakpro.input_handler.abstract_extraction_input_handler import AbstractExtractionInputHandler  # noqa: PLC0415
+            from leakpro.input_handler.extraction_handler import ExtractionHandler  # noqa: PLC0415
+
             if not isinstance(user_input_handler, type) or not issubclass(
                 user_input_handler, AbstractExtractionInputHandler
             ):

@@ -120,9 +120,8 @@ def carlini_reference_scores(
     alpha: float = 0.5,
     block_size: int = 64,
     device: str = "cpu",
-    reference_neighbor_means: Tensor | None = None,
 ) -> ReferenceScores:
-    """Compute Carlini's reference-centric adaptive ratio from Section 5.1."""
+    """Compare each candidate's nearest distance with its own k-neighbor mean."""
     _validate_pairwise_inputs(candidates, references, block_size)
     if neighbors < 1:
         raise ValueError("neighbors must be positive.")
@@ -130,62 +129,37 @@ def carlini_reference_scores(
         raise ValueError("alpha must be finite and positive.")
     if references.shape[0] < neighbors:
         raise ValueError(f"reference set has {references.shape[0]} images but neighbors={neighbors}.")
-    if reference_neighbor_means is None:
-        reference_neighbor_means = reference_neighborhood_means(
-            references,
-            neighbors=neighbors,
-            block_size=block_size,
-            device=device,
-        )
-    if tuple(reference_neighbor_means.shape) != (references.shape[0],):
-        raise ValueError("reference_neighbor_means must contain one value per reference image.")
-    if not torch.isfinite(reference_neighbor_means).all() or torch.any(reference_neighbor_means < 0):
-        raise ValueError("reference_neighbor_means must be finite and non-negative.")
-    nearest_indices, nearest_distances = nearest_reference(
-        candidates,
-        references,
-        block_size=block_size,
-        device=device,
-    )
-    neighbor_means = reference_neighbor_means.detach().cpu()[nearest_indices]
+    target_device = resolve_device(device)
+    dimensions = candidates[0].numel()
+    indices, distances, means = [], [], []
+    for start, end in batch_ranges(candidates.shape[0], block_size):
+        left = _flatten_float(candidates[start:end], target_device)
+        nearest = torch.empty((left.shape[0], 0), device=target_device)
+        best_distances = torch.full((left.shape[0],), torch.inf, device=target_device)
+        best_indices = torch.full((left.shape[0],), -1, dtype=torch.long, device=target_device)
+        for right_start, right_end in batch_ranges(references.shape[0], block_size):
+            right = _flatten_float(references[right_start:right_end], target_device)
+            block = _normalized_l2_block(left, right, dimensions)
+            block_best, local_indices = block.min(dim=1)
+            improve = block_best < best_distances
+            best_indices = torch.where(improve, local_indices + right_start, best_indices)
+            best_distances = torch.minimum(best_distances, block_best)
+            combined = torch.cat((nearest, block), dim=1)
+            nearest = combined.topk(min(neighbors, combined.shape[1]), dim=1, largest=False, sorted=False).values
+        indices.append(best_indices.cpu())
+        distances.append(best_distances.cpu())
+        means.append(nearest.mean(dim=1).cpu())
+    neighbor_means = torch.cat(means)
     denominator = alpha * neighbor_means
     if torch.any(denominator <= 0):
-        raise ValueError("Reference-neighbor mean distance is zero; the adaptive ratio is undefined.")
+        raise ValueError("Candidate-neighbor mean distance is zero; the adaptive ratio is undefined.")
+    nearest_distances = torch.cat(distances)
     return ReferenceScores(
-        nearest_indices=nearest_indices,
+        nearest_indices=torch.cat(indices),
         nearest_distances=nearest_distances,
         neighbor_mean_distances=neighbor_means,
         ratios=nearest_distances / denominator,
     )
-
-
-def reference_neighborhood_means(
-    references: Tensor,
-    *,
-    neighbors: int = 50,
-    block_size: int = 64,
-    device: str = "cpu",
-) -> Tensor:
-    """Mean distance from each reference to its k closest references, including itself."""
-    _validate_pairwise_inputs(references, references, block_size)
-    if neighbors < 1:
-        raise ValueError("neighbors must be positive.")
-    if references.shape[0] < neighbors:
-        raise ValueError(f"reference set has {references.shape[0]} images but neighbors={neighbors}.")
-    target_device = resolve_device(device)
-    dimensions = references[0].numel()
-    means = torch.empty(references.shape[0], dtype=torch.float32)
-    for left_start, left_end in batch_ranges(references.shape[0], block_size):
-        left = _flatten_float(references[left_start:left_end], target_device)
-        nearest = torch.empty((left.shape[0], 0), device=target_device)
-        for right_start, right_end in batch_ranges(references.shape[0], block_size):
-            right = _flatten_float(references[right_start:right_end], target_device)
-            distances = _normalized_l2_block(left, right, dimensions)
-            combined = torch.cat((nearest, distances), dim=1)
-            keep = min(neighbors, combined.shape[1])
-            nearest = torch.topk(combined, k=keep, dim=1, largest=False, sorted=False).values
-        means[left_start:left_end] = nearest.mean(dim=1).cpu()
-    return means
 
 
 def nearest_reference(

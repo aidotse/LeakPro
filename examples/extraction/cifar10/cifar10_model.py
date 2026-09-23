@@ -10,12 +10,10 @@ import copy
 import hashlib
 import json
 import math
-import random
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
-import numpy as np
 import torch
 from improved_diffusion.script_util import (
     create_gaussian_diffusion,
@@ -32,6 +30,8 @@ from tqdm.auto import tqdm
 
 from leakpro.attacks.extraction_attacks.adapters import CallableDiffusionAdapter
 from leakpro.attacks.extraction_attacks.protocols import ConditionGradient, FeatureTransform
+from leakpro.utils.device import get_device
+from leakpro.utils.seed import seed_everything
 
 
 @dataclass(frozen=True)
@@ -79,21 +79,10 @@ CHECKPOINT_EVERY_EPOCHS = 100
 
 def select_device(requested: str = "auto") -> torch.device:
     """Resolve the device name from ``train_config.yaml``."""
-    if requested == "auto":
-        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    device = torch.device(requested)
+    device = get_device() if requested == "auto" else torch.device(requested)
     if device.type not in ("cpu", "cuda"):
         raise ValueError("The official Improved DDPM backend supports CPU and CUDA; use CPU on a Mac.")
     return device
-
-
-def seed_everything(seed: int) -> None:
-    """Seed the libraries used by this example."""
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
 
 
 def _model_options(train: TrainConfig) -> dict[str, Any]:

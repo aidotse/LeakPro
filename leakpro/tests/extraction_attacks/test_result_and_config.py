@@ -102,11 +102,11 @@ def test_failed_first_save_leaves_no_published_or_temporary_artifacts(
 ) -> None:
     result = _make_result()
     if failure == "json":
-        def fail_json(stream: object, payload: dict[str, object]) -> None:
-            del stream, payload
+        def fail_json(*args: object, **kwargs: object) -> None:
+            del args, kwargs
             raise OSError("disk full")
 
-        monkeypatch.setattr(ExtractionResult, "_dump_json", staticmethod(fail_json))
+        monkeypatch.setattr(json, "dumps", fail_json)
     else:
         def fail_npz(*args: object, **kwargs: object) -> None:
             del args, kwargs
@@ -121,6 +121,7 @@ def test_failed_first_save_leaves_no_published_or_temporary_artifacts(
     assert not (tmp_path / "data_objects" / f"{result.id}.json").exists()
     assert list((tmp_path / "results").glob(f".{result.id}-*")) == []
     assert list((tmp_path / "data_objects").glob(f".{result.id}-*")) == []
+    assert list(tmp_path.glob(f".{result.id}-*")) == []
 
 
 def test_failed_overwrite_preserves_previous_complete_bundle(
@@ -146,127 +147,53 @@ def test_failed_overwrite_preserves_previous_complete_bundle(
     assert after == before
 
 
-def test_failed_publish_rolls_back_previous_complete_bundle(
-    tmp_path: pytest.TempPathFactory,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    initial = _make_result(pixel=0.0)
-    initial.save(output_dir=tmp_path)
-    result_path = tmp_path / "results" / initial.id / "result.json"
-    candidates_path = tmp_path / "results" / initial.id / "candidates.npz"
-    data_path = tmp_path / "data_objects" / f"{initial.id}.json"
-    before = (result_path.read_bytes(), candidates_path.read_bytes(), data_path.read_bytes())
-    real_replace = os.replace
+@pytest.mark.parametrize("overwrite", [False, True])
+def test_stale_claim_does_not_block_save(tmp_path: Path, overwrite: bool) -> None:
+    """An abandoned claim from an older run does not prevent saving."""
+    if overwrite:
+        _make_result().save(output_dir=tmp_path)
+    (tmp_path / ".extraction_result_claims" / "safe-id").mkdir(parents=True)
+    _make_result(overwrite=overwrite, pixel=1.0).save(output_dir=tmp_path)
+    with np.load(tmp_path / "results" / "safe-id" / "candidates.npz") as archive:
+        assert np.all(archive["images"] == 1.0)
+    result = json.loads((tmp_path / "results" / "safe-id" / "result.json").read_text())
+    assert result == json.loads((tmp_path / "data_objects" / "safe-id.json").read_text())
+    assert result["metrics"]["pixel"] == 1.0
 
-    def fail_staged_data_publish(source: object, destination: object) -> None:
-        source_path = Path(source)  # type: ignore[arg-type]
-        destination_path = Path(destination)  # type: ignore[arg-type]
-        if destination_path == data_path and "-stage-" in source_path.name:
+
+def test_save_requires_explicit_overwrite(tmp_path: Path) -> None:
+    """Saving the same result ID without overwrite leaves the original unchanged."""
+    _make_result().save(output_dir=tmp_path)
+    with pytest.raises(FileExistsError, match="overwrite_results=true"):
+        _make_result(pixel=1.0).save(output_dir=tmp_path)
+    with np.load(tmp_path / "results" / "safe-id" / "candidates.npz") as archive:
+        assert np.all(archive["images"] == 0.0)
+
+
+@pytest.mark.parametrize("overwrite", [False, True])
+def test_failed_publish_can_be_retried(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, overwrite: bool,
+) -> None:
+    """Failed publication removes incomplete output so a later save can succeed."""
+    if overwrite:
+        _make_result().save(output_dir=tmp_path)
+    real_replace = os.replace
+    data_path = tmp_path / "data_objects" / "safe-id.json"
+
+    def fail_metadata_publish(source: Path, destination: Path) -> None:
+        if destination == data_path:
             raise OSError("publish interrupted")
         real_replace(source, destination)
 
-    monkeypatch.setattr(os, "replace", fail_staged_data_publish)
-    with pytest.raises(OSError, match="publish interrupted"):
-        _make_result(overwrite=True, pixel=1.0).save(output_dir=tmp_path)
-
-    after = (result_path.read_bytes(), candidates_path.read_bytes(), data_path.read_bytes())
-    assert after == before
-    assert list((tmp_path / "results").glob(f".{initial.id}-*")) == []
-    assert list((tmp_path / "data_objects").glob(f".{initial.id}-*")) == []
-
-
-def test_keyboard_interrupt_during_publish_rolls_back_previous_bundle(
-    tmp_path: pytest.TempPathFactory,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    initial = _make_result(pixel=0.0)
-    initial.save(output_dir=tmp_path)
-    result_path = tmp_path / "results" / initial.id / "result.json"
-    candidates_path = tmp_path / "results" / initial.id / "candidates.npz"
-    data_path = tmp_path / "data_objects" / f"{initial.id}.json"
-    before = (result_path.read_bytes(), candidates_path.read_bytes(), data_path.read_bytes())
-    real_replace = os.replace
-
-    def interrupt_staged_data_publish(source: object, destination: object) -> None:
-        source_path = Path(source)  # type: ignore[arg-type]
-        destination_path = Path(destination)  # type: ignore[arg-type]
-        if destination_path == data_path and "-stage-" in source_path.name:
-            raise KeyboardInterrupt
-        real_replace(source, destination)
-
-    monkeypatch.setattr(os, "replace", interrupt_staged_data_publish)
-    with pytest.raises(KeyboardInterrupt):
-        _make_result(overwrite=True, pixel=1.0).save(output_dir=tmp_path)
-
-    after = (result_path.read_bytes(), candidates_path.read_bytes(), data_path.read_bytes())
-    assert after == before
-    assert list((tmp_path / "results").glob(f".{initial.id}-*")) == []
-    assert list((tmp_path / "data_objects").glob(f".{initial.id}-*")) == []
-
-
-def test_interrupt_after_result_rename_rolls_back_previous_bundle(
-    tmp_path: pytest.TempPathFactory,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    initial = _make_result(pixel=0.0)
-    initial.save(output_dir=tmp_path)
-    result_dir = tmp_path / "results" / initial.id
-    result_path = result_dir / "result.json"
-    candidates_path = result_dir / "candidates.npz"
-    data_path = tmp_path / "data_objects" / f"{initial.id}.json"
-    before = (result_path.read_bytes(), candidates_path.read_bytes(), data_path.read_bytes())
-    real_replace = os.replace
-    interrupted = False
-
-    def rename_then_interrupt(source: object, destination: object) -> None:
-        nonlocal interrupted
-        source_path = Path(source)  # type: ignore[arg-type]
-        destination_path = Path(destination)  # type: ignore[arg-type]
-        real_replace(source, destination)
-        if not interrupted and destination_path == result_dir and "-stage-" in source_path.name:
-            interrupted = True
-            raise KeyboardInterrupt
-
-    monkeypatch.setattr(os, "replace", rename_then_interrupt)
-    with pytest.raises(KeyboardInterrupt):
-        _make_result(overwrite=True, pixel=1.0).save(output_dir=tmp_path)
-
-    after = (result_path.read_bytes(), candidates_path.read_bytes(), data_path.read_bytes())
-    assert after == before
-    assert list((tmp_path / "results").glob(f".{initial.id}-*")) == []
-    assert list((tmp_path / "data_objects").glob(f".{initial.id}-*")) == []
-
-
-def test_competing_bundle_appearing_after_staging_is_not_overwritten(
-    tmp_path: pytest.TempPathFactory,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    result = _make_result(pixel=1.0)
-    result_dir = tmp_path / "results" / result.id
-    data_path = tmp_path / "data_objects" / f"{result.id}.json"
-    original_stage = result._stage_bundle  # noqa: SLF001 - deterministic publication-race injection
-    competitor_result = b"competitor-result"
-    competitor_data = b"competitor-data"
-
-    def stage_then_inject_competitor(
-        results_dir: Path,
-        data_dir: Path,
-        metadata: dict[str, object],
-    ) -> object:
-        staged = original_stage(results_dir, data_dir, metadata)
-        result_dir.mkdir()
-        (result_dir / "result.json").write_bytes(competitor_result)
-        data_path.write_bytes(competitor_data)
-        return staged
-
-    monkeypatch.setattr(result, "_stage_bundle", stage_then_inject_competitor)
-    with pytest.raises(FileExistsError, match="appeared while saving"):
-        result.save(output_dir=tmp_path)
-
-    assert (result_dir / "result.json").read_bytes() == competitor_result
-    assert data_path.read_bytes() == competitor_data
-    assert list((tmp_path / "results").glob(f".{result.id}-*")) == []
-    assert list((tmp_path / "data_objects").glob(f".{result.id}-*")) == []
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "replace", fail_metadata_publish)
+        with pytest.raises(OSError, match="publish interrupted"):
+            _make_result(overwrite=overwrite, pixel=1.0).save(output_dir=tmp_path)
+    assert not (tmp_path / "results" / "safe-id").exists()
+    assert not data_path.exists()
+    assert list(tmp_path.glob(".safe-id-*")) == []
+    _make_result(pixel=1.0).save(output_dir=tmp_path)
+    assert json.loads(data_path.read_text())["metrics"]["pixel"] == 1.0
 
 
 def test_result_rejects_path_traversal_id() -> None:

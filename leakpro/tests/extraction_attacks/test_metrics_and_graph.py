@@ -105,16 +105,16 @@ def test_carlini_reference_ratio_flags_exact_copy() -> None:
     assert scores.ratios.tolist() == [0.0]
 
 
-def test_carlini_reference_ratio_uses_nearest_reference_neighborhood() -> None:
+def test_carlini_reference_ratio_uses_generated_image_neighborhood() -> None:
     references = torch.tensor([[[[0.0]]], [[[0.2]]], [[[0.4]]], [[[1.0]]]])
     candidates = torch.tensor([[[[0.1]]]])
 
     scores = carlini_reference_scores(candidates, references, neighbors=3, alpha=0.5, block_size=2)
 
     assert scores.nearest_indices.tolist() == [0]
-    assert scores.neighbor_mean_distances.tolist() == pytest.approx([0.2])
-    assert scores.ratios.tolist() == pytest.approx([1.0])
-    assert scores.ratios.le(1.0).tolist() == [True]
+    assert scores.neighbor_mean_distances.tolist() == pytest.approx([1 / 6])
+    assert scores.ratios.tolist() == pytest.approx([1.2])
+    assert scores.ratios.le(1.0).tolist() == [False]
 
 
 def test_streamed_reference_metrics_match_full_pairwise_values() -> None:
@@ -183,3 +183,9 @@ def test_l2_ams_uses_nearest_match_while_ums_keeps_in_band_references() -> None:
 
     assert result["farther"]["ams"] == 0.0
     assert result["farther"]["ums"] == 1.0
+
+
+def test_carlini_ratio_rejects_undefined_duplicate_neighborhood() -> None:
+    """All-zero neighbour distances must not produce a misleading ratio."""
+    with pytest.raises(ValueError, match="mean distance is zero"):
+        carlini_reference_scores(torch.zeros(1, 1, 1, 1), torch.zeros(3, 1, 1, 1), neighbors=3)
