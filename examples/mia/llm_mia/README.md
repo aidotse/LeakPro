@@ -16,7 +16,7 @@ pip install -e ".[llm]"        # transformers, datasets, accelerate, peft
 llm_mia/
 ├── ...                        # shared code/scripts (prepare_target.py, run_audit.py, etc.)
 ├── ez-mia/                    # GPT-2 / WikiText-103 demo — EZ-MIA only, small and fast
-└── wbc/                       # Pythia-2.8B / Khan Academy — WBC only, the paper's own recipe
+└── wbc/                       # Pythia-2.8B / Khan Academy — WBC only, paper setup, HPU-tuned training
 ```
 Each folder is self-contained (own config, data, output); run scripts *from inside* the folder,
 e.g. `cd ez-mia && python ../run_audit.py`.
