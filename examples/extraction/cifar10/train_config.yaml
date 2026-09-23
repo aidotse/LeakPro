@@ -1,0 +1,26 @@
+##
+## Copyright 2023-2026 Lindholmen Science Park AB
+## SPDX-License-Identifier: Apache-2.0
+##
+
+run:
+  random_seed: 2026
+  audit_config: ./audit.yaml
+  device: auto
+  force_retrain: false
+  data_dir: ./data
+  target_dir: ./target
+
+train:
+  train_size: 1024
+  epochs: 1400
+  train_batch_size: 128
+  learning_rate: 0.0001
+  timesteps: 4000
+  sampling_steps: 100
+  model_channels: 128
+  reference_size: 1024
+  num_res_blocks: 3
+  dropout: 0.3
+  microbatch: 32
+  ema_decay: 0.999
