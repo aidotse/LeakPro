@@ -23,7 +23,7 @@ e.g. `cd ez-mia && python ../run_audit.py`.
 
 ## EZ-MIA — GPT-2 / WikiText-103
 
-**Easiest:** open and run `ez-mia/llm_mia_main.ipynb` top to bottom — prepares the target, plots
+**Easiest:** open and run `ez-mia/ezmia_main.ipynb` top to bottom — prepares the target, plots
 training curves, and runs the audit, all in one notebook.
 
 **Or from a terminal:**

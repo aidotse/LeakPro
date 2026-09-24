@@ -180,7 +180,19 @@ def main() -> None:
               f"{len(test_indices)} non-members from {data_cfg['test_path']})")
     else:
         texts = _load_texts(data_cfg)
-        random.shuffle(texts)
+        if data_cfg["chunking"] == "fixed":
+            # `fixed` concatenates consecutive rows into one continuous stream. Some datasets (e.g.
+            # WikiText-103's `Salesforce/wikitext`) store one row per paragraph/heading, not one row
+            # per document -- shuffling row order first would glue together unrelated paragraphs from
+            # different articles into the same chunk, producing incoherent "salad" text that is
+            # trivially memorable and inflates membership-inference scores for reasons that have
+            # nothing to do with the attack itself. A random rotation keeps every row's neighbours
+            # intact (matching the reference code's random-start-offset, sequential-read approach for
+            # WikiText) while still giving a seed-dependent slice of the corpus.
+            start = random.randrange(len(texts)) if texts else 0
+            texts = texts[start:] + texts[:start]
+        else:
+            random.shuffle(texts)
         seqs = _tokenise(texts, tokenizer, data_cfg)
         if len(seqs) < data_cfg["n_sequences"]:
             raise ValueError(f"only {len(seqs)} sequences available, need {data_cfg['n_sequences']}")
