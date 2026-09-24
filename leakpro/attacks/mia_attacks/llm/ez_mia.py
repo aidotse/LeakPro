@@ -20,6 +20,16 @@ Edge cases the paper fixes (appendix E.5 / E.6): if ``N == 0`` (all movement upw
 has no error positions, it is the strongest possible member signal and is classified as a member.
 Those rows are routed through :func:`~leakpro.attacks.mia_attacks.llm.abstract_llm_mia.rank_top`
 so they rank above every ordinary score without emitting ``inf``.
+
+This module implements the paper's *text*, not the authors' reference code (github.com/JetBrains-Research/
+ez-mia, ``mia/ez_score.py``, read for comparison only -- nothing is ported from it; the repo also ships no
+license file). That code diverges from the paper in three places, so scores agree on ordinary sequences but
+not everywhere: (1) ``N == 0`` returns ``0.0`` there (strongest *non*-member) instead of the paper's ``+inf``;
+(2) fewer than two error positions also returns ``0.0`` (``min_tokens=2``), where the paper says member;
+(3) the first scored position is always dropped (``ignore_bos=True``), which the paper never mentions and
+which is a real token in its GPT-2 setting. Since the published numbers were presumably produced by that
+code, a reproduction here landing slightly *above* the paper's AUC is expected, not a bug -- the
+``run_attack`` log line reports how many sequences hit cases (1)/(2).
 """
 
 import warnings
@@ -87,6 +97,7 @@ def ez_scores(delta: np.ndarray, error: np.ndarray, aggregation: str) -> np.ndar
             raise ValueError(f"Unknown EZ-MIA aggregation: {aggregation}")
 
     # N == 0 with P > 0 → EZ = +inf → member; no error positions → member (paper E.5 / E.6).
+    # Deliberately follows the paper, not the reference code, which scores both cases 0.0 (see module docstring).
     force_top = (N == 0) | (n_err == 0)
     return rank_top(raw, force_top=force_top, tiebreak=P)
 
