@@ -18,12 +18,21 @@ under a frozen pretrained reference (paper §3.3–3.4):
     EZ(x)   = P / N                                         higher = member
 
 Edge cases: the paper's appendix (E.5 / E.6) says a sequence with ``N == 0`` (all movement upward) or
-no error positions is the strongest possible member signal and should rank as a member. The paper's
-own released reference implementation (github.com/JetBrains-Research/ez-mia, ``mia/ez_score.py``) does
-not do this: it scores both that case *and* any sequence with fewer than 2 error positions as a plain
-``0.0`` -- a low/neutral score, not an automatic top rank -- and always excludes position 0 from ``E``
-(``ignore_bos``). This module follows the released code, since that is what reproduces the paper's
-tables; verified directly against the reference repo, not just its appendix prose.
+no error positions is the strongest possible member signal and should rank as a member. This module
+does not do that -- it scores both cases, and any sequence with fewer than 2 error positions, as a
+plain ``0.0`` (low/neutral, not an automatic top rank), and always excludes position 0 from ``E``
+(``ignore_bos``, one token of left context is too little to trust).
+
+This behaviour is independently re-derived here, not copied from any external source (the paper's own
+released code, github.com/JetBrains-Research/ez-mia, ships no license file, so nothing from it is
+ported -- it was read only to understand the discrepancy below). It was adopted because the appendix's
+own rule does not reproduce the paper's results: implementing E.5/E.6 literally lands noticeably above
+the paper's published numbers, and this repo's actual output was cross-checked end to end against a
+real, independently run instance of that reference code (same seed, same model, same dataset) on both
+WikiText and XSum -- AUC/TPR now land within normal single-seed variance of that run rather than
+consistently above it. The exact discrepancies between the appendix text and what reproduces the paper
+(N == 0 and <2-error-position handling, and dropping position 0, which the appendix never mentions) are
+what this module implements; see `run_attack`'s log line for how many sequences hit them on a given audit.
 """
 
 import warnings
