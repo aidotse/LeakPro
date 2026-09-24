@@ -6,11 +6,13 @@
 
 Tests cover:
 - hand-worked P / N / EZ on a 2-row example under every aggregation
-- N == 0 and zero-error rows rank strictly above every ordinary row under every aggregation
-- log_ratio and ratio produce identical rankings (monotone transform)
+- position 0 of every row is always excluded (ignore_bos), even when it looks like error signal
+- N == 0 and fewer-than-2-error-position rows score plain 0.0 under every aggregation, matching the
+  paper's own released reference code (not forced above ordinary rows, contra the paper's appendix)
+- log_ratio and ratio produce identical rankings on ordinary rows (monotone transform)
 - padding never contributes to P or N
 - end-to-end against the fake handler: a self-reference gives delta == 0 everywhere, so every row
-  is forced (N == 0) and the result is still finite and well-formed
+  is degenerate (N == 0) and the result is still finite and well-formed
 """
 
 import numpy as np
@@ -25,11 +27,12 @@ AGGREGATIONS = ("ratio", "log_ratio", "positive_fraction", "difference", "mean_d
 
 
 def _example() -> tuple:
-    """Two rows. Row 0: P=3, N=1. Row 1: P=0.5, N=2. Position 2 of row 0 is a non-error and must be ignored."""
-    delta = np.array([[2.0, -1.0, 9.0, 1.0],
-                      [0.5, -1.5, -0.5, 0.0]])
-    error = np.array([[True, True, False, True],
-                      [True, True, True, True]])
+    """Two rows. Row 0: P=3, N=1. Row 1: P=0.5, N=2. Column 0 is a dummy, always non-error, so
+    ignore_bos never changes these numbers; column 3 of row 0 is a non-error and must be ignored."""
+    delta = np.array([[0.0, 2.0, -1.0, 9.0, 1.0],
+                      [0.0, 0.5, -1.5, -0.5, 0.0]])
+    error = np.array([[False, True, True, False, True],
+                      [False, True, True, True, True]])
     return delta, error
 
 
@@ -49,24 +52,24 @@ def test_hand_worked_values_per_aggregation() -> None:
 
 
 @pytest.mark.parametrize("aggregation", AGGREGATIONS)
-def test_edge_rows_rank_as_members_under_every_aggregation(aggregation: str) -> None:
-    """N == 0 (all upward) and zero-error rows end up above all ordinary rows, finite, tiebroken by P."""
-    delta = np.array([[2.0, -1.0, 1.0],    # ordinary: P=3, N=1
-                      [1.0, 2.0, 0.5],     # N == 0, P = 3.5  → forced
-                      [0.1, 0.2, 0.0],     # N == 0, P = 0.3  → forced (lower tiebreak than row 1)
-                      [5.0, -5.0, 3.0],    # zero error positions → forced, P = 0
-                      [-1.0, -2.0, 0.5]])  # ordinary: P=0.5, N=3
-    error = np.array([[True, True, True],
-                      [True, True, True],
-                      [True, True, True],
-                      [False, False, False],
-                      [True, True, True]])
+def test_degenerate_rows_score_zero_under_every_aggregation(aggregation: str) -> None:
+    """N == 0 (all upward) and fewer-than-2-error-position rows score plain 0.0 -- not forced above
+    ordinary rows. This matches the paper's own released reference code, not its appendix prose."""
+    delta = np.array([[0.0, 2.0, -1.0, 1.0],    # ordinary: P=3, N=1
+                      [0.0, 1.0, 2.0, 0.5],     # N == 0 (all upward, 3 error positions) → degenerate
+                      [0.0, 5.0, -5.0, 3.0],    # only 1 real error position (col 0 is ignore_bos) → degenerate
+                      [0.0, 0.0, 0.0, 0.0],     # zero error positions → degenerate
+                      [0.0, -1.0, -2.0, 0.5]])  # ordinary: P=0.5, N=3
+    error = np.array([[False, True, True, True],
+                      [False, True, True, True],
+                      [False, True, False, False],
+                      [False, False, False, False],
+                      [False, True, True, True]])
     scores = ez_scores(delta, error, aggregation)
     assert np.all(np.isfinite(scores)), aggregation
-    forced, ordinary = scores[[1, 2, 3]], scores[[0, 4]]
-    assert forced.min() > ordinary.max(), aggregation
-    assert scores[1] > scores[2] > scores[3], aggregation   # tiebreak by P: 3.5 > 0.3 > 0
-    assert scores[0] > scores[4], aggregation                # ordinary ordering preserved
+    np.testing.assert_array_equal(scores[[1, 2, 3]], [0.0, 0.0, 0.0])
+    assert scores[0] != 0.0, aggregation
+    assert scores[4] != 0.0, aggregation
 
 
 def test_log_ratio_and_ratio_rank_identically() -> None:
@@ -83,8 +86,15 @@ def test_log_ratio_and_ratio_rank_identically() -> None:
 
 def test_padding_positions_do_not_contribute() -> None:
     """Values at masked-out positions (error == False) are ignored even when huge."""
-    delta = np.array([[1.0, -0.5, 1e6, -1e6]])
-    error = np.array([[True, True, False, False]])
+    delta = np.array([[999.0, 1.0, -0.5, 1e6, -1e6]])
+    error = np.array([[True, True, True, False, False]])
+    np.testing.assert_allclose(ez_scores(delta, error, "ratio"), [2.0])
+
+
+def test_ignore_bos_excludes_first_position() -> None:
+    """Position 0 is always excluded from E, even when it is a large error-position delta."""
+    delta = np.array([[100.0, 2.0, -1.0]])   # if column 0 counted, P would be huge instead of 2
+    error = np.array([[True, True, True]])
     np.testing.assert_allclose(ez_scores(delta, error, "ratio"), [2.0])
 
 

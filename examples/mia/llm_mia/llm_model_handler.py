@@ -91,6 +91,7 @@ class LLMModelHandler(AbstractInputHandler, role="model"):
         eval_dataloader: Optional[DataLoader] = None,
         checkpoint_dir: Optional[str] = None,
         save_total_limit: int = 1,
+        load_best_checkpoint_at_end: bool = False,
     ) -> TrainingOutput:
         """Fine-tune `model`.
 
@@ -114,12 +115,23 @@ class LLMModelHandler(AbstractInputHandler, role="model"):
                 `<checkpoint_dir>/checkpoint-<global_step>/model.pkl` (`save_strategy: epoch`),
                 pruning down to `save_total_limit` afterwards.
             save_total_limit: How many of the newest checkpoints under `checkpoint_dir` to keep.
+            load_best_checkpoint_at_end: If True, restore the epoch with the lowest `eval_dataloader`
+                loss into `model` before returning, instead of leaving whatever the last epoch
+                produced. Matches the EZ-MIA paper's own protocol (Appendix A.2): it explicitly
+                selects the checkpoint with the lowest validation loss "to mitigate overfitting
+                artifacts that could confound membership signals" -- an over-trained target is
+                easier to attack for reasons that have nothing to do with the attack itself.
+                Requires `eval_dataloader`. Tracked in memory (not by re-reading `checkpoint_dir`),
+                so it works even when `checkpoint_dir` is None or `save_total_limit` would otherwise
+                have pruned the best epoch's file away.
 
         """
         if epochs is None:
             raise ValueError("epochs not found in configs")
         if gradient_accumulation_steps < 1:
             raise ValueError(f"gradient_accumulation_steps must be >= 1, got {gradient_accumulation_steps}")
+        if load_best_checkpoint_at_end and eval_dataloader is None:
+            raise ValueError("load_best_checkpoint_at_end requires eval_dataloader (eval_strategy: epoch)")
         device = get_device()
 
         if self.lora:
@@ -143,6 +155,7 @@ class LLMModelHandler(AbstractInputHandler, role="model"):
         model.to(device)
         history = {"loss": [], "acc": [], "val_loss": [], "val_acc": []}
         global_step = 0
+        best_val_loss, best_epoch, best_state_dict = float("inf"), None, None
         for epoch in range(epochs):
             model.train()
             tot_loss, tot_correct, tot_tokens = 0.0, 0, 0
@@ -176,6 +189,9 @@ class LLMModelHandler(AbstractInputHandler, role="model"):
                 history["val_loss"].append(eval_result.loss)
                 history["val_acc"].append(eval_result.accuracy)
                 print(f"epoch {epoch + 1}: eval loss {eval_result.loss:.4f}  eval next-token acc {eval_result.accuracy:.4f}")
+                if load_best_checkpoint_at_end and eval_result.loss < best_val_loss:
+                    best_val_loss, best_epoch = eval_result.loss, epoch + 1
+                    best_state_dict = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
 
             if checkpoint_dir is not None:
                 ckpt_dir = Path(checkpoint_dir)
@@ -183,6 +199,11 @@ class LLMModelHandler(AbstractInputHandler, role="model"):
                 ckpt_path.mkdir(parents=True, exist_ok=True)
                 torch.save({k: v.cpu() for k, v in model.state_dict().items()}, ckpt_path / "model.pkl")
                 _prune_old_checkpoints(ckpt_dir, save_total_limit)
+
+        if load_best_checkpoint_at_end and best_state_dict is not None and best_epoch != epochs:
+            print(f"restoring epoch {best_epoch} (eval loss {best_val_loss:.4f}), "
+                  f"the best of {epochs} epochs, instead of the last epoch's weights")
+            model.load_state_dict(best_state_dict)
 
         if self.lora:
             # Fold the adapters back in so the saved state dict matches a plain HFCausalLMWrapper.
@@ -192,7 +213,8 @@ class LLMModelHandler(AbstractInputHandler, role="model"):
         metrics = EvalOutput(
             accuracy=history["acc"][-1], loss=history["loss"][-1],
             extra={"loss_history": history["loss"], "acc_history": history["acc"],
-                  "val_loss_history": history["val_loss"], "val_acc_history": history["val_acc"]},
+                  "val_loss_history": history["val_loss"], "val_acc_history": history["val_acc"],
+                  "best_epoch": best_epoch, "best_val_loss": best_val_loss if best_epoch is not None else None},
         )
         return TrainingOutput(model=model, metrics=metrics)
 

@@ -24,6 +24,16 @@ train:
                                     # size at a smaller per-step memory cost: batch_size 4 x steps 4 == 16
   learning_rate: 1.0e-4
   weight_decay: 0.0
+  eval_strategy: epoch             # held-out eval after every epoch (non-member split doubles as the
+                                    # paper's own validation set, same reuse ../wbc/'s config makes)
+  save_strategy: epoch             # checkpoint after every epoch, under log_dir/ckpts/checkpoint-<step>
+  save_total_limit: 1
+  load_best_checkpoint_at_end: true  # paper appendix A.2: selects the checkpoint with the lowest
+                                      # validation loss "to mitigate overfitting artifacts that could
+                                      # confound membership signals" -- without this, the target is the
+                                      # last epoch's weights, which are more overfit and make the attack
+                                      # look stronger than the paper's own numbers for reasons that have
+                                      # nothing to do with the attack itself.
   lora:                       # used only when finetune_method == lora (paper: r=16, alpha=32, dropout=0.05)
     r: 16
     alpha: 32
@@ -40,9 +50,14 @@ data:
   hf_config: wikitext-103-raw-v1
   split: train
   text_field: text
-  chunking: fixed             # fixed: concatenate and cut into max_length-token chunks (paper) | variable
+  chunking: fixed             # concatenate and cut into max_length-token chunks, matching the reference
+                              # code's WikiText path specifically (see _tokenise's docstring for why this
+                              # differs from ../ez-mia's `prefix` for XSum) | other modes: prefix, variable
   max_length: 128
-  n_sequences: 20000          # population size; members + non-members must fit inside it
+  n_sequences: 20500          # population size; members + non-members + validation must fit inside it
   n_members: 10000
   n_nonmembers: 10000
+  n_validation: 500           # disjoint from n_members/n_nonmembers -- used only for load_best_checkpoint_at_end's
+                              # epoch selection, never scored. Matches the paper's own reference code (which draws
+                              # a genuinely separate 500-sequence validation pool, not the audit non-members).
   data_path: ./data/wikitext_gpt2_128.pkl

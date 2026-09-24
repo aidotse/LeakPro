@@ -202,6 +202,8 @@ leakpro_output
 leakpro_output_*
 examples/mia/llm_mia/ez-mia/target_full/
 examples/mia/llm_mia/ez-mia/target_lora/
+examples/mia/llm_mia/ez-mia/target_xsum_full/
+examples/mia/llm_mia/ez-mia/target_xsum_lora/
 examples/mia/llm_mia/wbc/target_pythia_external/
 examples/mia/llm_mia/wbc/pythia-2.8b-pretrained-cosmopedia-khanacademy-2hpucards-1/
 # NOTE: wbc/train_config.yaml's `run.log_dir` can be changed to any name; if you do, add its

@@ -5,9 +5,6 @@
 """Unit tests for leakpro.attacks.mia_attacks.llm.abstract_llm_mia.
 
 Tests cover:
-- rank_top(): forced and +inf rows end up strictly above every ordinary row, ordered by the
-  tiebreak; -inf rows go below every ordinary row; unforced nan raises; all outputs finite,
-  ordinary rows untouched; all-forced and none-forced cases
 - ReferenceModelConfig / LLMAttackConfig validation (extra="forbid", source literal)
 - load_reference(): `self` wraps the handler's target; `random_init` re-initialises the blueprint
   so it differs from the target; `pretrained` without a path raises
@@ -29,62 +26,10 @@ from leakpro.attacks.mia_attacks.llm.abstract_llm_mia import (
     LLMAttackConfig,
     ReferenceModelConfig,
     load_reference,
-    rank_top,
 )
 from leakpro.reporting.mia_result import MIAResult
 from leakpro.signals.token_evidence import CausalLMModel
 from leakpro.tests.signals.test_token_evidence import VOCAB, TinyCausalLM
-
-# --------------------------------------------------------------------------------------- rank_top
-
-
-def test_rank_top_leaves_ordinary_rows_alone_when_nothing_forced() -> None:
-    """No forced or non-finite rows → identity."""
-    s = np.array([0.3, -1.0, 2.5])
-    np.testing.assert_array_equal(rank_top(s, np.zeros(3, bool), s), s)
-
-
-def test_rank_top_places_forced_rows_above_all_others_ordered_by_tiebreak() -> None:
-    """Forced rows and +inf beat the max ordinary score; among themselves larger tiebreak ranks higher."""
-    s = np.array([0.5, 9.0, 0.1, 2.0, np.inf, np.nan])
-    force = np.array([True, False, False, True, False, True])   # the nan row must be explicitly forced
-    tb = np.array([1.0, 0.0, 0.0, 5.0, 3.0, 2.0])
-    out = rank_top(s, force, tb)
-    assert np.all(np.isfinite(out))
-    forced_rows = force | np.isposinf(s)  # rows 0, 3, 4, 5
-    assert out[forced_rows].min() > out[~forced_rows].max()
-    np.testing.assert_array_equal(out[~forced_rows], s[~forced_rows])
-    # tiebreak order among forced: row3 (5) > row4 (3) > row5 (2) > row0 (1)
-    assert out[3] > out[4] > out[5] > out[0]
-
-
-def test_rank_top_neg_inf_goes_to_bottom_and_only_pos_inf_is_forced() -> None:
-    """-inf is the weakest signal (log(P/N) with P == 0) and must rank below every ordinary row."""
-    s = np.array([0.5, -np.inf, 2.0, np.inf, -np.inf])
-    out = rank_top(s, np.zeros(5, bool), np.zeros(5))
-    assert np.all(np.isfinite(out))
-    assert out[3] > max(out[0], out[2])           # +inf forced to the top
-    assert out[1] < min(out[0], out[2])           # -inf below the ordinary rows
-    assert out[1] == out[4]                       # ties preserved
-    np.testing.assert_array_equal(out[[0, 2]], s[[0, 2]])
-
-
-def test_rank_top_rejects_nan_outside_forced_rows() -> None:
-    """A nan in an ordinary row is a caller bug, not something to silently rank."""
-    with pytest.raises(ValueError, match="nan"):
-        rank_top(np.array([1.0, np.nan]), np.array([False, False]), np.zeros(2))
-    # nan in a forced row is fine
-    out = rank_top(np.array([1.0, np.nan]), np.array([False, True]), np.zeros(2))
-    assert np.all(np.isfinite(out))
-    assert out[1] > out[0]
-
-
-def test_rank_top_all_forced_is_finite_and_ordered() -> None:
-    """Every row forced (e.g. every sequence memorised) still yields finite, tiebreak-ordered scores."""
-    s = np.full(4, np.inf)
-    out = rank_top(s, np.ones(4, bool), np.array([2.0, 0.5, 3.0, 1.0]))
-    assert np.all(np.isfinite(out))
-    assert out[2] > out[0] > out[3] > out[1]
 
 
 # ---------------------------------------------------------------------------------------- configs
