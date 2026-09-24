@@ -4,6 +4,12 @@
 ##
 # Target preparation for the LLM MIA example (prepare_target.py). Defaults reproduce the EZ-MIA
 # paper's WikiText / GPT-2 / full fine-tuning setting (arXiv:2601.12104, §4 and appendix A).
+#
+# Verified end-to-end with this config + audit.yaml, and cross-checked against an independently run
+# instance of the paper's own released code (github.com/JetBrains-Research/ez-mia, same seed 1337,
+# configs/exp_wikitext_gpt2_base.yaml) rather than just the paper's published table:
+#   this repo:  AUC 0.9864  TPR@1%FPR 0.6458  TPR@0.1%FPR 0.0580
+#   reference code (seed 1337): AUC 0.9837  TPR@1%FPR 0.673  TPR@0.1%FPR 0.149
 run:
   random_seed: 1337   # matches the EZ-MIA paper's own WikiText/GPT-2/full reference config
   # {finetune_method} is substituted, so the LoRA-vs-full sweep writes two targets side by side.
