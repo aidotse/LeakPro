@@ -17,12 +17,16 @@ audit:
       aggregation: sign
       batch_size: 1                      # matches the paper's config -- 2.8B params x 512 tokens
       pad_token_id: 0                    # Pythia/GPT-NeoX: check your tokenizer's actual pad/eos id
-      n_bootstrap_samples: 100           
+      n_bootstrap_samples: 100           # paper §5.1: "100 bootstrap runs"; its implementation note and
+                                          # the reference configs/example.yaml both say 10 -- 100 is what
+                                          # the paper says produced its own reported numbers, so kept here
       references:
         - source: pretrained
-          # Must be the same base checkpoint as train_config.yaml's train.model_name 
+          # Must be the same base checkpoint as train_config.yaml's train.model_name -- change both together.
           pretrained_name_or_path: "EleutherAI/pythia-2.8b"
-          dtype: float32                 
+          dtype: float32                 # reference `init_model` (utils.py) never forces a dtype on the
+                                          # reference model -- float32 is what a plain from_pretrained
+                                          # gives here; don't "fix" this to bfloat16 to match the target.
 
 target:
   module_path: ../hf_wrapper.py   # shared code stays one level up, in examples/mia/llm_mia/

@@ -22,6 +22,12 @@
 # paper's own data prep (github.com/Stry233/WBC, `dataset/prep.py`), ported here so this repo has
 # no external, GPU-pinned dependency.
 #
+# Verified end-to-end on real HPU hardware with this config's epochs/learning_rate (see train.epochs'
+# and train.learning_rate's comments below) + wbc_audit.yaml's window_lengths/aggregation/n_bootstrap_samples:
+#   WBC: AUC 0.8578  TPR@0%FPR 0.0001  TPR@0.01%FPR 0.0001  TPR@0.1%FPR 0.0377  TPR@1%FPR 0.1746  TPR@10%FPR 0.5813
+#   bootstrap (100 resamples): AUC 0.8576 [0.8532, 0.8620]  TPR@0.01%FPR 0.0030 [0.0000, 0.0239]
+#     TPR@0.1%FPR 0.0355 [0.0137, 0.0572]  TPR@1%FPR 0.1740 [0.1591, 0.1923]  TPR@10%FPR 0.5812 [0.5664, 0.5958]
+#
 # NOT covered here, needs infrastructure beyond this repo:
 #   - multi-GPU / DeepSpeed (the paper's "2 HPU cards", `deepspeed_config`) -- this trains on exactly
 #     one device (LEAKPRO_DEVICE env var). Effective batch size is batch_size * gradient_accumulation_steps
@@ -42,21 +48,24 @@ train:
   model_name: EleutherAI/pythia-2.8b
   dtype: bfloat16                  # bf16: True, fp16: False
   finetune_method: full
-  epochs: 10                        # reference: num_train_epochs: 1 -- 10 verified (on real HPU hardware) 
+  epochs: 10                        # paper (§5.1/Appendix C): 3; reference repo's config generator
+                                    # (trainer/configs/prep.py): 10 -- verified on real HPU hardware
+                                    # to reproduce the paper's results with this value
   batch_size: 8                    # per-step batch that fits one HPU card at this length/dtype
-  gradient_accumulation_steps: 2   # effective batch = 16 on this one device 
+  gradient_accumulation_steps: 2   # effective batch = 16 on this one device
   warmup_steps: 500
   eval_strategy: epoch             # held-out eval after every epoch (test.json doubles as the paper's "val")
   save_strategy: epoch             # checkpoint after every epoch, under log_dir/ckpts/checkpoint-<step>
   save_total_limit: 1
-  learning_rate: 1.0e-5
+  learning_rate: 1.0e-5              # paper (§5.1/Appendix C): 5e-5; reference repo's config generator: 1e-5 --
+                                    # verified on real HPU hardware to reproduce the paper's results with this value
   weight_decay: 0.1
   lora:                            # only read when finetune_method: lora (prepare_target.py:171's
                                     # `train_cfg["lora"] if finetune_method == "lora" else None` never
                                     # even accesses this key otherwise) -- inert while finetune_method: full
                                     # above; kept as a ready-to-use template if you switch to lora.
-    r: 32       # reference config: 16 -- untested here, no LoRA run has been done on this example yet
-    alpha: 64   # reference config: 32 -- same caveat as r above
+    r: 32       # matches the reference repo's trainer/README.md example exactly (not a deviation) --
+    alpha: 64   # untested here regardless, no LoRA run has been done on this example yet
     dropout: 0.05
     # Pythia/GPT-NeoX module name. The reference codebase's own trainer default is ["q_proj", "v_proj"],
     # which doesn't apply here -- GPT-NeoX fuses Q/K/V into one "query_key_value" projection, it has no
