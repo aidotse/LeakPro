@@ -5,7 +5,9 @@
 """Contains the Result classes for MIA, MiNVA, and GIA attacks."""
 
 import json
+import logging
 import os
+from typing import Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -165,7 +167,77 @@ class MIAResult:
             fn = self.fn,
             tpr = self.tpr,
             fpr = self.fpr,
+            bootstrap = getattr(self, "bootstrap", None),
         )
+
+    @staticmethod
+    def bootstrap_metrics(
+        true_membership: list,
+        signal_values: list,
+        n_resamples: int,
+        seed: Optional[int] = None,
+    ) -> dict:
+        """Bootstrap mean and 95% CI of ``roc_auc`` and the fixed-FPR TPR table.
+
+        Each resample is scored by constructing a ``MIAResult`` on it, so the bootstrap uses exactly the
+        definitions of the point estimate (``TPR@x%FPR`` = largest achievable TPR at FPR <= x); a second,
+        interpolated definition would give a different number for the same quantity. Resamples that draw
+        a single class, or whose scores all tie, have no ROC and are skipped; ``n_used`` reports how many
+        of ``n_resamples`` contributed.
+
+        Args:
+        ----
+            true_membership: ``(N,)`` 1/0 ground truth, aligned with ``signal_values``.
+            signal_values: ``(N,)`` attack scores, higher = more likely member.
+            n_resamples: Number of bootstrap draws (with replacement, size N).
+            seed: Seeds the draws.
+
+        Returns:
+        -------
+            ``{"n_bootstrap_samples", "n_used", "roc_auc": {mean, ci_low, ci_high},
+            "fixed_fpr_table": {"TPR@1%FPR": {...}, ...}}`` — JSON-serialisable.
+
+        """
+        y = np.ravel(true_membership)
+        s = np.ravel(signal_values)
+        rng = np.random.RandomState(seed)
+        aucs: list = []
+        table: dict = {}
+        previous_level = logger.level
+        logger.setLevel(logging.WARNING)  # from_full_scores logs a hash line per construction
+        try:
+            for _ in range(n_resamples):
+                idx = rng.choice(len(y), size=len(y), replace=True)
+                if len(np.unique(y[idx])) < 2:
+                    continue
+                res = MIAResult.from_full_scores(true_membership=y[idx], signal_values=s[idx],
+                                                 result_name="bootstrap", metadata={})
+                if res.roc_auc is None:
+                    continue
+                aucs.append(float(res.roc_auc))
+                for key, value in res.fixed_fpr_table.items():
+                    table.setdefault(key, []).append(float(value))
+        finally:
+            logger.setLevel(previous_level)
+
+        def summary(values: list) -> dict:
+            arr = np.asarray(values, dtype=float)
+            if arr.size == 0:
+                return {"mean": None, "ci_low": None, "ci_high": None}
+            return {"mean": float(arr.mean()), "ci_low": float(np.percentile(arr, 2.5)),
+                    "ci_high": float(np.percentile(arr, 97.5))}
+
+        return {
+            "n_bootstrap_samples": int(n_resamples),
+            "n_used": len(aucs),
+            "roc_auc": summary(aucs),
+            "fixed_fpr_table": {key: summary(values) for key, values in table.items()},
+        }
+
+    def set_bootstrap(self, block: dict) -> None:
+        """Attach a :meth:`bootstrap_metrics` block so it is saved with the result and restored by :meth:`load`."""
+        self.bootstrap = block
+        self.result = self._make_result_object()
 
     def _compute_confusion_arrays(self) -> None:
         """Compute confusion arrays for a full ROC sweep from signal values."""
@@ -386,6 +458,7 @@ class MIAResult:
         obj.accuracy = mia_data.accuracy
         obj.metadata = mia_data.config
         obj.fixed_fpr_table = mia_data.fixed_fpr if mia_data.fixed_fpr else None
+        obj.bootstrap = mia_data.bootstrap
         obj.signal_values = mia_data.signal_values if mia_data.signal_values else None
         obj.true = mia_data.true_labels
         obj.tp = mia_data.tp

@@ -1,0 +1,86 @@
+##
+## Copyright 2023-2026 Lindholmen Science Park AB
+## SPDX-License-Identifier: Apache-2.0
+##
+# Fine-tunes the WBC paper's own target: Pythia-2.8B on a local cosmopedia/Khan Academy subset,
+# matching its reference training config as closely as this repo currently allows. Produces the same
+# artifacts train_config.yaml (the EZ-MIA/WikiText example) does, under a different log_dir/data_path
+# -- running this does not touch or conflict with that config.
+#
+# data.train_path/test_path below are relative to THIS folder (wbc/) -- you need to generate them
+# first, from this repo's own self-contained prep script (see ../prepare_json_subset.py; run it
+# from examples/mia/llm_mia/, its --output-dir already points at wbc/cosmopedia-khanacademy-subset):
+#
+#   cd examples/mia/llm_mia
+#   python prepare_json_subset.py \
+#       --dataset-name HuggingFaceTB/cosmopedia --config khanacademy \
+#       --num-samples 20000 --min-length 512 --tokenizer-name EleutherAI/pythia-2.8b \
+#       --output-dir wbc/cosmopedia-khanacademy-subset
+#
+# This downloads HuggingFaceTB/cosmopedia (config khanacademy), keeps only entries >= 512 tokens,
+# shuffles (seed 42), and writes a 50/50 train.json/test.json split -- the same recipe as the WBC
+# paper's own data prep (github.com/Stry233/WBC, `dataset/prep.py`), ported here so this repo has
+# no external, GPU-pinned dependency.
+#
+# Verified end-to-end on real HPU hardware with this config's epochs/learning_rate (see train.epochs'
+# and train.learning_rate's comments below) + wbc_audit.yaml's window_lengths/aggregation/n_bootstrap_samples:
+#   WBC: AUC 0.8578  TPR@0%FPR 0.0001  TPR@0.01%FPR 0.0001  TPR@0.1%FPR 0.0377  TPR@1%FPR 0.1746  TPR@10%FPR 0.5813
+#   bootstrap (100 resamples): AUC 0.8576 [0.8532, 0.8620]  TPR@0.01%FPR 0.0030 [0.0000, 0.0239]
+#     TPR@0.1%FPR 0.0355 [0.0137, 0.0572]  TPR@1%FPR 0.1740 [0.1591, 0.1923]  TPR@10%FPR 0.5812 [0.5664, 0.5958]
+#
+# NOT covered here, needs infrastructure beyond this repo:
+#   - multi-GPU / DeepSpeed (the paper's "2 HPU cards", `deepspeed_config`) -- this trains on exactly
+#     one device (LEAKPRO_DEVICE env var). Effective batch size is batch_size * gradient_accumulation_steps
+#     on that one device, not `* num_cards`.
+#   - wandb tracking (`run_name`/`wandb_project`/`wandb_group`) -- no experiment-tracking integration
+#     exists here; training progress prints per-epoch to stdout only.
+run:
+  random_seed: 42   # matches this WBC reference config
+  log_dir: ./target_pythia_{finetune_method}   # full | lora write to separate dirs, matching ../ez-mia's
+                                                # target_{finetune_method} convention -- does not conflict
+
+train:
+  # Other models the WBC paper evaluates (untested here -- see issue #463): other Pythia sizes
+  # (EleutherAI/pythia-{160m,410m,1.4b,2.8b,6.9b}), gpt2, EleutherAI/gpt-j-6b, meta-llama/Llama-3.2-3B.
+  # Mamba-1.4b (state-spaces/mamba-1.4b-hf) is also in the paper but NEEDS A COMPATIBILITY CHECK
+  # first: it's not attention-based, so whether CausalLMModel's attention_mask handling is even valid for
+  # it is unverified. Changing this also needs `lora.target_modules` below (if finetune_method: lora) and
+  # wbc_audit.yaml's `references[].pretrained_name_or_path` updated to match.
+  model_name: EleutherAI/pythia-2.8b
+  dtype: bfloat16                  # bf16: True, fp16: False
+  finetune_method: full
+  epochs: 10                        # paper (§5.1/Appendix C): 3; reference repo's config generator
+                                    # (trainer/configs/prep.py): 10 -- verified on real HPU hardware
+                                    # to reproduce the paper's results with this value
+  batch_size: 8                    # per-step batch that fits one HPU card at this length/dtype
+  gradient_accumulation_steps: 2   # effective batch = 16 on this one device
+  warmup_steps: 500
+  eval_strategy: epoch             # held-out eval after every epoch (test.json doubles as the paper's "val")
+  save_strategy: epoch             # checkpoint after every epoch, under log_dir/ckpts/checkpoint-<step>
+  save_total_limit: 1
+  learning_rate: 1.0e-5              # paper (§5.1/Appendix C): 5e-5; reference repo's config generator: 1e-5 --
+                                    # verified on real HPU hardware to reproduce the paper's results with this value
+  weight_decay: 0.1
+  lora:                            # only read when finetune_method: lora (prepare_target.py:171's
+                                    # `train_cfg["lora"] if finetune_method == "lora" else None` never
+                                    # even accesses this key otherwise) -- inert while finetune_method: full
+                                    # above; kept as a ready-to-use template if you switch to lora.
+    r: 32       # matches the reference repo's trainer/README.md example exactly (not a deviation) --
+    alpha: 64   # untested here regardless, no LoRA run has been done on this example yet
+    dropout: 0.05
+    # Pythia/GPT-NeoX module name. The reference codebase's own trainer default is ["q_proj", "v_proj"],
+    # which doesn't apply here -- GPT-NeoX fuses Q/K/V into one "query_key_value" projection, it has no
+    # separate q_proj/v_proj to target. Other architectures need their own list -- e.g. Llama-family
+    # (Llama-3.2): [q_proj, k_proj, v_proj, o_proj]; GPT-2: [c_attn, c_proj, c_fc]; GPT-J: [q_proj, v_proj, k_proj, out_proj].
+    target_modules: ["query_key_value"]
+
+data:
+  # This example uses HuggingFaceTB/cosmopedia's khanacademy config. Other WBC paper dataset configs
+  # (untested here -- see issue #463), all valid --config values for prepare_json_subset.py against the
+  # same HuggingFaceTB/cosmopedia dataset: stanford, stories, web_samples_v2, auto_math_text, wikihow.
+  source: local
+  train_path: ./cosmopedia-khanacademy-subset/train.json
+  test_path: ./cosmopedia-khanacademy-subset/test.json
+  text_field: text   # adjust to match your JSON's actual key (see json_dataset.load_json_texts)
+  max_length: 512    # tokenizer.max_length
+  data_path: ./data/pythia_cosmopedia_khanacademy_512.pkl

@@ -31,15 +31,18 @@ class AbstractMIA(AbstractAttack):
     This serves as a guideline for implementing a metric to be used for measuring the privacy leakage of a target model.
     """
 
-    # Class attributes for sharing between the different attacks
-    population = None
-    population_size = None
-    target_model = None
-    audit_dataset = None
-    handler = None
     _initialized = False
 
     AttackConfig: type[BaseModel]  # Subclasses must define an attack config
+
+    # Auxiliary-model requirements. AttackFactoryMIA reads these off the *class* before
+    # instantiating it and only builds the ShadowModelHandler / DistillationModelHandler
+    # singletons when they are True. Building them is not free: ModelHandler.__init__ hashes
+    # the full target state dict and caches a dense forward pass over the audit set, which is
+    # prohibitive for large models. Attacks that train nothing (e.g. the LLM reference-model
+    # attacks) set both to False. The default keeps every existing attack unchanged.
+    requires_shadow_models: bool = True
+    requires_distillation_models: bool = True
 
     def __init__(
         self:Self,
@@ -57,11 +60,16 @@ class AbstractMIA(AbstractAttack):
         if not isinstance(self.configs, BaseModel):
             raise TypeError(f"{self.__class__.__name__}.configs must be a subclass of Pydantic's BaseModel.")
 
-        # These objects are shared and should be initialized only once
-        AbstractMIA.population = handler.population
-        AbstractMIA.population_size = handler.population_size
-        AbstractMIA.target_model = PytorchModel(handler.target_model, handler.get_criterion())
-        AbstractMIA.audit_dataset = {
+        # Everything the attack reads from the handler is stored on the *instance*. Assigning to
+        # ``AbstractMIA.<name>`` here (as this code once did) replaces the property object of the same
+        # name on the class with a plain value, after which every attack in the process — including
+        # ones built on another handler — reads whichever value was written last.
+        self._handler = handler
+        self._population = handler.population
+        self._population_size = handler.population_size
+        # Attacks in one run may wrap the same target differently (PytorchModel vs CausalLMModel).
+        self._target_model = self._wrap_target_model(handler)
+        self._audit_dataset = {
             # Assuming train_indices and test_indices are arrays of indices, not the actual data
             "data": np.concatenate((handler.train_indices, handler.test_indices)),
             # in_members will be an array from 0 to the number of training indices - 1
@@ -69,7 +77,6 @@ class AbstractMIA(AbstractAttack):
             # out_members will start after the last training index and go up to the number of test indices - 1
             "out_members": np.arange(len(handler.train_indices),len(handler.train_indices)+len(handler.test_indices)),
         }
-        AbstractMIA.handler = handler
         self._validate_shared_quantities()
 
         # These objects are instance specific
@@ -78,9 +85,21 @@ class AbstractMIA(AbstractAttack):
         # Create an ID for the attack based on config + target model
         self._hash_attack()
 
+    @staticmethod
+    def _wrap_target_model(handler: AbstractInputHandler) -> PytorchModel:
+        """Wrap the handler's raw target module in the signal-extractor interface.
+
+        Subclasses whose target is not a classifier (e.g. a causal language model) override this
+        to return a different :class:`leakpro.signals.signal_extractor.Model` implementation.
+        """
+        return PytorchModel(handler.target_model, handler.get_criterion())
+
     def _hash_attack(self:Self)->None:
-        """Hash the attack based on the config and target model."""
-        self.attack_id = hash_attack(self.configs.model_dump(), AbstractMIA.handler.target_model)
+        """Hash the attack based on the config and target model.
+
+        Overridable: subclasses auditing very large models may substitute a cheaper fingerprint.
+        """
+        self.attack_id = hash_attack(self.configs.model_dump(), self.handler.target_model)
 
     @classmethod
     def get_default_attack_config(cls) -> BaseModel:
@@ -99,21 +118,21 @@ class AbstractMIA(AbstractAttack):
 
     def _validate_shared_quantities(self:Self)->None:
         """Validate the shared quantities used by the attack."""
-        if AbstractMIA.population is None:
+        if self._population is None:
             raise ValueError("Population dataset not found.")
-        if AbstractMIA.population_size is None:
+        if self._population_size is None:
             raise ValueError("Population size not found.")
-        if AbstractMIA.population_size != len(AbstractMIA.population):
+        if self._population_size != len(self._population):
             raise ValueError("Population size does not match the population dataset.")
-        if len(AbstractMIA.audit_dataset["in_members"]) == 0:
+        if len(self._audit_dataset["in_members"]) == 0:
             raise ValueError("Train indices must be provided.")
-        if len(AbstractMIA.audit_dataset["out_members"]) == 0:
+        if len(self._audit_dataset["out_members"]) == 0:
             raise ValueError("Test indices must be provided.")
-        if AbstractMIA.target_model is None:
+        if self._target_model is None:
             raise ValueError("Target model not found.")
-        if AbstractMIA.audit_dataset is None:
+        if self._audit_dataset is None:
             raise ValueError("Audit dataset not found.")
-        if len(AbstractMIA.audit_dataset["data"]) > AbstractMIA.population_size:
+        if len(self._audit_dataset["data"]) > self._population_size:
             raise ValueError("Audit dataset is larger than the entire population dataset.")
 
     def sample_indices_from_population(
@@ -134,7 +153,7 @@ class AbstractMIA(AbstractAttack):
             np.ndarray: The selected attack data indices.
 
         """
-        all_index = np.arange(AbstractMIA.population_size)
+        all_index = np.arange(self._population_size)
 
         not_allowed_indices = np.array([])
         if not include_train_indices:
@@ -295,7 +314,7 @@ class AbstractMIA(AbstractAttack):
         List: The population used for the attack.
 
         """
-        return AbstractMIA.population
+        return self._population
 
     @property
     def population_size(self:Self)-> int:
@@ -306,7 +325,12 @@ class AbstractMIA(AbstractAttack):
         int: The size of the population used for the attack.
 
         """
-        return AbstractMIA.population_size
+        return self._population_size
+
+    @property
+    def handler(self:Self) -> AbstractInputHandler:
+        """Get the input handler this attack was built on."""
+        return self._handler
 
     @property
     def target_model(self:Self)-> Union[Self, List[Self] ]:
@@ -317,7 +341,7 @@ class AbstractMIA(AbstractAttack):
         Union[Self, List[Self]]: The target model used for the attack.
 
         """
-        return AbstractMIA.target_model
+        return self._target_model
 
     @property
     def audit_dataset(self:Self)-> Self:
@@ -328,7 +352,21 @@ class AbstractMIA(AbstractAttack):
         Self: The audit dataset used for the attack.
 
         """
-        return AbstractMIA.audit_dataset
+        return self._audit_dataset
+
+    @audit_dataset.setter
+    def audit_dataset(self:Self, value: dict)-> None:
+        """Set the audit dataset used for the attack.
+
+        Instance-only, unlike the class-attribute assignment this replaced: it never affects any
+        other attack instance.
+
+        Args:
+        ----
+            value (dict): The new audit dataset, keyed by "data", "in_members", "out_members".
+
+        """
+        self._audit_dataset = value
 
     @property
     def train_indices(self:Self)-> np.ndarray:
@@ -339,7 +377,7 @@ class AbstractMIA(AbstractAttack):
         np.ndarray: The training indices of the audit dataset.
 
         """
-        return AbstractMIA.audit_dataset["in_members"]
+        return self._audit_dataset["in_members"]
 
 
     @property
@@ -351,7 +389,7 @@ class AbstractMIA(AbstractAttack):
         np.ndarray: The test indices of the audit dataset.
 
         """
-        return AbstractMIA.audit_dataset["out_members"]
+        return self._audit_dataset["out_members"]
 
     @property
     def audit_size(self:Self)-> int:
@@ -362,7 +400,7 @@ class AbstractMIA(AbstractAttack):
         int: The size of the audit dataset.
 
         """
-        return len(AbstractMIA.audit_dataset["data"])
+        return len(self._audit_dataset["data"])
 
     @abstractmethod
     def description(self:Self) -> dict:
