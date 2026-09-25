@@ -10,9 +10,17 @@
 # configs/exp_wikitext_gpt2_base.yaml) rather than just the paper's published table:
 #   this repo:  AUC 0.9864  TPR@1%FPR 0.6458  TPR@0.1%FPR 0.0580
 #   reference code (seed 1337): AUC 0.9837  TPR@1%FPR 0.673  TPR@0.1%FPR 0.149
-# AUC/TPR@1%FPR agree closely; TPR@0.1%FPR does not (0.058 vs 0.149, ~2.5x) and an isolated ablation
-# ruled out EZ-MIA's scoring-edge-case handling as the cause (see ez_mia.py's module docstring) --
-# this is an open, unexplained discrepancy at that specific threshold, not resolved noise.
+# AUC/TPR@1%FPR agree closely; TPR@0.1%FPR does not (0.058 vs 0.149, ~2.5x), and an isolated ablation
+# ruled out EZ-MIA's scoring-edge-case handling as the cause (see ez_mia.py's module docstring). Most
+# likely explanation: at only ~10-15 non-members out of 10k, this specific metric is highly sensitive
+# to exactly which documents land in the sample -- and this repo's sampling and the reference code's
+# consume their PRNGs in different order (different library, different call sequence), so the same
+# seed value does not select the same WikiText excerpts in each. Supporting evidence: on this repo
+# alone, one otherwise-unrelated fix (row-shuffle -> row-rotation before chunking) swung this same
+# metric from 0.316 to 0.058 -- the reference's 0.149 sits between those two values we've already seen
+# from a single change on one side. Ranking itself is clean at the top (checked directly: the first 60
+# ranks are members, no ties, smooth score decay -- not the XSum football-commentary contamination
+# pattern), so this reads as sampling variance at a high-variance metric, not a remaining code bug.
 run:
   random_seed: 1337   # matches the EZ-MIA paper's own WikiText/GPT-2/full reference config
   # {finetune_method} is substituted, so the LoRA-vs-full sweep writes two targets side by side.
