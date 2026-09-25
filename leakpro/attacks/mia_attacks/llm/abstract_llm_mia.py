@@ -12,7 +12,9 @@ NumPy reduction they apply to per-token evidence. Everything else is here:
   training-time dataloader parameters cannot be trusted to yield ``(input_ids, mask)`` batches);
 * loading of frozen *reference* models — the pretrained base checkpoint, the target itself, or
   a re-initialised copy of the target — declared inside the attack's own config so that they
-  land in the attack hash and the result metadata.
+  land in the attack hash and the result metadata;
+* :func:`rank_top`, which turns "this sample must be classified as a member" edge cases into
+  finite scores that :meth:`MIAResult.from_full_scores` accepts.
 
 None of these attacks train anything, so they opt out of the shadow/distillation handlers.
 """
@@ -98,6 +100,51 @@ class TokenEvidenceSet:
     def ref(self: Self, i: int = 0) -> TokenEvidence:
         """Evidence for the ``i``-th reference model."""
         return self.references[i]
+
+
+def rank_top(scores: np.ndarray, force_top: np.ndarray, tiebreak: np.ndarray) -> np.ndarray:
+    """Return finite scores where forced rows sit strictly above every ordinary row.
+
+    Several attacks have configurations the paper says must be classified as members regardless of
+    the numeric score (EZ-MIA: ``N == 0`` or too few error positions). Those rows, and any row whose
+    score is ``+inf``, are placed above the highest ordinary score, ordered among themselves by
+    ``tiebreak`` (larger = higher). A ``-inf`` score is a legitimately *weakest* signal (e.g.
+    ``log(P/N)`` with ``P == 0``) and is placed just below the lowest ordinary score, so monotone
+    transforms of the same statistic keep the same ranking. ``nan`` outside the forced rows is a
+    caller bug and raises. All returned values are finite, which
+    :meth:`~leakpro.reporting.mia_result.MIAResult.from_full_scores` requires: its descending-sort
+    monotonicity assert fails on ``nan`` and on two or more ``inf`` values.
+
+    Args:
+    ----
+        scores: ``(N,)`` raw scores, higher = more likely member. May contain ±inf; nan only where forced.
+        force_top: ``(N,)`` bool, rows that must rank as members.
+        tiebreak: ``(N,)`` values ordering the forced rows among themselves.
+
+    Returns:
+    -------
+        ``(N,)`` float64 finite scores with the same ordering as ``scores`` on ordinary rows.
+
+    """
+    scores = np.asarray(scores, dtype=np.float64)
+    forced = np.asarray(force_top, dtype=bool) | np.isposinf(scores)
+    bottom = np.isneginf(scores) & ~forced
+    if np.isnan(scores[~forced]).any():
+        raise ValueError("rank_top: nan score in a row that is not forced to the top")
+    out = scores.copy()
+    ordinary = out[~forced & ~bottom]
+    if bottom.any():
+        out[bottom] = (ordinary.min() if ordinary.size else 0.0) - 1.0
+    if not forced.any():
+        return out
+    base = out[~forced].max() if (~forced).any() else 0.0
+    tb = np.asarray(tiebreak, dtype=np.float64)[forced]
+    tb = np.where(np.isfinite(tb), tb, 0.0)
+    order = np.argsort(tb, kind="stable")
+    ranks = np.empty(len(order), dtype=np.float64)
+    ranks[order] = np.arange(1, len(order) + 1, dtype=np.float64) / len(order)
+    out[forced] = base + 1.0 + ranks
+    return out
 
 
 def gpt2_style_init_(module: nn.Module, std: float = 0.02) -> None:

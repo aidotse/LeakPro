@@ -11,46 +11,42 @@ For a sequence ``x`` with per-token log-probs ``lp^T`` under the fine-tuned targ
 under a frozen pretrained reference (paper §3.3–3.4):
 
     delta_j = lp^T_j - lp^R_j
-    E       = { j : argmax_v p_T(v | x_<j) != x_j, j != 0 }  error positions (top-1), excluding the
-                                                              first prediction (one token of context)
+    E       = { j : argmax_v p_T(v | x_<j) != x_j }        error positions (top-1)
     P       = sum_{j in E} max(delta_j, 0)                  probability mass moved *up* by fine-tuning
     N       = sum_{j in E} |min(delta_j, 0)|                mass moved *down*
     EZ(x)   = P / N                                         higher = member
 
-Edge cases: the paper's appendix (E.5 / E.6) says a sequence with ``N == 0`` (all movement upward) or
-no error positions is the strongest possible member signal and should rank as a member. This module
-does not do that -- it scores both cases, and any sequence with fewer than 2 error positions, as a
-plain ``0.0`` (low/neutral, not an automatic top rank), and always excludes position 0 from ``E``
-(``ignore_bos``, one token of left context is too little to trust).
+Edge cases (paper appendix E.5 / E.6): a sequence with ``N == 0`` (all movement upward), or fewer than
+``min_error_positions`` error positions, is treated as the strongest possible member signal and ranked
+above every ordinary score via :func:`~leakpro.attacks.mia_attacks.llm.abstract_llm_mia.rank_top` --
+not scored ``0.0``. For an audit tool, scoring an actually-memorised sequence as a non-member is the
+worse failure mode, so ambiguous cases default to "member". ``min_error_positions`` (default 2) and
+``ignore_first_position`` (default True, one token of left context is too little to trust) are
+:class:`EZMIAConfig` fields, not hard-coded, so a run under either choice is reproducible from its
+config alone.
 
-This behaviour is independently re-derived here, not copied from any external source (the paper's own
-released code, github.com/JetBrains-Research/ez-mia, ships no license file, so nothing from it is
-ported -- it was read only to understand the discrepancy below). It was adopted because the appendix's
-own rule does not reproduce the paper's results: implementing E.5/E.6 literally lands noticeably above
-the paper's published numbers, and this repo's actual output was cross-checked end to end against a
-real, independently run instance of that reference code (same seed, same model, same dataset) on both
-WikiText and XSum -- AUC/TPR now land within normal single-seed variance of that run rather than
-consistently above it. The exact discrepancies between the appendix text and what reproduces the paper
-(N == 0 and <2-error-position handling, and dropping position 0, which the appendix never mentions) are
-what this module implements; see `run_attack`'s log line for how many sequences hit them on a given audit.
+The paper's own released code (github.com/JetBrains-Research/ez-mia, read for comparison only --
+nothing is ported from it, and it ships no license file) instead scores both edge cases as a plain
+``0.0``. An isolated ablation (same trained target and population, only the scoring rule swapped)
+found this makes almost no practical difference: on both WikiText and XSum, zero sequences in a
+20,000-sequence audit ever hit ``N == 0`` or fewer than 2 error positions, and the two rules' AUC/TPR
+agreed to within single-seed noise. The large gap this repo previously (dead02b5) attributed to this
+choice was actually caused by two unrelated fixes landing in the same commit (a disjoint validation
+split for checkpoint selection, and `prepare_target.py`'s `prefix` chunking mode) -- not by this one.
 """
 
 import warnings
-from typing import Literal
+from typing import Literal, NamedTuple
 
 import numpy as np
 from pydantic import ConfigDict, Field
 
-from leakpro.attacks.mia_attacks.llm.abstract_llm_mia import AbstractLLMMIA, LLMAttackConfig
+from leakpro.attacks.mia_attacks.llm.abstract_llm_mia import AbstractLLMMIA, LLMAttackConfig, rank_top
 from leakpro.reporting.mia_result import MIAResult
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
 Aggregation = Literal["ratio", "log_ratio", "positive_fraction", "difference", "mean_delta", "median_delta"]
-
-# Reference repo's `min_tokens` default (mia/ez_score.py): fewer error positions than this and the
-# ratio is not trusted, regardless of aggregation.
-MIN_ERROR_POSITIONS = 2
 
 
 class EZMIAConfig(LLMAttackConfig):
@@ -62,11 +58,30 @@ class EZMIAConfig(LLMAttackConfig):
     """
 
     aggregation: Aggregation = Field(default="ratio", description="How P and N (or delta on E) become a score")
+    min_error_positions: int = Field(default=2, ge=0,
+        description="Rows with fewer error positions than this cannot support a trustworthy ratio and "
+                    "are ranked as members (paper appendix E.5), same as N == 0 (appendix E.6).")
+    ignore_first_position: bool = Field(default=True,
+        description="Exclude position 0 from the error-position set E -- one token of left context is "
+                    "too little to trust. The paper's appendix never mentions this either way.")
 
     model_config = ConfigDict(extra="forbid")
 
 
-def ez_scores(delta: np.ndarray, error: np.ndarray, aggregation: str) -> np.ndarray:
+class EZScores(NamedTuple):
+    """``ez_scores``'s return value: the finite scores plus which rows were forced to the top."""
+
+    scores: np.ndarray
+    forced: np.ndarray
+
+
+def ez_scores(
+    delta: np.ndarray,
+    error: np.ndarray,
+    aggregation: str,
+    min_error_positions: int = 2,
+    ignore_first_position: bool = True,
+) -> EZScores:
     """Compute EZ-MIA scores from per-token deltas and the error-position mask.
 
     Args:
@@ -74,28 +89,29 @@ def ez_scores(delta: np.ndarray, error: np.ndarray, aggregation: str) -> np.ndar
         delta: ``(N, T)`` ``lp^T - lp^R``; values outside ``error`` are ignored.
         error: ``(N, T)`` bool, True at error positions (already restricted to valid tokens).
         aggregation: One of :data:`Aggregation`.
+        min_error_positions: Rows with fewer error positions than this are forced to the top (see
+            :class:`EZMIAConfig`).
+        ignore_first_position: If True, position 0 is never counted as an error position.
 
     Returns:
     -------
-        ``(N,)`` finite scores, higher = member. Position 0 of every row is excluded from ``E``
-        (``ignore_bos``, matching the reference implementation). Rows with fewer than
-        :data:`MIN_ERROR_POSITIONS` error positions, or ``N == 0``, score ``0.0`` -- not forced to
-        the top: the paper's own reference code treats these as too little evidence to trust, not
-        as a guaranteed member signal.
+        :class:`EZScores`: ``scores`` are ``(N,)`` finite, higher = member; ``forced`` is ``(N,)``
+        bool, True where ``N == 0`` or fewer than ``min_error_positions`` error positions forced that
+        row to rank as a member (paper appendix E.5 / E.6) rather than reflecting an ordinary ratio.
 
     """
     error = error.copy()
-    if error.shape[1] > 0:
-        error[:, 0] = False  # ignore_bos: the first prediction has only one token of left context
+    if ignore_first_position and error.shape[1] > 0:
+        error[:, 0] = False
 
     sel = np.where(error, delta, 0.0)
     P = np.clip(sel, 0.0, None).sum(axis=1)  # noqa: N806
     N = np.abs(np.clip(sel, None, 0.0)).sum(axis=1)  # noqa: N806
     n_err = error.sum(axis=1)
-    degenerate = (n_err < MIN_ERROR_POSITIONS) | (N == 0)
+    forced = (n_err < min_error_positions) | (N == 0)
 
     with np.errstate(divide="ignore", invalid="ignore"), warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)  # degenerate rows are overwritten below regardless
+        warnings.simplefilter("ignore", RuntimeWarning)  # forced rows are re-ranked by rank_top below regardless
         if aggregation == "ratio":
             raw = P / N
         elif aggregation == "log_ratio":
@@ -111,17 +127,7 @@ def ez_scores(delta: np.ndarray, error: np.ndarray, aggregation: str) -> np.ndar
         else:
             raise ValueError(f"Unknown EZ-MIA aggregation: {aggregation}")
 
-    raw = np.asarray(raw, dtype=np.float64)
-    raw[degenerate] = 0.0
-
-    # log_ratio can still legitimately be -inf on an ordinary row (P == 0, N > 0, enough error
-    # positions) -- log(P/N) with P == 0. That is a real, weakest-signal score, not degenerate; place
-    # every such row just below the lowest ordinary score, preserving ties between them.
-    neg_inf = np.isneginf(raw)
-    if neg_inf.any():
-        finite = raw[~neg_inf]
-        raw[neg_inf] = (finite.min() - 1.0) if finite.size else -1.0
-    return raw
+    return EZScores(scores=rank_top(raw, force_top=forced, tiebreak=P), forced=forced)
 
 
 class AttackEZMIA(AbstractLLMMIA):
@@ -139,11 +145,11 @@ class AttackEZMIA(AbstractLLMMIA):
                        "imbalance of log-probability shifts at the tokens the target mispredicts.",
             "detailed": "For each audited sequence: (1) compute per-token log-probabilities under the fine-tuned "
                         "target and a frozen pretrained reference (two forward passes, no training); (2) keep only "
-                        "error positions after the first token, where the target's top-1 prediction is wrong; "
-                        "(3) split the target-minus-reference shifts there into upward mass P and downward mass N; "
-                        "(4) score P/N — memorisation pushes the true token up even where the model still fails, so "
-                        "members show P >> N. Sequences with fewer than 2 error positions, or N = 0, score 0.0 "
-                        "(too little evidence to trust), matching the paper's own released reference code.",
+                        "error positions, where the target's top-1 prediction is wrong; (3) split the target-minus-"
+                        "reference shifts there into upward mass P and downward mass N; (4) score P/N — memorisation "
+                        "pushes the true token up even where the model still fails, so members show P >> N. "
+                        "Sequences with fewer than min_error_positions error positions, or N = 0, are ranked as "
+                        "members (paper appendix E.5/E.6) rather than scored on an untrustworthy ratio.",
         }
 
     def prepare_attack(self: Self) -> None:
@@ -158,18 +164,16 @@ class AttackEZMIA(AbstractLLMMIA):
         target, reference = self.evidence_set.target, self.evidence_set.ref(0)
         delta = target.logprob - reference.logprob
         error = (target.argmax != target.token_ids) & target.mask
-        scores = ez_scores(delta, error, self.configs.aggregation)
+        scores, forced = ez_scores(
+            delta, error, self.configs.aggregation,
+            min_error_positions=self.configs.min_error_positions,
+            ignore_first_position=self.configs.ignore_first_position,
+        )
 
-        error_no_bos = error.copy()
-        if error_no_bos.shape[1] > 0:
-            error_no_bos[:, 0] = False
-        sel = np.where(error_no_bos, delta, 0.0)
-        n_degenerate = int((
-            (error_no_bos.sum(1) < MIN_ERROR_POSITIONS) | (np.abs(np.clip(sel, None, 0.0)).sum(1) == 0)
-        ).sum())
-        if n_degenerate:
-            logger.info(f"EZ-MIA: {n_degenerate}/{len(scores)} sequences had fewer than {MIN_ERROR_POSITIONS} error "
-                        "positions or N = 0; scored 0.0")
+        n_forced = int(forced.sum())
+        if n_forced:
+            logger.info(f"EZ-MIA: {n_forced}/{len(scores)} sequences had fewer than "
+                        f"{self.configs.min_error_positions} error positions or N = 0; ranked as members")
 
         result = MIAResult.from_full_scores(
             true_membership=self._audit_labels,

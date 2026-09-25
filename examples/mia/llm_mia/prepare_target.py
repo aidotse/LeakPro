@@ -44,8 +44,11 @@ def _load_texts(cfg: dict) -> list:
 def _tokenise(texts: list, tokenizer, cfg: dict) -> list:
     """Return a list of 1-D int64 arrays.
 
-    Three ``chunking`` modes, matching the EZ-MIA paper's own reference code exactly -- it uses a
-    different one per dataset, not the same one everywhere:
+    Three ``chunking`` modes, following the EZ-MIA paper's own reference code's recipe -- it uses a
+    different one per dataset, not the same one everywhere. Both ``fixed`` and ``prefix`` follow that
+    recipe rather than reproducing it byte-for-byte: the reference counts whitespace-split *words* to
+    decide chunk boundaries and only BPE-truncates afterwards (``models.py``'s ``_collate_text``),
+    while this counts BPE tokens directly throughout -- same recipe, not identical sequences.
 
     - ``fixed``: concatenate every text into one continuous token stream and slice it into
       back-to-back max_length chunks, carrying overflow from one text into the next. A single long
