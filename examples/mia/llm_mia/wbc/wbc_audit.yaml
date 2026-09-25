@@ -34,7 +34,7 @@ target:
   # Matches train_config.yaml's run.log_dir/data.data_path (prepare_target.py output).
   # If you instead used import_external_target.py, point these at whatever --out-dir/--data-path
   # you passed it there.
-  target_folder: ./pythia-2.8b-pretrained-cosmopedia-khanacademy-2hpucards-1
+  target_folder: ./target_pythia_full   # use run_audit.py --target ./target_pythia_lora to audit the LoRA target instead
   data_path: ./data/pythia_cosmopedia_khanacademy_512.pkl
 
 shadow_model:

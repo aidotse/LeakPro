@@ -200,14 +200,10 @@ examples/mia/llm_mia/wbc/cosmopedia-khanacademy-subset
 # Ignore outputs
 leakpro_output
 leakpro_output_*
-examples/mia/llm_mia/ez-mia/target_full/
-examples/mia/llm_mia/ez-mia/target_lora/
-examples/mia/llm_mia/ez-mia/target_xsum_full/
-examples/mia/llm_mia/ez-mia/target_xsum_lora/
-examples/mia/llm_mia/wbc/target_pythia_external/
-examples/mia/llm_mia/wbc/pythia-2.8b-pretrained-cosmopedia-khanacademy-2hpucards-1/
-# NOTE: wbc/train_config.yaml's `run.log_dir` can be changed to any name; if you do, add its
-# new directory name here too, or your fine-tuned model weights risk being `git add`ed by accident.
+# Every `target_*` output directory under an llm_mia example (train_config.yaml's `run.log_dir`,
+# always target_<name>, and import_external_target.py's target_pythia_external) -- one pattern
+# covers ez-mia/ and wbc/ both, and any future one, with no NOTE needed to keep in sync.
+examples/mia/llm_mia/*/target_*/
 *.pth
 *.png
 nohup.out

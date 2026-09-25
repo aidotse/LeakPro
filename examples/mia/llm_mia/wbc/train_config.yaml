@@ -36,7 +36,8 @@
 #     exists here; training progress prints per-epoch to stdout only.
 run:
   random_seed: 42   # matches this WBC reference config
-  log_dir: ./pythia-2.8b-pretrained-cosmopedia-khanacademy-2hpucards-1   # matches the paper's own output_dir name
+  log_dir: ./target_pythia_{finetune_method}   # full | lora write to separate dirs, matching ../ez-mia's
+                                                # target_{finetune_method} convention -- does not conflict
 
 train:
   # Other models the WBC paper evaluates (untested here -- see issue #463): other Pythia sizes
