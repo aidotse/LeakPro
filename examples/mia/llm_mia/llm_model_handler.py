@@ -141,7 +141,13 @@ class LLMModelHandler(AbstractInputHandler, role="model"):
                              target_modules=self.lora["target_modules"], task_type="CAUSAL_LM")
             model.model = get_peft_model(model.model, cfg)
             # The optimizer was built over the base parameters; rebuild it over the trainable adapter ones.
-            optimizer = type(optimizer)((p for p in model.parameters() if p.requires_grad), **optimizer.defaults)
+            # Only lr/weight_decay are ever set explicitly (see prepare_target.py) -- splatting the rest of
+            # `.defaults` is fragile: some torch versions' AdamW.defaults includes keys (e.g.
+            # decoupled_weight_decay) that its own __init__ does not accept as a kwarg.
+            optimizer = type(optimizer)(
+                (p for p in model.parameters() if p.requires_grad),
+                lr=optimizer.defaults["lr"], weight_decay=optimizer.defaults["weight_decay"],
+            )
 
         n_batches = len(dataloader)
         steps_per_epoch = -(-n_batches // gradient_accumulation_steps)  # ceil div

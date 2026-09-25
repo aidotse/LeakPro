@@ -55,9 +55,10 @@ train:
     r: 16
     alpha: 32
     dropout: 0.05
-    # GPT-2/GPT-NeoX-family module names. Other architectures need their own list -- e.g. Llama-family
+    # Matches the reference repo's own GPT-2 LoRA config exactly (configs/exp_xsum_gpt2_lora.yaml) --
+    # attention only, not the MLP's c_fc. Other architectures need their own list -- e.g. Llama-family
     # (Llama-2/3, Mistral): [q_proj, k_proj, v_proj, o_proj]; GPT-J: [q_proj, v_proj, k_proj, out_proj].
-    target_modules: [c_attn, c_proj, c_fc]
+    target_modules: [c_attn, c_proj]
 
 data:
   # Full repo id; newer `datasets` no longer resolves the bare name. Other datasets the EZ-MIA paper
