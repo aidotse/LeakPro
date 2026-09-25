@@ -14,7 +14,7 @@
 #   full fine-tune -- this repo: AUC 0.9955  TPR@1%FPR 0.9024  TPR@0.1%FPR 0.5504
 #                     reference code (seed 1337): AUC 0.9930  TPR@1%FPR 0.829  TPR@0.1%FPR 0.356
 #   LoRA (finetune_method: lora) -- this repo: AUC 0.5797  TPR@1%FPR 0.0223  TPR@0.1%FPR 0.0027
-#        paper's published table (Table 2): AUC 0.553  TPR@1%FPR 1.5%  TPR@0.1%FPR 0.1%
+#        paper's published table (Table 2): AUC 0.553  TPR@1%FPR 0.015  TPR@0.1%FPR 0.001
 # LoRA's own signal is weak (near-random at these stringent thresholds per the paper too), so absolute
 # counts are tiny and noisy there; both AUC and TPR@1%FPR land close to the paper's numbers.
 run:
