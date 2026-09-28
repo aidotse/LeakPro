@@ -1,0 +1,81 @@
+##
+## Copyright 2023-2026 Lindholmen Science Park AB
+## SPDX-License-Identifier: Apache-2.0
+##
+# Target preparation for the LLM MIA example (prepare_target.py). Defaults reproduce the EZ-MIA
+# paper's WikiText / GPT-2 / full fine-tuning setting (arXiv:2601.12104, §4 and appendix A).
+#
+# Verified end-to-end with this config + audit.yaml, and cross-checked against an independently run
+# instance of the paper's own released code (github.com/JetBrains-Research/ez-mia, same seed 1337,
+# configs/exp_wikitext_gpt2_base.yaml) rather than just the paper's published table:
+#   this repo:  AUC 0.9864  TPR@1%FPR 0.6458  TPR@0.1%FPR 0.0580
+#   reference code (seed 1337): AUC 0.9837  TPR@1%FPR 0.673  TPR@0.1%FPR 0.149
+# AUC/TPR@1%FPR agree closely; TPR@0.1%FPR does not (0.058 vs 0.149, ~2.5x), and an isolated ablation
+# ruled out EZ-MIA's scoring-edge-case handling as the cause (see ez_mia.py's module docstring). Most
+# likely explanation: at only ~10-15 non-members out of 10k, this specific metric is highly sensitive
+# to exactly which documents land in the sample -- and this repo's sampling and the reference code's
+# consume their PRNGs in different order (different library, different call sequence), so the same
+# seed value does not select the same WikiText excerpts in each. Supporting evidence: on this repo
+# alone, one otherwise-unrelated fix (row-shuffle -> row-rotation before chunking) swung this same
+# metric from 0.316 to 0.058 -- the reference's 0.149 sits between those two values we've already seen
+# from a single change on one side. Ranking itself is clean at the top (checked directly: the first 60
+# ranks are members, no ties, smooth score decay -- not the XSum football-commentary contamination
+# pattern), so this reads as sampling variance at a high-variance metric, not a remaining code bug.
+run:
+  random_seed: 1337   # matches the EZ-MIA paper's own WikiText/GPT-2/full reference config
+  # {finetune_method} is substituted, so the LoRA-vs-full sweep writes two targets side by side.
+  log_dir: ./target_{finetune_method}
+
+train:
+  # HF hub id; GPT-2 (124M) is fully fine-tuned in the paper, larger models use LoRA. Other models the
+  # EZ-MIA paper evaluates (untested here -- see issue #463): EleutherAI/gpt-j-6b, meta-llama/Llama-2-7b-hf
+  # (LoRA r=16/alpha=32), bigcode/stable-code-3b; also distilgpt2, google/gemma-3-1b,
+  # deepseek-ai/DeepSeek-R1-Distill-Llama-8B, Qwen/Qwen3-14B. Changing this also needs `lora.target_modules`
+  # below (if finetune_method: lora) and audit.yaml's `references[].pretrained_name_or_path` updated to match.
+  model_name: gpt2
+  dtype: float32
+  finetune_method: full       # full | lora   (override with --finetune-method)
+  epochs: 3
+  batch_size: 16
+  gradient_accumulation_steps: 1   # raise for big models (GPT-J-6B, Llama) to keep this effective batch
+                                    # size at a smaller per-step memory cost: batch_size 4 x steps 4 == 16
+  learning_rate: 1.0e-4
+  weight_decay: 0.0
+  eval_strategy: epoch             # held-out eval after every epoch (non-member split doubles as the
+                                    # paper's own validation set, same reuse ../wbc/'s config makes)
+  save_strategy: epoch             # checkpoint after every epoch, under log_dir/ckpts/checkpoint-<step>
+  save_total_limit: 1
+  load_best_checkpoint_at_end: true  # paper appendix A.2: selects the checkpoint with the lowest
+                                      # validation loss "to mitigate overfitting artifacts that could
+                                      # confound membership signals" -- without this, the target is the
+                                      # last epoch's weights, which are more overfit and make the attack
+                                      # look stronger than the paper's own numbers for reasons that have
+                                      # nothing to do with the attack itself.
+  lora:                       # used only when finetune_method == lora (paper: r=16, alpha=32, dropout=0.05)
+    r: 16
+    alpha: 32
+    dropout: 0.05
+    # Matches the reference repo's own GPT-2 LoRA config exactly (configs/exp_xsum_gpt2_lora.yaml) --
+    # attention only, not the MLP's c_fc. Other architectures need their own list -- e.g. Llama-family
+    # (Llama-2/3, Mistral): [q_proj, k_proj, v_proj, o_proj]; GPT-J: [q_proj, v_proj, k_proj, out_proj].
+    target_modules: [c_attn, c_proj]
+
+data:
+  # Full repo id; newer `datasets` no longer resolves the bare name. Other datasets the EZ-MIA paper
+  # evaluates (untested here -- see issue #463): ag_news, EdinburghNLP/xsum; also enron_emails, pubmed,
+  # allenai/c4 (mC4-German config). Each needs its own `hf_config`/`text_field` below to match.
+  hf_dataset: Salesforce/wikitext
+  hf_config: wikitext-103-raw-v1
+  split: train
+  text_field: text
+  chunking: fixed             # concatenate and cut into max_length-token chunks, matching the reference
+                              # code's WikiText path specifically (see _tokenise's docstring for why this
+                              # differs from ../ez-mia's `prefix` for XSum) | other modes: prefix, variable
+  max_length: 128
+  n_sequences: 20500          # population size; members + non-members + validation must fit inside it
+  n_members: 10000
+  n_nonmembers: 10000
+  n_validation: 500           # disjoint from n_members/n_nonmembers -- used only for load_best_checkpoint_at_end's
+                              # epoch selection, never scored. Matches the paper's own reference code (which draws
+                              # a genuinely separate 500-sequence validation pool, not the audit non-members).
+  data_path: ./data/wikitext_gpt2_128.pkl

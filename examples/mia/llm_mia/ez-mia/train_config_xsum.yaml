@@ -1,0 +1,62 @@
+##
+## Copyright 2023-2026 Lindholmen Science Park AB
+## SPDX-License-Identifier: Apache-2.0
+##
+# Target preparation for the LLM MIA example (prepare_target.py). Reproduces the EZ-MIA paper's
+# XSum / GPT-2 / full fine-tuning setting -- the exact row the paper's Table 2 (0.993 AUC, 82.6%
+# TPR@1%FPR, 33.1% TPR@0.1%FPR) reports, distinct from train_config_ez-mia.yaml's WikiText row
+# (arXiv:2601.12104, Table 1/6). Same train.* hyperparameters as WikiText: Table 5 uses one fixed
+# recipe (epochs/LR/batch) across every dataset, only the data changes.
+#
+# Verified end-to-end with this config + audit_xsum.yaml, full fine-tuning cross-checked against an
+# independently run instance of the paper's own released code (github.com/JetBrains-Research/ez-mia,
+# same seed 1337, configs/exp_xsum_gpt2_base.yaml) rather than just the paper's published table:
+#   full fine-tune -- this repo: AUC 0.9955  TPR@1%FPR 0.9024  TPR@0.1%FPR 0.5504
+#                     reference code (seed 1337): AUC 0.9930  TPR@1%FPR 0.829  TPR@0.1%FPR 0.356
+#   LoRA (finetune_method: lora) -- this repo: AUC 0.5797  TPR@1%FPR 0.0223  TPR@0.1%FPR 0.0027
+#        paper's published table (Table 2): AUC 0.553  TPR@1%FPR 0.015  TPR@0.1%FPR 0.001
+# LoRA's own signal is weak (near-random at these stringent thresholds per the paper too), so absolute
+# counts are tiny and noisy there; both AUC and TPR@1%FPR land close to the paper's numbers.
+run:
+  random_seed: 1337
+  log_dir: ./target_xsum_{finetune_method}   # separate from target_{finetune_method} (WikiText) -- does not conflict
+
+train:
+  model_name: gpt2
+  dtype: float32
+  finetune_method: lora       # full | lora   (override with --finetune-method)
+  epochs: 3
+  batch_size: 16
+  gradient_accumulation_steps: 1
+  learning_rate: 1.0e-4
+  weight_decay: 0.0
+  eval_strategy: epoch
+  save_strategy: epoch
+  save_total_limit: 1
+  load_best_checkpoint_at_end: true  # see train_config_ez-mia.yaml's comment for why (paper appendix A.2)
+  lora:
+    r: 16
+    alpha: 32
+    dropout: 0.05
+    target_modules: [c_attn, c_proj]  # matches the reference's configs/exp_xsum_gpt2_lora.yaml exactly --
+                                      # attention only, not the MLP's c_fc
+
+data:
+  # EdinburghNLP/xsum: BBC news articles + one-sentence summaries. `document` is the article body --
+  # the paper fine-tunes on article text, not the summary. Single default config, no hf_config needed.
+  hf_dataset: EdinburghNLP/xsum
+  split: train
+  text_field: document
+  chunking: prefix            # one chunk per document (first 128 tokens, rest discarded) -- matches the
+                              # reference code's XSum/ag_news path, NOT its WikiText path (which concatenates
+                              # and slices continuously instead -- see train_config_ez-mia.yaml/prepare_target.py's
+                              # _tokenise docstring). Long documents (e.g. football live-text commentary) would
+                              # otherwise be sliced into many chunks and disproportionately dominate fine-tuning.
+  max_length: 128
+  n_sequences: 20500          # population size; members + non-members + validation must fit inside it
+  n_members: 10000
+  n_nonmembers: 10000
+  n_validation: 500           # disjoint from n_members/n_nonmembers -- used only for load_best_checkpoint_at_end's
+                              # epoch selection, never scored. Matches the paper's own reference code (which draws
+                              # a genuinely separate 500-sequence validation pool, not the audit non-members).
+  data_path: ./data/xsum_gpt2_128.pkl   # separate from wikitext_gpt2_128.pkl -- does not conflict
