@@ -58,6 +58,10 @@ train:
   eval_strategy: epoch             # held-out eval after every epoch (test.json doubles as the paper's "val")
   save_strategy: epoch             # checkpoint after every epoch, under log_dir/ckpts/checkpoint-<step>
   save_total_limit: 1
+  load_best_checkpoint_at_end: true  # paper appendix A.2 (EZ-MIA)/§4 (WBC): select the lowest-validation-loss
+                                      # checkpoint rather than always the last epoch's -- this key was dropped
+                                      # from this file at some point; restored, since both the full and LoRA
+                                      # runs need it to avoid an artificially overfit target.
   learning_rate: 1.0e-5              # paper (§5.1/Appendix C): 5e-5; reference repo's config generator: 1e-5 --
                                     # verified on real HPU hardware to reproduce the paper's results with this value
   weight_decay: 0.1

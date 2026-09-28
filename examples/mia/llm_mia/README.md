@@ -53,11 +53,13 @@ python prepare_json_subset.py \
 ```bash
 cd wbc
 python ../prepare_target.py --config train_config.yaml
+# python ../prepare_target.py --config train_config.yaml --finetune-method lora   # to fine-tune with LoRA instead
 ```
 
 **3. Run the audit:**
 ```bash
 python ../run_audit.py --audit wbc_audit.yaml
+# python ../run_audit.py --audit wbc_audit.yaml --target ./target_pythia_lora   # to audit the LoRA target instead
 ```
 Results land in `./leakpro_output_wbc_pythia/`.
 
