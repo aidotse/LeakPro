@@ -10,7 +10,6 @@ from leakpro.attacks.extraction_attacks.abstract_extraction import AbstractExtra
 from leakpro.attacks.extraction_attacks.carlini import AttackCarliniExtraction
 from leakpro.attacks.extraction_attacks.side import AttackSIDEExtraction
 from leakpro.attacks.extraction_attacks.utils_generative import (
-    extraction_audit_hash,
     normalize_conditions,
     require_authorized,
 )
@@ -43,7 +42,7 @@ class AttackFactoryExtraction:
             requested_devices.append(config.compute_device)
         if "auto" in requested_devices:
             device = get_device()
-            if device.type not in {"cpu", "cuda"}:
+            if device.type not in {"cpu", "cuda", "hpu", "mps"}:
                 raise ValueError(f"Unsupported extraction device type: {device.type!r}.")
         return config
 
@@ -65,7 +64,8 @@ class AttackFactoryExtraction:
             target_hash = handler.configs.target.hash
         if target_hash is None:
             raise ValueError("Extraction requires a target hash from the input handler or audit.yaml.")
-        audit_hash = extraction_audit_hash(target_hash, reference_images=reference_images)
+        if not target_hash.strip():
+            raise ValueError("Extraction target hash must not be empty.")
         if name == "carlini_diffusion":
             if not isinstance(config, AttackCarliniExtraction.AttackConfig):
                 raise RuntimeError("Carlini configuration dispatch failed.")
@@ -73,7 +73,7 @@ class AttackFactoryExtraction:
             return AttackCarliniExtraction(
                 handler.get_diffusion_adapter(),
                 config,
-                audit_hash=audit_hash,
+                audit_hash=target_hash,
                 conditions=conditions,
                 reference_images=reference_images,
             )
@@ -87,7 +87,7 @@ class AttackFactoryExtraction:
                 handler.get_diffusion_adapter(),
                 feature_extractor,
                 config,
-                audit_hash=audit_hash,
+                audit_hash=target_hash,
                 reference_images=reference_images,
                 feature_transform=handler.get_side_feature_transform(),
                 classifier_factory=handler.get_side_classifier_factory(),

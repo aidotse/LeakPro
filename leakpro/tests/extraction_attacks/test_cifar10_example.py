@@ -28,6 +28,13 @@ from examples.extraction.cifar10.cifar10_model import (
 from leakpro.utils.save_load import hash_model
 
 
+def test_example_accepts_detected_hpu_and_explicit_mps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pass the selected accelerator to the backend without a device block."""
+    monkeypatch.setattr(cifar10_model, "get_device", lambda: torch.device("hpu"))
+    assert cifar10_model.select_device("auto") == torch.device("hpu")
+    assert cifar10_model.select_device("mps") == torch.device("mps")
+
+
 def _test_train_config() -> TrainConfig:
     return TrainConfig(
         seed=7,
@@ -232,6 +239,8 @@ def test_training_loss_matches_the_published_hybrid_objective() -> None:
 
 def test_microbatches_preserve_the_effective_batch_update(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Uneven microbatches and a partial final batch must retain sample weights."""
+    marked_devices: list[str] = []
+    monkeypatch.setattr(cifar10_model, "mark_step", lambda device: marked_devices.append(device.type))
     monkeypatch.setattr(cifar10_model, "create_target_model", lambda _train, device: _TinyLearnedVarianceModel().to(device))
     train = replace(_test_train_config(), train_size=130, train_batch_size=128, microbatch=128)
     generator = torch.Generator().manual_seed(8)
@@ -244,6 +253,7 @@ def test_microbatches_preserve_the_effective_batch_update(tmp_path: Path, monkey
 
     torch.testing.assert_close(torch.tensor(full_losses), torch.tensor(accumulated_losses))
     torch.testing.assert_close(full.output_scale, accumulated.output_scale)
+    assert marked_devices == ["cpu"] * 8
 
 
 def test_train_then_reload_preserves_the_target_checkpoint(tmp_path: Path) -> None:

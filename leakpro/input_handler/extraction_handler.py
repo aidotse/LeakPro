@@ -48,6 +48,14 @@ class ExtractionHandler:
         """Load reference images once per audit, including absent references."""
         return self._reference_images
 
+    @cached_property
+    def _target_hash(self) -> str | None:
+        return self._get_provider().get_extraction_target_hash()
+
+    def get_extraction_target_hash(self) -> str | None:
+        """Compute the target identity once per audit."""
+        return self._target_hash
+
     def __getattr__(self, name: str) -> object:
         """Lazily bind only methods declared by the extraction provider contract."""
         if name not in self.__dict__.get("_provider_methods", set()):

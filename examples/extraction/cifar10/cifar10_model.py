@@ -28,7 +28,7 @@ from tqdm.auto import tqdm
 
 from leakpro.attacks.extraction_attacks.adapters import CallableDiffusionAdapter
 from leakpro.attacks.extraction_attacks.protocols import ConditionGradient, FeatureTransform
-from leakpro.utils.device import get_device
+from leakpro.utils.device import get_device, mark_step
 from leakpro.utils.seed import seed_everything
 
 
@@ -78,8 +78,8 @@ CHECKPOINT_EVERY_EPOCHS = 100
 def select_device(requested: str = "auto") -> torch.device:
     """Resolve the device name from ``train_config.yaml``."""
     device = get_device() if requested == "auto" else torch.device(requested)
-    if device.type not in ("cpu", "cuda"):
-        raise ValueError("The official Improved DDPM backend supports CPU and CUDA; use CPU on a Mac.")
+    if device.type not in ("cpu", "cuda", "hpu", "mps"):
+        raise ValueError("The CIFAR-10 example requires CPU, CUDA, HPU, or MPS.")
     return device
 
 
@@ -190,6 +190,7 @@ class GaussianDiffusion:
                 predicted_clean = guided_clean
             previous_alpha = float(self.sampler.alphas_cumprod_prev[index])
             images = math.sqrt(previous_alpha) * predicted_clean + math.sqrt(1.0 - previous_alpha) * predicted_noise
+            mark_step(self.device)
         return images.clamp(-1.0, 1.0).detach()
 
 
@@ -270,8 +271,10 @@ def _train_epoch(
             # Weight the final short microbatch by its image count.
             (losses.sum() / batch_count).backward()
             loss_sum += float(losses.detach().sum())
+        mark_step(device)
         optimizer.step()
         _update_ema(ema_model, model, decay=train.ema_decay)
+        mark_step(device)
         image_count += batch_count
     return loss_sum / image_count
 

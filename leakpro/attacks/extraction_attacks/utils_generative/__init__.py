@@ -6,11 +6,10 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import math
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from importlib import import_module
 from typing import Any, Literal
 
 import numpy as np
@@ -24,10 +23,13 @@ from tqdm.auto import tqdm
 # previous state so one attack does not change another attack's samples.
 @contextmanager
 def seeded_torch_rng(device: torch.device, seed: int) -> Iterator[None]:
-    """Seed CPU and selected CUDA, then restore their RNG states."""
+    """Seed CPU and the selected accelerator, then restore their RNG states."""
     cpu_state = torch.random.get_rng_state()
     accelerator_state: Tensor | None = None
     accelerator_index: int | None = None
+    hpu_random = import_module("habana_frameworks.torch.hpu.random") if device.type == "hpu" else None
+    hpu_states = hpu_random.get_rng_state_all() if hpu_random is not None else None
+    mps_state = torch.mps.get_rng_state(device) if device.type == "mps" else None
     if device.type == "cuda":
         accelerator_index = device.index if device.index is not None else torch.cuda.current_device()
         accelerator_state = torch.cuda.get_rng_state(accelerator_index)
@@ -38,11 +40,19 @@ def seeded_torch_rng(device: torch.device, seed: int) -> Iterator[None]:
                 raise RuntimeError("CUDA RNG device was not resolved.")
             with torch.cuda.device(accelerator_index):
                 torch.cuda.manual_seed(seed)
+        if hpu_random is not None:
+            hpu_random.manual_seed_all(seed)
+        if mps_state is not None:
+            torch.mps.manual_seed(seed)
         yield
     finally:
         torch.random.set_rng_state(cpu_state)
         if device.type == "cuda" and accelerator_state is not None and accelerator_index is not None:
             torch.cuda.set_rng_state(accelerator_state, accelerator_index)
+        if hpu_random is not None and hpu_states is not None:
+            hpu_random.set_rng_state_all(hpu_states)
+        if mps_state is not None:
+            torch.mps.set_rng_state(mps_state, device)
 
 
 def require_authorized(authorized_audit: bool) -> None:
@@ -127,37 +137,6 @@ def normalize_conditions(conditions: Sequence[Any] | None) -> list[Any] | None:
     if isinstance(conditions, (str, bytes, bytearray, memoryview, Mapping)) or not isinstance(conditions, Sequence):
         raise TypeError("Extraction conditions must be an ordered sequence of prompts or labels.")
     return list(conditions)
-
-
-def extraction_audit_hash(
-    target_hash: str,
-    *,
-    reference_images: Tensor | None,
-) -> str:
-    """Hash target identity and attack inputs without persisting their contents."""
-    if not target_hash.strip():
-        raise ValueError("target hash must not be empty.")
-    digest = hashlib.sha256()
-
-    def update(tag: str, payload: bytes) -> None:
-        digest.update(tag.encode("ascii"))
-        digest.update(len(payload).to_bytes(8, "big"))
-        digest.update(payload)
-
-    update("target", target_hash.encode("utf-8"))
-    if reference_images is None:
-        update("references", b"none")
-    else:
-        metadata = json.dumps(
-            {"dtype": str(reference_images.dtype), "shape": list(reference_images.shape)},
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("ascii")
-        update("reference_metadata", metadata)
-        for start, end in batch_ranges(reference_images.shape[0], 16):
-            block = reference_images[start:end].detach().to(device="cpu").contiguous().view(torch.uint8)
-            update(f"reference_block:{start}", block.numpy().tobytes())
-    return digest.hexdigest()
 
 
 def json_safe(value: object) -> object:

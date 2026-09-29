@@ -84,7 +84,7 @@ class AttackCarliniExtraction(AbstractExtraction):
         image_range: Literal["zero_one", "minus_one_one"] = "zero_one"
         generation_batch_size: int = Field(default=64, ge=1)
         distance_block_size: int = Field(default=64, ge=1)
-        distance_device: str = Field(default="cpu", pattern=r"^(auto|cpu|cuda(?::[0-9]+)?)$")
+        distance_device: str = Field(default="cpu", pattern=r"^(auto|cpu|(?:cuda|hpu|mps)(?::[0-9]+)?)$")
         mode: Literal["conditional_black_box", "unconditional_reference_audit"] = "conditional_black_box"
         num_generations_per_condition: int = Field(default=500, ge=2)
         num_unconditional_generations: int = Field(default=1_000_000, ge=1)
@@ -169,8 +169,8 @@ class AttackCarliniExtraction(AbstractExtraction):
     def _prepare_attack(self) -> None:  # noqa: C901 - preparation checks must precede target sampling
         """Validate authorization, model surface, conditions, and reference data."""
         require_authorized(self.config.authorized_audit)
-        if self.config.distance_device == "auto" and get_device().type not in {"cpu", "cuda"}:
-            raise ValueError("Automatic extraction distance device must be CPU or CUDA.")
+        if self.config.distance_device == "auto" and get_device().type not in {"cpu", "cuda", "hpu", "mps"}:
+            raise ValueError("Automatic extraction distance device must be CPU, CUDA, HPU, or MPS.")
         if (
             not isinstance(self.adapter, ExtractionAdapter)
             or not callable(getattr(self.adapter, "sample", None))

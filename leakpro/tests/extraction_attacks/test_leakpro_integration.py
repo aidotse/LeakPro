@@ -18,6 +18,7 @@ from torch import nn
 from examples.extraction.cifar10.cifar10_handler import CIFAR10ExtractionHandler
 from leakpro import AbstractExtractionInputHandler, LeakPro
 from leakpro.attacks.extraction_attacks.adapters import CallableDiffusionAdapter
+from leakpro.attacks.extraction_attacks.attack_factory_extraction import AttackFactoryExtraction
 from leakpro.schemas import ExtractionTargetConfig, LeakProConfig, TargetConfig
 
 
@@ -208,6 +209,64 @@ def test_extraction_attack_seed_inherits_audit_seed_unless_overridden(
     assert overridden.result_id != inherited.result_id
 
 
+def test_two_attacks_reuse_provider_inputs_without_hashing_references(tmp_path: Path) -> None:
+    """Construct both attacks with one target identity and no reference digest."""
+    calls = {"adapter": 0, "references": 0, "target_hash": 0}
+
+    class CountingProvider(SIDEProvider):
+        def get_diffusion_adapter(self) -> CallableDiffusionAdapter:
+            calls["adapter"] += 1
+            return super().get_diffusion_adapter()
+
+        def get_extraction_reference_images(self) -> torch.Tensor:
+            calls["references"] += 1
+            return super().get_extraction_reference_images()
+
+        def get_extraction_target_hash(self) -> str:
+            calls["target_hash"] += 1
+            return "counted-target"
+
+    config_path = Path(_write_config(tmp_path, "side", {"authorized_audit": True}))
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["audit"]["attack_list"].insert(
+        0,
+        {
+            "attack": "carlini_diffusion",
+            "authorized_audit": True,
+            "mode": "unconditional_reference_audit",
+            "reference_neighbors": 2,
+        },
+    )
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    attacks = LeakPro(CountingProvider, str(config_path)).attack_scheduler.attacks
+
+    assert len(attacks) == 2
+    assert calls == {"adapter": 1, "references": 1, "target_hash": 1}
+    assert all(attack.audit_hash == "counted-target" for attack in attacks)
+
+
+@pytest.mark.parametrize("device_type", ["hpu", "mps"])
+def test_accelerators_are_accepted_as_extraction_devices(
+    monkeypatch: pytest.MonkeyPatch, device_type: str,
+) -> None:
+    """Accept accelerator selection before a backend operation is attempted."""
+    monkeypatch.setattr(
+        "leakpro.attacks.extraction_attacks.attack_factory_extraction.get_device",
+        lambda: torch.device(device_type),
+    )
+    for attack_name in ("carlini_diffusion", "side"):
+        config = AttackFactoryExtraction.validate_config(
+            attack_name,
+            {"authorized_audit": True, "distance_device": "auto"},
+        )
+        assert config.distance_device == "auto"
+    assert AttackFactoryExtraction.validate_config(
+        "side",
+        {"authorized_audit": True, "compute_device": device_type, "distance_device": device_type},
+    ).compute_device == device_type
+
+
 def test_cifar10_result_id_tracks_model_and_sampling_without_editing_yaml(tmp_path: Path) -> None:
     class ExampleProvider(CIFAR10ExtractionHandler):
         pass
@@ -307,7 +366,9 @@ def test_carlini_public_path_persists_trace(tmp_path: Any) -> None:
     assert (tmp_path / "output" / "results" / second.id / "result.json").exists()
 
 
-def test_side_public_path_records_training_and_guidance(tmp_path: Any) -> None:
+def test_side_public_path_records_training_and_guidance(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    marked_devices: list[str] = []
+    monkeypatch.setattr("leakpro.attacks.extraction_attacks.side.mark_step", lambda device: marked_devices.append(device.type))
     config_path = _write_config(
         tmp_path,
         "side",
@@ -329,6 +390,7 @@ def test_side_public_path_records_training_and_guidance(tmp_path: Any) -> None:
     )
 
     result = LeakPro(SIDEProvider, config_path).run_audit()[0]
+    assert marked_devices == ["cpu"] * 4
     phases = [event["phase"] for event in result.execution_trace]
 
     assert phases == [

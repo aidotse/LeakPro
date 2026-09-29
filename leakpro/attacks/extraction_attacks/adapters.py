@@ -107,7 +107,7 @@ class OpenAIDiffusionAdapter(ExtractionAdapter[Tensor]):
         self.diffusion = diffusion
         self.image_shape = image_shape
         self.device = get_device() if device == "auto" else torch.device(device)
-        if self.device.type not in {"cpu", "cuda"}:
+        if self.device.type not in {"cpu", "cuda", "hpu", "mps"}:
             raise ValueError(f"Unsupported extraction device type: {self.device.type!r}.")
         self.condition_encoder = condition_encoder
         self.base_model_kwargs = dict(base_model_kwargs or {})

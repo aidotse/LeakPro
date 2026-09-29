@@ -44,7 +44,7 @@ from leakpro.attacks.extraction_attacks.utils_generative.image_metrics import (
 )
 from leakpro.attacks.extraction_attacks.utils_generative.side_classifier import TimeConditionedResNet
 from leakpro.reporting.extraction_result import CandidateRecord, ExtractionResult
-from leakpro.utils.device import get_device
+from leakpro.utils.device import get_device, mark_step
 from leakpro.utils.import_helper import Self
 from leakpro.utils.save_load import hash_config
 
@@ -87,8 +87,8 @@ class AttackSIDEExtraction(AbstractExtraction):
         image_range: Literal["zero_one", "minus_one_one"] = "zero_one"
         generation_batch_size: int = Field(default=64, ge=1)
         distance_block_size: int = Field(default=64, ge=1)
-        distance_device: str = Field(default="cpu", pattern=r"^(auto|cpu|cuda(?::[0-9]+)?)$")
-        compute_device: str = Field(default="auto", pattern=r"^(auto|cpu|cuda(?::[0-9]+)?)$")
+        distance_device: str = Field(default="cpu", pattern=r"^(auto|cpu|(?:cuda|hpu|mps)(?::[0-9]+)?)$")
+        compute_device: str = Field(default="auto", pattern=r"^(auto|cpu|(?:cuda|hpu|mps)(?::[0-9]+)?)$")
         synthetic_samples: int = Field(default=10_000, ge=2)
         synthetic_batch_size: int = Field(default=64, ge=1)
         clusters: int = Field(default=100, ge=2)
@@ -149,7 +149,7 @@ class AttackSIDEExtraction(AbstractExtraction):
         self.result_id = f"side-extraction-{result_hash}"
         self.attack_id = self.result_id
         self.device = get_device() if self.config.compute_device == "auto" else torch.device(self.config.compute_device)
-        if self.device.type not in {"cpu", "cuda"}:
+        if self.device.type not in {"cpu", "cuda", "hpu", "mps"}:
             raise ValueError(f"Unsupported extraction device type: {self.device.type!r}.")
         self.synthetic_images_uint8: Tensor | None = None
         self.synthetic_labels: Tensor | None = None
@@ -241,8 +241,8 @@ class AttackSIDEExtraction(AbstractExtraction):
 
     def _validate_preparation_inputs(self) -> None:
         """Reject malformed white-box components before target sampling."""
-        if self.config.distance_device == "auto" and get_device().type not in {"cpu", "cuda"}:
-            raise ValueError("Automatic extraction distance device must be CPU or CUDA.")
+        if self.config.distance_device == "auto" and get_device().type not in {"cpu", "cuda", "hpu", "mps"}:
+            raise ValueError("Automatic extraction distance device must be CPU, CUDA, HPU, or MPS.")
         self._validate_adapter()
         if not isinstance(self.feature_extractor, nn.Module):
             raise TypeError("feature_extractor must be a torch.nn.Module.")
@@ -418,7 +418,9 @@ class AttackSIDEExtraction(AbstractExtraction):
                         raise RuntimeError("SIDE classifier training produced NaN or infinity.")
                     optimizer.zero_grad(set_to_none=True)
                     loss.backward()
+                    mark_step(self.device)
                     optimizer.step()
+                    mark_step(self.device)
                     loss_sum += float(loss.detach()) * clean.shape[0]
                     sample_count += clean.shape[0]
                     progress.set_postfix(epoch=f"{epoch + 1}/{self.config.classifier_epochs}",

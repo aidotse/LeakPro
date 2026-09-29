@@ -8,10 +8,60 @@ import pytest
 import torch
 from torch import nn
 
+from leakpro.attacks.extraction_attacks import utils_generative
 from leakpro.attacks.extraction_attacks.adapters import OpenAIDiffusionAdapter
 from leakpro.attacks.extraction_attacks.carlini import AttackCarliniExtraction
 from leakpro.attacks.extraction_attacks.protocols import ExtractionAdapter
 from leakpro.attacks.extraction_attacks.side import AttackSIDEExtraction
+
+
+def test_hpu_seed_context_restores_device_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Use the Habana RNG API when an HPU sampler requests a seed."""
+    class FakeHPURandom:
+        state = [torch.tensor([5], dtype=torch.uint8)]
+
+        def get_rng_state_all(self) -> list[torch.Tensor]:
+            return [value.clone() for value in self.state]
+
+        def manual_seed_all(self, seed: int) -> None:
+            self.state = [torch.tensor([seed], dtype=torch.uint8)]
+
+        def set_rng_state_all(self, states: list[torch.Tensor]) -> None:
+            self.state = states
+
+    fake_hpu = FakeHPURandom()
+    monkeypatch.setattr(utils_generative, "import_module", lambda _: fake_hpu)
+    cpu_state = torch.random.get_rng_state()
+
+    with utils_generative.seeded_torch_rng(torch.device("hpu"), 7):
+        assert fake_hpu.state[0].item() == 7
+        torch.rand(1)
+
+    assert fake_hpu.state[0].item() == 5
+    assert torch.equal(torch.random.get_rng_state(), cpu_state)
+
+
+def test_mps_seed_context_restores_device_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Preserve MPS random state around a seeded sampling call."""
+    mps_state = [torch.tensor([5], dtype=torch.uint8)]
+
+    def seed_mps(seed: int) -> None:
+        mps_state[0] = torch.tensor([seed], dtype=torch.uint8)
+
+    def restore_mps(state: torch.Tensor, _device: torch.device) -> None:
+        mps_state[0] = state
+
+    monkeypatch.setattr(torch.mps, "get_rng_state", lambda _device: mps_state[0].clone())
+    monkeypatch.setattr(torch.mps, "manual_seed", seed_mps)
+    monkeypatch.setattr(torch.mps, "set_rng_state", restore_mps)
+    cpu_state = torch.random.get_rng_state()
+
+    with utils_generative.seeded_torch_rng(torch.device("mps"), 7):
+        assert mps_state[0].item() == 7
+        torch.rand(1)
+
+    assert mps_state[0].item() == 5
+    assert torch.equal(torch.random.get_rng_state(), cpu_state)
 
 
 class DummyOpenAIDiffusion:
