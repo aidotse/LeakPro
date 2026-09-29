@@ -20,17 +20,17 @@ from torch import Tensor
 from tqdm.auto import tqdm
 
 
+# seed_everything changes process-wide RNG state; sampling must restore the
+# previous state so one attack does not change another attack's samples.
 @contextmanager
 def seeded_torch_rng(device: torch.device, seed: int) -> Iterator[None]:
-    """Seed CPU and one selected accelerator, then restore their RNG states."""
+    """Seed CPU and selected CUDA, then restore their RNG states."""
     cpu_state = torch.random.get_rng_state()
     accelerator_state: Tensor | None = None
     accelerator_index: int | None = None
     if device.type == "cuda":
         accelerator_index = device.index if device.index is not None else torch.cuda.current_device()
         accelerator_state = torch.cuda.get_rng_state(accelerator_index)
-    elif device.type == "mps":
-        accelerator_state = torch.mps.get_rng_state()
     try:
         torch.random.default_generator.manual_seed(seed)
         if device.type == "cuda":
@@ -38,15 +38,11 @@ def seeded_torch_rng(device: torch.device, seed: int) -> Iterator[None]:
                 raise RuntimeError("CUDA RNG device was not resolved.")
             with torch.cuda.device(accelerator_index):
                 torch.cuda.manual_seed(seed)
-        elif device.type == "mps":
-            torch.mps.manual_seed(seed)
         yield
     finally:
         torch.random.set_rng_state(cpu_state)
         if device.type == "cuda" and accelerator_state is not None and accelerator_index is not None:
             torch.cuda.set_rng_state(accelerator_state, accelerator_index)
-        elif device.type == "mps" and accelerator_state is not None:
-            torch.mps.set_rng_state(accelerator_state)
 
 
 def require_authorized(authorized_audit: bool) -> None:
@@ -55,38 +51,6 @@ def require_authorized(authorized_audit: bool) -> None:
         raise PermissionError(
             "authorized_audit must be true. Run extraction only on models and data you are authorized to audit."
         )
-
-
-def resolve_device(requested: str) -> torch.device:
-    """Resolve an explicit or automatic torch device."""
-    if requested == "auto":
-        if torch.cuda.is_available():
-            return torch.device("cuda")
-        if torch.backends.mps.is_available():
-            return torch.device("mps")
-        return torch.device("cpu")
-    try:
-        device = torch.device(requested)
-    except (RuntimeError, ValueError) as error:
-        raise ValueError(f"Invalid device string: {requested!r}.") from error
-    return _validate_explicit_device(device)
-
-
-def _validate_explicit_device(device: torch.device) -> torch.device:
-    """Reject unsupported or unavailable explicit extraction devices."""
-    if device.type not in {"cpu", "cuda", "mps"}:
-        raise ValueError(f"Unsupported extraction device type: {device.type!r}.")
-    if device.type == "cpu" and device.index is not None:
-        raise ValueError("CPU extraction devices must not include an index.")
-    if device.type == "cuda" and not torch.cuda.is_available():
-        raise ValueError("CUDA was requested but is unavailable.")
-    if device.type == "cuda" and device.index is not None and device.index >= torch.cuda.device_count():
-        raise ValueError(f"CUDA device index {device.index} is unavailable.")
-    if device.type == "mps" and not torch.backends.mps.is_available():
-        raise ValueError("MPS was requested but is unavailable.")
-    if device.type == "mps" and device.index not in {None, 0}:
-        raise ValueError(f"MPS device index {device.index} is unavailable.")
-    return device
 
 
 def validate_image_batch(
@@ -156,17 +120,6 @@ def progress_batches(total: int, batch_size: int, description: str) -> Iterator[
             progress.update(end - start)
 
 
-def condition_hash(condition: object) -> str:
-    """Return a non-reversible identifier for a condition without storing it."""
-    payload = json.dumps(
-        _canonical_condition(condition),
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
-
-
 def normalize_conditions(conditions: Sequence[Any] | None) -> list[Any] | None:
     """Copy an ordered condition collection without splitting scalar values."""
     if conditions is None:
@@ -176,81 +129,9 @@ def normalize_conditions(conditions: Sequence[Any] | None) -> list[Any] | None:
     return list(conditions)
 
 
-def _canonical_condition(value: object) -> object:
-    """Encode supported condition values without process-dependent representations."""
-    if isinstance(value, BaseModel):
-        model_name = f"{type(value).__module__}.{type(value).__qualname__}"
-        return {
-            "type": "model",
-            "model": model_name,
-            "value": _canonical_condition(value.model_dump(mode="json")),
-        }
-    if isinstance(value, Tensor):
-        return _canonical_tensor_condition(value)
-    if isinstance(value, np.ndarray):
-        return _canonical_array_condition(value)
-    if isinstance(value, dict):
-        if any(not isinstance(key, str) for key in value):
-            raise TypeError("Extraction condition dictionaries require string keys.")
-        return {"type": "dict", "value": {key: _canonical_condition(item) for key, item in value.items()}}
-    if isinstance(value, (list, tuple)):
-        container_type = "list" if isinstance(value, list) else "tuple"
-        return {"type": container_type, "value": [_canonical_condition(item) for item in value]}
-    return _canonical_scalar_condition(value)
-
-
-def _canonical_tensor_condition(value: Tensor) -> dict[str, object]:
-    """Encode a tensor using stable dtype, shape, and byte content."""
-    tensor = value.detach().to(device="cpu").contiguous()
-    if (tensor.is_floating_point() or tensor.is_complex()) and not torch.isfinite(tensor).all():
-        raise ValueError("Extraction conditions must not contain NaN or infinity.")
-    payload = tensor.reshape(-1).view(torch.uint8).numpy().tobytes().hex()
-    return {"type": "tensor", "dtype": str(tensor.dtype), "shape": list(tensor.shape), "bytes": payload}
-
-
-def _canonical_array_condition(value: np.ndarray) -> dict[str, object]:
-    """Encode a non-object NumPy array using stable metadata and bytes."""
-    if value.dtype.hasobject:
-        raise TypeError("Object arrays are not supported as extraction conditions.")
-    if np.issubdtype(value.dtype, np.number) and not np.isfinite(value).all():
-        raise ValueError("Extraction conditions must not contain NaN or infinity.")
-    contiguous = np.ascontiguousarray(value)
-    return {
-        "type": "ndarray",
-        "dtype": str(contiguous.dtype),
-        "shape": list(contiguous.shape),
-        "bytes": contiguous.tobytes().hex(),
-    }
-
-
-def _canonical_scalar_condition(value: object) -> dict[str, object]:
-    """Encode supported scalar condition types or reject the value."""
-    if isinstance(value, np.generic):
-        value = value.item()
-    if isinstance(value, bytes):
-        return {"type": "bytes", "value": value.hex()}
-    if value is None:
-        return {"type": "none"}
-    if isinstance(value, bool):
-        return {"type": "bool", "value": value}
-    if isinstance(value, int):
-        return {"type": "int", "value": value}
-    if isinstance(value, float):
-        if not math.isfinite(value):
-            raise ValueError("Extraction conditions must not contain NaN or infinity.")
-        return {"type": "float", "value": value}
-    if isinstance(value, str):
-        return {"type": "str", "value": value}
-    raise TypeError(
-        "Unsupported extraction condition type. Use strings, finite scalars, bytes, lists, tuples, string-keyed "
-        "dictionaries, Pydantic models, NumPy arrays, or torch tensors."
-    )
-
-
 def extraction_audit_hash(
     target_hash: str,
     *,
-    conditions: Sequence[Any] | None,
     reference_images: Tensor | None,
 ) -> str:
     """Hash target identity and attack inputs without persisting their contents."""
@@ -264,11 +145,6 @@ def extraction_audit_hash(
         digest.update(payload)
 
     update("target", target_hash.encode("utf-8"))
-    if conditions is None:
-        update("conditions", b"none")
-    else:
-        for index, condition in enumerate(conditions):
-            update(f"condition:{index}", condition_hash(condition).encode("ascii"))
     if reference_images is None:
         update("references", b"none")
     else:

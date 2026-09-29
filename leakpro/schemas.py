@@ -112,19 +112,17 @@ class ExtractionTargetConfig(BaseModel):
     """Minimal target metadata for a handler-owned diffusion stack."""
 
     name: str = Field(default="diffusion_target", description="Human-readable target identifier")
-    hash: str = Field(
-        ...,
+    hash: Optional[str] = Field(
+        default=None,
         min_length=1,
-        description=(
-            "Stable identifier for the checkpoint and provider implementation, including target-specific callbacks."
-        ),
+        description="Fallback identifier when the input handler cannot hash the target model.",
     )
 
     @field_validator("hash")
     @classmethod
-    def validate_hash(cls, value: str) -> str:
+    def validate_hash(cls, value: Optional[str]) -> Optional[str]:
         """Reject identifiers that contain no visible characters."""
-        if not value.strip():
+        if value is not None and not value.strip():
             raise ValueError("target hash must not be blank.")
         return value
 
@@ -176,7 +174,7 @@ class LeakProConfig(BaseModel):
         """Match classifier and extraction target schemas to their attack families."""
         is_extraction_target = isinstance(self.target, ExtractionTargetConfig)
         if self.audit.attack_type == "extraction" and not is_extraction_target:
-            raise ValueError("extraction audits require ExtractionTargetConfig with a target name and hash.")
+            raise ValueError("extraction audits require ExtractionTargetConfig.")
         if self.audit.attack_type != "extraction" and is_extraction_target:
             raise ValueError("non-extraction audits require the standard TargetConfig.")
         return self

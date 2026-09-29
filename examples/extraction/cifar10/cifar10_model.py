@@ -7,8 +7,6 @@
 from __future__ import annotations
 
 import copy
-import hashlib
-import json
 import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -233,17 +231,6 @@ def _save_checkpoint(path: Path, state: dict[str, Any]) -> None:
     temporary_path.replace(path)
 
 
-def _device_rng_state(device: torch.device) -> Tensor | None:
-    if device.type == "cuda":
-        return torch.cuda.get_rng_state(device)
-    return None
-
-
-def _restore_device_rng(device: torch.device, state: Tensor | None) -> None:
-    if device.type == "cuda":
-        torch.cuda.set_rng_state(state, device)
-
-
 def _train_epoch(
     model: nn.Module,
     ema_model: nn.Module,
@@ -347,10 +334,6 @@ def train_or_load_target(
         model.load_state_dict(resume["model"])
         ema_model.load_state_dict(resume["ema_model"])
         optimizer.load_state_dict(resume["optimizer"])
-        loader_generator.set_state(resume["loader_rng"])
-        noise_generator.set_state(resume["noise_rng"])
-        torch.set_rng_state(resume["torch_rng"])
-        _restore_device_rng(device, resume["device_rng"])
     progress = tqdm(range(len(epoch_losses), train.epochs), desc="DDPM training epochs",
                     initial=len(epoch_losses), total=train.epochs)
     for _epoch in progress:
@@ -365,10 +348,6 @@ def train_or_load_target(
                 "ema_model": ema_model.state_dict(),
                 "optimizer": optimizer.state_dict(),
                 "epoch_losses": epoch_losses,
-                "loader_rng": loader_generator.get_state(),
-                "noise_rng": noise_generator.get_state(),
-                "torch_rng": torch.get_rng_state(),
-                "device_rng": _device_rng_state(device),
             })
 
     model.load_state_dict(ema_model.state_dict())
@@ -436,39 +415,3 @@ def make_feature_extractor() -> tuple[nn.Module, FeatureTransform]:
     for parameter in extractor.parameters():
         parameter.requires_grad_(False)
     return extractor, ImageNetFeatureTransform()
-
-
-def sha256_file(path: Path) -> str:
-    """Return a checkpoint hash for the extraction result identity."""
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def sha256_tensor(tensor: Tensor) -> str:
-    """Hash tensor metadata and bytes in a device-independent representation."""
-    value = tensor.detach().cpu().contiguous()
-    digest = hashlib.sha256()
-    metadata = json.dumps({"dtype": str(value.dtype), "shape": list(value.shape)}, sort_keys=True).encode()
-    raw_value = value.numpy().tobytes()
-    digest.update(len(metadata).to_bytes(8, "big"))
-    digest.update(metadata)
-    digest.update(len(raw_value).to_bytes(8, "big"))
-    digest.update(raw_value)
-    return digest.hexdigest()
-
-
-def sha256_module_state(module: nn.Module) -> str:
-    """Hash the named tensors that determine a module's outputs."""
-    digest = hashlib.sha256()
-    for name, tensor in sorted(module.state_dict().items()):
-        value = tensor.detach().cpu().contiguous()
-        header = json.dumps({"name": name, "dtype": str(value.dtype), "shape": list(value.shape)}, sort_keys=True).encode()
-        raw_value = value.numpy().tobytes()
-        digest.update(len(header).to_bytes(8, "big"))
-        digest.update(header)
-        digest.update(len(raw_value).to_bytes(8, "big"))
-        digest.update(raw_value)
-    return digest.hexdigest()

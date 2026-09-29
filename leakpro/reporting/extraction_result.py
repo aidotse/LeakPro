@@ -60,7 +60,7 @@ class ExtractionResult:
         execution_trace: list[dict[str, Any]] | None = None,
         overwrite: bool = False,
     ) -> None:
-        if re.fullmatch(r"[A-Za-z0-9._-]+", result_id) is None:
+        if result_id in {".", ".."} or re.fullmatch(r"[A-Za-z0-9._-]+", result_id) is None:
             raise ValueError("result_id contains unsafe path characters.")
         if (images is None) == (samples is None):
             raise ValueError("Provide exactly one of images or samples.")
@@ -115,29 +115,37 @@ class ExtractionResult:
         output_root = Path(output_dir).resolve()
         results_dir = output_root / "results"
         result_dir = results_dir / self.id
-        data_dir = output_root / "data_objects"
-        data_path = data_dir / f"{self.id}.json"
         results_dir.mkdir(parents=True, exist_ok=True)
-        data_dir.mkdir(parents=True, exist_ok=True)
-        if not self.overwrite and (result_dir.exists() or data_path.exists()):
+        if not self.overwrite and result_dir.exists():
             raise FileExistsError(
                 f"Extraction result {self.id!r} already exists. Set overwrite_results=true to replace it."
             )
-        with tempfile.TemporaryDirectory(dir=output_root, prefix=f".{self.id}-") as temporary_dir:
+        with tempfile.TemporaryDirectory(dir=results_dir, prefix=f".{self.id}-") as temporary_dir:
             staging = Path(temporary_dir)
             staged_result = staging / "result"
             staged_result.mkdir()
             metadata = json.dumps(self.result, indent=2, sort_keys=True, allow_nan=False) + "\n"
             (staged_result / "result.json").write_text(metadata, encoding="utf-8")
             np.savez_compressed(staged_result / "candidates.npz", **{self._array_key: self.samples.numpy()})
-            staged_data = staging / "data.json"
-            staged_data.write_text(metadata, encoding="utf-8")
+            previous_result = results_dir / f"{staging.name}-previous"
             if result_dir.exists():
-                shutil.rmtree(result_dir)
+                if not self.overwrite:
+                    raise FileExistsError(
+                        f"Extraction result {self.id!r} already exists. Set overwrite_results=true to replace it."
+                    )
+                result_dir.rename(previous_result)
             try:
                 os.replace(staged_result, result_dir)
-                os.replace(staged_data, data_path)
-            except BaseException:
-                shutil.rmtree(result_dir, ignore_errors=True)
-                data_path.unlink(missing_ok=True)
+            except BaseException as error:
+                if result_dir.exists():
+                    if previous_result.exists():
+                        raise RuntimeError(
+                            f"Extraction result {self.id!r} was saved concurrently. "
+                            f"The previous result remains at {previous_result}."
+                        ) from error
+                    raise FileExistsError(f"Extraction result {self.id!r} was saved concurrently.") from error
+                if previous_result.exists():
+                    previous_result.rename(result_dir)
                 raise
+            if previous_result.exists():
+                shutil.rmtree(previous_result)

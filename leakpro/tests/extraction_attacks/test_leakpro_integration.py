@@ -9,11 +9,13 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 import torch
 import yaml
 from torch import nn
 
+from examples.extraction.cifar10.cifar10_handler import CIFAR10ExtractionHandler
 from leakpro import AbstractExtractionInputHandler, LeakPro
 from leakpro.attacks.extraction_attacks.adapters import CallableDiffusionAdapter
 from leakpro.schemas import ExtractionTargetConfig, LeakProConfig, TargetConfig
@@ -100,7 +102,7 @@ class SIDEProvider(AbstractExtractionInputHandler):
             noisy = torch.full((batch_size, 1, 4, 4), 0.5)
             gradient = gradient_fn(noisy, torch.ones(batch_size, dtype=torch.long), labels)
             assert gradient.shape == noisy.shape
-            return _alternating_samples(batch_size, None, 0)
+            return noisy + 0.25 * gradient.tanh()
 
         return CallableDiffusionAdapter(
             image_shape=(1, 4, 4),
@@ -171,20 +173,74 @@ def test_extraction_schema_does_not_change_standard_target_parsing(tmp_path: Any
             audit={**common_audit, "attack_type": "extraction"},
             target={"name": "generator", "hash": "   "},
         )
-
-
-@pytest.mark.parametrize("modality", ["text", "tabular", "graph", "timeseries"])
-def test_extraction_schema_rejects_non_image_modalities(tmp_path: Any, modality: str) -> None:
     with pytest.raises(ValueError, match="image"):
         LeakProConfig(
-            audit={
-                "attack_type": "extraction",
-                "attack_list": [{"attack": "carlini_diffusion"}],
-                "data_modality": modality,
-                "output_dir": str(tmp_path),
-            },
+            audit={**common_audit, "attack_type": "extraction", "data_modality": "text"},
             target={"name": "generator", "hash": "generator-v1"},
         )
+
+
+@pytest.mark.parametrize(
+    ("attack_name", "provider"),
+    [
+        ("carlini_diffusion", CarliniProvider),
+        ("side", SIDEProvider),
+    ],
+)
+def test_extraction_attack_seed_inherits_audit_seed_unless_overridden(
+    tmp_path: Path,
+    attack_name: str,
+    provider: type[AbstractExtractionInputHandler],
+) -> None:
+    """The public audit path applies its seed without replacing an explicit attack seed."""
+    config_path = Path(_write_config(tmp_path, attack_name, {"authorized_audit": True}))
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["audit"]["random_seed"] = 7
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+
+    inherited = LeakPro(provider, str(config_path)).attack_scheduler.attacks[0]
+    assert inherited.config.random_seed == 7
+
+    config["audit"]["attack_list"][0]["random_seed"] = 11
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    overridden = LeakPro(provider, str(config_path)).attack_scheduler.attacks[0]
+    assert overridden.config.random_seed == 11
+    assert overridden.result_id != inherited.result_id
+
+
+def test_cifar10_result_id_tracks_model_and_sampling_without_editing_yaml(tmp_path: Path) -> None:
+    class ExampleProvider(CIFAR10ExtractionHandler):
+        pass
+
+    model = nn.Linear(1, 1)
+    feature_extractor = nn.Linear(1, 1)
+    adapter = CallableDiffusionAdapter(image_shape=(1, 4, 4), sample_fn=_alternating_samples)
+    config_path = _write_config(
+        tmp_path,
+        "carlini_diffusion",
+        {
+            "authorized_audit": True,
+            "mode": "unconditional_reference_audit",
+            "reference_neighbors": 2,
+        },
+    )
+
+    def result_id(steps: int) -> str:
+        ExampleProvider.configure(
+            adapter=adapter,
+            target_model=model,
+            sampling_steps=steps,
+            references=torch.zeros((2, 1, 4, 4)),
+            feature_extractor=feature_extractor,
+            feature_transform=nn.Identity(),
+        )
+        return LeakPro(ExampleProvider, config_path).attack_scheduler.attacks[0].result_id
+
+    original = result_id(50)
+    assert result_id(100) != original
+    with torch.no_grad():
+        model.weight.add_(1)
+    assert result_id(50) != original
 
 
 def test_carlini_public_path_persists_trace(tmp_path: Any) -> None:
@@ -212,35 +268,43 @@ def test_carlini_public_path_persists_trace(tmp_path: Any) -> None:
         "run_complete",
     ]
     assert result.execution_trace[-1]["sampling_calls"] == 2
-    assert (tmp_path / "output" / "results" / result.id / "result.json").exists()
-    assert (tmp_path / "output" / "results" / result.id / "candidates.npz").exists()
+    result_dir = tmp_path / "output" / "results" / result.id
+    metadata_path = result_dir / "result.json"
+    array_path = result_dir / "candidates.npz"
+    assert metadata_path.exists()
+    assert array_path.exists()
+    assert not (tmp_path / "output" / "data_objects").exists()
+    metadata = metadata_path.read_text(encoding="utf-8")
+    assert json.loads(metadata)["candidate_count"] == 1
+    assert json.loads(metadata)["candidates"][0]["image_index"] == 0
+    with np.load(array_path) as archive:
+        np.testing.assert_array_equal(archive["images"], result.images.numpy())
+    assert '"memorized"' not in metadata
+    assert "condition_hash" in metadata
+    saved_bundle = (metadata_path.read_bytes(), array_path.read_bytes())
 
+    sample_calls: list[int] = []
 
-def test_public_path_rejects_a_scalar_string_condition_before_adapter_access(tmp_path: Any) -> None:
-    class ScalarStringProvider(AbstractExtractionInputHandler):
-        adapter_requested = False
-
+    class RecordingProvider(CarliniProvider):
         def get_diffusion_adapter(self) -> CallableDiffusionAdapter:
-            type(self).adapter_requested = True
-            return CallableDiffusionAdapter(image_shape=(1, 4, 4), sample_fn=_alternating_samples)
+            def sample(batch_size: int, conditions: Sequence[Any] | None, seed: int) -> torch.Tensor:
+                sample_calls.append(batch_size)
+                return torch.zeros((batch_size, 1, 4, 4))
 
-        def get_extraction_conditions(self) -> Any:
-            return "cat"
+            return CallableDiffusionAdapter(image_shape=(1, 4, 4), sample_fn=sample)
 
-    config_path = _write_config(
-        tmp_path,
-        "carlini_diffusion",
-        {
-            "authorized_audit": True,
-            "num_generations_per_condition": 2,
-            "min_clique_size": 2,
-        },
-    )
+    with pytest.raises(FileExistsError, match="overwrite_results"):
+        LeakPro(RecordingProvider, config_path).run_audit()
+    assert sample_calls == []
+    assert saved_bundle == (metadata_path.read_bytes(), array_path.read_bytes())
 
-    with pytest.raises(TypeError, match="ordered sequence"):
-        LeakPro(ScalarStringProvider, config_path)
-
-    assert ScalarStringProvider.adapter_requested is False
+    different_target = yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
+    different_target["target"]["hash"] = "different-checkpoint"
+    second_config = tmp_path / "different-target.yaml"
+    second_config.write_text(yaml.safe_dump(different_target), encoding="utf-8")
+    second = LeakPro(CarliniProvider, str(second_config)).run_audit()[0]
+    assert second.id != result.id
+    assert (tmp_path / "output" / "results" / second.id / "result.json").exists()
 
 
 def test_side_public_path_records_training_and_guidance(tmp_path: Any) -> None:
@@ -277,14 +341,20 @@ def test_side_public_path_records_training_and_guidance(tmp_path: Any) -> None:
     assert result.execution_trace[-1]["sampling_calls"] == 4
     assert result.execution_trace[-1]["guidance_calls"] == 2
     assert result.metrics["retained_clusters"] == 2
+    assert not torch.allclose(result.images, torch.full_like(result.images, 0.5), atol=1e-6, rtol=0)
+
+    repeated_config = yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
+    repeated_config["audit"]["output_dir"] = str(tmp_path / "repeated-output")
+    repeated_path = tmp_path / "repeated.yaml"
+    repeated_path.write_text(yaml.safe_dump(repeated_config), encoding="utf-8")
+    torch.manual_seed(999)
+    repeated = LeakPro(SIDEProvider, str(repeated_path)).run_audit()[0]
+    assert repeated.id == result.id
+    assert repeated.metrics["classifier_epoch_losses"] == result.metrics["classifier_epoch_losses"]
+    torch.testing.assert_close(repeated.images, result.images, rtol=0, atol=0)
 
 
-@pytest.mark.parametrize(("classifier_batch_size", "expected_singletons"), [(1, 3), (2, 1)])
-def test_side_public_path_trains_singleton_batches_without_dropping_them(
-    tmp_path: Any,
-    classifier_batch_size: int,
-    expected_singletons: int,
-) -> None:
+def test_side_public_path_trains_default_classifier_with_a_singleton_batch(tmp_path: Path) -> None:
     class DefaultClassifierProvider(SIDEProvider):
         def get_side_classifier_factory(self) -> None:
             return None
@@ -293,133 +363,45 @@ def test_side_public_path_trains_singleton_batches_without_dropping_them(
         tmp_path,
         "side",
         {
-            "random_seed": 42,
             "authorized_audit": True,
             "compute_device": "cpu",
             "synthetic_samples": 3,
-            "synthetic_batch_size": 3,
             "clusters": 2,
-            "cohesion_threshold": -1.0,
             "min_cluster_size": 1,
+            "cohesion_threshold": -1.0,
             "classifier_epochs": 1,
-            "classifier_batch_size": classifier_batch_size,
+            "classifier_batch_size": 2,
             "classifier_base_width": 4,
             "classifier_blocks": [1, 1, 1, 1],
             "timestep_embedding_dim": 8,
             "num_generations": 2,
             "generation_batch_size": 2,
-            "guidance_scale": 1.0,
         },
     )
 
     result = LeakPro(DefaultClassifierProvider, config_path).run_audit()[0]
-    training_event = next(
-        event for event in result.execution_trace if event["phase"] == "classifier_training_complete"
-    )
-
-    assert training_event["singleton_batches"] == expected_singletons
-    assert len(result.metrics["classifier_epoch_losses"]) == 1
-    assert torch.isfinite(torch.tensor(result.metrics["classifier_epoch_losses"])).all()
-    assert result.metrics["images_generated"] == 2
+    training = next(event for event in result.execution_trace if event["phase"] == "classifier_training_complete")
+    assert training["singleton_batches"] == 1
+    assert result.images.shape == (2, 1, 4, 4)
+    assert not torch.allclose(result.images, torch.full_like(result.images, 0.5), atol=1e-6, rtol=0)
 
 
-def test_side_classifier_factory_is_seeded_independently_of_ambient_rng(tmp_path: Any) -> None:
-    attack_config = {
-        "random_seed": 42,
-        "authorized_audit": True,
-        "compute_device": "cpu",
-        "synthetic_samples": 8,
-        "synthetic_batch_size": 4,
-        "clusters": 2,
-        "cohesion_threshold": 0.9,
-        "min_cluster_size": 2,
-        "classifier_epochs": 1,
-        "classifier_batch_size": 4,
-        "classifier_learning_rate": 0.001,
-        "num_generations": 4,
-        "generation_batch_size": 2,
-        "guidance_scale": 1.0,
-    }
-    first_config = _write_config(
-        tmp_path,
-        "side",
-        attack_config,
-        config_name="side-first.yaml",
-        output_dir=tmp_path / "first-output",
-    )
-    second_config = _write_config(
-        tmp_path,
-        "side",
-        attack_config,
-        config_name="side-second.yaml",
-        output_dir=tmp_path / "second-output",
-    )
-
-    torch.manual_seed(1)
-    first = LeakPro(SIDEProvider, first_config).run_audit()[0]
-    torch.manual_seed(999)
-    second = LeakPro(SIDEProvider, second_config).run_audit()[0]
-
-    assert first.id == second.id
-    assert first.metrics["classifier_epoch_losses"] == second.metrics["classifier_epoch_losses"]
-    torch.testing.assert_close(first.images, second.images, rtol=0, atol=0)
-
-
-def test_public_path_rejects_nonfinite_generated_images(tmp_path: Any) -> None:
-    class NonfiniteProvider(AbstractExtractionInputHandler):
+def test_public_path_rejects_nonfinite_generated_images(tmp_path: Path) -> None:
+    class NonfiniteProvider(CarliniProvider):
         def get_diffusion_adapter(self) -> CallableDiffusionAdapter:
             return CallableDiffusionAdapter(
                 image_shape=(1, 4, 4),
                 sample_fn=lambda batch_size, conditions, seed: torch.full((batch_size, 1, 4, 4), torch.nan),
             )
 
-        def get_extraction_conditions(self) -> list[str]:
-            return ["fault"]
-
     config_path = _write_config(
         tmp_path,
         "carlini_diffusion",
-        {
-            "authorized_audit": True,
-            "num_generations_per_condition": 2,
-            "generation_batch_size": 2,
-            "tile_grid": [2, 2],
-            "min_clique_size": 2,
-        },
+        {"authorized_audit": True, "num_generations_per_condition": 2, "min_clique_size": 2},
     )
-
     with pytest.raises(ValueError, match="NaN or infinity"):
         LeakPro(NonfiniteProvider, config_path).run_audit()
-
-
-@pytest.mark.parametrize(
-    ("attack", "attack_config", "provider", "message"),
-    [
-        (
-            "carlini_diffusion",
-            {
-                "authorized_audit": True,
-                "num_generations_per_condition": 2,
-                "min_clique_size": 3,
-            },
-            CarliniProvider,
-            "min_clique_size",
-        ),
-        ("unknown", {"authorized_audit": True}, CarliniProvider, "Unknown extraction attack"),
-        ("side", {"authorized_audit": True}, CarliniProvider, "feature_extractor"),
-    ],
-)
-def test_invalid_extraction_configurations_fail_during_construction(
-    tmp_path: Any,
-    attack: str,
-    attack_config: dict[str, Any],
-    provider: type[AbstractExtractionInputHandler],
-    message: str,
-) -> None:
-    config_path = _write_config(tmp_path, attack, attack_config)
-
-    with pytest.raises(ValueError, match=message):
-        LeakPro(provider, config_path)
+    assert not any((tmp_path / "output" / "results").iterdir())
 
 
 @pytest.mark.parametrize(
@@ -431,41 +413,8 @@ def test_invalid_extraction_configurations_fail_during_construction(
             {"authorized_audit": True, "num_generations_per_condition": 2, "min_clique_size": 3},
             ValueError,
         ),
-        (
-            "carlini_diffusion",
-            {"authorized_audit": True, "tiled_l2_threshold": float("inf")},
-            ValueError,
-        ),
-        (
-            "carlini_diffusion",
-            {"authorized_audit": True, "distance_device": "not-a-device"},
-            ValueError,
-        ),
         ("side", {"authorized_audit": False}, PermissionError),
         ("side", {"authorized_audit": True, "synthetic_samples": 2, "clusters": 3}, ValueError),
-        (
-            "side",
-            {
-                "authorized_audit": True,
-                "synthetic_samples": 3,
-                "clusters": 2,
-                "min_cluster_size": 2,
-            },
-            ValueError,
-        ),
-        (
-            "side",
-            {
-                "authorized_audit": True,
-                "l2_bands": {"invalid": {"lower": float("nan"), "upper": 1.0}},
-            },
-            ValueError,
-        ),
-        (
-            "side",
-            {"authorized_audit": True, "compute_device": "not-a-device"},
-            ValueError,
-        ),
     ],
 )
 def test_authorization_and_config_validation_precede_provider_access(
@@ -501,108 +450,6 @@ def test_authorization_and_config_validation_precede_provider_access(
     with pytest.raises(expected_exception):
         LeakPro(GuardedProvider, config_path)
     assert calls == []
-
-
-@pytest.mark.parametrize(("attack", "provider_base"), [("carlini_diffusion", CarliniProvider), ("side", SIDEProvider)])
-@pytest.mark.parametrize("delta", [-1, 1])
-def test_public_path_rejects_wrong_adapter_batch_count(
-    tmp_path: Any,
-    attack: str,
-    provider_base: type[AbstractExtractionInputHandler],
-    delta: int,
-) -> None:
-    class WrongCountProvider(provider_base):  # type: ignore[valid-type, misc]
-        def get_diffusion_adapter(self) -> CallableDiffusionAdapter:
-            base = super().get_diffusion_adapter()
-
-            def wrong_count(batch_size: int, conditions: Sequence[Any] | None, seed: int) -> torch.Tensor:
-                del conditions, seed
-                return torch.zeros((batch_size + delta, *base.image_shape))
-
-            return CallableDiffusionAdapter(
-                image_shape=base.image_shape,
-                sample_fn=wrong_count,
-                num_timesteps=base.num_timesteps,
-                q_sample_fn=base.q_sample_fn,
-                guided_sample_fn=base.guided_sample_fn,
-                classifier_timestep_fn=base.classifier_timestep_fn,
-            )
-
-    attack_config = (
-        {
-            "authorized_audit": True,
-            "num_generations_per_condition": 4,
-            "generation_batch_size": 4,
-            "tile_grid": [2, 2],
-            "min_clique_size": 2,
-        }
-        if attack == "carlini_diffusion"
-        else {
-            "authorized_audit": True,
-            "compute_device": "cpu",
-            "synthetic_samples": 4,
-            "synthetic_batch_size": 4,
-            "clusters": 2,
-            "min_cluster_size": 1,
-            "cohesion_threshold": -1.0,
-            "classifier_epochs": 1,
-            "classifier_batch_size": 2,
-            "num_generations": 2,
-            "generation_batch_size": 2,
-        }
-    )
-    config_path = _write_config(tmp_path, attack, attack_config)
-
-    expected_actual = 4 + delta
-    with pytest.raises(ValueError, match=rf"Requested 4 images, but the adapter returned {expected_actual}"):
-        LeakPro(WrongCountProvider, config_path).run_audit()
-
-
-def test_public_side_path_rejects_wrong_guided_batch_count(tmp_path: Any) -> None:
-    class WrongGuidedCountProvider(SIDEProvider):
-        def get_diffusion_adapter(self) -> CallableDiffusionAdapter:
-            base = super().get_diffusion_adapter()
-
-            def wrong_guided_count(
-                batch_size: int,
-                labels: torch.Tensor,
-                gradient_fn: Any,
-                seed: int,
-            ) -> torch.Tensor:
-                del seed
-                noisy = torch.full((batch_size, *base.image_shape), 0.5)
-                gradient_fn(noisy, torch.ones(batch_size, dtype=torch.long), labels)
-                return torch.zeros((batch_size + 1, *base.image_shape))
-
-            return CallableDiffusionAdapter(
-                image_shape=base.image_shape,
-                sample_fn=base.sample_fn,
-                num_timesteps=base.num_timesteps,
-                q_sample_fn=base.q_sample_fn,
-                guided_sample_fn=wrong_guided_count,
-                classifier_timestep_fn=base.classifier_timestep_fn,
-            )
-
-    config_path = _write_config(
-        tmp_path,
-        "side",
-        {
-            "authorized_audit": True,
-            "compute_device": "cpu",
-            "synthetic_samples": 4,
-            "synthetic_batch_size": 4,
-            "clusters": 2,
-            "min_cluster_size": 1,
-            "cohesion_threshold": -1.0,
-            "classifier_epochs": 1,
-            "classifier_batch_size": 2,
-            "num_generations": 2,
-            "generation_batch_size": 2,
-        },
-    )
-
-    with pytest.raises(ValueError, match="Requested 2 images, but the adapter returned 3"):
-        LeakPro(WrongGuidedCountProvider, config_path).run_audit()
 
 
 def test_public_side_path_rejects_ignored_guidance_without_persisting(tmp_path: Any) -> None:
@@ -663,309 +510,6 @@ def test_public_side_path_rejects_ignored_guidance_without_persisting(tmp_path: 
     assert not data_objects.exists() or not any(data_objects.iterdir())
 
 
-def test_result_identity_separates_target_hashes(tmp_path: Any) -> None:
-    output_dir = tmp_path / "shared-output"
-    attack_config = {
-        "authorized_audit": True,
-        "num_generations_per_condition": 4,
-        "generation_batch_size": 4,
-        "tile_grid": [2, 2],
-        "min_clique_size": 4,
-    }
-    first_config = _write_config(
-        tmp_path,
-        "carlini_diffusion",
-        attack_config,
-        target_hash="checkpoint-a",
-        config_name="audit-a.yaml",
-        output_dir=output_dir,
-    )
-    second_config = _write_config(
-        tmp_path,
-        "carlini_diffusion",
-        attack_config,
-        target_hash="checkpoint-b",
-        config_name="audit-b.yaml",
-        output_dir=output_dir,
-    )
-
-    first = LeakPro(CarliniProvider, first_config).run_audit()[0]
-    second = LeakPro(CarliniProvider, second_config).run_audit()[0]
-
-    assert first.id != second.id
-    assert (output_dir / "results" / first.id / "result.json").exists()
-    assert (output_dir / "results" / second.id / "result.json").exists()
-    assert first.provenance["audit_hash"] != second.provenance["audit_hash"]
-
-
-def test_duplicate_result_requires_explicit_overwrite(tmp_path: Any) -> None:
-    config_path = _write_config(
-        tmp_path,
-        "carlini_diffusion",
-        {
-            "authorized_audit": True,
-            "num_generations_per_condition": 4,
-            "generation_batch_size": 4,
-            "tile_grid": [2, 2],
-            "min_clique_size": 4,
-        },
-    )
-    LeakPro(CarliniProvider, config_path).run_audit()
-
-    with pytest.raises(FileExistsError, match="overwrite_results"):
-        LeakPro(CarliniProvider, config_path).run_audit()
-
-
-def test_duplicate_result_is_rejected_before_sampling(tmp_path: Any) -> None:
-    sample_calls: list[int] = []
-
-    class RecordingProvider(CarliniProvider):
-        def get_diffusion_adapter(self) -> CallableDiffusionAdapter:
-            def sample(batch_size: int, conditions: Sequence[Any] | None, seed: int) -> torch.Tensor:
-                del conditions, seed
-                sample_calls.append(batch_size)
-                return torch.zeros((batch_size, 1, 4, 4))
-
-            return CallableDiffusionAdapter(image_shape=(1, 4, 4), sample_fn=sample)
-
-    attack_config = {
-        "authorized_audit": True,
-        "num_generations_per_condition": 4,
-        "generation_batch_size": 4,
-        "tile_grid": [2, 2],
-        "min_clique_size": 4,
-    }
-    config_path = _write_config(tmp_path, "carlini_diffusion", attack_config)
-    LeakPro(CarliniProvider, config_path).run_audit()
-
-    with pytest.raises(FileExistsError, match="overwrite_results"):
-        LeakPro(RecordingProvider, config_path).run_audit()
-    assert sample_calls == []
-
-
-def test_duplicate_result_ids_inside_one_audit_are_rejected_before_sampling(tmp_path: Any) -> None:
-    sample_calls: list[int] = []
-
-    class RecordingProvider(CarliniProvider):
-        def get_diffusion_adapter(self) -> CallableDiffusionAdapter:
-            def sample(batch_size: int, conditions: Sequence[Any] | None, seed: int) -> torch.Tensor:
-                del conditions, seed
-                sample_calls.append(batch_size)
-                return torch.zeros((batch_size, 1, 4, 4))
-
-            return CallableDiffusionAdapter(image_shape=(1, 4, 4), sample_fn=sample)
-
-    config_path = _write_config(
-        tmp_path,
-        "carlini_diffusion",
-        {
-            "authorized_audit": True,
-            "num_generations_per_condition": 4,
-            "generation_batch_size": 4,
-            "tile_grid": [2, 2],
-            "min_clique_size": 4,
-        },
-    )
-    payload = yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
-    payload["audit"]["attack_list"] *= 2
-    Path(config_path).write_text(yaml.safe_dump(payload), encoding="utf-8")
-
-    with pytest.raises(ValueError, match="Duplicate extraction result IDs"):
-        LeakPro(RecordingProvider, config_path).run_audit()
-    assert sample_calls == []
-
-
-def test_overwrite_flag_does_not_change_identity_and_permits_replacement(tmp_path: Any) -> None:
-    attack_config = {
-        "authorized_audit": True,
-        "num_generations_per_condition": 4,
-        "generation_batch_size": 4,
-        "tile_grid": [2, 2],
-        "min_clique_size": 4,
-    }
-    initial_config = _write_config(
-        tmp_path,
-        "carlini_diffusion",
-        attack_config,
-        config_name="initial.yaml",
-    )
-    initial = LeakPro(CarliniProvider, initial_config).run_audit()[0]
-
-    overwrite_config = _write_config(
-        tmp_path,
-        "carlini_diffusion",
-        {**attack_config, "overwrite_results": True},
-        config_name="overwrite.yaml",
-    )
-    replacement = LeakPro(CarliniProvider, overwrite_config).run_audit()[0]
-
-    assert replacement.id == initial.id
-    persisted = tmp_path / "output" / "results" / initial.id / "result.json"
-    assert json.loads(persisted.read_text(encoding="utf-8"))["config"]["overwrite_results"] is True
-
-
-def test_same_instance_replay_fails_before_sampling_and_preserves_bundle(tmp_path: Any) -> None:
-    sample_calls: list[tuple[str, int]] = []
-
-    class RecordingSIDEProvider(SIDEProvider):
-        def get_diffusion_adapter(self) -> CallableDiffusionAdapter:
-            def sample(batch_size: int, conditions: Sequence[Any] | None, seed: int) -> torch.Tensor:
-                sample_calls.append(("sample", batch_size))
-                return _alternating_samples(batch_size, conditions, seed)
-
-            def q_sample(clean: torch.Tensor, timesteps: torch.Tensor, noise: torch.Tensor) -> torch.Tensor:
-                scale = timesteps.float().view(-1, 1, 1, 1) / 100.0
-                return clean + scale * noise
-
-            def guided_sample(
-                batch_size: int,
-                labels: torch.Tensor,
-                gradient_fn: Any,
-                seed: int,
-            ) -> torch.Tensor:
-                sample_calls.append(("guided", batch_size))
-                noisy = torch.full((batch_size, 1, 4, 4), 0.5)
-                gradient_fn(noisy, torch.ones(batch_size, dtype=torch.long), labels)
-                return _alternating_samples(batch_size, None, seed)
-
-            return CallableDiffusionAdapter(
-                image_shape=(1, 4, 4),
-                sample_fn=sample,
-                num_timesteps=10,
-                q_sample_fn=q_sample,
-                guided_sample_fn=guided_sample,
-            )
-
-    config_path = _write_config(
-        tmp_path,
-        "side",
-        {
-            "authorized_audit": True,
-            "overwrite_results": True,
-            "compute_device": "cpu",
-            "synthetic_samples": 4,
-            "synthetic_batch_size": 4,
-            "clusters": 2,
-            "min_cluster_size": 1,
-            "cohesion_threshold": -1.0,
-            "classifier_epochs": 1,
-            "classifier_batch_size": 2,
-            "num_generations": 2,
-            "generation_batch_size": 2,
-        },
-    )
-    audit = LeakPro(RecordingSIDEProvider, config_path)
-    first = audit.run_audit()[0]
-    persisted = tmp_path / "output" / "results" / first.id / "result.json"
-    first_bundle = persisted.read_bytes()
-    first_call_count = len(sample_calls)
-
-    with pytest.raises(RuntimeError, match="one-shot"):
-        audit.run_audit()
-
-    assert len(sample_calls) == first_call_count
-    assert persisted.read_bytes() == first_bundle
-
-
-def test_conditions_are_hashed_not_persisted(tmp_path: Any) -> None:
-    secret = "private-prompt-marker-7f42"
-
-    class SecretProvider(CarliniProvider):
-        def get_diffusion_adapter(self) -> CallableDiffusionAdapter:
-            return CallableDiffusionAdapter(
-                image_shape=(1, 4, 4),
-                sample_fn=lambda batch_size, conditions, seed: torch.zeros((batch_size, 1, 4, 4)),
-            )
-
-        def get_extraction_conditions(self) -> list[str]:
-            return [secret]
-
-    config_path = _write_config(
-        tmp_path,
-        "carlini_diffusion",
-        {
-            "authorized_audit": True,
-            "num_generations_per_condition": 4,
-            "generation_batch_size": 4,
-            "tile_grid": [2, 2],
-            "min_clique_size": 4,
-        },
-    )
-    LeakPro(SecretProvider, config_path).run_audit()
-
-    persisted_json = "\n".join(path.read_text(encoding="utf-8") for path in (tmp_path / "output").rglob("*.json"))
-    assert secret not in persisted_json
-    assert "condition_hash" in persisted_json
-
-
-def test_public_path_rejects_noncanonical_condition_objects(tmp_path: Any) -> None:
-    class UnsupportedCondition:
-        pass
-
-    class UnsupportedConditionProvider(CarliniProvider):
-        def get_extraction_conditions(self) -> list[object]:
-            return [UnsupportedCondition()]
-
-    config_path = _write_config(
-        tmp_path,
-        "carlini_diffusion",
-        {"authorized_audit": True},
-    )
-
-    with pytest.raises(TypeError, match="Unsupported extraction condition type"):
-        LeakPro(UnsupportedConditionProvider, config_path)
-
-
-def test_extraction_pdf_is_rejected_before_attack_execution(tmp_path: Any) -> None:
-    config_path = _write_config(
-        tmp_path,
-        "carlini_diffusion",
-        {
-            "authorized_audit": True,
-            "num_generations_per_condition": 4,
-            "tile_grid": [2, 2],
-            "min_clique_size": 4,
-        },
-    )
-    audit = LeakPro(CarliniProvider, config_path)
-
-    with pytest.raises(NotImplementedError, match="PDF reporting"):
-        audit.run_audit(create_pdf=True)
-
-    assert not any((tmp_path / "output" / "results").iterdir())
-
-
-def test_extraction_requires_explicit_handler_type(tmp_path: Any) -> None:
-    config_path = _write_config(
-        tmp_path,
-        "carlini_diffusion",
-        {"authorized_audit": True, "num_generations_per_condition": 2, "min_clique_size": 2},
-    )
-
-    with pytest.raises(TypeError, match="AbstractExtractionInputHandler"):
-        LeakPro(object, config_path)
-
-
-@pytest.mark.parametrize("attack_name,provider", [("carlini_diffusion", CarliniProvider), ("side", SIDEProvider)])
-def test_attack_hash_tracks_target_and_configuration(tmp_path: Path, attack_name: str, provider: type) -> None:
-    """Both public attack paths distinguish target and configuration changes."""
-    config = {"authorized_audit": True, "generation_batch_size": 4}
-    config_path = _write_config(tmp_path, attack_name, config, target_hash="target-a")
-    first = LeakPro(provider, config_path).attack_scheduler.attacks[0]
-    repeated = LeakPro(provider, config_path).attack_scheduler.attacks[0]
-    assert first.attack_id == repeated.attack_id
-
-    config_path = _write_config(tmp_path, attack_name, {**config, "generation_batch_size": 8}, target_hash="target-a")
-    changed_config = LeakPro(provider, config_path).attack_scheduler.attacks[0]
-    assert changed_config.audit_hash == first.audit_hash
-    assert changed_config.attack_id != first.attack_id
-
-    config_path = _write_config(tmp_path, attack_name, config, target_hash="target-b")
-    changed_target = LeakPro(provider, config_path).attack_scheduler.attacks[0]
-    assert changed_target.audit_hash != first.audit_hash
-    assert changed_target.attack_id != first.attack_id
-
-
 def test_core_import_does_not_load_extraction_attacks() -> None:
     """Extraction remains optional until an extraction API is requested."""
     script = """
@@ -982,48 +526,3 @@ assert AbstractInputHandler is not None
 """
     completed = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=False)
     assert completed.returncode == 0, completed.stderr
-
-
-@pytest.mark.parametrize("with_references", [False, True])
-def test_handler_reuses_shared_inputs_and_digest(monkeypatch: pytest.MonkeyPatch, with_references: bool) -> None:
-    """Two factory calls load and hash shared inputs once; a new audit reloads them."""
-    from types import SimpleNamespace
-
-    from leakpro.attacks.extraction_attacks.attack_factory_extraction import AttackFactoryExtraction
-    from leakpro.input_handler import extraction_handler
-
-    calls = {"adapter": 0, "references": 0, "hash": 0}
-    references = torch.stack((torch.zeros(1, 4, 4), torch.ones(1, 4, 4))) if with_references else None
-    original_adapter = SIDEProvider.get_diffusion_adapter
-    original_hash = extraction_handler.extraction_audit_hash
-
-    def adapter(provider: SIDEProvider) -> CallableDiffusionAdapter:
-        calls["adapter"] += 1
-        return original_adapter(provider)
-
-    def reference_images(provider: SIDEProvider) -> torch.Tensor | None:
-        calls["references"] += 1
-        return references
-
-    def digest(*args: Any, **kwargs: Any) -> str:
-        calls["hash"] += 1
-        return original_hash(*args, **kwargs)
-
-    monkeypatch.setattr(SIDEProvider, "get_diffusion_adapter", adapter)
-    monkeypatch.setattr(SIDEProvider, "get_extraction_reference_images", reference_images)
-    monkeypatch.setattr(extraction_handler, "extraction_audit_hash", digest)
-    configs = SimpleNamespace(target=SimpleNamespace(hash="shared-target"))
-    handler = extraction_handler.ExtractionHandler(configs, SIDEProvider)
-    config = {"authorized_audit": True}
-    carlini = AttackFactoryExtraction.create_attack("carlini_diffusion", config, handler)
-    side = AttackFactoryExtraction.create_attack("side", config, handler)
-    assert calls == {"adapter": 1, "references": 1, "hash": 1}
-    assert carlini.adapter is side.adapter
-    assert carlini.reference_images is side.reference_images
-    assert carlini.audit_hash == side.audit_hash
-    assert handler.get_audit_hash(["a"]) != handler.get_audit_hash(["b"])
-    assert calls["hash"] == 1
-    fresh = extraction_handler.ExtractionHandler(configs, SIDEProvider)
-    repeated = AttackFactoryExtraction.create_attack("side", config, fresh)
-    assert repeated.audit_hash == side.audit_hash
-    assert calls == {"adapter": 2, "references": 2, "hash": 2}

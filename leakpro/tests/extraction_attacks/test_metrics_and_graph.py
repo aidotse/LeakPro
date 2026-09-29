@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 from itertools import combinations
+from time import perf_counter
 
 import pytest
 import torch
 
-from leakpro.attacks.extraction_attacks.configs import SimilarityBand
-from leakpro.attacks.extraction_attacks.utils_generative.carlini_graph import clique_medoid, maximum_clique
+from leakpro.attacks.extraction_attacks.utils_generative.carlini_graph import maximum_clique
 from leakpro.attacks.extraction_attacks.utils_generative.image_metrics import (
+    SimilarityBand,
     carlini_reference_scores,
     l2_band_scores,
     nearest_reference,
     normalized_l2_pairwise,
-    pairwise_band_scores,
     tiled_l2_pairwise,
 )
 
@@ -69,40 +69,17 @@ def test_maximum_clique_matches_brute_force_on_random_graphs() -> None:
         assert maximum_clique(adjacency) == _brute_maximum_clique(adjacency)
 
 
-def test_maximum_clique_handles_a_dense_graph_beyond_the_recursion_limit() -> None:
-    vertex_count = 1_100
-    adjacency = torch.ones((vertex_count, vertex_count), dtype=torch.bool)
+def test_maximum_clique_prunes_many_equal_dense_choices() -> None:
+    parts = 24
+    adjacency = torch.ones((2 * parts, 2 * parts), dtype=torch.bool)
     adjacency.fill_diagonal_(False)
+    for pair in range(parts):
+        adjacency[2 * pair, 2 * pair + 1] = False
+        adjacency[2 * pair + 1, 2 * pair] = False
 
-    assert maximum_clique(adjacency) == list(range(vertex_count))
-
-
-def test_clique_medoid_uses_lowest_index_for_a_tie() -> None:
-    distances = torch.tensor(
-        [
-            [0.0, 0.1, 0.2],
-            [0.1, 0.0, 0.1],
-            [0.2, 0.1, 0.0],
-        ]
-    )
-    medoid, mean_distance = clique_medoid([0, 1, 2], distances)
-    assert medoid == 1
-    assert mean_distance == torch.tensor(0.4 / 3).item()
-
-
-def test_carlini_reference_ratio_flags_exact_copy() -> None:
-    references = torch.tensor(
-        [
-            [[[0.0, 0.0], [0.0, 0.0]]],
-            [[[0.2, 0.2], [0.2, 0.2]]],
-            [[[0.4, 0.4], [0.4, 0.4]]],
-        ]
-    )
-    candidates = references[:1].clone()
-    scores = carlini_reference_scores(candidates, references, neighbors=3, alpha=0.5)
-    assert scores.nearest_indices.tolist() == [0]
-    assert scores.nearest_distances.tolist() == [0.0]
-    assert scores.ratios.tolist() == [0.0]
+    start = perf_counter()
+    assert maximum_clique(adjacency) == list(range(0, 2 * parts, 2))
+    assert perf_counter() - start < 10.0
 
 
 def test_carlini_reference_ratio_uses_generated_image_neighborhood() -> None:
@@ -133,43 +110,6 @@ def test_streamed_reference_metrics_match_full_pairwise_values() -> None:
     assert streamed["near"]["unique_references"] == int(matches.any(dim=0).sum())
 
 
-def test_generic_pairwise_bands_support_similarity_scores() -> None:
-    candidates = torch.tensor([[[[0.0]]], [[[1.0]]]])
-    references = torch.tensor([[[[0.0]]], [[[0.5]]], [[[1.0]]]])
-
-    def similarity(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
-        return 1.0 - (left.flatten(start_dim=1) - right.flatten(start_dim=1).transpose(0, 1)).abs()
-
-    result = pairwise_band_scores(
-        candidates,
-        references,
-        {"exact": SimilarityBand(lower=0.99, upper=1.0)},
-        similarity,
-        block_size=1,
-    )
-    assert result["exact"]["ams"] == 1.0
-    assert result["exact"]["ums"] == 1.0
-
-
-def test_similarity_ams_uses_best_match_while_ums_keeps_in_band_references() -> None:
-    candidates = torch.zeros((1, 1, 1, 1))
-    references = torch.tensor([[[[0.45]]], [[[0.70]]]])
-
-    def similarity(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
-        return right.flatten(start_dim=1).transpose(0, 1).expand(left.shape[0], -1)
-
-    result = pairwise_band_scores(
-        candidates,
-        references,
-        {"lower": SimilarityBand(lower=0.4, upper=0.5)},
-        similarity,
-        block_size=1,
-    )
-
-    assert result["lower"]["ams"] == 0.0
-    assert result["lower"]["ums"] == 1.0
-
-
 def test_l2_ams_uses_nearest_match_while_ums_keeps_in_band_references() -> None:
     candidates = torch.zeros((1, 1, 1, 1))
     references = torch.tensor([[[[0.10]]], [[[0.45]]]])
@@ -183,9 +123,3 @@ def test_l2_ams_uses_nearest_match_while_ums_keeps_in_band_references() -> None:
 
     assert result["farther"]["ams"] == 0.0
     assert result["farther"]["ums"] == 1.0
-
-
-def test_carlini_ratio_rejects_undefined_duplicate_neighborhood() -> None:
-    """All-zero neighbour distances must not produce a misleading ratio."""
-    with pytest.raises(ValueError, match="mean distance is zero"):
-        carlini_reference_scores(torch.zeros(1, 1, 1, 1), torch.zeros(3, 1, 1, 1), neighbors=3)

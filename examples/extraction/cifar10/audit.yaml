@@ -10,7 +10,6 @@ audit:
   output_dir: ./leakpro_output/
   attack_list:
     - attack: carlini_diffusion
-      random_seed: 2026
       authorized_audit: true
       overwrite_results: true
       mode: unconditional_reference_audit
@@ -26,7 +25,6 @@ audit:
       distance_device: cpu
 
     - attack: side
-      random_seed: 2026
       authorized_audit: true
       overwrite_results: true
       image_range: minus_one_one
@@ -50,8 +48,7 @@ audit:
       l2_bands:
         near_copy:
           lower: 0.0
-          upper: 0.3
+          upper: 0.15
 
 target:
   name: cifar10_unconditional_ddim
-  hash: set-by-notebook

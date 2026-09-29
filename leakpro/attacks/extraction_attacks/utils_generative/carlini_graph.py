@@ -33,6 +33,37 @@ def adjacency_to_bitsets(adjacency: Tensor) -> list[int]:
     return masks
 
 
+def _color_bound(candidates: int, neighbors: list[int]) -> int:
+    """Bound clique size by greedily coloring the candidate subgraph."""
+    colors = 0
+    uncolored = candidates
+    while uncolored:
+        colors += 1
+        available = uncolored
+        while available:
+            bit = available & -available
+            vertex = bit.bit_length() - 1
+            uncolored &= ~bit
+            available &= ~(bit | neighbors[vertex])
+    return colors
+
+
+def _can_improve(candidates: int, clique: tuple[int, ...], best: tuple[int, ...], neighbors: list[int]) -> bool:
+    """Keep branches that can improve clique size or its deterministic tie break."""
+    possible_size = len(clique) + _population_count(candidates)
+    if best and possible_size > len(best):
+        possible_size = len(clique) + _color_bound(candidates, neighbors)
+    if possible_size != len(best):
+        return possible_size > len(best)
+    optimistic = list(clique)
+    remaining = candidates
+    while len(optimistic) < len(best):
+        bit = remaining & -remaining
+        optimistic.append(bit.bit_length() - 1)
+        remaining ^= bit
+    return tuple(sorted(optimistic)) < best
+
+
 def maximum_clique(adjacency: Tensor) -> list[int]:
     """Return an exact maximum clique using deterministic bitset branch-and-bound."""
     neighbors = adjacency_to_bitsets(adjacency)
@@ -46,7 +77,7 @@ def maximum_clique(adjacency: Tensor) -> list[int]:
     stack = [((1 << vertex_count) - 1, ())]
     while stack:
         candidates, clique = stack.pop()
-        if len(clique) + _population_count(candidates) < len(best):
+        if not _can_improve(candidates, clique, best, neighbors):
             continue
         if candidates == 0:
             canonical = tuple(sorted(clique))
@@ -62,7 +93,7 @@ def maximum_clique(adjacency: Tensor) -> list[int]:
             children.append((candidates & neighbors[vertex], clique + (vertex,)))
             candidates &= ~bit
             extensions &= ~bit
-            if len(clique) + _population_count(candidates) < len(best):
+            if not _can_improve(candidates, clique, best, neighbors):
                 break
         stack.extend(reversed(children))
 

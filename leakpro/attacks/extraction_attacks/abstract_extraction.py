@@ -11,7 +11,18 @@ from collections.abc import Callable
 from enum import Enum
 from time import perf_counter
 
+from pydantic import BaseModel, ConfigDict
+
 from leakpro.reporting.extraction_result import ExtractionResult
+
+
+class ExtractionConfig(BaseModel):
+    """Settings shared by extraction attacks across data modalities."""
+
+    random_seed: int = 42
+    authorized_audit: bool = False
+    overwrite_results: bool = False
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
 
 class AttackState(str, Enum):

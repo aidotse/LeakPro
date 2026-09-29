@@ -6,21 +6,22 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, Literal
 
+import numpy as np
 import torch
+from pydantic import BaseModel, Field, field_validator, model_validator
 from torch import Tensor
 
-from leakpro.attacks.extraction_attacks.abstract_extraction import AbstractExtraction, AttackState
-from leakpro.attacks.extraction_attacks.configs import CarliniConfig
-from leakpro.attacks.extraction_attacks.protocols import SamplingAdapter
+from leakpro.attacks.extraction_attacks.abstract_extraction import AbstractExtraction, AttackState, ExtractionConfig
+from leakpro.attacks.extraction_attacks.protocols import ExtractionAdapter
 from leakpro.attacks.extraction_attacks.utils_generative import (
-    condition_hash,
+    json_safe,
     normalize_conditions,
     progress_batches,
     require_authorized,
-    resolve_device,
     to_zero_one,
     validate_image_batch,
 )
@@ -31,7 +32,41 @@ from leakpro.attacks.extraction_attacks.utils_generative.image_metrics import (
     tiled_l2_pairwise,
 )
 from leakpro.reporting.extraction_result import CandidateRecord, ExtractionResult
+from leakpro.utils.device import get_device
+from leakpro.utils.import_helper import Self
 from leakpro.utils.save_load import hash_config
+
+
+def _condition_hash(value: object) -> str:  # noqa: C901 - condition types must have distinct identities
+    """Identify a Carlini condition without conflating tensors and JSON values."""
+    if isinstance(value, Tensor):
+        tensor = value.detach().to(device="cpu").contiguous()
+        if (tensor.is_floating_point() or tensor.is_complex()) and not torch.isfinite(tensor).all():
+            raise ValueError("Extraction conditions must not contain NaN or infinity.")
+        identity = {"type": "tensor", "dtype": str(tensor.dtype), "shape": list(tensor.shape),
+                    "digest": hashlib.sha256(tensor.reshape(-1).view(torch.uint8).numpy().tobytes()).hexdigest()}
+    elif isinstance(value, np.ndarray):
+        if value.dtype.hasobject:
+            raise TypeError("Object arrays are not supported as extraction conditions.")
+        if np.issubdtype(value.dtype, np.number) and not np.isfinite(value).all():
+            raise ValueError("Extraction conditions must not contain NaN or infinity.")
+        array = np.ascontiguousarray(value)
+        identity = {"type": "ndarray", "dtype": str(array.dtype), "shape": list(array.shape),
+                    "digest": hashlib.sha256(array.tobytes()).hexdigest()}
+    elif isinstance(value, BaseModel):
+        identity = {"type": f"{type(value).__module__}.{type(value).__qualname__}",
+                    "value": _condition_hash(value.model_dump(mode="json"))}
+    elif isinstance(value, dict):
+        if any(not isinstance(key, str) for key in value):
+            raise TypeError("Extraction condition dictionaries require string keys.")
+        identity = {"type": "dict", "value": {key: _condition_hash(item) for key, item in value.items()}}
+    elif isinstance(value, (list, tuple)):
+        identity = {"type": type(value).__name__, "value": [_condition_hash(item) for item in value]}
+    elif isinstance(value, bytes):
+        identity = {"type": "bytes", "value": value.hex()}
+    else:
+        identity = {"type": type(value).__name__, "value": json_safe(value)}
+    return hash_config(identity)
 
 
 class AttackCarliniExtraction(AbstractExtraction):
@@ -43,21 +78,58 @@ class AttackCarliniExtraction(AbstractExtraction):
     score used for the paper's CIFAR-10 extraction audit.
     """
 
+    class AttackConfig(ExtractionConfig):
+        """Carlini generation and candidate-scoring settings."""
+
+        image_range: Literal["zero_one", "minus_one_one"] = "zero_one"
+        generation_batch_size: int = Field(default=64, ge=1)
+        distance_block_size: int = Field(default=64, ge=1)
+        distance_device: str = Field(default="cpu", pattern=r"^(auto|cpu|cuda(?::[0-9]+)?)$")
+        mode: Literal["conditional_black_box", "unconditional_reference_audit"] = "conditional_black_box"
+        num_generations_per_condition: int = Field(default=500, ge=2)
+        num_unconditional_generations: int = Field(default=1_000_000, ge=1)
+        tile_grid: tuple[int, int] = (4, 4)
+        tiled_l2_threshold: float = Field(default=0.1, gt=0)
+        min_clique_size: int = Field(default=10, ge=2)
+        verification_l2_threshold: float = Field(default=0.15, gt=0)
+        reference_alpha: float = Field(default=0.5, gt=0)
+        reference_neighbors: int = Field(default=50, ge=2)
+        ratio_threshold: float = Field(default=1.0, gt=0)
+        max_extractions: int | None = Field(default=None, ge=1)
+
+        @field_validator("tile_grid")
+        @classmethod
+        def validate_tile_grid(cls, value: tuple[int, int]) -> tuple[int, int]:
+            """Reject an image grid with a nonpositive dimension."""
+            if any(size < 1 for size in value):
+                raise ValueError("tile_grid values must be positive.")
+            return value
+
+        @model_validator(mode="after")
+        def validate_clique_budget(self) -> Self:
+            """Require enough generations to form a qualifying clique."""
+            if self.mode == "conditional_black_box" and self.min_clique_size > self.num_generations_per_condition:
+                raise ValueError("min_clique_size cannot exceed num_generations_per_condition.")
+            return self
+
     def __init__(
         self,
-        adapter: SamplingAdapter,
-        configs: CarliniConfig | dict[str, Any],
+        adapter: ExtractionAdapter[Tensor],
+        configs: AttackConfig | dict[str, Any],
         *,
         audit_hash: str,
         conditions: Sequence[Any] | None = None,
         reference_images: Tensor | None = None,
     ) -> None:
         self.adapter = adapter
-        self.config = configs if isinstance(configs, CarliniConfig) else CarliniConfig(**configs)
+        self.config = configs if isinstance(configs, self.AttackConfig) else self.AttackConfig(**configs)
         self.configs = self.config
         self.optuna_params = 0
-        self.audit_hash = audit_hash
         self.conditions = normalize_conditions(conditions)
+        self.audit_hash = (
+            hash_config({"audit_hash": audit_hash, "conditions": [_condition_hash(c) for c in self.conditions]})
+            if self.conditions is not None else audit_hash
+        )
         self.reference_images = reference_images
         self.state = AttackState.CREATED
         identity_config = self.config.model_dump(mode="json", exclude={"overwrite_results"})
@@ -94,13 +166,22 @@ class AttackCarliniExtraction(AbstractExtraction):
         """Prepare this attack exactly once."""
         self._prepare_once(self._prepare_attack)
 
-    def _prepare_attack(self) -> None:
+    def _prepare_attack(self) -> None:  # noqa: C901 - preparation checks must precede target sampling
         """Validate authorization, model surface, conditions, and reference data."""
         require_authorized(self.config.authorized_audit)
-        resolve_device(self.config.distance_device)
-        if not isinstance(self.adapter, SamplingAdapter):
-            raise TypeError("adapter does not satisfy the SamplingAdapter protocol.")
-        if len(self.adapter.image_shape) != 3 or any(size < 1 for size in self.adapter.image_shape):
+        if self.config.distance_device == "auto" and get_device().type not in {"cpu", "cuda"}:
+            raise ValueError("Automatic extraction distance device must be CPU or CUDA.")
+        if (
+            not isinstance(self.adapter, ExtractionAdapter)
+            or not callable(getattr(self.adapter, "sample", None))
+            or not hasattr(self.adapter, "image_shape")
+        ):
+            raise TypeError("Carlini requires an adapter with sample() and image_shape.")
+        if (
+            not isinstance(self.adapter.image_shape, tuple)
+            or len(self.adapter.image_shape) != 3
+            or any(not isinstance(size, int) or isinstance(size, bool) or size < 1 for size in self.adapter.image_shape)
+        ):
             raise ValueError("adapter.image_shape must be a positive CHW tuple.")
         if self.config.mode == "conditional_black_box" and not self.conditions:
             raise ValueError("conditional_black_box mode requires at least one condition.")
@@ -151,7 +232,7 @@ class AttackCarliniExtraction(AbstractExtraction):
         if self.conditions is None:
             raise RuntimeError("Conditional inputs were not prepared.")
         for condition_index, condition in enumerate(self.conditions):
-            hash = condition_hash(condition)
+            hash = _condition_hash(condition)
             condition_id = f"condition:{condition_index}:{hash[:12]}"
             images = self._generate(
                 self.config.num_generations_per_condition,

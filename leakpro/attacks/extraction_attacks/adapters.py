@@ -13,8 +13,9 @@ from typing import Any, Callable, Dict, Optional, Sequence
 import torch
 from torch import Tensor, nn
 
-from leakpro.attacks.extraction_attacks.protocols import ConditionGradient, DiffusionAdapter
+from leakpro.attacks.extraction_attacks.protocols import ConditionGradient, ExtractionAdapter
 from leakpro.attacks.extraction_attacks.utils_generative import seeded_torch_rng
+from leakpro.utils.device import get_device
 
 SampleFunction = Callable[[int, Optional[Sequence[Any]], int], Tensor]
 QSampleFunction = Callable[[Tensor, Tensor, Tensor], Tensor]
@@ -24,7 +25,7 @@ ConditionEncoder = Callable[[Sequence[Any]], Dict[str, Any]]
 
 
 @dataclass
-class CallableDiffusionAdapter(DiffusionAdapter):
+class CallableDiffusionAdapter(ExtractionAdapter[Tensor]):
     """Bind simple callables to the attack adapter contract."""
 
     image_shape: tuple[int, int, int]
@@ -82,7 +83,7 @@ class CallableDiffusionAdapter(DiffusionAdapter):
         return self.guided_sample_fn(batch_size, labels, classifier_gradient, seed)
 
 
-class OpenAIDiffusionAdapter(DiffusionAdapter):
+class OpenAIDiffusionAdapter(ExtractionAdapter[Tensor]):
     """Adapter for OpenAI Improved/Guided Diffusion compatible objects.
 
     Basic sampling supports Improved Diffusion's loop. SIDE additionally
@@ -105,7 +106,9 @@ class OpenAIDiffusionAdapter(DiffusionAdapter):
         self.model = model
         self.diffusion = diffusion
         self.image_shape = image_shape
-        self.device = torch.device(device)
+        self.device = get_device() if device == "auto" else torch.device(device)
+        if self.device.type not in {"cpu", "cuda"}:
+            raise ValueError(f"Unsupported extraction device type: {self.device.type!r}.")
         self.condition_encoder = condition_encoder
         self.base_model_kwargs = dict(base_model_kwargs or {})
         self.clip_denoised = clip_denoised

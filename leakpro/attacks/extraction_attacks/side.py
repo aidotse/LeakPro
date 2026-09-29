@@ -8,20 +8,20 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 import numpy as np
 import torch
+from pydantic import Field, model_validator
 from sklearn.cluster import KMeans
 from torch import Tensor, nn
 from torch.nn import functional
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm.auto import tqdm
 
-from leakpro.attacks.extraction_attacks.abstract_extraction import AbstractExtraction, AttackState
-from leakpro.attacks.extraction_attacks.configs import SIDEConfig
+from leakpro.attacks.extraction_attacks.abstract_extraction import AbstractExtraction, AttackState, ExtractionConfig
 from leakpro.attacks.extraction_attacks.protocols import (
-    DiffusionAdapter,
+    ExtractionAdapter,
     FeatureTransform,
     PairwiseScore,
     identity_feature_transform,
@@ -32,18 +32,20 @@ from leakpro.attacks.extraction_attacks.utils_generative import (
     encode_uint8,
     progress_batches,
     require_authorized,
-    resolve_device,
     seeded_torch_rng,
     to_zero_one,
     validate_image_batch,
 )
 from leakpro.attacks.extraction_attacks.utils_generative.image_metrics import (
+    SimilarityBand,
     l2_band_scores,
     nearest_reference,
     pairwise_band_scores,
 )
 from leakpro.attacks.extraction_attacks.utils_generative.side_classifier import TimeConditionedResNet
 from leakpro.reporting.extraction_result import CandidateRecord, ExtractionResult
+from leakpro.utils.device import get_device
+from leakpro.utils.import_helper import Self
 from leakpro.utils.save_load import hash_config
 
 ClassifierFactory = Callable[[int, int], nn.Module]
@@ -79,11 +81,50 @@ class AttackSIDEExtraction(AbstractExtraction):
     gradient to the target model score during reverse diffusion.
     """
 
+    class AttackConfig(ExtractionConfig):
+        """SIDE generation, clustering, guidance, and scoring settings."""
+
+        image_range: Literal["zero_one", "minus_one_one"] = "zero_one"
+        generation_batch_size: int = Field(default=64, ge=1)
+        distance_block_size: int = Field(default=64, ge=1)
+        distance_device: str = Field(default="cpu", pattern=r"^(auto|cpu|cuda(?::[0-9]+)?)$")
+        compute_device: str = Field(default="auto", pattern=r"^(auto|cpu|cuda(?::[0-9]+)?)$")
+        synthetic_samples: int = Field(default=10_000, ge=2)
+        synthetic_batch_size: int = Field(default=64, ge=1)
+        clusters: int = Field(default=100, ge=2)
+        cohesion_threshold: float = Field(default=0.5, ge=-1, le=1)
+        min_cluster_size: int = Field(default=2, ge=1)
+        kmeans_n_init: int = Field(default=10, ge=1)
+        classifier_epochs: int = Field(default=20, ge=1)
+        classifier_batch_size: int = Field(default=64, ge=1)
+        classifier_learning_rate: float = Field(default=1e-4, gt=0)
+        classifier_weight_decay: float = Field(default=1e-2, ge=0)
+        classifier_base_width: int = Field(default=64, ge=4)
+        classifier_blocks: tuple[int, int, int, int] = (3, 4, 6, 3)
+        timestep_embedding_dim: int = Field(default=128, ge=8)
+        guidance_scale: float = Field(default=10.0, ge=0, le=50)
+        num_generations: int = Field(default=10_000, ge=1)
+        l2_bands: dict[str, SimilarityBand] = Field(default_factory=dict)
+        similarity_bands: dict[str, SimilarityBand] = Field(default_factory=dict)
+
+        @model_validator(mode="after")
+        def validate_sample_and_cluster_counts(self) -> Self:
+            """Reject impossible clustering and classifier layouts."""
+            if self.clusters > self.synthetic_samples:
+                raise ValueError("clusters cannot exceed synthetic_samples.")
+            if 2 * self.min_cluster_size > self.synthetic_samples:
+                raise ValueError("synthetic_samples must fit at least two clusters of min_cluster_size samples.")
+            if any(block_count < 1 for block_count in self.classifier_blocks):
+                raise ValueError("classifier_blocks entries must be positive.")
+            if any(band.lower < 0 or band.upper > 1 for band in self.l2_bands.values()):
+                raise ValueError("SIDE l2_bands must use distances on the [0, 1] image scale.")
+            return self
+
     def __init__(
         self,
-        adapter: DiffusionAdapter,
+        adapter: ExtractionAdapter[Tensor],
         feature_extractor: nn.Module,
-        configs: SIDEConfig | dict[str, Any],
+        configs: AttackConfig | dict[str, Any],
         *,
         audit_hash: str,
         reference_images: Tensor | None = None,
@@ -93,7 +134,7 @@ class AttackSIDEExtraction(AbstractExtraction):
     ) -> None:
         self.adapter = adapter
         self.feature_extractor = feature_extractor
-        self.config = configs if isinstance(configs, SIDEConfig) else SIDEConfig(**configs)
+        self.config = configs if isinstance(configs, self.AttackConfig) else self.AttackConfig(**configs)
         self.configs = self.config
         self.optuna_params = 0
         self.audit_hash = audit_hash
@@ -107,14 +148,15 @@ class AttackSIDEExtraction(AbstractExtraction):
         result_hash = hash_config({"audit_hash": self.audit_hash, "config": identity_config})[:16]
         self.result_id = f"side-extraction-{result_hash}"
         self.attack_id = self.result_id
-        self.device = resolve_device(self.config.compute_device)
+        self.device = get_device() if self.config.compute_device == "auto" else torch.device(self.config.compute_device)
+        if self.device.type not in {"cpu", "cuda"}:
+            raise ValueError(f"Unsupported extraction device type: {self.device.type!r}.")
         self.synthetic_images_uint8: Tensor | None = None
         self.synthetic_labels: Tensor | None = None
         self.cluster_centroids: Tensor | None = None
         self.cluster_cohesion: list[float] = []
         self.training_history: list[float] = []
         self._references_zero_one: Tensor | None = None
-        self._references_metric: Tensor | None = None
         self._sampling_calls = 0
         self._guidance_calls = 0
         self._singleton_classifier_batches = 0
@@ -172,24 +214,36 @@ class AttackSIDEExtraction(AbstractExtraction):
         )
         self._record_trace("prepared")
 
-    def _validate_preparation_inputs(self) -> None:
-        """Reject malformed white-box components before target sampling."""
-        resolve_device(self.config.distance_device)
-        if not isinstance(self.adapter, DiffusionAdapter):
-            raise TypeError("adapter does not satisfy the DiffusionAdapter protocol.")
-        self.adapter.validate_side_capabilities()
+    def _validate_adapter(self) -> None:
+        """Check the operations SIDE needs before requesting samples."""
+        if not isinstance(self.adapter, ExtractionAdapter) or not callable(getattr(self.adapter, "sample", None)):
+            raise TypeError("SIDE requires an adapter with sample().")
+        for operation in ("classifier_timesteps", "q_sample", "sample_with_classifier_guidance"):
+            if not callable(getattr(self.adapter, operation, None)):
+                raise TypeError(f"SIDE requires adapter.{operation}().")
+        validate_capabilities = getattr(self.adapter, "validate_side_capabilities", None)
+        if validate_capabilities is not None:
+            if not callable(validate_capabilities):
+                raise TypeError("adapter.validate_side_capabilities must be callable.")
+            validate_capabilities()
         if (
-            not isinstance(self.adapter.num_timesteps, int)
+            not isinstance(getattr(self.adapter, "num_timesteps", None), int)
             or isinstance(self.adapter.num_timesteps, bool)
             or self.adapter.num_timesteps < 2
         ):
             raise ValueError("adapter.num_timesteps must be at least 2.")
         if (
-            not isinstance(self.adapter.image_shape, tuple)
+            not isinstance(getattr(self.adapter, "image_shape", None), tuple)
             or len(self.adapter.image_shape) != 3
             or any(not isinstance(size, int) or isinstance(size, bool) or size < 1 for size in self.adapter.image_shape)
         ):
             raise ValueError("adapter.image_shape must be a positive CHW tuple.")
+
+    def _validate_preparation_inputs(self) -> None:
+        """Reject malformed white-box components before target sampling."""
+        if self.config.distance_device == "auto" and get_device().type not in {"cpu", "cuda"}:
+            raise ValueError("Automatic extraction distance device must be CPU or CUDA.")
+        self._validate_adapter()
         if not isinstance(self.feature_extractor, nn.Module):
             raise TypeError("feature_extractor must be a torch.nn.Module.")
         self._feature_extractor_dtype()
@@ -204,7 +258,6 @@ class AttackSIDEExtraction(AbstractExtraction):
         """Validate reference-dependent metrics before target sampling."""
         if self.reference_images is not None:
             references = validate_image_batch(self.reference_images, self.adapter.image_shape)
-            self._references_metric = references.detach().cpu()
             self._references_zero_one = to_zero_one(references.detach().cpu(), self.config.image_range)
         if self.config.similarity_bands and self.reference_score_fn is None:
             raise ValueError("similarity_bands requires a reference_score_fn.")
@@ -425,26 +478,6 @@ class AttackSIDEExtraction(AbstractExtraction):
             raise ValueError("SIDE feature-extractor floating-point parameters and buffers must use one dtype.")
         return next(iter(dtypes), torch.float32)
 
-    def _new_metric_image_buffer(self) -> list[Tensor] | None:
-        """Allocate raw-range batch storage only when reference L2 requires it."""
-        if self._references_metric is not None and self.config.image_range == "minus_one_one":
-            return []
-        return None
-
-    @staticmethod
-    def _retain_metric_batch(metric_images: list[Tensor] | None, batch: Tensor) -> None:
-        """Retain a raw-range batch when reference metrics requested a buffer."""
-        if metric_images is not None:
-            metric_images.append(batch)
-
-    def _reference_metric_images(self, images: Tensor, metric_images: list[Tensor] | None) -> Tensor:
-        """Select the persisted tensor or construct the required raw-range tensor."""
-        if self.config.image_range == "zero_one":
-            return images
-        if metric_images is None:
-            raise RuntimeError("Reference metric images were not retained.")
-        return torch.cat(metric_images)
-
     def _sample_guided_batch(self, batch_size: int, labels: Tensor, seed: int) -> Tensor:
         """Generate one batch and prove that classifier guidance was invoked."""
         guidance_calls_before = self._guidance_calls
@@ -468,7 +501,6 @@ class AttackSIDEExtraction(AbstractExtraction):
         if self.cluster_centroids is None:
             raise RuntimeError("Surrogate clusters were not prepared.")
         generated: list[Tensor] = []
-        metric_images = self._new_metric_image_buffer()
         generated_labels: list[Tensor] = []
         label_generator = torch.Generator(device="cpu").manual_seed(self.config.random_seed + 29)
         for batch_index, (start, end) in enumerate(
@@ -486,7 +518,6 @@ class AttackSIDEExtraction(AbstractExtraction):
                 labels=labels,
                 seed=self.config.random_seed + 1_000_003 + batch_index,
             )
-            self._retain_metric_batch(metric_images, batch)
             generated.append(to_zero_one(batch, self.config.image_range))
             generated_labels.append(labels)
         images = torch.cat(generated)
@@ -502,17 +533,16 @@ class AttackSIDEExtraction(AbstractExtraction):
             "classifier_epoch_losses": self.training_history,
             "guidance_scale": self.config.guidance_scale,
         }
-        if self._references_metric is not None:
-            images_for_l2 = self._reference_metric_images(images, metric_images)
+        if self._references_zero_one is not None:
             nearest_indices, nearest_distances = nearest_reference(
-                images_for_l2,
-                self._references_metric,
+                images,
+                self._references_zero_one,
                 block_size=self.config.distance_block_size,
                 device=self.config.distance_device,
             )
             band_metrics = l2_band_scores(
-                images_for_l2,
-                self._references_metric,
+                images,
+                self._references_zero_one,
                 self.config.l2_bands,
                 block_size=self.config.distance_block_size,
                 device=self.config.distance_device,
@@ -523,7 +553,7 @@ class AttackSIDEExtraction(AbstractExtraction):
                     "nearest_l2_median": float(nearest_distances.median()),
                     "nearest_l2_p95": float(np.percentile(nearest_distances.numpy(), 95)),
                     "l2_band_scores": band_metrics,
-                    "l2_coordinate_range": self.config.image_range,
+                    "l2_coordinate_range": "zero_one",
                 }
             )
             if self.config.similarity_bands:

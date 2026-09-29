@@ -10,11 +10,28 @@ import math
 from dataclasses import dataclass
 
 import torch
+from pydantic import BaseModel, ConfigDict, model_validator
 from torch import Tensor
 
-from leakpro.attacks.extraction_attacks.configs import SimilarityBand
 from leakpro.attacks.extraction_attacks.protocols import PairwiseScore
-from leakpro.attacks.extraction_attacks.utils_generative import batch_ranges, resolve_device
+from leakpro.attacks.extraction_attacks.utils_generative import batch_ranges
+from leakpro.utils.device import get_device
+from leakpro.utils.import_helper import Self
+
+
+class SimilarityBand(BaseModel):
+    """Inclusive band used for SIDE's AMS and UMS metrics."""
+
+    lower: float
+    upper: float
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def validate_bounds(self) -> Self:
+        """Reject inverted bands."""
+        if self.lower > self.upper:
+            raise ValueError("SimilarityBand.lower must not exceed upper.")
+        return self
 
 
 @dataclass(frozen=True)
@@ -59,7 +76,9 @@ def normalized_l2_pairwise(
 ) -> Tensor:
     """Compute sqrt(mean squared pixel error) for every image pair."""
     _validate_pairwise_inputs(left, right, block_size)
-    target_device = resolve_device(device)
+    target_device = get_device() if device == "auto" else torch.device(device)
+    if target_device.type not in {"cpu", "cuda"}:
+        raise ValueError(f"Unsupported extraction device type: {target_device.type!r}.")
     dimensions = left[0].numel()
     result = torch.empty((left.shape[0], right.shape[0]), dtype=torch.float32)
     for left_start, left_end in batch_ranges(left.shape[0], block_size):
@@ -93,7 +112,9 @@ def tiled_l2_pairwise(
         .reshape(images.shape[0], grid_height * grid_width, channels * tile_height * tile_width)
     )
     tile_dimensions = tiles.shape[-1]
-    target_device = resolve_device(device)
+    target_device = get_device() if device == "auto" else torch.device(device)
+    if target_device.type not in {"cpu", "cuda"}:
+        raise ValueError(f"Unsupported extraction device type: {target_device.type!r}.")
     result = torch.empty((images.shape[0], images.shape[0]), dtype=torch.float32)
     for left_start, left_end in batch_ranges(images.shape[0], block_size):
         left = tiles[left_start:left_end].to(device=target_device, dtype=torch.float32)
@@ -129,7 +150,9 @@ def carlini_reference_scores(
         raise ValueError("alpha must be finite and positive.")
     if references.shape[0] < neighbors:
         raise ValueError(f"reference set has {references.shape[0]} images but neighbors={neighbors}.")
-    target_device = resolve_device(device)
+    target_device = get_device() if device == "auto" else torch.device(device)
+    if target_device.type not in {"cpu", "cuda"}:
+        raise ValueError(f"Unsupported extraction device type: {target_device.type!r}.")
     dimensions = candidates[0].numel()
     indices, distances, means = [], [], []
     for start, end in batch_ranges(candidates.shape[0], block_size):
@@ -171,7 +194,9 @@ def nearest_reference(
 ) -> tuple[Tensor, Tensor]:
     """Return each candidate's nearest reference index and normalized L2 distance."""
     _validate_pairwise_inputs(candidates, references, block_size)
-    target_device = resolve_device(device)
+    target_device = get_device() if device == "auto" else torch.device(device)
+    if target_device.type not in {"cpu", "cuda"}:
+        raise ValueError(f"Unsupported extraction device type: {target_device.type!r}.")
     dimensions = candidates[0].numel()
     all_indices: list[Tensor] = []
     all_distances: list[Tensor] = []
@@ -199,7 +224,7 @@ def l2_band_scores(
     block_size: int = 64,
     device: str = "cpu",
 ) -> dict[str, dict[str, float | int]]:
-    """Compute SIDE AMS/UMS with raw normalized-L2 distance bands.
+    """Compute SIDE AMS/UMS with normalized-L2 distance bands.
 
     AMS classifies each generation by its nearest-reference distance. UMS is the
     number of unique reference records reached by any in-band pair divided by
@@ -209,7 +234,9 @@ def l2_band_scores(
         return {}
     _validate_pairwise_inputs(candidates, references, block_size)
     generation_count = candidates.shape[0]
-    target_device = resolve_device(device)
+    target_device = get_device() if device == "auto" else torch.device(device)
+    if target_device.type not in {"cpu", "cuda"}:
+        raise ValueError(f"Unsupported extraction device type: {target_device.type!r}.")
     dimensions = candidates[0].numel()
     candidate_best = torch.full((generation_count,), torch.inf)
     reference_matches = {
@@ -259,7 +286,9 @@ def pairwise_band_scores(
     if not bands:
         return {}
     _validate_pairwise_inputs(candidates, references, block_size)
-    target_device = resolve_device(device)
+    target_device = get_device() if device == "auto" else torch.device(device)
+    if target_device.type not in {"cpu", "cuda"}:
+        raise ValueError(f"Unsupported extraction device type: {target_device.type!r}.")
     candidate_best = torch.full((candidates.shape[0],), -torch.inf)
     reference_matches = {
         name: torch.zeros(references.shape[0], dtype=torch.bool)

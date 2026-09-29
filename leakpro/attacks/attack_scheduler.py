@@ -152,8 +152,7 @@ class AttackScheduler:
             if attack.config.overwrite_results:
                 continue
             result_dir = self.report_dir / attack.result_id
-            data_path = self.data_object_dir / f"{attack.result_id}.json"
-            if result_dir.exists() or data_path.exists():
+            if result_dir.exists():
                 raise FileExistsError(
                     f"Extraction result {attack.result_id!r} already exists. "
                     "Set overwrite_results=true to replace it."
