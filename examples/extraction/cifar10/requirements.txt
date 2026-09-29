@@ -1,0 +1,2 @@
+# Upstream packaging requires an editable install. Keep sources on persistent storage.
+-e git+https://github.com/openai/improved-diffusion.git@1bc7bbbdc414d83d4abf2ad8cc1446dc36c4e4d5#egg=improved-diffusion
