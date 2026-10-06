@@ -179,6 +179,9 @@ class TestTiedScoreROC:
         assert np.allclose(result.tpr, [0.5, 1.0])
         # The old block-start rule reported fp=[0,1], i.e. a phantom vertex at
         # FPR 0 for an attack that cannot tell members from nonmembers.
+        # A random attack has AUC 0.5; integrating from the first vertex
+        # (0.5, 0.5) without the (0, 0) anchor would report 0.375.
+        assert np.isclose(result.roc_auc, 0.5)
 
     def test_vertices_match_sklearn_on_heavy_ties(self:Self) -> None:
         """Randomized heavy-tie cases: the (fpr, tpr) vertex set must equal
@@ -196,6 +199,23 @@ class TestTiedScoreROC:
             fpr_sk, tpr_sk, _ = roc_curve(labels, scores, drop_intermediate=False)
             np.testing.assert_allclose(result.fpr, fpr_sk[1:], atol=1e-12)
             np.testing.assert_allclose(result.tpr, tpr_sk[1:], atol=1e-12)
+
+    def test_roc_auc_matches_sklearn_on_heavy_ties(self:Self) -> None:
+        """roc_auc must equal sklearn's roc_auc_score when the top scores are
+        tied. Two-level scores (label-only attacks) are the worst case: without
+        the (0, 0) anchor the first vertex can sit at FPR ~0.4 and a leaky attack
+        reads as worse than random."""
+        from sklearn.metrics import roc_auc_score
+        rng = np.random.default_rng(2)
+        for levels in (2, 3, 6):
+            for _ in range(30):
+                n = int(rng.integers(20, 300))
+                scores = rng.integers(0, levels, size=n).astype(float)
+                labels = rng.integers(0, 2, size=n).astype(bool)
+                if labels.all() or not labels.any() or len(np.unique(scores)) < 2:
+                    continue
+                result = self._full(scores, labels)
+                assert np.isclose(result.roc_auc, roc_auc_score(labels, scores), atol=1e-12)
 
     def test_result_is_invariant_to_input_order(self:Self) -> None:
         """The old rule made TPR at low FPR depend on which tied point argsort

@@ -248,7 +248,11 @@ class MIAResult:
             self.fpr = self.fpr[sort_idx]
             self.tpr = self.tpr[sort_idx]
 
-        self.roc_auc = auc(self.fpr, self.tpr)
+        # Integrate from the (0, 0) anchor. fpr/tpr stay anchor-free (one
+        # vertex per realizable threshold), but when the top scores are tied
+        # the first vertex sits away from the origin and the area under the
+        # segment from (0, 0) to it would otherwise be dropped.
+        self.roc_auc = auc(np.r_[0.0, self.fpr], np.r_[0.0, self.tpr])
         self.fixed_fpr_table = self._get_result_fixed_fpr([0.0, 0.0001, 0.001, 0.01, 0.1])
 
     def _get_result_fixed_fpr(self, fpr_targets: list[float]) -> dict[str, float]:
