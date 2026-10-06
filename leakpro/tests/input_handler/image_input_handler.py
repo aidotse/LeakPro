@@ -5,11 +5,12 @@
 """Module containing the class to handle the user input for the CIFAR10 dataset."""
 
 import torch
-from torch import cuda, device, optim
+from torch import optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.utils.device import get_device, mark_step
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 from leakpro.schemas import TrainingOutput, EvalOutput
@@ -54,7 +55,7 @@ class ImageInputHandler(AbstractInputHandler):
             raise ValueError("epochs not found in configs")
 
         # prepare training
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         model.to(gpu_or_cpu)
 
         # training loop
@@ -70,6 +71,7 @@ class ImageInputHandler(AbstractInputHandler):
                 pred = outputs.data.max(1, keepdim=True)[1]
                 loss.backward()
                 optimizer.step()
+                mark_step(gpu_or_cpu)
 
                 # Accumulate performance of shadow model
                 train_acc += pred.eq(labels.data.view_as(pred)).sum()

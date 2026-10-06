@@ -15,6 +15,7 @@ from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.reporting.mia_result import MIAResult
+from leakpro.utils.device import get_device, mark_step
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
@@ -25,7 +26,7 @@ class AttackYOQO(AbstractMIA):
     class AttackConfig(BaseModel):
         """Configuration for the RMIA attack."""
 
-        training_data_fraction: float = Field(default=0.01, ge=0.0, le=1.0, description="Fraction of auxilary dataset to use for each shadow model training")  # noqa: E501
+        training_data_fraction: float = Field(default=0.01, gt=0.0, lt=1.0, description="Fraction of auxilary dataset to use for each shadow model training. Must be < 1: at 1 every shadow model trains on every point, leaving no OUT reference models.")  # noqa: E501
         num_shadow_models: int = Field(default=2, ge=1, description="Number of shadow models to train")
         online: bool = Field(default=False, description="Perform online or offline attack")
         lr_xprime_optimization: float = Field(default=1e-3, ge=0.0, description="Learning rate for optimization of xprime")
@@ -238,6 +239,7 @@ class AttackYOQO(AbstractMIA):
                 break
             loss.backward()
             optim.step()
+            mark_step(x0.device)
             optim.zero_grad()
 
         return (x0 + dx)
@@ -260,7 +262,7 @@ class AttackYOQO(AbstractMIA):
 
         predictions = []
 
-        device_name = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device_name = get_device()
 
         for model in self.shadow_models:
             model.model_obj.eval()

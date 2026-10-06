@@ -1,21 +1,52 @@
 /** Typed fetch wrappers for the LeakPro backend API. */
 
 const BASE = "";
+const TOKEN_KEY = "leakpro_api_token";
 
-async function post<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(BASE + path, {
-    method: "POST",
-    headers: body ? { "Content-Type": "application/json" } : {},
-    body: body ? JSON.stringify(body) : undefined,
-  });
+/**
+ * The backend requires a bearer token on every /jobs request. It prints one at
+ * startup (or reads LEAKPRO_WEBAPP_TOKEN). We keep it in localStorage and ask
+ * for it once per browser.
+ */
+export function getToken(): string {
+  let token = localStorage.getItem(TOKEN_KEY);
+  if (!token) {
+    token = window.prompt("LeakPro API token (printed in the backend log at startup):") ?? "";
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+  }
+  return token;
+}
+
+export function clearToken(): void {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
+function authHeaders(extra?: Record<string, string>): Record<string, string> {
+  return { Authorization: `Bearer ${getToken()}`, ...(extra ?? {}) };
+}
+
+async function handle<T>(res: Response): Promise<T> {
+  if (res.status === 401) {
+    // Stale or wrong token — drop it so the next call re-prompts.
+    clearToken();
+    throw new Error("Unauthorized: check the API token printed in the backend log.");
+  }
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
 
+async function post<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(BASE + path, {
+    method: "POST",
+    headers: authHeaders(body ? { "Content-Type": "application/json" } : undefined),
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  return handle<T>(res);
+}
+
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(BASE + path);
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  const res = await fetch(BASE + path, { headers: authHeaders() });
+  return handle<T>(res);
 }
 
 async function upload<T>(path: string, file: File, extra?: Record<string, string>): Promise<T> {
@@ -24,9 +55,8 @@ async function upload<T>(path: string, file: File, extra?: Record<string, string
   const url = extra
     ? BASE + path + "?" + new URLSearchParams(extra).toString()
     : BASE + path;
-  const res = await fetch(url, { method: "POST", body: fd });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+  const res = await fetch(url, { method: "POST", body: fd, headers: authHeaders() });
+  return handle<T>(res);
 }
 
 // ---------------------------------------------------------------------------
@@ -72,7 +102,10 @@ export const api = {
   checkCompat: (id: string, modelName: string) =>
     post<CompatResult>(`/jobs/${id}/check?model_name=${encodeURIComponent(modelName)}`),
   removeModel: (id: string, modelName: string) =>
-    fetch(`/jobs/${id}/models/${encodeURIComponent(modelName)}`, { method: "DELETE" }).then((r) => r.json()),
+    fetch(`/jobs/${id}/models/${encodeURIComponent(modelName)}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    }).then((r) => handle<unknown>(r)),
   trainModel: (id: string, params: TrainParams) => post(`/jobs/${id}/train`, params),
 
   // Step 5

@@ -13,12 +13,13 @@ Usage:
     leakpro = LeakPro(GddDataHandler, config_path, model_handler=GddModelHandler)
 """
 
-from torch import cuda, device, nn, no_grad, optim
+from torch import nn, no_grad, optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.schemas import EvalOutput, TrainingOutput
+from leakpro.utils.device import get_device, mark_step
 
 
 class GddModelHandler(AbstractInputHandler, role="model"):
@@ -35,7 +36,7 @@ class GddModelHandler(AbstractInputHandler, role="model"):
         if epochs is None:
             raise ValueError("epochs not found in configs")
 
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         model.to(gpu_or_cpu)
 
         accuracy_history, loss_history = [], []
@@ -51,6 +52,7 @@ class GddModelHandler(AbstractInputHandler, role="model"):
                 loss = criterion(outputs, labels)
                 loss.backward()
                 optimizer.step()
+                mark_step(gpu_or_cpu)
 
                 running_loss += loss.item() * labels.size(0)
                 correct += outputs.argmax(dim=1).eq(labels).sum().item()
@@ -68,7 +70,7 @@ class GddModelHandler(AbstractInputHandler, role="model"):
         return TrainingOutput(model=model, metrics=results)
 
     def eval(self, loader, model, criterion) -> EvalOutput:
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         model.to(gpu_or_cpu)
         model.eval()
         loss, correct, total = 0.0, 0, 0

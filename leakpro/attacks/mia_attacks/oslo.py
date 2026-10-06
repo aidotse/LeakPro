@@ -15,6 +15,7 @@ from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.reporting.mia_result import MIAResult
+from leakpro.utils.device import get_device, mark_step
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
@@ -25,7 +26,7 @@ class AttackOSLO(AbstractMIA):
     class AttackConfig(BaseModel):
         """Configuration for the OSLO attack."""
 
-        training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Fraction of auxilary dataset to use for each shadow model training")  # noqa: E501
+        training_data_fraction: float = Field(default=0.5, gt=0.0, lt=1.0, description="Fraction of auxilary dataset to use for each shadow model training. Must be < 1: at 1 every shadow model trains on every point, leaving no OUT reference models.")  # noqa: E501
         online: bool = Field(default=False, description="Perform online or offline attack")
         num_source_models: int = Field(default=9, ge=1, description="Number of source shadow models to train")
         num_validation_models: int = Field(default=3, ge=1, description="Number of validation shadow models to train")
@@ -171,6 +172,7 @@ class AttackOSLO(AbstractMIA):
                 loss = self._optimization_objective(x0, dx, y)
                 loss.backward()
                 optim.step()
+                mark_step(x0.device)
 
                 with torch.no_grad():
                     norm = k * self.max_perturbation_size / self.num_sub_procedures / (torch.linalg.vector_norm(dx) + 1e-30)
@@ -207,7 +209,7 @@ class AttackOSLO(AbstractMIA):
         in_members = set(self.audit_dataset["data"][self.audit_dataset["in_members"]].tolist())
         true_labels = np.array([i in in_members for i in self.audit_data_indices])
 
-        device_name = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device_name = get_device()
 
         self.target_model.model_obj.to(device_name)
         self.target_model.model_obj.eval()

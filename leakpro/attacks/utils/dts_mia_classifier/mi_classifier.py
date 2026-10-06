@@ -8,12 +8,13 @@ from typing import Any, Dict
 
 import numpy as np
 import torch
-from torch import cuda, nn, optim
+from torch import nn, optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from leakpro.attacks.utils.dts_mia_classifier.models.inception_time import InceptionTime
 from leakpro.attacks.utils.dts_mia_classifier.models.lstm_classifier import LSTMClassifier
+from leakpro.utils.device import get_device, mark_step
 from leakpro.utils.logger import logger
 
 
@@ -32,7 +33,7 @@ class MIClassifier():
             model_kwargs: Dict[str, Any] = None
         ) -> None:
 
-        self.device = torch.device("cuda" if cuda.is_available() else "cpu")
+        self.device = get_device()
         model_kwargs = model_kwargs or {}
 
         # Sanity check for InceptionTime
@@ -88,6 +89,7 @@ class MIClassifier():
                 loss = criterion(pred, target)
                 loss.backward()
                 optimizer.step()
+                mark_step(self.device)
                 train_loss += loss.item()
 
                 # Accuracy

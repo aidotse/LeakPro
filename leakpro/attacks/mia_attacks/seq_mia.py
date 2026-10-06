@@ -22,6 +22,7 @@ from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.reporting.mia_result import MIAResult
 from leakpro.signals.signal import ModelLogits
+from leakpro.utils.device import get_device, mark_step
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
@@ -36,7 +37,7 @@ class LSTM(nn.Module):
         self.num_layers = num_layers
         self.lstm = nn.LSTM(input_size, hidden_size, num_layers)
         self.label = nn.Linear(hidden_size, num_classes)
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = get_device()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward call."""
@@ -58,7 +59,7 @@ class LSTMAttention(nn.Module):
         self.num_layers = num_layers
         self.layer1 = nn.LSTM(input_size, hidden_size, num_layers)
         self.layer3 = nn.Linear(hidden_size * 2, num_classes)
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = get_device()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward call."""
@@ -284,7 +285,7 @@ class AttackSeqMIA(AbstractMIA):
         """
 
         logger.info(f"Preparing MIA {dataset_name}: {len(data_indices)} points")
-        gpu_or_cpu = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         data_loader = self.handler.get_dataloader(data_indices, batch_size=self.train_mia_batch_size, shuffle = False)
 
         model_trajectory_list = []
@@ -375,7 +376,7 @@ class AttackSeqMIA(AbstractMIA):
 
         """
         attack_model = self.mia_model
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = get_device()
         attack_model = attack_model.to(device)
 
         if not os.path.exists(f"{self.storage_dir}/seqmia_model.pt"):
@@ -431,7 +432,7 @@ class AttackSeqMIA(AbstractMIA):
         model.train()
 
         mia_train_loader = self.mia_train_data_loader
-        gpu_or_cpu = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         for _ in  tqdm(range(self.mia_classifier_epochs), total=self.mia_classifier_epochs):
             train_loss = 0.0
             num_correct = 0
@@ -448,6 +449,7 @@ class AttackSeqMIA(AbstractMIA):
                 loss.backward()
 
                 attack_optimizer.step()
+                mark_step(gpu_or_cpu)
                 train_loss += loss.item()
                 pred_label = pred.max(1, keepdim=True)[1]
                 num_correct += pred_label.eq(label).sum().item()
@@ -475,7 +477,7 @@ class AttackSeqMIA(AbstractMIA):
 
         """
         logger.info("Running the MIA attack")
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = get_device()
         attack_model = attack_model.to(device)
         attack_model.eval()
 

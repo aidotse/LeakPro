@@ -10,7 +10,9 @@ for image classification.
 import os
 import pickle
 
-from torch import cuda, device, nn, no_grad, optim, save
+from torch import nn, no_grad, optim, save
+
+from leakpro.utils.device import get_device, mark_step
 from torchvision.models import resnet18, resnet50, resnet152
 from torchvision.models import ResNet18_Weights, ResNet50_Weights, ResNet152_Weights
 from tqdm import tqdm
@@ -81,6 +83,7 @@ def evaluate(model, loader, criterion, device):
             data, target = data.to(device), target.to(device)
             target = target.view(-1)
             output = model(data)
+            mark_step(device)
             loss += criterion(output, target).item()
             pred = output.argmax(dim=1)
             acc += pred.eq(target).sum().item()
@@ -96,7 +99,7 @@ def create_trained_model_and_metadata(model, train_loader, test_loader, train_co
     optimizer_name = str(train_config["train"].get("optimizer", "adam")).lower()
     momentum = float(train_config["train"].get("momentum", 0.9))
 
-    device_name = device("cuda" if cuda.is_available() else "cpu")
+    device_name = get_device()
     model.to(device_name)
     model.train()
 
@@ -124,6 +127,7 @@ def create_trained_model_and_metadata(model, train_loader, test_loader, train_co
 
             loss.backward()
             optimizer.step()
+            mark_step(device_name)
             train_loss += loss.item()
 
         train_loss /= len(train_loader)

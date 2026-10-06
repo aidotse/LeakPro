@@ -24,6 +24,7 @@ from leakpro.attacks.mia_attacks.base import AttackBASE
 from leakpro.attacks.utils.group_testing import GroupTestDecoder
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.reporting.mia_result import MIAResult
+from leakpro.utils.device import get_device
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 from leakpro.utils.save_load import hash_attack
@@ -53,7 +54,7 @@ class AttackRaMIA(AbstractMIA):
         # parameters used for the MIA attack
         online: bool = Field(default=False, description="Online vs offline attack")
         num_shadow_models: int = Field(default=2, ge=2, description="Number of shadow models")
-        training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow models")  # noqa: E501
+        training_data_fraction: float = Field(default=0.5, gt=0.0, lt=1.0, description="Part of available attack data to use for shadow models. Must be < 1: at 1 every shadow model trains on every point, leaving no OUT reference models.")  # noqa: E501
 
     def __init__(self:Self,
                  handler: MIAHandler,
@@ -246,12 +247,13 @@ class AttackRaMIA(AbstractMIA):
         # ----------------------------
         # 1) Build feature extractor
         # ----------------------------
-        dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        dev = get_device()
         m = models.resnet18(weights=models.ResNet18_Weights.IMAGENET1K_V1)
         # keep layers up to avgpool, then flatten -> 512-d vectors
         feature_extractor = torch.nn.Sequential(*(list(m.children())[:-1]),
                                                 torch.nn.Flatten(1)).eval().to(dev)
-        torch.backends.cudnn.benchmark = True  # speedup for fixed-size inputs
+        if dev.type == "cuda":
+            torch.backends.cudnn.benchmark = True  # speedup for fixed-size inputs
         # ----------------------------
         # 2) Pass all data once
         # ----------------------------

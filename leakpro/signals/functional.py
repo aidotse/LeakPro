@@ -8,11 +8,11 @@ from collections.abc import Callable
 
 import numpy as np
 from joblib import Parallel, delayed
-from torch import cuda
 from ts2vec import TS2Vec
 
 from leakpro.signals.utils.dtw import mv_dtw_distance
 from leakpro.signals.utils.msm import mv_msm_distance
+from leakpro.utils.device import get_device
 
 
 def logits(logits: np.ndarray, targets: np.ndarray) -> np.ndarray:
@@ -195,7 +195,9 @@ def ts2vec(logits: np.ndarray, targets: np.ndarray, batch_size: int = 256,
         logits = np.expand_dims(logits, axis=2)
         targets = np.expand_dims(targets, axis=2)
     if encoder is None:
-        device = "cuda:0" if cuda.is_available() else "cpu"
+        # ts2vec upstream has no HPU backend; see leakpro/signals/utils/get_TS2Vec.py for the
+        # same fallback (falls back to CPU on HPU/mixed hosts instead of assuming CUDA).
+        device = "cuda:0" if get_device().type == "cuda" else "cpu"
         encoder = TS2Vec(input_dims = targets.shape[-1], device = device, batch_size = batch_size)
         encoder.fit(targets)
     logits_encoded = encoder.encode(logits, encoding_window="full_series", batch_size=batch_size)
