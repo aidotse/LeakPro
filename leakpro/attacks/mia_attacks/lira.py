@@ -12,12 +12,13 @@ from scipy.stats import norm
 from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
-from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
+from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler, audit_points_with_reference_models
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.reporting.mia_result import MIAResult
 from leakpro.signals import functional
 from leakpro.signals.utils.get_TS2Vec import bind_ts2vec_encoder
 from leakpro.utils.import_helper import Self
+from leakpro.utils.logger import logger
 
 
 class AttackLiRA(AbstractMIA):
@@ -28,7 +29,7 @@ class AttackLiRA(AbstractMIA):
 
         model_config = ConfigDict(extra="forbid")
         num_shadow_models: int = Field(default=1, ge=1, description="Number of shadow models")
-        training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow models")  # noqa: E501
+        training_data_fraction: float = Field(default=0.5, gt=0.0, lt=1.0, description="Part of available attack data to use for shadow models. Must be < 1: at 1 every shadow model trains on every point, leaving no OUT reference models.")  # noqa: E501
         online: bool = Field(default=False, description="Online vs offline attack")
         var_calculation: Literal["carlini", "individual_carlini", "fixed"] = Field(default="carlini", description="Variance estimation method to use [carlini, individual_carlini, fixed]")  # noqa: E501
         signal: str = Field(default="rescaled_logits",
@@ -146,6 +147,55 @@ class AttackLiRA(AbstractMIA):
             )
         self.shadow_models_signals = np.array(self.shadow_models_signals)
 
+        self._drop_unscorable_audit_points()
+
+    def _drop_unscorable_audit_points(self:Self) -> None:
+        """Restrict the audit set to points that have the reference models this variant needs.
+
+        The OUT Gaussian is fitted on the shadow models that did not train on the point, and the
+        IN Gaussian (online only) on those that did. A point missing either side yields a mean over
+        an empty slice, i.e. NaN, which previously surfaced as a bare ``ValueError("Score is NaN")``
+        with no indication of the cause. Mirrors the filtering already used by yoqo.py and dts.py.
+
+        Dropping points is a last resort, not a silent fix: under balanced sampling the per-point
+        membership counts stay within 1 of ``num_shadow_models * training_data_fraction``, so a
+        non-empty drop set means the fraction is too extreme for this number of shadow models, and
+        the warning below says so.
+        """
+        mask = audit_points_with_reference_models(self.out_indices, require_in_models=self.online)
+        n_dropped = int(np.sum(~mask))
+
+        if n_dropped == 0:
+            self.in_members = self.audit_dataset["in_members"]
+            self.out_members = self.audit_dataset["out_members"]
+            return
+
+        side = "IN and OUT" if self.online else "OUT"
+        logger.warning(
+            f"LiRA: {n_dropped} of {mask.size} audit points have no {side} shadow model and cannot be "
+            f"scored; dropping them. With num_shadow_models={self.num_shadow_models} and "
+            f"training_data_fraction={self.training_data_fraction}, every point is expected in about "
+            f"{self.num_shadow_models * self.training_data_fraction:.1f} shadow model(s). Move the "
+            "fraction towards 0.5, or raise num_shadow_models, to score the full audit set."
+        )
+
+        self.out_indices = self.out_indices[:, mask]
+        self.target_signals = self.target_signals[mask]
+        self.shadow_models_signals = self.shadow_models_signals[:, mask]
+
+        # in_members/out_members index the audit set, which is ordered [in_members..., out_members...],
+        # so the surviving points keep that order and can be renumbered contiguously.
+        self.in_members = np.arange(np.sum(mask[self.audit_dataset["in_members"]]))
+        num_out_members = int(np.sum(mask[self.audit_dataset["out_members"]]))
+        self.out_members = np.arange(len(self.in_members), len(self.in_members) + num_out_members)
+
+        if len(self.in_members) == 0 or len(self.out_members) == 0:
+            raise ValueError(
+                "LiRA has no scorable audit points left on at least one side after dropping points "
+                f"without {side} shadow models. Set training_data_fraction closer to 0.5 or increase "
+                "num_shadow_models."
+            )
+
     def _check_signal_shape(self:Self, signal_values: np.ndarray, n_audit_points: int) -> np.ndarray:
         """Verify the signal produced exactly one value per audit point.
 
@@ -260,9 +310,10 @@ class AttackLiRA(AbstractMIA):
             if np.isnan(score[i]):
                 raise ValueError("Score is NaN")
 
-        # Split the score array into two parts based on membership: in (training) and out (non-training)
-        in_members = self.audit_dataset["in_members"]
-        out_members = self.audit_dataset["out_members"]
+        # Split the score array into two parts based on membership: in (training) and out (non-training).
+        # Set by _drop_unscorable_audit_points, which renumbers them if any point was dropped.
+        in_members = self.in_members
+        out_members = self.out_members
         self.in_member_signals = score[in_members].reshape(-1,1)  # Scores for known training data members
         self.out_member_signals = score[out_members].reshape(-1,1)  # Scores for non-training data members
 

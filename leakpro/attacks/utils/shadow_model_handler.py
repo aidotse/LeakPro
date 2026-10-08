@@ -187,14 +187,82 @@ class ShadowModelHandler(ModelHandler):
 
         return all_indices, filtered_indices
 
-    def construct_balanced_assignments(self, m: int, n: int, seed: int = None) -> np.ndarray:
-        """Assigns each of m data points to approximately n/2 out of n datasets by partitioning.
+    @staticmethod
+    def _validate_training_size(data_size:int, population_size:int, training_fraction:float) -> None:
+        """Reject training fractions that leave a shadow model with no data or no OUT references.
+
+        A fraction of 0 leaves nothing to train on. A fraction of 1 puts every point in every shadow
+        model, so no point has an OUT reference model and every reference-based attack (LiRA, RMIA,
+        BASE, ...) degenerates into a NaN score or an empty-slice mean. Both are configuration
+        mistakes worth catching before any model is trained.
+
+        Args:
+        ----
+            data_size (int): Number of points each shadow model will train on.
+            population_size (int): Size of the shadow population.
+            training_fraction (float): The fraction that produced data_size, quoted back in errors.
+
+        Raises:
+        ------
+            ValueError: If data_size is below 1 or covers the whole shadow population.
+
+        """
+        if data_size < 1:
+            raise ValueError(
+                f"training_fraction={training_fraction} gives {data_size} training points out of "
+                f"{population_size}; it must yield at least 1 point per shadow model."
+            )
+        if data_size >= population_size:
+            raise ValueError(
+                f"training_fraction={training_fraction} puts all {population_size} shadow-population "
+                "points in every shadow model, leaving no OUT reference models. Use a fraction < 1."
+            )
+
+    def _cached_inclusion_counts(self:Self, cached_indices:list[int], shadow_population:np.ndarray) -> np.ndarray:
+        """Count, for each shadow-population point, how many cached shadow models were trained on it.
+
+        Read back from the cached models' stored ``train_indices`` rather than regenerated, so a run
+        that resumes after a crash or an increase in ``num_shadow_models`` can extend the existing
+        design instead of starting a new one.
+
+        Args:
+        ----
+            cached_indices (list[int]): Indices of the reusable cached shadow models.
+            shadow_population (np.ndarray): The shadow population, in assignment-column order.
+
+        Returns:
+        -------
+            np.ndarray: Length-``len(shadow_population)`` counts of cached-model memberships.
+
+        """
+        if len(cached_indices) == 0:
+            return np.zeros(len(shadow_population), dtype=np.int64)
+        in_mask = self.get_in_indices_mask(cached_indices, shadow_population)
+        return in_mask.sum(axis=1).astype(np.int64)
+
+    def construct_balanced_assignments(self, m: int, n: int, points_per_model: int = None, seed: int = None,
+                                       prior_inclusion_counts: np.ndarray = None) -> np.ndarray:
+        """Assigns each of m data points to n datasets of points_per_model points each, keeping per-point balance.
+
+        Every dataset gets exactly points_per_model points, and each point ends up
+        in an equal number of datasets (within 1), so the per-point IN/OUT counts
+        stay as even as the training fraction allows.
+
+        ``prior_inclusion_counts`` carries the membership of datasets that already
+        exist (cached shadow models). The greedy pass continues from those counts
+        instead of restarting at zero, so the union of cached and newly generated
+        datasets keeps the within-1 property. Without it, a run that resumes after
+        a crash produces a second, independent balanced design whose union with the
+        cached one is only balanced within 2.
 
         Args:
         ----
             m (int): The number of data points.
-            n (int): The number of datasets.
+            n (int): The number of datasets to generate.
+            points_per_model (int, optional): Number of points per dataset. Defaults to m // 2.
             seed (int, optional): Random seed for reproducibility. Defaults to None.
+            prior_inclusion_counts (np.ndarray, optional): Length-m counts of how many
+                already-existing datasets contain each point. Defaults to all zeros.
 
         Returns:
         -------
@@ -204,19 +272,30 @@ class ShadowModelHandler(ModelHandler):
         if seed is not None:
             np.random.seed(seed)
 
+        if points_per_model is None:
+            points_per_model = m // 2
+        if not 0 < points_per_model <= m:
+            raise ValueError(f"points_per_model must be in [1, {m}], got {points_per_model}")
+
+        if prior_inclusion_counts is None:
+            inclusion_counts = np.zeros(m, dtype=np.int64)
+        else:
+            inclusion_counts = np.asarray(prior_inclusion_counts, dtype=np.int64)
+            if inclusion_counts.shape != (m,):
+                raise ValueError(f"prior_inclusion_counts must have shape ({m},), got {inclusion_counts.shape}")
+            inclusion_counts = inclusion_counts.copy()
+
         A = np.zeros((n, m), dtype=np.uint8)  # noqa: N806
-        all_indices = np.arange(m)
 
-        for i in range(0, n - 1, 2):
-            permuted = np.random.permutation(all_indices)
-            half = m // 2
-            A[i, permuted[:half]] = 1       # First half to dataset i
-            A[i+1, permuted[half:]] = 1     # Second half to dataset i+1
-
-        if n % 2 == 1:
-            permuted = np.random.permutation(all_indices)
-            half = m // 2
-            A[n - 1, permuted[:half]] = 1   # Last dataset gets half for odd n
+        # Greedy least-loaded assignment: each dataset takes the points that are
+        # currently members of the fewest datasets (random tie-breaking), which
+        # keeps the per-point inclusion counts within 1 of each other.
+        for i in range(n):
+            tie_breaker = np.random.permutation(m)
+            order = np.lexsort((tie_breaker, inclusion_counts))
+            chosen = order[:points_per_model]
+            A[i, chosen] = 1
+            inclusion_counts[chosen] += 1
 
         return A
 
@@ -261,6 +340,9 @@ class ShadowModelHandler(ModelHandler):
 
         # Get the size of the dataset
         data_size = int(len(shadow_population)*training_fraction)
+
+        self._validate_training_size(data_size, len(shadow_population), training_fraction)
+
         all_indices, filtered_indices = self._filter(data_size)
 
         # Create a list of indices to use for the new shadow models
@@ -279,11 +361,21 @@ class ShadowModelHandler(ModelHandler):
             indices_to_use.append(next_index)
             next_index += 1
 
-        A = self.construct_balanced_assignments(len(shadow_population), num_models)  # noqa: N806
-        expected_size = len(shadow_population) // 2
-        if not np.all(np.sum(A, axis=1) == expected_size):
-            raise ValueError("Balanced shadow assignments must contain half of the shadow population per model")
+        # Cached models already hold part of the design. Seed the greedy pass with their actual
+        # membership (read back from their metadata) so the union of cached and new models stays
+        # balanced; otherwise a resumed run draws a second independent design and the per-point
+        # IN/OUT counts drift apart.
         shadow_population = np.array(shadow_population)
+        n_new_models = num_models - n_existing_models
+        prior_counts = self._cached_inclusion_counts(filtered_indices, shadow_population)
+
+        # data_size is also what the cache signature records, so the trained size
+        # must match it exactly or cached models are never reused (issue #345).
+        A = self.construct_balanced_assignments(len(shadow_population), n_new_models,  # noqa: N806
+                                                points_per_model=data_size,
+                                                prior_inclusion_counts=prior_counts)
+        if not np.all(np.sum(A, axis=1) == data_size):
+            raise ValueError("Balanced shadow assignments must contain data_size points per model")
 
         for i, indx in enumerate(indices_to_use):
             # Get dataloader based on sampling method
@@ -490,3 +582,36 @@ def _torch_indice_in_shadowmodel_training_set(in_tensor:Tensor, dataset:Tensor, 
     for i in range(in_tensor.shape[1]):
         in_tensor[:, i] = torch.isin(dataset, model_indices[i, :])
     return in_tensor
+
+
+def audit_points_with_reference_models(out_indices:np.ndarray, require_in_models:bool) -> np.ndarray:
+    """Select the audit points that have the shadow models a reference-based attack needs.
+
+    A per-point Gaussian or log-sum-exp reference statistic is undefined when a point has no
+    model on the relevant side: the mean of an empty slice is NaN, and the score derived from it
+    is NaN too. Which side is needed depends on the attack variant - offline scoring uses only the
+    OUT models, online scoring uses both.
+
+    Points can end up one-sided in two ways. Under ``sampling_method="random"`` the handler draws
+    each shadow model's training set independently, so a point can miss a side by chance. Under
+    balanced sampling the per-point membership counts stay within 1 of ``num_shadow_models *
+    training_data_fraction``, so a one-sided point means the fraction itself is too extreme for the
+    number of shadow models, and the count of dropped points will be large rather than incidental.
+
+    Args:
+    ----
+        out_indices (np.ndarray): Boolean matrix of shape (num_shadow_models, num_audit_points)
+            where entry (i, j) is True when shadow model i did NOT train on audit point j.
+        require_in_models (bool): Whether the attack also needs at least one IN model per point,
+            as online scoring does.
+
+    Returns:
+    -------
+        np.ndarray: Boolean mask of shape (num_audit_points,), True for points that can be scored.
+
+    """
+    has_out_model = np.any(out_indices, axis=0)
+    if not require_in_models:
+        return has_out_model
+    has_in_model = np.any(~out_indices, axis=0)
+    return has_out_model & has_in_model
