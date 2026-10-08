@@ -20,6 +20,7 @@ from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.device import get_device
 from leakpro.utils.import_helper import Any, Dict, List, Self, Tuple, Union
 from leakpro.utils.logger import logger
+from leakpro.utils.save_load import unwrapped_state_dict
 
 
 def singleton(cls):  # noqa: ANN001, ANN201
@@ -404,9 +405,7 @@ class ShadowModelHandler(ModelHandler):
             test_result = self.handler.eval(test_loader, shadow_model, criterion)
 
             logger.info(f"Training shadow model {indx} complete")
-            shadow_model_state_dict = shadow_model.state_dict()
-            cleaned_state_dict = {key.replace("_module.", "").replace("module.", ""): value
-                    for key, value in shadow_model_state_dict.items()}
+            cleaned_state_dict = unwrapped_state_dict(shadow_model)
 
             with open(f"{self.storage_path}/{self.model_storage_name}_{indx}.pkl", "wb") as f:
                 save(cleaned_state_dict, f)

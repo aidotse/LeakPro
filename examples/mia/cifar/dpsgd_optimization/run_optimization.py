@@ -63,6 +63,7 @@ from leakpro.optimization import (  # noqa: E402
 )
 from leakpro.schemas import PrivacyUtilityConfig  # noqa: E402
 from leakpro.utils.logger import logger  # noqa: E402
+from leakpro.utils.save_load import unwrapped_state_dict  # noqa: E402
 
 NUM_CLASSES = 10
 
@@ -225,8 +226,7 @@ def make_objective(cfg: PrivacyUtilityConfig, pop: dict, out_dir: Path, device: 
                                    extras={"epsilon": epsilon, "tuning_accounted": False, "gated": True})
 
         # 4. Persist the target in the layout LeakPro's MIAHandler reads.
-        state_dict = {k.replace("_module.", "").replace("module.", ""): v
-                      for k, v in train_result.model.state_dict().items()}
+        state_dict = unwrapped_state_dict(train_result.model)
         with (target_folder / "target_model.pkl").open("wb") as f:
             torch.save(state_dict, f)
         test_result = CifarDPHandler().eval(test_loader, train_result.model, criterion)
