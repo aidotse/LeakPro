@@ -112,6 +112,8 @@ def dp_train(  # noqa: PLR0913
     )
     # Training-set fit after the last epoch, measured on the logical loader (the
     # Poisson-sampled private loader does not visit every example exactly once).
+    # Cost: one extra forward pass over the training set for every model trained,
+    # shadow models included.
     fit = evaluate(dataloader, model, criterion, device)
     model.to("cpu")
     epsilon = model.dp_accounting["epsilon"]
