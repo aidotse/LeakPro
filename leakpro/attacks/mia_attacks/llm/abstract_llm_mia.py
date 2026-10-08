@@ -108,8 +108,13 @@ def rank_top(scores: np.ndarray, force_top: np.ndarray, tiebreak: np.ndarray) ->
     Several attacks have configurations the paper says must be classified as members regardless of
     the numeric score (EZ-MIA: ``N == 0`` or too few error positions). Those rows, and any row whose
     score is ``+inf``, are placed above the highest ordinary score, ordered among themselves by
-    ``tiebreak`` (larger = higher). A ``-inf`` score is a legitimately *weakest* signal (e.g.
-    ``log(P/N)`` with ``P == 0``) and is placed just below the lowest ordinary score, so monotone
+    ``tiebreak`` (larger = higher) -- rows with an *equal* ``tiebreak`` value get an *equal* output
+    score (ranked by the distinct values of ``tiebreak``, not by row position), so a batch of
+    genuinely tied rows -- e.g. a self-reference audit, where every row has ``delta == 0`` and ties
+    on every measure -- doesn't silently pick up a spurious ordering from wherever those rows happened
+    to sit in the input (which correlates with the membership label whenever the caller's rows are
+    grouped by label, as ``AbstractLLMMIA``'s are). A ``-inf`` score is a legitimately *weakest* signal
+    (e.g. ``log(P/N)`` with ``P == 0``) and is placed just below the lowest ordinary score, so monotone
     transforms of the same statistic keep the same ranking. ``nan`` outside the forced rows is a
     caller bug and raises. All returned values are finite, which
     :meth:`~leakpro.reporting.mia_result.MIAResult.from_full_scores` requires: its descending-sort
@@ -140,9 +145,12 @@ def rank_top(scores: np.ndarray, force_top: np.ndarray, tiebreak: np.ndarray) ->
     base = out[~forced].max() if (~forced).any() else 0.0
     tb = np.asarray(tiebreak, dtype=np.float64)[forced]
     tb = np.where(np.isfinite(tb), tb, 0.0)
-    order = np.argsort(tb, kind="stable")
-    ranks = np.empty(len(order), dtype=np.float64)
-    ranks[order] = np.arange(1, len(order) + 1, dtype=np.float64) / len(order)
+    # Rank by distinct value (np.unique sorts ascending), not by position: equal tb -> equal rank ->
+    # equal output score. argsort+arange ranks every row individually even when tb values are equal,
+    # which silently encodes row order (and therefore the caller's row grouping) into the score.
+    _, inverse = np.unique(tb, return_inverse=True)
+    n_unique = inverse.max() + 1 if inverse.size else 0
+    ranks = (inverse + 1) / n_unique if n_unique else inverse.astype(np.float64)
     out[forced] = base + 1.0 + ranks
     return out
 

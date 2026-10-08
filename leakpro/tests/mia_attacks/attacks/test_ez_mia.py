@@ -8,12 +8,20 @@ Tests cover:
 - hand-worked P / N / EZ on a 2-row example under every aggregation
 - position 0 of every row is excluded by default (ignore_first_position), even when it looks like
   error signal, and is configurable
-- N == 0 and fewer-than-min_error_positions rows rank as members under every aggregation (paper
-  appendix E.5/E.6), not scored on an untrustworthy ratio -- min_error_positions is configurable
+- zero error positions (E.5) rank as members under every aggregation; N == 0 with at least one error
+  position (E.6) ranks as a member only for aggregations where that is genuinely undefined/infinite
+  (ratio, log_ratio) -- not for positive_fraction/difference/mean_delta/median_delta, which have
+  ordinary finite values there
+- rows with 1 <= n_err < min_error_positions that are not otherwise forced score a plain 0.0, not a
+  member rank -- in particular a lone *downward* error (the attack's own non-member signal) must not
+  outrank a genuine member
+- among forced rows, zero-error-position rows (E.5) always rank above N==0 rows (E.6), tiebroken by P
+  within each bucket -- not by row position, so a batch of genuinely tied rows (e.g. a self-reference
+  audit) gets equal scores regardless of input order
 - log_ratio and ratio produce identical rankings on ordinary rows (monotone transform)
 - padding never contributes to P or N
-- end-to-end against the fake handler: a self-reference gives delta == 0 everywhere, so every row
-  is forced (N == 0) and the result is still finite and well-formed
+- end-to-end against the fake handler: a self-reference gives delta == 0 everywhere, so every row is
+  forced and the result is still finite and well-formed
 """
 
 import numpy as np
@@ -25,6 +33,7 @@ from leakpro.reporting.mia_result import MIAResult
 from leakpro.tests.mia_attacks.attacks.test_llm_base import _fake_handler
 
 AGGREGATIONS = ("ratio", "log_ratio", "positive_fraction", "difference", "mean_delta", "median_delta")
+UNDEFINED_AT_N_ZERO = ("ratio", "log_ratio")
 
 
 def _example() -> tuple:
@@ -38,7 +47,7 @@ def _example() -> tuple:
 
 
 def test_hand_worked_values_per_aggregation() -> None:
-    """Each aggregation matches its definition on the worked example (no forced rows)."""
+    """Each aggregation matches its definition on the worked example (no forced/insufficient rows)."""
     delta, error = _example()
     expected = {
         "ratio": [3.0 / 1.0, 0.5 / 2.0],
@@ -52,37 +61,98 @@ def test_hand_worked_values_per_aggregation() -> None:
         result = ez_scores(delta, error, agg)
         np.testing.assert_allclose(result.scores, exp, err_msg=agg)
         assert not result.forced.any(), agg
+        assert not result.insufficient.any(), agg
 
 
 @pytest.mark.parametrize("aggregation", AGGREGATIONS)
-def test_degenerate_rows_rank_as_members_under_every_aggregation(aggregation: str) -> None:
-    """N == 0 (all upward) and fewer-than-min_error_positions rows end up above all ordinary rows,
-    finite, tiebroken by P (paper appendix E.5/E.6) -- not scored on an untrustworthy ratio."""
+def test_zero_error_positions_ranks_as_member_under_every_aggregation(aggregation: str) -> None:
+    """n_err == 0 (paper E.5) is forced above all ordinary rows regardless of aggregation."""
     delta = np.array([[0.0, 2.0, -1.0, 1.0],    # ordinary: P=3, N=1
-                      [0.0, 1.0, 2.0, 0.5],     # N == 0 (all upward, 3 error positions) → forced, P=3.5
-                      [0.0, 0.3, -5.0, 3.0],    # only 1 real error position (col 0 excluded) → forced, P=0.3
-                      [0.0, 0.0, 0.0, 0.0],     # zero error positions → forced, P=0
+                      [0.0, 0.0, 0.0, 0.0],     # zero error positions -> forced
                       [0.0, -1.0, -2.0, 0.5]])  # ordinary: P=0.5, N=3
     error = np.array([[False, True, True, True],
-                      [False, True, True, True],
-                      [False, True, False, False],
                       [False, False, False, False],
                       [False, True, True, True]])
     result = ez_scores(delta, error, aggregation)
     assert np.all(np.isfinite(result.scores)), aggregation
-    np.testing.assert_array_equal(result.forced, [False, True, True, True, False])
-    forced, ordinary = result.scores[[1, 2, 3]], result.scores[[0, 4]]
-    assert forced.min() > ordinary.max(), aggregation
-    assert result.scores[1] > result.scores[2] > result.scores[3], aggregation  # tiebreak by P: 3.5 > 0.3 > 0
-    assert result.scores[0] > result.scores[4], aggregation                     # ordinary ordering preserved
+    np.testing.assert_array_equal(result.forced, [False, True, False], err_msg=aggregation)
+    assert not result.insufficient.any(), aggregation
+    assert result.scores[1] > max(result.scores[0], result.scores[2]), aggregation
+
+
+@pytest.mark.parametrize("aggregation", UNDEFINED_AT_N_ZERO)
+def test_n_zero_ranks_as_member_only_where_undefined(aggregation: str) -> None:
+    """N == 0 with enough error positions (E.6) is forced only for ratio/log_ratio, where P/N is
+    genuinely undefined/infinite -- not a general 'too little evidence' rule."""
+    delta = np.array([[0.0, 2.0, -1.0, 1.0],   # ordinary: P=3, N=1
+                      [0.0, 1.0, 2.0, 0.5]])   # N == 0, 3 error positions -> forced here
+    error = np.array([[False, True, True, True],
+                      [False, True, True, True]])
+    result = ez_scores(delta, error, aggregation)
+    np.testing.assert_array_equal(result.forced, [False, True], err_msg=aggregation)
+    assert not result.insufficient.any(), aggregation
+    assert result.scores[1] > result.scores[0], aggregation
+
+
+@pytest.mark.parametrize("aggregation", ("positive_fraction", "difference", "mean_delta", "median_delta"))
+def test_n_zero_is_not_forced_where_it_has_an_ordinary_finite_value(aggregation: str) -> None:
+    """For aggregations where N == 0 is not degenerate, it must not be forced to the top."""
+    delta = np.array([[0.0, 1.0, 2.0, 0.5]])  # N == 0, 3 error positions
+    error = np.array([[False, True, True, True]])
+    result = ez_scores(delta, error, aggregation)
+    assert not result.forced[0], aggregation
+    assert not result.insufficient[0], aggregation
+    assert np.isfinite(result.scores[0]), aggregation
+
+
+def test_lone_downward_error_does_not_outrank_a_real_member() -> None:
+    """A single error whose mass moved entirely downward (P == 0, the attack's own non-member
+    signal) must not be forced above a genuine member just for having few error positions."""
+    delta = np.zeros((2, 6))
+    error = np.zeros((2, 6), bool)
+    error[0, 2] = True
+    delta[0, 2] = -5.0                       # 1 error position, P = 0, N = 5 -- insufficient, not forced
+    error[1, 2:5] = True
+    delta[1, 2:5] = [1.0, 1.0, -0.1]         # ordinary member: P = 2, N = 0.1, ratio = 20
+    result = ez_scores(delta, error, "ratio")
+    np.testing.assert_array_equal(result.forced, [False, False])
+    np.testing.assert_array_equal(result.insufficient, [True, False])
+    assert result.scores[1] > result.scores[0]
+    assert result.scores[0] == 0.0
 
 
 def test_min_error_positions_is_configurable() -> None:
-    """Raising min_error_positions forces a row that would otherwise be ordinary (N != 0, 2 errors)."""
+    """Raising min_error_positions marks insufficient a row that would otherwise be ordinary
+    (N != 0, 2 errors) -- it is scored 0.0, not forced to the top."""
     delta = np.array([[0.0, 5.0, -3.0, 1.0]])  # 2 real error positions (col 0 excluded): P=5, N=3
     error = np.array([[False, True, True, False]])
-    assert not ez_scores(delta, error, "ratio", min_error_positions=2).forced[0]
-    assert ez_scores(delta, error, "ratio", min_error_positions=3).forced[0]
+    low = ez_scores(delta, error, "ratio", min_error_positions=2)
+    assert not low.forced[0] and not low.insufficient[0]
+    high = ez_scores(delta, error, "ratio", min_error_positions=3)
+    assert not high.forced[0] and high.insufficient[0]
+    assert high.scores[0] == 0.0
+
+
+def test_forced_tiebreak_is_lexicographic_zero_errors_above_n_zero() -> None:
+    """Among forced rows, zero-error-position rows (E.5, the paper's strongest case) always rank
+    above N==0 rows (E.6), regardless of P -- a tiebreak on P alone can't express "no errors at all"."""
+    delta = np.array([[0.0, 0.0, 0.0, 0.0],     # zero error positions, P = 0 -- E.5
+                      [0.0, 50.0, 10.0, 5.0]])  # N == 0, P = 65 -- E.6, much larger P than row 0
+    error = np.array([[False, False, False, False],
+                      [False, True, True, True]])
+    result = ez_scores(delta, error, "ratio")
+    np.testing.assert_array_equal(result.forced, [True, True])
+    assert result.scores[0] > result.scores[1]  # E.5 outranks E.6 despite P = 0 < 65
+
+
+def test_tied_forced_rows_get_equal_scores_regardless_of_order() -> None:
+    """Genuinely tied forced rows (equal P, equal E.5/E.6 bucket) must get equal scores -- not an
+    ordering that depends on row position (which in AbstractLLMMIA's output correlates with label)."""
+    delta = np.zeros((8, 6))
+    error = np.zeros((8, 6), bool)  # every row: zero error positions -> all E.5, all P = 0
+    result = ez_scores(delta, error, "ratio")
+    assert result.forced.all()
+    np.testing.assert_allclose(result.scores, result.scores[0])
 
 
 def test_log_ratio_and_ratio_rank_identically() -> None:

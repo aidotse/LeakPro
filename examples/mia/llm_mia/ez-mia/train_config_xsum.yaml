@@ -24,7 +24,7 @@ run:
 train:
   model_name: gpt2
   dtype: float32
-  finetune_method: lora       # full | lora   (override with --finetune-method)
+  finetune_method: full       # full | lora   (override with --finetune-method)
   epochs: 3
   batch_size: 16
   gradient_accumulation_steps: 1

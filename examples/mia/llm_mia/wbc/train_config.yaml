@@ -27,6 +27,10 @@
 #   WBC: AUC 0.8578  TPR@0%FPR 0.0001  TPR@0.01%FPR 0.0001  TPR@0.1%FPR 0.0377  TPR@1%FPR 0.1746  TPR@10%FPR 0.5813
 #   bootstrap (100 resamples): AUC 0.8576 [0.8532, 0.8620]  TPR@0.01%FPR 0.0030 [0.0000, 0.0239]
 #     TPR@0.1%FPR 0.0355 [0.0137, 0.0572]  TPR@1%FPR 0.1740 [0.1591, 0.1923]  TPR@10%FPR 0.5812 [0.5664, 0.5958]
+# PROVENANCE WARNING: the run above predates load_best_checkpoint_at_end being restored to this file
+# (see that key's own comment) and only has 3 epochs of training history, not the 10 set below -- these
+# numbers are from an earlier config, not this one. Needs a fresh run against the current config before
+# being treated as this example's verified result.
 #
 # NOT covered here, needs infrastructure beyond this repo:
 #   - multi-GPU / DeepSpeed (the paper's "2 HPU cards", `deepspeed_config`) -- this trains on exactly
@@ -58,10 +62,10 @@ train:
   eval_strategy: epoch             # held-out eval after every epoch (test.json doubles as the paper's "val")
   save_strategy: epoch             # checkpoint after every epoch, under log_dir/ckpts/checkpoint-<step>
   save_total_limit: 1
-  load_best_checkpoint_at_end: true  # paper appendix A.2 (EZ-MIA)/§4 (WBC): select the lowest-validation-loss
-                                      # checkpoint rather than always the last epoch's -- this key was dropped
-                                      # from this file at some point; restored, since both the full and LoRA
-                                      # runs need it to avoid an artificially overfit target.
+  load_best_checkpoint_at_end: true  # WBC paper §4: select the lowest-validation-loss checkpoint rather
+                                      # than always the last epoch's -- this key was dropped from this
+                                      # file at some point; restored, since both the full and LoRA runs
+                                      # need it to avoid an artificially overfit target.
   learning_rate: 1.0e-5              # paper (§5.1/Appendix C): 5e-5; reference repo's config generator: 1e-5 --
                                     # verified on real HPU hardware to reproduce the paper's results with this value
   weight_decay: 0.1

@@ -10,6 +10,7 @@ themselves train nothing. Both accept the ``(input_ids, input_ids)`` batches the
 (always built with ``CausalLMCollate`` in ``prepare_target.py``, so batches are ``(input_ids, attention_mask)``).
 """
 
+import inspect
 import shutil
 from pathlib import Path
 from typing import Optional
@@ -141,13 +142,13 @@ class LLMModelHandler(AbstractInputHandler, role="model"):
                              target_modules=self.lora["target_modules"], task_type="CAUSAL_LM")
             model.model = get_peft_model(model.model, cfg)
             # The optimizer was built over the base parameters; rebuild it over the trainable adapter ones.
-            # Only lr/weight_decay are ever set explicitly (see prepare_target.py) -- splatting the rest of
-            # `.defaults` is fragile: some torch versions' AdamW.defaults includes keys (e.g.
-            # decoupled_weight_decay) that its own __init__ does not accept as a kwarg.
-            optimizer = type(optimizer)(
-                (p for p in model.parameters() if p.requires_grad),
-                lr=optimizer.defaults["lr"], weight_decay=optimizer.defaults["weight_decay"],
-            )
+            # `.defaults` carries every constructor kwarg (lr, weight_decay, betas, eps, amsgrad, ...),
+            # but splatting it verbatim is fragile: some torch versions' AdamW.defaults includes keys
+            # (e.g. decoupled_weight_decay) that its own __init__ does not accept as a kwarg. Filter
+            # against the actual signature instead of hard-coding which keys are "the ones that matter".
+            accepted = inspect.signature(type(optimizer).__init__).parameters
+            kwargs = {k: v for k, v in optimizer.defaults.items() if k in accepted}
+            optimizer = type(optimizer)((p for p in model.parameters() if p.requires_grad), **kwargs)
 
         n_batches = len(dataloader)
         steps_per_epoch = -(-n_batches // gradient_accumulation_steps)  # ceil div

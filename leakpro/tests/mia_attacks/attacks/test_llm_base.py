@@ -7,7 +7,8 @@
 Tests cover:
 - rank_top(): forced and +inf rows end up strictly above every ordinary row, ordered by the
   tiebreak; -inf rows go below every ordinary row; unforced nan raises; all outputs finite,
-  ordinary rows untouched; all-forced and none-forced cases
+  ordinary rows untouched; all-forced and none-forced cases; genuinely tied forced rows (equal
+  tiebreak) get equal scores regardless of row position
 - ReferenceModelConfig / LLMAttackConfig validation (extra="forbid", source literal)
 - load_reference(): `self` wraps the handler's target; `random_init` re-initialises the blueprint
   so it differs from the target; `pretrained` without a path raises
@@ -85,6 +86,19 @@ def test_rank_top_all_forced_is_finite_and_ordered() -> None:
     out = rank_top(s, np.ones(4, bool), np.array([2.0, 0.5, 3.0, 1.0]))
     assert np.all(np.isfinite(out))
     assert out[2] > out[0] > out[3] > out[1]
+
+
+def test_rank_top_tied_forced_rows_get_equal_scores_regardless_of_position() -> None:
+    """Equal tiebreak values among forced rows must give equal output scores -- not a position-
+    dependent rank. In AbstractLLMMIA's output row order correlates with membership_labels (members
+    first), so a stable-sort-based ranking would silently correlate a fully-tied input's scores with
+    the label (e.g. a self-reference audit, where every row is forced with the same tiebreak)."""
+    s = np.full(6, np.inf)
+    force = np.ones(6, bool)
+    tb = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+    out = rank_top(s, force, tb)
+    assert np.all(np.isfinite(out))
+    np.testing.assert_allclose(out, out[0])
 
 
 # ---------------------------------------------------------------------------------------- configs
