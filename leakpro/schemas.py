@@ -11,6 +11,8 @@ import optuna
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from torch.nn import Module
 
+from leakpro.utils.seed import MAX_SEED
+
 ArrayOrScalar = Union[np.ndarray, np.integer, int, list]
 
 class OptimizerConfig(BaseModel):
@@ -69,7 +71,7 @@ class ReconstructionConfig(BaseModel):
 class AuditConfig(BaseModel):
     """Configuration for the audit process."""
 
-    random_seed: int = Field(default=42, description="Random seed for reproducibility")
+    random_seed: int = Field(default=42, ge=0, le=MAX_SEED, description="Random seed for reproducibility")
     attack_type: Literal["mia", "gia", "minv", "synthetic"] = Field(..., description="Type of attack: must be one of ['mia', 'gia', 'minv', 'synthetic]")  # noqa: E501
     attack_list: List[Dict[str, Any]] = Field(..., min_length=1, description="Must have at least one attack")
     hyper_param_search: bool = Field(default=False, description="Whether to perform hyperparameter search")

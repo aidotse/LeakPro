@@ -10,19 +10,23 @@ Covers:
 - a failure inside HPU seeding is caught and logged, not raised
 - seeding is reproducible and leaves the cuDNN flags alone (issue #325)
 - AttackScheduler applies audit.random_seed at audit start and before every attack
+- a non-int or out-of-range random_seed warns and defaults; the schema rejects out-of-range seeds
 """
 import random
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import pytest
 import torch
 from dotmap import DotMap
+from pydantic import ValidationError
 from pytest import LogCaptureFixture, MonkeyPatch
 
 import leakpro.utils.seed as seed_module
 from leakpro.attacks.attack_scheduler import AttackScheduler
+from leakpro.schemas import AuditConfig
 from leakpro.tests.input_handler.image_input_handler import ImageInputHandler
-from leakpro.utils.seed import seed_everything
+from leakpro.utils.seed import MAX_SEED, seed_everything
 
 
 def _mock_habana_hpu_module() -> MagicMock:
@@ -171,16 +175,18 @@ class TestAuditSeeding:
         assert scheduler.random_seed == 42
         assert seeds_applied == [42]
 
-    def test_warns_and_defaults_on_non_int_seed(
+    @pytest.mark.parametrize("bad_seed", ["42", -1, MAX_SEED + 1])
+    def test_warns_and_defaults_on_invalid_seed(
         self,
+        bad_seed: object,
         image_handler: ImageInputHandler,
         monkeypatch: MonkeyPatch,
         caplog: LogCaptureFixture,
         tmp_path,  # noqa: ANN001
     ) -> None:
-        """A non-int random_seed (config typo) must warn rather than silently default."""
+        """A non-int or out-of-range random_seed must warn and default, not crash np.random.seed()."""
         audit_dict = image_handler.configs.audit.model_dump()
-        audit_dict["random_seed"] = "42"
+        audit_dict["random_seed"] = bad_seed
         image_handler.configs.audit = DotMap(audit_dict)
 
         seeds_applied = []
@@ -192,3 +198,17 @@ class TestAuditSeeding:
         assert scheduler.random_seed == 42
         assert seeds_applied == [42]
         assert any("random_seed" in record.message and "42" in record.message for record in caplog.records)
+
+    @pytest.mark.parametrize("seed", [0, MAX_SEED])
+    def test_schema_accepts_seed_range_bounds(self, seed: int) -> None:
+        """Both ends of np.random.seed()'s legal range pass schema validation."""
+        audit = AuditConfig(random_seed=seed, attack_type="mia", attack_list=[{"attack": "lira"}],
+                            data_modality="image", output_dir="out")
+        assert audit.random_seed == seed
+
+    @pytest.mark.parametrize("seed", [-1, MAX_SEED + 1])
+    def test_schema_rejects_out_of_range_seed(self, seed: int) -> None:
+        """A seed np.random.seed() would reject fails at config validation, not mid-audit."""
+        with pytest.raises(ValidationError):
+            AuditConfig(random_seed=seed, attack_type="mia", attack_list=[{"attack": "lira"}],
+                        data_modality="image", output_dir="out")

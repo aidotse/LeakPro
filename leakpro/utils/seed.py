@@ -11,6 +11,9 @@ import torch
 from leakpro.utils.device import hpu_is_installed
 from leakpro.utils.logger import logger
 
+# np.random.seed() rejects anything outside [0, 2**32 - 1], so this is the legal seed range.
+MAX_SEED = 2**32 - 1
+
 
 def seed_everything(seed: int) -> None:
     """Set the seed for different libraries.
