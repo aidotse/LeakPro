@@ -255,13 +255,15 @@ class MIAResult:
         tp_cumsum = np.cumsum(sorted_labels == 1)
         fp_cumsum = np.cumsum(sorted_labels == 0)
 
-        # Remove duplicates in sorted_scores and keep the first occurrence
-        _, first_indices = np.unique(sorted_scores, return_index=True)
-        first_indices = first_indices[::-1]
+        # One ROC point per distinct score, taken at the LAST row of each tied block: thresholding at
+        # `score >= t` predicts every row tied at t as a member, so the cumulative counts must include
+        # the whole block. Taking the first row instead made the ROC depend on row order within ties.
+        _, first_in_reversed = np.unique(sorted_scores[::-1], return_index=True)
+        last_indices = (len(sorted_scores) - 1 - first_in_reversed)[::-1]
 
-        self.tp = tp_cumsum[first_indices]
-        self.fp = fp_cumsum[first_indices]
-        self.thresholds = sorted_scores[first_indices]
+        self.tp = tp_cumsum[last_indices]
+        self.fp = fp_cumsum[last_indices]
+        self.thresholds = sorted_scores[last_indices]
 
         self.fn = np.sum(sorted_labels == 1) - self.tp
         self.tn = np.sum(sorted_labels == 0) - self.fp
@@ -316,7 +318,9 @@ class MIAResult:
             self.fpr = self.fpr[sort_idx]
             self.tpr = self.tpr[sort_idx]
 
-        self.roc_auc = auc(self.fpr, self.tpr)
+        # Anchor the curve at (0, 0) (threshold above every score). Without it, a tied block at the top
+        # score starts the curve at (fpr, tpr) > 0 and the area under that first segment is lost.
+        self.roc_auc = auc(np.r_[0.0, self.fpr], np.r_[0.0, self.tpr])
         self.fixed_fpr_table = self._get_result_fixed_fpr([0.0, 0.0001, 0.001, 0.01, 0.1])
 
     def _get_result_fixed_fpr(self, fpr_targets: list[float]) -> dict[str, float]:

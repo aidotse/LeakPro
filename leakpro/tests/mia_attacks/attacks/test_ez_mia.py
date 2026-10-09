@@ -202,6 +202,37 @@ def test_attack_end_to_end_with_self_reference(monkeypatch: pytest.MonkeyPatch) 
     assert result.metadata["aggregation"] == "ratio"
     assert result.metadata["references"][0]["source"] == "self"
 
+    # delta == 0 removes all reference signal: every row with an error position is tied (E.6, P = 0).
+    # Only zero-error rows (E.5) break the tie -- that comes from the target's own predictions, not the
+    # reference -- so the AUC is the pairwise definition over these scores, ties counted as 1/2.
+    target = attack.evidence_set.target
+    error = (target.argmax != target.token_ids) & target.mask
+    error[:, 0] = False
+    has_errors = error.sum(axis=1) > 0
+    assert has_errors.any() and (~has_errors).any()  # the fake data exercises both kinds of row
+    tied = result.signal_values[has_errors]
+    np.testing.assert_allclose(tied, tied[0])
+    assert np.all(result.signal_values[~has_errors] > tied[0])
+    labels = attack._audit_labels
+    pos, neg = result.signal_values[labels == 1], result.signal_values[labels == 0]
+    expected_auc = ((pos[:, None] > neg[None, :]).sum() + 0.5 * (pos[:, None] == neg[None, :]).sum()) / (pos.size * neg.size)
+    assert np.isclose(result.roc_auc, expected_auc)
+
+
+def test_self_reference_without_error_free_rows_gives_auc_one_half() -> None:
+    """Self-reference (delta == 0) where every row has an error position: all rows tie, so AUC is 0.5."""
+    labels = np.array([1, 1, 1, 0, 0, 0, 1, 0])
+    delta = np.zeros((8, 5))
+    error = np.zeros((8, 5), bool)
+    error[:, 2] = True
+    scores = ez_scores(delta, error, "ratio").scores
+    # A second, distinct score level so MIAResult builds a ROC (one level alone has no curve); it holds
+    # one member and one non-member, so it adds no signal either.
+    labels = np.r_[labels, 1, 0]
+    scores = np.r_[scores, scores[0] - 1.0, scores[0] - 1.0]
+    result = MIAResult.from_full_scores(true_membership=labels, signal_values=scores, result_name="self")
+    assert np.isclose(result.roc_auc, 0.5)
+
 
 def test_attack_requires_a_reference(monkeypatch: pytest.MonkeyPatch) -> None:
     """Without a reference model prepare_attack fails with an actionable message."""

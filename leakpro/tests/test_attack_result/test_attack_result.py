@@ -95,7 +95,30 @@ class TestMIAResult:
         assert np.allclose(self.miaresult_fixed.tpr, self.fixed_tpr)
         np.testing.assert_array_equal(self.miaresult_fixed.fp, self.fixed_fp)
         np.testing.assert_array_equal(self.miaresult_fixed.tn, self.fixed_tn)
-        
+
+    def test_tied_scores_count_as_half_regardless_of_row_order(self:Self) -> None:
+        """Rows tied on score are one ROC point, counted as a whole block -- not by row position."""
+        # Each score level holds 2 members and 2 non-members: no ranking signal at all.
+        labels = np.array([1, 1, 1, 1, 0, 0, 0, 0])
+        scores = np.array([2.0, 2.0, 1.0, 1.0, 2.0, 2.0, 1.0, 1.0])
+        for order in (np.arange(8), np.arange(8)[::-1], np.array([4, 0, 6, 2, 5, 1, 7, 3])):
+            res = MIAResult.from_full_scores(true_membership=labels[order], signal_values=scores[order],
+                                             result_name="ties")
+            assert np.isclose(res.roc_auc, 0.5)
+            np.testing.assert_array_equal(res.tp, [2, 4])
+            np.testing.assert_array_equal(res.fp, [2, 4])
+
+    def test_tied_scores_auc_matches_pairwise_definition(self:Self) -> None:
+        """AUC = P(member score > non-member score) + 0.5 * P(tie), on heavily tied scores."""
+        rng = np.random.default_rng(0)
+        labels = rng.integers(0, 2, 60)
+        labels[:2] = [0, 1]
+        scores = rng.integers(0, 4, 60).astype(float)
+        pos, neg = scores[labels == 1], scores[labels == 0]
+        expected = ((pos[:, None] > neg[None, :]).sum() + 0.5 * (pos[:, None] == neg[None, :]).sum()) / (pos.size * neg.size)
+        res = MIAResult.from_full_scores(true_membership=labels, signal_values=scores, result_name="ties")
+        assert np.isclose(res.roc_auc, expected)
+
 
     def test_save_load_miaresult(self:Self, mocker: MockerFixture) -> None:
         """Test load and save functionality."""
