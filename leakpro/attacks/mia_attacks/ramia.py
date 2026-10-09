@@ -304,7 +304,7 @@ class AttackRaMIA(AbstractMIA):
         hash_config = {"augment_strength": self.augment_strength,
                        "num_transforms": self.num_transforms,
                        "n_ops": self.n_ops}
-        hash_str = hash_attack(hash_config, AbstractMIA.handler.target_model)
+        hash_str = hash_attack(hash_config, self.handler.target_model)
 
         if os.path.exists(f"{augmented_data_dir}/{hash_str}"):
             logger.info("Loading existing augmented data...")
