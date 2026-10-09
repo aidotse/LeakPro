@@ -22,15 +22,8 @@
 # paper's own data prep (github.com/Stry233/WBC, `dataset/prep.py`), ported here so this repo has
 # no external, GPU-pinned dependency.
 #
-# Verified end-to-end on real HPU hardware with this config's epochs/learning_rate (see train.epochs'
-# and train.learning_rate's comments below) + wbc_audit.yaml's window_lengths/aggregation/n_bootstrap_samples:
-#   WBC: AUC 0.8578  TPR@0%FPR 0.0001  TPR@0.01%FPR 0.0001  TPR@0.1%FPR 0.0377  TPR@1%FPR 0.1746  TPR@10%FPR 0.5813
-#   bootstrap (100 resamples): AUC 0.8576 [0.8532, 0.8620]  TPR@0.01%FPR 0.0030 [0.0000, 0.0239]
-#     TPR@0.1%FPR 0.0355 [0.0137, 0.0572]  TPR@1%FPR 0.1740 [0.1591, 0.1923]  TPR@10%FPR 0.5812 [0.5664, 0.5958]
-# PROVENANCE WARNING: the run above predates load_best_checkpoint_at_end being restored to this file
-# (see that key's own comment) and only has 3 epochs of training history, not the 10 set below -- these
-# numbers are from an earlier config, not this one. Needs a fresh run against the current config before
-# being treated as this example's verified result.
+# Verified on HPU (2026-10-09) with this config + wbc_audit.yaml (best checkpoint: epoch 8 of 10):
+#   WBC: AUC 0.8572  TPR@1%FPR 0.160  TPR@0.1%FPR 0.033   (bootstrap 95%: AUC [0.8520, 0.8614], TPR@1%FPR [0.144, 0.176])
 #
 # NOT covered here, needs infrastructure beyond this repo:
 #   - multi-GPU / DeepSpeed (the paper's "2 HPU cards", `deepspeed_config`) -- this trains on exactly

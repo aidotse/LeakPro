@@ -28,7 +28,7 @@ target:
   module_path: ../hf_wrapper.py   # shared code stays one level up, in examples/mia/llm_mia/
   model_class: HFCausalLMWrapper
   target_folder: ./target_full          # prepare_target.py --finetune-method full|lora → target_full|target_lora
-  data_path: ./data/wikitext_gpt2_128.pkl
+  data_path: ./data/wikitext_gpt2_128_pool140k.pkl
 
 shadow_model:
 

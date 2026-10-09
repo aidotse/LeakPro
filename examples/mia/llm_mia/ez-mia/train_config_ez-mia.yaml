@@ -5,25 +5,11 @@
 # Target preparation for the LLM MIA example (prepare_target.py). Defaults reproduce the EZ-MIA
 # paper's WikiText / GPT-2 / full fine-tuning setting (arXiv:2601.12104, §4 and appendix A).
 #
-# Verified end-to-end with this config + audit.yaml, and cross-checked against an independently run
-# instance of the paper's own released code (github.com/JetBrains-Research/ez-mia, same seed 1337,
-# configs/exp_wikitext_gpt2_base.yaml) rather than just the paper's published table:
-#   this repo:  AUC 0.9864  TPR@1%FPR 0.6458  TPR@0.1%FPR 0.0580
-#   reference code (seed 1337): AUC 0.9837  TPR@1%FPR 0.673  TPR@0.1%FPR 0.149
-# AUC/TPR@1%FPR agree closely; TPR@0.1%FPR does not (0.058 vs 0.149, ~2.5x). A first isolated-ablation
-# attempt tried to rule out EZ-MIA's scoring-edge-case handling as the cause but accidentally toggled
-# two variables at once (force-policy and ignore_first_position together), so it does not actually
-# support that conclusion -- see ez_mia.py's module docstring. Status: OPEN, unexplained; hypotheses
-# below are untested. At 10 non-members out of 10k, TPR@0.1%FPR is set by which ~10-15 non-members
-# land in the top ~0.1% x 10000 = 10 ranks of a ~20000-row population -- the relevant rank band for
-# a discrepancy of this size is roughly ranks 590-1500 (where the two runs' non-member orderings would
-# need to differ for one to log 10/17 hits and the other ~3/17), not the top 60 outright. One candidate
-# explanation: this repo's sampling and the reference code's consume their PRNGs in different order
-# (different library, different call sequence), so the same seed value does not select the same
-# WikiText excerpts in each -- untested. Supporting (but not conclusive) evidence: on this repo alone,
-# one otherwise-unrelated fix (row-shuffle -> row-rotation before chunking) swung this same metric from
-# 0.316 to 0.058, so the metric is known to be sensitive to sampling order; that doesn't show PRNG
-# consumption order is *the* explanation here, only that this metric moves a lot for unrelated reasons.
+# Verified on HPU (2026-10-09) with this config + audit.yaml, against the paper's released code
+# (github.com/JetBrains-Research/ez-mia, configs/exp_wikitext_gpt2_base.yaml, seed 1337):
+#   this repo:       AUC 0.9817  TPR@1%FPR 0.590  TPR@0.1%FPR 0.172   (bootstrap 95%: TPR@1%FPR [0.546, 0.629])
+#   reference code:  AUC 0.9837  TPR@1%FPR 0.673  TPR@0.1%FPR 0.149
+# Open: TPR@1%FPR is ~0.08 below the reference (one seed each side).
 run:
   random_seed: 1337   # matches the EZ-MIA paper's own WikiText/GPT-2/full reference config
   # {finetune_method} is substituted, so the LoRA-vs-full sweep writes two targets side by side.
@@ -43,7 +29,7 @@ train:
   gradient_accumulation_steps: 1   # raise for big models (GPT-J-6B, Llama) to keep this effective batch
                                     # size at a smaller per-step memory cost: batch_size 4 x steps 4 == 16
   learning_rate: 1.0e-4
-  weight_decay: 0.0
+  weight_decay: 0.01   # reference code: torch AdamW default (it passes no weight_decay); decays LR linearly to 0 too
   eval_strategy: epoch             # held-out eval after every epoch (non-member split doubles as the
                                     # paper's own validation set, same reuse ../wbc/'s config makes)
   save_strategy: epoch             # checkpoint after every epoch, under log_dir/ckpts/checkpoint-<step>
@@ -76,9 +62,14 @@ data:
                               # differs from ../ez-mia's `prefix` for XSum) | other modes: prefix, variable
   max_length: 128
   n_sequences: 20500          # population size; members + non-members + validation must fit inside it
+  pool_sequences: 140000      # chunk this many CONSECUTIVE chunks, then keep a random n_sequences of them, so
+                              # members and non-members are rarely neighbouring chunks of the same article
+                              # (~15% of the pool is used, about the reference code's density: it chunks a
+                              # ~200k-row buffer into ~130-140k chunks and shuffles before taking its 20k).
+                              # Without it, ~3/4 of non-members neighbour a member chunk and look like members.
   n_members: 10000
   n_nonmembers: 10000
   n_validation: 500           # disjoint from n_members/n_nonmembers -- used only for load_best_checkpoint_at_end's
                               # epoch selection, never scored. Matches the paper's own reference code (which draws
                               # a genuinely separate 500-sequence validation pool, not the audit non-members).
-  data_path: ./data/wikitext_gpt2_128.pkl
+  data_path: ./data/wikitext_gpt2_128_pool140k.pkl   # new name: the old consecutive-chunk pkl must not be reused
