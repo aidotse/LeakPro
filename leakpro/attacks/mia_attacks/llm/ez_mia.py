@@ -44,14 +44,19 @@ no downward movement at all) as a non-member is the worse failure mode, so this 
 paper's two structural force-to-member cases and only applies the reference code's floor to the
 genuinely-ambiguous remainder.
 
-A first attempt at an isolated ablation (comparing this policy against the reference code's, same
-trained target and population) found the two policies gave near-identical metrics and concluded the
-scoring rule barely mattered. That conclusion doesn't hold: the attempt changed two variables at once
-(this module's force-policy *and* ``ignore_first_position``), so it wasn't an isolated test of the
-scoring rule alone -- its result is retracted, not confirmed by a corrected rerun. A real one-variable-
-at-a-time ablation (same trained target/population, force-policy toggled alone, then
-``ignore_first_position`` toggled alone) is still open; nothing in this package's test suite performs
-it yet.
+One-toggle-at-a-time ablation (``examples/mia/llm_mia/ez_mia_ablation.py``: same target, same
+evidence, only the scoring rule or only ``ignore_first_position`` changed), GPT-2 full fine-tune,
+20,000 audited rows each on WikiText and XSum:
+
+- edge-case policy (this module's vs the reference code's): 0 rows hit any edge case on either
+  dataset, so scores and metrics are identical;
+- ``ignore_first_position`` False instead of True: most rows change score (WikiText 17,228, XSum
+  17,956) but the metrics barely move -- WikiText AUC 0.9817 -> 0.9818, TPR@1%FPR 0.590 -> 0.597;
+  XSum AUC 0.9895 -> 0.9896, TPR@1%FPR 0.778 -> 0.777.
+
+An earlier, retracted ablation reported small metric differences between the two scoring rules despite
+zero forced rows; that difference came from ``ignore_first_position``, which it had changed at the same
+time.
 """
 
 import warnings
