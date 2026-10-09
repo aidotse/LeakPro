@@ -64,6 +64,7 @@ def _tokenise(texts: list, tokenizer, cfg: dict) -> list:
     """
     max_length = int(cfg["max_length"])
     chunking = cfg["chunking"]
+    limit = int(cfg.get("pool_sequences") or cfg["n_sequences"])
     if chunking == "fixed":
         stream = []
         chunks = []
@@ -72,9 +73,9 @@ def _tokenise(texts: list, tokenizer, cfg: dict) -> list:
             while len(stream) >= max_length:
                 chunks.append(np.asarray(stream[:max_length], dtype=np.int64))
                 stream = stream[max_length:]
-            if len(chunks) >= cfg["n_sequences"]:
+            if len(chunks) >= limit:
                 break
-        return chunks[: cfg["n_sequences"]]
+        return chunks[:limit]
     if chunking == "prefix":
         buf = []
         chunks = []
@@ -83,18 +84,54 @@ def _tokenise(texts: list, tokenizer, cfg: dict) -> list:
             if len(buf) >= max_length:
                 chunks.append(np.asarray(buf[:max_length], dtype=np.int64))
                 buf = []
-            if len(chunks) >= cfg["n_sequences"]:
+            if len(chunks) >= limit:
                 break
-        return chunks[: cfg["n_sequences"]]
+        return chunks[:limit]
     seqs = []
     for t in texts:
         ids = tokenizer(t, truncation=True, max_length=max_length)["input_ids"]
         if len(ids) >= 2:
             seqs.append(np.asarray(ids, dtype=np.int64))
-        if len(seqs) >= cfg["n_sequences"]:
+        if len(seqs) >= limit:
             break
     return seqs
 
+
+def _build_hf_sequences(texts: list, tokenizer, data_cfg: dict) -> list:
+    """Order the texts, chunk them, and (with ``pool_sequences``) sample ``n_sequences`` of the chunks.
+
+    Uses the global ``random`` state, so seed it (``random.seed(run.random_seed)``) first. Shared by
+    ``main`` and ezmia_main.ipynb so both build the identical population.
+
+    ``fixed`` concatenates consecutive rows into one continuous stream. Some datasets (e.g.
+    WikiText-103's ``Salesforce/wikitext``) store one row per paragraph/heading, not one row per
+    document -- shuffling row order first would glue together unrelated paragraphs from different
+    articles into the same chunk, producing incoherent "salad" text that is trivially memorable and
+    inflates membership-inference scores for reasons that have nothing to do with the attack itself.
+    A random rotation keeps every row's neighbours intact (matching the reference code's
+    random-start-offset, sequential-read approach for WikiText) while still giving a seed-dependent
+    slice of the corpus.
+
+    ``pool_sequences`` (optional): chunk that many consecutive sequences, then keep a random
+    ``n_sequences`` of them. Without it the population is ``n_sequences`` *consecutive* chunks, so
+    almost every non-member's neighbouring chunks -- the rest of the same article -- are members the
+    target was trained on, which makes non-members look like members and weakens every attack. The
+    reference code avoids this the same way: it chunks a ~200k-row buffer (~130-140k chunks) and
+    shuffles before taking its 20k.
+    """
+    if data_cfg["chunking"] == "fixed":
+        start = random.randrange(len(texts)) if texts else 0
+        texts = texts[start:] + texts[:start]
+    else:
+        random.shuffle(texts)
+    seqs = _tokenise(texts, tokenizer, data_cfg)
+    n = int(data_cfg["n_sequences"])
+    needed = max(n, int(data_cfg.get("pool_sequences") or 0))
+    if len(seqs) < needed:
+        raise ValueError(f"only {len(seqs)} sequences available, need {needed}")
+    if len(seqs) > n:
+        seqs = [seqs[i] for i in sorted(random.sample(range(len(seqs)), n))]
+    return seqs
 
 def _member_nonmember_val_split(n: int, data_cfg: dict, seed: int) -> tuple:
     """Random, disjoint (members, non-members, validation) index split of a population of size n.
@@ -182,23 +219,7 @@ def main() -> None:
               f"{len(train_indices)} members from {data_cfg['train_path']}, "
               f"{len(test_indices)} non-members from {data_cfg['test_path']})")
     else:
-        texts = _load_texts(data_cfg)
-        if data_cfg["chunking"] == "fixed":
-            # `fixed` concatenates consecutive rows into one continuous stream. Some datasets (e.g.
-            # WikiText-103's `Salesforce/wikitext`) store one row per paragraph/heading, not one row
-            # per document -- shuffling row order first would glue together unrelated paragraphs from
-            # different articles into the same chunk, producing incoherent "salad" text that is
-            # trivially memorable and inflates membership-inference scores for reasons that have
-            # nothing to do with the attack itself. A random rotation keeps every row's neighbours
-            # intact (matching the reference code's random-start-offset, sequential-read approach for
-            # WikiText) while still giving a seed-dependent slice of the corpus.
-            start = random.randrange(len(texts)) if texts else 0
-            texts = texts[start:] + texts[:start]
-        else:
-            random.shuffle(texts)
-        seqs = _tokenise(texts, tokenizer, data_cfg)
-        if len(seqs) < data_cfg["n_sequences"]:
-            raise ValueError(f"only {len(seqs)} sequences available, need {data_cfg['n_sequences']}")
+        seqs = _build_hf_sequences(_load_texts(data_cfg), tokenizer, data_cfg)
         if data_cfg["chunking"] in ("fixed", "prefix"):  # both always emit exactly max_length tokens
             ids = torch.as_tensor(np.stack(seqs))
         else:
