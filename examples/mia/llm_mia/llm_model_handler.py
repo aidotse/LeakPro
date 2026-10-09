@@ -107,8 +107,10 @@ class LLMModelHandler(AbstractInputHandler, role="model"):
                 a big model use a small per-step `batch_size` while keeping a larger effective batch
                 size (`batch_size * gradient_accumulation_steps`), matching a paper's own recipe.
             warmup_steps: Linear LR warmup over this many *optimizer* steps (not micro-batches), then
-                linear decay to 0 over the remaining steps -- matches HF `Trainer`'s default schedule
-                when its `warmup_steps` is set. 0 (default) keeps the LR constant, as before.
+                linear decay to 0 over the remaining steps -- HF `Trainer`'s default schedule and the
+                EZ-MIA reference code's (`get_linear_schedule_with_warmup`). 0 (default) skips the
+                warmup but still decays: a constant LR leaves the target memorising its training set
+                more than the papers' targets do, which inflates every attack's numbers.
             eval_dataloader: If given, run a held-out eval pass after every epoch (`eval_strategy:
                 epoch`) and print/record it in `history`. `None` (default) evaluates only once, at
                 the very end via a separate `self.eval(...)` call -- unchanged from before.
@@ -153,11 +155,8 @@ class LLMModelHandler(AbstractInputHandler, role="model"):
         n_batches = len(dataloader)
         steps_per_epoch = -(-n_batches // gradient_accumulation_steps)  # ceil div
         total_optimizer_steps = steps_per_epoch * epochs
-        scheduler = (
-            optim.lr_scheduler.LambdaLR(
-                optimizer, lambda s: _linear_warmup_then_decay(s, warmup_steps, total_optimizer_steps))
-            if warmup_steps > 0 else None
-        )
+        scheduler = optim.lr_scheduler.LambdaLR(
+            optimizer, lambda s: _linear_warmup_then_decay(s, warmup_steps, total_optimizer_steps))
 
         model.to(device)
         history = {"loss": [], "acc": [], "val_loss": [], "val_acc": []}
@@ -179,8 +178,7 @@ class LLMModelHandler(AbstractInputHandler, role="model"):
                 if (step + 1) % gradient_accumulation_steps == 0 or is_last_batch:
                     optimizer.step()
                     optimizer.zero_grad(set_to_none=True)
-                    if scheduler is not None:
-                        scheduler.step()
+                    scheduler.step()
                     global_step += 1
                 mark_step(device)
                 tot_loss += loss.item() * n_tok.item()
