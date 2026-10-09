@@ -249,17 +249,19 @@ class MIAResult:
 
         assert np.all(np.diff(sorted_scores) <= 0), "sorted_scores are not in descending order"
 
-        # check that sorted_scores are descending
-        assert np.all(np.diff(sorted_scores) <= 0), "sorted_scores are not in descending order"
-
         tp_cumsum = np.cumsum(sorted_labels == 1)
         fp_cumsum = np.cumsum(sorted_labels == 0)
 
-        # One ROC point per distinct score, taken at the LAST row of each tied block: thresholding at
-        # `score >= t` predicts every row tied at t as a member, so the cumulative counts must include
-        # the whole block. Taking the first row instead made the ROC depend on row order within ties.
-        _, first_in_reversed = np.unique(sorted_scores[::-1], return_index=True)
-        last_indices = (len(sorted_scores) - 1 - first_in_reversed)[::-1]
+        # One ROC vertex per distinct score, snapshotted at the END of each tie
+        # block: a threshold at value v admits every point scoring >= v (the
+        # same rule _compute_fixed_threshold_confusions applies), so a tie
+        # block is admitted whole or not at all. Snapshotting the block start
+        # instead would count exactly one arbitrary element of the block — an
+        # operating point no threshold can realize, whose value depends on
+        # argsort tie order.
+        _, first_indices = np.unique(sorted_scores, return_index=True)
+        first_indices = first_indices[::-1]  # block starts, in descending-score order
+        last_indices = np.r_[first_indices[1:] - 1, len(sorted_scores) - 1]
 
         self.tp = tp_cumsum[last_indices]
         self.fp = fp_cumsum[last_indices]
@@ -318,8 +320,10 @@ class MIAResult:
             self.fpr = self.fpr[sort_idx]
             self.tpr = self.tpr[sort_idx]
 
-        # Anchor the curve at (0, 0) (threshold above every score). Without it, a tied block at the top
-        # score starts the curve at (fpr, tpr) > 0 and the area under that first segment is lost.
+        # Integrate from the (0, 0) anchor. fpr/tpr stay anchor-free (one
+        # vertex per realizable threshold), but when the top scores are tied
+        # the first vertex sits away from the origin and the area under the
+        # segment from (0, 0) to it would otherwise be dropped.
         self.roc_auc = auc(np.r_[0.0, self.fpr], np.r_[0.0, self.tpr])
         self.fixed_fpr_table = self._get_result_fixed_fpr([0.0, 0.0001, 0.001, 0.01, 0.1])
 

@@ -95,41 +95,18 @@ class TestMIAResult:
         assert np.allclose(self.miaresult_fixed.tpr, self.fixed_tpr)
         np.testing.assert_array_equal(self.miaresult_fixed.fp, self.fixed_fp)
         np.testing.assert_array_equal(self.miaresult_fixed.tn, self.fixed_tn)
-
-    def test_tied_scores_count_as_half_regardless_of_row_order(self:Self) -> None:
-        """Rows tied on score are one ROC point, counted as a whole block -- not by row position."""
-        # Each score level holds 2 members and 2 non-members: no ranking signal at all.
-        labels = np.array([1, 1, 1, 1, 0, 0, 0, 0])
-        scores = np.array([2.0, 2.0, 1.0, 1.0, 2.0, 2.0, 1.0, 1.0])
-        for order in (np.arange(8), np.arange(8)[::-1], np.array([4, 0, 6, 2, 5, 1, 7, 3])):
-            res = MIAResult.from_full_scores(true_membership=labels[order], signal_values=scores[order],
-                                             result_name="ties")
-            assert np.isclose(res.roc_auc, 0.5)
-            np.testing.assert_array_equal(res.tp, [2, 4])
-            np.testing.assert_array_equal(res.fp, [2, 4])
-
-    def test_tied_scores_auc_matches_pairwise_definition(self:Self) -> None:
-        """AUC = P(member score > non-member score) + 0.5 * P(tie), on heavily tied scores."""
-        rng = np.random.default_rng(0)
-        labels = rng.integers(0, 2, 60)
-        labels[:2] = [0, 1]
-        scores = rng.integers(0, 4, 60).astype(float)
-        pos, neg = scores[labels == 1], scores[labels == 0]
-        expected = ((pos[:, None] > neg[None, :]).sum() + 0.5 * (pos[:, None] == neg[None, :]).sum()) / (pos.size * neg.size)
-        res = MIAResult.from_full_scores(true_membership=labels, signal_values=scores, result_name="ties")
-        assert np.isclose(res.roc_auc, expected)
-
+        
 
     def test_save_load_miaresult(self:Self, mocker: MockerFixture) -> None:
         """Test load and save functionality."""
 
         name = "lira"
-        save_path = f"{self.temp_dir}/results/{self.miaresult_full.id}"
-        data_storage_path = f"{self.temp_dir}/data_objects/"
+        save_path = f"{self.temp_dir.name}/results/{self.miaresult_full.id}"
+        data_storage_path = f"{self.temp_dir.name}/data_objects/"
 
         # Test saving
         attack_mock = mocker.Mock(attack_id=self.miaresult_full.id)
-        self.miaresult_full.save(attack_mock, self.temp_dir)
+        self.miaresult_full.save(attack_mock, self.temp_dir.name)
 
         assert os.path.isdir(save_path)
         assert os.path.exists(data_storage_path)
@@ -172,3 +149,85 @@ class TestMIAResult:
 
         # Ensure the LaTeX content ends properly
         assert "\\newline\n"  in latex_content
+
+class TestTiedScoreROC:
+    """Regression tests: ROC vertices must sit at the END of each tie block.
+
+    A threshold at value v admits every point scoring >= v, so a tie block is
+    admitted whole or not at all. The old code snapshotted the block START
+    (np.unique first occurrence), counting exactly one arbitrary element per
+    block — an operating point no threshold can realize. Consequences: phantom
+    vertices near the origin, curves that never reach (1, 1), and headline
+    TPRs (e.g. TPR@0%FPR) that depended on argsort tie order. Invisible on
+    all-distinct scores; bites on clamped/quantized signals such as DP-SGD
+    saturation.
+    """
+
+    @staticmethod
+    def _full(scores, labels) -> MIAResult:
+        return MIAResult.from_full_scores(true_membership=np.asarray(labels, dtype=bool),
+                                          signal_values=np.asarray(scores, dtype=float),
+                                          result_name="tied")
+
+    def test_minimal_tied_case_counts_whole_blocks(self:Self) -> None:
+        """Scores [9,9,5,5], labels [1,0,1,0]: threshold 9 admits one member AND
+        one nonmember (they are tied); threshold 5 admits everything."""
+        result = self._full([9, 9, 5, 5], [1, 0, 1, 0])
+        np.testing.assert_array_equal(result.tp, [1, 2])
+        np.testing.assert_array_equal(result.fp, [1, 2])
+        assert np.allclose(result.fpr, [0.5, 1.0])
+        assert np.allclose(result.tpr, [0.5, 1.0])
+        # The old block-start rule reported fp=[0,1], i.e. a phantom vertex at
+        # FPR 0 for an attack that cannot tell members from nonmembers.
+        # A random attack has AUC 0.5; integrating from the first vertex
+        # (0.5, 0.5) without the (0, 0) anchor would report 0.375.
+        assert np.isclose(result.roc_auc, 0.5)
+
+    def test_vertices_match_sklearn_on_heavy_ties(self:Self) -> None:
+        """Randomized heavy-tie cases: the (fpr, tpr) vertex set must equal
+        sklearn's roc_curve(..., drop_intermediate=False) minus its (0,0) anchor."""
+        from sklearn.metrics import roc_curve
+        rng = np.random.default_rng(0)
+        for _ in range(50):
+            n = int(rng.integers(20, 300))
+            # Quantized scores -> plenty of ties, including at the extremes.
+            scores = rng.integers(0, 6, size=n).astype(float)
+            labels = rng.integers(0, 2, size=n).astype(bool)
+            if labels.all() or not labels.any():
+                continue
+            result = self._full(scores, labels)
+            fpr_sk, tpr_sk, _ = roc_curve(labels, scores, drop_intermediate=False)
+            np.testing.assert_allclose(result.fpr, fpr_sk[1:], atol=1e-12)
+            np.testing.assert_allclose(result.tpr, tpr_sk[1:], atol=1e-12)
+
+    def test_roc_auc_matches_sklearn_on_heavy_ties(self:Self) -> None:
+        """roc_auc must equal sklearn's roc_auc_score when the top scores are
+        tied. Two-level scores (label-only attacks) are the worst case: without
+        the (0, 0) anchor the first vertex can sit at FPR ~0.4 and a leaky attack
+        reads as worse than random."""
+        from sklearn.metrics import roc_auc_score
+        rng = np.random.default_rng(2)
+        for levels in (2, 3, 6):
+            for _ in range(30):
+                n = int(rng.integers(20, 300))
+                scores = rng.integers(0, levels, size=n).astype(float)
+                labels = rng.integers(0, 2, size=n).astype(bool)
+                if labels.all() or not labels.any() or len(np.unique(scores)) < 2:
+                    continue
+                result = self._full(scores, labels)
+                assert np.isclose(result.roc_auc, roc_auc_score(labels, scores), atol=1e-12)
+
+    def test_result_is_invariant_to_input_order(self:Self) -> None:
+        """The old rule made TPR at low FPR depend on which tied point argsort
+        happened to place first. Reshuffling the inputs must not change anything."""
+        rng = np.random.default_rng(1)
+        n = 2000
+        # Saturation shape: a shared tie block at the top score.
+        scores = np.concatenate([np.full(120, 5.0), rng.random(n - 120),      # members
+                                 np.full(60, 5.0), rng.random(n - 60)])        # nonmembers
+        labels = np.concatenate([np.ones(n, dtype=bool), np.zeros(n, dtype=bool)])
+        tables = []
+        for _ in range(6):
+            perm = rng.permutation(2 * n)
+            tables.append(self._full(scores[perm], labels[perm]).fixed_fpr_table)
+        assert all(t == tables[0] for t in tables[1:])
