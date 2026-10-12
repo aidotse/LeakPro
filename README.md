@@ -183,7 +183,6 @@ target:
 ```
 
 For full documentation see the **[LeakPro Wiki](https://github.com/aidotse/LeakPro/wiki)**:
-- [RAPID — offline attack and CIFAR configuration](examples/mia/cifar/RAPID.md)
 - [Attack Modules overview](https://github.com/aidotse/LeakPro/wiki/Attack-Modules)
 - [Membership Inference Attacks — implemented attacks & papers](https://github.com/aidotse/LeakPro/wiki/Membership-Inference-Attacks)
 - [Running MIA Attacks — audit.yaml config reference for all MIA attacks](https://github.com/aidotse/LeakPro/wiki/Running-MIA-Attacks)
