@@ -48,6 +48,23 @@ class TestFunctionalLoss:
         with pytest.raises(AssertionError):
             functional.loss(np.array([[1.0, 0.0]]), np.array([0], dtype=np.float64))
 
+    @pytest.mark.parametrize("single_logit", [False, True])
+    def test_stable_loss_preserves_large_wrong_class_losses(self, single_logit: bool) -> None:
+        """Stable mode computes NLL without changing the existing default floor."""
+        logits = np.array([[1000.0], [-1000.0], [0.0]])
+        if not single_logit:
+            logits = np.column_stack((np.zeros(3), logits[:, 0]))
+        labels = np.array([1, 1, 0], dtype=np.int64)
+        np.testing.assert_allclose(functional.loss(logits, labels, stable=True), [0.0, 1000.0, np.log(2)])
+        with np.errstate(over="ignore"):
+            np.testing.assert_allclose(functional.loss(logits, labels), functional.loss(logits, labels, stable=False))
+            assert functional.loss(logits, labels)[1] == pytest.approx(-np.log(1e-45))
+
+    def test_stable_loss_keeps_equal_large_logits_distinguishable(self) -> None:
+        """Equal logits retain log(2) loss even when their common offset is huge."""
+        logits = np.array([[1e20, 1e20]])
+        np.testing.assert_allclose(functional.loss(logits, np.array([1], dtype=np.int64), stable=True), [np.log(2)])
+
 
 class TestRescaledSmape:
     """``functional.rescaled_smape`` must stay finite at both saturation points of SMAPE."""

@@ -1,0 +1,31 @@
+##
+## Copyright 2023-2026 Lindholmen Science Park AB
+## SPDX-License-Identifier: Apache-2.0
+##
+# Uses the target artifacts produced by cifar_main.ipynb. See RAPID.md.
+audit:
+  random_seed: 1234
+  attack_type: mia
+  data_modality: image
+  output_dir: ./leakpro_output_rapid
+  attack_list:
+    - attack: rapid
+      num_reference_models: 4
+      shadow_data_fraction: 0.5
+      training_data_fraction: 0.5
+      query_num: 8
+      augment_strength: easy
+      batch_size: 128
+      mia_classifier_epochs: 150
+      learning_rate: 0.0002
+      weight_decay: 0.0005
+      use_attack: null  # Default: ordinary RAPID. None/RAPID are aliases; lira/rmia selects a source.
+      use_attack_output: scores  # With a source, choose scores or logits for RAPID loss features.
+      use_attack_config: {}  # Source parameters; online: true enables balanced IN/OUT references.
+target:
+  module_path: ./target_model_class.py
+  model_class: WideResNet
+  target_folder: ./target
+  data_path: ./data/cifar10.pkl
+shadow_model: null
+distillation_model: null

@@ -379,6 +379,9 @@ def _build_attack_config(attack_name: str) -> dict:
         candidate["batch_size"] = max(candidate["batch_size"], 1)
     if "temperature" in candidate:
         candidate["temperature"] = max(candidate["temperature"], 1e-3)
+    if attack_name == "rmia":
+        # Temperature is not a runtime budget; its numeric floor underflows softmax probabilities.
+        candidate["temperature"] = default_config["temperature"]
     if "max_num_evals" in candidate and "initial_num_evals" in candidate:
         if candidate["max_num_evals"] <= candidate["initial_num_evals"]:
             candidate["max_num_evals"] = candidate["initial_num_evals"] + 1
@@ -402,6 +405,11 @@ def _build_attack_config(attack_name: str) -> dict:
         # SeqMIA builds 5 metrics per trajectory step; keep feature width aligned with model input.
         candidate["input_size"] = max(candidate.get("input_size", 5), 5)
         candidate["train_mia_batch_size"] = max(candidate.get("train_mia_batch_size", 2), 2)
+
+    if attack_name == "rapid":
+        candidate.update(shadow_data_fraction=0.5, training_data_fraction=0.5,
+                         num_reference_models=2, query_num=2, mia_classifier_epochs=2,
+                         learning_rate=0.0002, random_seed=1234)
 
     if attack_name == "oslo":
         # Keep a valid positive threshold range and an even post-audit pool size
@@ -464,6 +472,7 @@ def _create_audit_yaml(
     model_class: str,
     data_path: Path,
     target_dir: Path,
+    source_config: dict | None = None,
 ) -> Path:
     config = {
         "audit": {
@@ -482,6 +491,8 @@ def _create_audit_yaml(
         "shadow_model": None,
         "distillation_model": None,
     }
+    if source_config is not None:
+        config["audit"]["attack_list"][0].update(source_config)
 
     config_path = run_dir / "audit.yaml"
     with open(config_path, "w") as file:
@@ -489,7 +500,7 @@ def _create_audit_yaml(
     return config_path
 
 
-def _create_image_e2e_config(run_dir: Path, attack_name: str) -> Path:
+def _create_image_e2e_config(run_dir: Path, attack_name: str, source_config: dict | None = None) -> Path:
     population = _build_tiny_image_population()
     target_model = TinyImageTargetModel()
     criterion = nn.CrossEntropyLoss()
@@ -510,7 +521,7 @@ def _create_image_e2e_config(run_dir: Path, attack_name: str) -> Path:
         train_indices=train_indices,
         test_indices=test_indices,
     )
-    return _create_audit_yaml(run_dir, attack_name, "image", "TinyImageTargetModel", data_path, target_dir)
+    return _create_audit_yaml(run_dir, attack_name, "image", "TinyImageTargetModel", data_path, target_dir, source_config)
 
 
 def _create_timeseries_e2e_config(run_dir: Path, attack_name: str) -> Path:
@@ -543,11 +554,16 @@ E2E_TESTED_MIA_ATTACKS = (
     "multi_signal_lira",
     "dts",
     "oslo",
+    "rapid",
 )
 
 ATTACK_PARAMETERS = [
-    pytest.param(attack_name, id=f"{attack_name}-real")
+    pytest.param(attack_name, None, id=f"{attack_name}-real")
     for attack_name in E2E_TESTED_MIA_ATTACKS
+] + [
+    pytest.param("rapid", {"use_attack": source, "use_attack_output": output, "use_attack_config": {"online": online}},
+                 id=f"rapid-{source}-{output}-{'online' if online else 'offline'}-real")
+    for source in ("lira", "rmia") for output in ("scores", "logits") for online in (False, True)
 ]
 
 
@@ -575,8 +591,8 @@ def test_target_split_keeps_aux_population() -> None:
     assert len(RMIA_TRAIN_INDICES) + len(RMIA_TEST_INDICES) == N_SAMPLES
 
 
-@pytest.mark.parametrize("attack_name", ATTACK_PARAMETERS)
-def test_all_attacks_end_to_end(attack_name: str, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(("attack_name", "source_config"), ATTACK_PARAMETERS)
+def test_all_attacks_end_to_end(attack_name: str, source_config: dict | None, monkeypatch: pytest.MonkeyPatch) -> None:
     """Run a minimal real E2E flow for each MIA attack in AttackFactoryMIA."""
     _set_seed()
     optuna_metadata_snapshot = _snapshot_optuna_metadata()
@@ -593,7 +609,7 @@ def test_all_attacks_end_to_end(attack_name: str, monkeypatch: pytest.MonkeyPatc
                 config_path = _create_timeseries_e2e_config(run_dir, attack_name)
                 user_handler = TinyTimeSeriesInputHandler
             else:
-                config_path = _create_image_e2e_config(run_dir, attack_name)
+                config_path = _create_image_e2e_config(run_dir, attack_name, source_config)
                 user_handler = TinyImageInputHandler
 
             leakpro = LeakPro(user_handler, str(config_path))
@@ -606,6 +622,11 @@ def test_all_attacks_end_to_end(attack_name: str, monkeypatch: pytest.MonkeyPatc
             assert hasattr(result, "id")
             assert isinstance(result.id, str)
             assert result.id
+
+            if attack_name == "rapid":
+                np.testing.assert_array_equal(result.true, [1] * N_TRAIN + [0] * N_TEST)
+                assert np.isfinite(result.signal_values).all()
+                assert np.all((result.signal_values >= 0) & (result.signal_values <= 1))
 
             output_dir = Path(leakpro.handler.configs.audit.output_dir)
             result_file = output_dir / "results" / result.id / "result.txt"

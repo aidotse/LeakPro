@@ -16,6 +16,7 @@ from leakpro.attacks.mia_attacks.multi_signal_lira import AttackMSLiRA
 from leakpro.attacks.mia_attacks.oslo import AttackOSLO
 from leakpro.attacks.mia_attacks.qmia import AttackQMIA
 from leakpro.attacks.mia_attacks.ramia import AttackRaMIA
+from leakpro.attacks.mia_attacks.rapid import AttackRAPID
 from leakpro.attacks.mia_attacks.rmia import AttackRMIA
 from leakpro.attacks.mia_attacks.seq_mia import AttackSeqMIA
 from leakpro.attacks.mia_attacks.yoqo import AttackYOQO
@@ -42,6 +43,7 @@ class AttackFactoryMIA:
         "multi_signal_lira": AttackMSLiRA,
         "dts": AttackDTS,
         "oslo": AttackOSLO,
+        "rapid": AttackRAPID,
     }
 
     # Shared variables for all attacks

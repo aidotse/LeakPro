@@ -38,7 +38,7 @@ class AttackRMIA(AbstractMIA):
                                        ge=1,
                                        description="Number of shadow models")
         temperature: float = Field(default=2.0,
-                                   ge=0.0,
+                                   gt=0.0, allow_inf_nan=False,
                                    description="Softmax temperature")
         training_data_fraction: float = Field(default=0.5,
                                               gt=0.0,
@@ -320,6 +320,28 @@ shadow-model residuals on the z-population. Ignored for classification models, w
             self._get_z_logits(sm_logits, sm, z_indices, cached_mask, logit_row)
             for sm, sm_logits in zip(self.shadow_models, self.logits_shadow_models)
         ]
+        self._prepare_ratio_z(logits_z_theta, logits_z_shadow_models, z_labels)
+
+    def prepare_from_logits(self:Self, target_logits:np.ndarray, shadow_logits:list[np.ndarray],
+                            true_labels:np.ndarray, out_indices:np.ndarray,
+                            z_logits:np.ndarray, z_shadow_logits:list[np.ndarray], z_labels:np.ndarray) -> None:
+        """Prepare RMIA from aligned audit and population logits without retraining models."""
+        if not shadow_logits or out_indices.shape != (len(shadow_logits), len(target_logits)) or out_indices.dtype != bool:
+            raise ValueError("RMIA requires reference logits and an aligned OUT-model mask.")
+        if len(z_labels) == 0 or len(z_shadow_logits) != len(shadow_logits):
+            raise ValueError("RMIA requires a nonempty population sample for every reference model.")
+        if len(z_logits) != len(z_labels) or any(len(logits) != len(z_labels) for logits in z_shadow_logits):
+            raise ValueError("RMIA population logits must align with their labels.")
+        self.ground_truth = true_labels
+        self.logits_theta = target_logits
+        self.logits_shadow_models = shadow_logits
+        self.out_indices = out_indices
+        self.load_for_optuna = False
+        self._prepare_ratio_z(z_logits, z_shadow_logits, z_labels)
+
+    def _prepare_ratio_z(self:Self, logits_z_theta:np.ndarray, logits_z_shadow_models:list[np.ndarray],
+                         z_labels:np.ndarray) -> None:
+        """Compute the population likelihood ratio shared by both preparation paths."""
 
         if self.is_regression:
             self._resolve_scale(logits_z_shadow_models, z_labels)
@@ -340,6 +362,8 @@ shadow-model residuals on the z-population. Ignored for classification models, w
             p_z = 0.5*((self.offline_a + 1) * p_z + (1-self.offline_a))
 
         self.ratio_z = p_z_given_theta / (p_z + self.epsilon)
+        if not np.isfinite(self.ratio_z).all():
+            raise ValueError("RMIA population likelihood ratios must be finite.")
 
     def _run_attack(self:Self) -> None:
         mode = "online" if self.online else "offline"
@@ -363,11 +387,16 @@ shadow-model residuals on the z-population. Ignored for classification models, w
 
         # compute the ratio of p(x|theta) to p(x)
         ratio_x = p_x_given_theta / (p_x + self.epsilon)
+        if not np.isfinite(ratio_x).all() or not np.isfinite(self.ratio_z).all():
+            raise ValueError("RMIA likelihood ratios must be finite.")
 
         # for each x, compute the score
         score = np.zeros((1, n_audit_points))
         for i in range(n_audit_points):
-            likelihoods = ratio_x[0,i] / self.ratio_z
+            with np.errstate(divide="ignore", invalid="ignore"):
+                likelihoods = ratio_x[0,i] / self.ratio_z
+            if np.isnan(likelihoods).any():
+                raise ValueError("RMIA comparisons are undefined; check zero population likelihood ratios.")
             score[0, i] = np.mean(likelihoods > self.gamma)
 
         # pick out the in-members and out-members signals
@@ -410,5 +439,3 @@ shadow-model residuals on the z-population. Ignored for classification models, w
 
         # new hyperparameters have been set, let's prepare the attack again
         self.prepare_attack()
-
-

@@ -32,7 +32,9 @@ class CifarDataHandler(AbstractInputHandler, role="data"):
                 transforms.RandomRotation(degrees=10, fill=0),
             ]
             strong = medium + [
+                transforms.ToPILImage(),
                 transforms.RandAugment(num_ops=2, magnitude=9),
+                transforms.ToTensor(),
                 transforms.RandomErasing(p=0.25, scale=(0.02, 0.2), ratio=(0.3, 3.3), value="random"),
             ]
 
