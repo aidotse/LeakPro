@@ -275,11 +275,11 @@ class AttackLossTrajectory(AbstractMIA):
             # Calculate the loss for the teacher model
             #---------------------------------------------------------------------
             teacher_model.to(gpu_or_cpu)
-            batch_logit_target = teacher_model(data).squeeze() # TODO: replace with hopskipjump for label only
+            batch_target_output = teacher_model(data).squeeze() # TODO: replace with hopskipjump for label only
             batch_loss_teacher = []
 
-            for (batch_logit_target_i, target_i) in zip(batch_logit_target, target_for_loss):
-                loss = criterion(batch_logit_target_i, target_i)
+            for (batch_target_output_i, target_i) in zip(batch_target_output, target_for_loss):
+                loss = criterion(batch_target_output_i, target_i)
                 batch_loss_teacher.append(loss)
             batch_loss_teacher = np.array([batch_loss_teacher_i.cpu().detach().numpy() for batch_loss_teacher_i in
                                             batch_loss_teacher])
