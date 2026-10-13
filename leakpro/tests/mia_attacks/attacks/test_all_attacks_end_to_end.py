@@ -561,9 +561,12 @@ ATTACK_PARAMETERS = [
     pytest.param(attack_name, None, id=f"{attack_name}-real")
     for attack_name in E2E_TESTED_MIA_ATTACKS
 ] + [
-    pytest.param("rapid", {"use_attack": source, "use_attack_output": output, "use_attack_config": {"online": online}},
+    pytest.param("rapid", {"use_attack": source, "use_attack_output": output,
+                          "use_attack_config": {"online": online} if "online" in
+                          AttackFactoryMIA.attack_classes[source].AttackConfig.model_fields else {}},
                  id=f"rapid-{source}-{output}-{'online' if online else 'offline'}-real")
-    for source in ("lira", "rmia") for output in ("scores", "logits") for online in (False, True)
+    for source in ("lira", "rmia", "base", "multi_signal_lira", "population") for output in ("scores", "logits")
+    for online in ((False, True) if "online" in AttackFactoryMIA.attack_classes[source].AttackConfig.model_fields else (False,))
 ]
 
 

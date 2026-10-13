@@ -8,8 +8,6 @@ from collections.abc import Callable
 
 import numpy as np
 from joblib import Parallel, delayed
-from torch import as_tensor
-from torch.nn.functional import binary_cross_entropy_with_logits, cross_entropy
 from ts2vec import TS2Vec
 
 from leakpro.signals.utils.dtw import mv_dtw_distance
@@ -67,7 +65,7 @@ def rescaled_logits(logits: np.ndarray, true_labels: np.ndarray) -> np.ndarray:
     return np.log(y_true+1e-45) - np.log(y_wrong+1e-45)
 
 
-def loss(logits: np.ndarray, true_labels: np.ndarray, *, stable: bool = False) -> np.ndarray:
+def loss(logits: np.ndarray, true_labels: np.ndarray) -> np.ndarray:
     """Per-point cross-entropy loss computed from cached logits and integer class labels.
 
     Functional counterpart of the ``ModelLoss`` signal for the common classification case:
@@ -80,20 +78,12 @@ def loss(logits: np.ndarray, true_labels: np.ndarray, *, stable: bool = False) -
         logits (np.ndarray): The logits, shape (n_points, n_classes); a single-column array is
             treated as a binary logit head.
         true_labels (np.ndarray): Integer class labels, shape (n_points,).
-        stable (bool): Use stable unweighted logit-space loss without the probability floor.
-            Default False preserves the existing signal for current callers.
 
     Returns:
         np.ndarray: Per-point cross-entropy loss, shape (n_points,).
 
     """
     assert true_labels.dtype == np.int64
-    if stable:
-        model_logits = as_tensor(logits)
-        labels = as_tensor(true_labels)
-        if logits.shape[1] == 1:
-            return binary_cross_entropy_with_logits(model_logits[:, 0], labels.to(model_logits.dtype), reduction="none").numpy()
-        return cross_entropy(model_logits, labels, reduction="none").numpy()
     if logits.shape[1] == 1:
         def sigmoid(z:np.ndarray) -> np.ndarray:
             return 1/(1 + np.exp(-z))

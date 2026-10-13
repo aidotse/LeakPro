@@ -106,6 +106,10 @@ class AttackLiRA(AbstractMIA):
         signal for both shadow models and the target model.
         """
 
+        # Fixed variance is used when the number of shadow models is below 32 (64, IN and OUT models)
+        #       from (Membership Inference Attacks From First Principles)
+        self.fix_var_threshold = 32
+
         self.attack_data_indices = self.sample_indices_from_population(include_train_indices = True,
                                                                        include_test_indices = True)
 
@@ -126,16 +130,6 @@ class AttackLiRA(AbstractMIA):
         # an error, a distance, ...) rather than logits; named accordingly, as in MS-LiRA.
         true_labels = self.handler.get_labels(self.audit_dataset["data"])
         target_logits = ShadowModelHandler().load_logits(name="target")
-        shadow_logits = [ShadowModelHandler().load_logits(indx=indx) for indx in self.shadow_model_indices]
-        self.prepare_from_logits(target_logits, shadow_logits, true_labels, self.out_indices)
-
-    def prepare_from_logits(self:Self, target_logits:np.ndarray, shadow_logits:list[np.ndarray],
-                            true_labels:np.ndarray, out_indices:np.ndarray) -> None:
-        """Prepare LiRA from aligned logits using the current audit dataset and configuration."""
-        self.fix_var_threshold = 32
-        if not shadow_logits or out_indices.shape != (len(shadow_logits), len(target_logits)) or out_indices.dtype != bool:
-            raise ValueError("LiRA requires reference logits and an aligned OUT-model mask.")
-        self.out_indices = out_indices
         # Classification labels arrive with a spurious singleton axis (e.g. (N, 1)) that must be
         # dropped before rescaled_logits/loss index them as (N,). Forecasting targets, though,
         # already match the cached logits' shape (N, horizon, num_variables) — squeezing them
@@ -145,9 +139,11 @@ class AttackLiRA(AbstractMIA):
         self.target_signals = self._check_signal_shape(self.signal(target_logits, true_labels),
                                                        n_audit_points=target_logits.shape[0])
         self.shadow_models_signals = []
-        for logits in shadow_logits:
+        for indx in self.shadow_model_indices:
+            shadow_logits = ShadowModelHandler().load_logits(indx=indx)
             self.shadow_models_signals.append(
-                self._check_signal_shape(self.signal(logits, true_labels), n_audit_points=len(target_logits))
+                self._check_signal_shape(self.signal(shadow_logits, true_labels),
+                                         n_audit_points=shadow_logits.shape[0])
             )
         self.shadow_models_signals = np.array(self.shadow_models_signals)
 
@@ -280,8 +276,7 @@ class AttackLiRA(AbstractMIA):
         n_audit_samples = self.shadow_models_signals.shape[1]
         score = np.zeros(n_audit_samples)  # List to hold the computed probability scores for each sample
 
-        self.fixed_in_std = self.get_std(self.shadow_models_signals.flatten(), (~self.out_indices).flatten(), True, "fixed") \
-            if np.any(~self.out_indices) else None
+        self.fixed_in_std = self.get_std(self.shadow_models_signals.flatten(), (~self.out_indices).flatten(), True, "fixed")
         self.fixed_out_std = self.get_std(self.shadow_models_signals.flatten(), self.out_indices.flatten(), False, "fixed")
 
         # Iterate over and extract signals for IN and OUT shadow models for each audit sample

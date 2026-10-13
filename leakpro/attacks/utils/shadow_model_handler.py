@@ -151,14 +151,13 @@ class ShadowModelHandler(ModelHandler):
             self._freeze_value(metadata.init_params),
         )
 
-    def _filter(self:Self, data_size:int, shadow_population:np.ndarray=None) -> tuple[list[int], list[int]]:
+    def _filter(self:Self, data_size:int) -> tuple[list[int], list[int]]:
         """Find cached shadow models compatible with the current configuration.
 
         Args:
         ----
             data_size (int): Number of samples that should be used for each
                 shadow-model training run.
-            shadow_population (np.ndarray): Optional eligible training indices.
 
         Returns:
         -------
@@ -182,8 +181,6 @@ class ShadowModelHandler(ModelHandler):
                 logger.debug(f"Shadow model {i} skipped — population_hash mismatch")
             elif self._metadata_training_signature(metadata) != current_sig:
                 logger.debug(f"Shadow model {i} skipped — training signature mismatch")
-            elif shadow_population is not None and not np.isin(metadata.train_indices, shadow_population).all():
-                logger.debug(f"Shadow model {i} skipped — training indices outside the requested pool")
             else:
                 logger.debug(f"Shadow model {i} accepted")
                 filtered_indices.append(i)
@@ -346,7 +343,7 @@ class ShadowModelHandler(ModelHandler):
 
         self._validate_training_size(data_size, len(shadow_population), training_fraction)
 
-        all_indices, filtered_indices = self._filter(data_size, shadow_population=np.asarray(shadow_population))
+        all_indices, filtered_indices = self._filter(data_size)
 
         # Create a list of indices to use for the new shadow models
         n_existing_models = len(filtered_indices)
