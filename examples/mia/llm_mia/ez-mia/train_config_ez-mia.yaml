@@ -5,11 +5,14 @@
 # Target preparation for the LLM MIA example (prepare_target.py). Defaults reproduce the EZ-MIA
 # paper's WikiText / GPT-2 / full fine-tuning setting (arXiv:2601.12104, §4 and appendix A).
 #
-# Verified on HPU (2026-10-09) with this config + audit.yaml, against the paper's released code
-# (github.com/JetBrains-Research/ez-mia, configs/exp_wikitext_gpt2_base.yaml, seed 1337):
-#   this repo:       AUC 0.9817  TPR@1%FPR 0.590  TPR@0.1%FPR 0.172   (bootstrap 95%: TPR@1%FPR [0.546, 0.629])
-#   reference code:  AUC 0.9837  TPR@1%FPR 0.673  TPR@0.1%FPR 0.149
-# Open: TPR@1%FPR is ~0.08 below the reference (one seed each side).
+# Verified on HPU (2026-10-14) with this config + audit.yaml (plus n_bootstrap_samples: 1000), against the
+# paper's released code (github.com/JetBrains-Research/ez-mia, configs/exp_wikitext_gpt2_base.yaml, seed 1337):
+#   this repo:       AUC 0.9817            TPR@1%FPR 0.593            TPR@0.1%FPR 0.170
+#     bootstrap 95%: AUC [0.9801, 0.9833]  TPR@1%FPR [0.547, 0.623]   TPR@0.1%FPR [0.113, 0.234]
+#   reference code:  AUC 0.9837            TPR@1%FPR 0.673            TPR@0.1%FPR 0.149   (single run, no interval)
+# Open: AUC and TPR@1%FPR are below the reference, and the reference values fall outside this run's audit-
+# bootstrap intervals, so resampling the audited rows does not explain the gap. Training-seed variance (not
+# measured: one training run each side) or a remaining setup difference could. TPR@0.1%FPR agrees.
 run:
   random_seed: 1337   # matches the EZ-MIA paper's own WikiText/GPT-2/full reference config
   # {finetune_method} is substituted, so the LoRA-vs-full sweep writes two targets side by side.
