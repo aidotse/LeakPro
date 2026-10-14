@@ -4,6 +4,10 @@ Reuses the tiny-target machinery from the MIA end-to-end suite so this exercises
 pipeline rather than synthetic results. The audit population is small (72 records, ~32 members), so
 the operating point here is 10% FPR: anything stricter is genuinely unresolvable at that size, which
 is exactly what the resolution guard enforces.
+
+The shared machinery saves an untrained target, which gives a chance-level audit whose AUC lands on
+either side of 0.5 depending on the seed. The fixture here overfits the target to its training split
+first, so the assessment runs on a real leak and the test can check that it registers as one.
 """
 
 from __future__ import annotations
@@ -12,20 +16,47 @@ import json
 import tempfile
 from pathlib import Path
 
+import joblib
 import pytest
+import torch
 import yaml
+from torch import nn
 
 from leakpro import LeakPro
 from leakpro.reporting.report_handler import ReportHandler
 from leakpro.risk import RiskAssessment, UseCaseProfile, assess_risk
 from leakpro.tests.mia_attacks.attacks.test_all_attacks_end_to_end import (
+    TRAIN_INDICES,
     TinyImageInputHandler,
+    TinyImageTargetModel,
     _clear_global_attack_cache,
     _create_image_e2e_config,
     _set_seed,
 )
 
 E2E_ALPHA = 0.1
+OVERFIT_EPOCHS = 200
+
+
+def _overfit_target(run_dir: Path) -> None:
+    """Train the saved tiny target until it memorises its training split, in place.
+
+    Args:
+    ----
+        run_dir: Run directory written by ``_create_image_e2e_config``.
+
+    """
+    population = joblib.load(run_dir / "tiny_cifar.pkl")
+    state_path = run_dir / "target" / "target_model.pkl"
+    model = TinyImageTargetModel()
+    model.load_state_dict(torch.load(state_path))
+    inputs, labels = population.data[TRAIN_INDICES], population.targets[TRAIN_INDICES]
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+    for _ in range(OVERFIT_EPOCHS):
+        optimizer.zero_grad()
+        nn.functional.cross_entropy(model(inputs), labels).backward()
+        optimizer.step()
+    torch.save(model.state_dict(), state_path)
 
 
 @pytest.fixture
@@ -39,6 +70,7 @@ def audited(monkeypatch, tmp_path):
         run_dir = temp_root / "lira"
         run_dir.mkdir(parents=True, exist_ok=True)
         config_path = _create_image_e2e_config(run_dir, "lira")
+        _overfit_target(run_dir)
         leakpro = LeakPro(TinyImageInputHandler, str(config_path))
         results = leakpro.run_audit(create_pdf=False, use_optuna=False)
         yield leakpro, results, config_path
@@ -56,6 +88,9 @@ class TestEndToEnd:
 
         assert assessment.measured.resolvable is True
         assert 0.0 <= assessment.measured.success_rate <= 1.0
+        # The target memorised its training split, so the attack must clear the random-guess baseline
+        # by a wide margin; a wiring fault that dropped or misoriented scores would not.
+        assert assessment.measured.lift > 3.0
         assert assessment.measured.n_members_audit > 0
         assert assessment.combined.ppv is not None
         assert assessment.combined.risk is not None

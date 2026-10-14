@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { api, ModelResult, RiskAssessment, RiskRequest } from "../../api";
+import { api, AttackResult, ModelResult, RiskAssessment, RiskRequest } from "../../api";
 import InfoButton, { Detail } from "../InfoButton";
 import MetaPanel from "./MetaPanel";
 import RiskDiagram from "./RiskDiagram";
@@ -93,14 +93,29 @@ function num(v: number | undefined | null, digits = 0) {
   return v != null ? v.toLocaleString(undefined, { maximumFractionDigits: digits }) : "—";
 }
 
+/**
+ * Whether an attack's ROC is inverted rather than chance-level. Mirrors
+ * `_inversion_threshold` in leakpro/risk/vulnerability.py, which is the source of truth: AUC more
+ * than 3 null standard errors below 0.5. Without labels it falls back to a plain AUC < 0.5.
+ */
+function isInverted(a: AttackResult): boolean {
+  if (a.roc_auc == null) return false;
+  const n = a.true_labels?.length ?? 0;
+  const members = a.true_labels?.filter((label) => label === 1).length ?? 0;
+  const nonMembers = n - members;
+  if (members === 0 || nonMembers === 0) return a.roc_auc < 0.5;
+  const seNull = Math.sqrt((members + nonMembers + 1) / (12 * members * nonMembers));
+  return a.roc_auc < 0.5 - 3 * seNull;
+}
+
 /** Best TPR at a given operating point across a model's attacks, for the pre-assessment view. */
 function bestTpr(model: ModelResult, alpha: number): { value: number; attack: string } | undefined {
   const key = alpha === 0.01 ? "TPR@1%FPR" : alpha === 0.001 ? "TPR@0.1%FPR" : "TPR@0.01%FPR";
   let best: { value: number; attack: string } | undefined;
   model.attacks.forEach((a) => {
-    // Attacks with an inverted ROC are excluded, matching the backend's guard: an AUC below 0.5 means
-    // a real leak would read as no leak.
-    if (a.roc_auc != null && a.roc_auc < 0.5) return;
+    // Attacks with an inverted ROC are excluded, matching the backend's guard: a real leak would read
+    // as no leak.
+    if (isInverted(a)) return;
     const v = a.tpr_at_fpr?.[key];
     if (v != null && (best === undefined || v > best.value)) best = { value: v, attack: a.attack_name };
   });
@@ -199,8 +214,9 @@ const ABOUT_TPR = (
     <p>Share of training members the best attack finds, at your false-alarm rate.</p>
     <Detail>
       <p>
-        Attacks whose ROC is inverted (AUC below 0.5) are excluded rather than counted as weak evidence,
-        because an inverted result makes a real leak read as no leak.
+        Attacks whose ROC is inverted (AUC clearly below 0.5, beyond what chance explains for this
+        audit size) are excluded rather than counted as weak evidence, because an inverted result makes
+        a real leak read as no leak. An AUC just under 0.5 is chance, and is assessed as no leakage.
       </p>
     </Detail>
   </>
