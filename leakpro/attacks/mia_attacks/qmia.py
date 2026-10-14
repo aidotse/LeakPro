@@ -18,6 +18,7 @@ from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.reporting.mia_result import MIAResult
 from leakpro.signals.signal import ModelRescaledLogits
+from leakpro.utils.device import get_device, mark_step
 from leakpro.utils.import_helper import Any, Self, Tuple
 from leakpro.utils.logger import logger
 
@@ -270,7 +271,7 @@ class AttackQMIA(AbstractMIA):
             None
 
         """
-        device = ("cuda" if torch.cuda.is_available() else "cpu")
+        device = get_device()
         self.quantile_regressor.to(device)
         self.quantile_regressor.train()
 
@@ -298,6 +299,7 @@ class AttackQMIA(AbstractMIA):
                 loss.backward()
                 # Take a step using optimizer
                 optimizer.step()
+                mark_step(device)
                 # Add the loss to the total loss
                 train_loss += loss.item()
 

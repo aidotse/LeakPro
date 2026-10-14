@@ -7,14 +7,50 @@
 import os
 import pickle
 import re
+from functools import partial
+from typing import Callable
 
 import numpy as np
-import torch
-from torch import cuda, is_tensor, os
+from torch import is_tensor
 from ts2vec import TS2Vec
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.signals import functional
+from leakpro.utils.device import get_device
 from leakpro.utils.logger import logger
+
+
+def bind_ts2vec_encoder(
+        signal_fn: Callable,
+        handler: AbstractInputHandler,
+        shadow_population_indices: np.ndarray,
+        batch_size: int = 256
+    ) -> Callable:
+    """Bind one shared TS2Vec encoder to the ts2vec signal; return other signals untouched.
+
+    LiRA-style attacks call a signal once per shadow model and once for the target, then compare
+    those values per audit point. ``functional.ts2vec`` fits an encoder when none is given, so
+    calling it that way would train a separate encoder per model and fold encoder-training
+    randomness into the statistics the attack fits. Fitting once here keeps every model encoded by
+    the same representation, and reuses the on-disk encoder cache keyed by the shadow population.
+
+    Args:
+    ----
+        signal_fn: The resolved functional signal. Anything other than ts2vec is returned as is.
+        handler: The input handler object.
+        shadow_population_indices: Indices in the population used to train the shadow models; the
+            encoder is fitted on these, not on the audited points.
+        batch_size: Batch size used during fitting and inference of TS2Vec.
+
+    Returns:
+    -------
+        The signal function, with a shared encoder bound if it is the ts2vec signal.
+
+    """
+    if signal_fn is not functional.ts2vec:
+        return signal_fn
+    encoder = get_ts2vec_model(handler, shadow_population_indices, batch_size)
+    return partial(functional.ts2vec, batch_size=batch_size, encoder=encoder)
 
 
 def get_ts2vec_model(
@@ -43,8 +79,10 @@ def get_ts2vec_model(
     if not os.path.exists(ts2vec_dir):
         os.makedirs(ts2vec_dir)
 
-    device = "cuda:0" if cuda.is_available() else "cpu"
-    torch.backends.cudnn.deterministic = False
+    # ts2vec upstream has no HPU backend, and running it on CPU instead does not reliably work
+    # around that: callers on HPU must drop "ts2vec" from their signal list themselves (see
+    # examples/mia/time_series_mia/audit.yaml).
+    device = "cuda:0" if get_device().type == "cuda" else "cpu"
 
     # Init TS2Vec
     model_loaded = False

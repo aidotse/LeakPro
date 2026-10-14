@@ -1,5 +1,7 @@
 # Modular GIA Framework - Architecture Overview
 
+> **This is the current, recommended way to build and run GIA attacks in LeakPro.** The other examples under `examples/gia/` predate this framework and each hard-code a single attack; this one shows the modular framework that reimplements and generalizes all of them.
+
 This example demonstrates the **modular Gradient Inversion Attack (GIA) framework**, a flexible component-based architecture for implementing and experimenting with gradient inversion attacks in federated learning.
 
 ## 🏗️ Architecture Overview

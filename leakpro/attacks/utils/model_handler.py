@@ -135,16 +135,26 @@ class ModelHandler():
         """Cache the target model logits."""
         cache_file = f"{self.attack_cache_folder_path}/{name}_logits.npy"
         indices_file = f"{self.attack_cache_folder_path}/{name}_indices.npy"
+        data_indices = np.concatenate((self.handler.train_indices, self.handler.test_indices))
 
         # Require BOTH files to exist. If only logits exist (old cache without companion),
-        # treat as miss so both are rewritten with a correct index record.
+        # treat as miss so both are rewritten with a correct index record. If both exist but
+        # were cached for a different sample set (e.g. the audit config changed since the last
+        # run), also treat as a miss so the stale pair gets overwritten instead of silently
+        # reused — load_logits() would otherwise never be able to load them.
         if os.path.exists(cache_file) and os.path.exists(indices_file):
-            logger.info(f"Logits already cached at {cache_file}")
-            return
+            cached_indices = np.load(indices_file)
+            # np.array_equal on sorted arrays, not a set comparison: a set comparison
+            # would treat two index arrays as equal even if one had a duplicate and the
+            # other didn't (multiplicity is invisible to sets), silently reusing a cache
+            # of the wrong length if train/test indices ever overlap.
+            if np.array_equal(np.sort(cached_indices), np.sort(data_indices)):
+                logger.info(f"Logits already cached at {cache_file}")
+                return
+            logger.info(f"Cached indices at {indices_file} no longer match the current run — recomputing")
 
         if not isinstance(model, list):
             model = [model]
-        data_indices = np.concatenate((self.handler.train_indices, self.handler.test_indices))
         # ModelLogits returns one (N, num_classes) entry per model; cache_logits always
         # caches a single model, so drop only the leading model-list axis. A bare
         # .squeeze() would also collapse the class axis of a single-logit binary head

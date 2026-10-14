@@ -7,8 +7,6 @@ import torch.nn.functional as F
 from torch import (
     Tensor,
     cat,
-    cuda,
-    device,
     exp,
     eye,
     isnan,
@@ -19,6 +17,7 @@ from torch import (
     tanh,
     zeros,
 )
+from leakpro.utils.device import get_device
 import numpy as np
 from torch.autograd import Variable
 from torch.nn.parameter import Parameter
@@ -166,7 +165,7 @@ class GRUD(nn.Module):
         self.force_functorch = force_functorch
         self.dpsgd_path = dpsgd_path
 
-        self.device = device("cuda" if cuda.is_available() else "cpu")
+        self.device = get_device()
         self.identity = eye(input_size).to(self.device)
         self.X_mean = Variable(Tensor(X_mean).to(self.device))
 

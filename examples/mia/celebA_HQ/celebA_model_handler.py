@@ -12,12 +12,13 @@ Usage:
 """
 
 import torch
-from torch import cuda, device, no_grad, optim
+from torch import no_grad, optim
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from leakpro import AbstractInputHandler
 from leakpro.schemas import EvalOutput, TrainingOutput
+from leakpro.utils.device import get_device, mark_step
 
 
 class CelebAModelHandler(AbstractInputHandler, role="model"):
@@ -34,7 +35,7 @@ class CelebAModelHandler(AbstractInputHandler, role="model"):
         if epochs is None:
             raise ValueError("epochs not found in configs")
 
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         model.to(gpu_or_cpu)
 
         accuracy_history, loss_history = [], []
@@ -51,6 +52,7 @@ class CelebAModelHandler(AbstractInputHandler, role="model"):
                 pred = outputs.argmax(dim=1)
                 loss.backward()
                 optimizer.step()
+                mark_step(gpu_or_cpu)
                 train_acc += pred.eq(labels.view_as(pred)).sum().item()
                 total_samples += labels.size(0)
                 train_loss += loss.item() * labels.size(0)
@@ -68,7 +70,7 @@ class CelebAModelHandler(AbstractInputHandler, role="model"):
         return TrainingOutput(model=model, metrics=results)
 
     def eval(self, loader, model, criterion) -> EvalOutput:
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         model.to(gpu_or_cpu)
         model.eval()
         loss, acc, total_samples = 0, 0, 0
@@ -77,6 +79,7 @@ class CelebAModelHandler(AbstractInputHandler, role="model"):
                 data, target = data.to(gpu_or_cpu), target.to(gpu_or_cpu)
                 target = target.view(-1)
                 output = model(data)
+                mark_step(gpu_or_cpu)
                 loss += criterion(output, target).item() * target.size(0)
                 acc += output.argmax(dim=1).eq(target).sum().item()
                 total_samples += target.size(0)

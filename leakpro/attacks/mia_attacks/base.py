@@ -24,7 +24,7 @@ class BASEConfig(BaseModel):
 
     num_shadow_models: int = Field(default=1, ge=1, description="Number of shadow models")
     temperature: float = Field(default=2.0, ge=0.0, description="Softmax temperature")
-    training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow models")  # noqa: E501
+    training_data_fraction: float = Field(default=0.5, gt=0.0, lt=1.0, description="Part of available attack data to use for shadow models. Must be < 1: at 1 every shadow model trains on every point, leaving no OUT reference models.")  # noqa: E501
     online: bool = Field(default=False, description="Online vs offline attack")
     offline_scale_factor: float = Field(default=0.33,
                                         description="Rescale the LogSumExp threshold to compensate for the lack of in-models",
@@ -118,6 +118,37 @@ class AttackBASE(AbstractMIA):
         if self.online is False:
             self.out_indices = ~ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"]).T
 
+    def _check_out_models_available(self:Self, n_out_models:np.ndarray) -> None:
+        """Verify every scored point has at least one OUT shadow model.
+
+        The offline threshold is ``logsumexp(out_logits) - log(n_out_models)``, the log mean
+        confidence over the models that did not train on the point. That is well defined for any
+        positive number of OUT models, so the only real requirement is that the count is non-zero.
+
+        This replaces an assert that demanded exactly ``num_shadow_models // 2`` OUT models per
+        point. That encoded the old fixed half-and-half split and was wrong twice over: it rejected
+        every ``training_data_fraction`` other than 0.5, and it already failed for an odd
+        ``num_shadow_models`` at fraction 0.5, where the counts legitimately straddle the half.
+
+        Args:
+        ----
+            n_out_models (np.ndarray): Per-point count of shadow models that did not train on the point.
+
+        Raises:
+        ------
+            ValueError: If any scored point has no OUT shadow model.
+
+        """
+        n_without = int(np.sum(n_out_models == 0))
+        if n_without > 0:
+            raise ValueError(
+                f"Offline BASE needs at least one OUT shadow model per audit point, but {n_without} of "
+                f"{n_out_models.size} points are in every shadow model. With num_shadow_models="
+                f"{self.num_shadow_models} and training_data_fraction={self.training_data_fraction}, "
+                f"each point is expected in about {self.num_shadow_models * self.training_data_fraction:.1f} "
+                "model(s). Move the fraction towards 0.5, or raise num_shadow_models."
+            )
+
     def score_samples(self:Self, dataloader:list, audit_indices:list) -> np.ndarray:
         """Score samples in the dataloader.
 
@@ -146,14 +177,11 @@ class AttackBASE(AbstractMIA):
         if self.online is True:
             threshold = logsumexp(log_conf_shadow_models, axis=0) - np.log(self.num_shadow_models)
         else:
-            # ensure that each point has been trained on by half of the shadow models
-            n_out_models = np.sum(self.out_indices, axis=0)
-            assert np.all(n_out_models == self.num_shadow_models//2), "Number of OUT models is wrong"
-
             # get what shadow models have seen the audit indices
             index_map = np.array([np.where(self.audit_dataset["data"] == val)[0][0] for val in audit_indices])
             out_indices_audit = self.out_indices[:, index_map]
             n_out_models = np.sum(out_indices_audit, axis=0)
+            self._check_out_models_available(n_out_models)
             # make the "in-model" logits -inf so they are not included in the logsumexp
             out_logits = np.where(out_indices_audit, log_conf_shadow_models, -np.inf)
             threshold = logsumexp(out_logits, axis=0) - np.log(n_out_models)
@@ -192,7 +220,7 @@ class AttackBASE(AbstractMIA):
             threshold = logsumexp(log_conf_shadow_models, axis=0) - np.log(self.num_shadow_models)
         else:
             n_out_models = np.sum(self.out_indices, axis=0)
-            assert np.all(n_out_models == self.num_shadow_models//2), "Number of OUT models is wrong"
+            self._check_out_models_available(n_out_models)
 
             out_logits = np.where(self.out_indices, log_conf_shadow_models, -np.inf)
             threshold = logsumexp(out_logits, axis=0) - np.log(n_out_models)

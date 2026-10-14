@@ -11,6 +11,3 @@ To run the use case follow these stpes:<br>
 
 
 Once the dataset is ready, you can proceed to run any of the use case notebooks.
-
-
-

@@ -137,7 +137,10 @@ try:
         try:
             import numpy as np
 
-            class _SafeUnpickler(pickle.Unpickler):
+            # Compatibility shim, not a security boundary: it resolves real
+            # classes whenever the import succeeds. Safe here only because this
+            # runs in a subprocess on a file the authenticated operator supplied.
+            class _LenientUnpickler(pickle.Unpickler):
                 def find_class(self, module, name):
                     try:
                         return super().find_class(module, name)
@@ -145,7 +148,7 @@ try:
                         return type(name, (), {})
 
             with open(data_path, "rb") as fh:
-                raw = _SafeUnpickler(fh).load()
+                raw = _LenientUnpickler(fh).load()
 
             # Extract data array and targets — try common attribute names
             data_arr = targets_arr = None
