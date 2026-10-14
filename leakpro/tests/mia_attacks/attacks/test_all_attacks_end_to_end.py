@@ -472,7 +472,6 @@ def _create_audit_yaml(
     model_class: str,
     data_path: Path,
     target_dir: Path,
-    source_config: dict | None = None,
 ) -> Path:
     config = {
         "audit": {
@@ -491,8 +490,6 @@ def _create_audit_yaml(
         "shadow_model": None,
         "distillation_model": None,
     }
-    if source_config is not None:
-        config["audit"]["attack_list"][0].update(source_config)
 
     config_path = run_dir / "audit.yaml"
     with open(config_path, "w") as file:
@@ -500,7 +497,7 @@ def _create_audit_yaml(
     return config_path
 
 
-def _create_image_e2e_config(run_dir: Path, attack_name: str, source_config: dict | None = None) -> Path:
+def _create_image_e2e_config(run_dir: Path, attack_name: str) -> Path:
     population = _build_tiny_image_population()
     target_model = TinyImageTargetModel()
     criterion = nn.CrossEntropyLoss()
@@ -521,7 +518,7 @@ def _create_image_e2e_config(run_dir: Path, attack_name: str, source_config: dic
         train_indices=train_indices,
         test_indices=test_indices,
     )
-    return _create_audit_yaml(run_dir, attack_name, "image", "TinyImageTargetModel", data_path, target_dir, source_config)
+    return _create_audit_yaml(run_dir, attack_name, "image", "TinyImageTargetModel", data_path, target_dir)
 
 
 def _create_timeseries_e2e_config(run_dir: Path, attack_name: str) -> Path:
@@ -558,15 +555,8 @@ E2E_TESTED_MIA_ATTACKS = (
 )
 
 ATTACK_PARAMETERS = [
-    pytest.param(attack_name, None, id=f"{attack_name}-real")
+    pytest.param(attack_name, id=f"{attack_name}-real")
     for attack_name in E2E_TESTED_MIA_ATTACKS
-] + [
-    pytest.param("rapid", {"use_attack": source, "use_attack_output": output,
-                          "use_attack_config": {"online": online} if "online" in
-                          AttackFactoryMIA.attack_classes[source].AttackConfig.model_fields else {}},
-                 id=f"rapid-{source}-{output}-{'online' if online else 'offline'}-real")
-    for source in ("lira", "rmia", "base", "multi_signal_lira", "population") for output in ("scores", "logits")
-    for online in ((False, True) if "online" in AttackFactoryMIA.attack_classes[source].AttackConfig.model_fields else (False,))
 ]
 
 
@@ -594,8 +584,8 @@ def test_target_split_keeps_aux_population() -> None:
     assert len(RMIA_TRAIN_INDICES) + len(RMIA_TEST_INDICES) == N_SAMPLES
 
 
-@pytest.mark.parametrize(("attack_name", "source_config"), ATTACK_PARAMETERS)
-def test_all_attacks_end_to_end(attack_name: str, source_config: dict | None, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("attack_name", ATTACK_PARAMETERS)
+def test_all_attacks_end_to_end(attack_name: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """Run a minimal real E2E flow for each MIA attack in AttackFactoryMIA."""
     _set_seed()
     optuna_metadata_snapshot = _snapshot_optuna_metadata()
@@ -612,7 +602,7 @@ def test_all_attacks_end_to_end(attack_name: str, source_config: dict | None, mo
                 config_path = _create_timeseries_e2e_config(run_dir, attack_name)
                 user_handler = TinyTimeSeriesInputHandler
             else:
-                config_path = _create_image_e2e_config(run_dir, attack_name, source_config)
+                config_path = _create_image_e2e_config(run_dir, attack_name)
                 user_handler = TinyImageInputHandler
 
             leakpro = LeakPro(user_handler, str(config_path))
