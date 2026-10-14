@@ -21,17 +21,24 @@ Edge cases (paper appendix E.5 / E.6) -- two *independent* rules, neither gated 
 - ``n_err == 0`` (no error positions at all): the paper's own strongest possible member signal
   (E.5), forced to the top regardless of aggregation. This is a structural fact about the row, not
   a "too little evidence" judgment, so it does not depend on ``min_error_positions``.
-- ``N == 0`` *with at least one error position*: only meaningful for aggregations whose formula is
+- ``N == 0`` and ``P > 0``: only meaningful for aggregations whose formula is
   genuinely undefined/infinite there (``ratio``: ``P / 0``; ``log_ratio``: ``log(P) - log(0)``).
   ``positive_fraction`` already evaluates to its own maximum (``1.0``) at ``N == 0`` without forcing;
   ``difference``/``mean_delta``/``median_delta`` have perfectly ordinary finite values there and are
   never forced by it (paper E.6 is specifically about the ``P / N -> inf`` case).
 
 Neither rule is about "too few error positions" as a general reliability floor -- ``min_error_positions``
-(default 2) is a *separate* knob for that: a row with ``1 <= n_err < min_error_positions`` and ``N != 0``
-has some evidence, just not enough to trust a ratio built from one or two positions, so it is scored a
-plain ``0.0`` (the reference code's floor), *not* forced to the top -- a lone error whose mass moved
-entirely downward (``P == 0``, the attack's own non-member signal) must not outrank a genuine member.
+(default 2) is a *separate* knob for that: a row with ``1 <= n_err < min_error_positions`` that is not
+forced has some evidence, just not enough to trust a ratio built from one or two positions, so it is
+scored at the bottom of the aggregation's range, *not* forced to the top -- a lone error whose mass
+moved entirely downward (``P == 0``, the attack's own non-member signal) must not outrank a genuine
+member. The bottom is ``0.0`` for ``ratio``/``positive_fraction`` (their own minimum, reached at
+``P == 0`` -- the reference code's floor) and ``-inf`` for the rest, where ``0.0`` means ``P == N`` and
+sits mid-ranking. Using each aggregation's own ``P == 0`` value keeps the monotone transforms of
+``P / N`` (``ratio``, ``log_ratio``, ``positive_fraction``) ranking identically, ties included: a
+floored row ties with an ordinary ``P == 0`` row under all three. Rows with error positions but no
+movement at all (``P == N == 0``) get the same floor under those three, where ``0 / 0`` carries no
+evidence.
 ``ignore_first_position`` (default True, one token of left context is too little to trust) and
 ``min_error_positions`` are :class:`EZMIAConfig` fields, not hard-coded, so a run under either choice
 is reproducible from its config alone.
@@ -77,6 +84,15 @@ Aggregation = Literal["ratio", "log_ratio", "positive_fraction", "difference", "
 # mean_delta / median_delta have ordinary finite values. See ez_scores' docstring.
 _UNDEFINED_AT_N_ZERO = frozenset({"ratio", "log_ratio"})
 
+# Monotone functions of P / N, so undefined at P == N == 0 (0 / 0). The others are 0 there, an
+# ordinary value.
+_RATIO_FAMILY = frozenset({"ratio", "log_ratio", "positive_fraction"})
+
+# Score given to insufficient rows: the aggregation's own value at P == 0, so it is the bottom of the
+# range and ties with ordinary P == 0 rows. Unbounded-below aggregations (and log_ratio, whose P == 0
+# value is -inf) get -inf, which rank_top places just below the lowest ordinary score.
+_FLOOR = {"ratio": 0.0, "positive_fraction": 0.0}
+
 
 class EZMIAConfig(LLMAttackConfig):
     """Configuration for EZ-MIA.
@@ -89,8 +105,8 @@ class EZMIAConfig(LLMAttackConfig):
     aggregation: Aggregation = Field(default="ratio", description="How P and N (or delta on E) become a score")
     min_error_positions: int = Field(default=2, ge=0,
         description="Rows with fewer (but at least 1) error positions than this cannot support a "
-                    "trustworthy ratio and score a plain 0.0 (reference-code floor), unless they "
-                    "already hit the paper's own E.5 (zero errors) or E.6 (N == 0) member cases, "
+                    "trustworthy ratio and score the bottom of the aggregation's range (reference-code "
+                    "floor), unless they already hit the paper's own E.5 (zero errors) or E.6 (N == 0) member cases, "
                     "which this threshold does not override.")
     ignore_first_position: bool = Field(default=True,
         description="Exclude position 0 from the error-position set E -- one token of left context is "
@@ -104,7 +120,7 @@ class EZScores(NamedTuple):
 
     scores: np.ndarray
     forced: np.ndarray        # ranked as members (paper E.5/E.6) -- not a reflection of the raw score
-    insufficient: np.ndarray  # scored a plain 0.0 -- too few error positions to trust, not a member signal
+    insufficient: np.ndarray  # scored the bottom of the range -- too little evidence, not a member signal
 
 
 def ez_scores(
@@ -121,18 +137,19 @@ def ez_scores(
         delta: ``(N, T)`` ``lp^T - lp^R``; values outside ``error`` are ignored.
         error: ``(N, T)`` bool, True at error positions (already restricted to valid tokens).
         aggregation: One of :data:`Aggregation`.
-        min_error_positions: Rows with fewer error positions than this are forced to the top (see
-            :class:`EZMIAConfig`).
+        min_error_positions: Rows with fewer (but at least 1) error positions than this score the
+            bottom of the aggregation's range unless forced (see :class:`EZMIAConfig`).
         ignore_first_position: If True, position 0 is never counted as an error position.
 
     Returns:
     -------
         :class:`EZScores`: ``scores`` are ``(N,)`` finite, higher = member. ``forced`` is True where
-        ``n_err == 0`` or (``N == 0`` and the aggregation is undefined there) ranked that row as a
-        member (paper appendix E.5 / E.6), regardless of the raw score. ``insufficient`` is True
-        where ``1 <= n_err < min_error_positions`` and the row was *not* otherwise forced -- scored a
-        plain ``0.0``, too little evidence to trust rather than a member signal (see the module
-        docstring). The two are mutually exclusive.
+        ``n_err == 0`` or (``N == 0``, ``P > 0`` and the aggregation is undefined there) ranked that
+        row as a member (paper appendix E.5 / E.6), regardless of the raw score. ``insufficient`` is
+        True where the row was *not* otherwise forced and either ``1 <= n_err < min_error_positions``
+        or (ratio-family aggregation) ``P == N == 0`` -- scored the bottom of the range, too little
+        evidence to trust rather than a member signal (see the module docstring). The two are
+        mutually exclusive.
 
     """
     error = error.copy()
@@ -145,9 +162,11 @@ def ez_scores(
     n_err = error.sum(axis=1)
 
     no_errors = n_err == 0  # paper E.5: always the strongest signal, independent of aggregation
-    n_zero_forced = (N == 0) & (n_err > 0) & (aggregation in _UNDEFINED_AT_N_ZERO)  # paper E.6
+    n_zero_forced = (N == 0) & (P > 0) & (aggregation in _UNDEFINED_AT_N_ZERO)  # paper E.6
     forced = no_errors | n_zero_forced
-    insufficient = (n_err > 0) & (n_err < min_error_positions) & ~forced
+    # P == N == 0 with error positions: no movement at all, so the ratio family (0 / 0) has no evidence.
+    no_movement = (n_err > 0) & (P == 0) & (N == 0) & (aggregation in _RATIO_FAMILY)
+    insufficient = (((n_err > 0) & (n_err < min_error_positions)) | no_movement) & ~forced
 
     with np.errstate(divide="ignore", invalid="ignore"), warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)  # forced/insufficient rows are overwritten below regardless
@@ -167,7 +186,7 @@ def ez_scores(
             raise ValueError(f"Unknown EZ-MIA aggregation: {aggregation}")
 
     raw = np.asarray(raw, dtype=np.float64)
-    raw[insufficient] = 0.0
+    raw[insufficient] = _FLOOR.get(aggregation, -np.inf)
 
     # Lexicographic tiebreak among forced rows: no_errors (E.5, the paper's strongest case) ranks
     # above n_zero_forced (E.6) regardless of P; P only breaks ties within each bucket.
@@ -197,7 +216,7 @@ class AttackEZMIA(AbstractLLMMIA):
                         "pushes the true token up even where the model still fails, so members show P >> N. "
                         "Sequences with zero error positions, or N = 0 (all movement upward), are ranked as members "
                         "(paper appendix E.5/E.6); sequences with too few error positions to trust a ratio but not "
-                        "otherwise covered score a plain 0.0 instead.",
+                        "otherwise covered are ranked lowest instead.",
         }
 
     def prepare_attack(self: Self) -> None:
@@ -225,7 +244,8 @@ class AttackEZMIA(AbstractLLMMIA):
         n_insufficient = int(insufficient.sum())
         if n_insufficient:
             logger.info(f"EZ-MIA: {n_insufficient}/{len(scores)} sequences had fewer than "
-                        f"{self.configs.min_error_positions} error positions; scored 0.0 (too little evidence)")
+                        f"{self.configs.min_error_positions} error positions or no movement at all; "
+                        "ranked lowest (too little evidence)")
 
         result = MIAResult.from_full_scores(
             true_membership=self._audit_labels,
