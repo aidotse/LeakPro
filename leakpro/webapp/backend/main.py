@@ -848,7 +848,18 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                 import pickle
 
                 def _safe_load_dataset(path: Path):
-                    """Load a dataset pickle, falling back to SafeUnpickler for missing modules."""
+                    """Load a dataset pickle, falling back to SafeUnpickler for missing modules.
+
+                    joblib first: safe-format uploads are converted by dataio.convert_upload
+                    with joblib.dump, whose on-disk format plain pickle cannot read (this is
+                    also the order MIAHandler._load_population uses). Plain pickle second
+                    for legacy .pkl uploads that joblib cannot resolve.
+                    """
+                    import joblib
+                    try:
+                        return joblib.load(path)
+                    except Exception:
+                        pass
                     try:
                         with open(path, "rb") as _f:
                             return pickle.load(_f)

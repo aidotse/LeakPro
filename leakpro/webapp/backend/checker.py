@@ -147,8 +147,14 @@ try:
                     except (ImportError, AttributeError):
                         return type(name, (), {})
 
-            with open(data_path, "rb") as fh:
-                raw = _LenientUnpickler(fh).load()
+            # joblib first: converted safe-format uploads are written with joblib.dump,
+            # which plain pickle cannot read. Legacy pickles fall through to the shim.
+            try:
+                import joblib
+                raw = joblib.load(data_path)
+            except Exception:
+                with open(data_path, "rb") as fh:
+                    raw = _LenientUnpickler(fh).load()
 
             # Extract data array and targets — try common attribute names
             data_arr = targets_arr = None

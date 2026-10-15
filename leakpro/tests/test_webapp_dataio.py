@@ -186,6 +186,79 @@ class TestUploadEndpoint:
         assert sample.status_code == 200, sample.text
         assert len(sample.json()["features"]) == 4
 
+    def test_npz_upload_trains(self: Self) -> None:
+        """Regression for #473: /train must read the joblib-written converted upload.
+
+        The training path used plain pickle and failed with "invalid load key".
+        """
+        import io
+        import queue
+
+        from leakpro.webapp.backend import main as backend_main
+
+        client, auth = self._client()
+        job_id = client.post("/jobs", headers=auth).json()["job_id"]
+
+        rng = np.random.default_rng(0)
+        buf = io.BytesIO()
+        np.savez(buf, data=rng.normal(size=(24, 4)).astype(np.float32),
+                 targets=np.arange(24) % 3)
+        buf.seek(0)
+        res = client.post(f"/jobs/{job_id}/upload/data",
+                          files={"file": ("d.npz", buf, "application/octet-stream")},
+                          headers=auth)
+        assert res.status_code == 200, res.text
+        assert client.post(f"/jobs/{job_id}/arch-config", headers=auth,
+                           json={"preset": "tabular_mlp"}).status_code == 200
+
+        res = client.post(f"/jobs/{job_id}/train", headers=auth,
+                          json={"name": "m1", "epochs": 1, "learning_rate": 0.01,
+                                "batch_size": 8, "optimizer": "adam",
+                                "f_train": 0.5, "f_test": 0.5, "dpsgd": False})
+        assert res.status_code == 200, res.text
+
+        log_q = backend_main._log_queues[job_id]
+        lines = []
+        while True:
+            try:
+                line = log_q.get(timeout=120)
+            except queue.Empty:
+                pytest.fail("training did not finish; log so far:\n" + "\n".join(lines))
+            lines.append(line)
+            if line == "__TRAIN_DONE__":
+                break
+        failed = [ln for ln in lines if ln.startswith("[train] FAILED")]
+        assert not failed, "\n".join(lines)
+
+        model = next(m for m in backend_main._jobs[job_id]["models"] if m["name"] == "m1")
+        assert model["status"] == "ready", "\n".join(lines)
+        assert (Path(model["target_folder"]) / "model_metadata.pkl").exists()
+
+    def test_check_reads_converted_upload(self: Self) -> None:
+        """The compatibility check must produce sample outputs from a converted upload.
+
+        Before #473 the checker's plain-pickle read failed and silently dropped them.
+        """
+        from leakpro.webapp.backend.checker import run_check
+        from leakpro.webapp.backend.dataio import convert_upload
+        from leakpro.webapp.backend.main import _PRESET_ARCHS
+
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "up.npz"
+            # 10 features: the preset MLP's default input width.
+            np.savez(src, data=np.random.rand(5, 10).astype(np.float32),
+                     targets=np.arange(5) % 2)
+            data_path, _ = convert_upload(src, Path(tmp))
+            arch = Path(tmp) / "arch.py"
+            arch.write_text(_PRESET_ARCHS["tabular_mlp"])
+
+            result = run_check(arch_path=arch, weights_path=None,
+                               data_shape=[10], data_path=data_path)
+            assert result.ok, result.error
+            assert result.sample_outputs is not None
+            assert len(result.sample_outputs) == 2
+            assert result.sample_outputs[0]["true_label"] in (0, 1)
+
     def test_truncated_npz_upload_rejected(self: Self) -> None:
         """A corrupt upload gets 400 through the endpoint, not an unhandled 500."""
         import io
