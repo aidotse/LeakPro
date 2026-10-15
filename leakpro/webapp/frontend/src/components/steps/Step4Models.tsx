@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import Plot from "react-plotly.js";
 import type Plotly from "plotly.js";
-import { api, CompatResult, MetaValidationResult, TrainParams } from "../../api";
+import { api, CompatResult, MetaValidationResult, TrainParams, getToken } from "../../api";
 import ServerOrUpload from "../ServerOrUpload";
 
 export interface ModelEntry {
@@ -360,7 +360,13 @@ function TrainModelForm({ jobId, onAdded, existingCount, initialModels }: {
     // otherwise later models' __METRICS__ (and their plots) are dropped.
     let doneCount = 0;
 
-    const wsUrl = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/jobs/${jobId}/logs`;
+    // Browsers cannot set an Authorization header on a WebSocket, so the
+    // backend accepts the token as a query parameter for this route only.
+    // Without it the backend closes before accept and the UI never sees
+    // __TRAIN_DONE__, leaving the model card stuck on "training".
+    const wsUrl =
+      `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}` +
+      `/jobs/${jobId}/logs?token=${encodeURIComponent(getToken())}`;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
