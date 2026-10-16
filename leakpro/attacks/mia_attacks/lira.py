@@ -168,6 +168,7 @@ class AttackLiRA(AbstractMIA):
         if n_dropped == 0:
             self.in_members = self.audit_dataset["in_members"]
             self.out_members = self.audit_dataset["out_members"]
+            self.kept_audit_points = None
             return
 
         side = "IN and OUT" if self.online else "OUT"
@@ -179,6 +180,7 @@ class AttackLiRA(AbstractMIA):
             "fraction towards 0.5, or raise num_shadow_models, to score the full audit set."
         )
 
+        self.kept_audit_points = mask
         self.out_indices = self.out_indices[:, mask]
         self.target_signals = self.target_signals[mask]
         self.shadow_models_signals = self.shadow_models_signals[:, mask]
@@ -329,4 +331,5 @@ class AttackLiRA(AbstractMIA):
         return MIAResult.from_full_scores(true_membership=true_labels,
                                     signal_values=signal_values,
                                     result_name="LiRA",
-                                    metadata=self.configs.model_dump())
+                                    metadata=self.configs.model_dump(),
+                                    audit_indices=self.scored_population_indices(self.kept_audit_points))

@@ -113,6 +113,8 @@ class CompatResult(BaseModel):
     param_count: int | None = None
     error: str | None = None
     sample_outputs: list[dict] | None = None
+    # Why sample_outputs is missing although the model loaded (logged server-side too).
+    sample_error: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +143,9 @@ class AttackResult(BaseModel):
     tpr: list[float] | None = None
     signal_values: list[float] | None = None
     true_labels: list[int] | None = None
+    # Population index of each entry in signal_values / true_labels, so the UI can
+    # fetch the right sample; None when the attack's audit set cannot be mapped.
+    audit_indices: list[int] | None = None
 
 
 class JobListItem(BaseModel):

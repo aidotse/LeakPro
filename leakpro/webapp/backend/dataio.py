@@ -30,6 +30,8 @@ import numpy as np
 import torch
 from fastapi import HTTPException
 
+from leakpro.input_handler.mia_handler import load_dataset_file
+
 from .inspector import _guess_type
 from .models import DataMeta
 
@@ -55,10 +57,20 @@ class ArrayDataset(torch.utils.data.Dataset):
     """
 
     def __init__(self, data: np.ndarray, targets: np.ndarray,
-                 feature_names: Optional[list] = None, **_kwargs: Any) -> None:  # noqa: ANN401
+                 feature_names: Optional[list] = None, data_type: Optional[str] = None,
+                 **_kwargs: Any) -> None:  # noqa: ANN401
         self.data = data
         self.targets = targets
         self.feature_names = feature_names
+        # One modality decision per dataset, shared with the upload metadata.
+        self.data_type = data_type or infer_data_type(data, feature_names)
+        # Decided once per dataset, never per row: integer pixel data is scaled
+        # to [0, 1]; float images are taken as already normalised (ImageNet-style
+        # values outside [0, 1] must not be rescaled); nothing else is touched.
+        self.scale_to_unit = self.data_type == "image" and np.asarray(data).dtype.kind in "iu"
+        # Channel-last images (N, H, W, C) are presented channel-first.
+        self.channels_last = (np.ndim(data) == 4 and data.shape[-1] in (1, 3, 4)
+                              and data.shape[1] > 4)
 
     def __len__(self) -> int:
         """Number of samples."""
@@ -67,18 +79,56 @@ class ArrayDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx: int) -> tuple:
         """Return one (input, label) pair as normalised tensors."""
         x = torch.as_tensor(np.asarray(self.data[idx]), dtype=torch.float32)
-        if np.asarray(self.data[idx]).dtype == np.uint8 or x.max() > 1.0:
+        if self.scale_to_unit:
             x = x / 255.0
-        if x.ndim == 3 and x.shape[-1] in (1, 3, 4) and x.shape[0] > 4:
+        if self.channels_last:
             x = x.permute(2, 0, 1).contiguous()
         y = torch.as_tensor(self.targets[idx], dtype=torch.long)
         return x, y
 
 
+def infer_data_type(data: np.ndarray, feature_names: Optional[list] = None) -> str:
+    """Modality of a dataset: named columns are tabular, otherwise by item shape.
+
+    The single place this decision is made for converted uploads; the upload
+    metadata and :class:`ArrayDataset` both take it from here.
+    """
+    if feature_names:
+        return "tabular"
+    data = np.asarray(data)
+    item_shape = list(data.shape[1:]) if data.ndim > 1 else [1]
+    return _guess_type(item_shape)
+
+
+def load_dataset(path: Path) -> torch.utils.data.Dataset:
+    """Load a job's dataset file as a torch Dataset.
+
+    Uses the same loader as LeakPro core (:func:`load_dataset_file`: joblib,
+    then a pickle that stubs classes it cannot import). A stubbed object (a
+    dataset whose class is not importable here) is rebuilt as an
+    :class:`ArrayDataset` from its ``data``/``targets``-style attributes, so the
+    training path gets normalised tensors from one place.
+    """
+    obj = load_dataset_file(str(path))
+    if isinstance(obj, torch.utils.data.Dataset):
+        return obj
+    attrs = getattr(obj, "__dict__", {})
+    data = _pick(attrs, _DATA_KEYS)
+    if data is None:
+        raise ValueError(f"Cannot extract a data array from {type(obj).__name__}; "
+                         f"available attributes: {list(attrs)}")
+    targets = _pick(attrs, _TARGET_KEYS)
+    if targets is None:
+        targets = np.zeros(len(data), dtype=np.int64)
+    return ArrayDataset(data=data, targets=np.asarray(targets),
+                        feature_names=attrs.get("feature_names"))
+
+
 def _pick(mapping: Any, keys: tuple) -> Optional[np.ndarray]:  # noqa: ANN401
     for key in keys:
-        if key in mapping:
-            return np.asarray(mapping[key])
+        if key in mapping and mapping[key] is not None:
+            value = mapping[key]
+            return value.numpy() if hasattr(value, "numpy") else np.asarray(value)
     return None
 
 
@@ -187,7 +237,7 @@ def convert_upload(src: Path, out_dir: Path) -> Optional[tuple[Path, DataMeta]]:
 
     item_shape = list(data.shape[1:]) if data.ndim > 1 else [1]
     meta = DataMeta(
-        data_type="tabular" if feature_names else _guess_type(item_shape),
+        data_type=dataset.data_type,
         shape=item_shape,
         n_samples=int(data.shape[0]),
         n_classes=int(len(np.unique(targets))),

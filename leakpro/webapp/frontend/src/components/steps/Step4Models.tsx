@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import Plot from "react-plotly.js";
 import type Plotly from "plotly.js";
-import { api, CompatResult, MetaValidationResult, TrainParams } from "../../api";
+import { api, CompatResult, MetaValidationResult, TrainParams, logsSocketUrl } from "../../api";
 import ServerOrUpload from "../ServerOrUpload";
 
 export interface ModelEntry {
@@ -360,8 +360,7 @@ function TrainModelForm({ jobId, onAdded, existingCount, initialModels }: {
     // otherwise later models' __METRICS__ (and their plots) are dropped.
     let doneCount = 0;
 
-    const wsUrl = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/jobs/${jobId}/logs`;
-    const ws = new WebSocket(wsUrl);
+    const ws = new WebSocket(logsSocketUrl(jobId));
     wsRef.current = ws;
 
     ws.onmessage = (e) => {

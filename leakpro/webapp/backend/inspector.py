@@ -2,31 +2,15 @@
 
 from __future__ import annotations
 
-import pickle
 import io
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
+from leakpro.input_handler.mia_handler import load_dataset_file
+
 from .models import DataMeta
-
-
-class _LenientUnpickler(pickle.Unpickler):
-    """Unpickler that substitutes a placeholder for classes that fail to import.
-
-    NOTE: this is a *compatibility* shim, not a security boundary. It resolves
-    real classes whenever the import succeeds, so it offers no protection
-    against a malicious pickle. Reaching it requires an authenticated request;
-    see ``security.RestrictedUnpickler`` for the hardened variant used where
-    only field names are needed.
-    """
-    def find_class(self, module: str, name: str):
-        try:
-            return super().find_class(module, name)
-        except (ImportError, AttributeError):
-            # Return a dummy class that accepts any args
-            return type(name, (), {"__reduce__": lambda self: (type(self), ())})
 
 
 def _try_load(path: Path) -> Any:
@@ -50,13 +34,10 @@ def _try_load(path: Path) -> Any:
         for p in _extra_paths:
             if p not in sys.path:
                 sys.path.insert(0, p)
-        try:
-            with open(path, "rb") as f:
-                return pickle.load(f)  # noqa: S301
-        except Exception:
-            # Fall back to the lenient unpickler if a custom class won't import
-            with open(path, "rb") as f:
-                return _LenientUnpickler(f).load()  # noqa: S301
+        # Same loader as LeakPro core and the training path: joblib, then a
+        # pickle that stubs classes it cannot import. Not a security boundary;
+        # reaching it requires an authenticated request.
+        return load_dataset_file(str(path))
     if suffix == ".pt":
         import torch
         # Tensors and state dicts load without executing pickled code.

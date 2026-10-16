@@ -545,6 +545,29 @@ E2E_TESTED_MIA_ATTACKS = (
     "oslo",
 )
 
+# Attacks that report, on MIAResult.audit_indices, the population index of every
+# score they return. Every other attack must leave it None rather than guess
+# (loss_traj scores a shuffled set, see #476; qmia reports no per-point scores).
+ATTACKS_REPORTING_SCORED_INDICES = frozenset({"rmia", "lira", "base", "multi_signal_lira"})
+
+
+def _assert_scored_indices_contract(attack_name: str, result: MIAResult,
+                                    handler: AbstractInputHandler) -> None:
+    """audit_indices is either absent or a faithful map from each score to a population point."""
+    indices = result.audit_indices
+    if attack_name not in ATTACKS_REPORTING_SCORED_INDICES:
+        assert indices is None, f"{attack_name} attached audit_indices but is not in the reporting set"
+        return
+    assert indices is not None, f"{attack_name} must report which population points it scored"
+    assert len(indices) == len(result.signal_values) == len(result.true)
+    train = {int(i) for i in handler.train_indices}
+    test = {int(i) for i in handler.test_indices}
+    for idx, is_member in zip(indices.tolist(), result.true.tolist()):
+        assert idx in train or idx in test, f"{attack_name}: scored index {idx} is not an audit point"
+        assert (idx in train) == bool(is_member), (
+            f"{attack_name}: index {idx} labelled member={is_member} but train membership is {idx in train}"
+        )
+
 ATTACK_PARAMETERS = [
     pytest.param(attack_name, id=f"{attack_name}-real")
     for attack_name in E2E_TESTED_MIA_ATTACKS
@@ -606,6 +629,7 @@ def test_all_attacks_end_to_end(attack_name: str, monkeypatch: pytest.MonkeyPatc
             assert hasattr(result, "id")
             assert isinstance(result.id, str)
             assert result.id
+            _assert_scored_indices_contract(attack_name, result, leakpro.handler)
 
             output_dir = Path(leakpro.handler.configs.audit.output_dir)
             result_file = output_dir / "results" / result.id / "result.txt"
