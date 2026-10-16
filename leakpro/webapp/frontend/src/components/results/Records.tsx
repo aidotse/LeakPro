@@ -19,11 +19,13 @@ export default function Records({ results, jobId }: Props) {
   // Full sorted member list — not sliced, so slider max doesn't depend on topN
   const allMemberRecords = useMemo(() => {
     if (!attack?.signal_values || !attack.true_labels) return [];
-    // signal_values is in audit-set order; audit_indices maps each position to
-    // the population index the sample endpoints expect. Fall back to the
-    // position only when the backend could not provide the mapping.
+    // signal_values is in the attack's own scoring order; audit_indices (reported
+    // by the attack) maps each position to the population index the sample
+    // endpoints expect. Without it there is no honest way to show a sample, so
+    // index stays null and the row offers no modal or thumbnail.
+    const mapping = attack.audit_indices ?? null;
     return attack.signal_values
-      .map((score, i) => ({ index: attack.audit_indices?.[i] ?? i, score, is_member: attack.true_labels![i] }))
+      .map((score, i) => ({ index: mapping ? mapping[i] : null, score, is_member: attack.true_labels![i] }))
       .filter((r) => r.is_member === 1)
       .sort((a, b) => b.score - a.score);
   }, [attack]);
@@ -32,10 +34,11 @@ export default function Records({ results, jobId }: Props) {
     allMemberRecords.slice(0, topN).map((r, i) => ({ ...r, rank: i + 1 })),
     [allMemberRecords, topN]
   );
+  const hasMapping = !!attack?.audit_indices;
 
   const downloadCSV = () => {
     const rows = ["rank,sample_index,risk_score,is_member",
-      ...topRecords.map((r) => `${r.rank},${r.index},${r.score.toFixed(6)},${r.is_member}`)
+      ...topRecords.map((r) => `${r.rank},${r.index ?? ""},${r.score.toFixed(6)},${r.is_member}`)
     ];
     const blob = new Blob([rows.join("\n")], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -92,6 +95,12 @@ export default function Records({ results, jobId }: Props) {
         </button>
       </div>
 
+      {!hasMapping && topRecords.length > 0 && (
+        <p className="text-sm text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/40 rounded-lg px-4 py-2">
+          Sample mapping unavailable for this attack: it did not report which population
+          records it scored, so rows cannot be linked to data.
+        </p>
+      )}
       {topRecords.length > 0 ? (
         <div className="rounded-xl border border-slate-200 dark:border-surface-border overflow-hidden">
           <table className="w-full text-sm">
@@ -107,14 +116,16 @@ export default function Records({ results, jobId }: Props) {
                 <React.Fragment key={`${attackName}-${selectedKey}-${r.rank}`}>
                   <tr className="hover:bg-slate-50/50 dark:hover:bg-surface/50">
                     <td className="px-4 py-2.5 font-bold text-slate-400">#{r.rank}</td>
-                    {isImage ? (
+                    {r.index === null ? (
+                      <td className="px-4 py-2.5 text-slate-400">—</td>
+                    ) : isImage ? (
                       <td className="px-4 py-2.5">
                         <ImgWithLoader jobId={model?.job_id ?? jobId} index={r.index} />
                       </td>
                     ) : (
                       <td className="px-4 py-2.5">
                         <button
-                          onClick={() => openModal(r.index, model?.job_id ?? jobId)}
+                          onClick={() => openModal(r.index!, model?.job_id ?? jobId)}
                           className="text-slate-400 hover:text-primary transition-colors"
                           title="View row data"
                         >
@@ -122,7 +133,7 @@ export default function Records({ results, jobId }: Props) {
                         </button>
                       </td>
                     )}
-                    <td className="px-4 py-2.5 font-mono">{r.index}</td>
+                    <td className="px-4 py-2.5 font-mono">{r.index ?? "n/a"}</td>
                     <td className="px-4 py-2.5">
                       <div className="flex items-center gap-2">
                         <div className="flex-1 h-1.5 rounded-full bg-slate-200 dark:bg-surface-2">

@@ -21,6 +21,17 @@ export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
 }
 
+/**
+ * Log-stream WebSocket URL for a job. Browsers cannot set an Authorization
+ * header on a WebSocket, so the backend takes the token as a query parameter
+ * on this one route. Every caller must go through here so an auth change
+ * cannot miss a call site again.
+ */
+export function logsSocketUrl(jobId: string): string {
+  const scheme = location.protocol === "https:" ? "wss" : "ws";
+  return `${scheme}://${location.host}/jobs/${jobId}/logs?token=${encodeURIComponent(getToken())}`;
+}
+
 function authHeaders(extra?: Record<string, string>): Record<string, string> {
   return { Authorization: `Bearer ${getToken()}`, ...(extra ?? {}) };
 }
@@ -166,6 +177,7 @@ export interface CompatResult {
   param_count?: number;
   error?: string;
   sample_outputs?: Array<{ sample: number; top1_class: number; confidence: number; true_label: number | null }>;
+  sample_error?: string;
 }
 
 export interface MetaValidationResult {
