@@ -30,6 +30,8 @@ import numpy as np
 import torch
 from fastapi import HTTPException
 
+from leakpro.input_handler.mia_handler import load_dataset_file
+
 from .inspector import _guess_type
 from .models import DataMeta
 
@@ -59,6 +61,12 @@ class ArrayDataset(torch.utils.data.Dataset):
         self.data = data
         self.targets = targets
         self.feature_names = feature_names
+        # Decided once per dataset, never per row: raw pixel data is scaled to
+        # [0, 1]; already-normalised floats and tabular features are left alone.
+        self.scale_to_unit = pixel_data_needs_unit_scaling(data, feature_names)
+        # Channel-last images (N, H, W, C) are presented channel-first.
+        self.channels_last = (np.ndim(data) == 4 and data.shape[-1] in (1, 3, 4)
+                              and data.shape[1] > 4)
 
     def __len__(self) -> int:
         """Number of samples."""
@@ -67,18 +75,59 @@ class ArrayDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx: int) -> tuple:
         """Return one (input, label) pair as normalised tensors."""
         x = torch.as_tensor(np.asarray(self.data[idx]), dtype=torch.float32)
-        if np.asarray(self.data[idx]).dtype == np.uint8 or x.max() > 1.0:
+        if self.scale_to_unit:
             x = x / 255.0
-        if x.ndim == 3 and x.shape[-1] in (1, 3, 4) and x.shape[0] > 4:
+        if self.channels_last:
             x = x.permute(2, 0, 1).contiguous()
         y = torch.as_tensor(self.targets[idx], dtype=torch.long)
         return x, y
 
 
+def pixel_data_needs_unit_scaling(data: np.ndarray, feature_names: Optional[list] = None) -> bool:
+    """True when ``data`` is raw pixel intensities that should be divided by 255.
+
+    One decision for the whole dataset: uint8 arrays are pixels; other integer
+    arrays are pixels when they exceed 1; floats are taken as already normalised
+    (ImageNet-style values outside [0, 1] must not be rescaled). Tabular data
+    (named columns, or one feature vector per row) is never scaled.
+    """
+    data = np.asarray(data)
+    if feature_names is not None or data.ndim <= 2:
+        return False
+    if data.dtype == np.uint8:
+        return True
+    return data.dtype.kind in "iu" and data.size > 0 and data.max() > 1
+
+
+def load_dataset(path: Path) -> torch.utils.data.Dataset:
+    """Load a job's dataset file as a torch Dataset.
+
+    Uses the same loader as LeakPro core (:func:`load_dataset_file`: joblib,
+    then a pickle that stubs classes it cannot import). A stubbed object (a
+    dataset whose class is not importable here) is rebuilt as an
+    :class:`ArrayDataset` from its ``data``/``targets``-style attributes, so the
+    training path gets normalised tensors from one place.
+    """
+    obj = load_dataset_file(str(path))
+    if isinstance(obj, torch.utils.data.Dataset):
+        return obj
+    attrs = getattr(obj, "__dict__", {})
+    data = _pick(attrs, _DATA_KEYS)
+    if data is None:
+        raise ValueError(f"Cannot extract a data array from {type(obj).__name__}; "
+                         f"available attributes: {list(attrs)}")
+    targets = _pick(attrs, _TARGET_KEYS)
+    if targets is None:
+        targets = np.zeros(len(data), dtype=np.int64)
+    return ArrayDataset(data=data, targets=np.asarray(targets),
+                        feature_names=attrs.get("feature_names"))
+
+
 def _pick(mapping: Any, keys: tuple) -> Optional[np.ndarray]:  # noqa: ANN401
     for key in keys:
-        if key in mapping:
-            return np.asarray(mapping[key])
+        if key in mapping and mapping[key] is not None:
+            value = mapping[key]
+            return value.numpy() if hasattr(value, "numpy") else np.asarray(value)
     return None
 
 

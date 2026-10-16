@@ -9,54 +9,35 @@ import pytest
 
 pytest.importorskip("fastapi", reason="webapp extras (fastapi) not installed")
 
-from leakpro.utils.import_helper import Self
+from leakpro.reporting.mia_result import MIAResult  # noqa: E402
+from leakpro.utils.import_helper import Self  # noqa: E402
 
 
-class _Result:
-    """Minimal stand-in for MIAResult with the fields the worker reads."""
-
-    def __init__(self: Self, n: int) -> None:
-        self.result_name = "RMIA"
-        self.roc_auc = 0.5
-        self.fixed_fpr_table = {"TPR@1%FPR": 0.01}
-        self.fpr = np.linspace(0, 1, n)
-        self.tpr = np.linspace(0, 1, n)
-        self.signal_values = np.arange(n, dtype=float)
-        self.true = np.array([1] * (n // 2) + [0] * (n - n // 2))
+def _result(n: int, audit_indices: list | None) -> MIAResult:
+    true = [1] * (n // 2) + [0] * (n - n // 2)
+    return MIAResult.from_full_scores(true_membership=true, signal_values=np.arange(n, dtype=float),
+                                      result_name="RMIA", audit_indices=audit_indices)
 
 
-class _Handler:
-    def __init__(self: Self, train: list, test: list) -> None:
-        self.train_indices = np.array(train)
-        self.test_indices = np.array(test)
+class TestSerialiseResult:
+    """The Records tab gets population indices only when the attack reported them."""
 
-
-class TestAuditIndices:
-    """The Records tab needs population indices, not audit-set positions."""
-
-    def test_indices_follow_audit_set_order(self: Self) -> None:
-        """train_indices first, then test_indices — the order every MIA attack scores in."""
-        from leakpro.webapp.backend.worker import _audit_population_indices
-
-        assert _audit_population_indices(_Handler([7, 3], [11, 5, 9])) == [7, 3, 11, 5, 9]
-
-    def test_missing_handler_indices_gives_none(self: Self) -> None:
-        """A handler without index attributes yields no mapping rather than an error."""
-        from leakpro.webapp.backend.worker import _audit_population_indices
-
-        assert _audit_population_indices(object()) is None
-
-    def test_serialised_result_carries_matching_indices(self: Self) -> None:
-        """A one-to-one mapping is passed through next to the signals."""
+    def test_attack_reported_indices_pass_through(self: Self) -> None:
+        """audit_indices from MIAResult reach the UI unchanged, aligned with the signals."""
         from leakpro.webapp.backend.worker import _serialise_result
 
-        out = _serialise_result(_Result(5), [7, 3, 11, 5, 9])
+        out = _serialise_result(_result(5, [7, 3, 11, 5, 9]))
         assert out["audit_indices"] == [7, 3, 11, 5, 9]
         assert out["signal_values"] == [0.0, 1.0, 2.0, 3.0, 4.0]
+        assert out["true_labels"] == [1, 1, 0, 0, 0]
 
-    def test_length_mismatch_drops_indices(self: Self) -> None:
-        """An attack that subsamples the audit set must not get a wrong mapping."""
+    def test_no_indices_means_none_not_positions(self: Self) -> None:
+        """An attack that cannot say what it scored yields None; the worker never guesses."""
         from leakpro.webapp.backend.worker import _serialise_result
 
-        assert _serialise_result(_Result(5), [7, 3, 11])["audit_indices"] is None
-        assert _serialise_result(_Result(5), None)["audit_indices"] is None
+        assert _serialise_result(_result(5, None))["audit_indices"] is None
+
+    def test_misaligned_indices_are_rejected_at_the_source(self: Self) -> None:
+        """MIAResult refuses a mapping that does not line up with the signals."""
+        with pytest.raises(ValueError, match="line up one-to-one"):
+            _result(5, [7, 3, 11])

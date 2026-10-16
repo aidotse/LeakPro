@@ -113,6 +113,8 @@ class CompatResult(BaseModel):
     param_count: int | None = None
     error: str | None = None
     sample_outputs: list[dict] | None = None
+    # Why sample_outputs is missing although the model loaded (logged server-side too).
+    sample_error: str | None = None
 
 
 # ---------------------------------------------------------------------------

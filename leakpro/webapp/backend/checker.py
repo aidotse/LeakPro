@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 import sys
 import textwrap
@@ -10,9 +11,11 @@ from pathlib import Path
 
 from .models import CompatResult
 
+logger = logging.getLogger("leakpro.webapp.checker")
+
 
 _RUNNER_SCRIPT = textwrap.dedent("""
-import sys, json, importlib.util, traceback, pickle
+import sys, json, importlib.util, traceback, pathlib
 import torch
 import torch.nn.functional as F
 
@@ -40,7 +43,7 @@ try:
     # --- Priority 1: init_params from model_metadata.pkl ---
     init_params = {}
     if weights_path != "none":
-        import joblib, pathlib
+        import joblib
         meta_path = pathlib.Path(weights_path).parent / "model_metadata.pkl"
         if meta_path.exists():
             try:
@@ -132,70 +135,34 @@ try:
         "param_count": param_count,
     }
 
-    # Optional: run 2 real data samples through the model
+    # Optional: run 2 real data samples through the model. The dataset is loaded
+    # and normalised by the same code the training path uses (dataio.load_dataset),
+    # so this check sees exactly the tensors the model will be trained on.
     if data_path != "none":
         try:
-            import numpy as np
-
-            # Compatibility shim, not a security boundary: it resolves real
-            # classes whenever the import succeeds. Safe here only because this
-            # runs in a subprocess on a file the authenticated operator supplied.
-            class _LenientUnpickler(pickle.Unpickler):
-                def find_class(self, module, name):
-                    try:
-                        return super().find_class(module, name)
-                    except (ImportError, AttributeError):
-                        return type(name, (), {})
-
-            # joblib first: converted safe-format uploads are written with joblib.dump,
-            # which plain pickle cannot read. Legacy pickles fall through to the shim.
-            try:
-                import joblib
-                raw = joblib.load(data_path)
-            except Exception:
-                with open(data_path, "rb") as fh:
-                    raw = _LenientUnpickler(fh).load()
-
-            # Extract data array and targets — try common attribute names
-            data_arr = targets_arr = None
-            for _da in ("data", "x", "X", "features", "samples"):
-                _v = getattr(raw, _da, None)
-                if _v is not None:
-                    data_arr = _v if isinstance(_v, np.ndarray) else (_v.numpy() if hasattr(_v, "numpy") else None)
-                    if data_arr is not None:
-                        break
-            for _ta in ("targets", "y", "Y", "labels"):
-                _v = getattr(raw, _ta, None)
-                if _v is not None:
-                    targets_arr = _v if isinstance(_v, (list, np.ndarray)) else (_v.tolist() if hasattr(_v, "tolist") else None)
-                    if targets_arr is not None:
-                        break
-
-            if data_arr is not None and len(data_arr) >= 1:
-                sample_outputs = []
-                for i in range(min(2, len(data_arr))):
-                    x = torch.tensor(np.array(data_arr[i]), dtype=torch.float32)
-                    if x.max() > 1.0:
-                        x = x / 255.0
-                    if x.ndim == 3 and x.shape[-1] in (1, 3, 4) and x.shape[0] > 4:
-                        x = x.permute(2, 0, 1)
-                    x = x.unsqueeze(0)
-                    with torch.no_grad():
-                        logits = model(x)
-                    probs = F.softmax(logits, dim=1)
-                    top1 = int(probs.argmax(dim=1).item())
-                    conf = round(float(probs.max(dim=1).values.item()), 4)
-                    true_label = int(targets_arr[i]) if targets_arr is not None else None
-                    sample_outputs.append({
-                        "sample": i,
-                        "top1_class": top1,
-                        "confidence": conf,
-                        "true_label": true_label,
-                    })
-                result["sample_outputs"] = sample_outputs
+            from leakpro.webapp.backend.dataio import load_dataset
+            dataset = load_dataset(pathlib.Path(data_path))
+            sample_outputs = []
+            for i in range(min(2, len(dataset))):
+                x, y = dataset[i]
+                x = torch.as_tensor(x, dtype=torch.float32).unsqueeze(0)
+                with torch.no_grad():
+                    logits = model(x)
+                probs = F.softmax(logits, dim=1)
+                top1 = int(probs.argmax(dim=1).item())
+                conf = round(float(probs.max(dim=1).values.item()), 4)
+                true_label = int(y) if y is not None else None
+                sample_outputs.append({
+                    "sample": i,
+                    "top1_class": top1,
+                    "confidence": conf,
+                    "true_label": true_label,
+                })
+            result["sample_outputs"] = sample_outputs
         except Exception as _se:
-            result["sample_outputs"] = None  # skip silently; main check still passed
-
+            # The main check passed; report why the sample pass did not, never hide it.
+            result["sample_outputs"] = None
+            result["sample_error"] = f"{type(_se).__name__}: {_se}"
     print(json.dumps(result))
 except Exception:
     print(json.dumps({"ok": False, "error": traceback.format_exc()}))
@@ -231,6 +198,9 @@ def run_check(
         if not raw:
             return CompatResult(ok=False, error=result.stderr or "No output from check subprocess")
         data = json.loads(raw)
+        if data.get("sample_error"):
+            logger.warning("Compatibility check: model loaded but the sample pass failed: %s",
+                           data["sample_error"])
         return CompatResult(**data)
     except subprocess.TimeoutExpired:
         return CompatResult(ok=False, error="Compatibility check timed out (>60s)")

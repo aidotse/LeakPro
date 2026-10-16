@@ -145,6 +145,128 @@ class TestConvertUpload:
             assert convert_upload(src, Path(tmp)) is None
 
 
+class TestScalingDecidedPerDataset:
+    """Pixel scaling is one decision for the whole dataset, never per row."""
+
+    def test_tabular_rows_are_never_rescaled(self: Self) -> None:
+        """A row whose max exceeds 1 must not be divided by 255 (the #474 review finding)."""
+        from leakpro.webapp.backend.dataio import ArrayDataset
+
+        data = np.array([[0.4, 0.9, 1.0], [0.4, 0.9, 1.5], [37.0, 0.9, 1.0]], dtype=np.float32)
+        ds = ArrayDataset(data, np.array([0, 1, 0]), feature_names=["a", "b", "c"])
+        assert ds.scale_to_unit is False
+        for i in range(3):
+            x, _ = ds[i]
+            assert np.allclose(x.numpy(), data[i])
+
+    def test_unnamed_feature_vectors_are_never_rescaled(self: Self) -> None:
+        """Tabular .npz (no column names) is still tabular: 2-D data is left alone."""
+        from leakpro.webapp.backend.dataio import ArrayDataset
+
+        data = np.array([[0.5, 300.0], [2.0, 0.1]], dtype=np.float32)
+        ds = ArrayDataset(data, np.array([0, 1]))
+        assert ds.scale_to_unit is False
+        assert np.allclose(ds[0][0].numpy(), data[0])
+
+    def test_uint8_images_are_scaled_once(self: Self) -> None:
+        """Raw pixels go to [0, 1]; the decision holds for rows whose max is below 1 too."""
+        from leakpro.webapp.backend.dataio import ArrayDataset
+
+        data = np.zeros((2, 3, 4, 4), dtype=np.uint8)
+        data[0] = 255
+        data[1] = 0  # a row that would not trip a per-row "max > 1" check
+        ds = ArrayDataset(data, np.array([0, 1]))
+        assert ds.scale_to_unit is True
+        assert float(ds[0][0].max()) == 1.0
+        assert float(ds[1][0].max()) == 0.0
+
+    def test_float_images_are_taken_as_normalised(self: Self) -> None:
+        """ImageNet-style floats outside [0, 1] are not rescaled."""
+        from leakpro.webapp.backend.dataio import ArrayDataset
+
+        data = np.full((2, 3, 4, 4), 2.1, dtype=np.float32)
+        ds = ArrayDataset(data, np.array([0, 1]))
+        assert ds.scale_to_unit is False
+        assert float(ds[0][0].max()) == np.float32(2.1)
+
+    def test_channels_last_images_are_presented_channels_first(self: Self) -> None:
+        """(N, H, W, C) arrays come out as (C, H, W) tensors."""
+        from leakpro.webapp.backend.dataio import ArrayDataset
+
+        ds = ArrayDataset(np.zeros((2, 8, 8, 3), dtype=np.uint8), np.array([0, 1]))
+        assert ds.channels_last is True
+        assert tuple(ds[0][0].shape) == (3, 8, 8)
+
+
+class TestLoadDataset:
+    """One loader for every webapp path: joblib files, plain pickles, stubbed classes."""
+
+    def test_joblib_written_dataset_loads(self: Self) -> None:
+        """The converter writes with joblib; the training path must read it (#473)."""
+        import joblib
+
+        from leakpro.webapp.backend.dataio import ArrayDataset, load_dataset
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "d.pkl"
+            joblib.dump(ArrayDataset(np.zeros((3, 4), np.float32), np.arange(3)), path)
+            ds = load_dataset(path)
+            assert isinstance(ds, ArrayDataset)
+            assert len(ds) == 3
+
+    def test_plain_pickle_dataset_loads(self: Self) -> None:
+        """A dataset written with plain pickle still loads."""
+        import pickle
+
+        from leakpro.webapp.backend.dataio import ArrayDataset, load_dataset
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "d.pkl"
+            with open(path, "wb") as f:
+                pickle.dump(ArrayDataset(np.zeros((3, 4), np.float32), np.arange(3)), f)
+            assert len(load_dataset(path)) == 3
+
+    def test_unimportable_class_is_rebuilt_from_its_arrays(self: Self) -> None:
+        """A legacy pickle whose class no longer exists becomes an ArrayDataset."""
+        import importlib
+        import pickle
+        import sys
+
+        from leakpro.webapp.backend.dataio import ArrayDataset, load_dataset
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # Pickle an instance of a class from a throwaway module, then make that
+            # module unimportable before loading, as with an old handler file.
+            (Path(tmp) / "old_handler_mod.py").write_text(
+                "import numpy as np\nclass OldDataset:\n    def __init__(self):\n"
+                "        self.x = np.ones((4, 2), dtype=np.float32)\n"
+                "        self.y = np.array([0, 1, 0, 1])\n")
+            sys.path.insert(0, tmp)
+            try:
+                mod = importlib.import_module("old_handler_mod")
+                path = Path(tmp) / "legacy.pkl"
+                with open(path, "wb") as f:
+                    pickle.dump(mod.OldDataset(), f)
+            finally:
+                sys.path.remove(tmp)
+                sys.modules.pop("old_handler_mod", None)
+            ds = load_dataset(path)
+            assert isinstance(ds, ArrayDataset)
+            assert len(ds) == 4
+            assert int(ds.targets[1]) == 1
+            assert np.allclose(ds[0][0].numpy(), [1.0, 1.0])
+
+    def test_unreadable_file_reports_both_loader_errors(self: Self) -> None:
+        """When every loader fails, the message names the joblib error, not just 'invalid load key'."""
+        from leakpro.webapp.backend.dataio import load_dataset
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "garbage.pkl"
+            path.write_bytes(b"\x02not a pickle at all")
+            with pytest.raises(RuntimeError, match="joblib failed"):
+                load_dataset(path)
+
+
 class TestUploadEndpoint:
     """The upload endpoint converts safe formats at the trust boundary."""
 
