@@ -119,6 +119,14 @@ export const api = {
   getResults: (id: string) => get<{ job_id: string; results: ModelResult[] }>(`/jobs/${id}/results`),
   getSampleData: (jobId: string, index: number) =>
     get<{ index: number; label: number; features: number[]; feature_names?: string[] }>(`/jobs/${jobId}/sample_data/${index}`),
+  // An <img src> cannot carry the Authorization header, so fetch the PNG with
+  // the token and hand back an object URL (caller revokes it).
+  getSampleImageUrl: async (jobId: string, index: number): Promise<string> => {
+    const res = await fetch(`${BASE}/jobs/${jobId}/sample_image/${index}`, { headers: authHeaders() });
+    if (res.status === 401) { clearToken(); throw new Error("Unauthorized"); }
+    if (!res.ok) throw new Error(await res.text());
+    return URL.createObjectURL(await res.blob());
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -201,6 +209,7 @@ export interface AttackResult {
   tpr?: number[];
   signal_values?: number[];
   true_labels?: number[];
+  audit_indices?: number[] | null;  // population index per signal entry
 }
 
 export interface JobListItem {

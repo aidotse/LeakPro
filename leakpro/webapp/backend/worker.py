@@ -363,6 +363,11 @@ def run_audit_job(
                 lp = LeakPro(handler_cls, str(temp_yaml))
                 results = lp.run_audit(create_pdf=False)
 
+                # Every MIA attack scores the audit set in order (in-members, then
+                # out-members), i.e. population indices train_indices + test_indices.
+                # Ship that mapping so the Records tab fetches the right sample.
+                audit_indices = _audit_population_indices(lp.handler)
+
                 # Detect model class name for display in results
                 _preset_class_map = {"cifar_image": "ResNet18", "cifar_wrn": "ResNet18"}
                 _model_class: str | None = _preset_class_map.get(preset)  # type: ignore[arg-type]
@@ -410,7 +415,7 @@ def run_audit_job(
                     "test_accuracy": model_spec.get("test_accuracy"),
                     "model_class": _model_class,
                     "train_meta": _train_meta,
-                    "attacks": [_serialise_result(r) for r in results],
+                    "attacks": [_serialise_result(r, audit_indices) for r in results],
                 }
                 all_results.append(model_results)
                 log_q.put(f"[worker] Done: {model_name} — {len(results)} attack result(s)")
@@ -435,8 +440,24 @@ def run_audit_job(
         leakpro_logger.removeHandler(handler)
 
 
-def _serialise_result(r: Any) -> dict:
+def _audit_population_indices(handler: object) -> list[int] | None:
+    """Population index of each audit-set position, or None if unavailable."""
+    train = getattr(handler, "train_indices", None)
+    test = getattr(handler, "test_indices", None)
+    if train is None or test is None:
+        return None
+    return [int(i) for i in train] + [int(i) for i in test]
+
+
+def _serialise_result(r: Any, audit_indices: list[int] | None = None) -> dict:
+    n_signals = len(r.signal_values) if r.signal_values is not None else None
+    # Only attach the mapping when it lines up one-to-one with the signals; an
+    # attack that subsamples or reorders the audit set gets None, and the UI
+    # then shows positions rather than a wrong sample.
+    if audit_indices is not None and n_signals is not None and len(audit_indices) != n_signals:
+        audit_indices = None
     return {
+        "audit_indices": audit_indices,
         "attack_name": r.result_name,
         "roc_auc": float(r.roc_auc) if r.roc_auc is not None else None,
         "tpr_at_fpr": {k: float(v) for k, v in (r.fixed_fpr_table or {}).items()},

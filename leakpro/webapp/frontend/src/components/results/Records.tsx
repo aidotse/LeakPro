@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback } from "react";
+import React, { useMemo, useState, useCallback, useEffect } from "react";
 import { api, ModelResult } from "../../api";
 
 // model key is "jobId/modelName" to support cross-session results
@@ -19,8 +19,11 @@ export default function Records({ results, jobId }: Props) {
   // Full sorted member list — not sliced, so slider max doesn't depend on topN
   const allMemberRecords = useMemo(() => {
     if (!attack?.signal_values || !attack.true_labels) return [];
+    // signal_values is in audit-set order; audit_indices maps each position to
+    // the population index the sample endpoints expect. Fall back to the
+    // position only when the backend could not provide the mapping.
     return attack.signal_values
-      .map((score, i) => ({ index: i, score, is_member: attack.true_labels![i] }))
+      .map((score, i) => ({ index: attack.audit_indices?.[i] ?? i, score, is_member: attack.true_labels![i] }))
       .filter((r) => r.is_member === 1)
       .sort((a, b) => b.score - a.score);
   }, [attack]);
@@ -31,7 +34,7 @@ export default function Records({ results, jobId }: Props) {
   );
 
   const downloadCSV = () => {
-    const rows = ["rank,audit_index,risk_score,is_member",
+    const rows = ["rank,sample_index,risk_score,is_member",
       ...topRecords.map((r) => `${r.rank},${r.index},${r.score.toFixed(6)},${r.is_member}`)
     ];
     const blob = new Blob([rows.join("\n")], { type: "text/csv" });
@@ -106,7 +109,7 @@ export default function Records({ results, jobId }: Props) {
                     <td className="px-4 py-2.5 font-bold text-slate-400">#{r.rank}</td>
                     {isImage ? (
                       <td className="px-4 py-2.5">
-                        <ImgWithLoader src={`/jobs/${model?.job_id ?? jobId}/sample_image/${r.index}`} />
+                        <ImgWithLoader jobId={model?.job_id ?? jobId} index={r.index} />
                       </td>
                     ) : (
                       <td className="px-4 py-2.5">
@@ -181,20 +184,31 @@ export default function Records({ results, jobId }: Props) {
   );
 }
 
-function ImgWithLoader({ src }: { src: string }) {
+function ImgWithLoader({ jobId, index }: { jobId: string; index: number }) {
   const [loaded, setLoaded] = useState(false);
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => {
+    let url: string | null = null;
+    let cancelled = false;
+    setLoaded(false);
+    setSrc(null);
+    api.getSampleImageUrl(jobId, index)
+      .then((u) => { if (cancelled) URL.revokeObjectURL(u); else { url = u; setSrc(u); } })
+      .catch(() => { if (!cancelled) setLoaded(true); });
+    return () => { cancelled = true; if (url) URL.revokeObjectURL(url); };
+  }, [jobId, index]);
   return (
     <div className="w-16 h-16 relative">
       {!loaded && (
         <div className="absolute inset-0 rounded border border-slate-200 dark:border-surface-border bg-slate-200 dark:bg-surface-2 animate-pulse" />
       )}
-      <img
+      {src && <img
         src={src}
         alt=""
         className={`w-16 h-16 object-contain rounded border border-slate-200 dark:border-surface-border transition-opacity duration-200 ${loaded ? "opacity-100" : "opacity-0"}`}
         onLoad={() => setLoaded(true)}
         onError={() => setLoaded(true)}
-      />
+      />}
     </div>
   );
 }
