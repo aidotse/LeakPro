@@ -1193,14 +1193,14 @@ async def get_results(job_id: str) -> dict:
 @app.get("/jobs/{job_id}/sample_data/{index}")
 async def get_sample_data(job_id: str, index: int):
     """Return tabular feature values for a single sample as JSON."""
-    import joblib, torch
+    import torch
     import numpy as np
     job = _get_job(job_id)
     data_path = job.get("data_path")
     if not data_path or not Path(data_path).exists():
         raise HTTPException(status_code=404, detail="Dataset not found")
     try:
-        dataset = joblib.load(data_path)
+        dataset = load_dataset(Path(data_path))
         row = dataset.data[index]
         if isinstance(row, torch.Tensor):
             row = row.tolist()
@@ -1222,7 +1222,6 @@ async def get_sample_data(job_id: str, index: int):
 async def get_sample_image(job_id: str, index: int):
     """Return a single sample image from the job's dataset as PNG."""
     import io
-    import joblib
     import numpy as np
     from PIL import Image
     from fastapi.responses import Response
@@ -1232,7 +1231,7 @@ async def get_sample_image(job_id: str, index: int):
     if not data_path or not Path(data_path).exists():
         raise HTTPException(status_code=404, detail="Dataset not found")
 
-    dataset = joblib.load(data_path)
+    dataset = load_dataset(Path(data_path))
 
     try:
         img = dataset.data[index]
