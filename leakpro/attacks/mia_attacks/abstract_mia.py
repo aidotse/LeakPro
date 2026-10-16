@@ -419,7 +419,7 @@ class AbstractMIA(AbstractAttack):
             np.ndarray: Population index of each reported score, aligned with ``signal_values``.
 
         """
-        data = np.asarray(AbstractMIA.audit_dataset["data"])
+        data = np.asarray(self.audit_dataset["data"])
         return data if kept is None else data[np.asarray(kept, dtype=bool)]
 
     @abstractmethod
