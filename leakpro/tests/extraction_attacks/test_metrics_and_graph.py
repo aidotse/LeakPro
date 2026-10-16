@@ -93,6 +93,32 @@ def test_maximum_clique_prunes_many_equal_dense_choices() -> None:
     assert perf_counter() - start < 10.0
 
 
+def test_maximum_clique_budget_warns_and_rejects_an_unfinished_search(caplog: pytest.LogCaptureFixture) -> None:
+    adjacency = torch.zeros((3, 3), dtype=torch.bool)
+
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="budget of 2 search nodes.*No exact result was returned"):
+            maximum_clique(adjacency, max_search_nodes=2)
+
+    assert len(caplog.records) == 2
+    assert all(record.levelname == "WARNING" for record in caplog.records)
+    assert caplog.records[0].message == caplog.records[1].message
+    assert "increase max_clique_search_nodes" in caplog.text
+
+    # Four popped states finish this graph, retaining the original tie break.
+    caplog.clear()
+    assert maximum_clique(adjacency, max_search_nodes=4) == _brute_maximum_clique(adjacency) == [0]
+    assert not caplog.records
+
+
+@pytest.mark.parametrize(
+    ("budget", "error"), [(0, ValueError), (-1, ValueError), (True, TypeError), (1.5, TypeError), (None, TypeError)],
+)
+def test_maximum_clique_rejects_invalid_budgets(budget: object, error: type[Exception]) -> None:
+    with pytest.raises(error, match="positive integer"):
+        maximum_clique(torch.zeros((1, 1), dtype=torch.bool), max_search_nodes=budget)
+
+
 def test_carlini_reference_ratio_uses_generated_image_neighborhood() -> None:
     references = torch.tensor([[[[0.0]]], [[[0.2]]], [[[0.4]]], [[[1.0]]]])
     candidates = torch.tensor([[[[0.1]]]])

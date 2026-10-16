@@ -34,6 +34,16 @@ class TinyTimeClassifier(nn.Module):
         return self.image(images.flatten(start_dim=1)) + self.time(time)
 
 
+@pytest.mark.parametrize("seed", [-1, 2**32])
+def test_side_rejects_unsupported_kmeans_seeds_before_sampling(seed: int) -> None:
+    def sample(*args, **kwargs):
+        raise AssertionError("Invalid seed must be rejected before target generation")
+
+    adapter = image_sampler((1, 4, 4), sample, model=nn.Identity())
+    with pytest.raises(ValueError, match="random_seed"):
+        AttackSIDEExtraction(adapter, TwoFeatureExtractor(), {"random_seed": seed})
+
+
 def test_side_default_uses_raw_feature_space_kmeans() -> None:
     adapter = image_sampler(
         image_shape=(1, 1, 1),

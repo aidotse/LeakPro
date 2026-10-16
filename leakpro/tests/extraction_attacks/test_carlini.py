@@ -113,10 +113,33 @@ def test_prompt_and_label_hashes_use_shared_json_utilities() -> None:
     adapter = image_sampler((1, 4, 4), lambda *args, **kwargs: None, model=model)
     conditions = ["1", 1, np.int64(2)]
     attack = AttackCarliniExtraction(adapter, {}, conditions=conditions)
-    identity = {"config": attack.config.model_dump(mode="json", exclude={"overwrite_results"}),
+    identity = {"config": attack.config.model_dump(mode="json", exclude={"overwrite_results", "max_clique_search_nodes"}),
                 "conditions": [hash_config({"condition": json_safe(value)}) for value in conditions]}
     assert attack.result_id.endswith(hash_attack(identity, model)[:16])
     assert identity["conditions"][0] != identity["conditions"][1]
+
+
+def test_clique_budget_does_not_change_successful_results_or_their_identity() -> None:
+    adapter = image_sampler(
+        (1, 4, 4), lambda count, conditions, seed: torch.zeros((count, 1, 4, 4)), model=torch.nn.Identity(),
+    )
+    common = {"num_generations_per_condition": 4, "min_clique_size": 2}
+    results = []
+    for budget in (5, 100):
+        attack = AttackCarliniExtraction(adapter, {**common, "max_clique_search_nodes": budget}, conditions=["prompt"])
+        attack.prepare_attack()
+        results.append(attack.run_attack())
+
+    assert results[0].id == results[1].id
+    assert results[0].candidates == results[1].candidates
+    assert results[0].metrics == results[1].metrics
+    torch.testing.assert_close(results[0].images, results[1].images, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("budget", [0, -1, True, 1.5, None])
+def test_carlini_rejects_invalid_clique_budgets(budget: object) -> None:
+    with pytest.raises(ValueError, match="max_clique_search_nodes"):
+        AttackCarliniExtraction.AttackConfig(max_clique_search_nodes=budget)
 
 
 def test_missing_weights_cannot_fall_back_to_a_target_name() -> None:

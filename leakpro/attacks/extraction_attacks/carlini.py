@@ -22,7 +22,11 @@ from leakpro.attacks.extraction_attacks.utils_generative import (
     to_zero_one,
     validate_image_batch,
 )
-from leakpro.attacks.extraction_attacks.utils_generative.carlini_graph import clique_medoid, maximum_clique
+from leakpro.attacks.extraction_attacks.utils_generative.carlini_graph import (
+    DEFAULT_MAX_CLIQUE_SEARCH_NODES,
+    clique_medoid,
+    maximum_clique,
+)
 from leakpro.attacks.extraction_attacks.utils_generative.image_metrics import (
     carlini_reference_scores,
     nearest_reference,
@@ -57,6 +61,10 @@ class AttackCarliniExtraction(AbstractExtraction):
         tile_grid: tuple[int, int] = (4, 4)
         tiled_l2_threshold: float = Field(default=0.1, gt=0)
         min_clique_size: int = Field(default=10, ge=2)
+        max_clique_search_nodes: int = Field(
+            default=DEFAULT_MAX_CLIQUE_SEARCH_NODES, ge=1, strict=True,
+            description="Maximum search states per condition; exhaustion aborts without a partial result.",
+        )
         verification_l2_threshold: float = Field(default=0.15, gt=0)
         reference_alpha: float = Field(default=0.5, gt=0)
         reference_neighbors: int = Field(default=50, ge=2)
@@ -94,7 +102,8 @@ class AttackCarliniExtraction(AbstractExtraction):
         self.conditions = normalize_conditions(conditions)
         self.target_name = target_name
         self.reference_images = reference_images
-        identity_config = self.config.model_dump(mode="json", exclude={"overwrite_results"})
+        # Resource limits do not change the exact result of a completed search.
+        identity_config = self.config.model_dump(mode="json", exclude={"overwrite_results", "max_clique_search_nodes"})
         if self.config.mode == "unconditional_reference_audit":
             identity_config["reference_score"] = "candidate_neighbors"
         model = getattr(self.adapter, "model", None)
@@ -218,7 +227,7 @@ class AttackCarliniExtraction(AbstractExtraction):
             )
             adjacency = distances.le(self.config.tiled_l2_threshold)
             adjacency.fill_diagonal_(False)
-            clique = maximum_clique(adjacency)
+            clique = maximum_clique(adjacency, max_search_nodes=self.config.max_clique_search_nodes)
             summary = {
                 "condition_index": condition_index,
                 "condition_hash": hash,

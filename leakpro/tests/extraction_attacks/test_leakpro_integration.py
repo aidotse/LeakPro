@@ -183,6 +183,26 @@ def _write_config(
     return str(config_path)
 
 
+def test_public_clique_budget_failure_publishes_no_partial_result(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture,
+) -> None:
+    settings = {"num_generations_per_condition": 4, "min_clique_size": 2, "max_clique_search_nodes": 1}
+    config_path = _write_config(tmp_path, "carlini_diffusion", settings)
+    audit = LeakPro(CarliniProvider, config_path)
+    with pytest.raises(RuntimeError, match="budget of 1 search nodes"):
+        audit.run_audit()
+    assert "No exact result was returned" in caplog.text
+    assert not list((tmp_path / "output").rglob("result.txt"))
+    assert not list((tmp_path / "output").rglob("candidates.npz"))
+
+    settings["max_clique_search_nodes"] = 5
+    recovered = LeakPro(CarliniProvider, _write_config(tmp_path, "carlini_diffusion", settings))
+    assert recovered.attack_scheduler.attacks[0].result_id == audit.attack_scheduler.attacks[0].result_id
+    results = recovered.run_audit()
+    assert len(results) == 1 and len(results[0].candidates) == 1
+    assert len(list((tmp_path / "output").rglob("result.txt"))) == 1
+
+
 def test_extraction_schema_does_not_change_standard_target_parsing(tmp_path: Any) -> None:
     common_audit = {
         "attack_list": [{"attack": "rmia"}],
@@ -239,6 +259,26 @@ def test_extraction_attack_seed_inherits_audit_seed_unless_overridden(
     overridden = LeakPro(provider, str(config_path)).attack_scheduler.attacks[0]
     assert overridden.config.random_seed == 11
     assert overridden.result_id != inherited.result_id
+
+
+@pytest.mark.parametrize("seed", [-1, 2**32])
+@pytest.mark.parametrize("seed_source", ["audit", "attack"])
+def test_invalid_side_seed_is_rejected_before_loading_inputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, seed: int, seed_source: str,
+) -> None:
+    get_features = Mock(side_effect=AssertionError("Invalid seed must fail before loading target inputs"))
+    monkeypatch.setattr(SIDEProvider, "get_side_feature_extractor", get_features)
+    path = Path(_write_config(tmp_path, "side", {}))
+    config = yaml.safe_load(path.read_text())
+    destination = config["audit"] if seed_source == "audit" else config["audit"]["attack_list"][0]
+    destination["random_seed"] = seed
+    path.write_text(yaml.safe_dump(config))
+
+    audit = LeakPro(SIDEProvider, str(path))
+
+    assert audit.attack_scheduler.attacks == []
+    assert "random_seed" in caplog.text and "Failed to create attack: side" in caplog.text
+    get_features.assert_not_called()
 
 
 def test_two_attacks_reuse_provider_inputs_without_hashing_references(tmp_path: Path) -> None:
@@ -380,13 +420,17 @@ def test_carlini_public_path_persists_metrics(tmp_path: Any) -> None:
     assert (tmp_path / "output" / "data_objects" / f"{second.id}.json").exists()
 
 
-def test_side_public_path_records_training_and_guidance(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("seed", [42, 0, 2**32 - 1])
+def test_side_public_path_records_training_and_guidance(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch, seed: int,
+) -> None:
     marked_devices: list[str] = []
     monkeypatch.setattr("leakpro.attacks.extraction_attacks.side.mark_step", lambda device: marked_devices.append(device.type))
     config_path = _write_config(
         tmp_path,
         "side",
         {
+            "random_seed": seed,
             "compute_device": "cpu",
             "synthetic_samples": 8,
             "synthetic_batch_size": 4,

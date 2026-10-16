@@ -9,6 +9,10 @@ from __future__ import annotations
 import torch
 from torch import Tensor
 
+from leakpro.utils.logger import logger
+
+DEFAULT_MAX_CLIQUE_SEARCH_NODES = 10_000_000
+
 
 def _population_count(value: int) -> int:
     """Count set bits on Python versions without int.bit_count()."""
@@ -67,8 +71,17 @@ def _can_improve(candidates: int, clique: tuple[int, ...], best: tuple[int, ...]
     return tuple(sorted(optimistic)) < best
 
 
-def maximum_clique(adjacency: Tensor) -> list[int]:
-    """Return an exact maximum clique using deterministic bitset branch-and-bound."""
+def maximum_clique(  # noqa: C901 - keep budget enforcement in the exact search traversal
+    adjacency: Tensor, *, max_search_nodes: int = DEFAULT_MAX_CLIQUE_SEARCH_NODES,
+) -> list[int]:
+    """Return an exact clique, or warn and fail when the search budget is exhausted.
+
+    Count popped branch-and-bound states, including pruned states, rather than elapsed time.
+    """
+    if isinstance(max_search_nodes, bool) or not isinstance(max_search_nodes, int):
+        raise TypeError("max_search_nodes must be a positive integer.")
+    if max_search_nodes < 1:
+        raise ValueError("max_search_nodes must be a positive integer.")
     neighbors = adjacency_to_bitsets(adjacency)
     vertex_count = len(neighbors)
     best: tuple[int, ...] = ()
@@ -86,7 +99,17 @@ def maximum_clique(adjacency: Tensor) -> list[int]:
         return selected
 
     stack = [((1 << vertex_count) - 1, ())]
+    search_nodes = 0
     while stack:
+        if search_nodes >= max_search_nodes:
+            message = (
+                f"Maximum-clique search exhausted its budget of {max_search_nodes} search nodes "
+                f"for a {vertex_count}-vertex graph. No exact result was returned; "
+                "increase max_clique_search_nodes to allow more search work."
+            )
+            logger.warning(message)
+            raise RuntimeError(message)
+        search_nodes += 1
         candidates, clique = stack.pop()
         if not _can_improve(candidates, clique, best, neighbors):
             continue

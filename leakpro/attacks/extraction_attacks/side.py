@@ -84,6 +84,7 @@ class AttackSIDEExtraction(AbstractExtraction):
     class AttackConfig(ExtractionConfig):
         """SIDE generation, clustering, guidance, and scoring settings."""
 
+        random_seed: int = Field(default=42, ge=0, le=2**32 - 1)
         image_range: Literal["zero_one", "minus_one_one"] = "zero_one"
         generation_batch_size: int = Field(default=64, ge=1)
         distance_block_size: int = Field(default=64, ge=1)
