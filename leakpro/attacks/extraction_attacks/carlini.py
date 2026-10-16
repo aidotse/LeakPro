@@ -6,22 +6,19 @@
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Sequence
 from typing import Any, Literal
 
-import numpy as np
 import torch
-from pydantic import BaseModel, Field, field_validator, model_validator
-from torch import Tensor
+from pydantic import Field, field_validator, model_validator
+from torch import Tensor, nn
 
-from leakpro.attacks.extraction_attacks.abstract_extraction import AbstractExtraction, AttackState, ExtractionConfig
+from leakpro.attacks.extraction_attacks.abstract_extraction import AbstractExtraction, ExtractionConfig
 from leakpro.attacks.extraction_attacks.protocols import ExtractionAdapter
 from leakpro.attacks.extraction_attacks.utils_generative import (
     json_safe,
     normalize_conditions,
     progress_batches,
-    require_authorized,
     to_zero_one,
     validate_image_batch,
 )
@@ -31,42 +28,11 @@ from leakpro.attacks.extraction_attacks.utils_generative.image_metrics import (
     nearest_reference,
     tiled_l2_pairwise,
 )
+from leakpro.input_handler.extraction_handler import ExtractionHandler
 from leakpro.reporting.extraction_result import CandidateRecord, ExtractionResult
-from leakpro.utils.device import get_device
 from leakpro.utils.import_helper import Self
-from leakpro.utils.save_load import hash_config
-
-
-def _condition_hash(value: object) -> str:  # noqa: C901 - condition types must have distinct identities
-    """Identify a Carlini condition without conflating tensors and JSON values."""
-    if isinstance(value, Tensor):
-        tensor = value.detach().to(device="cpu").contiguous()
-        if (tensor.is_floating_point() or tensor.is_complex()) and not torch.isfinite(tensor).all():
-            raise ValueError("Extraction conditions must not contain NaN or infinity.")
-        identity = {"type": "tensor", "dtype": str(tensor.dtype), "shape": list(tensor.shape),
-                    "digest": hashlib.sha256(tensor.reshape(-1).view(torch.uint8).numpy().tobytes()).hexdigest()}
-    elif isinstance(value, np.ndarray):
-        if value.dtype.hasobject:
-            raise TypeError("Object arrays are not supported as extraction conditions.")
-        if np.issubdtype(value.dtype, np.number) and not np.isfinite(value).all():
-            raise ValueError("Extraction conditions must not contain NaN or infinity.")
-        array = np.ascontiguousarray(value)
-        identity = {"type": "ndarray", "dtype": str(array.dtype), "shape": list(array.shape),
-                    "digest": hashlib.sha256(array.tobytes()).hexdigest()}
-    elif isinstance(value, BaseModel):
-        identity = {"type": f"{type(value).__module__}.{type(value).__qualname__}",
-                    "value": _condition_hash(value.model_dump(mode="json"))}
-    elif isinstance(value, dict):
-        if any(not isinstance(key, str) for key in value):
-            raise TypeError("Extraction condition dictionaries require string keys.")
-        identity = {"type": "dict", "value": {key: _condition_hash(item) for key, item in value.items()}}
-    elif isinstance(value, (list, tuple)):
-        identity = {"type": type(value).__name__, "value": [_condition_hash(item) for item in value]}
-    elif isinstance(value, bytes):
-        identity = {"type": "bytes", "value": value.hex()}
-    else:
-        identity = {"type": type(value).__name__, "value": json_safe(value)}
-    return hash_config(identity)
+from leakpro.utils.logger import logger
+from leakpro.utils.save_load import hash_attack, hash_config
 
 
 class AttackCarliniExtraction(AbstractExtraction):
@@ -117,7 +83,7 @@ class AttackCarliniExtraction(AbstractExtraction):
         adapter: ExtractionAdapter[Tensor],
         configs: AttackConfig | dict[str, Any],
         *,
-        audit_hash: str,
+        target_name: str = "diffusion_target",
         conditions: Sequence[Any] | None = None,
         reference_images: Tensor | None = None,
     ) -> None:
@@ -126,21 +92,34 @@ class AttackCarliniExtraction(AbstractExtraction):
         self.configs = self.config
         self.optuna_params = 0
         self.conditions = normalize_conditions(conditions)
-        self.audit_hash = (
-            hash_config({"audit_hash": audit_hash, "conditions": [_condition_hash(c) for c in self.conditions]})
-            if self.conditions is not None else audit_hash
-        )
+        self.target_name = target_name
         self.reference_images = reference_images
-        self.state = AttackState.CREATED
         identity_config = self.config.model_dump(mode="json", exclude={"overwrite_results"})
         if self.config.mode == "unconditional_reference_audit":
             identity_config["reference_score"] = "candidate_neighbors"
-        result_hash = hash_config({"audit_hash": self.audit_hash, "config": identity_config})[:16]
+        model = getattr(self.adapter, "model", None)
+        if not isinstance(model, nn.Module):
+            raise ValueError("Weight-based extraction result IDs require adapter.model to contain the audited torch model.")
+        identity = {"config": identity_config}
+        if self.conditions is not None:
+            identity["conditions"] = [hash_config({"condition": json_safe(condition)}) for condition in self.conditions]
+        result_hash = hash_attack(identity, model)[:16]
         self.result_id = f"carlini-diffusion-extraction-{result_hash}"
         self.attack_id = self.result_id
         self._references_zero_one: Tensor | None = None
         self._sampling_calls = 0
-        self._initialize_trace()
+
+    @classmethod
+    def from_handler(cls, handler: ExtractionHandler, attack_config: dict[str, Any]) -> Self:
+        """Validate settings and obtain Carlini inputs from the audit handler."""
+        config = cls.AttackConfig(**{"random_seed": handler.configs.audit.random_seed, **attack_config})
+        return cls(
+            handler.get_diffusion_adapter(),
+            config,
+            target_name=handler.configs.target.name,
+            conditions=handler.get_extraction_conditions(),
+            reference_images=handler.get_extraction_reference_images(),
+        )
 
     def description(self) -> dict[str, str]:
         """Return the attack's reference and implemented scope."""
@@ -162,15 +141,10 @@ class AttackCarliniExtraction(AbstractExtraction):
             ),
         }
 
-    def prepare_attack(self) -> None:
-        """Prepare this attack exactly once."""
-        self._prepare_once(self._prepare_attack)
-
-    def _prepare_attack(self) -> None:  # noqa: C901 - preparation checks must precede target sampling
-        """Validate authorization, model surface, conditions, and reference data."""
-        require_authorized(self.config.authorized_audit)
-        if self.config.distance_device == "auto" and get_device().type not in {"cpu", "cuda", "hpu", "mps"}:
-            raise ValueError("Automatic extraction distance device must be CPU, CUDA, HPU, or MPS.")
+    def prepare_attack(self) -> None:  # noqa: C901 - preparation checks must precede target sampling
+        """Validate model surface, conditions, and reference data."""
+        logger.info("Preparing Carlini extraction attack")
+        self._references_zero_one = None
         if (
             not isinstance(self.adapter, ExtractionAdapter)
             or not callable(getattr(self.adapter, "sample", None))
@@ -201,14 +175,8 @@ class AttackCarliniExtraction(AbstractExtraction):
             _channels, height, width = self.adapter.image_shape
             if height % self.config.tile_grid[0] or width % self.config.tile_grid[1]:
                 raise ValueError("adapter image dimensions must be divisible by tile_grid.")
-        self._record_trace(
-            "prepared",
-            mode=self.config.mode,
-            condition_count=len(self.conditions or []),
-            reference_count=0 if self._references_zero_one is None else int(self._references_zero_one.shape[0]),
-        )
 
-    def _generate(self, count: int, condition: object | None, seed_offset: int) -> Tensor:
+    def _generate(self, count: int, condition: object | None, condition_index: int) -> Tensor:
         generated: list[Tensor] = []
         for batch_index, (start, end) in enumerate(
             progress_batches(count, self.config.generation_batch_size, "Carlini generation")
@@ -218,7 +186,10 @@ class AttackCarliniExtraction(AbstractExtraction):
             batch = self.adapter.sample(
                 batch_size,
                 conditions=conditions,
-                seed=self.config.random_seed + seed_offset + batch_index,
+                seed=int(hash_config({
+                    "seed": self.config.random_seed, "attack": "carlini_diffusion", "phase": "conditional",
+                    "condition": condition_index, "batch": batch_index,
+                })[:8], 16),
             )
             self._sampling_calls += 1
             batch = validate_image_batch(batch, self.adapter.image_shape, expected_count=batch_size)
@@ -232,12 +203,12 @@ class AttackCarliniExtraction(AbstractExtraction):
         if self.conditions is None:
             raise RuntimeError("Conditional inputs were not prepared.")
         for condition_index, condition in enumerate(self.conditions):
-            hash = _condition_hash(condition)
+            hash = hash_config({"condition": json_safe(condition)})
             condition_id = f"condition:{condition_index}:{hash[:12]}"
             images = self._generate(
                 self.config.num_generations_per_condition,
                 condition,
-                seed_offset=condition_index * 1_000_003,
+                condition_index=condition_index,
             )
             distances = tiled_l2_pairwise(
                 images,
@@ -275,13 +246,6 @@ class AttackCarliniExtraction(AbstractExtraction):
                 )
                 summary["mean_clique_distance"] = mean_distance
             condition_summaries.append(summary)
-            self._record_trace(
-                "condition_complete",
-                condition_index=condition_index,
-                generated=int(images.shape[0]),
-                largest_clique_size=len(clique),
-                qualified=summary["qualified"],
-            )
 
         if retained_images:
             images_tensor = torch.stack(retained_images)
@@ -314,12 +278,6 @@ class AttackCarliniExtraction(AbstractExtraction):
                 )
             records = updated
 
-        self._record_trace(
-            "run_complete",
-            sampling_calls=self._sampling_calls,
-            images_generated=len(self.conditions) * self.config.num_generations_per_condition,
-            candidate_count=len(records),
-        )
         return ExtractionResult(
             name="Carlini Diffusion Extraction Result",
             result_id=self.result_id,
@@ -331,12 +289,11 @@ class AttackCarliniExtraction(AbstractExtraction):
                 "conditions_audited": len(self.conditions),
                 "images_generated": len(self.conditions) * self.config.num_generations_per_condition,
                 "candidate_count": len(records),
+                "sampling_calls": self._sampling_calls,
                 "verified_count": verified_count if self._references_zero_one is not None else None,
                 "condition_summaries": condition_summaries,
             },
-            provenance={**self.description(), "audit_hash": self.audit_hash},
-            execution_trace=self.execution_trace,
-            overwrite=self.config.overwrite_results,
+            provenance={**self.description(), "target": self.target_name},
         )
 
     def _unconditional_reference_attack(self) -> ExtractionResult:
@@ -351,7 +308,10 @@ class AttackCarliniExtraction(AbstractExtraction):
             batch = self.adapter.sample(
                 end - start,
                 conditions=None,
-                seed=self.config.random_seed + batch_index,
+                seed=int(hash_config({
+                    "seed": self.config.random_seed, "attack": "carlini_diffusion", "phase": "unconditional",
+                    "batch": batch_index,
+                })[:8], 16),
             )
             self._sampling_calls += 1
             batch = to_zero_one(
@@ -397,12 +357,6 @@ class AttackCarliniExtraction(AbstractExtraction):
             else torch.empty((0, *self.adapter.image_shape), dtype=torch.float32)
         )
         records = [item[2].model_copy(update={"image_index": index}) for index, item in enumerate(ordered)]
-        self._record_trace(
-            "run_complete",
-            sampling_calls=self._sampling_calls,
-            images_generated=total_generated,
-            candidate_count=len(records),
-        )
         return ExtractionResult(
             name="Carlini Unconditional Reference Audit Result",
             result_id=self.result_id,
@@ -413,20 +367,17 @@ class AttackCarliniExtraction(AbstractExtraction):
                 "mode": self.config.mode,
                 "images_generated": total_generated,
                 "candidate_count": len(records),
+                "sampling_calls": self._sampling_calls,
                 "unique_reference_matches": len(records),
                 "ratio_threshold": self.config.ratio_threshold,
             },
-            provenance={**self.description(), "audit_hash": self.audit_hash},
-            execution_trace=self.execution_trace,
-            overwrite=self.config.overwrite_results,
+            provenance={**self.description(), "target": self.target_name},
         )
 
     def run_attack(self) -> ExtractionResult:
-        """Run this prepared attack exactly once."""
-        return self._execute_once(self._run_attack)
-
-    def _run_attack(self) -> ExtractionResult:
         """Run the configured Carlini extraction path."""
+        logger.info("Running Carlini extraction attack")
+        self._sampling_calls = 0
         if self.config.mode == "conditional_black_box":
             result = self._conditional_attack()
         else:

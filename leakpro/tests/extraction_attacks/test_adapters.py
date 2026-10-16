@@ -9,7 +9,7 @@ import torch
 from torch import nn
 
 from leakpro.attacks.extraction_attacks import utils_generative
-from leakpro.attacks.extraction_attacks.adapters import OpenAIDiffusionAdapter
+from leakpro.attacks.extraction_attacks.adapters import DiffusionAdapter
 from leakpro.attacks.extraction_attacks.carlini import AttackCarliniExtraction
 from leakpro.attacks.extraction_attacks.protocols import ExtractionAdapter
 from leakpro.attacks.extraction_attacks.side import AttackSIDEExtraction
@@ -150,7 +150,7 @@ class DummyImprovedOnlyDiffusion(DummyOpenAIDiffusion):
 
 
 def test_openai_adapter_sampling_forward_process_and_guidance() -> None:
-    adapter = OpenAIDiffusionAdapter(
+    adapter = DiffusionAdapter(
         model=nn.Identity(),
         diffusion=DummyOpenAIDiffusion(),
         image_shape=(1, 2, 2),
@@ -178,7 +178,7 @@ def test_openai_adapter_sampling_forward_process_and_guidance() -> None:
 
 
 def test_openai_spaced_diffusion_training_and_guidance_timesteps_match() -> None:
-    adapter = OpenAIDiffusionAdapter(
+    adapter = DiffusionAdapter(
         model=nn.Identity(),
         diffusion=DummySpacedOpenAIDiffusion(),
         image_shape=(1, 2, 2),
@@ -204,7 +204,7 @@ def test_openai_spaced_diffusion_training_and_guidance_timesteps_match() -> None
 
 def test_side_rejects_improved_diffusion_loop_before_sampling() -> None:
     diffusion = DummyImprovedOnlyDiffusion()
-    adapter = OpenAIDiffusionAdapter(
+    adapter = DiffusionAdapter(
         model=nn.Identity(),
         diffusion=diffusion,
         image_shape=(1, 2, 2),
@@ -213,12 +213,11 @@ def test_side_rejects_improved_diffusion_loop_before_sampling() -> None:
         adapter,
         nn.Flatten(start_dim=1),
         {
-            "authorized_audit": True,
             "synthetic_samples": 4,
             "clusters": 2,
             "min_cluster_size": 1,
         },
-        audit_hash="improved-only-test",
+        target_name="improved-only-test",
     )
 
     with pytest.raises(ValueError, match="cond_fn"):
@@ -231,6 +230,7 @@ def test_attacks_check_their_own_adapter_requirements() -> None:
     """Carlini accepts a sampler that lacks SIDE's white-box operations."""
 
     class ImageSampler(ExtractionAdapter[torch.Tensor]):
+        model = nn.Identity()
         image_shape = (1, 4, 4)
         num_timesteps = 10
 
@@ -241,12 +241,55 @@ def test_attacks_check_their_own_adapter_requirements() -> None:
     sampler = ImageSampler()
     carlini = AttackCarliniExtraction(
         sampler,
-        {"authorized_audit": True, "num_generations_per_condition": 2, "min_clique_size": 2},
-        audit_hash="sampler-only",
+        {"num_generations_per_condition": 2, "min_clique_size": 2},
+        target_name="sampler-only",
         conditions=["label"],
     )
     carlini.prepare_attack()
 
-    side = AttackSIDEExtraction(sampler, nn.Identity(), {"authorized_audit": True}, audit_hash="sampler-only")
+    side = AttackSIDEExtraction(sampler, nn.Identity(), {}, target_name="sampler-only")
     with pytest.raises(TypeError, match="classifier_timesteps"):
         side.prepare_attack()
+
+
+def test_vendored_diffusion_preserves_conditional_classifier_free_guidance() -> None:
+    """The unconditional branch must not change MINV's labeled prediction."""
+    from leakpro.attacks.utils.diff_mi.script_util import create_gaussian_diffusion
+
+    class LabeledDenoiser(nn.Module):
+        num_classes = 4
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.labels: list[torch.Tensor] = []
+
+        def forward(self, images: torch.Tensor, timesteps: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            self.labels.append(y.clone())
+            return images * 0.05 + 0.1 + y[:, None, None, None] * 0.02
+
+    model = LabeledDenoiser()
+    diffusion = create_gaussian_diffusion(diffusion_steps=8, noise_schedule="cosine", w=0.5)
+    images = torch.full((2, 1, 4, 4), 0.2)
+    timesteps = torch.tensor([2, 5])
+    labels = torch.tensor([0, 2])
+    result = diffusion.p_mean_variance(model, images, timesteps, model_kwargs={"y": labels})
+    conditional_eps = images * 0.05 + 0.1 + labels[:, None, None, None] * 0.02
+    unconditional_eps = images * 0.05 + 0.1 + 3 * 0.02
+    alpha = torch.tensor(diffusion.alphas_cumprod[timesteps], dtype=torch.float32).view(2, 1, 1, 1)
+    expected_clean = ((images - (1 - alpha).sqrt() * (1.5 * conditional_eps - 0.5 * unconditional_eps)) / alpha.sqrt())
+
+    torch.testing.assert_close(result["pred_xstart"], expected_clean.clamp(-1, 1))
+    assert len(model.labels) == 2
+    assert torch.equal(model.labels[0], labels)
+    assert torch.equal(model.labels[1], torch.full_like(labels, 3))
+
+
+def test_ddim_respacing_rejects_external_diffusion_before_sampling() -> None:
+    """External enum/model contracts remain on their own original sampling path."""
+    diffusion = DummyOpenAIDiffusion()
+    with pytest.raises(TypeError, match="vendored GaussianDiffusion"):
+        DiffusionAdapter(
+            model=nn.Identity(), diffusion=diffusion, image_shape=(1, 4, 4), sampling_steps=3,
+        )
+    adapter = DiffusionAdapter(model=nn.Identity(), diffusion=diffusion, image_shape=(1, 4, 4))
+    assert torch.equal(adapter.sample(2, conditions=None, seed=17), torch.zeros((2, 1, 4, 4)))

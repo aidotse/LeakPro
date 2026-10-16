@@ -34,10 +34,6 @@ class AbstractExtractionInputHandler(ABC):
         """Return authorized training references when verification is enabled."""
         return None
 
-    def get_extraction_target_hash(self) -> str | None:
-        """Return the target model and sampling identity, if available."""
-        return None
-
     def get_side_feature_extractor(self) -> nn.Module | None:
         """Return SIDE's frozen feature extractor."""
         return None

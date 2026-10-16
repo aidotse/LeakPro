@@ -48,13 +48,18 @@ def _flatten_float(images: Tensor, device: torch.device) -> Tensor:
     return images.to(device=device, dtype=torch.float32).flatten(start_dim=1)
 
 
-def _validate_pairwise_inputs(left: Tensor, right: Tensor, block_size: int) -> None:
+def _validate_pairwise_inputs(left: Tensor, right: Tensor, block_size: int, neighbors: int | None = None) -> None:
     if left.ndim != 4 or right.ndim != 4 or tuple(left.shape[1:]) != tuple(right.shape[1:]):
         raise ValueError("left and right must be BCHW tensors with identical image shapes.")
     if left.shape[0] < 1 or right.shape[0] < 1:
         raise ValueError("left and right must both contain at least one image.")
     if block_size < 1:
         raise ValueError("block_size must be positive.")
+    if neighbors is not None:
+        if neighbors < 1:
+            raise ValueError("neighbors must be positive.")
+        if right.shape[0] < neighbors:
+            raise ValueError(f"reference set has {right.shape[0]} images but neighbors={neighbors}.")
 
 
 def _normalized_l2_block(left: Tensor, right: Tensor, dimensions: int) -> Tensor:
@@ -65,29 +70,6 @@ def _normalized_l2_block(left: Tensor, right: Tensor, dimensions: int) -> Tensor
         difference = left[:, None, start:end] - right[None, :, start:end]
         squared += difference.square().sum(dim=2)
     return squared.div(float(dimensions)).sqrt()
-
-
-def normalized_l2_pairwise(
-    left: Tensor,
-    right: Tensor,
-    *,
-    block_size: int = 64,
-    device: str = "cpu",
-) -> Tensor:
-    """Compute sqrt(mean squared pixel error) for every image pair."""
-    _validate_pairwise_inputs(left, right, block_size)
-    target_device = get_device() if device == "auto" else torch.device(device)
-    if target_device.type not in {"cpu", "cuda", "hpu", "mps"}:
-        raise ValueError(f"Unsupported extraction device type: {target_device.type!r}.")
-    dimensions = left[0].numel()
-    result = torch.empty((left.shape[0], right.shape[0]), dtype=torch.float32)
-    for left_start, left_end in batch_ranges(left.shape[0], block_size):
-        left_block = _flatten_float(left[left_start:left_end], target_device)
-        for right_start, right_end in batch_ranges(right.shape[0], block_size):
-            right_block = _flatten_float(right[right_start:right_end], target_device)
-            distances = _normalized_l2_block(left_block, right_block, dimensions)
-            result[left_start:left_end, right_start:right_end] = distances.cpu()
-    return result
 
 
 def tiled_l2_pairwise(
@@ -113,8 +95,6 @@ def tiled_l2_pairwise(
     )
     tile_dimensions = tiles.shape[-1]
     target_device = get_device() if device == "auto" else torch.device(device)
-    if target_device.type not in {"cpu", "cuda", "hpu", "mps"}:
-        raise ValueError(f"Unsupported extraction device type: {target_device.type!r}.")
     result = torch.empty((images.shape[0], images.shape[0]), dtype=torch.float32)
     for left_start, left_end in batch_ranges(images.shape[0], block_size):
         left = tiles[left_start:left_end].to(device=target_device, dtype=torch.float32)
@@ -133,6 +113,77 @@ def tiled_l2_pairwise(
     return result
 
 
+@dataclass(frozen=True)
+class _ReferenceStatistics:
+    indices: Tensor
+    scores: Tensor
+    neighbor_means: Tensor | None
+    bands: dict[str, dict[str, float | int]]
+
+
+def _reference_statistics(
+    candidates: Tensor,
+    references: Tensor,
+    *,
+    block_size: int,
+    device: str,
+    bands: dict[str, SimilarityBand] | None = None,
+    neighbors: int | None = None,
+    score_fn: PairwiseScore | None = None,
+    higher_is_better: bool = False,
+) -> _ReferenceStatistics:
+    """Accumulate nearest scores, top-k means, and band hits in one blocked pass."""
+    _validate_pairwise_inputs(candidates, references, block_size, neighbors)
+    bands = {} if bands is None else bands
+    target_device = get_device() if device == "auto" else torch.device(device)
+    dimensions = candidates[0].numel()
+    reference_matches = {name: torch.zeros(references.shape[0], dtype=torch.bool, device="cpu") for name in bands}
+    indices, scores, means = [], [], []
+    initial = -torch.inf if higher_is_better else torch.inf
+    for start, end in batch_ranges(candidates.shape[0], block_size):
+        left = (_flatten_float(candidates[start:end], target_device) if score_fn is None
+                else candidates[start:end].to(target_device))
+        best = torch.full((end - start,), initial, dtype=torch.float32, device=target_device)
+        best_indices = torch.full((end - start,), -1, dtype=torch.long, device=target_device)
+        nearest = torch.empty((end - start, 0), device=target_device)
+        for ref_start, ref_end in batch_ranges(references.shape[0], block_size):
+            right = (_flatten_float(references[ref_start:ref_end], target_device) if score_fn is None
+                     else references[ref_start:ref_end].to(target_device))
+            if score_fn is None:
+                block = _normalized_l2_block(left, right, dimensions)
+            else:
+                block = score_fn(left, right)
+                expected_shape = (end - start, ref_end - ref_start)
+                if not isinstance(block, Tensor) or tuple(block.shape) != expected_shape:
+                    raise ValueError(f"score_fn must return shape {expected_shape}.")
+                if not torch.isfinite(block).all():
+                    raise ValueError("score_fn returned NaN or infinity.")
+                block = block.to(device=target_device, dtype=torch.float32)
+            block_best, local_indices = block.max(dim=1) if higher_is_better else block.min(dim=1)
+            improve = block_best > best if higher_is_better else block_best < best
+            best_indices = torch.where(improve, local_indices + ref_start, best_indices)
+            best = torch.maximum(best, block_best) if higher_is_better else torch.minimum(best, block_best)
+            if neighbors is not None:
+                combined = torch.cat((nearest, block), dim=1)
+                nearest = combined.topk(min(neighbors, combined.shape[1]), dim=1,
+                                        largest=higher_is_better, sorted=False).values
+            for name, band in bands.items():
+                matches = block.ge(band.lower) & block.le(band.upper)
+                reference_matches[name][ref_start:ref_end] |= matches.any(dim=0).cpu()
+        indices.append(best_indices.cpu())
+        scores.append(best.cpu())
+        if neighbors is not None:
+            means.append(nearest.mean(dim=1).cpu())
+    best_scores = torch.cat(scores)
+    metrics = {}
+    for name, band in bands.items():
+        matched = int((best_scores.ge(band.lower) & best_scores.le(band.upper)).sum())
+        unique = int(reference_matches[name].sum())
+        metrics[name] = {"matched_generations": matched, "unique_references": unique,
+                         "ams": matched / candidates.shape[0], "ums": unique / candidates.shape[0]}
+    return _ReferenceStatistics(torch.cat(indices), best_scores, torch.cat(means) if means else None, metrics)
+
+
 def carlini_reference_scores(
     candidates: Tensor,
     references: Tensor,
@@ -143,46 +194,15 @@ def carlini_reference_scores(
     device: str = "cpu",
 ) -> ReferenceScores:
     """Compare each candidate's nearest distance with its own k-neighbor mean."""
-    _validate_pairwise_inputs(candidates, references, block_size)
-    if neighbors < 1:
-        raise ValueError("neighbors must be positive.")
     if not math.isfinite(alpha) or alpha <= 0:
         raise ValueError("alpha must be finite and positive.")
-    if references.shape[0] < neighbors:
-        raise ValueError(f"reference set has {references.shape[0]} images but neighbors={neighbors}.")
-    target_device = get_device() if device == "auto" else torch.device(device)
-    if target_device.type not in {"cpu", "cuda", "hpu", "mps"}:
-        raise ValueError(f"Unsupported extraction device type: {target_device.type!r}.")
-    dimensions = candidates[0].numel()
-    indices, distances, means = [], [], []
-    for start, end in batch_ranges(candidates.shape[0], block_size):
-        left = _flatten_float(candidates[start:end], target_device)
-        nearest = torch.empty((left.shape[0], 0), device=target_device)
-        best_distances = torch.full((left.shape[0],), torch.inf, device=target_device)
-        best_indices = torch.full((left.shape[0],), -1, dtype=torch.long, device=target_device)
-        for right_start, right_end in batch_ranges(references.shape[0], block_size):
-            right = _flatten_float(references[right_start:right_end], target_device)
-            block = _normalized_l2_block(left, right, dimensions)
-            block_best, local_indices = block.min(dim=1)
-            improve = block_best < best_distances
-            best_indices = torch.where(improve, local_indices + right_start, best_indices)
-            best_distances = torch.minimum(best_distances, block_best)
-            combined = torch.cat((nearest, block), dim=1)
-            nearest = combined.topk(min(neighbors, combined.shape[1]), dim=1, largest=False, sorted=False).values
-        indices.append(best_indices.cpu())
-        distances.append(best_distances.cpu())
-        means.append(nearest.mean(dim=1).cpu())
-    neighbor_means = torch.cat(means)
-    denominator = alpha * neighbor_means
+    stats = _reference_statistics(candidates, references, block_size=block_size, device=device, neighbors=neighbors)
+    if stats.neighbor_means is None:
+        raise RuntimeError("Reference-neighbor means were not computed.")
+    denominator = alpha * stats.neighbor_means
     if torch.any(denominator <= 0):
         raise ValueError("Candidate-neighbor mean distance is zero; the adaptive ratio is undefined.")
-    nearest_distances = torch.cat(distances)
-    return ReferenceScores(
-        nearest_indices=torch.cat(indices),
-        nearest_distances=nearest_distances,
-        neighbor_mean_distances=neighbor_means,
-        ratios=nearest_distances / denominator,
-    )
+    return ReferenceScores(stats.indices, stats.scores, stats.neighbor_means, stats.scores / denominator)
 
 
 def nearest_reference(
@@ -193,27 +213,8 @@ def nearest_reference(
     device: str = "cpu",
 ) -> tuple[Tensor, Tensor]:
     """Return each candidate's nearest reference index and normalized L2 distance."""
-    _validate_pairwise_inputs(candidates, references, block_size)
-    target_device = get_device() if device == "auto" else torch.device(device)
-    if target_device.type not in {"cpu", "cuda", "hpu", "mps"}:
-        raise ValueError(f"Unsupported extraction device type: {target_device.type!r}.")
-    dimensions = candidates[0].numel()
-    all_indices: list[Tensor] = []
-    all_distances: list[Tensor] = []
-    for candidate_start, candidate_end in batch_ranges(candidates.shape[0], block_size):
-        candidate_block = _flatten_float(candidates[candidate_start:candidate_end], target_device)
-        best_distances = torch.full((candidate_block.shape[0],), torch.inf, device=target_device)
-        best_indices = torch.full((candidate_block.shape[0],), -1, dtype=torch.long, device=target_device)
-        for reference_start, reference_end in batch_ranges(references.shape[0], block_size):
-            reference_block = _flatten_float(references[reference_start:reference_end], target_device)
-            block_distances = _normalized_l2_block(candidate_block, reference_block, dimensions)
-            block_best, local_indices = block_distances.min(dim=1)
-            improve = block_best < best_distances
-            best_distances = torch.where(improve, block_best, best_distances)
-            best_indices = torch.where(improve, local_indices + reference_start, best_indices)
-        all_indices.append(best_indices.cpu())
-        all_distances.append(best_distances.cpu())
-    return torch.cat(all_indices), torch.cat(all_distances)
+    stats = _reference_statistics(candidates, references, block_size=block_size, device=device)
+    return stats.indices, stats.scores
 
 
 def l2_band_scores(
@@ -223,48 +224,19 @@ def l2_band_scores(
     *,
     block_size: int = 64,
     device: str = "cpu",
-) -> dict[str, dict[str, float | int]]:
-    """Compute SIDE AMS/UMS with normalized-L2 distance bands.
+    return_nearest: bool = False,
+) -> dict[str, dict[str, float | int]] | tuple[Tensor, Tensor, dict[str, dict[str, float | int]]]:
+    """Compute L2 AMS/UMS and optionally return nearest matches from the same pass.
 
-    AMS classifies each generation by its nearest-reference distance. UMS is the
-    number of unique reference records reached by any in-band pair divided by
-    N_G, matching equations 6-9 of SIDE. Smaller L2 means greater similarity.
+    AMS classifies each generation by its nearest-reference distance. UMS
+    counts all references reached by any in-band pair.
     """
-    if not bands:
+    if not bands and not return_nearest:
         return {}
-    _validate_pairwise_inputs(candidates, references, block_size)
-    generation_count = candidates.shape[0]
-    target_device = get_device() if device == "auto" else torch.device(device)
-    if target_device.type not in {"cpu", "cuda", "hpu", "mps"}:
-        raise ValueError(f"Unsupported extraction device type: {target_device.type!r}.")
-    dimensions = candidates[0].numel()
-    candidate_best = torch.full((generation_count,), torch.inf)
-    reference_matches = {
-        name: torch.zeros(references.shape[0], dtype=torch.bool)
-        for name in bands
-    }
-    for candidate_start, candidate_end in batch_ranges(generation_count, block_size):
-        candidate_block = _flatten_float(candidates[candidate_start:candidate_end], target_device)
-        block_best = torch.full((candidate_end - candidate_start,), torch.inf, device=target_device)
-        for reference_start, reference_end in batch_ranges(references.shape[0], block_size):
-            reference_block = _flatten_float(references[reference_start:reference_end], target_device)
-            distances = _normalized_l2_block(candidate_block, reference_block, dimensions)
-            block_best = torch.minimum(block_best, distances.min(dim=1).values)
-            for name, band in bands.items():
-                matches = distances.ge(band.lower) & distances.le(band.upper)
-                reference_matches[name][reference_start:reference_end] |= matches.any(dim=0).cpu()
-        candidate_best[candidate_start:candidate_end] = block_best.cpu()
-    results: dict[str, dict[str, float | int]] = {}
-    for name, band in bands.items():
-        matched_generations = int((candidate_best.ge(band.lower) & candidate_best.le(band.upper)).sum())
-        unique_references = int(reference_matches[name].sum())
-        results[name] = {
-            "matched_generations": matched_generations,
-            "unique_references": unique_references,
-            "ams": matched_generations / generation_count,
-            "ums": unique_references / generation_count,
-        }
-    return results
+    stats = _reference_statistics(candidates, references, block_size=block_size, device=device, bands=bands)
+    if return_nearest:
+        return stats.indices, stats.scores, stats.bands
+    return stats.bands
 
 
 def pairwise_band_scores(
@@ -276,49 +248,12 @@ def pairwise_band_scores(
     block_size: int = 64,
     device: str = "cpu",
 ) -> dict[str, dict[str, float | int]]:
-    """Compute AMS/UMS for inclusive bands of a supplied pairwise score.
+    """Compute AMS/UMS for a finite higher-is-more-similar pairwise score.
 
-    ``score_fn`` receives candidate and reference BCHW blocks and must return a
-    finite higher-is-more-similar matrix shaped ``(candidate_count,
-    reference_count)``. AMS classifies each candidate by its maximum score;
-    UMS retains every reference reached by any in-band pair.
+    The callback receives BCHW blocks and returns a candidate-by-reference
+    matrix. AMS uses each candidate's maximum; UMS retains all in-band hits.
     """
     if not bands:
         return {}
-    _validate_pairwise_inputs(candidates, references, block_size)
-    target_device = get_device() if device == "auto" else torch.device(device)
-    if target_device.type not in {"cpu", "cuda", "hpu", "mps"}:
-        raise ValueError(f"Unsupported extraction device type: {target_device.type!r}.")
-    candidate_best = torch.full((candidates.shape[0],), -torch.inf)
-    reference_matches = {
-        name: torch.zeros(references.shape[0], dtype=torch.bool)
-        for name in bands
-    }
-    for candidate_start, candidate_end in batch_ranges(candidates.shape[0], block_size):
-        candidate_block = candidates[candidate_start:candidate_end].to(target_device)
-        block_best = torch.full((candidate_end - candidate_start,), -torch.inf, device=target_device)
-        for reference_start, reference_end in batch_ranges(references.shape[0], block_size):
-            reference_block = references[reference_start:reference_end].to(target_device)
-            scores = score_fn(candidate_block, reference_block)
-            expected_shape = (candidate_end - candidate_start, reference_end - reference_start)
-            if not isinstance(scores, Tensor) or tuple(scores.shape) != expected_shape:
-                raise ValueError(f"score_fn must return shape {expected_shape}.")
-            if not torch.isfinite(scores).all():
-                raise ValueError("score_fn returned NaN or infinity.")
-            scores = scores.to(device=target_device, dtype=torch.float32)
-            block_best = torch.maximum(block_best, scores.max(dim=1).values)
-            for name, band in bands.items():
-                matches = scores.ge(band.lower) & scores.le(band.upper)
-                reference_matches[name][reference_start:reference_end] |= matches.any(dim=0).cpu()
-        candidate_best[candidate_start:candidate_end] = block_best.cpu()
-    results: dict[str, dict[str, float | int]] = {}
-    for name, band in bands.items():
-        matched_generations = int((candidate_best.ge(band.lower) & candidate_best.le(band.upper)).sum())
-        unique_references = int(reference_matches[name].sum())
-        results[name] = {
-            "matched_generations": matched_generations,
-            "unique_references": unique_references,
-            "ams": matched_generations / candidates.shape[0],
-            "ums": unique_references / candidates.shape[0],
-        }
-    return results
+    return _reference_statistics(candidates, references, block_size=block_size, device=device,
+                                 bands=bands, score_fn=score_fn, higher_is_better=True).bands

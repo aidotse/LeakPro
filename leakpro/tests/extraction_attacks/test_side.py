@@ -9,7 +9,7 @@ import pytest
 import torch
 from torch import nn
 
-from leakpro.attacks.extraction_attacks.adapters import CallableDiffusionAdapter
+from leakpro.tests.extraction_attacks.image_sampler import image_sampler
 from leakpro.attacks.extraction_attacks.side import AttackSIDEExtraction
 
 
@@ -35,21 +35,20 @@ class TinyTimeClassifier(nn.Module):
 
 
 def test_side_default_uses_raw_feature_space_kmeans() -> None:
-    adapter = CallableDiffusionAdapter(
+    adapter = image_sampler(
         image_shape=(1, 1, 1),
         sample_fn=lambda batch_size, conditions, seed: torch.zeros((batch_size, 1, 1, 1)),
-    )
+     model=nn.Identity())
     attack = AttackSIDEExtraction(
         adapter,
         TwoFeatureExtractor(),
         {
-            "authorized_audit": True,
             "synthetic_samples": 6,
             "clusters": 2,
             "min_cluster_size": 1,
             "cohesion_threshold": -1.0,
         },
-        audit_hash="raw-kmeans-test",
+        target_name="raw-kmeans-test",
     )
     attack._synthetic_features = torch.tensor(  # noqa: SLF001 - direct algorithm boundary test
         [[1.0, 0.0], [2.0, 0.0], [100.0, 0.0], [0.0, 1.0], [0.0, 2.0], [0.0, 3.0]]
@@ -63,21 +62,20 @@ def test_side_default_uses_raw_feature_space_kmeans() -> None:
 
 
 def test_side_reassigns_samples_from_a_rejected_cluster() -> None:
-    adapter = CallableDiffusionAdapter(
+    adapter = image_sampler(
         image_shape=(1, 1, 1),
         sample_fn=lambda batch_size, conditions, seed: torch.zeros((batch_size, 1, 1, 1)),
-    )
+     model=nn.Identity())
     attack = AttackSIDEExtraction(
         adapter,
         TwoFeatureExtractor(),
         {
-            "authorized_audit": True,
             "synthetic_samples": 6,
             "clusters": 3,
             "min_cluster_size": 1,
             "cohesion_threshold": 0.5,
         },
-        audit_hash="reassignment-test",
+        target_name="reassignment-test",
     )
     attack._synthetic_features = torch.tensor(  # noqa: SLF001 - fixed clustering input
         [[100.0, 0.0], [100.0, 0.0], [0.0, 100.0], [0.0, 100.0], [1.0, 0.0], [-1.0, 0.0]]
@@ -92,7 +90,7 @@ def test_side_reassigns_samples_from_a_rejected_cluster() -> None:
     assert attack.synthetic_labels[5] == attack.synthetic_labels[2]
 
 
-def test_side_l2_results_use_zero_one_coordinates_for_minus_one_one_model() -> None:
+def test_side_l2_results_use_zero_one_coordinates_for_minus_one_one_model(monkeypatch: pytest.MonkeyPatch) -> None:
     def sample(batch_size: int, conditions: Sequence[Any] | None, seed: int) -> torch.Tensor:
         del conditions, seed
         values = torch.arange(batch_size).remainder(2).float().mul(2).sub(1)
@@ -113,18 +111,17 @@ def test_side_l2_results_use_zero_one_coordinates_for_minus_one_one_model() -> N
         gradient_fn(noisy, torch.ones(batch_size, dtype=torch.long), labels)
         return torch.full((batch_size, 1, 4, 4), 0.38)
 
-    adapter = CallableDiffusionAdapter(
+    adapter = image_sampler(
         image_shape=(1, 4, 4),
         sample_fn=sample,
         num_timesteps=10,
         q_sample_fn=q_sample,
         guided_sample_fn=guided_sample,
-    )
+     model=nn.Identity())
     attack = AttackSIDEExtraction(
         adapter,
         TwoFeatureExtractor(),
         {
-            "authorized_audit": True,
             "image_range": "minus_one_one",
             "compute_device": "cpu",
             "synthetic_samples": 8,
@@ -138,13 +135,25 @@ def test_side_l2_results_use_zero_one_coordinates_for_minus_one_one_model() -> N
             "generation_batch_size": 1,
             "l2_bands": {"near": {"lower": 0.675, "upper": 0.7}},
         },
-        audit_hash="side-minus-one-one-range",
+        target_name="side-minus-one-one-range",
         reference_images=torch.full((1, 1, 4, 4), -1.0),
         classifier_factory=TinyTimeClassifier,
     )
 
     attack.prepare_attack()
+    from leakpro.attacks.extraction_attacks.utils_generative import image_metrics
+
+    original_distance = image_metrics._normalized_l2_block
+    evaluated_pairs = 0
+
+    def counted_distance(left: torch.Tensor, right: torch.Tensor, dimensions: int) -> torch.Tensor:
+        nonlocal evaluated_pairs
+        evaluated_pairs += left.shape[0] * right.shape[0]
+        return original_distance(left, right, dimensions)
+
+    monkeypatch.setattr(image_metrics, "_normalized_l2_block", counted_distance)
     result = attack.run_attack()
+    assert evaluated_pairs == 1
 
     assert result.metrics["nearest_l2_mean"] == pytest.approx(0.69)
     assert result.metrics["l2_coordinate_range"] == "zero_one"

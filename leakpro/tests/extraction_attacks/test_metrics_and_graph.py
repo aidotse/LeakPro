@@ -14,7 +14,7 @@ from leakpro.attacks.extraction_attacks.utils_generative.image_metrics import (
     carlini_reference_scores,
     l2_band_scores,
     nearest_reference,
-    normalized_l2_pairwise,
+    pairwise_band_scores,
     tiled_l2_pairwise,
 )
 
@@ -30,11 +30,12 @@ def _brute_maximum_clique(adjacency: torch.Tensor) -> list[int]:
     return list(best)
 
 
-def test_normalized_l2_pairwise_matches_direct_formula() -> None:
+def test_nearest_reference_matches_direct_formula() -> None:
     left = torch.tensor([[[[0.0, 1.0], [0.0, 1.0]]]])
     right = torch.tensor([[[[0.0, 0.0], [0.0, 0.0]]], [[[1.0, 1.0], [1.0, 1.0]]]])
-    distances = normalized_l2_pairwise(left, right, block_size=1)
-    expected = torch.tensor([[2.0**-0.5, 2.0**-0.5]])
+    indices, distances = nearest_reference(left, right, block_size=1)
+    expected = torch.tensor([2.0**-0.5])
+    assert indices.tolist() == [0]
     torch.testing.assert_close(distances, expected)
 
 
@@ -52,7 +53,7 @@ def test_near_copy_distances_avoid_high_resolution_cancellation() -> None:
     images = torch.cat((original, near_copy))
     expected = (original - near_copy).square().mean().sqrt()
 
-    normalized = normalized_l2_pairwise(original, near_copy, block_size=1)[0, 0]
+    normalized = nearest_reference(original, near_copy, block_size=1)[1][0]
     tiled = tiled_l2_pairwise(images, tile_grid=(4, 4), block_size=1)[0, 1]
 
     torch.testing.assert_close(normalized, expected, rtol=1e-5, atol=1e-8)
@@ -67,6 +68,16 @@ def test_maximum_clique_matches_brute_force_on_random_graphs() -> None:
         upper = torch.rand((8, 8), generator=generator).lt(0.35).triu(diagonal=1)
         adjacency = upper | upper.transpose(0, 1)
         assert maximum_clique(adjacency) == _brute_maximum_clique(adjacency)
+
+
+def test_maximum_clique_preserves_the_selected_group_when_sizes_tie() -> None:
+    adjacency = torch.zeros((8, 8), dtype=torch.bool)
+    edges = [(0, 3), (0, 5), (0, 6), (0, 7), (1, 2), (1, 5), (1, 6), (2, 3), (2, 4),
+             (2, 5), (2, 7), (3, 4), (3, 6), (4, 5), (4, 6), (4, 7), (5, 6), (6, 7)]
+    for left, right in edges:
+        adjacency[left, right] = adjacency[right, left] = True
+
+    assert maximum_clique(adjacency) == [0, 3, 6]
 
 
 def test_maximum_clique_prunes_many_equal_dense_choices() -> None:
@@ -94,17 +105,33 @@ def test_carlini_reference_ratio_uses_generated_image_neighborhood() -> None:
     assert scores.ratios.le(1.0).tolist() == [False]
 
 
-def test_streamed_reference_metrics_match_full_pairwise_values() -> None:
+def test_streamed_reference_metrics_match_full_pairwise_values(monkeypatch: pytest.MonkeyPatch) -> None:
     generator = torch.Generator().manual_seed(19)
     candidates = torch.rand((5, 1, 3, 3), generator=generator)
     references = torch.rand((7, 1, 3, 3), generator=generator)
-    full = normalized_l2_pairwise(candidates, references, block_size=2)
+    full = (candidates[:, None] - references[None, :]).square().flatten(2).mean(2).sqrt()
     indices, distances = nearest_reference(candidates, references, block_size=2)
     expected_distances, expected_indices = full.min(dim=1)
     torch.testing.assert_close(distances, expected_distances)
     assert indices.tolist() == expected_indices.tolist()
     band = {"near": SimilarityBand(lower=0.0, upper=float(full.median()))}
-    streamed = l2_band_scores(candidates, references, band, block_size=2)
+    from leakpro.attacks.extraction_attacks.utils_generative import image_metrics
+
+    original = image_metrics._normalized_l2_block
+    evaluated_pairs = 0
+
+    def counted(left: torch.Tensor, right: torch.Tensor, dimensions: int) -> torch.Tensor:
+        nonlocal evaluated_pairs
+        evaluated_pairs += left.shape[0] * right.shape[0]
+        return original(left, right, dimensions)
+
+    monkeypatch.setattr(image_metrics, "_normalized_l2_block", counted)
+    combined_indices, combined_distances, streamed = l2_band_scores(
+        candidates, references, band, block_size=2, return_nearest=True,
+    )
+    assert evaluated_pairs == candidates.shape[0] * references.shape[0]
+    assert combined_indices.tolist() == indices.tolist()
+    torch.testing.assert_close(combined_distances, distances)
     matches = full.le(band["near"].upper)
     assert streamed["near"]["matched_generations"] == int(matches.any(dim=1).sum())
     assert streamed["near"]["unique_references"] == int(matches.any(dim=0).sum())
@@ -123,3 +150,11 @@ def test_l2_ams_uses_nearest_match_while_ums_keeps_in_band_references() -> None:
 
     assert result["farther"]["ams"] == 0.0
     assert result["farther"]["ums"] == 1.0
+
+    def similarity(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
+        return 1.0 - (left[:, None] - right[None, :]).square().flatten(2).mean(2).sqrt()
+
+    scores = pairwise_band_scores(candidates, references,
+                                 {"lower": SimilarityBand(lower=0.5, upper=0.6)}, similarity)
+    assert scores["lower"]["ams"] == 0.0
+    assert scores["lower"]["ums"] == 1.0

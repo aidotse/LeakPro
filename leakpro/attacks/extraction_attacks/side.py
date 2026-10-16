@@ -19,7 +19,7 @@ from torch.nn import functional
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm.auto import tqdm
 
-from leakpro.attacks.extraction_attacks.abstract_extraction import AbstractExtraction, AttackState, ExtractionConfig
+from leakpro.attacks.extraction_attacks.abstract_extraction import AbstractExtraction, ExtractionConfig
 from leakpro.attacks.extraction_attacks.protocols import (
     ExtractionAdapter,
     FeatureTransform,
@@ -31,7 +31,6 @@ from leakpro.attacks.extraction_attacks.utils_generative import (
     decode_uint8,
     encode_uint8,
     progress_batches,
-    require_authorized,
     seeded_torch_rng,
     to_zero_one,
     validate_image_batch,
@@ -39,14 +38,15 @@ from leakpro.attacks.extraction_attacks.utils_generative import (
 from leakpro.attacks.extraction_attacks.utils_generative.image_metrics import (
     SimilarityBand,
     l2_band_scores,
-    nearest_reference,
     pairwise_band_scores,
 )
 from leakpro.attacks.extraction_attacks.utils_generative.side_classifier import TimeConditionedResNet
+from leakpro.input_handler.extraction_handler import ExtractionHandler
 from leakpro.reporting.extraction_result import CandidateRecord, ExtractionResult
 from leakpro.utils.device import get_device, mark_step
 from leakpro.utils.import_helper import Self
-from leakpro.utils.save_load import hash_config
+from leakpro.utils.logger import logger
+from leakpro.utils.save_load import hash_attack, hash_config
 
 ClassifierFactory = Callable[[int, int], nn.Module]
 
@@ -126,7 +126,7 @@ class AttackSIDEExtraction(AbstractExtraction):
         feature_extractor: nn.Module,
         configs: AttackConfig | dict[str, Any],
         *,
-        audit_hash: str,
+        target_name: str = "diffusion_target",
         reference_images: Tensor | None = None,
         feature_transform: FeatureTransform | None = None,
         classifier_factory: ClassifierFactory | None = None,
@@ -137,20 +137,20 @@ class AttackSIDEExtraction(AbstractExtraction):
         self.config = configs if isinstance(configs, self.AttackConfig) else self.AttackConfig(**configs)
         self.configs = self.config
         self.optuna_params = 0
-        self.audit_hash = audit_hash
+        self.target_name = target_name
         self.reference_images = reference_images
         self.feature_transform = feature_transform or identity_feature_transform
         self.classifier: nn.Module | None = None
         self.classifier_factory = classifier_factory
         self.reference_score_fn = reference_score_fn
-        self.state = AttackState.CREATED
         identity_config = self.config.model_dump(mode="json", exclude={"overwrite_results"})
-        result_hash = hash_config({"audit_hash": self.audit_hash, "config": identity_config})[:16]
+        model = getattr(self.adapter, "model", None)
+        if not isinstance(model, nn.Module):
+            raise ValueError("Weight-based extraction result IDs require adapter.model to contain the audited torch model.")
+        result_hash = hash_attack(identity_config, model)[:16]
         self.result_id = f"side-extraction-{result_hash}"
         self.attack_id = self.result_id
         self.device = get_device() if self.config.compute_device == "auto" else torch.device(self.config.compute_device)
-        if self.device.type not in {"cpu", "cuda", "hpu", "mps"}:
-            raise ValueError(f"Unsupported extraction device type: {self.device.type!r}.")
         self.synthetic_images_uint8: Tensor | None = None
         self.synthetic_labels: Tensor | None = None
         self.cluster_centroids: Tensor | None = None
@@ -158,9 +158,27 @@ class AttackSIDEExtraction(AbstractExtraction):
         self.training_history: list[float] = []
         self._references_zero_one: Tensor | None = None
         self._sampling_calls = 0
+        self._synthetic_sampling_calls = 0
         self._guidance_calls = 0
         self._singleton_classifier_batches = 0
-        self._initialize_trace()
+
+    @classmethod
+    def from_handler(cls, handler: ExtractionHandler, attack_config: dict[str, Any]) -> Self:
+        """Validate settings and obtain SIDE inputs from the audit handler."""
+        config = cls.AttackConfig(**{"random_seed": handler.configs.audit.random_seed, **attack_config})
+        feature_extractor = handler.get_side_feature_extractor()
+        if feature_extractor is None:
+            raise ValueError("SIDE requires get_side_feature_extractor() to return a torch module.")
+        return cls(
+            handler.get_diffusion_adapter(),
+            feature_extractor,
+            config,
+            target_name=handler.configs.target.name,
+            reference_images=handler.get_extraction_reference_images(),
+            feature_transform=handler.get_side_feature_transform(),
+            classifier_factory=handler.get_side_classifier_factory(),
+            reference_score_fn=handler.get_extraction_reference_score(),
+        )
 
     def description(self) -> dict[str, str]:
         """Return SIDE's paper reference, threat model, and fidelity boundary."""
@@ -182,37 +200,28 @@ class AttackSIDEExtraction(AbstractExtraction):
         }
 
     def prepare_attack(self) -> None:
-        """Prepare this attack exactly once."""
-        self._prepare_once(self._prepare_attack)
-
-    def _prepare_attack(self) -> None:
         """Create surrogate labels and train the time-dependent classifier."""
-        require_authorized(self.config.authorized_audit)
+        logger.info("Preparing SIDE extraction attack")
+        self.classifier = None
+        self.cluster_centroids = None
+        self.training_history = []
+        self._references_zero_one = None
+        self._sampling_calls = 0
+        self._synthetic_sampling_calls = 0
+        self._guidance_calls = 0
+        self._singleton_classifier_batches = 0
         self._validate_preparation_inputs()
         self._prepare_references()
 
+        logger.info("Generating SIDE synthetic training data")
         self._build_synthetic_dataset()
-        self._record_trace(
-            "synthetic_dataset_complete",
-            sampling_calls=self._sampling_calls,
-            synthetic_samples=self.config.synthetic_samples,
-        )
+        self._synthetic_sampling_calls = self._sampling_calls
+        logger.info("Clustering SIDE synthetic training data")
         self._fit_surrogate_clusters()
-        self._record_trace(
-            "clustering_complete",
-            requested_clusters=self.config.clusters,
-            retained_clusters=len(self.cluster_cohesion),
-        )
+        logger.info("Training SIDE time-dependent classifier")
         with seeded_torch_rng(self.device, self.config.random_seed):
             self._build_classifier()
             self._train_classifier()
-        self._record_trace(
-            "classifier_training_complete",
-            epochs=self.config.classifier_epochs,
-            final_loss=self.training_history[-1],
-            singleton_batches=self._singleton_classifier_batches,
-        )
-        self._record_trace("prepared")
 
     def _validate_adapter(self) -> None:
         """Check the operations SIDE needs before requesting samples."""
@@ -241,8 +250,6 @@ class AttackSIDEExtraction(AbstractExtraction):
 
     def _validate_preparation_inputs(self) -> None:
         """Reject malformed white-box components before target sampling."""
-        if self.config.distance_device == "auto" and get_device().type not in {"cpu", "cuda", "hpu", "mps"}:
-            raise ValueError("Automatic extraction distance device must be CPU, CUDA, HPU, or MPS.")
         self._validate_adapter()
         if not isinstance(self.feature_extractor, nn.Module):
             raise TypeError("feature_extractor must be a torch.nn.Module.")
@@ -277,7 +284,9 @@ class AttackSIDEExtraction(AbstractExtraction):
             batch = self.adapter.sample(
                 end - start,
                 conditions=None,
-                seed=self.config.random_seed + batch_index,
+                seed=int(hash_config({
+                    "seed": self.config.random_seed, "attack": "side", "phase": "synthetic", "batch": batch_index,
+                })[:8], 16),
             )
             self._sampling_calls += 1
             batch = validate_image_batch(batch, self.adapter.image_shape, expected_count=end - start)
@@ -495,12 +504,11 @@ class AttackSIDEExtraction(AbstractExtraction):
         return validate_image_batch(batch, self.adapter.image_shape, expected_count=batch_size).detach().cpu()
 
     def run_attack(self) -> ExtractionResult:
-        """Run this prepared attack exactly once."""
-        return self._execute_once(self._run_attack)
-
-    def _run_attack(self) -> ExtractionResult:
         """Generate cluster-guided candidates and optionally evaluate them against references."""
-        if self.cluster_centroids is None:
+        logger.info("Running SIDE extraction attack")
+        sampling_calls_before = self._sampling_calls
+        guidance_calls_before = self._guidance_calls
+        if self.cluster_centroids is None or self.classifier is None:
             raise RuntimeError("Surrogate clusters were not prepared.")
         generated: list[Tensor] = []
         generated_labels: list[Tensor] = []
@@ -518,7 +526,9 @@ class AttackSIDEExtraction(AbstractExtraction):
             batch = self._sample_guided_batch(
                 end - start,
                 labels=labels,
-                seed=self.config.random_seed + 1_000_003 + batch_index,
+                seed=int(hash_config({
+                    "seed": self.config.random_seed, "attack": "side", "phase": "guided", "batch": batch_index,
+                })[:8], 16),
             )
             generated.append(to_zero_one(batch, self.config.image_range))
             generated_labels.append(labels)
@@ -534,20 +544,19 @@ class AttackSIDEExtraction(AbstractExtraction):
             "cluster_cohesion": self.cluster_cohesion,
             "classifier_epoch_losses": self.training_history,
             "guidance_scale": self.config.guidance_scale,
+            "sampling_calls": self._synthetic_sampling_calls + self._sampling_calls - sampling_calls_before,
+            "synthetic_sampling_calls": self._synthetic_sampling_calls,
+            "guidance_calls": self._guidance_calls - guidance_calls_before,
+            "singleton_classifier_batches": self._singleton_classifier_batches,
         }
         if self._references_zero_one is not None:
-            nearest_indices, nearest_distances = nearest_reference(
-                images,
-                self._references_zero_one,
-                block_size=self.config.distance_block_size,
-                device=self.config.distance_device,
-            )
-            band_metrics = l2_band_scores(
+            nearest_indices, nearest_distances, band_metrics = l2_band_scores(
                 images,
                 self._references_zero_one,
                 self.config.l2_bands,
                 block_size=self.config.distance_block_size,
                 device=self.config.distance_device,
+                return_nearest=True,
             )
             metrics.update(
                 {
@@ -589,13 +598,6 @@ class AttackSIDEExtraction(AbstractExtraction):
                 )
             records.append(CandidateRecord(**record_kwargs))
 
-        self._record_trace(
-            "run_complete",
-            sampling_calls=self._sampling_calls,
-            guidance_calls=self._guidance_calls,
-            images_generated=int(images.shape[0]),
-            candidate_count=len(records),
-        )
         return ExtractionResult(
             name="SIDE Extraction Result",
             result_id=self.result_id,
@@ -603,7 +605,5 @@ class AttackSIDEExtraction(AbstractExtraction):
             images=images,
             candidates=records,
             metrics=metrics,
-            provenance={**self.description(), "audit_hash": self.audit_hash},
-            execution_trace=self.execution_trace,
-            overwrite=self.config.overwrite_results,
+            provenance={**self.description(), "target": self.target_name},
         )

@@ -275,16 +275,16 @@ class GaussianDiffusion:
             Dictionary containing the model mean, variance, log-variance, and `x_0` prediction.
 
         """
-        if model_kwargs is None:
-            model_kwargs = {}
-
-        free_labels = th.ones_like(model_kwargs["y"]) * (model.model.num_classes - 1)
-
+        model_kwargs = {} if model_kwargs is None else model_kwargs
         batch_size, channels = x.shape[:2]
         assert t.shape == (batch_size,)
         eps = model(x, self._scale_timesteps(t), **model_kwargs)
-        uncond_eps = model(x, self._scale_timesteps(t), **{"y": free_labels})
-        model_output = (1.0 + self.w) * eps - self.w * uncond_eps
+        if model_kwargs.get("y") is not None:
+            free_labels = th.ones_like(model_kwargs["y"]) * (model.model.num_classes - 1)
+            uncond_eps = model(x, self._scale_timesteps(t), **{"y": free_labels})
+            model_output = (1.0 + self.w) * eps - self.w * uncond_eps
+        else:
+            model_output = eps
 
         if self.model_var_type in [ModelVarType.LEARNED, ModelVarType.LEARNED_RANGE]:
             assert model_output.shape == (batch_size, channels * 2, *x.shape[2:])
@@ -392,6 +392,7 @@ class GaussianDiffusion:
         x: th.Tensor,
         t: th.Tensor,
         model_kwargs: ModelKwargs | None = None,
+        clip_denoised: bool = False,
     ) -> TensorDict:
         """Compute what the p_mean_variance output would have been, should the.
 
@@ -404,11 +405,17 @@ class GaussianDiffusion:
         """
         alpha_bar = _extract_into_tensor(self.alphas_cumprod, t, x.shape)
 
-        eps = self._predict_eps_from_xstart(x, t, p_mean_var["pred_xstart"])
-        eps = eps - (1 - alpha_bar).sqrt() * cond_fn(x, self._scale_timesteps(t), **model_kwargs)
-
         out = p_mean_var.copy()
-        out["pred_xstart"] = self._predict_xstart_from_eps(x, t, eps)
+        gradient = cond_fn(x, self._scale_timesteps(t), **(model_kwargs or {}))
+        if clip_denoised:
+            # Add to x0 directly so zero guidance preserves the original prediction.
+            out["pred_xstart"] = (
+                p_mean_var["pred_xstart"] + (1 - alpha_bar) / alpha_bar.sqrt() * gradient
+            ).clamp(-1, 1)
+        else:
+            eps = self._predict_eps_from_xstart(x, t, p_mean_var["pred_xstart"])
+            eps = eps - (1 - alpha_bar).sqrt() * gradient
+            out["pred_xstart"] = self._predict_xstart_from_eps(x, t, eps)
         out["mean"], _, _ = self.q_posterior_mean_variance(x_start=out["pred_xstart"], x_t=x, t=t)
         return out
 
@@ -554,6 +561,7 @@ class GaussianDiffusion:
         cond_fn: ConditionFn | None = None,
         model_kwargs: ModelKwargs | None = None,
         eta: float = 0.0,
+        clip_guided: bool = False,
     ) -> TensorDict:
         """Sample x_{t-1} from the model using DDIM.
 
@@ -568,7 +576,7 @@ class GaussianDiffusion:
             model_kwargs=model_kwargs,
         )
         if cond_fn is not None:
-            out = self.condition_score(cond_fn, out, x, t, model_kwargs=model_kwargs)
+            out = self.condition_score(cond_fn, out, x, t, model_kwargs=model_kwargs, clip_denoised=clip_guided)
 
         # Usually our model outputs epsilon, but we re-derive it
         # in case we used x_start or x_prev prediction.
@@ -628,6 +636,7 @@ class GaussianDiffusion:
         device: DeviceLike | None = None,
         progress: bool = True,
         eta: float = 0.0,
+        clip_guided: bool = False,
     ) -> th.Tensor:
         """Generate samples from the model using DDIM.
 
@@ -645,6 +654,7 @@ class GaussianDiffusion:
             device=device,
             progress=progress,
             eta=eta,
+            clip_guided=clip_guided,
         ):
             final = sample
         return final["sample"]
@@ -661,6 +671,7 @@ class GaussianDiffusion:
         device: DeviceLike | None = None,
         progress: bool = False,
         eta: float = 0.0,
+        clip_guided: bool = False,
     ) -> Generator[TensorDict, None, None]:
         """Use DDIM to sample from the model and yield intermediate samples from.
 
@@ -691,6 +702,7 @@ class GaussianDiffusion:
                         cond_fn=cond_fn,
                         model_kwargs=model_kwargs,
                         eta=eta,
+                        clip_guided=clip_guided,
                     )
                     yield out
                     img = out["sample"]

@@ -60,18 +60,6 @@ class LeakPro:
                 raise TypeError("handler must be a subclass of AbstractExtractionInputHandler for extraction audits")
             if model_handler is not None:
                 raise ValueError("model_handler is not used for extraction audits.")
-            from leakpro.attacks.extraction_attacks.attack_factory_extraction import (  # noqa: PLC0415
-                AttackFactoryExtraction,
-            )
-
-            for entry in configs.audit.attack_list:
-                attack_name = entry.get("attack")
-                if not isinstance(attack_name, str):
-                    raise ValueError("Each extraction attack entry requires a string attack name.")
-                AttackFactoryExtraction.validate_config(
-                    attack_name,
-                    {key: value for key, value in entry.items() if key != "attack"},
-                )
         else:
             assert issubclass(user_input_handler, AbstractInputHandler), "handler must be a subclass of AbstractInputHandler"
             if model_handler is not None:

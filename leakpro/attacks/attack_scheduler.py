@@ -36,20 +36,21 @@ class AttackScheduler:
         self.attack_type = attack_type
         self._initialize_factory(attack_type)
 
-        self.attack_names = [entry["attack"] for entry in configs.audit.attack_list]
-        self.attack_configs = [{k: v for k, v in entry.items() if k != "attack"} for entry in configs.audit.attack_list]
-
         self.attacks = []
-        for attack_name, attack_config in zip(self.attack_names, self.attack_configs):
+        self.attack_names = []
+        self.attack_configs = []
+        for entry in configs.audit.attack_list:
+            attack_name = entry["attack"]
+            attack_config = {key: value for key, value in entry.items() if key != "attack"}
             try:
                 attack = self.attack_factory.create_attack(attack_name, attack_config, handler)
                 self.add_attack(attack)
+                self.attack_names.append(attack_name)
+                self.attack_configs.append(attack_config)
                 logger.info(f"Added attack: {attack_name}")
             except ValueError as e:
                 logger.info(e)
                 logger.info(f"Failed to create attack: {attack_name}, supported attacks: {self.attack_factory.attack_classes.keys()}")  # noqa: E501
-                if configs.audit.attack_type == "extraction":
-                    raise ValueError(f"Failed to create extraction attack {attack_name!r}: {e}") from e
 
         # Read all previous hashed attack objects from the report directory
         self.output_dir = output_dir

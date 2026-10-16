@@ -112,20 +112,6 @@ class ExtractionTargetConfig(BaseModel):
     """Minimal target metadata for a handler-owned diffusion stack."""
 
     name: str = Field(default="diffusion_target", description="Human-readable target identifier")
-    hash: Optional[str] = Field(
-        default=None,
-        min_length=1,
-        description="Fallback identifier when the input handler cannot hash the target model.",
-    )
-
-    @field_validator("hash")
-    @classmethod
-    def validate_hash(cls, value: Optional[str]) -> Optional[str]:
-        """Reject identifiers that contain no visible characters."""
-        if value is not None and not value.strip():
-            raise ValueError("target hash must not be blank.")
-        return value
-
     model_config = ConfigDict(extra="forbid")
 
 class ShadowModelConfig(BaseModel):

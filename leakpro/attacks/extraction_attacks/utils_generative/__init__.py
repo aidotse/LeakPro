@@ -55,14 +55,6 @@ def seeded_torch_rng(device: torch.device, seed: int) -> Iterator[None]:
             torch.mps.set_rng_state(mps_state, device)
 
 
-def require_authorized(authorized_audit: bool) -> None:
-    """Fail closed unless the caller confirms audit authorization."""
-    if not authorized_audit:
-        raise PermissionError(
-            "authorized_audit must be true. Run extraction only on models and data you are authorized to audit."
-        )
-
-
 def validate_image_batch(
     images: Tensor,
     expected_shape: tuple[int, int, int] | None = None,
@@ -136,7 +128,10 @@ def normalize_conditions(conditions: Sequence[Any] | None) -> list[Any] | None:
         return None
     if isinstance(conditions, (str, bytes, bytearray, memoryview, Mapping)) or not isinstance(conditions, Sequence):
         raise TypeError("Extraction conditions must be an ordered sequence of prompts or labels.")
-    return list(conditions)
+    normalized = list(conditions)
+    if any(isinstance(condition, bool) or not isinstance(condition, (str, int, np.integer)) for condition in normalized):
+        raise TypeError("Extraction conditions support only string prompts and integer labels; tensors/arrays are unsupported.")
+    return normalized
 
 
 def json_safe(value: object) -> object:

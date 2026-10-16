@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -9,30 +11,30 @@ from pathlib import Path
 import pytest
 import torch
 import yaml
-
-pytest.importorskip("improved_diffusion", reason="Install examples/extraction/cifar10/requirements.txt")
-
-
-from improved_diffusion.respace import SpacedDiffusion
-from improved_diffusion.script_util import create_gaussian_diffusion
-from improved_diffusion.unet import UNetModel
 from torch.utils.data import TensorDataset
 
 from examples.extraction.cifar10 import cifar10_model
 from examples.extraction.cifar10.cifar10_model import (
-    GaussianDiffusion,
     TrainConfig,
-    make_adapter,
     train_or_load_target,
 )
+from leakpro.attacks.extraction_attacks.adapters import DiffusionAdapter
+from leakpro.attacks.utils.diff_mi.respace import SpacedDiffusion
+from leakpro.attacks.utils.diff_mi.script_util import create_gaussian_diffusion
+from leakpro.attacks.utils.diff_mi.unet import UNetModel
 from leakpro.utils.save_load import hash_model
 
 
-def test_example_accepts_detected_hpu_and_explicit_mps(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pass the selected accelerator to the backend without a device block."""
-    monkeypatch.setattr(cifar10_model, "get_device", lambda: torch.device("hpu"))
-    assert cifar10_model.select_device("auto") == torch.device("hpu")
-    assert cifar10_model.select_device("mps") == torch.device("mps")
+def test_example_uses_shared_selection_and_preserves_explicit_devices(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Forward core selection and explicit devices to model construction."""
+    selected = []
+    model = torch.nn.Identity()
+    monkeypatch.setattr(model, "to", lambda device: selected.append(device) or model)
+    monkeypatch.setattr(cifar10_model, "get_device", lambda: torch.device("xpu"))
+    monkeypatch.setattr(cifar10_model, "create_model_and_diffusion", lambda **kwargs: (model, None))
+    assert cifar10_model.create_target_model(_test_train_config(), "auto") is model
+    assert cifar10_model.create_target_model(_test_train_config(), torch.device("mps")) is model
+    assert selected == [torch.device("xpu"), torch.device("mps")]
 
 
 def _test_train_config() -> TrainConfig:
@@ -55,13 +57,13 @@ def _test_train_config() -> TrainConfig:
 
 def test_forward_noising_matches_the_closed_form() -> None:
     """The notebook diffusion must expose the SIDE forward process exactly."""
-    diffusion = GaussianDiffusion(timesteps=4, sampling_steps=4, device=torch.device("cpu"))
+    diffusion = _training_diffusion(4)
     clean = torch.full((2, 3, 4, 4), 0.25)
     noise = torch.full_like(clean, -0.5)
     timesteps = torch.tensor([0, 3])
 
     observed = diffusion.q_sample(clean, timesteps, noise)
-    alpha_bar = diffusion.alpha_bars[timesteps].view(2, 1, 1, 1)
+    alpha_bar = torch.tensor(diffusion.alphas_cumprod, dtype=torch.float32)[timesteps].view(2, 1, 1, 1)
     expected = alpha_bar.sqrt() * clean + (1.0 - alpha_bar).sqrt() * noise
 
     torch.testing.assert_close(observed, expected)
@@ -72,8 +74,8 @@ def test_shipped_schedules_reach_the_gaussian_prior() -> None:
     example_dir = Path(__file__).parents[3] / "examples" / "extraction" / "cifar10"
     train_config = yaml.safe_load((example_dir / "train_config.yaml").read_text(encoding="utf-8"))
     train = TrainConfig(seed=train_config["run"]["random_seed"], **train_config["train"])
-    diffusion = GaussianDiffusion(train.timesteps, train.sampling_steps, torch.device("cpu"))
-    assert float(diffusion.alpha_bars[-1].sqrt()) < 0.01
+    diffusion = _training_diffusion(train.timesteps)
+    assert float(diffusion.alphas_cumprod[-1]**0.5) < 0.01
 
 
 class _TinyLearnedVarianceModel(torch.nn.Module):
@@ -89,9 +91,9 @@ class _TinyLearnedVarianceModel(torch.nn.Module):
         return torch.cat((images, torch.ones_like(images)), dim=1) * self.output_scale[None, :, None, None]
 
 
-def _official_diffusion(steps: int, sampling_steps: int | None = None) -> SpacedDiffusion:
+def _training_diffusion(steps: int, sampling_steps: int | None = None) -> SpacedDiffusion:
     return create_gaussian_diffusion(
-        steps=steps,
+        diffusion_steps=steps,
         learn_sigma=True,
         noise_schedule="cosine",
         rescale_timesteps=True,
@@ -100,13 +102,20 @@ def _official_diffusion(steps: int, sampling_steps: int | None = None) -> Spaced
     )
 
 
-def test_ddim_sampling_matches_openai_and_uses_native_guidance_timesteps() -> None:
+def _adapter(model: torch.nn.Module, diffusion: SpacedDiffusion, steps: int) -> DiffusionAdapter:
+    return DiffusionAdapter(
+        model=model, diffusion=diffusion, image_shape=(3, 32, 32),
+        sampling_steps=steps, clip_guided=True,
+    )
+
+
+def test_ddim_adapter_uses_the_shared_sampler_and_native_guidance_timesteps() -> None:
     """Respacing must preserve the published sampler and SIDE's noise levels."""
     model = _TinyLearnedVarianceModel()
-    diffusion = GaussianDiffusion(timesteps=6, sampling_steps=3, device=torch.device("cpu"))
-    adapter = make_adapter(model, diffusion, torch.device("cpu"))
+    diffusion = _training_diffusion(6)
+    adapter = _adapter(model, diffusion, 3)
     noise = torch.randn((2, 3, 32, 32), generator=torch.Generator().manual_seed(11))
-    oracle = _official_diffusion(6, 3)
+    oracle = _training_diffusion(6, 3)
     with torch.no_grad():
         expected = oracle.ddim_sample_loop(model, noise.shape, noise=noise, device=torch.device("cpu"))
     model.seen_timesteps.clear()
@@ -140,7 +149,7 @@ def test_ddim_sampling_matches_openai_and_uses_native_guidance_timesteps() -> No
 
 
 def _guided_reference_ddim(
-    diffusion: GaussianDiffusion,
+    adapter: DiffusionAdapter,
     model: torch.nn.Module,
     gradient_fn: Callable[[torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor],
     labels: torch.Tensor,
@@ -155,10 +164,10 @@ def _guided_reference_ddim(
     terminal step, which would otherwise push the state far outside the range
     the target was trained on.
     """
-    sampler = diffusion.sampler
+    sampler = adapter.sampling_diffusion
     images = torch.randn((batch_size, 3, 32, 32), generator=torch.Generator(device="cpu").manual_seed(seed))
     model.eval()
-    for index in reversed(range(diffusion.sampling_steps)):
+    for index in reversed(range(sampler.num_timesteps)):
         timesteps = torch.full((batch_size,), index, dtype=torch.long)
         with torch.no_grad():
             output = sampler.p_mean_variance(model, images, timesteps, clip_denoised=True)
@@ -174,11 +183,11 @@ def _guided_reference_ddim(
     return images.clamp(-1.0, 1.0)
 
 
-def _terminal_guidance_setup() -> tuple[_TinyLearnedVarianceModel, GaussianDiffusion, torch.Tensor]:
+def _terminal_guidance_setup() -> tuple[_TinyLearnedVarianceModel, DiffusionAdapter, torch.Tensor]:
     """Use the shipped 4,000-step cosine schedule so the terminal step is exercised."""
     model = _TinyLearnedVarianceModel()
-    diffusion = GaussianDiffusion(timesteps=4000, sampling_steps=100, device=torch.device("cpu"))
-    return model, diffusion, torch.zeros(2, dtype=torch.long)
+    adapter = _adapter(model, _training_diffusion(4000), 100)
+    return model, adapter, torch.zeros(2, dtype=torch.long)
 
 
 def test_guided_sampling_reclamps_the_guided_clean_prediction() -> None:
@@ -188,7 +197,7 @@ def test_guided_sampling_reclamps_the_guided_clean_prediction() -> None:
     def gradient(images: torch.Tensor, _timesteps: torch.Tensor, _labels: torch.Tensor) -> torch.Tensor:
         return torch.full_like(images, 0.2)
 
-    guided = diffusion.sample(model, 2, seed=11, labels=labels, gradient_fn=gradient)
+    guided = diffusion.sample_with_classifier_guidance(2, seed=11, labels=labels, gradient_fn=gradient)
     reference = _guided_reference_ddim(diffusion, model, gradient, labels, 2, 11)
 
     torch.testing.assert_close(guided, reference)
@@ -207,10 +216,10 @@ def test_classifier_guidance_moves_samples_along_the_gradient() -> None:
 
         return gradient
 
-    unguided = diffusion.sample(model, 2, seed=17)
-    zero_guided = diffusion.sample(model, 2, seed=17, labels=labels, gradient_fn=make_gradient(0.0))
-    positive = diffusion.sample(model, 2, seed=17, labels=labels, gradient_fn=make_gradient(0.2))
-    negative = diffusion.sample(model, 2, seed=17, labels=labels, gradient_fn=make_gradient(-0.2))
+    unguided = diffusion.sample(2, conditions=None, seed=17)
+    zero_guided = diffusion.sample_with_classifier_guidance(2, seed=17, labels=labels, gradient_fn=make_gradient(0.0))
+    positive = diffusion.sample_with_classifier_guidance(2, seed=17, labels=labels, gradient_fn=make_gradient(0.2))
+    negative = diffusion.sample_with_classifier_guidance(2, seed=17, labels=labels, gradient_fn=make_gradient(-0.2))
 
     torch.testing.assert_close(zero_guided, unguided, atol=0.0, rtol=0.0)
     assert float((positive - unguided).mean()) > 0.1
@@ -220,16 +229,19 @@ def test_classifier_guidance_moves_samples_along_the_gradient() -> None:
 def test_training_loss_matches_the_published_hybrid_objective() -> None:
     """Learned variance must receive its variational loss as well as epsilon MSE."""
     model = _TinyLearnedVarianceModel()
-    diffusion = GaussianDiffusion(4, 4, torch.device("cpu"))
-    generator = torch.Generator().manual_seed(4)
-    images = torch.rand((2, 3, 4, 4), generator=generator).mul(2).sub(1)
-    noise = torch.randn(images.shape, generator=generator)
+    diffusion = _training_diffusion(4)
+    images = torch.zeros((2, 3, 2, 2))
+    noise = torch.full_like(images, 0.3)
     timesteps = torch.tensor([0, 3])
-    observed = diffusion.process.training_losses(model, images, timesteps, noise=noise)
-    expected = _official_diffusion(4).training_losses(model, images, timesteps, noise=noise)
-
-    for name in ("loss", "mse", "vb"):
-        torch.testing.assert_close(observed[name], expected[name])
+    observed = diffusion.training_losses(model, images, timesteps, noise=noise)
+    # Captured from upstream Improved Diffusion at 1bc7bbbd before the shared-code port.
+    expected = {
+        "vb": [0.0278979670, 0.2172818333],
+        "mse": [0.0812552795, 0.0702011287],
+        "loss": [0.1091532484, 0.2874829769],
+    }
+    for name, values in expected.items():
+        torch.testing.assert_close(observed[name], torch.tensor(values))
     torch.testing.assert_close(observed["loss"], observed["mse"] + observed["vb"])
     observed["loss"].mean().backward()
     assert model.output_scale.grad is not None
@@ -287,7 +299,8 @@ def test_train_then_reload_preserves_the_target_checkpoint(tmp_path: Path) -> No
         replace(train, sampling_steps=2), dataset, tmp_path, torch.device("cpu")
     )
     assert resampled_path == checkpoint_path
-    assert resampled_diffusion.sampling_steps == 2
+    assert resampled_diffusion.num_timesteps == train.timesteps
+    assert _adapter(resampled, resampled_diffusion, 2).sampling_diffusion.num_timesteps == 2
     assert hash_model(resampled) == hash_model(trained)
     with pytest.raises(ValueError, match="metadata does not match"):
         train_or_load_target(replace(train, learning_rate=2e-3), dataset, tmp_path, torch.device("cpu"))
@@ -297,3 +310,18 @@ def test_train_then_reload_preserves_the_target_checkpoint(tmp_path: Path) -> No
     torch.save(checkpoint, checkpoint_path)
     with pytest.raises(ValueError, match="metadata does not match"):
         train_or_load_target(train, dataset, tmp_path, torch.device("cpu"))
+
+
+def test_example_import_does_not_require_external_improved_diffusion() -> None:
+    script = """
+import builtins
+real_import = builtins.__import__
+def guarded_import(name, *args, **kwargs):
+    if name.split('.')[0] == 'improved_diffusion':
+        raise ModuleNotFoundError(name)
+    return real_import(name, *args, **kwargs)
+builtins.__import__ = guarded_import
+from examples.extraction.cifar10.cifar10_model import create_target_model, train_or_load_target
+"""
+    completed = subprocess.run([sys.executable, "-c", script], check=False, capture_output=True, text=True)
+    assert completed.returncode == 0, completed.stderr

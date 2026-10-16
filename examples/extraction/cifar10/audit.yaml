@@ -10,7 +10,6 @@ audit:
   output_dir: ./leakpro_output/
   attack_list:
     - attack: carlini_diffusion
-      authorized_audit: true
       overwrite_results: true
       mode: unconditional_reference_audit
       image_range: minus_one_one
@@ -25,7 +24,6 @@ audit:
       distance_device: cpu
 
     - attack: side
-      authorized_audit: true
       overwrite_results: true
       image_range: minus_one_one
       compute_device: auto

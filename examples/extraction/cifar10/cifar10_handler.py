@@ -11,17 +11,13 @@ from typing import ClassVar
 from torch import Tensor, nn
 
 from leakpro import AbstractExtractionInputHandler
-from leakpro.attacks.extraction_attacks.adapters import CallableDiffusionAdapter
-from leakpro.attacks.extraction_attacks.protocols import FeatureTransform
-from leakpro.utils.save_load import hash_config, hash_model
+from leakpro.attacks.extraction_attacks.protocols import ExtractionAdapter, FeatureTransform
 
 
 class CIFAR10ExtractionHandler(AbstractExtractionInputHandler):
     """Provide the notebook's target and authorized references to LeakPro."""
 
-    adapter: ClassVar[CallableDiffusionAdapter | None] = None
-    target_model: ClassVar[nn.Module | None] = None
-    sampling_steps: ClassVar[int | None] = None
+    adapter: ClassVar[ExtractionAdapter[Tensor] | None] = None
     references: ClassVar[Tensor | None] = None
     feature_extractor: ClassVar[nn.Module | None] = None
     feature_transform: ClassVar[nn.Module | None] = None
@@ -30,35 +26,18 @@ class CIFAR10ExtractionHandler(AbstractExtractionInputHandler):
     def configure(
         cls,
         *,
-        adapter: CallableDiffusionAdapter,
-        target_model: nn.Module,
-        sampling_steps: int,
+        adapter: ExtractionAdapter[Tensor],
         references: Tensor,
         feature_extractor: nn.Module,
         feature_transform: nn.Module,
     ) -> None:
         """Set the objects required by the extraction scheduler."""
         cls.adapter = adapter
-        cls.target_model = target_model
-        cls.sampling_steps = sampling_steps
         cls.references = references
         cls.feature_extractor = feature_extractor
         cls.feature_transform = feature_transform
 
-    def get_extraction_target_hash(self) -> str:
-        """Include the model, sampler, and SIDE features in the audit ID."""
-        if self.target_model is None or self.sampling_steps is None:
-            raise RuntimeError("Configure CIFAR10ExtractionHandler before creating LeakPro.")
-        if self.feature_extractor is None or self.feature_transform is None:
-            raise RuntimeError("Configure CIFAR10ExtractionHandler before creating LeakPro.")
-        return hash_config({
-            "model": hash_model(self.target_model),
-            "sampling_steps": self.sampling_steps,
-            "side_features": hash_model(self.feature_extractor),
-            "side_transform": hash_model(self.feature_transform),
-        })
-
-    def get_diffusion_adapter(self) -> CallableDiffusionAdapter:
+    def get_diffusion_adapter(self) -> ExtractionAdapter[Tensor]:
         """Return the trained unconditional DDPM adapter."""
         if self.adapter is None:
             raise RuntimeError("Configure CIFAR10ExtractionHandler before creating LeakPro.")

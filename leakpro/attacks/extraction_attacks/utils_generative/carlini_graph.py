@@ -11,8 +11,11 @@ from torch import Tensor
 
 
 def _population_count(value: int) -> int:
-    """Count set bits without relying on Python 3.10's int.bit_count()."""
+    """Count set bits on Python versions without int.bit_count()."""
     return bin(value).count("1")
+
+
+_population_count = getattr(int, "bit_count", _population_count)
 
 
 def adjacency_to_bitsets(adjacency: Tensor) -> list[int]:
@@ -71,8 +74,16 @@ def maximum_clique(adjacency: Tensor) -> list[int]:
     best: tuple[int, ...] = ()
 
     def choose_pivot(candidates: int) -> int:
-        vertices = [index for index in range(vertex_count) if candidates & (1 << index)]
-        return min(vertices, key=lambda index: (-_population_count(candidates & neighbors[index]), index))
+        remaining = candidates
+        selected, best_degree = -1, -1
+        while remaining:
+            bit = remaining & -remaining
+            vertex = bit.bit_length() - 1
+            degree = _population_count(candidates & neighbors[vertex])
+            if degree > best_degree:
+                selected, best_degree = vertex, degree
+            remaining ^= bit
+        return selected
 
     stack = [((1 << vertex_count) - 1, ())]
     while stack:
