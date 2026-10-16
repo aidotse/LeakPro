@@ -169,9 +169,11 @@ class AttackLossTrajectory(AbstractMIA):
                               teacher_model = self.shadow_model[0].model_obj,
                               train_mode = True)
 
-        # Data used in the target (train and test) is used as test data for MIA_classifier
-        mia_test_data_indices = np.concatenate( (self.train_indices , self.test_indices))
-        test_mask = np.isin(mia_test_data_indices, self.train_indices)
+        # Data used in the target (train and test) is used as test data for MIA_classifier.
+        # train_indices/test_indices are positions in the audit set; the population indices are in "data".
+        mia_test_data_indices = self.audit_dataset["data"]
+        test_mask = np.zeros(len(mia_test_data_indices), dtype=bool)
+        test_mask[self.audit_dataset["in_members"]] = True
         self.prepare_mia_data(mia_test_data_indices,
                               test_mask,
                               student_model = self.distill_target_models,
