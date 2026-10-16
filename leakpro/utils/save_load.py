@@ -9,6 +9,11 @@ import json
 
 import numpy as np
 from torch.nn import Module
+from torch.nn.modules.utils import consume_prefix_in_state_dict_if_present
+
+# Prefixes that wrappers add to every state-dict key: Opacus's GradSampleModule
+# ("_module.") and DataParallel / DistributedDataParallel ("module.").
+WRAPPER_PREFIXES = ("_module.", "module.")
 
 
 def hash_config(config: dict) -> str:
@@ -36,6 +41,20 @@ def hash_model(model: Module) -> str:
         hasher.update(tensor_bytes)
 
     return hasher.hexdigest()
+
+def unwrapped_state_dict(model: Module) -> dict:
+    """Return ``model.state_dict()`` with wrapper prefixes stripped from the start of each key.
+
+    Only a *leading* ``_module.`` / ``module.`` is removed, repeatedly, so nested
+    wrappers unwrap fully while a submodule that merely ends in "module" (e.g.
+    ``encoder.submodule.weight``) keeps its name. A substring replace would turn
+    that into ``encoder.subweight`` and the weights would no longer load.
+    """
+    state_dict = model.state_dict()
+    while any(key.startswith(WRAPPER_PREFIXES) for key in state_dict):
+        for prefix in WRAPPER_PREFIXES:
+            consume_prefix_in_state_dict_if_present(state_dict, prefix)
+    return state_dict
 
 def hash_indices(train_indices: np.ndarray, test_indices: np.ndarray) -> str:
     """Generate a SHA-256 hash of the train/test index split.
