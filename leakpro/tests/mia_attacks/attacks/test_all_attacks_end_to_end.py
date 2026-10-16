@@ -379,6 +379,9 @@ def _build_attack_config(attack_name: str) -> dict:
         candidate["batch_size"] = max(candidate["batch_size"], 1)
     if "temperature" in candidate:
         candidate["temperature"] = max(candidate["temperature"], 1e-3)
+    if attack_name == "rmia":
+        # Temperature is not a runtime budget; its numeric floor underflows softmax probabilities.
+        candidate["temperature"] = default_config["temperature"]
     if "max_num_evals" in candidate and "initial_num_evals" in candidate:
         if candidate["max_num_evals"] <= candidate["initial_num_evals"]:
             candidate["max_num_evals"] = candidate["initial_num_evals"] + 1
@@ -402,6 +405,11 @@ def _build_attack_config(attack_name: str) -> dict:
         # SeqMIA builds 5 metrics per trajectory step; keep feature width aligned with model input.
         candidate["input_size"] = max(candidate.get("input_size", 5), 5)
         candidate["train_mia_batch_size"] = max(candidate.get("train_mia_batch_size", 2), 2)
+
+    if attack_name == "rapid":
+        candidate.update(shadow_data_fraction=0.5, training_data_fraction=0.5,
+                         num_reference_models=2, query_num=2, mia_classifier_epochs=2,
+                         learning_rate=0.0002, random_seed=1234)
 
     if attack_name == "oslo":
         # Keep a valid positive threshold range and an even post-audit pool size
@@ -543,6 +551,7 @@ E2E_TESTED_MIA_ATTACKS = (
     "multi_signal_lira",
     "dts",
     "oslo",
+    "rapid",
 )
 
 # Attacks that report, on MIAResult.audit_indices, the population index of every
@@ -630,6 +639,11 @@ def test_all_attacks_end_to_end(attack_name: str, monkeypatch: pytest.MonkeyPatc
             assert isinstance(result.id, str)
             assert result.id
             _assert_scored_indices_contract(attack_name, result, leakpro.handler)
+
+            if attack_name == "rapid":
+                np.testing.assert_array_equal(result.true, [1] * N_TRAIN + [0] * N_TEST)
+                assert np.isfinite(result.signal_values).all()
+                assert np.all((result.signal_values >= 0) & (result.signal_values <= 1))
 
             output_dir = Path(leakpro.handler.configs.audit.output_dir)
             result_file = output_dir / "results" / result.id / "result.txt"
