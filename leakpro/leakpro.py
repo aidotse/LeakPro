@@ -96,7 +96,7 @@ class LeakPro:
                 )
 
         if configs.audit.attack_type == "mia":
-            handler = MIAHandler(configs, user_input_handler, training_handler)
+            handler = MIAHandler(configs, user_input_handler)
 
         elif configs.audit.attack_type == "minv":
             handler = MINVHandler(configs)
