@@ -57,13 +57,17 @@ class ArrayDataset(torch.utils.data.Dataset):
     """
 
     def __init__(self, data: np.ndarray, targets: np.ndarray,
-                 feature_names: Optional[list] = None, **_kwargs: Any) -> None:  # noqa: ANN401
+                 feature_names: Optional[list] = None, data_type: Optional[str] = None,
+                 **_kwargs: Any) -> None:  # noqa: ANN401
         self.data = data
         self.targets = targets
         self.feature_names = feature_names
-        # Decided once per dataset, never per row: raw pixel data is scaled to
-        # [0, 1]; already-normalised floats and tabular features are left alone.
-        self.scale_to_unit = pixel_data_needs_unit_scaling(data, feature_names)
+        # One modality decision per dataset, shared with the upload metadata.
+        self.data_type = data_type or infer_data_type(data, feature_names)
+        # Decided once per dataset, never per row: integer pixel data is scaled
+        # to [0, 1]; float images are taken as already normalised (ImageNet-style
+        # values outside [0, 1] must not be rescaled); nothing else is touched.
+        self.scale_to_unit = self.data_type == "image" and np.asarray(data).dtype.kind in "iu"
         # Channel-last images (N, H, W, C) are presented channel-first.
         self.channels_last = (np.ndim(data) == 4 and data.shape[-1] in (1, 3, 4)
                               and data.shape[1] > 4)
@@ -83,20 +87,17 @@ class ArrayDataset(torch.utils.data.Dataset):
         return x, y
 
 
-def pixel_data_needs_unit_scaling(data: np.ndarray, feature_names: Optional[list] = None) -> bool:
-    """True when ``data`` is raw pixel intensities that should be divided by 255.
+def infer_data_type(data: np.ndarray, feature_names: Optional[list] = None) -> str:
+    """Modality of a dataset: named columns are tabular, otherwise by item shape.
 
-    One decision for the whole dataset: uint8 arrays are pixels; other integer
-    arrays are pixels when they exceed 1; floats are taken as already normalised
-    (ImageNet-style values outside [0, 1] must not be rescaled). Tabular data
-    (named columns, or one feature vector per row) is never scaled.
+    The single place this decision is made for converted uploads; the upload
+    metadata and :class:`ArrayDataset` both take it from here.
     """
+    if feature_names:
+        return "tabular"
     data = np.asarray(data)
-    if feature_names is not None or data.ndim <= 2:
-        return False
-    if data.dtype == np.uint8:
-        return True
-    return data.dtype.kind in "iu" and data.size > 0 and data.max() > 1
+    item_shape = list(data.shape[1:]) if data.ndim > 1 else [1]
+    return _guess_type(item_shape)
 
 
 def load_dataset(path: Path) -> torch.utils.data.Dataset:
@@ -236,7 +237,7 @@ def convert_upload(src: Path, out_dir: Path) -> Optional[tuple[Path, DataMeta]]:
 
     item_shape = list(data.shape[1:]) if data.ndim > 1 else [1]
     meta = DataMeta(
-        data_type="tabular" if feature_names else _guess_type(item_shape),
+        data_type=dataset.data_type,
         shape=item_shape,
         n_samples=int(data.shape[0]),
         n_classes=int(len(np.unique(targets))),

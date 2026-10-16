@@ -33,9 +33,10 @@ def _reverse_audit_order(handler: ImageInputHandler) -> tuple[np.ndarray, np.nda
     return train, test
 
 
-def _lira_params() -> DotMap:
+def _lira_params(**overrides: object) -> DotMap:
     params = DotMap({k: v for k, v in get_audit_config().attack_list[0].items() if k != "attack"})
     params.online = True
+    params.update(overrides)
     return params
 
 
@@ -48,6 +49,10 @@ def _rmia_params() -> DotMap:
 ATTACKS = {
     "rmia": lambda h: AttackRMIA(h, _rmia_params()),
     "lira": lambda h: AttackLiRA(h, _lira_params()),
+    # Extreme fraction with few shadow models: most audit points end up IN every
+    # model, have no OUT model, and are dropped, so this exercises the kept-mask path.
+    "lira_dropping_points": lambda h: AttackLiRA(h, _lira_params(num_shadow_models=2,
+                                                                 training_data_fraction=0.9)),
     "base": lambda h: AttackBASE(h, {"num_shadow_models": 2, "online": True, "training_data_fraction": 0.5}),
     "multi_signal_lira": lambda h: AttackMSLiRA(h, {"signals": ["ModelRescaledLogits"], "num_shadow_models": 4,
                                                    "training_data_fraction": 0.5, "online": True}),
@@ -80,3 +85,10 @@ def test_scores_map_to_the_population_points_they_belong_to(image_handler: Image
 
     # And it is not just the audit-set position in disguise.
     assert indices.tolist() != list(range(len(indices)))
+
+    if attack_name == "lira_dropping_points":
+        # The case exists to cover the drop path: some audit points must have been dropped,
+        # and the survivors must still be reported with the right identity.
+        assert attack.kept_audit_points is not None
+        assert len(indices) < len(audit_order)
+        assert len(indices) == int(np.sum(attack.kept_audit_points))

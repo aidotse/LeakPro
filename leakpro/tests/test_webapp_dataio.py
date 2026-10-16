@@ -146,7 +146,38 @@ class TestConvertUpload:
 
 
 class TestScalingDecidedPerDataset:
-    """Pixel scaling is one decision for the whole dataset, never per row."""
+    """Pixel scaling follows the dataset's data_type, decided once, never per row."""
+
+    def test_integer_time_series_is_not_scaled(self: Self) -> None:
+        """Integer (N, T, F) is time_series at upload; it must not be treated as pixels."""
+        from leakpro.webapp.backend.dataio import ArrayDataset
+
+        data = np.full((3, 24, 5), 7, dtype=np.int64)
+        ds = ArrayDataset(data, np.array([0, 1, 0]))
+        assert ds.data_type == "time_series"
+        assert ds.scale_to_unit is False
+        assert float(ds[0][0].max()) == 7.0
+
+    def test_flat_uint8_images_are_scaled(self: Self) -> None:
+        """uint8 (N, 3072) is image at upload (flat CIFAR); it scales like any image."""
+        from leakpro.webapp.backend.dataio import ArrayDataset
+
+        ds = ArrayDataset(np.full((2, 3072), 255, dtype=np.uint8), np.array([0, 1]))
+        assert ds.data_type == "image"
+        assert ds.scale_to_unit is True
+        assert float(ds[0][0].max()) == 1.0
+
+    def test_upload_metadata_and_dataset_agree_on_data_type(self: Self) -> None:
+        """convert_upload's DataMeta.data_type is the dataset's own decision, not a second one."""
+        import joblib
+
+        from leakpro.webapp.backend.dataio import convert_upload
+
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "up.npz"
+            np.savez(src, data=np.zeros((4, 24, 5), dtype=np.int64), targets=np.arange(4) % 2)
+            path, meta = convert_upload(src, Path(tmp))
+            assert meta.data_type == joblib.load(path).data_type == "time_series"
 
     def test_tabular_rows_are_never_rescaled(self: Self) -> None:
         """A row whose max exceeds 1 must not be divided by 255 (the #474 review finding)."""
@@ -154,6 +185,7 @@ class TestScalingDecidedPerDataset:
 
         data = np.array([[0.4, 0.9, 1.0], [0.4, 0.9, 1.5], [37.0, 0.9, 1.0]], dtype=np.float32)
         ds = ArrayDataset(data, np.array([0, 1, 0]), feature_names=["a", "b", "c"])
+        assert ds.data_type == "tabular"
         assert ds.scale_to_unit is False
         for i in range(3):
             x, _ = ds[i]
