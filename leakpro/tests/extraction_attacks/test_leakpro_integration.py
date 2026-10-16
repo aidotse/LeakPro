@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 import torch
 import yaml
+from pydantic import ValidationError
 from torch import nn
 
 from examples.extraction.cifar10.cifar10_handler import CIFAR10ExtractionHandler
@@ -274,10 +275,20 @@ def test_invalid_side_seed_is_rejected_before_loading_inputs(
     destination["random_seed"] = seed
     path.write_text(yaml.safe_dump(config))
 
-    audit = LeakPro(SIDEProvider, str(path))
-
-    assert audit.attack_scheduler.attacks == []
-    assert "random_seed" in caplog.text and "Failed to create attack: side" in caplog.text
+    try:
+        audit = LeakPro(SIDEProvider, str(path))
+    except ValidationError as error:
+        # The shared audit schema may reject the inherited seed before SIDE is constructed.
+        assert seed_source == "audit"
+        expected_type = "greater_than_equal" if seed < 0 else "less_than_equal"
+        assert any(
+            detail["loc"][0] == "audit" and detail["loc"][-1] == "random_seed"
+            and detail["input"] == seed and detail["type"] == expected_type
+            for detail in error.errors()
+        )
+    else:
+        assert audit.attack_scheduler.attacks == []
+        assert "random_seed" in caplog.text and "Failed to create attack: side" in caplog.text
     get_features.assert_not_called()
 
 
