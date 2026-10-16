@@ -398,7 +398,8 @@ shadow-model residuals on the z-population. Ignored for classification models, w
         return MIAResult.from_full_scores(true_membership=true_labels,
                                           signal_values=signal_values,
                                           result_name="RMIA",
-                                          metadata=self.configs.model_dump())
+                                          metadata=self.configs.model_dump(),
+                                          audit_indices=self.scored_population_indices())
 
     def reset_attack(self: Self, config:BaseModel) -> None:
         """Reset attack to initial state."""

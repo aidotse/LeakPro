@@ -262,7 +262,7 @@ _PRESET_ARCHS: dict[str, str] = {
 }
 
 from .checker import run_check
-from .dataio import convert_upload
+from .dataio import convert_upload, load_dataset
 from .inspector import inspect
 from .security import (
     ALLOWED_ORIGINS,
@@ -845,59 +845,7 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
             # Load dataset, apply f_train fraction
             data_path = Path(job.get("data_path", ""))
             if data_path.exists():
-                import pickle
-
-                def _safe_load_dataset(path: Path):
-                    """Load a dataset pickle, falling back to SafeUnpickler for missing modules."""
-                    try:
-                        with open(path, "rb") as _f:
-                            return pickle.load(_f)
-                    except Exception:
-                        pass
-                    # Fall back: stub out missing classes, then reconstruct as TensorDataset.
-                    # NOTE: compatibility shim, not a security boundary — it resolves real
-                    # classes whenever the import succeeds (see security.RestrictedUnpickler).
-                    class _LenientUnpickler(pickle.Unpickler):
-                        def find_class(self, module, name):
-                            try:
-                                return super().find_class(module, name)
-                            except (ImportError, AttributeError):
-                                return type(name, (), {})
-                    with open(path, "rb") as _f:
-                        raw = _LenientUnpickler(_f).load()
-                    import numpy as np
-                    # Use __dict__ directly — bypasses any descriptor protocol on the stub class
-                    attrs = getattr(raw, "__dict__", {})
-                    data_arr = targets_arr = None
-                    for data_attr in ("data", "x", "X", "features", "samples"):
-                        val = attrs.get(data_attr)
-                        if val is not None:
-                            data_arr = val if isinstance(val, np.ndarray) else (val.numpy() if hasattr(val, "numpy") else None)
-                            if data_arr is not None:
-                                break
-                    for tgt_attr in ("targets", "y", "Y", "labels"):
-                        val = attrs.get(tgt_attr)
-                        if val is not None:
-                            targets_arr = val if isinstance(val, (list, np.ndarray)) else (val.tolist() if hasattr(val, "tolist") else None)
-                            if targets_arr is not None:
-                                break
-                    if data_arr is None:
-                        raise ValueError(
-                            f"Cannot extract data array from {type(raw).__name__}. "
-                            f"Available keys: {list(attrs.keys())}"
-                        )
-                    _raw_np = np.array(data_arr)
-                    x = torch.from_numpy(_raw_np.astype("float32"))
-                    # Only normalize if data is raw uint8 pixels — already-normalized floats must not be touched
-                    if _raw_np.dtype == np.uint8 or (_raw_np.dtype != np.float32 and _raw_np.dtype != np.float64 and x.max() > 1.0):
-                        x = x / 255.0
-                    # Channel-last (N,H,W,C) → channel-first (N,C,H,W)
-                    if x.ndim == 4 and x.shape[-1] in (1, 3, 4) and x.shape[1] > 4:
-                        x = x.permute(0, 3, 1, 2).contiguous()
-                    y = torch.tensor(np.array(targets_arr), dtype=torch.long) if targets_arr is not None else torch.zeros(len(x), dtype=torch.long)
-                    return torch.utils.data.TensorDataset(x, y)
-
-                dataset = _safe_load_dataset(data_path)
+                dataset = load_dataset(data_path)
                 if not isinstance(dataset, torch.utils.data.Dataset):
                     raise ValueError(f"Loaded object is not a Dataset: {type(dataset)}")
             else:
@@ -1245,14 +1193,14 @@ async def get_results(job_id: str) -> dict:
 @app.get("/jobs/{job_id}/sample_data/{index}")
 async def get_sample_data(job_id: str, index: int):
     """Return tabular feature values for a single sample as JSON."""
-    import joblib, torch
+    import torch
     import numpy as np
     job = _get_job(job_id)
     data_path = job.get("data_path")
     if not data_path or not Path(data_path).exists():
         raise HTTPException(status_code=404, detail="Dataset not found")
     try:
-        dataset = joblib.load(data_path)
+        dataset = load_dataset(Path(data_path))
         row = dataset.data[index]
         if isinstance(row, torch.Tensor):
             row = row.tolist()
@@ -1274,7 +1222,6 @@ async def get_sample_data(job_id: str, index: int):
 async def get_sample_image(job_id: str, index: int):
     """Return a single sample image from the job's dataset as PNG."""
     import io
-    import joblib
     import numpy as np
     from PIL import Image
     from fastapi.responses import Response
@@ -1284,7 +1231,7 @@ async def get_sample_image(job_id: str, index: int):
     if not data_path or not Path(data_path).exists():
         raise HTTPException(status_code=404, detail="Dataset not found")
 
-    dataset = joblib.load(data_path)
+    dataset = load_dataset(Path(data_path))
 
     try:
         img = dataset.data[index]

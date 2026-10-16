@@ -11,6 +11,8 @@ import optuna
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from torch.nn import Module
 
+from leakpro.utils.seed import MAX_SEED
+
 ArrayOrScalar = Union[np.ndarray, np.integer, int, list]
 
 class OptimizerConfig(BaseModel):
@@ -69,7 +71,7 @@ class ReconstructionConfig(BaseModel):
 class AuditConfig(BaseModel):
     """Configuration for the audit process."""
 
-    random_seed: int = Field(default=42, description="Random seed for reproducibility")
+    random_seed: int = Field(default=42, ge=0, le=MAX_SEED, description="Random seed for reproducibility")
     attack_type: Literal["mia", "gia", "minv", "synthetic"] = Field(..., description="Type of attack: must be one of ['mia', 'gia', 'minv', 'synthetic]")  # noqa: E501
     attack_list: List[Dict[str, Any]] = Field(..., min_length=1, description="Must have at least one attack")
     hyper_param_search: bool = Field(default=False, description="Whether to perform hyperparameter search")
@@ -277,6 +279,11 @@ class PrivacyUtilityConfig(BaseModel):
                              description="FPR level the loop minimizes TPR at (one of 0.0001, 0.001, 0.01, 0.1)")
     delta: float = Field(default=1e-5, gt=0.0, lt=1.0,
                          description="DP delta used for epsilon accounting; choose well below 1/n_target")
+    accountant: Literal["prv", "rdp"] = Field(
+        default="prv",
+        description="Opacus privacy accountant; PRV is tighter than RDP, so epsilons from different accountants "
+                    "are not comparable and the choice is recorded with every reported epsilon. GDP is not "
+                    "offered: Opacus's GDP accountant is experimental and can underestimate epsilon")
     epochs: int = Field(default=15, ge=1,
                         description="Training epochs (fixed unless 'epochs' is listed as a knob)")
     output_dir: str = Field(..., description="Output directory (study.db, per-config artifacts)")

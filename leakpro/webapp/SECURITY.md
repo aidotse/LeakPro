@@ -79,10 +79,11 @@ upload trusted files" is not an answer on its own.
 (metadata validation) and never resolves an attacker-chosen callable. Its scope
 is that one endpoint: the compatibility check, the audit worker and the sample
 endpoints load the same files with full (code-executing) deserialization, behind
-authentication. The `_LenientUnpickler` in `inspector.py` and `checker.py` is a
-**compatibility shim, not a security boundary** — it resolves real classes
-whenever the import succeeds, and is safe only because it now sits behind
-authentication.
+authentication. Those paths all go through one loader,
+`leakpro.input_handler.mia_handler.load_dataset_file` (joblib, then a pickle
+that stubs classes it cannot import), which is a **compatibility shim, not a
+security boundary** — it resolves real classes whenever the import succeeds,
+and is safe only because it sits behind authentication.
 
 The WebSocket log stream authenticates via a `?token=` query parameter (browsers
 cannot set headers on a WebSocket), so the token can appear in server access
