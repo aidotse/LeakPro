@@ -364,6 +364,26 @@ class AbstractMIA(AbstractAttack):
         """
         return len(AbstractMIA.audit_dataset["data"])
 
+    def scored_population_indices(self:Self, kept: Optional[np.ndarray] = None) -> np.ndarray:
+        """Population indices of the audit points an attack reports scores for, in scoring order.
+
+        Attacks report signals as [in-members..., out-members...], which is the order of
+        ``audit_dataset["data"]`` (train indices followed by test indices). An attack that
+        drops audit points passes the boolean ``kept`` mask (over the audit set) it applied.
+
+        Args:
+        ----
+            kept: Boolean mask over the audit set marking the points that were scored, or None
+                when every audit point was scored.
+
+        Returns:
+        -------
+            np.ndarray: Population index of each reported score, aligned with ``signal_values``.
+
+        """
+        data = np.asarray(AbstractMIA.audit_dataset["data"])
+        return data if kept is None else data[np.asarray(kept, dtype=bool)]
+
     @abstractmethod
     def description(self:Self) -> dict:
         """Return a description of the attack.
