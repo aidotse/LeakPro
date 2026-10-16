@@ -119,11 +119,10 @@ class AttackLossTrajectory(AbstractMIA):
         # create auxiliary dataset
         aux_data_size = len(aux_data_index)
         shadow_data_size = int(aux_data_size * self.shadow_data_fraction)
-        shadow_data_indices = np.random.choice(aux_data_size, shadow_data_size, replace=False)
-        # Split the shadow data into two equal parts
+        shadow_data_indices = np.random.choice(aux_data_index, shadow_data_size, replace=False)
+        # Split the shadow data into two equal parts: the shadow model trains on the first, the second is held out
         split_index = len(shadow_data_indices) // 2
         shadow_training_indices = shadow_data_indices[:split_index]
-        shadow_not_used_indices = shadow_data_indices[split_index:]
         # Distillation on target and shadow model happen on the same dataset
         distill_data_indices = np.setdiff1d(aux_data_index, shadow_data_indices)
 
@@ -161,17 +160,20 @@ class AttackLossTrajectory(AbstractMIA):
         #--------------------------------------------------------
         # Prepare data to train and test the MIA classifier
         #--------------------------------------------------------
-        # shadow data (train and test) is used as training data for MIA_classifier in the paper
-        train_mask = np.isin(shadow_data_indices,shadow_not_used_indices)
+        # shadow data (train and test) is used as training data for MIA_classifier in the paper.
+        # Membership is read from the shadow model's metadata, which also holds for a reused cached model.
+        train_mask = ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, shadow_data_indices)[:, 0]
         self.prepare_mia_data(shadow_data_indices,
                               train_mask,
                               student_model = self.distill_shadow_models,
                               teacher_model = self.shadow_model[0].model_obj,
                               train_mode = True)
 
-        # Data used in the target (train and test) is used as test data for MIA_classifier
-        mia_test_data_indices = np.concatenate( (self.train_indices , self.test_indices))
-        test_mask = np.isin(mia_test_data_indices, self.train_indices)
+        # Data used in the target (train and test) is used as test data for MIA_classifier.
+        # train_indices/test_indices are positions in the audit set; the population indices are in "data".
+        mia_test_data_indices = self.audit_dataset["data"]
+        test_mask = np.zeros(len(mia_test_data_indices), dtype=bool)
+        test_mask[self.audit_dataset["in_members"]] = True
         self.prepare_mia_data(mia_test_data_indices,
                               test_mask,
                               student_model = self.distill_target_models,
