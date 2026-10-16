@@ -11,7 +11,7 @@ from torch import Tensor
 
 from leakpro.utils.logger import logger
 
-DEFAULT_MAX_CLIQUE_SEARCH_NODES = 10_000_000
+DEFAULT_MAX_CLIQUE_SEARCH_NODES = 20_000
 
 
 def _population_count(value: int) -> int:
