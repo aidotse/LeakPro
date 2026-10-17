@@ -401,6 +401,14 @@ def run_audit_job(
                     "n_samples":          _dm.get("n_samples"),
                 } if (_tp or _hc or _dm) else None
 
+                # Training-set size of the target, needed by leakpro.risk to scale exposure to the
+                # population. Read from the handler while it is still alive; saved results cannot
+                # recover it.
+                try:
+                    _num_train = int(lp.handler.target_model_metadata.num_train)
+                except Exception:  # noqa: BLE001 - metadata is optional for non-MIA handlers
+                    _num_train = None
+
                 model_results = {
                     "model_name": model_name,
                     "source": model_spec.get("source", "trained"),
@@ -410,6 +418,7 @@ def run_audit_job(
                     "test_accuracy": model_spec.get("test_accuracy"),
                     "model_class": _model_class,
                     "train_meta": _train_meta,
+                    "num_train": _num_train,
                     "attacks": [_serialise_result(r) for r in results],
                 }
                 all_results.append(model_results)
