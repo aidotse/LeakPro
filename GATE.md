@@ -54,4 +54,34 @@ the existing upper-TPR tie test also passes. The corrected combined suite report
 `79 passed, 124 warnings in 8.35s`; raw output is in
 `/tmp/robustness-roc-final-tests.log`. CI Ruff passed again.
 
-Status: final candidate checks and independent review pending.
+Final source candidate: `f66293937c09dd96b2ada63a89fd4ff9d1184d4e`.
+Verification date: 2026-10-19, 17:50 UTC. Working directory:
+`/Users/henrikfo/Documents/Leakpro/LeakPro-robustness`.
+The evidence-only update to this file does not change the reviewed runtime inputs.
+
+Affected-suite command, with the `leakpro` conda environment active:
+
+```sh
+LEAKPRO_DEVICE=cpu MPLBACKEND=Agg python -m pytest \
+  leakpro/tests/mia_attacks/test_robustness.py \
+  leakpro/tests/mia_attacks/attacks/test_lira.py \
+  leakpro/tests/mia_attacks/attacks/test_rmia.py \
+  leakpro/tests/mia_attacks/attacks/test_base.py \
+  leakpro/tests/mia_attacks/utils/test_shadow_model_handler.py \
+  leakpro/tests/mia_attacks/utils/test_model_handler.py \
+  leakpro/tests/mia_attacks/utils/test_distillation_model_handler.py \
+  -q --disable-warnings --tb=short --show-capture=no
+```
+
+Final independent review: **approve** the exact candidate; no verified defects
+remain. The reviewer independently obtained `79 passed, 124 warnings in 7.94s`
+and passed CI Ruff. A separate multi-signal LiRA check exercised five targets,
+two signals, nondefault variance settings, correct membership and record IDs,
+direct-model numerical score checks, ten real plots, and cache replay with
+training forbidden. Maximum relative score error was `9.135e-7`. Raw evidence:
+`/tmp/robustness-release-independent.log`.
+
+Status: **PASS** for the requested local implementation and preparation, within
+the limits above. Full repository CI, CIFAR/GPU execution, and every registered
+attack are unverified. Both the original PR head and the integrated upstream main
+remain ancestors; all ten original author commits are preserved. Nothing was pushed.
