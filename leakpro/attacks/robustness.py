@@ -216,13 +216,14 @@ class Robustness:
             summary["roc_auc"] = {"mean": float(np.mean(aucs)),
                                   "percentiles_2_5_97_5": np.percentile(aucs, [2.5, 97.5]).tolist()}
         if all(result.roc_mode == "full" for result in rotated):
-            fpr_grid = np.unique(np.concatenate([result.fpr for result in rotated]))
+            fpr_grid = np.unique(np.concatenate([[0.0], *[result.fpr for result in rotated]]))
             curves = []
             for result in rotated:
-                # Take the upper ROC value at each repeated FPR, independent of tie ordering.
-                fpr, inverse = np.unique(result.fpr, return_inverse=True)
+                # MIAResult omits the origin. Include it before taking upper values
+                # at repeated FPRs so tied scores do not inflate low-FPR summaries.
+                fpr, inverse = np.unique(np.concatenate(([0.0], result.fpr)), return_inverse=True)
                 upper_tpr = np.zeros(len(fpr))
-                np.maximum.at(upper_tpr, inverse, result.tpr)
+                np.maximum.at(upper_tpr, inverse, np.concatenate(([0.0], result.tpr)))
                 curves.append(np.interp(fpr_grid, fpr, upper_tpr))
             summary["roc"] = {"fpr": fpr_grid.tolist(), "mean_tpr": np.mean(curves, axis=0).tolist(),
                               "pointwise_tpr_percentiles_2_5_97_5": np.percentile(curves, [2.5, 97.5], axis=0).tolist()}

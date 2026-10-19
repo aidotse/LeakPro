@@ -25,7 +25,7 @@ cached logits, and summaries. A fixed-pool hook reuses normal shadow-handler acc
 distillation now reuses the existing singleton decorator so both handlers can be
 restored after a rotation. No attack-specific adapter classes or scoring changes.
 
-Observed checks before final review: 17 new tests passed (including a saved-input
+Observed checks before final review: 19 new tests passed (including a saved-input
 LeakPro workflow and real LiRA, RMIA, BASE, and binary population attacks); 60
 existing attack/model-handler tests passed. Ruff 0.11.2 passed the exact workflow
 command: `ruff check leakpro --exclude examples,leakpro/tests,leakpro/webapp`.
@@ -44,5 +44,14 @@ Limits: CPU/synthetic-data verification; full CIFAR/GPU training and hosted full
 CI are not claimed. The wrapper retains attacks' reference-data restrictions and
 accepts one MIAResult per run. Percentile summaries are empirical, not calibrated
 coverage claims. Publication to GitHub has not been requested.
+
+A second independent review confirmed the training-count fix and passed an
+additional cache test with permuted, noncontiguous records, shuffled training,
+missing cached logits, and all five target rotations. It requested changes for
+ROC interpolation without the origin when top scores tie. New mixed-tie and
+all-tie tests failed before adding the origin to each curve and the shared grid;
+the existing upper-TPR tie test also passes. The corrected combined suite reported
+`79 passed, 124 warnings in 8.35s`; raw output is in
+`/tmp/robustness-roc-final-tests.log`. CI Ruff passed again.
 
 Status: final candidate checks and independent review pending.

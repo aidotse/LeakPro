@@ -297,3 +297,16 @@ def test_summary_uses_upper_roc_ties_and_excludes_original():
     assert summary["roc"]["mean_tpr"][0] == pytest.approx(2 / 3)
     np.testing.assert_allclose(summary["roc"]["pointwise_tpr_percentiles_2_5_97_5"],
                                [summary["roc"]["mean_tpr"]] * 2)
+
+
+@pytest.mark.parametrize("all_tied", [False, True])
+def test_summary_includes_roc_origin_for_tied_scores(all_tied):
+    tied = MIAResult.from_full_scores([1, 0, 1, 0], [2, 2, 1, 1], result_name="tied")
+    other = tied if all_tied else MIAResult.from_full_scores([1, 0, 1, 0], [4, 3, 2, 1], result_name="untied")
+    wrapper = object.__new__(Robustness)
+    wrapper.results = [{"result_object": result} for result in [tied, tied, other]]
+    summary = wrapper._summarize()["roc"]
+    assert summary["fpr"][0] == 0.0
+    assert summary["mean_tpr"][0] == pytest.approx(0.0 if all_tied else 0.25)
+    expected = [0.0, 0.0] if all_tied else [0.0125, 0.4875]
+    np.testing.assert_allclose(np.array(summary["pointwise_tpr_percentiles_2_5_97_5"])[:, 0], expected)
