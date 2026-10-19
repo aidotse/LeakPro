@@ -1,0 +1,32 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ../../          # repo root (needs leakpro/ package)
+      dockerfile: leakpro/webapp/Dockerfile.backend
+    # Bound to the loopback interface: this backend loads user pickles and runs
+    # user-supplied Python by design, so it must not be reachable off-host.
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - leakpro_jobs:/data/jobs
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LEAKPRO_WEBAPP_JOBS_DIR=/data/jobs
+      # Set a fixed token to pin it; otherwise one is generated and logged.
+      - LEAKPRO_WEBAPP_TOKEN=${LEAKPRO_WEBAPP_TOKEN:-}
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "127.0.0.1:5173:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  leakpro_jobs:

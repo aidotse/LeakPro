@@ -1,16 +1,22 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Module for handling shadow models."""
 
+import copy
 import pickle
 
 import numpy as np
 import torch.nn.functional as F  # noqa: N812
-from torch import cat, cuda, device, save, sigmoid
-from torch.nn import CrossEntropyLoss, KLDivLoss, Module
+from torch import cat, save, sigmoid
+from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, KLDivLoss, Module
 from tqdm import tqdm
 
 from leakpro.attacks.utils.model_handler import ModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.schemas import DistillationModelTrainingSchema
+from leakpro.utils.device import get_device, mark_step
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
@@ -98,7 +104,7 @@ class DistillationModelHandler(ModelHandler):
         optimizer = model_pair["optimizer"] # optimizer for student model
 
         # Get the device for training
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         teacher_model.to(gpu_or_cpu)
         student_model.to(gpu_or_cpu)
         student_model.train()
@@ -112,12 +118,12 @@ class DistillationModelHandler(ModelHandler):
         for d in range(num_trajectory_epochs):
             epoch_loss = 0
 
-            # Loop over the training set
-            for data, target_labels in tqdm(data_loader, desc=f"Epoch {d+1}/{num_trajectory_epochs}"):
+            # Loop over the training set. Ground-truth labels are deliberately unused:
+            # the student must only learn from the teacher, in both distillation modes.
+            for data, _ in tqdm(data_loader, desc=f"Epoch {d+1}/{num_trajectory_epochs}"):
 
                 # Move data to the device
                 data = data.to(gpu_or_cpu, non_blocking=True)
-                target_labels = target_labels.to(gpu_or_cpu, non_blocking=True)
 
                 # Output of the distillation model
                 output_student = student_model(data)
@@ -137,19 +143,26 @@ class DistillationModelHandler(ModelHandler):
 
                 # TODO: add hopskipjump distance here
                 if label_only:
-                    loss = CrossEntropyLoss()(output_student, target_labels) # TODO: I think this is wrong (teacher?)
+                    # Label-only mode: distill on the teacher's predicted (hard) labels.
+                    if output_teacher.shape[1] == 1:
+                        teacher_labels = (output_teacher.detach() > 0).float()
+                        loss = BCEWithLogitsLoss()(output_student, teacher_labels)
+                    else:
+                        teacher_labels = output_teacher.detach().argmax(dim=1)
+                        loss = CrossEntropyLoss()(output_student, teacher_labels)
                 else:
                     loss = KLDivLoss(reduction="batchmean")(student_signal, teacher_signal)
                 optimizer.zero_grad(set_to_none=True)
                 loss.backward()
                 optimizer.step()
+                mark_step(gpu_or_cpu)
                 epoch_loss += loss.item()
 
             logger.info(f"Epoch {d+1}/{num_trajectory_epochs} | Loss: {epoch_loss}")
             with open(f"{self.storage_path}/{model_pair_name}_{d}.pkl", "wb") as f:
                 save(student_model.state_dict(), f)
                 logger.info(f"Saved distillation model for epoch {d} to {self.storage_path}")
-            distillation_checkpoints.append(student_model)
+            distillation_checkpoints.append(copy.deepcopy(student_model))
 
             logger.info("Storing metadata for distillation model")
             meta_data = {

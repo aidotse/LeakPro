@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 import torch
 from leakpro.fl_utils.similarity_measurements import cosine_similarity_weights, l2_norm, total_variation
 from leakpro.utils.import_helper import Callable, Self

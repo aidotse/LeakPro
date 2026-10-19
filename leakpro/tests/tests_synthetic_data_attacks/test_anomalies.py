@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Tests for anomalies module."""
 import numpy as np
 import pandas as pd
@@ -12,7 +16,11 @@ df = pd.DataFrame(
 
 def test_encode_categorical_columns() -> None:
     """Assert results for encode_categorical_columns function with simple input."""
-    assert list(df.dtypes) == [np.dtype("int64"), np.dtype("bool"), np.dtype("O"), np.dtype("O")]
+    # Check dtypes - newer pandas may use StringDtype instead of object
+    assert df["non_cat"].dtype == np.dtype("int64")
+    assert df["cat_bool"].dtype == np.dtype("bool")
+    assert pd.api.types.is_string_dtype(df["cat_less_threshold"])
+    assert pd.api.types.is_string_dtype(df["cat_more_threshold"])
     df_encoded = anom.encode_categorical_columns(df=df)
     assert list(df_encoded.columns) == ["non_cat", "cat_bool", "cat_more_threshold", "cat_less_threshold_True"]
     assert df_encoded[["non_cat", "cat_bool"]].equals(df[["non_cat", "cat_bool"]])

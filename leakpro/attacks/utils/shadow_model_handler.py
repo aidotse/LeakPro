@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Module for handling shadow models."""
 
 import os
@@ -13,8 +17,10 @@ from leakpro.attacks.utils.model_handler import ModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.schemas import ShadowModelTrainingSchema, TrainingOutput
 from leakpro.signals.signal_extractor import PytorchModel
-from leakpro.utils.import_helper import Self, Tuple
+from leakpro.utils.device import get_device
+from leakpro.utils.import_helper import Any, Dict, List, Self, Tuple, Union
 from leakpro.utils.logger import logger
+from leakpro.utils.save_load import unwrapped_state_dict
 
 
 def singleton(cls):  # noqa: ANN001, ANN201
@@ -65,68 +71,242 @@ class ShadowModelHandler(ModelHandler):
         self.model_storage_name = "shadow_model"
         self.metadata_storage_name = "metadata"
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = get_device()
 
-    def _filter(self:Self, data_size:int)->list[int]:
-        # Get the metadata for the shadow models
+    def _freeze_value(self:Self, value: Union[List, Dict, Any]) -> Union[tuple, Any]:
+        """Convert nested config values to a stable, comparable structure.
+
+        Args:
+        ----
+            value: Arbitrary config value taken from shadow-model settings or metadata.
+
+        Returns:
+        -------
+            A recursively normalized representation that can be compared safely
+            when deciding whether cached shadow models were trained with the
+            same effective configuration.
+
+        """
+        if isinstance(value, dict):
+            return tuple((key, self._freeze_value(val)) for key, val in sorted(value.items()))
+        if isinstance(value, list):
+            return tuple(self._freeze_value(item) for item in value)
+        return value
+
+    def _current_training_signature(self:Self, data_size:int) -> tuple:
+        """Build the effective training signature for the current shadow setup.
+
+        Args:
+        ----
+            data_size (int): Number of samples that will be used to train a
+                shadow model.
+
+        Returns:
+        -------
+            tuple: Normalized description of the active shadow-model training
+            configuration, including architecture, optimizer, criterion,
+            initialization parameters, batch size, and target-model identity.
+
+        """
+        return (
+            data_size,
+            self.model_class,
+            self.model_path,
+            self.target_model_hash,
+            self.optimizer_name,
+            self._freeze_value(self.optimizer_config),
+            self.criterion_name,
+            self._freeze_value(self.loss_config),
+            self.epochs,
+            self.batch_size,
+            self._freeze_value(self.init_params),
+        )
+
+    def _metadata_training_signature(self:Self, metadata: ShadowModelTrainingSchema) -> tuple:
+        """Build a normalized training signature from stored shadow metadata.
+
+        Args:
+        ----
+            metadata (ShadowModelTrainingSchema): Metadata loaded for a cached
+                shadow model.
+
+        Returns:
+        -------
+            tuple: Normalized representation of the stored training setup. If
+            older metadata files do not contain newly added fields, they will
+            naturally fail to match the current signature and therefore be
+            retrained instead of being silently reused.
+
+        """
+        return (
+            metadata.num_train,
+            metadata.model_class,
+            getattr(metadata, "model_module_path", None),
+            metadata.target_model_hash,
+            metadata.optimizer.lower(),
+            self._freeze_value(getattr(metadata, "optimizer_params", None)),
+            metadata.criterion.lower(),
+            self._freeze_value(getattr(metadata, "criterion_params", None)),
+            metadata.epochs,
+            getattr(metadata, "batch_size", None),
+            self._freeze_value(metadata.init_params),
+        )
+
+    def _filter(self:Self, data_size:int) -> tuple[list[int], list[int]]:
+        """Find cached shadow models compatible with the current configuration.
+
+        Args:
+        ----
+            data_size (int): Number of samples that should be used for each
+                shadow-model training run.
+
+        Returns:
+        -------
+            tuple[list[int], list[int]]: Two lists packed in a tuple-like return value:
+            all discovered metadata indices and the subset whose stored
+            signature matches the current effective training configuration.
+
+        """
         entries = os.listdir(self.storage_path)
         pattern = re.compile(rf"^{self.metadata_storage_name}_\d+\.pkl$")
         files = [f for f in entries if pattern.match(f)]
-
-        # Extract the index of the metadata
         all_indices = [int(re.search(r"\d+", f).group()) for f in files]
 
-        # Setup checks
-        # TODO: we use the same shadow models for all targets!
-        filter_checks = [data_size, self.model_class]
+        current_sig = self._current_training_signature(data_size)
 
-        # Filter out indices to only keep the ones that passes the checks
         filtered_indices = []
         for i in all_indices:
             metadata = self._load_shadow_metadata(i)
             assert isinstance(metadata, ShadowModelTrainingSchema), "Shadow Model metadata is not of the correct type"
-            meta_check_values = [metadata.num_train, metadata.model_class]
-            if all(a == b for a, b in zip(filter_checks, meta_check_values)):
+            if getattr(metadata, "population_hash", None) != self.population_hash:
+                logger.debug(f"Shadow model {i} skipped — population_hash mismatch")
+            elif self._metadata_training_signature(metadata) != current_sig:
+                logger.debug(f"Shadow model {i} skipped — training signature mismatch")
+            else:
+                logger.debug(f"Shadow model {i} accepted")
                 filtered_indices.append(i)
 
         return all_indices, filtered_indices
 
-    def construct_balanced_assignments(self, m: int, n: int, seed: int = None) -> np.ndarray:
-        """Assigns each of m data points to exactly n/2 out of n datasets by partitioning.
+    @staticmethod
+    def _validate_training_size(data_size:int, population_size:int, training_fraction:float) -> None:
+        """Reject training fractions that leave a shadow model with no data or no OUT references.
+
+        A fraction of 0 leaves nothing to train on. A fraction of 1 puts every point in every shadow
+        model, so no point has an OUT reference model and every reference-based attack (LiRA, RMIA,
+        BASE, ...) degenerates into a NaN score or an empty-slice mean. Both are configuration
+        mistakes worth catching before any model is trained.
+
+        Args:
+        ----
+            data_size (int): Number of points each shadow model will train on.
+            population_size (int): Size of the shadow population.
+            training_fraction (float): The fraction that produced data_size, quoted back in errors.
+
+        Raises:
+        ------
+            ValueError: If data_size is below 1 or covers the whole shadow population.
+
+        """
+        if data_size < 1:
+            raise ValueError(
+                f"training_fraction={training_fraction} gives {data_size} training points out of "
+                f"{population_size}; it must yield at least 1 point per shadow model."
+            )
+        if data_size >= population_size:
+            raise ValueError(
+                f"training_fraction={training_fraction} puts all {population_size} shadow-population "
+                "points in every shadow model, leaving no OUT reference models. Use a fraction < 1."
+            )
+
+    def _cached_inclusion_counts(self:Self, cached_indices:list[int], shadow_population:np.ndarray) -> np.ndarray:
+        """Count, for each shadow-population point, how many cached shadow models were trained on it.
+
+        Read back from the cached models' stored ``train_indices`` rather than regenerated, so a run
+        that resumes after a crash or an increase in ``num_shadow_models`` can extend the existing
+        design instead of starting a new one.
+
+        Args:
+        ----
+            cached_indices (list[int]): Indices of the reusable cached shadow models.
+            shadow_population (np.ndarray): The shadow population, in assignment-column order.
+
+        Returns:
+        -------
+            np.ndarray: Length-``len(shadow_population)`` counts of cached-model memberships.
+
+        """
+        if len(cached_indices) == 0:
+            return np.zeros(len(shadow_population), dtype=np.int64)
+        in_mask = self.get_in_indices_mask(cached_indices, shadow_population)
+        return in_mask.sum(axis=1).astype(np.int64)
+
+    def construct_balanced_assignments(self, m: int, n: int, points_per_model: int = None, seed: int = None,
+                                       prior_inclusion_counts: np.ndarray = None) -> np.ndarray:
+        """Assigns each of m data points to n datasets of points_per_model points each, keeping per-point balance.
+
+        Every dataset gets exactly points_per_model points, and each point ends up
+        in an equal number of datasets (within 1), so the per-point IN/OUT counts
+        stay as even as the training fraction allows.
+
+        ``prior_inclusion_counts`` carries the membership of datasets that already
+        exist (cached shadow models). The greedy pass continues from those counts
+        instead of restarting at zero, so the union of cached and newly generated
+        datasets keeps the within-1 property. Without it, a run that resumes after
+        a crash produces a second, independent balanced design whose union with the
+        cached one is only balanced within 2.
 
         Args:
         ----
             m (int): The number of data points.
-            n (int): The number of datasets (must be even).
+            n (int): The number of datasets to generate.
+            points_per_model (int, optional): Number of points per dataset. Defaults to m // 2.
             seed (int, optional): Random seed for reproducibility. Defaults to None.
+            prior_inclusion_counts (np.ndarray, optional): Length-m counts of how many
+                already-existing datasets contain each point. Defaults to all zeros.
 
         Returns:
         -------
             A (np.ndarray): binary matrix of shape (n, m) where A[i,j] = 1 if data point j is in dataset i.
 
         """
-        assert n % 2 == 0, "n must be even"
         if seed is not None:
             np.random.seed(seed)
 
-        A = np.zeros((n, m), dtype=np.uint8)  # noqa: N806
-        all_indices = np.arange(m)
+        if points_per_model is None:
+            points_per_model = m // 2
+        if not 0 < points_per_model <= m:
+            raise ValueError(f"points_per_model must be in [1, {m}], got {points_per_model}")
 
-        for i in range(0, n, 2):
-            permuted = np.random.permutation(all_indices)
-            half = m // 2
-            A[i, permuted[:half]] = 1       # First half to dataset i
-            A[i+1, permuted[half:]] = 1     # Second half to dataset i+1
+        if prior_inclusion_counts is None:
+            inclusion_counts = np.zeros(m, dtype=np.int64)
+        else:
+            inclusion_counts = np.asarray(prior_inclusion_counts, dtype=np.int64)
+            if inclusion_counts.shape != (m,):
+                raise ValueError(f"prior_inclusion_counts must have shape ({m},), got {inclusion_counts.shape}")
+            inclusion_counts = inclusion_counts.copy()
+
+        A = np.zeros((n, m), dtype=np.uint8)  # noqa: N806
+
+        # Greedy least-loaded assignment: each dataset takes the points that are
+        # currently members of the fewest datasets (random tie-breaking), which
+        # keeps the per-point inclusion counts within 1 of each other.
+        for i in range(n):
+            tie_breaker = np.random.permutation(m)
+            order = np.lexsort((tie_breaker, inclusion_counts))
+            chosen = order[:points_per_model]
+            A[i, chosen] = 1
+            inclusion_counts[chosen] += 1
 
         return A
 
 
-    def create_shadow_models(
+    def create_shadow_models(  # noqa: PLR0915
         self:Self,
         num_models:int,
         shadow_population: list,
         training_fraction:float=0.1,
-        online:bool=False
+        sampling_method:str=None
     ) -> list[int]:
         """Create and train shadow models based on the blueprint.
 
@@ -135,27 +315,46 @@ class ShadowModelHandler(ModelHandler):
             num_models (int): The number of shadow models to create.
             shadow_population (list): The indices in population eligible for training the shadow models.
             training_fraction (float): The fraction of the shadow population to use for training of a shadow model.
-            online (bool): Whether the shadow models are created using an online or offline dataset.
+            sampling_method (str): Method for sampling training data. Options:
+                - "balanced": Each data point appears in exactly half the shadow models.
+                - "random": Random sampling, can be overridden by handler for custom behavior.
+                If None, reads from config (shadow_model.sampling_method), defaulting to "balanced".
 
         Returns:
         -------
-            None
+            list[int]: Indices of the shadow models (existing + newly created).
 
         """
         if num_models < 0:
             raise ValueError("Number of models cannot be negative")
 
+        # Get sampling_method from config if not explicitly provided
+        if sampling_method is None:
+            shadow_config = getattr(self.handler.configs, "shadow_model", None)
+            method = getattr(shadow_config, "sampling_method", None) if shadow_config is not None else None
+            sampling_method = method if isinstance(method, str) else "balanced"
+
+        if sampling_method not in ("balanced", "random"):
+            raise ValueError(f"Invalid sampling_method: {sampling_method}. Must be 'balanced' or 'random'.")
+
+        logger.info(f"Using '{sampling_method}' sampling method for shadow model training data")
+
         # Get the size of the dataset
         data_size = int(len(shadow_population)*training_fraction)
+
+        self._validate_training_size(data_size, len(shadow_population), training_fraction)
+
         all_indices, filtered_indices = self._filter(data_size)
 
         # Create a list of indices to use for the new shadow models
         n_existing_models = len(filtered_indices)
 
         if n_existing_models >= num_models:
-            logger.info("Number of existing models exceeds or equals the number of models to create")
+            logger.info(f"Reusing {num_models} cached shadow model(s) — population_hash and training signature match")
             # sort the filtered indices
             return np.sort(filtered_indices)[:num_models]
+
+        logger.info(f"Reusing {n_existing_models} cached shadow model(s), training {num_models - n_existing_models} new one(s)")
 
         indices_to_use = []
         next_index = max(all_indices) + 1 if all_indices else 0
@@ -163,51 +362,29 @@ class ShadowModelHandler(ModelHandler):
             indices_to_use.append(next_index)
             next_index += 1
 
-        # Get sampling strategy from audit config
-        sampling_strategy = "independent"  # default
-        if hasattr(self.handler.configs.audit, 'sampling_strategy') and self.handler.configs.audit.sampling_strategy is not None:
-            sampling_strategy = self.handler.configs.audit.sampling_strategy
-
-        # Validate sampling strategy
-        if sampling_strategy not in ["independent", "balanced"]:
-            raise ValueError(f"sampling_strategy must be 'independent' or 'balanced', got '{sampling_strategy}'")
-
-        logger.info(f"Using '{sampling_strategy}' sampling strategy for shadow models")
-
-        # Prepare population array and initialize buffer for balanced sampling
+        # Cached models already hold part of the design. Seed the greedy pass with their actual
+        # membership (read back from their metadata) so the union of cached and new models stays
+        # balanced; otherwise a resumed run draws a second independent design and the per-point
+        # IN/OUT counts drift apart.
         shadow_population = np.array(shadow_population)
-        if sampling_strategy == "balanced":
-            current_population = np.array([], dtype=int)
+        n_new_models = num_models - n_existing_models
+        prior_counts = self._cached_inclusion_counts(filtered_indices, shadow_population)
+
+        # data_size is also what the cache signature records, so the trained size
+        # must match it exactly or cached models are never reused (issue #345).
+        A = self.construct_balanced_assignments(len(shadow_population), n_new_models,  # noqa: N806
+                                                points_per_model=data_size,
+                                                prior_inclusion_counts=prior_counts)
+        if not np.all(np.sum(A, axis=1) == data_size):
+            raise ValueError("Balanced shadow assignments must contain data_size points per model")
 
         for i, indx in enumerate(indices_to_use):
-            # Sample data indices based on strategy
-            if sampling_strategy == "balanced":
-                # Structured shuffle-shift sampling: ensures balanced coverage
-                if data_size <= len(shadow_population)//2:
-                    # Standard mode: sample IN sets
-                    if len(current_population) < data_size:
-                        logger.info(f"Replenish buffer: {len(current_population)} < {data_size}")
-                        remaining_population = np.setdiff1d(shadow_population, current_population)
-                        np.random.shuffle(remaining_population)
-                        current_population = np.concatenate((current_population, remaining_population))
-                    data_indices = current_population[:data_size]
-                    current_population = current_population[data_size:]
-                else:
-                    # Complement mode: sample OUT sets (for training_fraction > 0.5)
-                    out_size = len(shadow_population) - data_size
-                    if len(current_population) < out_size:
-                        logger.info(f"Replenish buffer: {len(current_population)} < {out_size}")
-                        remaining_population = np.setdiff1d(shadow_population, current_population)
-                        np.random.shuffle(remaining_population)
-                        current_population = np.concatenate((current_population, remaining_population))
-                    data_indices = np.setdiff1d(shadow_population, current_population[:out_size])
-                    current_population = current_population[out_size:]
-            else:  # sampling_strategy == "independent"
-                # Independent random sampling: each model samples independently
-                data_indices = np.random.choice(shadow_population, data_size, replace=False)
-
-            # Get dataloader
-            data_loader = self.handler.get_dataloader(data_indices, params=None)
+            # Get dataloader based on sampling method
+            if sampling_method == "balanced":
+                data_indices = shadow_population[np.where(A[i,:] == 1)]
+            else:  # random sampling (can be overridden by handler)
+                data_indices = self.handler.sample_shadow_indices(shadow_population.tolist(), training_fraction)
+            data_loader = self.handler.get_dataloader(data_indices, params=None, batch_size=self.batch_size)
 
             # Get shadow model blueprint
             model, criterion, optimizer = self._get_model_criterion_optimizer()
@@ -217,7 +394,8 @@ class ShadowModelHandler(ModelHandler):
             training_results = self.handler.train(data_loader, model, criterion, optimizer, self.epochs)
 
             # Read out results
-            assert isinstance(training_results, TrainingOutput)
+            if not isinstance(training_results, TrainingOutput):
+                raise TypeError("Shadow model training must return TrainingOutput")
             shadow_model = training_results.model
 
             # Evaluate shadow model on remaining aux data
@@ -227,9 +405,7 @@ class ShadowModelHandler(ModelHandler):
             test_result = self.handler.eval(test_loader, shadow_model, criterion)
 
             logger.info(f"Training shadow model {indx} complete")
-            shadow_model_state_dict = shadow_model.state_dict()
-            cleaned_state_dict = {key.replace("_module.", "").replace("module.", ""): value
-                    for key, value in shadow_model_state_dict.items()}
+            cleaned_state_dict = unwrapped_state_dict(shadow_model)
 
             with open(f"{self.storage_path}/{self.model_storage_name}_{indx}.pkl", "wb") as f:
                 save(cleaned_state_dict, f)
@@ -240,24 +416,34 @@ class ShadowModelHandler(ModelHandler):
                 init_params=self.init_params,
                 train_indices = data_indices,
                 num_train = len(data_indices),
-                optimizer = optimizer.__class__.__name__,
-                criterion = criterion.__class__.__name__,
+                optimizer = self.optimizer_name,
+                optimizer_params = self.optimizer_config,
+                criterion = self.criterion_name,
+                criterion_params = self.loss_config,
                 epochs = self.epochs,
+                batch_size = self.batch_size,
                 train_result = training_results.metrics,
                 test_result = test_result,
-                online = online,
                 model_class = self.model_class,
-                target_model_hash= self.target_model_hash
+                model_module_path = self.model_path,
+                target_model_hash= self.target_model_hash,
+                population_hash = self.population_hash
             )
 
-            ShadowModelHandler().cache_logits(PytorchModel(shadow_model, criterion), name=f"sm_{indx}")
-
-            logger.debug(f"Metadata for shadow model {indx}:\n{meta_data}") # large debug dump
+            ShadowModelHandler().cache_logits(PytorchModel(shadow_model, criterion), name=f"sm_{indx}_{self.population_hash}")
 
             with open(f"{self.storage_path}/{self.metadata_storage_name}_{indx}.pkl", "wb") as f:
                 pickle.dump(meta_data, f)
 
+            meta_dic = meta_data.model_dump()
+            filtered_meta_data = {
+                    k: v for k, v in meta_dic.items()
+                    if k != "train_indices"
+            }
+
+            logger.info(f"Metadata for shadow model {indx}: {filtered_meta_data}")
             logger.info(f"Metadata for shadow model {indx} stored in {self.storage_path}")
+
         return filtered_indices + indices_to_use
 
     def _load_shadow_model(self:Self, index:int) -> Module:
@@ -322,20 +508,26 @@ class ShadowModelHandler(ModelHandler):
         return metadata
 
     def load_logits(self:Self, name:str=None, indx:int=None) -> np.ndarray:
-        """Load model logits."""
-
+        """Load model logits, realigning rows to current index order if needed."""
         if name is None and indx is not None:
-            name = f"sm_{indx}"
+            name = f"sm_{indx}_{self.population_hash}"
 
-        # check if the name is already in the cache
-        cache_file = f"{self.attack_cache_folder_path}/{name}_logits.npy"
-        if not os.path.exists(cache_file):
-            logger.info(f"Logits not cached at {cache_file}, caching now")
+        logits = super().load_logits(name)
+        if logits is not None:
+            return logits
+
+        # Cache miss — recompute.
+        logger.info(f"Cache miss for logits '{name}' — recomputing")
+        if indx is not None:
             self.cache_logits(self._load_shadow_model(indx), name=name)
+        else:
+            # Target model logits: re-cache using target model.
+            criterion = self.handler.get_criterion()
+            self.cache_logits(PytorchModel(self.handler.target_model, criterion), name=name)
 
-        # load the logits
-        logits = np.load(cache_file)
-        logger.info(f"Loaded logits from {cache_file}")
+        logits = super().load_logits(name)
+        if logits is None:
+            raise RuntimeError(f"Logits for '{name}' could not be loaded after recomputation.")
         return logits
 
     def get_in_indices_mask(self:Self, shadow_model_indices:list[int], dataset_indices:np.ndarray) -> np.ndarray:
@@ -360,7 +552,10 @@ class ShadowModelHandler(ModelHandler):
         # Convert to numpy array for easier manipulation
         models_in_indices = np.asarray(models_in_indices)
 
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Index membership lookup only; kept on CPU for HPU specifically, since its graph
+        # compiler cannot compile the jit-scripted torch.isin call below. CUDA has no such
+        # restriction, so it keeps using get_device() rather than being pinned to CPU too.
+        device = torch.device("cpu") if get_device().type == "hpu" else get_device()
         model_indices_tensor = torch.from_numpy(models_in_indices).to(device=device)
         dataset_tensor = torch.from_numpy(dataset_indices).to(device=device)
         indice_masks_tensor = torch.zeros((len(dataset_indices), len(models_in_indices)), dtype=torch.bool, device=device)
@@ -386,3 +581,36 @@ def _torch_indice_in_shadowmodel_training_set(in_tensor:Tensor, dataset:Tensor, 
     for i in range(in_tensor.shape[1]):
         in_tensor[:, i] = torch.isin(dataset, model_indices[i, :])
     return in_tensor
+
+
+def audit_points_with_reference_models(out_indices:np.ndarray, require_in_models:bool) -> np.ndarray:
+    """Select the audit points that have the shadow models a reference-based attack needs.
+
+    A per-point Gaussian or log-sum-exp reference statistic is undefined when a point has no
+    model on the relevant side: the mean of an empty slice is NaN, and the score derived from it
+    is NaN too. Which side is needed depends on the attack variant - offline scoring uses only the
+    OUT models, online scoring uses both.
+
+    Points can end up one-sided in two ways. Under ``sampling_method="random"`` the handler draws
+    each shadow model's training set independently, so a point can miss a side by chance. Under
+    balanced sampling the per-point membership counts stay within 1 of ``num_shadow_models *
+    training_data_fraction``, so a one-sided point means the fraction itself is too extreme for the
+    number of shadow models, and the count of dropped points will be large rather than incidental.
+
+    Args:
+    ----
+        out_indices (np.ndarray): Boolean matrix of shape (num_shadow_models, num_audit_points)
+            where entry (i, j) is True when shadow model i did NOT train on audit point j.
+        require_in_models (bool): Whether the attack also needs at least one IN model per point,
+            as online scoring does.
+
+    Returns:
+    -------
+        np.ndarray: Boolean mask of shape (num_audit_points,), True for points that can be scored.
+
+    """
+    has_out_model = np.any(out_indices, axis=0)
+    if not require_in_models:
+        return has_out_model
+    has_in_model = np.any(~out_indices, axis=0)
+    return has_out_model & has_in_model

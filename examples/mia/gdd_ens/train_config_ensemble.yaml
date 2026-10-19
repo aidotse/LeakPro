@@ -1,0 +1,30 @@
+##
+## Copyright 2023-2026 Lindholmen Science Park AB
+## SPDX-License-Identifier: Apache-2.0
+##
+## Config for the ENSEMBLE (real-model-style) audit: a self-trained 10-MLP GDD-ENS ensemble whose
+## member/non-member split reproduces the paper's deterministic split_data.py. See the README.
+## The target is always a freshly trained ensemble. Loading the released GDD-ENS weights is not an
+## option: they ship as a torch-1.4 whole-model pickle (fragile on a current torch).
+run:
+  random_seed: 1234
+  log_dir: ./target_ensemble   # Where the target ensemble + metadata are saved.
+
+train:
+  # Per-member epochs (paper recipe = 200). HEAVY: the target is 10 MLPs and each shadow is a 10-MLP
+  # ensemble, so total trainings = 10 x (1 + num_shadow_models) x epochs. Lower epochs +
+  # num_shadow_models (audit_ensemble.yaml) for a quick smoke run.
+  epochs: 200
+  batch_size: 32
+  # Nominal only — recorded in metadata but ignored by GddEnsembleModelHandler, which builds one
+  # Adam per member from the Table S6 learning_rate / weight_decay.
+  optimizer: Adam
+  learning_rate: 0.0001
+  weight_decay: 0.001
+
+data:
+  dataset: gdd_ens_ensemble
+  data_dir: ./data                        # Where the feature table + cached population live.
+  feature_table: msk_solid_heme_ft.csv    # User-provided GDD full feature table (see README).
+  # No f_train / f_test: membership is the reproduced deterministic GDD split (80/20, random_state=0),
+  # not a fresh random carve. members = 80% train split, non-members = 20% minus duplicate patients.

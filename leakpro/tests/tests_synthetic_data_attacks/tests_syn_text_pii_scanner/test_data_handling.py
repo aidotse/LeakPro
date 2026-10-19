@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Tests for syn_text_pii_scanner/data_handling module."""
 from typing import Any, Dict, List, Optional
 

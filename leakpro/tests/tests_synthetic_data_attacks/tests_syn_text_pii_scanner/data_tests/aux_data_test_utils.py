@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Auxiliary data for test_utils.py suite of tests."""
 import os
 from typing import Any, Dict, List

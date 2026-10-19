@@ -56,7 +56,7 @@ Our [example portfolio](https://github.com/aidotse/LeakPro/tree/readme/examples)
       <strong>Length-of-stay Prediction</strong><br>
       <img src="./resources/los.png" alt="LOS" style="width:150px; height:150px;">
       <br>
-      <a href="length-of-stay.md">length-of-stay.md</a>
+      <a href="examples/use-cases/length-of-stay.md">length-of-stay.md</a>
       <div style="text-align: left;">
         MIA: ✅<br>
         MInvA: ❌<br>
@@ -68,7 +68,7 @@ Our [example portfolio](https://github.com/aidotse/LeakPro/tree/readme/examples)
       <strong>Text Masking</strong><br>
       <img src="./resources/NER.png" alt="NER" style="width:150px; height:150px;">
       <br>
-      <a href="text-masking.md">text-masking.md</a>
+      <a href="examples/use-cases/text-masking.md">text-masking.md</a>
       <div style="text-align: left;">
         MIA: ✅<br>
         MInvA: ❌<br>
@@ -82,7 +82,7 @@ Our [example portfolio](https://github.com/aidotse/LeakPro/tree/readme/examples)
       <strong>Camera Surveillance</strong><br>
       <img src="./resources/surveillance.png" alt="Surveillance" style="width:150px; height:150px;">
       <br>
-      <a href="surveillance.md">surveillance.md</a>
+      <a href="examples/use-cases/surveillance.md">surveillance.md</a>
       <div style="text-align: left;">
         MIA: ✅<br>
         MInvA: ❌<br>
@@ -94,7 +94,7 @@ Our [example portfolio](https://github.com/aidotse/LeakPro/tree/readme/examples)
       <strong>Molecule Property Prediction</strong><br>
       <img src="./resources/graph.png" alt="Graph" style="width:150px; height:150px;">
       <br>
-      <a href="molecule-property.md">molecule-property.md</a>
+      <a href="examples/use-cases/molecule-property.md">molecule-property.md</a>
       <div style="text-align: left;">
         MIA: ✅<br>
         MInvA: ❌<br>
@@ -116,15 +116,95 @@ Our [example portfolio](https://github.com/aidotse/LeakPro/tree/readme/examples)
 1. **Navigate to the project repo**
 `cd Leakpro`
 2. **Install with pip**
-`pip install -e .[dev]`
+
+   **CPU / CUDA (default):**
+   ```bash
+   pip install -e .[dev]
+   ```
+
+   **Habana Gaudi (HPU):** the Habana plugin requires the **CPU upstream** build of
+   torch, not the default CUDA wheel that pip resolves from PyPI. Install torch
+   manually first so pip respects the already-installed version:
+
+   ```bash
+   # Step 1 — CPU upstream torch (Habana requires this exact build variant)
+   pip install torch==2.10.0 --index-url https://download.pytorch.org/whl/cpu
+
+   # Step 2 — LeakPro with HPU dev and runtime extras
+   pip install -e ".[hpu,dev-hpu]"
+
+   # Step 3 — remaining HPU runtime dependencies
+   python -m leakpro.utils.hardware_setup --install
+   ```
+
+   > **Why step 1 is required:** `habana_frameworks` checks the torch build variant
+   > at import time and raises an `AssertionError` if it finds a CUDA build
+   > (`2.10.0+cu128`). pip cannot be told to prefer the CPU wheel via
+   > `pyproject.toml`, so the wheel must be pre-installed before the extras are
+   > resolved.
+   >
+   > **`habana-torch-plugin`** itself must be pulled from Habana's own package
+   > index — it is not on PyPI. Follow the
+   > [Habana installation guide](https://docs.habana.ai/en/latest/Installation_Guide/index.html)
+   > before running the steps above.
+   >
+   > **HPU validation scope:** the device abstraction (`get_device()` / `mark_step()`)
+   > is wired through the MIA and MInvA attack families, including the LOS, CIFAR,
+   > celebA-HQ, celebA PLG-MI, and report-handler examples (and their webapp
+   > handler copies), and has been validated on physical Gaudi hardware in
+   > Habana's eager-mode default (the shipped default; lazy mode is not yet
+   > validated, tracked in #449). The time-series MIA example now uses the same
+   > device abstraction but has not yet been run on physical HPU hardware; the
+   > `ts2vec` signal has no HPU backend upstream and always falls back to CPU on
+   > non-CUDA hosts regardless of `LEAKPRO_DEVICE`. GIA remains **not** part of
+   > this PR's HPU support and stays CUDA/CPU-only.
+
+## How to run
+
+LeakPro runs privacy attacks against a **target model** that you have already trained. You provide the model, your dataset, and a small handler class — LeakPro takes care of the rest, including training shadow models, executing attacks, and producing a PDF report.
+
+A good starting point is the [CIFAR-10 example](https://github.com/aidotse/LeakPro/tree/main/examples/mia/cifar), which includes a ready-to-run notebook, a handler, and an [`audit.yaml`](https://github.com/aidotse/LeakPro/blob/main/examples/mia/cifar/audit.yaml). To run a different attack or tune parameters, edit the `attack_list` in `audit.yaml`:
+
+```yaml
+audit:
+  random_seed: 1234
+  attack_type: "mia"
+  data_modality: "image"
+  output_dir: "./leakpro_output"
+  attack_list:
+    - attack: lira
+      num_shadow_models: 4
+
+target:
+  module_path: "./target_model_class.py"
+  model_class: "MyModel"
+  target_folder: "./target"
+  data_path: "./data/dataset.pkl"
+```
+
+For full documentation see the **[LeakPro Wiki](https://github.com/aidotse/LeakPro/wiki)**:
+- [Attack Modules overview](https://github.com/aidotse/LeakPro/wiki/Attack-Modules)
+- [Membership Inference Attacks — implemented attacks & papers](https://github.com/aidotse/LeakPro/wiki/Membership-Inference-Attacks)
+- [Running MIA Attacks — audit.yaml config reference for all MIA attacks](https://github.com/aidotse/LeakPro/wiki/Running-MIA-Attacks)
 
 ## To Contribute
+
+### External contributors
+1. **Fork the repository** by clicking "Fork" on the GitHub page
+2. **Clone your fork, create a branch, and make your changes:**
+`git clone https://github.com/<your-username>/LeakPro.git`
+`git checkout -b my-feature-branch`
+3. **Push to your fork:**
+`git push origin my-feature-branch`
+4. **Open a Pull Request** from your fork to `aidotse/LeakPro:main` and request a review — a maintainer will review and merge it
+
+### Core team
 0. **Ensure local repo is up-to-date:**
 `git fetch origin`
 2. **Create feature branch**
  `git checkout -b my-feature-branch`
 3. **Make changes and commit:**
-`git add . ` 
+`git add . `
 `git commit -m "Added new feature" `
 4. **Ensure the local main is up to date:**
 `git checkout main`
@@ -133,9 +213,8 @@ Our [example portfolio](https://github.com/aidotse/LeakPro/tree/readme/examples)
 `git checkout my-feature-branch`
 `git merge main`
 6. **Resolve conflicts, add and commit.**
-7. **Push your update to the remore repository**
+7. **Push your branch and open a Pull Request — PRs require at least one approval from another team member before merging**
 `git push origin my-feature-branch`
-8. **Open pull request**
 
 
 ## Research Outputs  
@@ -144,6 +223,9 @@ LeakPro has contributed to the research community by enabling empirical studies 
 - [Krüger et al., *Publishing Neural Networks in Drug Discovery Might Compromise Training Data Privacy*, J. Cheminf, 2025](https://arxiv.org/abs/2410.16975)  
 - [Brännvall et al., *Targeted Obfuscation for Machine Learning*, arXiv, 2024](https://arxiv.org/abs/2501.11525)
 - [Reimer A., *Privacy Risks in Text Masking Models for Anonymization*, MSc Thesis, Chalmers University of Technology, 2025](https://odr.chalmers.se/server/api/core/bitstreams/3c2efd19-5440-43f7-a25f-051313f99c60/content)
+- [Lassila et al., *Practical Bayes-Optimal Membership Inference Attacks*, NeurIPS, 2025](https://neurips.cc/virtual/2025/loc/san-diego/poster/118144)
+- [Valadi et al., *From Research to Reality: Feasibility of Gradient Inversion Attacks in Federated Learning*, arXiv, 2025](https://arxiv.org/abs/2508.19819v2)
+- [Johansson et al., *Privacy Risks in Time Series Forecasting: User-and Record-Level Membership Inference*, arXiv, 2025](https://arxiv.org/abs/2509.04169)
 
 ## Credits
 LeakPro draws inspiration from other works including
@@ -151,4 +233,21 @@ LeakPro draws inspiration from other works including
 - [Giomi, M. et al., *A Unified Framework for Quantifying Privacy Risk in Synthetic Data, arXiv, 2022*](https://github.com/statice/anonymeter)
 
 ## Funding  
-LeakPro is funded by Sweden's innovation agency, Vinnova, under grant 2023-03000. The project is a collaboration between AI Sweden, RISE, Scaleout AB, Syndata AB, AstraZeneca AB, Sahlgrenska University Hopsital, and Region Halland, with the goal of advancing privacy-preserving machine learning and responsible AI deployment.  
+LeakPro is funded by Sweden's innovation agency, Vinnova, under grant 2023-03000. The project is a collaboration between AI Sweden, RISE, Scaleout AB, Syndata AB, AstraZeneca AB, Sahlgrenska University Hopsital, and Region Halland, with the goal of advancing privacy-preserving machine learning and responsible AI deployment.
+
+## License
+
+This project is licensed under the **Apache License 2.0**. 
+
+Copyright 2023-2026 **Lindholmen Science Park AB**.
+
+For full legal texts and attributions, please refer to the [LICENSE](LICENSE) and [NOTICE](NOTICE) files.
+
+## Attributions
+
+### Images
+* [Hospital icons created by Freepik - Flaticon](https://www.flaticon.com/free-icons/hospital)
+* [Hospital bed icons created by vectorsmarket15 - Flaticon](https://www.flaticon.com/free-icons/hospital-bed)
+* [Document icons created by Freepik - Flaticon](https://www.flaticon.com/free-icons/document)
+* [Camera icons created by dreamicons - Flaticon](https://www.flaticon.com/free-icons/camera)
+* [Molecule icons created by Freepik - Flaticon](https://www.flaticon.com/free-icons/molecule)

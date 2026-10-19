@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Module that contains the abstract class for constructing and performing a model inversion attack on a target."""
 
 from abc import ABC, abstractmethod

@@ -3,9 +3,10 @@
 name = "leakpro"
 version = "0.1.0"
 description = "A package for privacy risk analysis"
-authors = [{name = "LeakPro team", email = "johan.ostman@ai.se"}]
+authors = [{name = "LeakPro team", email = "fazeleh.hoseini@ai.se"}]
 readme = "README.md"
-license = {file="LICENSE"}
+# The full license text is located in the LICENSE file in the root directory
+license = "Apache-2.0"
 requires-python = '>=3.8,<3.13'
 
 dependencies = [
@@ -20,35 +21,66 @@ dependencies = [
   "joblib",
   "pyyaml",
   "scikit-learn",
+  "threadpoolctl",
   "pydantic",
   "ts2vec",
   "umap-learn"
 ]
 
 [project.optional-dependencies]
-mia = ["torch", "torchvision", "optuna"]
+mia = ["torch", "torchvision", "optuna", "opacus", "mne", "pytorch-tcn"]
 synthetic = ["numba", "pydantic", "transformers", "sentence-transformers"]
 federated = ["torch", "torchvision", "torchmetrics", "pytorch-ignite", "optuna", "albumentations"]
-minv = ["torch", "torchvision", "optuna", "kornia"]
-
+minv = ["torch", "torchvision", "optuna", "kornia", "blobfile", "lpips", "robustness", "mpi4py"]
+# LLM membership-inference attacks (leakpro/attacks/mia_attacks/llm). The attacks themselves
+# only need torch; the extras are for the example that fine-tunes and loads HuggingFace models.
+llm = ["torch", "transformers", "datasets", "accelerate", "peft"]
+# Habana Gaudi (HPU) extras. `habana-torch-plugin` itself must be pulled from
+# Habana's index (see docs.habana.ai); we list `lightning-habana` here as it
+# resolves cleanly from PyPI. Run `python -m leakpro.utils.hardware_setup
+# --install` after installing the Habana SDK to pull these in.
+hpu = ["lightning-habana"]
+webapp = ["fastapi", "uvicorn[standard]", "python-multipart", "httpx", "pyarrow"]
 dev = [
   "pytest",
   "pytest-cov",
   "pytest-mock",
   "coverage-badge",
   "ruff",
-  "torch >= 2.6.0",  # from mia & federated
-  "torchvision",  # from mia & federated
-  "torchmetrics",  # from federated
-  "numba",  # from synthetic
-  "transformers",  # from synthetic
+  "torch>=2.6.0",    # from mia & federated
+  "torchvision",     # matches torch series chosen by the resolver
+  "torchmetrics",    # from federated
+  "numba",           # from synthetic
+  "transformers",    # from synthetic
   "sentence-transformers",  # from synthetic
-  "pytorch-ignite", # from federated
-  "optuna", # federated and mia
-  "kornia", # from minv
-  "albumentations", # federated example
-  "transformers", # federated example
+  "pytorch-ignite",  # from federated
+  "optuna",          # federated and mia
+  "kornia",          # from minv
+  "blobfile",        # from minv
+  "lpips",           # from minv
+  "robustness",      # from minv
+  "mpi4py",          # from minv
+  "opacus",          # from mia
+  "albumentations",  # federated example
+  "ipywidgets",      # notebook progress bars for examples
+  "requests",
+  "pip-licenses",
+  "licenseheaders",
 ]
+
+# Habana Gaudi development extras. Pins torch to the 2.10.x series because
+# habana-torch-plugin 1.24.0.1007 hard-asserts torch's major.minor at runtime.
+# Bump these pins only when the Habana plugin is updated to match.
+dev-hpu = [
+  "leakpro[dev]",
+  "torch>=2.10,<2.11",
+  "torchvision>=0.25,<0.26",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/aidotse/LeakPro"
+"Bug Tracker" = "https://github.com/aidotse/LeakPro/issues"
+"License" = "https://github.com/aidotse/LeakPro/blob/main/LICENSE"
 
 [tool.setuptools]
 include-package-data = true
@@ -71,6 +103,7 @@ exclude = [
   "./tests",
   "./leakpro/tests",
   "./examples",
+  "./leakpro/webapp",
 ]
 
 lint.ignore = [

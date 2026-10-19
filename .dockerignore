@@ -1,0 +1,39 @@
+# The webapp image is built from the repo root (see leakpro/webapp/Dockerfile.backend).
+# Without this file, `COPY . .` bakes real audit data and git history into every
+# image layer — including anything pushed to a registry.
+
+# Version control
+.git
+.gitignore
+
+# Real job data, uploaded datasets and trained models
+webapp_jobs/
+webapp_*_files/
+leakpro_output/
+leakpro_outpu*/
+
+# Local environments and caches
+.venv/
+venv/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# Node
+**/node_modules/
+**/dist/
+**/.vite/
+
+# Notebooks and scratch files
+.ipynb_checkpoints/
+*.swp
+*.swo
+*~
+
+# Local configuration
+.env
+.env.*
+CLAUDE.local.md

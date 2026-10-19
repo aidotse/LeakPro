@@ -93,7 +93,7 @@ def main_linkability_attack(
     targets = ori.sample(n_attacks, replace=False)
     idx_0 = mixed_type_n_neighbors(queries=targets[aux_cols[0]], candidates=syn[aux_cols[0]], n_neighbors=n_neighbors, n_jobs=n_jobs) # noqa: E501
     idx_1 = mixed_type_n_neighbors(queries=targets[aux_cols[1]], candidates=syn[aux_cols[1]], n_neighbors=n_neighbors, n_jobs=n_jobs) # noqa: E501
-    return LinkabilityIndexes(idx_0=idx_0, idx_1=idx_1).find_links()
+    return LinkabilityIndexes(idx_0=idx_0, idx_1=idx_1).find_links(n_neighbors=n_neighbors)
 
 def random_links(*, n_synthetic: int, n_attacks: int, n_neighbors: int) -> npt.NDArray:
     """Auxiliary function for naive_linkability_attack.
@@ -113,7 +113,7 @@ def naive_linkability_attack(*, n_synthetic: int, n_attacks: int, n_neighbors: i
     """
     idx_0 = random_links(n_synthetic=n_synthetic, n_attacks=n_attacks, n_neighbors=n_neighbors)
     idx_1 = random_links(n_synthetic=n_synthetic, n_attacks=n_attacks, n_neighbors=n_neighbors)
-    return LinkabilityIndexes(idx_0=idx_0, idx_1=idx_1).find_links()
+    return LinkabilityIndexes(idx_0=idx_0, idx_1=idx_1).find_links(n_neighbors=n_neighbors)
 
 class LinkabilityEvaluator(BaseModel):
     """Measure the linkability risk created by a synthetic dataset.

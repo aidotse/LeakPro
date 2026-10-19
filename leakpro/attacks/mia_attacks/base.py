@@ -1,15 +1,17 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Implementation of the BASE attack."""
 
 import numpy as np
 from pydantic import BaseModel, Field
-from scipy.special import (
-    log_softmax,
-    logsumexp,
-)
+from scipy.special import logsumexp
 from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
+from leakpro.attacks.utils.utils import softmax_logits
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.reporting.mia_result import MIAResult
 from leakpro.signals.signal import ModelLogits
@@ -22,7 +24,7 @@ class BASEConfig(BaseModel):
 
     num_shadow_models: int = Field(default=1, ge=1, description="Number of shadow models")
     temperature: float = Field(default=2.0, ge=0.0, description="Softmax temperature")
-    training_data_fraction: float = Field(default=0.5, ge=0.0, le=1.0, description="Part of available attack data to use for shadow models")  # noqa: E501
+    training_data_fraction: float = Field(default=0.5, gt=0.0, lt=1.0, description="Part of available attack data to use for shadow models. Must be < 1: at 1 every shadow model trains on every point, leaving no OUT reference models.")  # noqa: E501
     online: bool = Field(default=False, description="Online vs offline attack")
     offline_scale_factor: float = Field(default=0.33,
                                         description="Rescale the LogSumExp threshold to compensate for the lack of in-models",
@@ -80,6 +82,19 @@ class AttackBASE(AbstractMIA):
             "detailed": detailed_str,
         }
 
+    def _log_conf(self:Self, logits: np.ndarray, ground_truth_indices: np.ndarray) -> np.ndarray:
+        """Log-confidence of the correct class, for either multi-class or single-logit (binary) logits.
+
+        Raw logits can't be fed straight into scipy's log_softmax when the model has a single
+        output unit (binary classification): log_softmax over one column is always 0, and indexing
+        with a ground-truth label of 1 raises an IndexError. softmax_logits() already knows how to
+        expand a single logit into [1-p, p] via sigmoid before applying temperature scaling, so we
+        reuse it here (same helper RMIA uses) and take the log ourselves.
+        """
+        n_points = logits.shape[0]
+        probs = softmax_logits(logits, self.temperature)
+        return np.log(probs + self.epsilon)[np.arange(n_points), ground_truth_indices]
+
     def prepare_attack(self:Self) -> None:
         """Prepare data needed for running the attack on the target model and dataset.
 
@@ -97,11 +112,42 @@ class AttackBASE(AbstractMIA):
             num_models = self.num_shadow_models,
             shadow_population = self.attack_data_indices,
             training_fraction = self.training_data_fraction,
-            online = self.online)
+        )
         # load shadow models
         self.shadow_models, _ = ShadowModelHandler().get_shadow_models(self.shadow_model_indices)
         if self.online is False:
             self.out_indices = ~ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"]).T
+
+    def _check_out_models_available(self:Self, n_out_models:np.ndarray) -> None:
+        """Verify every scored point has at least one OUT shadow model.
+
+        The offline threshold is ``logsumexp(out_logits) - log(n_out_models)``, the log mean
+        confidence over the models that did not train on the point. That is well defined for any
+        positive number of OUT models, so the only real requirement is that the count is non-zero.
+
+        This replaces an assert that demanded exactly ``num_shadow_models // 2`` OUT models per
+        point. That encoded the old fixed half-and-half split and was wrong twice over: it rejected
+        every ``training_data_fraction`` other than 0.5, and it already failed for an odd
+        ``num_shadow_models`` at fraction 0.5, where the counts legitimately straddle the half.
+
+        Args:
+        ----
+            n_out_models (np.ndarray): Per-point count of shadow models that did not train on the point.
+
+        Raises:
+        ------
+            ValueError: If any scored point has no OUT shadow model.
+
+        """
+        n_without = int(np.sum(n_out_models == 0))
+        if n_without > 0:
+            raise ValueError(
+                f"Offline BASE needs at least one OUT shadow model per audit point, but {n_without} of "
+                f"{n_out_models.size} points are in every shadow model. With num_shadow_models="
+                f"{self.num_shadow_models} and training_data_fraction={self.training_data_fraction}, "
+                f"each point is expected in about {self.num_shadow_models * self.training_data_fraction:.1f} "
+                "model(s). Move the fraction towards 0.5, or raise num_shadow_models."
+            )
 
     def score_samples(self:Self, dataloader:list, audit_indices:list) -> np.ndarray:
         """Score samples in the dataloader.
@@ -120,25 +166,22 @@ class AttackBASE(AbstractMIA):
         ground_truth_indices = dataloader.dataset.targets.numpy()
         assert n_points == len(ground_truth_indices), "Number of points and labels must be the same"
         logger.info(f"Scoring {n_points} points with BASE attack")
-        logits_target = np.array(ModelLogits()([self.target_model], None, None, dataloader)).squeeze()
-        log_conf_target = log_softmax(logits_target / self.temperature, axis=-1)[np.arange(n_points), ground_truth_indices]
+        logits_target = np.array(ModelLogits()([self.target_model], None, None, dataloader)).squeeze(axis=0)
+        log_conf_target = self._log_conf(logits_target, ground_truth_indices)
         # run points through shadow models and collect the log confidence values
         logits_sm = []
         for m in tqdm(self.shadow_models, desc="Scoring with shadow models"):
-            logits_sm.append( np.array(ModelLogits()([m], self.handler, None, dataloader)).squeeze() )
-        log_conf_shadow_models = np.array([log_softmax(x / self.temperature, axis=-1)[np.arange(n_points), ground_truth_indices] for x in logits_sm])  # noqa: E501
+            logits_sm.append( np.array(ModelLogits()([m], self.handler, None, dataloader)).squeeze(axis=0) )
+        log_conf_shadow_models = np.array([self._log_conf(x, ground_truth_indices) for x in logits_sm])
 
         if self.online is True:
             threshold = logsumexp(log_conf_shadow_models, axis=0) - np.log(self.num_shadow_models)
         else:
-            # ensure that each point has been trained on by half of the shadow models
-            n_out_models = np.sum(self.out_indices, axis=0)
-            assert np.all(n_out_models == self.num_shadow_models//2), "Number of OUT models is wrong"
-
             # get what shadow models have seen the audit indices
             index_map = np.array([np.where(self.audit_dataset["data"] == val)[0][0] for val in audit_indices])
             out_indices_audit = self.out_indices[:, index_map]
             n_out_models = np.sum(out_indices_audit, axis=0)
+            self._check_out_models_available(n_out_models)
             # make the "in-model" logits -inf so they are not included in the logsumexp
             out_logits = np.where(out_indices_audit, log_conf_shadow_models, -np.inf)
             threshold = logsumexp(out_logits, axis=0) - np.log(n_out_models)
@@ -162,23 +205,22 @@ class AttackBASE(AbstractMIA):
 
         # Load the logits for the target model and shadow models
         ground_truth_indices = self.handler.get_labels(self.audit_dataset["data"])
-        n_audit_points = len(self.audit_dataset["data"])
-        logits_target = ShadowModelHandler().load_logits(name="target")
+        logits_target = ShadowModelHandler().load_logits(name=f"target_{ShadowModelHandler().target_model_hash}")
         logits_shadow_models = []
         for indx in self.shadow_model_indices:
             logits_shadow_models.append(ShadowModelHandler().load_logits(indx=indx))
 
         # collect the log confidence output of the correct class (which is the negative cross-entropy loss)
-        log_conf_target = log_softmax(logits_target / self.temperature, axis=-1)[np.arange(n_audit_points),ground_truth_indices]
+        log_conf_target = self._log_conf(logits_target, ground_truth_indices)
 
         # run points through shadow models and collect the log confidence values
-        log_conf_shadow_models = np.array([log_softmax(x / self.temperature, axis=-1)[np.arange(n_audit_points),ground_truth_indices] for x in logits_shadow_models])  # noqa: E501
+        log_conf_shadow_models = np.array([self._log_conf(x, ground_truth_indices) for x in logits_shadow_models])
 
         if self.online is True:
             threshold = logsumexp(log_conf_shadow_models, axis=0) - np.log(self.num_shadow_models)
         else:
             n_out_models = np.sum(self.out_indices, axis=0)
-            assert np.all(n_out_models == self.num_shadow_models//2), "Number of OUT models is wrong"
+            self._check_out_models_available(n_out_models)
 
             out_logits = np.where(self.out_indices, log_conf_shadow_models, -np.inf)
             threshold = logsumexp(out_logits, axis=0) - np.log(n_out_models)
@@ -199,54 +241,5 @@ class AttackBASE(AbstractMIA):
         return MIAResult.from_full_scores(true_membership=true_labels,
                                     signal_values=signal_values,
                                     result_name="BASE",
-                                    metadata=self.configs.model_dump())
-
-#----------------------------------
-# Free-standing BASE implementation
-#----------------------------------
-
-def base_practical(log_conf_target: np.ndarray, log_conf_shadow: np.ndarray, shadow_inmasks: np.ndarray = None, 
-                     online: bool = True, offline_scale_factor: float = 0.33, verbose: bool = False) -> np.ndarray:
-    """
-    This function compute BASE membership inference scores proposed by 
-    Lassila, Marcus, Johan Östman, and Khac-Hoang Ngo. 
-    Practical Bayes-Optimal Membership Inference Attacks. 
-    arXiv preprint arXiv:2505.24089 (2025).
-
-    Parameters
-    ----------
-    log_conf_target : np.ndarray
-        Array of shape (N,), for N = n_samples, of ground truth label log confidence for the target model.
-    log_conf_shadow : np.ndarray
-        Array of shape (N, M), for M = num_shadow_models, containing GTL log conf for the shadow models.
-    shadow_inmask: np.ndarray, default None (for offline case)
-        Boolean array of shape (N, M) indicating which shadow models
-        correspond to IN (training) samples (for online).
-    online : bool, default False
-        Whether to compute online BASE scores or offline scores.
-    offline_scale_factor : float, default 0.33
-        The scale factor used for the offline BASE attack.
-
-    Returns
-    -------
-    np.ndarray
-        Array of shape (n_samples,) containing the BASE scores for each audit sample.
-    """
-
-    num_shadow_models = log_conf_shadow.shape[1]
-
-    if online is True:
-        threshold = logsumexp(log_conf_shadow, axis=1) - np.log(num_shadow_models)
-        if verbose: print("threshold",threshold.shape)
-        return log_conf_target.ravel() - threshold
-        
-    else:
-        # ensure that each point has been trained on by half of the shadow models # RB Why?
-        out_indices = ~shadow_inmasks
-        n_out_models = np.sum(out_indices, axis=1)
-        assert np.all(n_out_models == num_shadow_models//2), "Number of OUT models is wrong" 
-
-        out_logits = np.where(out_indices, log_conf_shadow, -np.inf)
-        threshold = logsumexp(out_logits, axis=1) - np.log(n_out_models)
-
-        return log_conf_target.ravel() - offline_scale_factor * threshold
+                                    metadata=self.configs.model_dump(),
+                                    audit_indices=self.scored_population_indices())

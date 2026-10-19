@@ -1,6 +1,11 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Parent class for user inputs."""
 
 import inspect
+import pickle
 import types
 
 import joblib
@@ -17,10 +22,75 @@ from leakpro.utils.import_helper import Any, Self, Tuple
 from leakpro.utils.logger import logger
 
 
+class _DatasetStub:
+    """Placeholder for dataset classes that cannot be resolved during unpickling."""
+
+    def __len__(self) -> int:
+        d = object.__getattribute__(self, "__dict__")
+        for k in ("data", "x", "X", "targets", "y", "Y"):
+            if k in d:
+                return len(d[k])
+        return 0
+
+    def __getitem__(self, idx: int) -> tuple:
+        d = object.__getattribute__(self, "__dict__")
+        data = d.get("data", d.get("x", d.get("X")))
+        targets = d.get("targets", d.get("y", d.get("Y")))
+        return (data[idx] if data is not None else None,
+                targets[idx] if targets is not None else None)
+
+
+class _SafeUnpickler(pickle.Unpickler):
+    """Unpickler that stubs unknown classes instead of raising ImportError."""
+
+    def find_class(self, module: str, name: str) -> type:
+        try:
+            return super().find_class(module, name)
+        except (ImportError, AttributeError):
+            return type(name, (_DatasetStub,), {"__qualname__": name})
+
+
+def load_dataset_file(path: str) -> Any:  # noqa: ANN401 - arbitrary user dataset object
+    """Load a dataset object from disk: joblib first, then a pickle that stubs missing classes.
+
+    joblib is tried first because it reads both plain pickles and joblib's own
+    format (which embeds NumPy arrays and is not plain-pickle readable). If both
+    loaders fail, the joblib error is chained so the real cause is visible instead
+    of the fallback's generic "invalid load key".
+    """
+    with open(path, "rb") as file:
+        try:
+            return joblib.load(file)
+        except Exception as joblib_error:
+            file.seek(0)
+            try:
+                obj = _SafeUnpickler(file).load()
+            except Exception as pickle_error:
+                raise RuntimeError(
+                    f"Could not load dataset file '{path}': joblib failed with {joblib_error!r}; "
+                    f"pickle fallback failed with {pickle_error!r}"
+                ) from joblib_error
+            logger.info("Loaded dataset via safe unpickler (missing module stub)")
+            return obj
+
+
+def _fix_bn_inplace(model: torch.nn.Module) -> None:
+    """Replace BatchNorm layers with GroupNorm in-place (no clone/pickle needed)."""
+    for name, module in list(model.named_children()):
+        if isinstance(module, (torch.nn.BatchNorm1d, torch.nn.BatchNorm2d, torch.nn.BatchNorm3d)):
+            num_groups = min(32, module.num_features)
+            gn = torch.nn.GroupNorm(num_groups, module.num_features,
+                                    eps=module.eps, affine=module.affine)
+            setattr(model, name, gn)
+        else:
+            _fix_bn_inplace(module)
+
+
 class MIAHandler:
     """Parent class for user inputs."""
 
-    def __init__(self:Self, configs: dict, user_input_handler:AbstractInputHandler) -> None:
+    def __init__(self:Self, configs: dict, user_input_handler:AbstractInputHandler,
+                 training_handler:AbstractInputHandler = None) -> None:
         self.configs = configs
         self._load_model_class()
         self._load_target_metadata()
@@ -29,28 +99,36 @@ class MIAHandler:
         self._load_criterion()
         self._load_dataloader_params()
 
-        # Attach methods to Handler explicitly defined in AbstractInputHandler from user_input_handler
+        # training_handler provides train() and eval(); falls back to user_input_handler
+        _training = training_handler if training_handler is not None else user_input_handler
+
+        # Attach methods defined in AbstractInputHandler from the training handler
         for name, _ in inspect.getmembers(AbstractInputHandler, predicate=inspect.isfunction):
-            if hasattr(user_input_handler, name) and not name.startswith("__"):
-                attr = getattr(user_input_handler, name)
+            if hasattr(_training, name) and not name.startswith("__"):
+                attr = getattr(_training, name)
                 if callable(attr):
-                    attr = types.MethodType(attr, self) # ensure to properly bind methods to handler
+                    attr = types.MethodType(attr, self)
                 setattr(self, name, attr)
 
-        # Save the Data-creation class to allow for creation of datasets with the same properties
+        # UserDataset always comes from the data handler (user_input_handler)
         self.UserDataset = user_input_handler.UserDataset
 
     def _load_population(self:Self) -> None:
         """Default implementation of the population loading."""
         try:
-            with open(self.configs.target.data_path, "rb") as file:
-
-                self.population = joblib.load(file)
+            self.population = load_dataset_file(self.configs.target.data_path)
+            try:
                 self.population_size = len(self.population)
-
-                if not self._is_indexable(self.population):
-                    raise ValueError("Population dataset is not indexable.")
-                logger.info(f"Loaded population dataset from {self.configs.target.data_path}")
+            except TypeError as e:
+                raise TypeError(
+                    f"The population file at '{self.configs.target.data_path}' is not compatible with the "
+                    f"current dataset handler. This usually means the .pkl was created with an older or "
+                    f"different handler class. Please regenerate the population file using your current "
+                    f"dataset_handler.py and re-upload it. Original error: {e}"
+                ) from e
+            if not self._is_indexable(self.population):
+                raise ValueError("Population dataset is not indexable.")
+            logger.info(f"Loaded population dataset from {self.configs.target.data_path}")
         except FileNotFoundError as e:
             raise FileNotFoundError(f"Could not find the population dataset at {self.configs.target.data_path}") from e
 
@@ -104,8 +182,16 @@ class MIAHandler:
         init_params = self.target_model_metadata.init_params
         try:
             with open(self.model_path, "rb") as f:
-                self.target_model = self.target_model_blueprint(**init_params)
-                self.target_model.load_state_dict(torch.load(f))
+                state_dict = torch.load(f)
+            self.target_model = self.target_model_blueprint(**init_params)
+            try:
+                self.target_model.load_state_dict(state_dict)
+            except RuntimeError:
+                # State dict may come from a DP-SGD run where BatchNorm was replaced by GroupNorm.
+                # Use in-place BN→GN replacement to avoid pickle-based clone in ModuleValidator.fix().
+                _fix_bn_inplace(self.target_model)
+                self.target_model.load_state_dict(state_dict)
+                logger.info("Applied BN→GN fix to match DP-SGD state dict")
             logger.info(f"Loaded target model from {model_path}")
         except FileNotFoundError as e:
             raise FileNotFoundError(f"Could not find the trained target model at {model_path}") from e
@@ -175,10 +261,20 @@ class MIAHandler:
         raise ValueError("Object is not indexable.")
 
     def get_dataset(self:Self, dataset_indices: np.ndarray, params:dict=None) -> np.ndarray:
-        """Get the dataset from the population."""
+        """Get the dataset from the population.
 
-        if params is None:
-            params = {}
+        Args:
+        ----
+            dataset_indices: Indices to select from the population.
+            params: Optional parameters for the UserDataset. If None, uses
+                    population's return_params() to preserve dataset-specific
+                    settings (e.g., scaler, lookback for time series).
+
+        Returns:
+        -------
+            A UserDataset instance with the selected data.
+
+        """
         if isinstance(dataset_indices, np.ndarray) is False:
             dataset_indices = np.array(dataset_indices, ndmin=1)
 
@@ -187,7 +283,11 @@ class MIAHandler:
         data = self.population.data[dataset_indices]
         targets = self.population.targets[dataset_indices]
 
-        params = {} if params is None else params
+        # Use population's params if none provided (preserves dataset-specific settings)
+        if params is None and hasattr(self.population, "return_params"):
+            params = self.population.return_params()
+        elif params is None:
+            params = {}
         return self.UserDataset(data, targets, **params)
 
     def get_dataloader(self: Self,
@@ -196,8 +296,6 @@ class MIAHandler:
                        batch_size:int=None,
                        shuffle:bool=None) -> DataLoader:
         """Default implementation of the dataloader."""
-        if params is None:
-            params = {}
         dataset = self.get_dataset(dataset_indices, params)
 
         # Get default parameters from stored config (includes batch size, collate_fn, shuffle etc.)
@@ -231,6 +329,9 @@ class MIAHandler:
         init_params = self.target_model_metadata.init_params
         try:
             model_replica = self.target_model_blueprint(**init_params)
+            # If the target model uses GroupNorm (DP-SGD trained), replicas must match
+            if any(isinstance(m, torch.nn.GroupNorm) for m in self.target_model.modules()):
+                _fix_bn_inplace(model_replica)
             return model_replica, self.get_criterion(), self.get_optimizer(model_replica)
         except Exception as e:
             raise ValueError("Failed to create an instance of the target model.") from e
@@ -259,12 +360,12 @@ class MIAHandler:
 
     def get_target_model_metadata(self:Self) -> dict:
         """Get the metadata of the target model."""
-        return self._target_model_metadata
+        return self.target_model_metadata
 
 
     def set_target_model_metadata(self:Self, metadata:dict) -> None:
         """Set the metadata of the target model."""
-        self._target_model_metadata = metadata
+        self.target_model_metadata = metadata
 
     def set_population_size(self:Self, size:int) -> None:
         """Set the size of the population."""
@@ -303,4 +404,12 @@ class MIAHandler:
         if optimizer_cls is None:
             raise ValueError(f"Optimizer {self.name} not found in torch.optim")
 
-        return optimizer_cls(model.parameters(), **optimizer_config.params)
+        # Get valid constructor argument names for given optimizer class
+        valid_args = set(inspect.signature(optimizer_cls.__init__).parameters)
+
+        # Filter params to only include valid ones
+        filtered_params = {
+            k: v for k, v in optimizer_config.params.items() if k in valid_args
+        }
+
+        return optimizer_cls(model.parameters(), **filtered_params)

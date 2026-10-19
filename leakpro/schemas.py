@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Module that contains the schema definitions for the input handler."""
 
 from typing import Annotated, Any, Callable, Dict, List, Literal, Optional, Union
@@ -6,6 +10,8 @@ import numpy as np
 import optuna
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from torch.nn import Module
+
+from leakpro.utils.seed import MAX_SEED
 
 ArrayOrScalar = Union[np.ndarray, np.integer, int, list]
 
@@ -65,35 +71,14 @@ class ReconstructionConfig(BaseModel):
 class AuditConfig(BaseModel):
     """Configuration for the audit process."""
 
-    random_seed: Optional[int] = Field(
-        default=None,
-        description="Random seed for reproducibility (NOT IMPLEMENTED - must be None or omitted)"
-    )
+    random_seed: int = Field(default=42, ge=0, le=MAX_SEED, description="Random seed for reproducibility")
     attack_type: Literal["mia", "gia", "minv", "synthetic"] = Field(..., description="Type of attack: must be one of ['mia', 'gia', 'minv', 'synthetic]")  # noqa: E501
     attack_list: List[Dict[str, Any]] = Field(..., min_length=1, description="Must have at least one attack")
     hyper_param_search: bool = Field(default=False, description="Whether to perform hyperparameter search")
     data_modality: Literal["image", "tabular", "text", "graph", "timeseries"] = Field(..., description="Type of data modality: must be one of ['image', 'tabular', 'text', 'graph', 'timeseries']")  # noqa: E501
     output_dir: str = Field(..., description="Output directory for audit results")
-    sampling_strategy: Optional[Literal["independent", "balanced"]] = Field(
-        default="independent",
-        description="Sampling strategy for shadow models: 'independent' (random) or 'balanced' (structured shuffle-shift)"
-    )
 
     reconstruction: Optional[ReconstructionConfig] = Field(None, description="Reconstruction attack configuration")
-
-    # Validate that random_seed is not set (not implemented)
-    @field_validator("random_seed", mode="before")
-    @classmethod
-    def validate_random_seed(cls, v: Optional[int]) -> Optional[int]:
-        """Validate that random_seed is not set since seeding is not implemented."""
-        if v is not None:
-            raise ValueError(
-                "random_seed is not implemented in LeakPro. "
-                "Setting a random seed will not control randomness and may create "
-                "a false sense of reproducibility. Please remove random_seed from "
-                "your configuration or set it to null/None."
-            )
-        return v
 
     # turn some of the fields to lowercase
     @field_validator("attack_type", "data_modality", "attack_list", mode="before")
@@ -111,6 +96,7 @@ class TargetConfig(BaseModel):
     model_class: str = Field(..., description="Class name of the model")
     target_folder: str = Field(..., description="Directory where target model data is stored")
     data_path: str = Field(..., description="Path to dataset file")
+    dpsgd_path: Optional[str] = Field(default=None, description="Path to DP-SGD metadata file")
     # TODO: Change data_path description to be more descriptive, i.e path to target (or private) dataset.
 
     # MINV-specific field - optional
@@ -121,13 +107,26 @@ class TargetConfig(BaseModel):
 class ShadowModelConfig(BaseModel):
     """Configuration for the Shadow models."""
 
-    model_class: Optional[str] = None
-    module_path: Optional[str] = None
-    init_params: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Model initialization parameters")
-    optimizer: Optional[OptimizerConfig] = Field(..., description="Optimizer configuration")
-    criterion: Optional[LossConfig] = Field(..., description="Loss function configuration")
-    batch_size: Optional[int] = Field(..., ge=1, description="Batch size used during training")
-    epochs: Optional[int] = Field(..., ge=1, description="Number of training epochs")
+    model_class: Optional[str] = Field(
+        default=None,
+        description=(
+            "Class name of the shadow model. Defaults to the target model class. "
+            "If set without module_path, the class is imported from the target model module path."
+        ),
+    )
+    module_path: Optional[str] = Field(
+        default=None,
+        description="Path to the shadow model module. Defaults to the target model module path.",
+    )
+    init_params: Optional[Dict[str, Any]] = Field(default=None, description="Model initialization parameters")
+    optimizer: Optional[OptimizerConfig] = Field(default=None, description="Optimizer configuration")
+    criterion: Optional[LossConfig] = Field(default=None, description="Loss function configuration")
+    batch_size: Optional[int] = Field(default=None, ge=1, description="Batch size used during training")
+    epochs: Optional[int] = Field(default=None, ge=1, description="Number of training epochs")
+    sampling_method: str = Field(
+        default="balanced",
+        description="Method for sampling shadow model training data: 'balanced' or 'random'"
+    )
 
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields
 
@@ -199,13 +198,17 @@ class ShadowModelTrainingSchema(BaseModel):
     train_indices: List[int] = Field(..., description="Indices of training samples")
     num_train: int = Field(..., ge=0, description="Number of training samples")
     optimizer: str = Field(..., description="Optimizer name")
+    optimizer_params: Dict[str, Any] = Field(default_factory=dict, description="Optimizer parameters")
     criterion: str = Field(..., description="Criterion (loss function) name")
+    criterion_params: Dict[str, Any] = Field(default_factory=dict, description="Criterion parameters")
     epochs: int = Field(..., ge=1, description="Number of training epochs")
+    batch_size: Optional[int] = Field(default=None, ge=1, description="Batch size used during training")
     train_result: EvalOutput = Field(..., description="Evaluation output for the training set")
     test_result: EvalOutput = Field(..., description="Evaluation output for the test set")
-    online: bool = Field(..., description="Online vs. offline training")
     model_class: str = Field(..., description="Model class name")
+    model_module_path: Optional[str] = Field(default=None, description="Path to the model module")
     target_model_hash: str = Field(..., description="Hash of target model")
+    population_hash: Optional[str] = Field(default=None, description="Hash of train/test index split")
 
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields
 
@@ -220,6 +223,80 @@ class DistillationModelTrainingSchema(BaseModel):
     label_only: bool = Field(..., description="Whether the distillation process is label-only")
 
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields
+
+class KnobConfig(BaseModel):
+    """One searched hyperparameter of a privacy-utility optimization."""
+
+    name: str = Field(..., description="Config key the value is emitted under (e.g. noise_multiplier)")
+    low: float = Field(..., description="Lower bound (inclusive)")
+    high: float = Field(..., description="Upper bound (inclusive)")
+    log_scale: bool = Field(default=False, description="Search on a log scale (bounds must be > 0)")
+    integer: bool = Field(default=False, description="Suggest integer values")
+
+    model_config = ConfigDict(extra="forbid")  # Prevent extra fields
+
+
+class UtilityMetricConfig(BaseModel):
+    """Utility metric and 'did it learn' gate for a privacy-utility optimization.
+
+    ``gate`` is a floor on the utility: a configuration at or below it is pruned
+    (the attack is skipped and the point can never sit on the frontier). When
+    ``gate`` is None the metric's chance level is used — 0.5 for AUC,
+    1/num_classes for accuracy and balanced accuracy. Plain accuracy's chance
+    level is only meaningful on class-balanced data; prefer balanced_accuracy or
+    auc for imbalanced tasks.
+    """
+
+    metric: Literal["accuracy", "balanced_accuracy", "auc"] = Field(
+        default="accuracy", description="Utility metric computed on the held-out test split")
+    gate: Optional[float] = Field(
+        default=None, description="Utility floor below which the attack is skipped; None = the metric's chance level")
+
+    model_config = ConfigDict(extra="forbid")  # Prevent extra fields
+
+
+class PopulationSplitConfig(BaseModel):
+    """Population and audit-split sizes for a privacy-utility optimization."""
+
+    pop_size: int = Field(..., ge=1, description="Total population size available to the audit")
+    n_target: int = Field(..., ge=1, description="Target training-set size (audit members)")
+    n_test: int = Field(..., ge=1, description="Held-out size (audit nonmembers and utility evaluation)")
+
+    model_config = ConfigDict(extra="forbid")  # Prevent extra fields
+
+
+class PrivacyUtilityConfig(BaseModel):
+    """User configuration of a privacy-utility optimization run.
+
+    Settings of the outer optimization loop: the search space, budget, privacy
+    accounting, utility metric, and the RMIA attack block. Per-trial audit
+    configs (audit.yaml) are generated by the run and are not user input.
+    """
+
+    n_trials: int = Field(..., ge=1, description="Total configurations to evaluate (finished trials count on resume)")
+    seed: int = Field(default=0, description="Run seed: sampler, splits, and derived audit seeds")
+    proxy_fpr: float = Field(default=0.01, gt=0.0, lt=1.0,
+                             description="FPR level the loop minimizes TPR at (one of 0.0001, 0.001, 0.01, 0.1)")
+    delta: float = Field(default=1e-5, gt=0.0, lt=1.0,
+                         description="DP delta used for epsilon accounting; choose well below 1/n_target")
+    accountant: Literal["prv", "rdp"] = Field(
+        default="prv",
+        description="Opacus privacy accountant; PRV is tighter than RDP, so epsilons from different accountants "
+                    "are not comparable and the choice is recorded with every reported epsilon. GDP is not "
+                    "offered: Opacus's GDP accountant is experimental and can underestimate epsilon")
+    epochs: int = Field(default=15, ge=1,
+                        description="Training epochs (fixed unless 'epochs' is listed as a knob)")
+    output_dir: str = Field(..., description="Output directory (study.db, per-config artifacts)")
+    knobs: List[KnobConfig] = Field(..., min_length=1, description="Searched hyperparameters")
+    fixed: Dict[str, float] = Field(default_factory=dict, description="Knobs pinned to constants")
+    utility: UtilityMetricConfig = Field(default_factory=UtilityMetricConfig, description="Utility metric and gate")
+    rmia: Dict[str, Any] = Field(
+        default_factory=lambda: {"num_shadow_models": 4, "training_data_fraction": 0.5, "online": False},
+        description="RMIA attack config, passed verbatim into each generated audit.yaml")
+    splits: PopulationSplitConfig = Field(..., description="Population and audit-split sizes")
+
+    model_config = ConfigDict(extra="forbid")  # Prevent extra fields
+
 
 class OptunaConfig(BaseModel):
     """Configuration for the Optuna hyperparameter search."""
@@ -256,5 +333,18 @@ class MIAResultSchema(BaseModel):
     fp: Union[ArrayOrScalar, None] = Field(None, description="FP values")
     tn: Union[ArrayOrScalar, None] = Field(None, description="TN values")
     fn: Union[ArrayOrScalar, None] = Field(None, description="FN values")
+    bootstrap: Optional[Dict[str, Any]] = Field(
+        None, description="Optional bootstrap mean/CI for roc_auc and the fixed-FPR table (see MIAResult.bootstrap_metrics)"
+    )
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # Prevent extra fields
+
+class MinvResultSchema(BaseModel):
+    """Schema for the Minv attack results."""
+
+    name: str = Field(..., description="Name of the result")
+    id: str = Field(..., description="Unique identifier for the result")
+    config: Dict[str, Any] = Field(..., description="Configuration of the attack")
+    metrics: Dict[str, Any] = Field(..., description="Reconstruction metrics")
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # Prevent extra fields

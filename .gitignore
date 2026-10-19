@@ -159,8 +159,34 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
+# Visual Studio Code
+.vscode/
+
 # mac generated files
 .DS_Store
+
+# Editor swap files
+*.swp
+*.swo
+
+# VS Code
+.vscode/
+
+# Temp directories
+"<TemporaryDirectory*
+
+# Env files
+env.yml
+.env.yml*
+
+# Webapp runtime
+webapp_jobs/
+
+# Webapp upload helpers + local datasets (not part of the library; like webapp_celebA_files / webapp_cifar_files)
+webapp_los_files/
+
+# Vite build cache
+leakpro/webapp/frontend/.vite/
 
 # Ignore data and model folders
 **/data/*
@@ -169,9 +195,15 @@ data/CINIC*
 attack_objects/
 coco2017
 COCO
+examples/mia/llm_mia/wbc/cosmopedia-khanacademy-subset
 
 # Ignore outputs
 leakpro_output
+leakpro_output_*
+# Every `target_*` output directory under an llm_mia example (train_config.yaml's `run.log_dir`,
+# always target_<name>, and import_external_target.py's target_pythia_external) -- one pattern
+# covers ez-mia/ and wbc/ both, and any future one, with no NOTE needed to keep in sync.
+examples/mia/llm_mia/*/target_*/
 *.pth
 *.png
 nohup.out

@@ -1,4 +1,7 @@
 /*
+ * Copyright 2023-2026 Lindholmen Science Park AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * BCJR decoder for Group testing with
  * MAP decoding on Trellis
  * based on the work

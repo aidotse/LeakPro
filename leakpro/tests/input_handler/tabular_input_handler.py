@@ -1,13 +1,18 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Module containing the class to handle the user input for the CIFAR10 dataset."""
 
 import torch
-from torch import cuda, device, optim, sigmoid
+from torch import optim, sigmoid
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from leakpro import AbstractInputHandler
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.schemas import TrainingOutput, EvalOutput
+from leakpro.utils.device import get_device, mark_step
 
 class TabularInputHandler(AbstractInputHandler):
     """Class to handle the user input for the CIFAR10 dataset."""
@@ -46,7 +51,7 @@ class TabularInputHandler(AbstractInputHandler):
     ) -> TrainingOutput:
         """Model training procedure."""
 
-        dev = device("cuda" if cuda.is_available() else "cpu")
+        dev = get_device()
         model.to(dev)
         model.train()
 
@@ -69,6 +74,7 @@ class TabularInputHandler(AbstractInputHandler):
 
                 loss.backward()
                 optimizer.step()
+                mark_step(dev)
                 train_loss += loss.item()
 
         train_acc = train_acc/len(dataloader.dataset)

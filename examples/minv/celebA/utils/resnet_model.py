@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """
 This file contains the implementation of ResNet18, ResNet152, and VGG16 models 
 for image classification.
@@ -6,47 +10,69 @@ for image classification.
 import os
 import pickle
 
-from torch import cuda, device, nn, no_grad, optim, save
+from torch import nn, no_grad, optim, save
+
+from leakpro.utils.device import get_device, mark_step
 from torchvision.models import resnet18, resnet50, resnet152
 from torchvision.models import ResNet18_Weights, ResNet50_Weights, ResNet152_Weights
 from tqdm import tqdm
 
 from leakpro.schemas import MIAMetaDataSchema, EvalOutput
-from leakpro.utils.conversion import _loss_to_config, _optimizer_to_config, _dataloader_to_config
+from leakpro.utils.conversion import loss_to_config, optimizer_to_config, dataloader_to_config
 
 
 class BaseCNN(nn.Module):
-    def __init__(self, num_classes):
+    def __init__(self, num_classes, return_feature=False):
         super().__init__()
         self.num_classes = num_classes
-        # Keep track of initialization parameters for metadata generation
-        self.init_params = {"num_classes": num_classes}
+        self.return_feature = return_feature
+        # Keep track of initialization parameters for metadata generation.
+        self.init_params = {"num_classes": num_classes, "return_feature": return_feature}
 
-    def forward(self, x):
-        return self.model(x)
+    def forward(self, x, **kwargs):
+        if not self.return_feature:
+            return self.model(x)
+
+        feature = None
+
+        def capture_fc_input(_module, inputs, _output):
+            nonlocal feature
+            feature = inputs[0]
+
+        hook = self.model.fc.register_forward_hook(capture_fc_input)
+        try:
+            res = self.model(x)
+        finally:
+            hook.remove()
+
+        return [feature, res]
 
 
 class ResNet18(BaseCNN):
-    def __init__(self, num_classes):
-        super().__init__(num_classes)
+    def __init__(self, num_classes, return_feature=False):
+        super().__init__(num_classes, return_feature=return_feature)
         self.model = resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
         # Replace the final fully-connected layer to match the desired number of classes
-        self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
+        self.feat_dim = self.model.fc.in_features
+        self.model.fc = nn.Linear(self.feat_dim, num_classes)
 
 
 class ResNet50(BaseCNN):
-    def __init__(self, num_classes):
-        super().__init__(num_classes)
+    def __init__(self, num_classes, return_feature=False):
+        super().__init__(num_classes, return_feature=return_feature)
         self.model = resnet50(weights=ResNet50_Weights.IMAGENET1K_V2)
         # Replace the final fully-connected layer to match the desired number of classes
-        self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
+        self.feat_dim = self.model.fc.in_features
+        self.model.fc = nn.Linear(self.feat_dim, num_classes)
+
 
 class ResNet152(BaseCNN):
-    def __init__(self, num_classes):
-        super().__init__(num_classes)
+    def __init__(self, num_classes, return_feature=False):
+        super().__init__(num_classes, return_feature=return_feature)
         self.model = resnet152(weights=ResNet152_Weights.IMAGENET1K_V2)
         # Replace the final fully-connected layer to match the desired number of classes
-        self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
+        self.feat_dim = self.model.fc.in_features
+        self.model.fc = nn.Linear(self.feat_dim, num_classes)
 
 
 def evaluate(model, loader, criterion, device):
@@ -57,6 +83,7 @@ def evaluate(model, loader, criterion, device):
             data, target = data.to(device), target.to(device)
             target = target.view(-1)
             output = model(data)
+            mark_step(device)
             loss += criterion(output, target).item()
             pred = output.argmax(dim=1)
             acc += pred.eq(target).sum().item()
@@ -69,13 +96,18 @@ def create_trained_model_and_metadata(model, train_loader, test_loader, train_co
     lr = train_config["train"]["learning_rate"]
     epochs = train_config["train"]["epochs"]
     weight_decay = train_config["train"]["weight_decay"]
+    optimizer_name = str(train_config["train"].get("optimizer", "adam")).lower()
+    momentum = float(train_config["train"].get("momentum", 0.9))
 
-    device_name = device("cuda" if cuda.is_available() else "cpu")
+    device_name = get_device()
     model.to(device_name)
     model.train()
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    if optimizer_name == "sgd":
+        optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay)
+    else:
+        optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     train_losses, train_accuracies = [], []
     test_losses, test_accuracies = [], []
 
@@ -95,6 +127,7 @@ def create_trained_model_and_metadata(model, train_loader, test_loader, train_co
 
             loss.backward()
             optimizer.step()
+            mark_step(device_name)
             train_loss += loss.item()
 
         train_loss /= len(train_loader)
@@ -134,13 +167,13 @@ def create_trained_model_and_metadata(model, train_loader, test_loader, train_co
         test_indices=test_loader.dataset.indices,
         num_train=len(train_loader.dataset.indices),
         init_params=init_params,
-        optimizer=_optimizer_to_config(optimizer),
-        criterion=_loss_to_config(criterion),
-        data_loader=_dataloader_to_config(train_loader),
+        optimizer=optimizer_to_config(optimizer),
+        criterion=loss_to_config(criterion),
+        data_loader=dataloader_to_config(train_loader),
         epochs=epochs,
         train_result=train_result,
         test_result=test_result,
-        dataset="mimiciii"
+        dataset=str(train_config.get("data", {}).get("dataset", "celebA"))
     )
 
     with open(os.path.join(train_config["run"]["log_dir"], "model_metadata.pkl"), "wb") as f:

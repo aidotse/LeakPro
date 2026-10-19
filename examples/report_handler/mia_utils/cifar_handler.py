@@ -1,7 +1,13 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Module containing the class to handle the user input for the CIFAR100 dataset."""
 
 import torch
-from torch import cuda, device, optim, sigmoid
+from torch import optim, sigmoid
+
+from leakpro.utils.device import get_device, mark_step
 from torch.nn import CrossEntropyLoss
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -41,7 +47,7 @@ class CifarInputHandler(AbstractInputHandler):
             raise ValueError("epochs not found in configs")
 
         # prepare training
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         model.to(gpu_or_cpu)
 
         # training loop
@@ -57,6 +63,7 @@ class CifarInputHandler(AbstractInputHandler):
                 pred = outputs.data.max(1, keepdim=True)[1]
                 loss.backward()
                 optimizer.step()
+                mark_step(gpu_or_cpu)
 
                 # Accumulate performance of shadow model
                 train_acc += pred.eq(labels.data.view_as(pred)).sum()

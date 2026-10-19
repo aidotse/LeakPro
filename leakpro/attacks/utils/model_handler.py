@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Abstract class for the model handler."""
 
 import os
@@ -7,7 +11,7 @@ import numpy as np
 from torch import load
 from torch.nn import Module
 
-from leakpro.input_handler.mia_handler import MIAHandler
+from leakpro.input_handler.mia_handler import MIAHandler, _fix_bn_inplace
 from leakpro.input_handler.user_imports import (
     get_class_from_module,
     get_criterion_mapping,
@@ -16,9 +20,9 @@ from leakpro.input_handler.user_imports import (
 )
 from leakpro.signals.signal import ModelLogits
 from leakpro.signals.signal_extractor import PytorchModel
-from leakpro.utils.import_helper import Self, Tuple, Union
+from leakpro.utils.import_helper import Any, Self, Tuple, Union
 from leakpro.utils.logger import logger
-from leakpro.utils.save_load import hash_model
+from leakpro.utils.save_load import hash_indices, hash_model
 
 
 class ModelHandler():
@@ -35,40 +39,16 @@ class ModelHandler():
 
         caller_configs = getattr(handler.configs, caller) if caller is not None else None
         self.use_target_model_setup = caller_configs is None
+        optimizer_name, criterion_name = self._load_model_setup(caller_configs)
 
-        # get the bluepring for the model
-        if self.use_target_model_setup:
-            self.model_class = handler.target_model_blueprint.__name__
-            self.model_blueprint = handler.target_model_blueprint
-        else:
-            try:
-                self.model_path = caller_configs.module_path
-                self.model_class = caller_configs.model_class
-            except AttributeError as e:
-                raise ValueError("Model path or class not provided in shadow model config") from e
-            try:
-                self.model_blueprint = self._import_model_from_path(self.model_path, self.model_class)
-            except Exception as e:
-                raise ValueError(f"Failed to create model blueprint from {self.model_class} in {self.model_path}") from e
-
-        # Pick either target config or caller config
-        setup_config = handler.target_model_metadata if self.use_target_model_setup else caller_configs
-        # extract the init params
-        self.init_params = setup_config.init_params
+        self.optimizer_name = optimizer_name.lower()
+        self.criterion_name = criterion_name.lower()
 
         # Get optimizer class
-        optimizer_name = setup_config.optimizer.name
         self.optimizer_class = self._get_optimizer_class(optimizer_name)
-        # copy to only have parameters left
-        self.optimizer_config = setup_config.optimizer.params
 
         # Get criterion class
-        criterion_class = setup_config.criterion.name
-        self.criterion_class = self._get_criterion_class(criterion_class)
-        # copy to only have parameters left
-        self.loss_config = setup_config.criterion.params
-
-        self.epochs = setup_config.epochs
+        self.criterion_class = self._get_criterion_class(criterion_name)
 
         # Set the storage paths for objects created by the handler
         storage_path = handler.configs.audit.output_dir
@@ -81,33 +61,135 @@ class ModelHandler():
         else:
             raise ValueError("Storage path not provided")
 
-        # Create the hash for the target model
+        # Create the hash for the target model weights
         self.target_model_hash = hash_model(self.handler.target_model)
 
-        # Folder to store intermediate results
-        self.attack_cache_folder_path = f"{storage_path}/attack_cache/{caller}" # prev hardcoded to "leakpro_output/attack_cache"
+        # Create the hash for the data split — order-sensitive so logit row order is always valid
+        self.population_hash = hash_indices(self.handler.train_indices, self.handler.test_indices)
+
+        # Folder to store intermediate results — scoped to the job/model so stale
+        # logits from a previous run never bleed into a new one.
+        self.attack_cache_folder_path = f"{storage_path}/attack_cache"
         os.makedirs(self.attack_cache_folder_path, exist_ok=True)
 
         criterion = self.handler.get_criterion()
-        self.cache_logits(PytorchModel(self.handler.target_model, criterion), name="target")
+        self.cache_logits(PytorchModel(self.handler.target_model, criterion), name=f"target_{self.target_model_hash}")
+
+    def _load_model_setup(self:Self, caller_configs) -> Tuple[str, str]:  # noqa: ANN001
+        """Load the effective model, optimizer, and criterion setup."""
+        target_setup = self.handler.target_model_metadata
+
+        if self.use_target_model_setup:
+            self.model_path = self.handler.configs.target.module_path
+            self.model_class = self.handler.target_model_blueprint.__name__
+            self.model_blueprint = self.handler.target_model_blueprint
+            self.init_params = (target_setup.init_params or {}).copy()
+            self.optimizer_config = (target_setup.optimizer.params or {}).copy()
+            self.loss_config = (target_setup.criterion.params or {}).copy()
+            self.epochs = target_setup.epochs
+            self.batch_size = target_setup.data_loader.params.get("batch_size")
+            return target_setup.optimizer.name, target_setup.criterion.name
+
+        # Allow partial shadow model config by inheriting from the target setup.
+        self.model_path = self._get_config_value(caller_configs, "module_path") or self.handler.configs.target.module_path
+        self.model_class = self._get_config_value(caller_configs, "model_class") or self.handler.configs.target.model_class
+        try:
+            self.model_blueprint = self._import_model_from_path(self.model_path, self.model_class)
+        except Exception as e:
+            raise ValueError(f"Failed to create model blueprint from {self.model_class} in {self.model_path}") from e
+
+        # Inherit defaults from target and apply caller overrides when present.
+        caller_init_params = self._get_config_value(caller_configs, "init_params")
+        target_init_params = (target_setup.init_params or {}).copy()
+        if caller_init_params is None:
+            self.init_params = target_init_params
+        elif caller_init_params:
+            self.init_params = target_init_params
+            self.init_params.update(caller_init_params)
+        else:
+            self.init_params = {}
+        optimizer_cfg = self._get_config_value(caller_configs, "optimizer") or target_setup.optimizer
+        criterion_cfg = self._get_config_value(caller_configs, "criterion") or target_setup.criterion
+        self.optimizer_config = (optimizer_cfg.params or {}).copy()
+        self.loss_config = (criterion_cfg.params or {}).copy()
+        caller_epochs = self._get_config_value(caller_configs, "epochs")
+        self.epochs = caller_epochs if caller_epochs is not None else target_setup.epochs
+        target_batch_size = target_setup.data_loader.params.get("batch_size")
+        caller_batch_size = self._get_config_value(caller_configs, "batch_size")
+        self.batch_size = caller_batch_size if caller_batch_size is not None else target_batch_size
+        return optimizer_cfg.name, criterion_cfg.name
+
+    def _get_config_value(self:Self, configs:Any, field_name:str) -> Any:
+        """Read config values safely from Pydantic models, DotMaps, and dictionaries."""
+        if configs is None:
+            return None
+        if isinstance(configs, dict):
+            return configs.get(field_name)
+        if hasattr(configs, "get"):
+            return configs.get(field_name, None)
+        return getattr(configs, field_name, None)
+
 
 
     def cache_logits(self:Self, model:Union[Module, list[Module]], name:str) -> None:
         """Cache the target model logits."""
-
-        # check if the name is already in the cache
         cache_file = f"{self.attack_cache_folder_path}/{name}_logits.npy"
-        if os.path.exists(cache_file):
-            logger.info(f"Logits already cached at {cache_file}")
-            return
+        indices_file = f"{self.attack_cache_folder_path}/{name}_indices.npy"
+        data_indices = np.concatenate((self.handler.train_indices, self.handler.test_indices))
 
-        # run data through the model, collect the logits, and store them
+        # Require BOTH files to exist. If only logits exist (old cache without companion),
+        # treat as miss so both are rewritten with a correct index record. If both exist but
+        # were cached for a different sample set (e.g. the audit config changed since the last
+        # run), also treat as a miss so the stale pair gets overwritten instead of silently
+        # reused — load_logits() would otherwise never be able to load them.
+        if os.path.exists(cache_file) and os.path.exists(indices_file):
+            cached_indices = np.load(indices_file)
+            # np.array_equal on sorted arrays, not a set comparison: a set comparison
+            # would treat two index arrays as equal even if one had a duplicate and the
+            # other didn't (multiplicity is invisible to sets), silently reusing a cache
+            # of the wrong length if train/test indices ever overlap.
+            if np.array_equal(np.sort(cached_indices), np.sort(data_indices)):
+                logger.info(f"Logits already cached at {cache_file}")
+                return
+            logger.info(f"Cached indices at {indices_file} no longer match the current run — recomputing")
+
         if not isinstance(model, list):
             model = [model]
-        data_indices = np.concatenate((self.handler.train_indices, self.handler.test_indices))
-        logits = np.array(ModelLogits()(model, self.handler, data_indices)).squeeze()
+        # ModelLogits returns one (N, num_classes) entry per model; cache_logits always
+        # caches a single model, so drop only the leading model-list axis. A bare
+        # .squeeze() would also collapse the class axis of a single-logit binary head
+        # (1, N, 1) -> (N,), breaking attacks that index logits as [rows, labels].
+        # squeeze(axis=0) leaves N and num_classes intact and raises if more than one
+        # model was passed, surfacing that misuse instead of silently mangling the cache.
+        logits = np.array(ModelLogits()(model, self.handler, data_indices)).squeeze(axis=0)
         np.save(cache_file, logits)
+        np.save(indices_file, data_indices)
         logger.info(f"Saved logits to {cache_file}")
+
+    def load_logits(self:Self, name:str) -> np.ndarray:
+        """Load cached logits, reordering rows if index order has changed since caching."""
+        cache_file = f"{self.attack_cache_folder_path}/{name}_logits.npy"
+        indices_file = f"{self.attack_cache_folder_path}/{name}_indices.npy"
+
+        if not os.path.exists(cache_file) or not os.path.exists(indices_file):
+            return None  # Cache miss — caller must recompute
+
+        cached_indices = np.load(indices_file)
+        current_indices = np.concatenate((self.handler.train_indices, self.handler.test_indices))
+        logits = np.load(cache_file)
+
+        if np.array_equal(cached_indices, current_indices):
+            logger.info(f"Loaded logits from {cache_file}")
+            return logits
+
+        # Same set of samples, different order — reorder rows to match current run.
+        cached_pos = {int(idx): row for row, idx in enumerate(cached_indices)}
+        try:
+            reorder = np.array([cached_pos[int(idx)] for idx in current_indices])
+        except KeyError:
+            return None  # Different sample set — treat as miss
+        logger.info(f"Loaded and reordered logits from {cache_file}")
+        return logits[reorder]
 
     def _import_model_from_path(self:Self, module_path:str, model_class:str)->None:
         """Import the model from the given path.
@@ -132,10 +214,11 @@ class ModelHandler():
             optimizer_name (str): The name of the optimizer.
 
         """
+        optimizer_name = optimizer_name.lower()
         try:
             return get_optimizer_mapping()[optimizer_name]
         except Exception as e:
-            raise ValueError(f"Failed to create optimizer from {self.optimizer_config['name']}") from e
+            raise ValueError(f"Failed to create optimizer from {optimizer_name}") from e
 
     def _get_criterion_class(self:Self, criterion_name:str)->None:
         """Get the criterion class based on the criterion name.
@@ -145,10 +228,11 @@ class ModelHandler():
             criterion_name (str): The name of the criterion.
 
         """
+        criterion_name = criterion_name.lower()
         try:
             return get_criterion_mapping()[criterion_name]
         except Exception as e:
-            raise ValueError(f"Failed to create criterion from {self.criterion_config['name']}") from e
+            raise ValueError(f"Failed to create criterion from {criterion_name}") from e
 
     def _get_model_criterion_optimizer(self:Self) -> Tuple[Module, Module, Module]:
         """Get the model, criterion, and optimizer from the handler or config."""
@@ -190,8 +274,14 @@ class ModelHandler():
         # Then load the weights and insert them into the model
         try:
             with open(model_path, "rb") as f:
-                model.load_state_dict(load(f))
-                logger.info(f"Loaded model from {model_path}")
+                state_dict = load(f)
+            try:
+                model.load_state_dict(state_dict)
+            except RuntimeError:
+                _fix_bn_inplace(model)
+                model.load_state_dict(state_dict)
+                logger.info(f"Applied BN→GN fix when loading {model_path}")
+            logger.info(f"Loaded model from {model_path}")
             return model, criterion
         except FileNotFoundError as e:
             raise ValueError(f"Model file not found at {model_path}") from e
@@ -214,4 +304,3 @@ class ModelHandler():
                 return joblib.load(f)
         except FileNotFoundError as e:
             raise FileNotFoundError(f"Metadata at {metadata_path} not found") from e
-

@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Module for handling GANs."""
 import os
 
@@ -87,4 +91,5 @@ class GANHandler(GeneratorHandler):
 
     def save_discriminator(self, discriminator: Module, path: str) -> None:
         """Save the discriminator model."""
-        torch.save(discriminator.state_dict(), path)
+        cpu_state_dict = {k: v.detach().to("cpu") for k, v in discriminator.state_dict().items()}
+        torch.save(cpu_state_dict, path)

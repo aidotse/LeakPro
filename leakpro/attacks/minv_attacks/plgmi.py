@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Implementation of the PLGMI attack."""
 from typing import Any, Dict, Optional
 
@@ -13,6 +17,7 @@ from leakpro.attacks.utils.gan_handler import GANHandler
 from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.input_handler.modality_extensions.image_metrics import ImageMetrics
 from leakpro.reporting.minva_result import MinvResult
+from leakpro.utils.device import get_device, mark_step
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
@@ -86,14 +91,25 @@ class AttackPLGMI(AbstractMINV):
         for key, value in self.configs.model_dump().items():
             setattr(self, key, value)
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = get_device()
 
         self.num_classes = self.handler.get_num_classes()
 
         self.configs.generator.init_params["num_classes"] = self.num_classes
         self.configs.discriminator.init_params["num_classes"] = self.num_classes
+        self._original_return_feature = None
 
+    def _set_logits_only_output(self: Self) -> None:
+        """Temporarily make compatible target models return logits only for PLG-MI."""
+        if hasattr(self.target_model, "return_feature"):
+            self._original_return_feature = self.target_model.return_feature
+            self.target_model.return_feature = False
 
+    def _restore_target_output(self: Self) -> None:
+        """Restore the target model output contract for later attacks."""
+        if self._original_return_feature is not None and hasattr(self.target_model, "return_feature"):
+            self.target_model.return_feature = self._original_return_feature
+            self._original_return_feature = None
 
     def description(self:Self) -> dict:
         """Return the description of the attack."""
@@ -157,9 +173,8 @@ class AttackPLGMI(AbstractMINV):
                 pseudo_data.append((self.public_dataloader.dataset[index][0], i))
 
         logger.info("Created pseudo dataloader")
-        # pseudo_data is now a list of tuples (image, pseudo_label)
-        # We want to set the default device to the sampler in the returned dataloader to be on device
-        return DataLoader(pseudo_data, batch_size=self.batch_size, shuffle=True, generator=torch.Generator(device=self.device))
+        # pseudo_data is now a list of tuples (image, pseudo_label).
+        return DataLoader(pseudo_data, batch_size=self.batch_size, shuffle=True)
 
 
     def prepare_attack(self:Self) -> None:
@@ -168,6 +183,7 @@ class AttackPLGMI(AbstractMINV):
 
         # Get the target model from the handler
         self.target_model = self.handler.target_model
+        self._set_logits_only_output()
 
         self.gan_handler = GANHandler(self.handler, configs=self.configs)
         # TODO: Change structure of how we load data, handler or model_handler should do this, not gan_handler
@@ -223,29 +239,31 @@ class AttackPLGMI(AbstractMINV):
     def run_attack(self:Self) -> MinvResult:
         """Run the attack."""
         logger.info("Running the PLG-MI attack")
-        # Define image metrics class
+        try:
+            # Define image metrics class
+            self.evaluation_model = self.target_model # TODO: Change to evaluation model
 
-        self.evaluation_model = self.target_model # TODO: Change to evaluation model
+            reconstruction_configs = self.handler.configs.audit.reconstruction
 
-        reconstruction_configs = self.handler.configs.audit.reconstruction
+            num_audited_classes = reconstruction_configs.num_audited_classes
 
-        num_audited_classes = reconstruction_configs.num_audited_classes
+            # Get random labels
+            labels = torch.randint(0, self.num_classes, (num_audited_classes,)).to(self.device)
 
-        # Get random labels
-        labels = torch.randint(0, self.num_classes, (num_audited_classes,)).to(self.device)
+            # Optimize z, TODO: Optimize in batches
+            opt_z = self.optimize_z(y=labels, lr= self.configs.z_optimization_lr,
+                                    iter_times=self.configs.z_optimization_iter).to(self.device)
 
-        # Optimize z, TODO: Optimize in batches
-        opt_z = self.optimize_z(y=labels, lr= self.configs.z_optimization_lr,
-                                iter_times=self.configs.z_optimization_iter).to(self.device)
-
-        # Compute image metrics for the optimized z and labels
-        image_metrics = ImageMetrics(self.handler, self.gan_handler,
-                                     reconstruction_configs,
-                                     labels=labels,
-                                     z=opt_z)
-        logger.info(image_metrics.results)
-        # TODO: Implement a class with a .save function.
-        return image_metrics
+            # Compute image metrics for the optimized z and labels
+            image_metrics = ImageMetrics(self.handler, self.gan_handler,
+                                         reconstruction_configs,
+                                         labels=labels,
+                                         z=opt_z)
+            logger.info(image_metrics.results)
+            # TODO: Implement a class with a .save function.
+            return image_metrics
+        finally:
+            self._restore_target_output()
 
     def optimize_z(self:Self,
                    y: torch.tensor,
@@ -303,6 +321,7 @@ class AttackPLGMI(AbstractMINV):
             optimizer.zero_grad()
             inv_loss.backward()
             optimizer.step()
+            mark_step(self.device)
 
             inv_loss_val = inv_loss.item()
 

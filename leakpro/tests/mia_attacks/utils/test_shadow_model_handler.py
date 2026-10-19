@@ -1,13 +1,19 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Test the shadow model handler module."""
 import os
+import pickle
 
 import numpy as np
 from pytest import raises
 
-from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
+from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler, audit_points_with_reference_models
+from leakpro.schemas import EvalOutput, LossConfig, OptimizerConfig, ShadowModelConfig, ShadowModelTrainingSchema, TrainingOutput
 from leakpro.tests.constants import get_shadow_model_config
 from leakpro.tests.input_handler.image_input_handler import ImageInputHandler
-from leakpro.schemas import ShadowModelConfig
+from leakpro.utils.save_load import hash_indices
 
 def test_shadow_model_handler_singleton(image_handler:ImageInputHandler) -> None:
     """Test that only one instance gets created."""
@@ -62,12 +68,11 @@ def test_shadow_model_creation_and_loading(image_handler:ImageInputHandler) -> N
     # Test creation
     n_models = 2
     training_fraction = 0.5
-    online = False
 
     entries_start = os.listdir(sm.storage_path)
     n_entries_start = len(entries_start)
 
-    indx = sm.create_shadow_models(n_models, image_handler.test_indices, training_fraction, online)[0]
+    indx = sm.create_shadow_models(n_models, image_handler.test_indices, training_fraction)[0]
     entries = os.listdir(sm.storage_path)
     n_entries_phase1 = len(entries)
     assert n_entries_phase1 - n_entries_start == 2*n_models
@@ -77,6 +82,9 @@ def test_shadow_model_creation_and_loading(image_handler:ImageInputHandler) -> N
     # Test loading
     meta= sm._load_metadata(sm.storage_path + f"/metadata_{indx}.pkl")
     assert meta.num_train == training_fraction * len(image_handler.test_indices)
+    assert meta.batch_size == image_handler.configs.shadow_model.batch_size
+    assert meta.optimizer_params == image_handler.configs.shadow_model.optimizer.params
+    assert meta.criterion_params == image_handler.configs.shadow_model.criterion.params
     shadow_model_indices = [indx]
     models, indices = sm.get_shadow_models(shadow_model_indices)
     for model in models:
@@ -89,3 +97,397 @@ def test_shadow_model_creation_and_loading(image_handler:ImageInputHandler) -> N
     true_mask_0 = np.array([True if item in meta.train_indices else False for item in image_handler.test_indices])
     assert np.array_equal(mask[:, 0], true_mask_0)
 
+
+def test_shadow_model_partial_inheritance_from_target(image_handler: ImageInputHandler) -> None:
+    """Shadow model should inherit missing fields from target setup."""
+    image_handler.configs.shadow_model = ShadowModelConfig(init_params={"dpsgd": False})
+
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+    sm = ShadowModelHandler(image_handler)
+
+    expected_init_params = image_handler.target_model_metadata.init_params.copy()
+    expected_init_params.update({"dpsgd": False})
+
+    assert sm.model_class == image_handler.configs.target.model_class
+    assert sm.init_params == expected_init_params
+    assert sm.optimizer_config == image_handler.target_model_metadata.optimizer.params
+    assert sm.loss_config == image_handler.target_model_metadata.criterion.params
+    assert sm.epochs == image_handler.target_model_metadata.epochs
+
+
+def test_shadow_model_init_params_distinguish_missing_partial_and_empty(image_handler: ImageInputHandler) -> None:
+    """Missing, partial, and empty init_params should have distinct inheritance behavior."""
+    image_handler.target_model_metadata.init_params = {"width": 16, "dpsgd": True}
+
+    image_handler.configs.shadow_model = ShadowModelConfig()
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+    sm = ShadowModelHandler(image_handler)
+    assert sm.init_params == {"width": 16, "dpsgd": True}
+
+    image_handler.configs.shadow_model = ShadowModelConfig(init_params={"dpsgd": False})
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+    sm = ShadowModelHandler(image_handler)
+    assert sm.init_params == {"width": 16, "dpsgd": False}
+
+    image_handler.configs.shadow_model = ShadowModelConfig(init_params={})
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+    sm = ShadowModelHandler(image_handler)
+    assert sm.init_params == {}
+
+
+def test_shadow_model_partial_override_optimizer_only(image_handler: ImageInputHandler) -> None:
+    """Provided optimizer should override while other fields still inherit."""
+    image_handler.configs.shadow_model = ShadowModelConfig(
+        optimizer=OptimizerConfig(name="adam", params={"lr": 0.002})
+    )
+
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+    sm = ShadowModelHandler(image_handler)
+
+    assert sm.model_class == image_handler.configs.target.model_class
+    assert sm.optimizer_class.__name__.lower() == "adam"
+    assert sm.optimizer_config["lr"] == 0.002
+    assert sm.loss_config == image_handler.target_model_metadata.criterion.params
+    assert sm.epochs == image_handler.target_model_metadata.epochs
+
+
+def test_shadow_model_model_class_without_module_path_uses_target_module(image_handler: ImageInputHandler) -> None:
+    """model_class without module_path should resolve against the target module path."""
+    image_handler.configs.shadow_model = ShadowModelConfig(model_class="ConvNet_Dummy")
+
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+
+    expected_path = image_handler.configs.target.module_path
+    with raises(ValueError) as excinfo:
+        ShadowModelHandler(image_handler)
+
+    assert str(excinfo.value) == f"Failed to create model blueprint from ConvNet_Dummy in {expected_path}"
+
+
+def test_shadow_model_invalid_optimizer_error_uses_optimizer_name(image_handler: ImageInputHandler) -> None:
+    """Invalid optimizer errors should not depend on optimizer params containing a name key."""
+    image_handler.configs.shadow_model = ShadowModelConfig(optimizer=OptimizerConfig(name="not_an_optimizer"))
+
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+
+    with raises(ValueError) as excinfo:
+        ShadowModelHandler(image_handler)
+
+    assert str(excinfo.value) == "Failed to create optimizer from not_an_optimizer"
+
+
+def test_shadow_model_invalid_criterion_error_uses_criterion_name(image_handler: ImageInputHandler) -> None:
+    """Invalid criterion errors should not reference a nonexistent criterion_config attribute."""
+    image_handler.configs.shadow_model = ShadowModelConfig(criterion=LossConfig(name="not_a_loss"))
+
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+
+    with raises(ValueError) as excinfo:
+        ShadowModelHandler(image_handler)
+
+    assert str(excinfo.value) == "Failed to create criterion from not_a_loss"
+
+
+def test_shadow_model_filter_requires_full_config_match(image_handler: ImageInputHandler, tmp_path) -> None:
+    """Reuse should require the full effective training configuration, not just class and size."""
+    image_handler.configs.shadow_model = ShadowModelConfig(
+        init_params={"dpsgd": False},
+        optimizer=OptimizerConfig(name="adam", params={"lr": 0.002}),
+        batch_size=16,
+    )
+
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+    sm = ShadowModelHandler(image_handler)
+    sm.storage_path = str(tmp_path)
+
+    metadata_kwargs = {
+        "init_params": sm.init_params,
+        "train_indices": [0, 1, 2, 3, 4],
+        "num_train": 5,
+        "optimizer": sm.optimizer_name,
+        "optimizer_params": sm.optimizer_config,
+        "criterion": sm.criterion_name,
+        "criterion_params": sm.loss_config,
+        "epochs": sm.epochs,
+        "batch_size": sm.batch_size,
+        "train_result": EvalOutput(accuracy=0.0, loss=0.0),
+        "test_result": EvalOutput(accuracy=0.0, loss=0.0),
+        "model_class": sm.model_class,
+        "model_module_path": sm.model_path,
+        "target_model_hash": sm.target_model_hash,
+        "population_hash": sm.population_hash,
+    }
+    matching_metadata = ShadowModelTrainingSchema(**metadata_kwargs)
+    stale_metadata = ShadowModelTrainingSchema(
+        **{
+            **metadata_kwargs,
+            "optimizer_params": {"lr": 0.5},
+        }
+    )
+
+    with open(tmp_path / "metadata_0.pkl", "wb") as file:
+        pickle.dump(matching_metadata, file)
+    with open(tmp_path / "metadata_1.pkl", "wb") as file:
+        pickle.dump(stale_metadata, file)
+
+    all_indices, filtered_indices = sm._filter(data_size=5)
+
+    assert sorted(all_indices) == [0, 1]
+    assert filtered_indices == [0]
+
+
+def test_shadow_model_creation_uses_shadow_batch_size(
+    image_handler: ImageInputHandler,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Shadow training dataloader should honor the configured shadow-model batch size."""
+    shadow_config = ShadowModelConfig(**get_shadow_model_config())
+    shadow_config.batch_size = 7
+    image_handler.configs.shadow_model = shadow_config
+
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+    sm = ShadowModelHandler(image_handler)
+    sm.storage_path = str(tmp_path / "attack_objects")
+    os.makedirs(sm.storage_path, exist_ok=True)
+    sm.attack_cache_folder_path = str(tmp_path / "attack_cache")
+    os.makedirs(sm.attack_cache_folder_path, exist_ok=True)
+
+    observed = {}
+
+    def fake_train(data_loader, model, criterion, optimizer, epochs):
+        observed["batch_size"] = data_loader.batch_size
+        return TrainingOutput(model=model, metrics=EvalOutput(accuracy=0.0, loss=0.0))
+
+    monkeypatch.setattr(image_handler, "train", fake_train)
+    monkeypatch.setattr(image_handler, "eval", lambda *args, **kwargs: EvalOutput(accuracy=0.0, loss=0.0))
+    monkeypatch.setattr(sm, "cache_logits", lambda *args, **kwargs: None)
+
+    sm.create_shadow_models(num_models=1, shadow_population=image_handler.test_indices, training_fraction=0.5)
+
+    assert observed["batch_size"] == shadow_config.batch_size
+
+
+def test_hash_indices_same_split_produces_same_hash() -> None:
+    """hash_indices must be stable and order-independent."""
+    train = np.array([3, 1, 2])
+    test = np.array([5, 4])
+    h1 = hash_indices(train, test)
+    h2 = hash_indices(np.array([1, 2, 3]), np.array([4, 5]))
+    assert h1 == h2
+
+
+def test_hash_indices_different_split_produces_different_hash() -> None:
+    """Different train/test splits must not collide."""
+    h1 = hash_indices(np.array([1, 2, 3]), np.array([4, 5]))
+    h2 = hash_indices(np.array([1, 2, 4]), np.array([3, 5]))
+    assert h1 != h2
+
+
+def test_filter_rejects_shadow_models_from_different_population(image_handler: ImageInputHandler, tmp_path) -> None:
+    """Shadow models trained on a different population must not be reused."""
+    image_handler.configs.shadow_model = ShadowModelConfig(**get_shadow_model_config())
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+    sm = ShadowModelHandler(image_handler)
+    sm.storage_path = str(tmp_path)
+
+    metadata_kwargs = {
+        "init_params": sm.init_params,
+        "train_indices": [0, 1, 2, 3, 4],
+        "num_train": 5,
+        "optimizer": sm.optimizer_name,
+        "optimizer_params": sm.optimizer_config,
+        "criterion": sm.criterion_name,
+        "criterion_params": sm.loss_config,
+        "epochs": sm.epochs,
+        "batch_size": sm.batch_size,
+        "train_result": EvalOutput(accuracy=0.0, loss=0.0),
+        "test_result": EvalOutput(accuracy=0.0, loss=0.0),
+        "model_class": sm.model_class,
+        "model_module_path": sm.model_path,
+        "target_model_hash": sm.target_model_hash,
+        "population_hash": "stale_hash_from_old_split",
+    }
+    stale_metadata = ShadowModelTrainingSchema(**metadata_kwargs)
+    with open(tmp_path / "metadata_0.pkl", "wb") as f:
+        pickle.dump(stale_metadata, f)
+
+    all_indices, filtered_indices = sm._filter(data_size=5)
+
+    assert all_indices == [0]
+    assert filtered_indices == []
+
+
+def test_construct_balanced_assignments_respects_points_per_model(image_handler: ImageInputHandler) -> None:
+    """Every dataset must get exactly points_per_model points, with per-point counts balanced within 1."""
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+    sm = ShadowModelHandler(image_handler)
+
+    m, n = 100, 7
+    for fraction in [0.3, 0.5, 0.72, 1.0]:
+        points_per_model = int(m * fraction)
+        A = sm.construct_balanced_assignments(m, n, points_per_model=points_per_model)
+        assert A.shape == (n, m)
+        assert np.all(A.sum(axis=1) == points_per_model)
+        inclusion_counts = A.sum(axis=0)
+        assert inclusion_counts.max() - inclusion_counts.min() <= 1
+
+    # Default keeps the historical behavior of half the population per model
+    A = sm.construct_balanced_assignments(101, 4)
+    assert np.all(A.sum(axis=1) == 101 // 2)
+
+    with raises(ValueError):
+        sm.construct_balanced_assignments(m, n, points_per_model=0)
+    with raises(ValueError):
+        sm.construct_balanced_assignments(m, n, points_per_model=m + 1)
+
+
+def test_shadow_model_training_fraction_is_used_and_cached(
+    image_handler: ImageInputHandler,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Shadow models must train on training_fraction of the population and be reused for that fraction."""
+    shadow_config = ShadowModelConfig(**get_shadow_model_config())
+    image_handler.configs.shadow_model = shadow_config
+
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+    sm = ShadowModelHandler(image_handler)
+    sm.storage_path = str(tmp_path / "attack_objects")
+    os.makedirs(sm.storage_path, exist_ok=True)
+    sm.attack_cache_folder_path = str(tmp_path / "attack_cache")
+    os.makedirs(sm.attack_cache_folder_path, exist_ok=True)
+
+    trained_sizes = []
+
+    def fake_train(data_loader, model, criterion, optimizer, epochs):
+        trained_sizes.append(len(data_loader.dataset))
+        return TrainingOutput(model=model, metrics=EvalOutput(accuracy=0.0, loss=0.0))
+
+    monkeypatch.setattr(image_handler, "train", fake_train)
+    monkeypatch.setattr(image_handler, "eval", lambda *args, **kwargs: EvalOutput(accuracy=0.0, loss=0.0))
+    monkeypatch.setattr(sm, "cache_logits", lambda *args, **kwargs: None)
+
+    population = image_handler.test_indices
+    training_fraction = 0.75
+    expected_size = int(len(population) * training_fraction)
+
+    sm.create_shadow_models(num_models=2, shadow_population=population, training_fraction=training_fraction)
+    assert trained_sizes == [expected_size, expected_size]
+
+    # Re-running with the same fraction must reuse the cached models, not retrain (issue #345)
+    sm.create_shadow_models(num_models=2, shadow_population=population, training_fraction=training_fraction)
+    assert trained_sizes == [expected_size, expected_size]
+
+
+def test_construct_balanced_assignments_extends_a_cached_design(image_handler: ImageInputHandler) -> None:
+    """Seeding with cached memberships must keep the union balanced, not start a second design."""
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+    sm = ShadowModelHandler(image_handler)
+
+    m, n_cached, n_new = 100, 3, 5
+    points_per_model = 40
+
+    cached = sm.construct_balanced_assignments(m, n_cached, points_per_model=points_per_model)
+    prior_counts = cached.sum(axis=0)
+
+    new = sm.construct_balanced_assignments(m, n_new, points_per_model=points_per_model,
+                                            prior_inclusion_counts=prior_counts)
+    assert new.shape == (n_new, m)
+    assert np.all(new.sum(axis=1) == points_per_model)
+
+    union_counts = np.concatenate([cached, new]).sum(axis=0)
+    assert union_counts.max() - union_counts.min() <= 1
+
+    # The seeded pass must prefer the points the cached models missed. With one cached model
+    # covering the first half, the next model is forced entirely onto the second half; an
+    # unseeded pass would have no reason to pick those five points.
+    prior = np.array([1] * 5 + [0] * 5)
+    forced = sm.construct_balanced_assignments(10, 1, points_per_model=5, prior_inclusion_counts=prior)
+    assert list(np.where(forced[0] == 1)[0]) == [5, 6, 7, 8, 9]
+
+    with raises(ValueError):
+        sm.construct_balanced_assignments(m, n_new, points_per_model=points_per_model,
+                                          prior_inclusion_counts=np.zeros(m + 1))
+
+
+def test_create_shadow_models_rejects_degenerate_training_fraction(image_handler: ImageInputHandler, tmp_path) -> None:
+    """A fraction of 1 leaves no OUT models and a fraction of 0 leaves no training data."""
+    image_handler.configs.shadow_model = ShadowModelConfig(**get_shadow_model_config())
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+    sm = ShadowModelHandler(image_handler)
+    sm.storage_path = str(tmp_path)
+
+    with raises(ValueError) as excinfo:
+        sm.create_shadow_models(num_models=2, shadow_population=image_handler.test_indices, training_fraction=1.0)
+    assert "no OUT reference models" in str(excinfo.value)
+
+    with raises(ValueError) as excinfo:
+        sm.create_shadow_models(num_models=2, shadow_population=image_handler.test_indices, training_fraction=0.0)
+    assert "at least 1 point" in str(excinfo.value)
+
+
+def test_resumed_run_extends_the_cached_assignment(
+    image_handler: ImageInputHandler,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Adding shadow models to a cached run must balance against the cached ones, not ignore them."""
+    image_handler.configs.shadow_model = ShadowModelConfig(**get_shadow_model_config())
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+    sm = ShadowModelHandler(image_handler)
+    sm.storage_path = str(tmp_path / "attack_objects")
+    os.makedirs(sm.storage_path, exist_ok=True)
+    sm.attack_cache_folder_path = str(tmp_path / "attack_cache")
+    os.makedirs(sm.attack_cache_folder_path, exist_ok=True)
+
+    monkeypatch.setattr(
+        image_handler, "train",
+        lambda data_loader, model, criterion, optimizer, epochs: TrainingOutput(
+            model=model, metrics=EvalOutput(accuracy=0.0, loss=0.0)),
+    )
+    monkeypatch.setattr(image_handler, "eval", lambda *args, **kwargs: EvalOutput(accuracy=0.0, loss=0.0))
+    monkeypatch.setattr(sm, "cache_logits", lambda *args, **kwargs: None)
+
+    population = np.array(image_handler.test_indices)
+    fraction = 0.5
+
+    # First run stops after 2 models (the crash), second run asks for 4.
+    sm.create_shadow_models(num_models=2, shadow_population=population.tolist(), training_fraction=fraction)
+    indices = sm.create_shadow_models(num_models=4, shadow_population=population.tolist(), training_fraction=fraction)
+    assert len(indices) == 4
+
+    counts = sm.get_in_indices_mask(list(indices), population).sum(axis=1)
+    assert counts.max() - counts.min() <= 1
+
+
+def test_audit_points_with_reference_models_requires_the_needed_side() -> None:
+    """Offline scoring needs an OUT model per point, online needs both sides."""
+    # 3 shadow models, 4 audit points. Point 0 is in every model (no OUT), point 1 in none (no IN).
+    out_indices = np.array([
+        [False, True, True, False],
+        [False, True, False, True],
+        [False, True, True, True],
+    ])
+
+    offline_mask = audit_points_with_reference_models(out_indices, require_in_models=False)
+    assert list(offline_mask) == [False, True, True, True]
+
+    online_mask = audit_points_with_reference_models(out_indices, require_in_models=True)
+    assert list(online_mask) == [False, False, True, True]

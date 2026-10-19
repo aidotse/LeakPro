@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Inverting on a single image."""
 
 from cifar import get_cifar10_loader
@@ -17,7 +21,7 @@ if __name__ == "__main__":
     for i in range(0,16*10,16):
         # only use two loaders for client here
         client_idx = 0 if i > 16*4 else 16
-        loader, _, _ = get_cifar10_loader(start_idx=i,
+        loader, _, _ = get_cifar10_loader(start_idx=client_idx,
                                                 num_images=16,
                                                 batch_size=16,
                                                 num_workers=2)

@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Implementation of the loss trajectory attack."""
 
 import os
@@ -6,7 +10,7 @@ import pickle
 import numpy as np
 import torch.nn.functional as F  # noqa: N812
 from pydantic import BaseModel, Field
-from torch import cuda, device, load, nn, no_grad, optim, save, tensor
+from torch import load, nn, no_grad, optim, save, tensor
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
@@ -16,6 +20,7 @@ from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.reporting.mia_result import MIAResult
 from leakpro.signals.signal import ModelLogits
+from leakpro.utils.device import get_device, mark_step
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
@@ -114,11 +119,10 @@ class AttackLossTrajectory(AbstractMIA):
         # create auxiliary dataset
         aux_data_size = len(aux_data_index)
         shadow_data_size = int(aux_data_size * self.shadow_data_fraction)
-        shadow_data_indices = np.random.choice(aux_data_size, shadow_data_size, replace=False)
-        # Split the shadow data into two equal parts
+        shadow_data_indices = np.random.choice(aux_data_index, shadow_data_size, replace=False)
+        # Split the shadow data into two equal parts: the shadow model trains on the first, the second is held out
         split_index = len(shadow_data_indices) // 2
         shadow_training_indices = shadow_data_indices[:split_index]
-        shadow_not_used_indices = shadow_data_indices[split_index:]
         # Distillation on target and shadow model happen on the same dataset
         distill_data_indices = np.setdiff1d(aux_data_index, shadow_data_indices)
 
@@ -156,17 +160,20 @@ class AttackLossTrajectory(AbstractMIA):
         #--------------------------------------------------------
         # Prepare data to train and test the MIA classifier
         #--------------------------------------------------------
-        # shadow data (train and test) is used as training data for MIA_classifier in the paper
-        train_mask = np.isin(shadow_data_indices,shadow_not_used_indices)
+        # shadow data (train and test) is used as training data for MIA_classifier in the paper.
+        # Membership is read from the shadow model's metadata, which also holds for a reused cached model.
+        train_mask = ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, shadow_data_indices)[:, 0]
         self.prepare_mia_data(shadow_data_indices,
                               train_mask,
                               student_model = self.distill_shadow_models,
                               teacher_model = self.shadow_model[0].model_obj,
                               train_mode = True)
 
-        # Data used in the target (train and test) is used as test data for MIA_classifier
-        mia_test_data_indices = np.concatenate( (self.train_indices , self.test_indices))
-        test_mask = np.isin(mia_test_data_indices, self.train_indices)
+        # Data used in the target (train and test) is used as test data for MIA_classifier.
+        # train_indices/test_indices are positions in the audit set; the population indices are in "data".
+        mia_test_data_indices = self.audit_dataset["data"]
+        test_mask = np.zeros(len(mia_test_data_indices), dtype=bool)
+        test_mask[self.audit_dataset["in_members"]] = True
         self.prepare_mia_data(mia_test_data_indices,
                               test_mask,
                               student_model = self.distill_target_models,
@@ -228,7 +235,7 @@ class AttackLossTrajectory(AbstractMIA):
                         dataset_name: str,
                         ) -> dict:
         logger.info(f"Preparing MIA {dataset_name}: {len(data_indices)} points")
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         data_loader = self.get_dataloader(data_indices, batch_size=self.train_mia_batch_size)
 
         teacher_model_loss = np.array([])
@@ -244,6 +251,12 @@ class AttackLossTrajectory(AbstractMIA):
             # Calculate the losses for the distilled student models
             #---------------------------------------------------------------------
             criterion = DistillationModelHandler().get_criterion()
+            # BCEWithLogitsLoss (single-logit/binary models) requires a float target of the same
+            # dtype as the model output; CrossEntropyLoss requires the original Long class index.
+            # `target` comes out of the dataloader as Long, so cast only in the binary case —
+            # otherwise BCE raises "result type Float can't be cast to the desired output type Long".
+            is_binary_criterion = isinstance(criterion, nn.BCEWithLogitsLoss)
+            target_for_loss = target.float() if is_binary_criterion else target
             trajectory_current = np.array([])
             for d in range(self.number_of_traj) :
                 distill_model[d].to(gpu_or_cpu)
@@ -254,7 +267,7 @@ class AttackLossTrajectory(AbstractMIA):
 
                 # Calculate the loss
                 loss = []
-                for logit_target_i, target_i in zip(distill_model_soft_output, target):
+                for logit_target_i, target_i in zip(distill_model_soft_output, target_for_loss):
                     loss_i = criterion(logit_target_i, target_i)
                     loss.append(loss_i)
                 loss = np.array([loss_i.detach().cpu().numpy() for loss_i in loss]).reshape(-1, 1)
@@ -267,7 +280,7 @@ class AttackLossTrajectory(AbstractMIA):
             batch_logit_target = teacher_model(data).squeeze() # TODO: replace with hopskipjump for label only
             batch_loss_teacher = []
 
-            for (batch_logit_target_i, target_i) in zip(batch_logit_target, target):
+            for (batch_logit_target_i, target_i) in zip(batch_logit_target, target_for_loss):
                 loss = criterion(batch_logit_target_i, target_i)
                 batch_loss_teacher.append(loss)
             batch_loss_teacher = np.array([batch_loss_teacher_i.cpu().detach().numpy() for batch_loss_teacher_i in
@@ -292,7 +305,7 @@ class AttackLossTrajectory(AbstractMIA):
         """
         attack_model = self.mia_classifer
         if not os.path.exists(f"{self.storage_dir}/trajectory_mia_model.pkl"):
-            gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+            gpu_or_cpu = get_device()
             attack_optimizer = optim.SGD(attack_model.parameters(),
                                             lr=0.01, momentum=0.9, weight_decay=0.0001)
             attack_model = attack_model.to(gpu_or_cpu)
@@ -337,7 +350,7 @@ class AttackLossTrajectory(AbstractMIA):
         train_loss = 0
         num_correct = 0
         mia_train_loader = self.mia_train_data_loader
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         for _ in  tqdm(range(self.mia_classifier_epochs), total=self.mia_classifier_epochs):
             for _batch_idx, (data, label) in enumerate(mia_train_loader):
                 data = data.to(gpu_or_cpu) # noqa: PLW2901
@@ -350,6 +363,7 @@ class AttackLossTrajectory(AbstractMIA):
                 loss.backward()
 
                 attack_optimizer.step()
+                mark_step(gpu_or_cpu)
                 train_loss += loss.item()
                 pred_label = pred.max(1, keepdim=True)[1]
                 num_correct += pred_label.eq(label).sum().item()
@@ -377,7 +391,7 @@ class AttackLossTrajectory(AbstractMIA):
 
         """
         logger.info("Running the MIA attack")
-        gpu_or_cpu = device("cuda" if cuda.is_available() else "cpu")
+        gpu_or_cpu = get_device()
         attack_model.to(gpu_or_cpu)
         attack_model.eval()
         test_loss = 0

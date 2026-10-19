@@ -1,8 +1,12 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Implementation of the Report module."""
 
 import subprocess
 
-from leakpro.reporting.gia_result import GIAResults
+from leakpro.metrics.attack_result import GIAResults
 from leakpro.reporting.mia_result import MIAResult
 from leakpro.synthetic_data_attacks.inference_utils import InferenceResults
 from leakpro.synthetic_data_attacks.linkability_utils import LinkabilityResults

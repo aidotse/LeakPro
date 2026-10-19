@@ -1,3 +1,7 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
 """Test the model handler module."""
 
 from leakpro.attacks.utils.model_handler import ModelHandler
