@@ -183,6 +183,32 @@ def test_cached_pool_and_seed_reproduce_runs(handler, mocker):
     assert first.summary == second.summary
 
 
+@pytest.mark.parametrize("fraction,compatible", [(15 / 22, True), (14.9 / 22, False)])
+def test_target_training_count_survives_fraction_rounding(handler, mocker, fraction, compatible):
+    handler.population.data = handler.population.data[:22]
+    handler.population.targets = handler.population.targets[:22]
+    handler.population_size = 22
+    handler.train_indices = np.arange(15)
+    handler.test_indices = np.arange(15, 22)
+    handler.target_model_metadata.train_indices = handler.train_indices.tolist()
+    handler.target_model_metadata.test_indices = handler.test_indices.tolist()
+    handler.target_model_metadata.num_train = 15
+    handler.target_model = TinyModel()
+    handler.train(handler.get_dataloader(handler.train_indices), handler.target_model, handler.get_criterion(),
+                  handler.get_optimizer(handler.target_model), 1)
+    training = mocker.spy(TinyHandler, "train")
+    wrapper = Robustness(handler, "lira", {"num_shadow_models": 4, "training_data_fraction": fraction,
+                                          "online": True}, 3, 4, seed=19)
+    if compatible:
+        assert len(wrapper.run()) == 3
+    else:
+        with pytest.raises(ValueError, match="incompatible with the robustness pool"):
+            wrapper.run()
+    assert training.call_count == 4
+    assert all(len(call.args[1].dataset) == 15 for call in training.call_args_list)
+    assert all(len(metadata.train_indices) == 15 for metadata in wrapper._metadata.values())
+
+
 def test_documented_workflow_from_saved_leakpro_inputs(handler, tmp_path):
     target_dir = tmp_path / "target"
     target_dir.mkdir()

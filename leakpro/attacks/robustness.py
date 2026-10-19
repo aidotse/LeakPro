@@ -135,7 +135,9 @@ class Robustness:
                   pool.criterion_name, pool.loss_config, pool.epochs, pool.batch_size)
         if actual != expected:
             raise ValueError("Robustness requires the same target and shadow training setup")
-        fraction = len(self.handler.train_indices) / len(self._records)
+        # The handler truncates population_size * fraction. Round the ratio upward
+        # by one float step so an exact count such as 15 / 22 cannot become 14.
+        fraction = np.nextafter(len(self.handler.train_indices) / len(self._records), 1.0)
         self._shadow_indices = pool.create_shadow_models(self.num_shadow_models, self._records,
                                                         training_fraction=fraction, sampling_method="random")
         self._shadow_indices = list(map(int, self._shadow_indices))

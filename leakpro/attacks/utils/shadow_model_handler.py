@@ -89,7 +89,8 @@ class ShadowModelHandler(ModelHandler):
         indices, _, metadata_loader, _ = self._reference_pool
         if num_models != len(indices):
             raise ValueError("The attack's shadow count must equal the robustness reference-pool size")
-        expected_size = int(len(shadow_population) * training_fraction)
+        # Recover integer ratios rounded just below their requested record count.
+        expected_size = int(np.nextafter(len(shadow_population) * training_fraction, np.inf))
         for index in indices:
             training_indices = np.asarray(metadata_loader(index).train_indices)
             if len(training_indices) != expected_size or not np.all(np.isin(training_indices, shadow_population)):
