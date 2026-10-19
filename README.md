@@ -182,6 +182,9 @@ target:
   data_path: "./data/dataset.pkl"
 ```
 
+To evaluate variation across trained targets, see the [model-level robustness wrapper](examples/mia/robustness/README.md).
+It runs a configured MIA on the original target and then on distinct shadows from a shared model pool.
+
 For full documentation see the **[LeakPro Wiki](https://github.com/aidotse/LeakPro/wiki)**:
 - [Attack Modules overview](https://github.com/aidotse/LeakPro/wiki/Attack-Modules)
 - [Membership Inference Attacks — implemented attacks & papers](https://github.com/aidotse/LeakPro/wiki/Membership-Inference-Attacks)
