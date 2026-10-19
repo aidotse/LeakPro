@@ -445,7 +445,11 @@ def run_audit_job(
 
 
 def _serialise_result(r: Any) -> dict:
+    # audit_indices is reported by the attack itself (MIAResult.from_full_scores);
+    # None means the attack cannot say which population points it scored.
+    audit_indices = getattr(r, "audit_indices", None)
     return {
+        "audit_indices": audit_indices.tolist() if audit_indices is not None else None,
         "attack_name": r.result_name,
         "roc_auc": float(r.roc_auc) if r.roc_auc is not None else None,
         "tpr_at_fpr": {k: float(v) for k, v in (r.fixed_fpr_table or {}).items()},

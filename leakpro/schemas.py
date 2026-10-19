@@ -283,6 +283,11 @@ class PrivacyUtilityConfig(BaseModel):
                              description="FPR level the loop minimizes TPR at (one of 0.0001, 0.001, 0.01, 0.1)")
     delta: float = Field(default=1e-5, gt=0.0, lt=1.0,
                          description="DP delta used for epsilon accounting; choose well below 1/n_target")
+    accountant: Literal["prv", "rdp"] = Field(
+        default="prv",
+        description="Opacus privacy accountant; PRV is tighter than RDP, so epsilons from different accountants "
+                    "are not comparable and the choice is recorded with every reported epsilon. GDP is not "
+                    "offered: Opacus's GDP accountant is experimental and can underestimate epsilon")
     epochs: int = Field(default=15, ge=1,
                         description="Training epochs (fixed unless 'epochs' is listed as a knob)")
     output_dir: str = Field(..., description="Output directory (study.db, per-config artifacts)")
@@ -332,6 +337,9 @@ class MIAResultSchema(BaseModel):
     fp: Union[ArrayOrScalar, None] = Field(None, description="FP values")
     tn: Union[ArrayOrScalar, None] = Field(None, description="TN values")
     fn: Union[ArrayOrScalar, None] = Field(None, description="FN values")
+    bootstrap: Optional[Dict[str, Any]] = Field(
+        None, description="Optional bootstrap mean/CI for roc_auc and the fixed-FPR table (see MIAResult.bootstrap_metrics)"
+    )
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # Prevent extra fields
 

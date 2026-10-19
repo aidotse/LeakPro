@@ -21,6 +21,17 @@ export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
 }
 
+/**
+ * Log-stream WebSocket URL for a job. Browsers cannot set an Authorization
+ * header on a WebSocket, so the backend takes the token as a query parameter
+ * on this one route. Every caller must go through here so an auth change
+ * cannot miss a call site again.
+ */
+export function logsSocketUrl(jobId: string): string {
+  const scheme = location.protocol === "https:" ? "wss" : "ws";
+  return `${scheme}://${location.host}/jobs/${jobId}/logs?token=${encodeURIComponent(getToken())}`;
+}
+
 function authHeaders(extra?: Record<string, string>): Record<string, string> {
   return { Authorization: `Bearer ${getToken()}`, ...(extra ?? {}) };
 }
@@ -122,6 +133,14 @@ export const api = {
   assessRisk: (id: string, profile: RiskRequest) => post<RiskResponse>(`/jobs/${id}/risk`, profile),
   getSampleData: (jobId: string, index: number) =>
     get<{ index: number; label: number; features: number[]; feature_names?: string[] }>(`/jobs/${jobId}/sample_data/${index}`),
+  // An <img src> cannot carry the Authorization header, so fetch the PNG with
+  // the token and hand back an object URL (caller revokes it).
+  getSampleImageUrl: async (jobId: string, index: number): Promise<string> => {
+    const res = await fetch(`${BASE}/jobs/${jobId}/sample_image/${index}`, { headers: authHeaders() });
+    if (res.status === 401) { clearToken(); throw new Error("Unauthorized"); }
+    if (!res.ok) throw new Error(await res.text());
+    return URL.createObjectURL(await res.blob());
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -161,6 +180,7 @@ export interface CompatResult {
   param_count?: number;
   error?: string;
   sample_outputs?: Array<{ sample: number; top1_class: number; confidence: number; true_label: number | null }>;
+  sample_error?: string;
 }
 
 export interface MetaValidationResult {
@@ -204,6 +224,7 @@ export interface AttackResult {
   tpr?: number[];
   signal_values?: number[];
   true_labels?: number[];
+  audit_indices?: number[] | null;  // population index per signal entry
 }
 
 export interface JobListItem {
