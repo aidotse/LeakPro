@@ -153,13 +153,13 @@ class AttackMSLiRA(AbstractMIA):
         # signal interprets it (rescaled_logits/loss expect int64 labels; mse/mae/... expect a
         # series matching the cached logits' shape).
         targets = np.asarray(self.handler.get_labels(audit_indices))
-        target_logits = ShadowModelHandler().load_logits(name="target")
-        shadow_logits = [ShadowModelHandler().load_logits(indx=indx) for indx in self.shadow_model_indices]
+        target_outputs = ShadowModelHandler().load_logits(name="target")
+        shadow_outputs = [ShadowModelHandler().load_logits(indx=indx) for indx in self.shadow_model_indices]
         # Classification labels arrive with a spurious singleton axis that must be dropped before
-        # rescaled_logits/loss index them as (N,). Forecasting targets already match target_logits'
+        # rescaled_logits/loss index them as (N,). Forecasting targets already match target_outputs'
         # shape (N, horizon, num_variables) — squeezing them would strip the real num_variables axis
         # and break the mse/dtw/msm/... shape assert.
-        if targets.shape != target_logits.shape:
+        if targets.shape != target_outputs.shape:
             targets = targets.squeeze()
 
         shadow_models_signals = []
@@ -167,14 +167,14 @@ class AttackMSLiRA(AbstractMIA):
         for signal_fn, signal_name in zip(self.signal_fns, self.signals):
             logger.info(f"Calculating {signal_name} for the target model")
             target_signals.append(
-                self._check_signal_shape(signal_fn(target_logits, targets), target_logits.shape[0], signal_name)
+                self._check_signal_shape(signal_fn(target_outputs, targets), target_outputs.shape[0], signal_name)
             )
 
             logger.info(f"Calculating {signal_name} for all {self.num_shadow_models} shadow models")
             # (n_shadow_models, n_audit_points) -> (n_audit_points, n_shadow_models)
             per_model = np.array([
-                self._check_signal_shape(signal_fn(logits, targets), logits.shape[0], signal_name)
-                for logits in shadow_logits
+                self._check_signal_shape(signal_fn(outputs, targets), outputs.shape[0], signal_name)
+                for outputs in shadow_outputs
             ])
             shadow_models_signals.append(per_model.T)
 
