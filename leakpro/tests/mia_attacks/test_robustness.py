@@ -15,6 +15,7 @@ import yaml
 from torch import nn
 
 from leakpro import LeakPro
+from leakpro.attacks.attack_scheduler import AttackScheduler
 from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
 from leakpro.attacks.robustness import Robustness
 from leakpro.attacks.utils.distillation_model_handler import DistillationModelHandler
@@ -209,7 +210,8 @@ def test_target_training_count_survives_fraction_rounding(handler, mocker, fract
     assert all(len(metadata.train_indices) == 15 for metadata in wrapper._metadata.values())
 
 
-def test_documented_workflow_from_saved_leakpro_inputs(handler, tmp_path):
+@pytest.fixture
+def saved_audit_inputs(handler, tmp_path):
     target_dir = tmp_path / "target"
     target_dir.mkdir()
     torch.save(handler.target_model.state_dict(), target_dir / "target_model.pkl")
@@ -221,9 +223,13 @@ def test_documented_workflow_from_saved_leakpro_inputs(handler, tmp_path):
     config["target"]["target_folder"] = str(target_dir)
     config["target"]["data_path"] = str(tmp_path / "population.pkl")
     config["audit"]["output_dir"] = str(tmp_path / "audit")
+    return config, tmp_path / "audit.yaml"
+
+
+def test_documented_workflow_from_saved_leakpro_inputs(saved_audit_inputs):
+    config, config_path = saved_audit_inputs
     config["audit"]["attack_list"] = [{"attack": "lira", "num_shadow_models": 4,
                                        "training_data_fraction": 1 / 3, "online": True}]
-    config_path = tmp_path / "audit.yaml"
     config_path.write_text(yaml.safe_dump(config))
     audit = LeakPro(TinyInputHandler, str(config_path))
     existing = ShadowModelHandler()
@@ -236,6 +242,128 @@ def test_documented_workflow_from_saved_leakpro_inputs(handler, tmp_path):
     assert runner._copy_handler().train.__self__ is not audit.handler
     assert vars(ShadowModelHandler()) == old_state
     assert json.loads((runner.output_dir / "summary.json").read_text())["setup"]["targets"][0] == -1
+
+
+@pytest.mark.parametrize("name", ["lira", "rmia"])
+def test_yaml_robustness_runs_through_normal_audit(saved_audit_inputs, mocker, name):
+    config, config_path = saved_audit_inputs
+    attack_config = {"num_shadow_models": 4, "training_data_fraction": 1 / 3, "online": True}
+    config["audit"]["random_seed"] = 11
+    config["audit"]["attack_list"] = [
+        {"attack": "unknown"},
+        {"attack": "lira", **attack_config, "robustness": None},
+        {"attack": name, **attack_config, "robustness": {"n_runs": 3}},
+        {"attack": "base", **attack_config},
+    ]
+    config_path.write_text(yaml.safe_dump(config))
+    training = mocker.spy(TinyInputHandler, "train")
+    report = mocker.patch("leakpro.leakpro.ReportHandler")
+    audit = LeakPro(TinyInputHandler, str(config_path))
+    results = audit.run_audit(create_pdf=True)
+    assert len(results) == 5
+    assert len({result.id for result in results}) == 5
+    assert all(result.result.id == result.id for result in results)
+    assert audit.attack_scheduler.attack_names == ["lira", name, "base"]
+    runner = audit.attack_scheduler.attacks[1]
+    assert isinstance(runner, Robustness)
+    assert runner.seed == 11
+    assert runner.num_shadow_models == 4
+    assert all(actual is entry["result_object"] for actual, entry in zip(results[1:4], runner.results))
+    assert audit.handler.configs.audit.attack_list == config["audit"]["attack_list"]
+    assert training.call_count == 8  # Four ordinary shadows and one reusable four-model robustness pool.
+    report.assert_called_once_with(results=results, report_dir=audit.report_dir)
+    report.return_value.create_report.assert_called_once_with()
+    saved = json.loads((runner.output_dir / "summary.json").read_text())
+    assert saved["setup"]["targets"] == [-1, *np.random.default_rng(11).permutation(4)[:2].tolist()]
+    assert len(saved["runs"]) == 3
+    assert all(entry["target"] not in entry["references"] for entry in saved["runs"])
+    assert all(-1 in entry["references"] for entry in saved["runs"][1:])
+    assert len(list((Path(config["audit"]["output_dir"]) / "data_objects").glob("*.json"))) == 2
+    report_dir = Path(config["audit"]["output_dir"]) / "report-check"
+    MIAResult.create_results(results, save_dir=str(report_dir))
+    assert all((report_dir / result.id).is_dir() for result in results)
+
+
+@pytest.mark.parametrize("options", [
+    {}, False, {"n_runs": True}, {"n_runs": 1}, {"n_runs": 6},
+    {"n_runs": 2, "seed": -1}, {"n_runs": 2, "typo": 4}, {"n_runs": 2, "num_shadow_models": 3},
+])
+def test_invalid_yaml_robustness_rejected_before_training(handler, mocker, options):
+    handler.configs.audit.attack_list = [{"attack": "lira", "num_shadow_models": 4,
+                                         "robustness": options}]
+    training = mocker.spy(TinyHandler, "train")
+    with pytest.raises(ValueError):
+        AttackScheduler(handler, output_dir=handler.configs.audit.output_dir)
+    assert training.call_count == 0
+
+
+@pytest.mark.parametrize("seed", [7, None])
+def test_yaml_robustness_seed_override_and_output_directory(handler, tmp_path, seed):
+    handler.configs.audit.attack_list = [{"attack": "lira", "num_shadow_models": 4,
+                                         "training_data_fraction": 1 / 3,
+                                         "robustness": {"n_runs": 2, "seed": seed}}]
+    output_dir = tmp_path / "custom"
+    scheduler = AttackScheduler(handler, output_dir=str(output_dir))
+    records = scheduler.run_attacks()
+    runner = scheduler.attacks[0]
+    assert runner.seed is seed
+    assert len(records) == 2
+    assert all(entry["attack_type"] == "lira" and entry["attack_object"] is runner for entry in records)
+    assert runner.output_dir.is_relative_to(output_dir)
+    assert (runner.output_dir / "summary.json").is_file()
+    assert not (Path(handler.configs.audit.output_dir) / "robustness").exists()
+
+
+def test_robustness_rejects_non_mia_and_optuna_before_training(handler, mocker):
+    handler.configs.audit.attack_list = [{"attack": "lira", "num_shadow_models": 4,
+                                         "robustness": {"n_runs": 2}}]
+    handler.configs.audit.attack_type = "minv"
+    initialize = mocker.spy(AttackScheduler, "_initialize_factory")
+    with pytest.raises(ValueError, match="only supported for MIA"):
+        AttackScheduler(handler, output_dir=handler.configs.audit.output_dir)
+    assert initialize.call_count == 0
+    handler.configs.audit.attack_type = "mia"
+    training = mocker.spy(TinyHandler, "train")
+    scheduler = AttackScheduler(handler, output_dir=handler.configs.audit.output_dir)
+    with pytest.raises(ValueError, match="use_optuna must be False"):
+        scheduler.run_attacks(use_optuna=True)
+    assert training.call_count == 0
+
+
+@pytest.mark.parametrize("fail_second", [False, True])
+def test_gradient_attack_preserves_caller_model_state(handler, monkeypatch, fail_second):
+    model = handler.target_model
+    model.train()
+    original_hash = hash_model(model)
+    hooks = [dict(module._forward_hooks) for module in model.modules()]
+    training = [module.training for module in model.modules()]
+    gradients = [parameter.grad.clone() for parameter in model.parameters()]
+    attack_class = AttackFactoryMIA.attack_classes["yoqo"]
+    run_attack = attack_class.run_attack
+    calls = []
+
+    def run_then_fail(attack):
+        result = run_attack(attack)
+        calls.append(result)
+        if fail_second and len(calls) == 2:
+            raise RuntimeError("injected gradient attack failure")
+        return result
+
+    monkeypatch.setattr(attack_class, "run_attack", run_then_fail)
+    runner = Robustness(handler, "yoqo", {"num_shadow_models": 4, "training_data_fraction": 1 / 3,
+                                          "online": True, "max_iterations": 1}, 2, 4, seed=123)
+    if fail_second:
+        with pytest.raises(RuntimeError, match="injected gradient attack failure"):
+            runner.run()
+    else:
+        assert len(runner.run()) == 2
+    assert len(calls) == 2
+    assert handler.target_model is model
+    assert hash_model(model) == original_hash
+    assert [dict(module._forward_hooks) for module in model.modules()] == hooks
+    assert [module.training for module in model.modules()] == training
+    for actual, expected in zip(model.parameters(), gradients):
+        torch.testing.assert_close(actual.grad, expected, rtol=0, atol=0)
 
 
 @pytest.mark.parametrize("runs,pool,seed", [(1, 4, 1), (6, 4, 1), (True, 4, 1), (2, 0, 1), (2, 4, -1)])
@@ -283,7 +411,7 @@ def test_attack_failure_restores_shared_state(handler, monkeypatch):
     with pytest.raises(RuntimeError, match="injected attack failure"):
         Robustness(handler, "lira", {"num_shadow_models": 4, "training_data_fraction": 1 / 3}, 3, 4, seed=6).run()
     assert vars(ShadowModelHandler()) == old_state
-    assert handler.target_model is calls[0]
+    assert handler.target_model is not calls[0]
 
 
 def test_summary_uses_upper_roc_ties_and_excludes_original():

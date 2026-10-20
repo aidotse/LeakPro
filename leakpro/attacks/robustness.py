@@ -17,6 +17,7 @@ from types import MethodType
 from typing import Any, Optional
 
 import numpy as np
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
 from leakpro.attacks.utils.distillation_model_handler import DistillationModelHandler
@@ -41,27 +42,41 @@ class Robustness:
         attack_name: Name registered in AttackFactoryMIA.
         attack_config: Parameters of the attack, without the "attack" routing key.
         n_runs: Total runs including the original target, from 2 to num_shadow_models + 1.
-        num_shadow_models: Number of models in each run's reference pool.
+        num_shadow_models: Number of models in each run's reference pool; defaults
+            to the configured attack's shadow count when available.
         seed: Optional seed for pool training, target order, and attack preparation.
+        output_dir: Optional output root, defaulting to the handler's audit output directory.
 
     Notes:
         The summary contains empirical percentiles across rotated targets, excluding
         the original-target result. These dependent runs do not establish calibrated
         confidence intervals. Execution is sequential because model handlers are shared.
+        In audit.yaml, add ``robustness: {n_runs: 9}`` to an MIA attack entry.
+        YAML runs inherit audit.random_seed unless robustness.seed is explicitly set.
 
     """
 
+    class Config(BaseModel):
+        """Settings accepted by the per-attack robustness field in audit.yaml."""
+
+        n_runs: StrictInt = Field(ge=2)
+        num_shadow_models: Optional[StrictInt] = Field(default=None, ge=1)
+        seed: Optional[StrictInt] = Field(default=None, ge=0, le=MAX_SEED)
+        model_config = ConfigDict(extra="forbid")
+
     def __init__(self, handler:MIAHandler, attack_name:str, attack_config:dict,
-                 n_runs:int, num_shadow_models:int, seed:Optional[int]=None) -> None:
+                 n_runs:int, num_shadow_models:Optional[int]=None, seed:Optional[int]=None,
+                 *, output_dir:Optional[str]=None) -> None:
         if attack_name not in AttackFactoryMIA.attack_classes:
             raise ValueError(f"Unknown attack type: {attack_name}")
-        if type(num_shadow_models) is not int or num_shadow_models < 1:
-            raise ValueError("num_shadow_models must be a positive integer")
-        if type(n_runs) is not int or not 2 <= n_runs <= num_shadow_models + 1:
-            raise ValueError("n_runs must be between 2 and num_shadow_models + 1")
-        if seed is not None and (type(seed) is not int or not 0 <= seed <= MAX_SEED):
-            raise ValueError(f"seed must be between 0 and {MAX_SEED}, or None")
         config = AttackFactoryMIA.attack_classes[attack_name].AttackConfig(**attack_config)
+        if num_shadow_models is None:
+            num_shadow_models = getattr(config, "num_shadow_models", None)
+        if num_shadow_models is None:
+            raise ValueError("num_shadow_models is required when the attack has no shadow count")
+        options = self.Config(n_runs=n_runs, num_shadow_models=num_shadow_models, seed=seed)
+        if options.n_runs > options.num_shadow_models + 1:
+            raise ValueError("n_runs must be between 2 and num_shadow_models + 1")
         if hasattr(config, "num_shadow_models") and config.num_shadow_models != num_shadow_models:
             raise ValueError("The attack's num_shadow_models must equal the robustness pool size")
         self.handler = handler
@@ -70,6 +85,7 @@ class Robustness:
         self.n_runs = n_runs
         self.num_shadow_models = num_shadow_models
         self.seed = seed
+        self._output_root = Path(handler.configs.audit.output_dir if output_dir is None else output_dir)
         self.results = []
         self.summary = {}
         self._records = np.concatenate((handler.train_indices, handler.test_indices))
@@ -94,7 +110,7 @@ class Robustness:
             self.target_indices = [-1, *map(int, order)]
             identity = {"attack": self.attack_name, "config": self.attack_config, "seed": self.seed,
                         "targets": self.target_indices, "models": self._model_hashes, "records": self._records.tolist()}
-            self.output_dir = Path(self.handler.configs.audit.output_dir) / "robustness" / hash_config(identity)[:16]
+            self.output_dir = self._output_root / "robustness" / hash_config(identity)[:16]
             self.output_dir.mkdir(parents=True, exist_ok=True)
             summary_path = self.output_dir / "summary.json"
             summary_path.unlink(missing_ok=True)
@@ -121,9 +137,10 @@ class Robustness:
     def _prepare_pool(self) -> None:
         """Reuse compatible trained shadows and verify the target and shadow setup agree."""
         pool_context = self._copy_handler()
+        pool_context.target_model = deepcopy(self.handler.target_model)
         # Ordinary shadow metadata does not identify the sampling strategy. Keep the
         # random pool separate so balanced caches cannot silently change this design.
-        pool_context.configs.audit.output_dir = str(Path(self.handler.configs.audit.output_dir) / "robustness" / "pool")
+        pool_context.configs.audit.output_dir = str(self._output_root / "robustness" / "pool")
         self._pool_handler = copy(ShadowModelHandler(pool_context))
         setup = self.handler.target_model_metadata
         pool = self._pool_handler
@@ -154,7 +171,7 @@ class Robustness:
     def _load_model(self, index:int) -> PytorchModel:
         """Load a pool member without loading all model weights into memory."""
         if index == -1:
-            return PytorchModel(self.handler.target_model, self.handler.get_criterion())
+            return PytorchModel(self._pool_handler.handler.target_model, self.handler.get_criterion())
         return self._pool_handler._load_shadow_model(index)
 
     def _load_logits(self, index:int, records:np.ndarray) -> np.ndarray:
@@ -198,6 +215,9 @@ class Robustness:
         result = attack.run_attack()
         if not isinstance(result, MIAResult):
             raise TypeError("Robustness requires an attack returning MIAResult")
+        # Reports deduplicate result IDs. Give every rotation its own stable ID.
+        result.id = f"{result.id}-robustness-{self.output_dir.name}-{run_index}"
+        result.result = result.result.model_copy(update={"id": result.id})
         metadata = {"target": target_index, "references": references,
                     "target_hash": self._model_hashes[str(target_index)],
                     "audit_record_count": len(result.true), "member_count": int(np.sum(result.true))}
