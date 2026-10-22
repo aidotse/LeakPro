@@ -6,7 +6,8 @@
 
 Provides ``train()`` and ``eval()``. Training uses DP-SGD when the webapp passes
 ``dpsgd_metadata_path``, and the plain loop otherwise; LeakPro's shadow models always take the plain
-loop.
+loop. Both paths use the same cosine LR schedule, so a DP-SGD target and its shadow models differ
+only in DP-SGD itself.
 
 Two constraints come from how the webapp uses this file:
 
@@ -46,8 +47,8 @@ class CifarModelHandler:
         virtual_batch_size: int = 16,
     ) -> TrainingOutput:
         """Train the model; pass ``dpsgd_metadata_path`` to train with DP-SGD."""
-        if epochs is None:
-            raise ValueError("epochs must be provided")
+        if epochs is None or epochs < 1:
+            raise ValueError(f"epochs must be a positive integer, got {epochs}")
         if dpsgd_metadata_path:
             return _train_dpsgd(dataloader, model, criterion, optimizer, epochs,
                                 dpsgd_metadata_path, virtual_batch_size)
@@ -124,9 +125,15 @@ def _train_dpsgd(dataloader, model, criterion, optimizer, epochs,  # noqa: ANN00
 
     if ModuleValidator.validate(model, strict=False):
         # fix() returns a new module (BatchNorm -> GroupNorm), so the optimizer must be rebuilt on its
-        # parameters. Rebuilding from `defaults` keeps the configured hyperparameters.
+        # parameters. The hyperparameters come from the live param group, not `defaults`, so values
+        # changed after construction carry over; restricting to the `defaults` keys drops non-constructor
+        # entries such as a scheduler's `initial_lr`. With several groups there is no mapping from the
+        # old parameters to the new ones, so that case is rejected rather than silently merged.
+        if len(optimizer.param_groups) != 1:
+            raise ValueError("DP-SGD training supports optimizers with a single param group only")
+        group = optimizer.param_groups[0]
         model = ModuleValidator.fix(model)
-        optimizer = optimizer.__class__(model.parameters(), **optimizer.defaults)
+        optimizer = optimizer.__class__(model.parameters(), **{k: group[k] for k in optimizer.defaults})
 
     if not os.path.exists(dpsgd_metadata_path):
         raise FileNotFoundError(f"DP-SGD config not found: {dpsgd_metadata_path}")
@@ -151,10 +158,13 @@ def _train_dpsgd(dataloader, model, criterion, optimizer, epochs,  # noqa: ANN00
 
     device = get_device()
     private_model.to(device)
+    # Same schedule as _train_standard, which is the loop LeakPro trains the shadow models with. The
+    # DPOptimizer shares param_groups with the optimizer it wraps, so the scheduler drives both.
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
     with BatchMemoryManager(data_loader=private_loader, max_physical_batch_size=virtual_batch_size,
                             optimizer=optimizer) as memory_safe_loader:
         accuracy_history, loss_history = _run_epochs(memory_safe_loader, private_model, criterion,
-                                                     optimizer, epochs, device)
+                                                     optimizer, epochs, device, scheduler)
 
     # to_standard_module() removes Opacus' hooks and per-sample gradient buffers. Unwrapping via
     # ._module leaves them attached, and a later backward pass on the model then fails.

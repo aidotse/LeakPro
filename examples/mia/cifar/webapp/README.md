@@ -5,7 +5,7 @@ Files for running a CIFAR-10 membership inference audit through the LeakPro weba
 ## Setup
 
 ```bash
-pip install -e ".[webapp]" opacus
+pip install -e ".[webapp,mia]"
 cd leakpro/webapp/frontend && npm install
 ```
 
@@ -35,16 +35,26 @@ Open the URL npm prints (usually `http://localhost:5173`).
 
 | File | Step | Required |
 |------|------|----------|
-| `cifar_data_handler.py` | Step 1: Dataset | **Mandatory.** Tells the webapp how to load `cifar10.pkl` |
+| `../cifar_data_handler.py` | Step 1: Dataset | **Mandatory.** The notebook's data handler; tells the webapp how to load `cifar10.pkl` |
 | `cifar_model_architecture.py` | Step 2: Architecture | Optional. WideResNet-28-2, the model `cifar_main.ipynb` audits; skip to use the default ResNet-18 |
-| `cifar_model_handler.py` | Step 2: Architecture | Optional. Training loop with cosine LR and DP-SGD support; skip to use the built-in default |
+| `cifar_model_handler.py` | Step 2: Architecture | Optional. Training loop with a cosine LR schedule for both standard and DP-SGD training; skip to use the built-in default |
 
-Use these files rather than `../target_model_class.py` and `../cifar_model_handler.py`. The webapp
-trains the first `nn.Module` subclass it finds in the architecture file, and `target_model_class.py`
-imports torchvision's `BasicBlock` before defining its models, so the webapp would try to train a
-single residual block. The notebook's training handler also holds out 10% of the training set for
-early stopping. Those records are labelled members in the metadata but never trained on, which
-mislabels membership in the audit.
+Upload the data handler unchanged. `cifar10.pkl` pickles instances of
+`cifar_data_handler.CifarDataHandler.UserDataset`, and the webapp registers the uploaded file under a
+module name derived from the class name (`CifarDataHandler` -> `cifar_data_handler`), so the pickle
+only loads while the class keeps that name.
+
+For Step 2, use the files in this folder rather than `../target_model_class.py` and
+`../cifar_model_handler.py`:
+
+- The webapp trains the first `nn.Module` subclass in the architecture file's namespace and
+  constructs it with only `num_classes`. In `target_model_class.py` that is the file's own
+  `BasicBlock`: torchvision's `BasicBlock` is imported first, and the later local definition takes
+  over the same namespace slot. Its constructor requires `in_planes`, `out_planes` and `stride`, so
+  the webapp fails to build the model ([#484](https://github.com/aidotse/LeakPro/issues/484)).
+- The notebook's training handler holds out 10% of the training set for early stopping. Those
+  records are labelled members in the metadata but never trained on, which mislabels membership in
+  the audit ([#482](https://github.com/aidotse/LeakPro/issues/482)).
 
 ## Runtime
 

@@ -9,8 +9,9 @@ webapp reads this file, so keep them if you edit it:
 
 - The webapp trains the *first* ``nn.Module`` subclass in this module's namespace. ``WideResNet`` is
   therefore defined first, and nothing here imports a module class (``from torch import nn`` binds a
-  module, not a class). The original ``target_model_class.py`` broke this by importing torchvision's
-  ``BasicBlock`` at the top.
+  module, not a class). The original ``target_model_class.py`` breaks this: it imports torchvision's
+  ``BasicBlock`` at the top and later defines its own, which takes over that first namespace slot, so
+  the webapp picks a residual block whose constructor requires arguments it never passes.
 - Every constructor argument has a default, because the webapp passes only ``num_classes``.
 - Every constructor argument is stored under its own name, because LeakPro rebuilds shadow models
   from ``model_metadata.init_params``, which it reads back from those attributes.
