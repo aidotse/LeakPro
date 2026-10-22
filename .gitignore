@@ -211,3 +211,5 @@ img_align_celeba
 optuna_results.txt
 echr*
 nohup*
+# Frontend dependencies (installed by npm, never committed)
+leakpro/webapp/frontend/node_modules
