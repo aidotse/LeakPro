@@ -9,6 +9,7 @@ import pickle
 import numpy as np
 import pytest
 import torch
+import yaml
 from torch.utils.data import TensorDataset
 
 from leakpro.optimization.adapters import recipe_from_module
@@ -63,7 +64,8 @@ def run(tmp_path):  # noqa: ANN001, ANN201
     with open(population.path, "rb") as f:
         pop = pickle.load(f)
     recipe = recipe_from_module(arch, pop, epochs=5, init_params={"num_classes": 3})
-    target = AuditTarget(module_path=str(arch), model_class="Net", dataset_name="blobs", data_modality="tabular")
+    target = AuditTarget(module_path=str(arch), model_class="Net", dataset_name="blobs", data_modality="tabular",
+                         init_params={"num_classes": 3})
     objective = make_dpsgd_objective(
         recipe, population, target, tmp_path,
         proxy_fpr=PROXY_FPR, rmia_config={"num_shadow_models": 2}, seed=0, device="cpu",
@@ -127,6 +129,10 @@ class TestObjective:
         assert (trial_dir / "target" / "dpsgd_dic.pkl").exists()
         assert (trial_dir / "audit.yaml").exists()
         assert result.extras["trial_dir"] == str(trial_dir)
+        # The shadow models are built with the target's constructor kwargs even
+        # when the architecture does not store them as attributes.
+        audit_cfg = yaml.safe_load((trial_dir / "audit.yaml").read_text())
+        assert audit_cfg["shadow_model"] == {"init_params": {"num_classes": 3}}
 
     def test_private_run_reports_a_finite_epsilon(self, run):  # noqa: ANN001, ANN201
         config = {"noise_multiplier": 1.0, "max_grad_norm": 1.0, "learning_rate": 0.05, "batch_size": 32}

@@ -312,6 +312,7 @@ def write_audit_yaml(  # noqa: PLR0913
     rmia_config: dict,
     seed: int,
     data_modality: str = "image",
+    shadow_init_params: dict | None = None,
 ) -> None:
     """Write a per-trial audit config that runs RMIA against the saved target."""
     config = {
@@ -330,6 +331,8 @@ def write_audit_yaml(  # noqa: PLR0913
             "dpsgd_path": str(dpsgd_path),
         },
     }
+    if shadow_init_params:
+        config["shadow_model"] = {"init_params": dict(shadow_init_params)}
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w") as f:
         yaml.safe_dump(config, f)
@@ -337,12 +340,20 @@ def write_audit_yaml(  # noqa: PLR0913
 
 @dataclass(frozen=True)
 class AuditTarget:
-    """What the objective needs to know to audit a trained model."""
+    """What the objective needs to know to audit a trained model.
+
+    ``init_params`` are the constructor kwargs the target was built with. LeakPro
+    records only the kwargs an architecture stores as attributes
+    (``get_model_init_params``); passing them here writes them into the audit
+    config's ``shadow_model.init_params`` as well, so the shadow models are built
+    like the target even when the architecture does not echo its arguments.
+    """
 
     module_path: str
     model_class: str
     dataset_name: str = "population"
     data_modality: str = "image"
+    init_params: dict | None = None
 
 
 def make_dpsgd_objective(  # noqa: PLR0913
@@ -440,7 +451,8 @@ def make_dpsgd_objective(  # noqa: PLR0913
         write_audit_yaml(config_path, population_path=population.path, target_folder=target_folder,
                          dpsgd_path=dpsgd_path, audit_dir=trial_dir / "audit",
                          module_path=target.module_path, model_class=target.model_class,
-                         rmia_config=rmia_config, seed=seed, data_modality=target.data_modality)
+                         rmia_config=rmia_config, seed=seed, data_modality=target.data_modality,
+                         shadow_init_params=target.init_params)
         result = run_rmia_audit(handler_cls, str(config_path))
 
         tpr, realized_fpr, degenerate = resolved_proxy_tpr(result, proxy_fpr)
@@ -489,5 +501,5 @@ def reaudit_trial(  # noqa: PLR0913
                      dpsgd_path=target_folder / DPSGD_CONFIG_NAME, audit_dir=trial_dir / tag,
                      module_path=target.module_path, model_class=target.model_class,
                      rmia_config={**RMIA_DEFAULTS, **rmia_config}, seed=seed,
-                     data_modality=target.data_modality)
+                     data_modality=target.data_modality, shadow_init_params=target.init_params)
     return run_rmia_audit(handler_cls, str(config_path))
