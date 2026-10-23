@@ -22,7 +22,7 @@ import json
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from leakpro.utils.import_helper import List, Optional, Self
+from leakpro.utils.import_helper import List, Optional, Self, Union
 
 
 class UseCaseProfile(BaseModel):
@@ -47,7 +47,8 @@ class UseCaseProfile(BaseModel):
                                               "precision for realistic pools (Jayaraman et al., PoPETs 2021).")
     n_subjects: Optional[int] = Field(default=None, ge=1,
                                       description="NDS: number of data subjects in the training population. Defaults "
-                                                  "to the target model's num_train when available.")
+                                                  "to the target model's num_train / records_per_subject when "
+                                                  "available, since num_train counts records, not subjects.")
     records_per_subject: float = Field(default=1.0, gt=0.0,
                                        description="NR: records of this data type per data subject. Fractions are "
                                                    "allowed when only some subjects contribute the data type.")
@@ -119,8 +120,11 @@ class DeclaredInputs(BaseModel):
 
     tolerated_fpr: float
     attacker_prior: float
-    n_subjects: Optional[int] = None
-    n_subjects_source: str = Field(..., description="'declared', 'target num_train', or 'unavailable'")
+    # A union rather than float so a declared count stays an integer in the JSON; only the count derived
+    # from num_train / records_per_subject is fractional.
+    n_subjects: Optional[Union[int, float]] = None
+    n_subjects_source: str = Field(..., description="'declared', 'target num_train / records_per_subject', or "
+                                                    "'unavailable'")
     records_per_subject: float
     data_type_sensitivity: float
     subject_type_weight: float

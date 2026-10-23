@@ -198,7 +198,7 @@ const ABOUT_FACTORS = (
         <li><b>Sensitivity</b> — how revealing the leaked data type is. The CNIL PIA severity levels are a defensible scale.</li>
         <li><b>Records per subject</b> — fractions are fine when only some subjects contribute the data.</li>
         <li><b>Subject weight</b> — raise it for vulnerable subjects such as minors or patients.</li>
-        <li><b>Data subjects</b> — left blank, the target’s training-set size is used.</li>
+        <li><b>Data subjects</b> — left blank, the target’s training-set size divided by records per subject is used.</li>
       </ul>
       <p>
         These are the Loss Magnitude factors of Sion et al., who supply the structure but deliberately no
@@ -632,7 +632,7 @@ export default function Summary({ results, risk, onRiskChange }: Props) {
                 <label className="flex flex-col gap-1">
                   <span className="font-bold">Data subjects (NDS)</span>
                   <input
-                    type="number" min={1} placeholder="training-set size"
+                    type="number" min={1} placeholder="training-set size ÷ records per subject"
                     className="rounded-lg border border-slate-300 dark:border-surface-border bg-transparent px-3 py-2"
                     value={draft.n_subjects ?? ""}
                     onChange={(e) => setDraft({ ...draft, n_subjects: e.target.value ? Number(e.target.value) : undefined })}

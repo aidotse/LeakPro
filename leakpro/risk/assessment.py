@@ -43,6 +43,8 @@ LEAKPRO_VERSION = "0.1.0"
 
 _BALANCED_PRIOR = 0.5
 
+_FROM_NUM_TRAIN = "target num_train / records_per_subject"
+
 
 def positive_predictive_value(success_rate: float, alpha: float, prior: float) -> float:
     """Return the attacker's precision at a given membership prior.
@@ -69,13 +71,14 @@ def positive_predictive_value(success_rate: float, alpha: float, prior: float) -
     return success_rate / denominator
 
 
-def loss_magnitude(profile: UseCaseProfile, n_subjects: Optional[int]) -> Optional[float]:
+def loss_magnitude(profile: UseCaseProfile, n_subjects: Optional[float]) -> Optional[float]:
     """Return Sion's Loss Magnitude, ``DTS x NR x DST x NDS``.
 
     Args:
     ----
         profile: The declared use-case profile.
-        n_subjects: Resolved number of data subjects (NDS), or None when unknown.
+        n_subjects: Resolved number of data subjects (NDS), or None when unknown. Fractional when it
+            was derived from a record count.
 
     Returns:
     -------
@@ -90,8 +93,13 @@ def loss_magnitude(profile: UseCaseProfile, n_subjects: Optional[int]) -> Option
             * float(n_subjects))
 
 
-def _resolve_n_subjects(profile: UseCaseProfile, num_train: Optional[int]) -> Tuple[Optional[int], str]:
+def _resolve_n_subjects(profile: UseCaseProfile, num_train: Optional[int]) -> Tuple[Optional[float], str]:
     """Decide how many data subjects the assessment scales to, and say where the number came from.
+
+    ``num_train`` counts training *records*, while NDS counts *subjects* and Loss Magnitude multiplies
+    by records per subject on top. The fallback therefore divides by NR, so that LM comes out as
+    ``DTS x DST x num_train`` rather than counting every record NR times. The quotient is kept
+    fractional: rounding it is badly wrong when NR is large, e.g. 1500 records at 1000 per subject.
 
     Args:
     ----
@@ -106,13 +114,15 @@ def _resolve_n_subjects(profile: UseCaseProfile, num_train: Optional[int]) -> Tu
     if profile.n_subjects is not None:
         return profile.n_subjects, "declared"
     if num_train is not None:
-        return int(num_train), "target num_train"
+        return num_train / profile.records_per_subject, _FROM_NUM_TRAIN
     return None, "unavailable"
 
 
 def _build_assumptions(profile: UseCaseProfile,
                        measured: MiaVulnerability,
+                       n_subjects: Optional[float],
                        n_subjects_source: str,
+                       num_train: Optional[int],
                        extrapolated: Optional[float]) -> List[str]:
     """Collect one assumption string per derived figure or degraded path.
 
@@ -120,7 +130,9 @@ def _build_assumptions(profile: UseCaseProfile,
     ----
         profile: The declared use-case profile.
         measured: The measured block.
+        n_subjects: Resolved number of data subjects, or None when unknown.
         n_subjects_source: Where the subject count came from.
+        num_train: Training-set size of the target model, when the caller supplied it.
         extrapolated: The extrapolated exposed-record count, when one was produced.
 
     Returns:
@@ -140,6 +152,19 @@ def _build_assumptions(profile: UseCaseProfile,
         f"itself is balanced, which corresponds to pi=0.5 and is reported separately as ppv_balanced.",
         f"Number of data subjects: {n_subjects_source}.",
     ]
+    if n_subjects_source == _FROM_NUM_TRAIN:
+        assumptions.append(
+            f"No subject count was declared, so it is derived from the target's {num_train} training records "
+            f"divided by records_per_subject={profile.records_per_subject}: {n_subjects:g} subjects. Declare "
+            "n_subjects if the training set is not the whole subject population."
+        )
+    if n_subjects is not None and profile.records_per_subject != 1.0:
+        assumptions.append(
+            f"Expected exposed subjects is TPR x subjects, which treats a subject as exposed with the same "
+            f"probability as one record. With records_per_subject={profile.records_per_subject} that is a lower "
+            "bound: it holds when a subject's records are flagged together. If they are flagged independently, "
+            f"a subject is exposed with probability 1 - (1 - TPR)^{profile.records_per_subject}."
+        )
     if profile.cost_per_exposed_subject is None:
         assumptions.append("No cost per exposed subject was declared, so no monetary figure is reported. This is "
                            "deliberate: a default cost would be fabricated.")
@@ -155,7 +180,10 @@ def _build_assumptions(profile: UseCaseProfile,
     return assumptions
 
 
-def _build_warnings(profile: UseCaseProfile, measured: MiaVulnerability, skipped: List[str]) -> List[str]:
+def _build_warnings(profile: UseCaseProfile,
+                    measured: MiaVulnerability,
+                    skipped: List[str],
+                    num_train: Optional[int]) -> List[str]:
     """Collect conditions that make the assessment unsafe to quote without qualification.
 
     Args:
@@ -163,6 +191,7 @@ def _build_warnings(profile: UseCaseProfile, measured: MiaVulnerability, skipped
         profile: The declared use-case profile.
         measured: The measured block.
         skipped: Reasons emitted while selecting the strongest attack.
+        num_train: Training-set size of the target model, when the caller supplied it.
 
     Returns:
     -------
@@ -170,6 +199,14 @@ def _build_warnings(profile: UseCaseProfile, measured: MiaVulnerability, skipped
 
     """
     warnings = list(skipped)
+    if (profile.n_subjects is not None
+            and num_train is not None
+            and profile.n_subjects * profile.records_per_subject < num_train):
+        warnings.append(
+            f"The declared population of {profile.n_subjects} subjects x {profile.records_per_subject} records each "
+            f"holds fewer records than the {num_train} the target was trained on. At least one of n_subjects and "
+            "records_per_subject is wrong, and Loss Magnitude is understated."
+        )
     if not measured.resolvable:
         warnings.append(
             f"alpha={measured.operating_point} is finer than the audit set can resolve (minimum "
@@ -287,8 +324,8 @@ def assess_risk(results: Any,
         measured=measured,
         declared=declared,
         combined=combined,
-        assumptions=_build_assumptions(profile, measured, n_subjects_source, extrapolated),
-        warnings=_build_warnings(profile, measured, skipped),
+        assumptions=_build_assumptions(profile, measured, n_subjects, n_subjects_source, num_train, extrapolated),
+        warnings=_build_warnings(profile, measured, skipped, num_train),
         policy_version=POLICY_VERSION,
         leakpro_version=LEAKPRO_VERSION,
     )

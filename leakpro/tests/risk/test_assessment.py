@@ -90,7 +90,55 @@ class TestAssessRisk:
         """The target's training-set size is the natural default, and its use is recorded."""
         assessment = assess_risk([result], UseCaseProfile(tolerated_fpr=0.01), num_train=1234)
         assert assessment.declared.n_subjects == 1234
-        assert assessment.declared.n_subjects_source == "target num_train"
+        assert assessment.declared.n_subjects_source == "target num_train / records_per_subject"
+        assert any("derived from the target's 1234 training records" in a for a in assessment.assumptions)
+
+    def test_should_divide_num_train_by_records_per_subject_when_deriving_subjects(self, result) -> None:
+        """num_train counts records; with NR = 2 there are half as many subjects, and LM counts each record once."""
+        profile = UseCaseProfile(tolerated_fpr=0.01, records_per_subject=2.0, data_type_sensitivity=3.0)
+        assessment = assess_risk([result], profile, num_train=1000)
+        assert assessment.declared.n_subjects == pytest.approx(500.0)
+        assert assessment.combined.loss_magnitude == pytest.approx(3.0 * 1000)
+        assert assessment.combined.expected_exposed_subjects == pytest.approx(
+            assessment.measured.success_rate * 500)
+
+    def test_should_keep_a_fractional_subject_count_rather_than_rounding(self, result) -> None:
+        """Rounding 1500 records at 1000 per subject to 2 subjects would overstate LM by a third."""
+        profile = UseCaseProfile(tolerated_fpr=0.01, records_per_subject=1000.0)
+        assessment = assess_risk([result], profile, num_train=1500)
+        assert assessment.declared.n_subjects == pytest.approx(1.5)
+        assert assessment.combined.loss_magnitude == pytest.approx(1500.0)
+
+    def test_should_scale_subjects_up_when_records_per_subject_is_below_one(self, result) -> None:
+        """NR = 0.5 means only half the subjects contribute a record, so there are twice as many subjects."""
+        profile = UseCaseProfile(tolerated_fpr=0.01, records_per_subject=0.5)
+        assessment = assess_risk([result], profile, num_train=1000)
+        assert assessment.declared.n_subjects == pytest.approx(2000.0)
+        assert assessment.combined.loss_magnitude == pytest.approx(1000.0)
+
+    def test_should_keep_a_declared_subject_count_an_integer(self, result) -> None:
+        """Only the derived count is fractional; a declared one round-trips as declared."""
+        assessment = assess_risk([result], UseCaseProfile(tolerated_fpr=0.01, n_subjects=50), num_train=50)
+        assert isinstance(assessment.declared.n_subjects, int)
+        assert '"n_subjects": 50,' in assessment.model_dump_json(indent=2)
+
+    def test_should_state_that_exposed_subjects_is_a_lower_bound_when_subjects_hold_several_records(
+            self, result) -> None:
+        """TPR is per record; with NR > 1 independently flagged records expose more subjects than TPR x NDS."""
+        several = assess_risk([result], UseCaseProfile(tolerated_fpr=0.01, records_per_subject=3.0), num_train=900)
+        assert any("lower bound" in a and "1 - (1 - TPR)^3.0" in a for a in several.assumptions)
+
+        single = assess_risk([result], UseCaseProfile(tolerated_fpr=0.01), num_train=900)
+        assert not any("lower bound" in a for a in single.assumptions)
+
+    def test_should_warn_when_the_declared_population_cannot_supply_the_training_set(self, result) -> None:
+        """100 subjects x 2 records is fewer than 1000 training records, so a declared factor is wrong."""
+        profile = UseCaseProfile(tolerated_fpr=0.01, n_subjects=100, records_per_subject=2.0)
+        assessment = assess_risk([result], profile, num_train=1000)
+        assert any("fewer records than the 1000" in w for w in assessment.warnings)
+
+        consistent = assess_risk([result], profile.model_copy(update={"n_subjects": 500}), num_train=1000)
+        assert not any("fewer records than" in w for w in consistent.warnings)
 
     def test_should_report_audit_set_figures_only_without_a_population_size(self, result) -> None:
         """Absent num_train and a declared count, population figures are withheld, not invented."""

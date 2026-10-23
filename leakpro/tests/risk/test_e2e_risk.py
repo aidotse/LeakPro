@@ -94,7 +94,7 @@ class TestEndToEnd:
         assert assessment.measured.n_members_audit > 0
         assert assessment.combined.ppv is not None
         assert assessment.combined.risk is not None
-        assert assessment.declared.n_subjects_source == "target num_train"
+        assert assessment.declared.n_subjects_source == "target num_train / records_per_subject"
 
     def test_should_write_a_self_contained_json_file(self, audited) -> None:
         """The saved file is the deliverable: it must carry every block plus provenance."""
