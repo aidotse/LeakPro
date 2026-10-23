@@ -104,9 +104,11 @@ class MiaVulnerability(VulnerabilityMeasurement):
                                            description="Members flagged at the threshold yielding FPR <= alpha. None "
                                                        "when the result carries no signal values")
     exposed_audit_indices: Optional[List[int]] = Field(default=None,
-                                                       description="Dataset indices of the exposed members. Usually None: "
-                                                                   "the live MIAResult does not carry audit indices, so "
-                                                                   "exposed records can be counted but not named")
+                                                       description="Population indices of the exposed members, from the "
+                                                                   "attack's own audit_indices. Populated for attacks that "
+                                                                   "report them (LiRA, MS-LiRA, RMIA, BASE). None when the "
+                                                                   "attack cannot say what it scored, or for a result read "
+                                                                   "back via MIAResult.load, which does not keep them yet")
     min_resolvable_fpr: float = Field(..., gt=0.0, description="1 / n_non_members_audit: the finest FPR this audit "
                                                               "set can express")
     train_test_gap: Optional[float] = Field(default=None, description="Context only: train accuracy minus test accuracy")
@@ -140,7 +142,8 @@ class CombinedRisk(BaseModel):
 
     ppv: Optional[float] = Field(default=None, ge=0.0, le=1.0,
                                  description="Precision of the attacker at the declared prior: "
-                                             "TPR / (TPR + gamma*alpha) with gamma = (1-pi)/pi. Jayaraman et al. Thm 4.2")
+                                             "TPR / (TPR + gamma*alpha) with gamma = (1-pi)/pi. Jayaraman et al. "
+                                             "section 4.2 (the identity in the proof of Thm 4.2)")
     ppv_balanced: Optional[float] = Field(default=None, ge=0.0, le=1.0,
                                           description="Same at pi = 0.5, the assumption built into the audit protocol")
     gamma: float = Field(..., gt=0.0, description="(1 - attacker_prior) / attacker_prior")

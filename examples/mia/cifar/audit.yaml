@@ -71,6 +71,10 @@ distillation_model:
 # `leakpro.use_case_profile` is simply None. Declaring it does NOT run an assessment either — that is
 # an explicit call after run_audit, see the notebook.
 #
+# The block is validated when the config is loaded. An invalid one (a missing tolerated_fpr, a value
+# out of range, a misspelt key) stops LeakPro before the audit starts rather than after it, so a long
+# audit is never wasted on a profile that cannot be assessed.
+#
 # Factor names follow the Loss Magnitude decomposition of Sion et al. (IWPE 2019),
 # LM = DTS x NR x DST x NDS. LeakPro measures the Vulnerability term; you supply the rest.
 use_case:
@@ -79,13 +83,17 @@ use_case:
   # set to be measurable at all (you need at least 1/alpha non-members).
   tolerated_fpr: 0.01
 
-  # pi: share of the attacker's candidate pool that really are members. 0.5 is the balanced-audit
-  # assumption behind every TPR and AUC LeakPro reports, and it overstates precision badly for
-  # realistic pools. Declare what your threat model actually implies.
+  # pi: share of the attacker's candidate pool that really are members. The library default (and the
+  # webapp's starting value) is 0.5, the balanced-audit assumption behind every TPR and AUC LeakPro
+  # reports. It is the conservative choice: it overstates the attacker's precision, which is why it
+  # comes with a caveat. The 0.01 below is an example declaration, not a default: it describes an
+  # attacker checking candidates from a pool where 1 in 100 is a training member. Declare what your
+  # own threat model implies.
   attacker_prior: 0.01
 
   # NDS: data subjects in the training population. Commented out here so the assessment falls back
-  # to the target's num_train. Set it when subjects and training records are not the same thing.
+  # to the target's num_train / records_per_subject. Set it when the training set is not the whole
+  # subject population.
   # n_subjects: 50000
 
   # NR: records of this data type per subject. Fractions are allowed.

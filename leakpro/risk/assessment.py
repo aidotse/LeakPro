@@ -5,7 +5,9 @@
 """Combination of measured vulnerability with declared harm parameters.
 
 The structure follows Sion et al. (*Privacy Risk Assessment for Data Subject-aware Threat Modeling*,
-IWPE 2019, doi:10.1109/SPW.2019.00023):
+IWPE 2019, doi:10.1109/SPW.2019.00023). LM is the product tree of Fig. 1 with its factors defined in
+section III-B (NR is records of the data type per data subject, fractional when only some subjects
+have it); LEF is given verbatim in section III-C:
 
 .. code-block:: text
 
@@ -20,13 +22,17 @@ retained model, because LeakPro cannot observe adversary behaviour. That assumpt
 the output rather than hidden.
 
 Precision is reported per Jayaraman et al. (*Revisiting Membership Inference Under Realistic
-Assumptions*, PoPETs 2021, Theorem 4.2): ``PPV = TPR / (TPR + gamma * FPR)`` with
-``gamma = (1 - pi) / pi``. Reporting it is not optional decoration. A balanced audit implies
-``pi = 0.5``, and at realistic priors the same measurement can mean a very different threat.
+Assumptions*, PoPETs 2021, section 4.2): ``PPV = TPR / (TPR + gamma * FPR)`` with
+``gamma = (1 - pi) / pi``. The identity is the one used in the proof of their Theorem 4.2; the theorem
+itself is an upper bound on PPV for (epsilon, delta)-DP training, which LeakPro does not compute.
+Reporting PPV is not optional decoration. A balanced audit implies ``pi = 0.5``, and at realistic
+priors the same measurement can mean a very different threat.
 
 Nothing in this module imports from ``leakpro.attacks``; it consumes the family-agnostic measured
 block so that other attack families can feed the same combination later.
 """
+
+from importlib.metadata import PackageNotFoundError, version
 
 from leakpro.risk.policy import POLICY_VERSION, resolve_vulnerability_band
 from leakpro.risk.schemas import (
@@ -39,7 +45,10 @@ from leakpro.risk.schemas import (
 from leakpro.risk.vulnerability import measure_strongest
 from leakpro.utils.import_helper import Any, List, Optional, Tuple
 
-LEAKPRO_VERSION = "0.1.0"
+try:
+    LEAKPRO_VERSION = version("leakpro")
+except PackageNotFoundError:  # running from a source tree that was never installed
+    LEAKPRO_VERSION = "unknown"
 
 _BALANCED_PRIOR = 0.5
 
@@ -50,7 +59,8 @@ def positive_predictive_value(success_rate: float, alpha: float, prior: float) -
     """Return the attacker's precision at a given membership prior.
 
     Implements ``PPV = TPR / (TPR + gamma * alpha)`` with ``gamma = (1 - prior) / prior``
-    (Jayaraman et al., PoPETs 2021, Theorem 4.2). Algebraically identical to
+    (Jayaraman et al., PoPETs 2021, section 4.2, the identity used in the proof of Theorem 4.2).
+    Algebraically identical to
     ``prior * TPR / (prior * TPR + (1 - prior) * alpha)``.
 
     Args:

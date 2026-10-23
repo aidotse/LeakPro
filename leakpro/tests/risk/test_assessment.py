@@ -8,7 +8,7 @@ from leakpro.tests.risk.conftest import make_result
 
 
 class TestPositivePredictiveValue:
-    """PPV per Jayaraman et al. (PoPETs 2021) Theorem 4.2."""
+    """PPV per Jayaraman et al. (PoPETs 2021) section 4.2, the identity in the proof of Theorem 4.2."""
 
     @pytest.mark.parametrize(("prior", "expected"), [
         # PPV = TPR / (TPR + gamma*alpha), gamma = (1-p)/p, with TPR = 0.10 and alpha = 0.01.

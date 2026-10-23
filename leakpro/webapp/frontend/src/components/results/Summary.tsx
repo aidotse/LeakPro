@@ -145,7 +145,7 @@ const HOW_IT_WORKS = (
       </p>
       <p className="text-xs text-slate-400">
         Structure: Sion, Van Landuyt, Wuyts &amp; Joosen, IWPE 2019. Precision: Jayaraman, Wang,
-        Knipmeyer, Gu &amp; Evans, PoPETs 2021, Theorem 4.2. Sensitivity scale: CNIL PIA-3, 2018.
+        Knipmeyer, Gu &amp; Evans, PoPETs 2021, §4.2. Sensitivity scale: CNIL PIA-3, 2018.
       </p>
     </Detail>
   </>

@@ -23,7 +23,7 @@ def _fmt(value: Optional[float], digits: int = 4) -> str:
 
     Returns:
     -------
-        The formatted value, or an em dash placeholder when absent.
+        The formatted value, or "not reported" when absent.
 
     """
     if value is None:
