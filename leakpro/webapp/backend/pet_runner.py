@@ -57,6 +57,7 @@ from leakpro.optimization.objective import (  # noqa: E402
 from leakpro.optimization.search import DEFAULT_STUDY_NAME, ObjectiveResult  # noqa: E402
 from leakpro.utils.logger import logger  # noqa: E402
 from leakpro.webapp.backend.dataio import load_dataset  # noqa: E402
+from leakpro.webapp.backend.dataset_modules import register_job_dataset_modules  # noqa: E402
 from leakpro.webapp.backend.security import load_metadata_fields  # noqa: E402
 
 DEFAULT_N_TRIALS = 24
@@ -253,6 +254,9 @@ def build(job: dict, job_dir: Path, model_name: str, request: dict) -> dict:
 
     out = pet_dir(job_dir, model_name)
     seed = int(request.get("seed") or 0)
+    # The job's dataset may be pickled with the user's own class; resolve it the
+    # way the audit worker does, so normalisation in its __getitem__ is kept.
+    register_job_dataset_modules(job_dir)
     dataset = load_dataset(Path(data_path))
     population = _population(out, dataset, seed)
     with open(population.path, "rb") as f:
