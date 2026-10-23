@@ -140,17 +140,20 @@ class TestEndToEnd:
                                 "policy_version", "leakpro_version"}
         assert RiskAssessment.load(str(path)).combined.gamma == assessment.combined.gamma
 
-    def test_should_add_a_risk_section_to_the_pdf_report(self, audited) -> None:
+    def test_should_add_a_risk_section_to_the_pdf_report(self, audited, monkeypatch) -> None:
         """A ReportHandler given an assessment emits the Risk section ahead of the attack sections."""
         leakpro, results, _ = audited
+        # Run the real create_report, which writes the .tex before compiling; only pdflatex is stubbed.
+        from leakpro.reporting import report_handler as report_module
+        monkeypatch.setattr(report_module.subprocess, "check_output", lambda *a, **k: "pdflatex")
+        monkeypatch.setattr(report_module.subprocess, "Popen",
+                            lambda *a, **k: type("Proc", (), {"communicate": lambda self: (None, None)})())
         assessment = assess_risk(results, UseCaseProfile(tolerated_fpr=E2E_ALPHA, n_subjects=100))
-        handler = ReportHandler(results=results, report_dir=leakpro.report_dir,
-                               risk_assessment=assessment)
-        handler.create_results()
-        handler._init_pdf()
-        from leakpro.risk.render import to_latex
-        handler.latex_content += to_latex(handler.risk_assessment)
-        assert "\\section{Risk assessment}" in handler.latex_content
+        ReportHandler(results=results, report_dir=leakpro.report_dir, risk_assessment=assessment).create_report()
+
+        tex = (Path(leakpro.report_dir) / "LeakPro_output.tex").read_text()
+        assert "\\section{Risk assessment}" in tex
+        assert tex.index("\\section{Risk assessment}") < tex.index("\\section{MIAResult}")
 
     def test_should_leave_run_audit_untouched_without_a_use_case_block(self, audited) -> None:
         """A config with no use_case block must behave exactly as before."""
