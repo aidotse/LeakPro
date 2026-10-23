@@ -167,3 +167,74 @@ class ModelResult(BaseModel):
     job_id: str | None = None        # originating job, used for sample image URLs
     train_meta: dict | None = None   # epochs, lr, batch_size, optimizer, data info
     attacks: list[AttackResult] = []
+
+
+# ---------------------------------------------------------------------------
+# PET optimization — see pet_runner.py for the on-disk layout and
+# leakpro/optimization for everything that scores a configuration.
+# ---------------------------------------------------------------------------
+
+class PETStartParams(BaseModel):
+    """Request to begin (or resume) a privacy-utility search for one model."""
+
+    # Display-side constraint: it dims settings that fall below the user's
+    # quality floor, but never gates the search, so moving the slider
+    # afterwards re-reads the same results instead of invalidating them.
+    max_quality_loss: float = Field(default=0.05, ge=0.0, le=1.0)
+    # Any knob named here is pinned to that value; the rest stay searched.
+    advanced: dict[str, float] = {}
+    n_trials: int | None = Field(default=None, ge=1, le=500)
+    # Shadow models per audit during the search; verification always uses more.
+    n_shadow: int | None = Field(default=None, ge=1, le=32)
+    delta: float | None = Field(default=None, gt=0.0, lt=1.0)
+    # Per-sample-gradient memory cap under DP-SGD. Lower it to fit a big model
+    # or a busy GPU; it changes speed only, never the privacy accounting.
+    max_physical_batch: int = Field(default=32, ge=1, le=4096)
+    seed: int = Field(default=0, ge=0)
+
+
+class PETSetting(BaseModel):
+    """One evaluated configuration (an Optuna trial), as the optimization view renders it."""
+
+    index: int
+    config: dict[str, float]
+    utility: float
+    attack_tpr: float | None = None          # None: pruned (see attack_resolution_warning)
+    proxy_fpr: float | None = None
+    attack_realized_fpr: float | None = None
+    attack_resolution_warning: str | None = None
+    epsilon: float | None = None             # None: non-private (infinite)
+    delta: float | None = None
+    accountant: str | None = None
+    roc_auc: float | None = None
+    tuning_accounted: bool = False
+
+
+class PETRun(BaseModel):
+    """Everything the optimization view needs for one model, read off disk."""
+
+    status: str                               # idle | running | done | failed
+    model_name: str
+    n_trials: int | None = None
+    proxy_fpr: float | None = None
+    baseline_utility: float | None = None
+    settings: list[PETSetting] = []
+    best_indices: list[int] = []
+    resolution_warning: str | None = None
+    error: str | None = None
+
+
+class PETVerification(BaseModel):
+    """A stronger re-audit of one setting's saved model."""
+
+    status: str                               # running | done | failed
+    index: int
+    estimated: dict[str, float | None] = {}
+    verified: dict[str, Any] | None = None
+    error: str | None = None
+
+
+class PETIndex(BaseModel):
+    """Body of the verify / adopt requests."""
+
+    index: int = Field(..., ge=0)

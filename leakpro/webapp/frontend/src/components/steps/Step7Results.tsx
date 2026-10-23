@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { api, ModelResult, JobListItem } from "../../api";
+import { api, ModelResult, JobListItem, Setting, Verification } from "../../api";
 import Summary from "../results/Summary";
+import Optimization from "../results/Optimization";
 import RocChart from "../results/RocChart";
 import Histograms from "../results/Histograms";
 import Records from "../results/Records";
@@ -40,6 +41,9 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
   // Rename dialog state
   const [pendingRename, setPendingRename] = useState<PendingRename | null>(null);
 
+  // The model whose optimization view is open; null shows the result tabs.
+  const [optimizing, setOptimizing] = useState<ModelResult | null>(null);
+
   useEffect(() => {
     api.getResults(jobId)
       .then((r) => {
@@ -75,7 +79,9 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
 
   const mergeResults = (pastJobId: string, newResults: ModelResult[], renames: Record<string, string>) => {
     const renamed = newResults.map((m) =>
-      renames[m.model_name] ? { ...m, model_name: renames[m.model_name] } : m
+      // Keep the backend name so optimization can still find the model in its
+      // own job after the display name changes.
+      renames[m.model_name] ? { ...m, model_name: renames[m.model_name], orig_model_name: m.model_name } : m
     );
     setAllResults((prev) => {
       const base = prev ?? [];
@@ -107,6 +113,29 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
     setLoadingJobId(null);
   };
 
+  // An adopted setting becomes a normal summary row, tagged so it reads as
+  // the outcome of optimization rather than another audited model. The
+  // backend persisted the same row; this keeps the open view in step.
+  const addOptimizedRow = (base: ModelResult, setting: Setting, verification: Verification) => {
+    const verified = verification.verified;
+    if (!verified) return;
+    const name = `${base.model_name} (optimized)`;
+    setAllResults((prev) => [
+      ...(prev ?? []).filter((m) => !(m.job_id === base.job_id && m.model_name === name)),
+      {
+        ...base,
+        model_name: name,
+        source: "optimized",
+        optimized: true,
+        dpsgd: true,
+        target_epsilon: setting.epsilon ?? undefined,
+        test_accuracy: verified.utility ?? undefined,
+        train_accuracy: undefined,
+        attacks: [],
+      },
+    ]);
+  };
+
   const confirmRename = () => {
     if (!pendingRename) return;
     mergeResults(pendingRename.pastJobId, pendingRename.results, pendingRename.renames);
@@ -134,6 +163,17 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
 
   const sessionCount = loadedJobIds.size;
   const hasResults = allResults.length > 0;
+
+  if (optimizing) {
+    return (
+      <Optimization
+        jobId={jobId}
+        model={optimizing}
+        onBack={() => setOptimizing(null)}
+        onAdopted={(setting, verification) => addOptimizedRow(optimizing, setting, verification)}
+      />
+    );
+  }
 
   return (
     <div className="flex flex-col gap-8">
@@ -303,7 +343,7 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
           </div>
 
           <div>
-            {tab === "summary"    && <Summary    results={allResults} />}
+            {tab === "summary"    && <Summary    results={allResults} onOptimize={setOptimizing} />}
             {tab === "roc"        && <RocChart   results={allResults} />}
             {tab === "histograms" && <Histograms results={allResults} />}
             {tab === "records"    && <Records    results={allResults} jobId={jobId} />}

@@ -289,9 +289,13 @@ from .models import (
     JobSummary,
     ModelAttackConfig,
     ModelInfo,
+    PETIndex,
+    PETRun,
+    PETStartParams,
+    PETVerification,
     TrainParams,
 )
-from .worker import run_audit_job
+from .worker import pick_model_class, run_audit_job
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -878,7 +882,6 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
             if True:
                 import importlib.util as _ilu2
                 import inspect as _inspect2
-                import torch.nn as _nn2
 
                 # Register job_dir on sys.path so pickle can reimport the module by name
                 if str(job_dir) not in _sys.path:
@@ -893,12 +896,8 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                 _sys.modules[_arch_mod_name] = _arch_mod  # register before exec so relative imports work
                 _arch_spec.loader.exec_module(_arch_mod)
 
-                try:
-                    _arch_cls = next(
-                        v for v in vars(_arch_mod).values()
-                        if isinstance(v, type) and issubclass(v, _nn2.Module) and v is not _nn2.Module
-                    )
-                except StopIteration:
+                _arch_cls = pick_model_class(_arch_mod)
+                if _arch_cls is None:
                     raise ValueError(
                         "No nn.Module subclass found in arch.py. "
                         "Make sure your arch.py defines a class that inherits from torch.nn.Module."
@@ -1290,6 +1289,186 @@ async def log_stream(websocket: WebSocket, job_id: str) -> None:
                 await asyncio.sleep(0.1)
     except WebSocketDisconnect:
         pass
+
+
+# ---------------------------------------------------------------------------
+# PET optimization
+#
+# A search is n_trials trainings, each followed by an RMIA audit, so it runs as
+# a detached subprocess (pet_runner) rather than on _executor: it must outlive
+# both the request and a backend restart. Progress is read back off disk: the
+# Optuna study is the resume state and status.json the runner's heartbeat, so
+# there is no in-memory state to lose and killing the process is a resumable
+# pause rather than a lost run. Nothing here scores a configuration; that is
+# leakpro.optimization.
+# ---------------------------------------------------------------------------
+
+def _pet_dir(job_id: str, model_name: str) -> Path:
+    from . import pet_runner  # noqa: PLC0415 - imports torch; keep it off the API's import path
+
+    return pet_runner.pet_dir(_job_dir(job_id), model_name)
+
+
+def _pet_runner_alive(status: dict | None) -> bool:
+    """Whether the process that wrote this status.json is still running."""
+    pid = (status or {}).get("pid")
+    if not pid:
+        return False
+    try:
+        os.kill(int(pid), 0)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def _pet_spawn(job_id: str, model_name: str, extra: list[str]) -> None:
+    """Launch the runner detached, so it survives this process exiting."""
+    import subprocess  # noqa: PLC0415
+    import sys  # noqa: PLC0415
+
+    cmd = [sys.executable, "-m", "leakpro.webapp.backend.pet_runner",
+           str(_job_dir(job_id)), model_name, *extra]
+    # Let CUDA grow its allocation instead of pre-reserving fixed segments; the
+    # search trains many models back to back, so fragmentation is the common
+    # cause of a spurious out-of-memory long before the card is actually full.
+    env = {**os.environ, "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"}
+    log_path = _pet_dir(job_id, model_name) / "runner.log"
+    with open(log_path, "ab") as log:
+        subprocess.Popen(  # noqa: S603 - argv is built here from validated names, never from a shell string
+            cmd, cwd=str(Path(__file__).parents[3]), env=env,
+            stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
+        )
+
+
+@app.post("/jobs/{job_id}/pet/start")
+async def pet_start(job_id: str, model_name: str, params: PETStartParams) -> dict:
+    """Begin (or resume) a search for one model."""
+    from . import pet_runner  # noqa: PLC0415
+
+    job = _get_job(job_id)
+    model_name = safe_name(model_name, "model_name")
+    if not any(m["name"] == model_name for m in job.get("models", [])):
+        raise HTTPException(status_code=404, detail=f"No model named '{model_name}' in this job.")
+
+    out = _pet_dir(job_id, model_name)
+    status = pet_runner.read_json(out / pet_runner.STATUS_FILE)
+    if status and status.get("status") == "running" and _pet_runner_alive(status):
+        raise HTTPException(status_code=409, detail="An optimization run is already in progress.")
+
+    out.mkdir(parents=True, exist_ok=True)
+    (out / pet_runner.REQUEST_FILE).write_text(json.dumps(params.model_dump(), indent=2))
+    # Written here rather than in the runner so a poll landing before the
+    # subprocess has started does not read the previous run's status.
+    (out / pet_runner.STATUS_FILE).write_text(json.dumps({"status": "running", "model_name": model_name}))
+    _pet_spawn(job_id, model_name, [])
+    return {"ok": True}
+
+
+@app.get("/jobs/{job_id}/pet/campaign", response_model=PETRun)
+async def pet_campaign(job_id: str, model_name: str) -> PETRun:
+    """Everything the optimization view needs, read straight off disk."""
+    from . import pet_runner  # noqa: PLC0415
+
+    _get_job(job_id)
+    model_name = safe_name(model_name, "model_name")
+    out = _pet_dir(job_id, model_name)
+    status = pet_runner.read_json(out / pet_runner.STATUS_FILE)
+    if status is None:
+        return PETRun(status="idle", model_name=model_name)
+
+    state = status.get("status", "idle")
+    error = status.get("error")
+    if state == "running" and "pid" in status and not _pet_runner_alive(status):
+        # The runner wrote a heartbeat and then vanished without reporting
+        # (killed, or the machine rebooted). Finished trials are still in the
+        # study; starting again resumes from them.
+        state, error = "failed", "The optimization process stopped unexpectedly; start again to resume."
+
+    return PETRun(
+        status=state,
+        model_name=model_name,
+        n_trials=status.get("n_trials"),
+        proxy_fpr=status.get("proxy_fpr"),
+        baseline_utility=status.get("baseline_utility"),
+        settings=pet_runner.trial_records(pet_runner.load_study(out)),
+        best_indices=status.get("best_indices", []),
+        resolution_warning=status.get("resolution_warning"),
+        error=error,
+    )
+
+
+@app.post("/jobs/{job_id}/pet/verify", response_model=PETVerification)
+async def pet_verify(job_id: str, model_name: str, body: PETIndex) -> PETVerification:
+    """Re-audit one setting's saved model with more shadow models than the search used."""
+    from . import pet_runner  # noqa: PLC0415
+
+    _get_job(job_id)
+    model_name = safe_name(model_name, "model_name")
+    out = _pet_dir(job_id, model_name)
+    if not (out / pet_runner.STUDY_FILE).exists():
+        raise HTTPException(status_code=404, detail="This model has no optimization results to verify.")
+
+    existing = pet_runner.read_json(pet_runner.verification_path(out, body.index))
+    if existing and existing.get("status") == "running":
+        return PETVerification(**existing)
+
+    placeholder = {"status": "running", "index": body.index, "estimated": {"attack_tpr": None, "utility": None}}
+    pet_runner.verification_path(out, body.index).write_text(json.dumps(placeholder))
+    _pet_spawn(job_id, model_name, ["--verify", str(body.index)])
+    return PETVerification(**placeholder)
+
+
+@app.get("/jobs/{job_id}/pet/verify", response_model=PETVerification)
+async def pet_verify_status(job_id: str, model_name: str, index: int) -> PETVerification:
+    """Poll a verification started by the POST above."""
+    from . import pet_runner  # noqa: PLC0415
+
+    _get_job(job_id)
+    model_name = safe_name(model_name, "model_name")
+    result = pet_runner.read_json(pet_runner.verification_path(_pet_dir(job_id, model_name), index))
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"No verification running for setting {index}.")
+    return PETVerification(**result)
+
+
+@app.post("/jobs/{job_id}/pet/adopt")
+async def pet_adopt(job_id: str, model_name: str, body: PETIndex) -> dict:
+    """Record a verified setting as a result row of its own."""
+    from . import pet_runner  # noqa: PLC0415
+
+    job = _get_job(job_id)
+    model_name = safe_name(model_name, "model_name")
+    out = _pet_dir(job_id, model_name)
+
+    verification = pet_runner.read_json(pet_runner.verification_path(out, body.index))
+    if not verification or verification.get("status") != "done":
+        raise HTTPException(status_code=409, detail="This setting has not been verified yet.")
+    record = next((r for r in pet_runner.trial_records(pet_runner.load_study(out)) if r["index"] == body.index), None)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"No evaluated setting with index {body.index}.")
+
+    verified = verification["verified"]
+    base = next((m for m in job.get("models", []) if m["name"] == model_name), {})
+    adopted = {
+        "model_name": f"{model_name} (optimized)",
+        "source": "optimized",
+        "optimized": True,
+        "dpsgd": True,
+        "target_epsilon": verified.get("epsilon"),
+        "test_accuracy": verified.get("utility"),
+        "train_accuracy": None,
+        "model_class": base.get("model_class"),
+        "attacks": [],
+        "pet_config": record["config"],
+        "pet_attack_tpr": verified.get("attack_tpr"),
+        "pet_proxy_fpr": record.get("proxy_fpr"),
+        "pet_setting_index": body.index,
+    }
+    job.setdefault("results", [])
+    job["results"] = [r for r in job["results"] if r.get("model_name") != adopted["model_name"]]
+    job["results"].append(adopted)
+    _save_job(job_id)
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------

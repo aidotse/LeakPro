@@ -1,8 +1,13 @@
 import React, { useState } from "react";
 import { ModelResult } from "../../api";
 import MetaPanel from "./MetaPanel";
+import { COPY as OPTIMIZE } from "./optimizationCopy";
 
-interface Props { results: ModelResult[] }
+interface Props {
+  results: ModelResult[];
+  /** Opens the optimization view for one model. Omitted when unavailable. */
+  onOptimize?: (model: ModelResult) => void;
+}
 
 function riskLevel(auc: number | undefined): { label: string; color: string; bg: string } {
   if (auc === undefined) return { label: "N/A", color: "text-slate-400", bg: "bg-slate-100 dark:bg-surface-2" };
@@ -30,7 +35,7 @@ function pct(v: number | undefined) {
   return v !== undefined ? (v * 100).toFixed(1) + "%" : "—";
 }
 
-export default function Summary({ results }: Props) {
+export default function Summary({ results, onOptimize }: Props) {
   const [openKey, setOpenKey] = useState<string | null>(null);
 
   const toggleInfo = (key: string) => setOpenKey((prev) => (prev === key ? null : key));
@@ -120,6 +125,11 @@ export default function Summary({ results }: Props) {
                             {m.model_class}
                           </span>
                         )}
+                        {m.optimized && (
+                          <span className="text-[11px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-bold uppercase tracking-wider">
+                            optimized
+                          </span>
+                        )}
                         <button
                           onClick={() => toggleInfo(key)}
                           title="Show model info"
@@ -127,6 +137,16 @@ export default function Summary({ results }: Props) {
                         >
                           info
                         </button>
+                        {onOptimize && !m.optimized && (
+                          <button
+                            onClick={() => onOptimize(m)}
+                            title={OPTIMIZE.entry}
+                            className="flex items-center gap-1 px-2 py-0.5 rounded border border-primary/40 text-primary text-xs font-bold hover:bg-primary/10 transition-colors"
+                          >
+                            <span className="material-symbols-outlined text-sm">tune</span>
+                            {OPTIMIZE.entry}
+                          </button>
+                        )}
                       </div>
                     </td>
                     <td className="px-4 py-3 font-mono">

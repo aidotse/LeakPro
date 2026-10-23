@@ -41,3 +41,34 @@ class TestSerialiseResult:
         """MIAResult refuses a mapping that does not line up with the signals."""
         with pytest.raises(ValueError, match="line up one-to-one"):
             _result(5, [7, 3, 11])
+
+
+class TestPickModelClass:
+    """One rule for which class in arch.py is the model: training, audit and PET all use it."""
+
+    @staticmethod
+    def _module(source: str):  # noqa: ANN205
+        import types
+
+        mod = types.ModuleType("arch_under_test")
+        exec(source, mod.__dict__)  # noqa: S102 - test-local source
+        return mod
+
+    def test_first_subclass_wins_without_metadata(self: Self) -> None:
+        from leakpro.webapp.backend.worker import pick_model_class
+
+        mod = self._module("import torch.nn as nn\nclass Block(nn.Module):\n    def __init__(self, k): super().__init__()\n"
+                           "class Net(nn.Module):\n    def __init__(self, num_classes=3): super().__init__()\n")
+        assert pick_model_class(mod).__name__ == "Block"
+
+    def test_recorded_init_params_pick_the_class_that_accepts_them(self: Self) -> None:
+        from leakpro.webapp.backend.worker import pick_model_class
+
+        mod = self._module("import torch.nn as nn\nclass Block(nn.Module):\n    def __init__(self, k): super().__init__()\n"
+                           "class Net(nn.Module):\n    def __init__(self, num_classes=3): super().__init__()\n")
+        assert pick_model_class(mod, {"num_classes": 10}).__name__ == "Net"
+
+    def test_no_module_subclass_is_none(self: Self) -> None:
+        from leakpro.webapp.backend.worker import pick_model_class
+
+        assert pick_model_class(self._module("x = 1")) is None
