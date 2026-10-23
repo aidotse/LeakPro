@@ -1205,11 +1205,9 @@ async def assess_job_risk(job_id: str, req: RiskRequest) -> RiskResponse:
     if job["status"] != JobStatus.done:
         raise HTTPException(status_code=425, detail=f"Job status: {job['status']}")
 
-    profile_fields = req.model_dump(exclude={"model_name"})
-    try:
-        profile = UseCaseProfile(**profile_fields)
-    except Exception as e:
-        raise HTTPException(status_code=422, detail=f"Invalid use-case profile: {e}") from e
+    # req was validated as a UseCaseProfile on the way in; strip model_name so the profile echoed into
+    # the assessment is exactly the library type.
+    profile = UseCaseProfile(**req.model_dump(exclude={"model_name"}))
 
     assessments: dict[str, dict] = {}
     unassessable: dict[str, str] = {}

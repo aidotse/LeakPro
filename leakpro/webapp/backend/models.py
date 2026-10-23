@@ -7,6 +7,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
+from leakpro.risk.schemas import UseCaseProfile
+
 
 # ---------------------------------------------------------------------------
 # Job state
@@ -175,23 +177,15 @@ class ModelResult(BaseModel):
 # frontend posts a use-case profile and renders whatever comes back.
 # ---------------------------------------------------------------------------
 
-class RiskRequest(BaseModel):
+class RiskRequest(UseCaseProfile):
     """A use-case profile plus the model it applies to.
 
-    Field names and semantics mirror leakpro.risk.schemas.UseCaseProfile; validation happens there so
-    there is exactly one definition of a valid profile.
+    Inherits every field, default and bound from leakpro.risk.schemas.UseCaseProfile, including
+    ``extra="forbid"``, so there is exactly one definition of a valid profile and an invalid one is
+    rejected with a 422 before the endpoint runs.
     """
 
     model_name: str | None = None    # None assesses every model in the job
-    tolerated_fpr: float             # required, deliberately no default
-    attacker_prior: float = 0.5
-    n_subjects: int | None = None
-    records_per_subject: float = 1.0
-    data_type_sensitivity: float = 1.0
-    subject_type_weight: float = 1.0
-    cost_per_exposed_subject: float | None = None
-    extrapolate_to_population: bool = False
-    notes: str = ""
 
 
 class RiskResponse(BaseModel):
