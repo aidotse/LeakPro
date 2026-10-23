@@ -295,7 +295,7 @@ from .models import (
     PETVerification,
     TrainParams,
 )
-from .worker import run_audit_job
+from .worker import pick_model_class, run_audit_job
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -882,7 +882,6 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
             if True:
                 import importlib.util as _ilu2
                 import inspect as _inspect2
-                import torch.nn as _nn2
 
                 # Register job_dir on sys.path so pickle can reimport the module by name
                 if str(job_dir) not in _sys.path:
@@ -897,12 +896,8 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                 _sys.modules[_arch_mod_name] = _arch_mod  # register before exec so relative imports work
                 _arch_spec.loader.exec_module(_arch_mod)
 
-                try:
-                    _arch_cls = next(
-                        v for v in vars(_arch_mod).values()
-                        if isinstance(v, type) and issubclass(v, _nn2.Module) and v is not _nn2.Module
-                    )
-                except StopIteration:
+                _arch_cls = pick_model_class(_arch_mod)
+                if _arch_cls is None:
                     raise ValueError(
                         "No nn.Module subclass found in arch.py. "
                         "Make sure your arch.py defines a class that inherits from torch.nn.Module."

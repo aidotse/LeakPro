@@ -31,6 +31,44 @@ class _QueueHandler(logging.Handler):
 
 
 # ---------------------------------------------------------------------------
+# Which class in an uploaded arch.py is "the model"
+# ---------------------------------------------------------------------------
+
+def model_class_candidates(module: Any) -> list[type]:  # noqa: ANN401
+    """Every ``nn.Module`` subclass in the module's namespace, in definition order.
+
+    Imported classes count too (that is how torchvision's ``BasicBlock`` can win,
+    see issue #484); the order is the order the names were bound in the file.
+    """
+    from torch import nn  # noqa: PLC0415 - keep torch off the import path of this module
+
+    return [v for v in vars(module).values() if isinstance(v, type) and issubclass(v, nn.Module) and v is not nn.Module]
+
+
+def pick_model_class(module: Any, init_params: dict | None = None) -> type | None:  # noqa: ANN401
+    """The class the webapp trains, audits and re-trains from an uploaded arch.py.
+
+    With ``init_params`` (from ``model_metadata.pkl``) the first candidate whose
+    constructor accepts every recorded kwarg wins, so a helper block defined
+    before the network does not shadow it. Without them, the first candidate
+    wins: the rule the training step applies. One implementation for the
+    training step, the audit worker and the PET runner; the compatibility
+    checker repeats it inside its isolated subprocess script.
+    """
+    import inspect  # noqa: PLC0415
+
+    candidates = model_class_candidates(module)
+    if not candidates:
+        return None
+    if init_params:
+        keys = set(init_params)
+        for cls in candidates:
+            if keys <= (set(inspect.signature(cls.__init__).parameters) - {"self"}):
+                return cls
+    return candidates[0]
+
+
+# ---------------------------------------------------------------------------
 # Default handler — used when no custom handler.py is uploaded
 # ---------------------------------------------------------------------------
 
@@ -226,28 +264,16 @@ def run_audit_job(
             # Detect model class from arch.py using init_params matching
             if arch_py.exists():
                 import importlib.util as _ilu
-                import torch.nn as _nn
-                import inspect as _inspect
                 import joblib as _joblib
                 _spec = _ilu.spec_from_file_location("_arch_probe", arch_py)
                 _mod = _ilu.module_from_spec(_spec)
                 _spec.loader.exec_module(_mod)
-                _candidates = [
-                    v for v in vars(_mod).values()
-                    if isinstance(v, type) and issubclass(v, _nn.Module) and v is not _nn.Module
-                ]
-                if _candidates:
-                    chosen = _candidates[0]
-                    try:
-                        _meta = _joblib.load(target_folder_path / "model_metadata.pkl")
-                        _init_keys = set(_meta.init_params.keys())
-                        for _cls in _candidates:
-                            _sig_params = set(_inspect.signature(_cls.__init__).parameters) - {"self"}
-                            if _init_keys.issubset(_sig_params):
-                                chosen = _cls
-                                break
-                    except Exception:
-                        pass
+                try:
+                    _init_params = dict(_joblib.load(target_folder_path / "model_metadata.pkl").init_params or {})
+                except Exception:  # noqa: BLE001 - no metadata yet: fall back to the first class
+                    _init_params = None
+                chosen = pick_model_class(_mod, _init_params)
+                if chosen is not None:
                     config["target"]["model_class"] = chosen.__name__
 
             if attack_list:
