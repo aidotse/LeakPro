@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { api, AttackResult, ModelResult, RiskAssessment, RiskRequest } from "../../api";
+import { api, ModelResult, RiskAssessment, RiskMeasured, RiskRequest } from "../../api";
 import InfoButton, { Detail } from "../InfoButton";
 import MetaPanel from "./MetaPanel";
 import RiskDiagram from "./RiskDiagram";
@@ -93,33 +93,30 @@ function num(v: number | undefined | null, digits = 0) {
   return v != null ? v.toLocaleString(undefined, { maximumFractionDigits: digits }) : "—";
 }
 
-/**
- * Whether an attack's ROC is inverted rather than chance-level. Mirrors
- * `_inversion_threshold` in leakpro/risk/vulnerability.py, which is the source of truth: AUC more
- * than 3 null standard errors below 0.5. Without labels it falls back to a plain AUC < 0.5.
- */
-function isInverted(a: AttackResult): boolean {
-  if (a.roc_auc == null) return false;
-  const n = a.true_labels?.length ?? 0;
-  const members = a.true_labels?.filter((label) => label === 1).length ?? 0;
-  const nonMembers = n - members;
-  if (members === 0 || nonMembers === 0) return a.roc_auc < 0.5;
-  const seNull = Math.sqrt((members + nonMembers + 1) / (12 * members * nonMembers));
-  return a.roc_auc < 0.5 - 3 * seNull;
+interface Measurement {
+  /** Undefined when no attack could be measured at this operating point. */
+  measured?: RiskMeasured;
+  /** Attacks the backend skipped, or why nothing could be measured. Shown as caveats. */
+  notes: string[];
 }
 
-/** Best TPR at a given operating point across a model's attacks, for the pre-assessment view. */
-function bestTpr(model: ModelResult, alpha: number): { value: number; attack: string } | undefined {
-  const key = alpha === 0.01 ? "TPR@1%FPR" : alpha === 0.001 ? "TPR@0.1%FPR" : "TPR@0.01%FPR";
-  let best: { value: number; attack: string } | undefined;
-  model.attacks.forEach((a) => {
-    // Attacks with an inverted ROC are excluded, matching the backend's guard: a real leak would read
-    // as no leak.
-    if (isInverted(a)) return;
-    const v = a.tpr_at_fpr?.[key];
-    if (v != null && (best === undefined || v > best.value)) best = { value: v, attack: a.attack_name };
-  });
-  return best;
+/**
+ * What the audit measured for a model at an operating point. Nothing is selected or thresholded here:
+ * after an assessment it is the assessment's own measured block, and before one it is the block the
+ * backend serves with the results, from the same leakpro.risk function. Every cell therefore reports
+ * the same attack and the same TPR.
+ */
+function measurementFor(m: ModelResult, a: RiskAssessment | undefined, alpha: number): Measurement {
+  if (a) return { measured: a.measured, notes: [] };
+  const block = m.measured?.[String(alpha)];
+  if (!block) return { notes: [] };
+  if (block.error !== undefined) return { notes: [block.error] };
+  return { measured: block.measured, notes: block.skipped };
+}
+
+/** The measured block when its TPR means something; an unresolvable TPR of 0 is "not measured". */
+function resolved(meas: Measurement): RiskMeasured | undefined {
+  return meas.measured?.resolvable ? meas.measured : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -336,15 +333,15 @@ export default function Summary({ results, risk, onRiskChange }: Props) {
     const rows = [header.join(",")];
     results.forEach((m) => {
       const a = assessments[modelKey(m)];
-      const tpr = bestTpr(m, alpha);
+      const r = resolved(measurementFor(m, a, alpha));
       rows.push([
         m.model_name,
         m.model_class ?? "",
         alpha,
-        a?.measured.success_rate?.toFixed(6) ?? tpr?.value.toFixed(6) ?? "",
-        a?.measured.advantage?.toFixed(6) ?? "",
-        a?.measured.lift?.toFixed(3) ?? "",
-        a?.measured.roc_auc?.toFixed(6) ?? "",
+        r?.success_rate.toFixed(6) ?? "",
+        r?.advantage.toFixed(6) ?? "",
+        r?.lift.toFixed(3) ?? "",
+        r?.roc_auc?.toFixed(6) ?? "",
         m.train_accuracy?.toFixed(6) ?? "",
         m.test_accuracy?.toFixed(6) ?? "",
         m.dpsgd ? `eps=${m.target_epsilon}` : "No",
@@ -377,13 +374,13 @@ export default function Summary({ results, risk, onRiskChange }: Props) {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           {results.map((m) => {
             const a = assessments[modelKey(m)];
-            const tpr = bestTpr(m, alpha);
+            const r = resolved(measurementFor(m, a, alpha));
             const style = bandStyle(a?.combined.vulnerability_band);
             return (
               <div key={modelKey(m)}
                    className={a ? `rounded-xl p-4 ${style.bg}` : "rounded-xl p-4 bg-slate-50 dark:bg-surface border border-slate-200 dark:border-surface-border"}>
                 <p className={`text-2xl font-black ${a ? style.color : "text-primary"}`}>
-                  {a ? a.combined.vulnerability_band : `${num(tpr ? tpr.value / alpha : undefined, 1)}×`}
+                  {a ? a.combined.vulnerability_band : `${num(r?.lift, 1)}×`}
                 </p>
                 <p className="text-[11px] uppercase tracking-wider text-slate-400 -mt-0.5">
                   {a ? "vulnerability" : "vs random"}
@@ -471,7 +468,8 @@ export default function Summary({ results, risk, onRiskChange }: Props) {
             {results.map((m) => {
               const key = modelKey(m);
               const a = assessments[key];
-              const tpr = bestTpr(m, alpha);
+              const meas = measurementFor(m, a, alpha);
+              const r = resolved(meas);
               const style = bandStyle(a?.combined.vulnerability_band);
               const isOpen = openKey === key;
               return (
@@ -510,14 +508,26 @@ export default function Summary({ results, risk, onRiskChange }: Props) {
                             {a.warnings.length} caveat{a.warnings.length > 1 ? "s" : ""}
                           </button>
                         )}
+                        {!a && meas.notes.length > 0 && (
+                          <span className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[11px] font-bold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                            {meas.notes.length} caveat{meas.notes.length > 1 ? "s" : ""}
+                            <InfoButton label="Caveats" title={`Caveats for ${m.model_name}`}>
+                              <ul className="list-disc ml-5 flex flex-col gap-1">
+                                {meas.notes.map((n) => <li key={n}>{n}</li>)}
+                              </ul>
+                            </InfoButton>
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="px-4 py-3 font-mono">
-                      {tpr !== undefined
-                        ? <>{pct(tpr.value)} <span className="text-slate-400 font-sans text-xs">({tpr.attack})</span></>
-                        : "—"}
+                      {r
+                        ? <>{pct(r.success_rate)} <span className="text-slate-400 font-sans text-xs">({r.attack_name})</span></>
+                        : meas.measured
+                          ? <span className="text-slate-400 font-sans text-xs">not measurable</span>
+                          : "—"}
                     </td>
-                    <td className="px-4 py-3 font-mono">{tpr ? `${num(tpr.value / alpha, 1)}×` : "—"}</td>
+                    <td className="px-4 py-3 font-mono">{r ? `${num(r.lift, 1)}×` : "—"}</td>
                     <td className="px-4 py-3 font-mono">
                       {a?.combined.ppv != null
                         ? <>{pct(a.combined.ppv)} <span className="text-slate-400 font-sans text-xs">(π={a.declared.attacker_prior})</span></>
@@ -554,7 +564,8 @@ export default function Summary({ results, risk, onRiskChange }: Props) {
         {results.map((m) => {
           const key = modelKey(m);
           const a = assessments[key];
-          const tpr = bestTpr(m, alpha);
+          const meas = measurementFor(m, a, alpha);
+          const r = resolved(meas);
           const style = bandStyle(a?.combined.vulnerability_band);
           return (
             <div key={key}
@@ -565,9 +576,11 @@ export default function Summary({ results, risk, onRiskChange }: Props) {
                 {a?.combined.vulnerability_band ? ` — ${a.combined.vulnerability_band} vulnerability` : ""}
               </p>
               <p className="text-sm text-slate-600 dark:text-slate-300">
-                {tpr
-                  ? `At a ${alphaLabel} false-positive rate, ${tpr.attack} identifies ${pct(tpr.value)} of training members, ${num(tpr.value / alpha, 1)}× better than chance.`
-                  : "No usable attack results at this operating point."}
+                {r
+                  ? `At a ${alphaLabel} false-positive rate, ${r.attack_name} identifies ${pct(r.success_rate)} of training members, ${num(r.lift, 1)}× better than chance.`
+                  : meas.measured
+                    ? `A ${alphaLabel} false-positive rate is not measurable here: ${num(meas.measured.n_non_members_audit)} non-members cannot express a rate below ${(meas.measured.min_resolvable_fpr * 100).toPrecision(2)}%.`
+                    : "No usable attack results at this operating point."}
                 {a?.combined.ppv != null && ` An attacker claiming membership would be right ${pct(a.combined.ppv)} of the time.`}
               </p>
               {a && (

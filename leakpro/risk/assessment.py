@@ -36,7 +36,7 @@ from leakpro.risk.schemas import (
     RiskAssessment,
     UseCaseProfile,
 )
-from leakpro.risk.vulnerability import measure_mia, strongest_for_risk
+from leakpro.risk.vulnerability import measure_strongest
 from leakpro.utils.import_helper import Any, List, Optional, Tuple
 
 LEAKPRO_VERSION = "0.1.0"
@@ -260,13 +260,11 @@ def assess_risk(results: Any,
         The full assessment.
 
     """
-    candidates = list(results) if isinstance(results, (list, tuple)) else [results]
-    best, skipped = strongest_for_risk(candidates, profile.tolerated_fpr)
-    measured = measure_mia(best,
-                           alpha=profile.tolerated_fpr,
-                           strict=strict,
-                           train_test_gap=train_test_gap,
-                           dp_epsilon=dp_epsilon)
+    measured, skipped, _ = measure_strongest(results,
+                                             alpha=profile.tolerated_fpr,
+                                             strict=strict,
+                                             train_test_gap=train_test_gap,
+                                             dp_epsilon=dp_epsilon)
 
     n_subjects, n_subjects_source = _resolve_n_subjects(profile, num_train)
     magnitude = loss_magnitude(profile, n_subjects)

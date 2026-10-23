@@ -170,6 +170,9 @@ class ModelResult(BaseModel):
     train_meta: dict | None = None   # epochs, lr, batch_size, optimizer, data info
     num_train: int | None = None     # target training-set size, used to scale risk to the population
     attacks: list[AttackResult] = []
+    # str(alpha) -> {"measured": MiaVulnerability, "skipped": [...]} or {"error": reason}. Derived by
+    # leakpro.risk.measure_strongest when the results are served, never stored with the job.
+    measured: dict[str, dict] | None = None
 
 
 # ---------------------------------------------------------------------------

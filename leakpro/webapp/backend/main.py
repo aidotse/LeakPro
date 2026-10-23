@@ -1179,6 +1179,47 @@ async def start_audit(job_id: str) -> dict:
 # Step 7 — Results
 # ---------------------------------------------------------------------------
 
+# Operating points the results view offers before a use case is declared. Must match ALPHAS in
+# frontend/src/components/results/Summary.tsx, which looks the blocks up by str(alpha).
+MEASURED_ALPHAS = (0.01, 0.001, 0.0001)
+
+
+def _train_test_gap(model: dict) -> float | None:
+    """Train accuracy minus test accuracy for a stored model result, when both are known."""
+    if model.get("train_accuracy") is None or model.get("test_accuracy") is None:
+        return None
+    return float(model["train_accuracy"]) - float(model["test_accuracy"])
+
+
+def _measured_blocks(model: dict) -> dict[str, dict]:
+    """The measured block per operating point for one stored model, through the library's own path.
+
+    This is what the results view shows before a use case is declared, and it is computed by
+    leakpro.risk.measure_strongest, the same function assess_risk uses, so the pre-assessment and
+    assessed views cannot disagree about the attack or its TPR. Computed on request rather than
+    stored, so jobs that finished before this existed get it too.
+
+    Each value is ``{"measured": MiaVulnerability, "skipped": [reasons]}``, or ``{"error": reason}``
+    when no attack can be measured at that operating point (for example, every one is inverted).
+    """
+    from leakpro.risk import measure_strongest, result_from_mapping  # noqa: PLC0415
+
+    results = [result_from_mapping(a) for a in model.get("attacks", [])]
+    blocks: dict[str, dict] = {}
+    for alpha in MEASURED_ALPHAS:
+        if not results:
+            blocks[str(alpha)] = {"error": "no attack results"}
+            continue
+        try:
+            measured, skipped, _ = measure_strongest(results, alpha=alpha, strict=False,
+                                                     train_test_gap=_train_test_gap(model),
+                                                     dp_epsilon=model.get("target_epsilon"))
+            blocks[str(alpha)] = {"measured": measured.model_dump(), "skipped": skipped}
+        except Exception as e:  # noqa: BLE001 - surfaced per operating point rather than failing the request
+            blocks[str(alpha)] = {"error": str(e)}
+    return blocks
+
+
 @app.get("/jobs/{job_id}/results")
 async def get_results(job_id: str) -> dict:
     job = _get_job(job_id)
@@ -1189,7 +1230,8 @@ async def get_results(job_id: str) -> dict:
     # sample images from the correct dataset even in cross-session comparisons.
     for r in results:
         r["job_id"] = job_id
-    return {"job_id": job_id, "results": results}
+    # The measured blocks go on copies: they are derived, so they are never persisted with the job.
+    return {"job_id": job_id, "results": [{**r, "measured": _measured_blocks(r)} for r in results]}
 
 
 @app.post("/jobs/{job_id}/risk", response_model=RiskResponse)
@@ -1220,14 +1262,11 @@ async def assess_job_risk(job_id: str, req: RiskRequest) -> RiskResponse:
             unassessable[name] = "no attack results"
             continue
         try:
-            gap = None
-            if model.get("train_accuracy") is not None and model.get("test_accuracy") is not None:
-                gap = float(model["train_accuracy"]) - float(model["test_accuracy"])
             assessment = assess_risk(
                 results,
                 profile,
                 num_train=model.get("num_train"),
-                train_test_gap=gap,
+                train_test_gap=_train_test_gap(model),
                 dp_epsilon=model.get("target_epsilon"),
                 strict=False,
             )

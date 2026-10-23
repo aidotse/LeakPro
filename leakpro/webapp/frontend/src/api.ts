@@ -263,6 +263,8 @@ export interface ModelResult {
   train_meta?: TrainMeta;
   num_train?: number;
   attacks: AttackResult[];
+  /** Measured block per operating point, keyed by String(alpha). Computed by leakpro.risk on the backend. */
+  measured?: Record<string, MeasuredAtAlpha>;
 }
 
 // ---------------------------------------------------------------------------
@@ -296,6 +298,11 @@ export interface RiskMeasured {
   n_exposed_audit?: number;
   min_resolvable_fpr: number;
 }
+
+/** Either the strongest attack's measured block (plus why others were skipped), or why none could be measured. */
+export type MeasuredAtAlpha =
+  | { measured: RiskMeasured; skipped: string[]; error?: undefined }
+  | { error: string; measured?: undefined; skipped?: undefined };
 
 export interface RiskCombined {
   ppv?: number;

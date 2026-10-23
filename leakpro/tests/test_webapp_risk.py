@@ -75,3 +75,54 @@ class TestRiskRequest(_WithClient):
         declared = res.json()["assessments"]["target"]["declared"]
         assert declared["attacker_prior"] == 0.01
         assert "model_name" not in declared
+
+
+class TestResultsMeasuredBlock(_WithClient):
+    """/results serves the measured block from the library, so the UI never selects or thresholds."""
+
+    def _measured(self: Self, job: dict) -> dict:
+        self.jobs["job"] = job
+        res = self.client.get("/jobs/job/results", headers=self.auth)
+        assert res.status_code == 200
+        return res.json()["results"][0]["measured"]
+
+    def test_should_offer_every_operating_point_the_ui_shows(self: Self) -> None:
+        """One block per alpha in the UI's selector, keyed the way the frontend looks them up."""
+        measured = self._measured(_stored_job(make_result()))
+        assert set(measured) == {"0.01", "0.001", "0.0001"}
+
+    def test_should_agree_with_the_assessment_at_the_same_operating_point(self: Self) -> None:
+        """Pre-assessment and assessed views report the same attack and the same figures."""
+        from leakpro.risk import UseCaseProfile, assess_risk
+
+        results = (make_result(separation=0.5, name="weak", seed=1), make_result(separation=2.0, name="strong", seed=2))
+        served = self._measured(_stored_job(*results))["0.01"]
+        assessed = assess_risk(list(results), UseCaseProfile(tolerated_fpr=0.01)).measured
+        assert served["measured"]["attack_name"] == assessed.attack_name == "strong"
+        for field in ("success_rate", "lift", "advantage", "n_exposed_audit"):
+            assert served["measured"][field] == pytest.approx(getattr(assessed, field))
+
+    def test_should_report_skipped_inverted_attacks_alongside_the_measurement(self: Self) -> None:
+        """An inverted attack is excluded by the library and named, so the UI can show it as a caveat."""
+        served = self._measured(_stored_job(make_result(name="ok"),
+                                            make_result(separation=2.0, name="flipped", inverted=True)))["0.01"]
+        assert served["measured"]["attack_name"] == "ok"
+        assert any("'flipped' skipped" in s and "inverted" in s for s in served["skipped"])
+
+    def test_should_return_an_error_rather_than_fail_when_every_attack_is_inverted(self: Self) -> None:
+        """No usable attack is a per-alpha message, not a 500 that loses the rest of the results."""
+        served = self._measured(_stored_job(make_result(separation=2.0, name="flipped", inverted=True)))["0.01"]
+        assert "measured" not in served
+        assert "No attack result can support" in served["error"]
+
+    def test_should_mark_an_operating_point_the_audit_set_cannot_resolve(self: Self) -> None:
+        """400 non-members cannot express 0.01%: the block says unresolvable, so a TPR of 0 is not shown as safe."""
+        measured = self._measured(_stored_job(make_result()))
+        assert measured["0.01"]["measured"]["resolvable"] is True
+        assert measured["0.0001"]["measured"]["resolvable"] is False
+
+    def test_should_not_persist_the_derived_block_into_the_stored_job(self: Self) -> None:
+        """The block is derived on request; the job keeps only what the worker stored."""
+        job = _stored_job(make_result())
+        self._measured(job)
+        assert "measured" not in job["results"][0]
