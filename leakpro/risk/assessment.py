@@ -120,6 +120,7 @@ def _resolve_n_subjects(profile: UseCaseProfile, num_train: Optional[int]) -> Tu
 
 def _build_assumptions(profile: UseCaseProfile,
                        measured: MiaVulnerability,
+                       n_usable: int,
                        n_subjects: Optional[float],
                        n_subjects_source: str,
                        num_train: Optional[int],
@@ -130,6 +131,7 @@ def _build_assumptions(profile: UseCaseProfile,
     ----
         profile: The declared use-case profile.
         measured: The measured block.
+        n_usable: How many attack results the strongest was selected from.
         n_subjects: Resolved number of data subjects, or None when unknown.
         n_subjects_source: Where the subject count came from.
         num_train: Training-set size of the target model, when the caller supplied it.
@@ -152,6 +154,12 @@ def _build_assumptions(profile: UseCaseProfile,
         f"itself is balanced, which corresponds to pi=0.5 and is reported separately as ppv_balanced.",
         f"Number of data subjects: {n_subjects_source}.",
     ]
+    if n_usable > 1:
+        assumptions.append(
+            f"The measured attack is the strongest of {n_usable} usable attacks at alpha={measured.operating_point}, "
+            "all evaluated on the same audit set. Taking the maximum is biased upward, in the attacker's favour: part "
+            "of the winner's lead is noise. The bias is largest at small alpha, where TPR rests on a few records."
+        )
     if n_subjects_source == _FROM_NUM_TRAIN:
         assumptions.append(
             f"No subject count was declared, so it is derived from the target's {num_train} training records "
@@ -182,7 +190,7 @@ def _build_assumptions(profile: UseCaseProfile,
 
 def _build_warnings(profile: UseCaseProfile,
                     measured: MiaVulnerability,
-                    skipped: List[str],
+                    selection_notes: List[str],
                     num_train: Optional[int]) -> List[str]:
     """Collect conditions that make the assessment unsafe to quote without qualification.
 
@@ -190,7 +198,8 @@ def _build_warnings(profile: UseCaseProfile,
     ----
         profile: The declared use-case profile.
         measured: The measured block.
-        skipped: Reasons emitted while selecting the strongest attack.
+        selection_notes: Results skipped while selecting the strongest attack, and accepted results
+            whose AUC is below 0.5.
         num_train: Training-set size of the target model, when the caller supplied it.
 
     Returns:
@@ -198,7 +207,7 @@ def _build_warnings(profile: UseCaseProfile,
         The warning strings.
 
     """
-    warnings = list(skipped)
+    warnings = list(selection_notes)
     if (profile.n_subjects is not None
             and num_train is not None
             and profile.n_subjects * profile.records_per_subject < num_train):
@@ -260,11 +269,11 @@ def assess_risk(results: Any,
         The full assessment.
 
     """
-    measured, skipped, _ = measure_strongest(results,
-                                             alpha=profile.tolerated_fpr,
-                                             strict=strict,
-                                             train_test_gap=train_test_gap,
-                                             dp_epsilon=dp_epsilon)
+    measured, skipped, below_chance, n_usable = measure_strongest(results,
+                                                                  alpha=profile.tolerated_fpr,
+                                                                  strict=strict,
+                                                                  train_test_gap=train_test_gap,
+                                                                  dp_epsilon=dp_epsilon)
 
     n_subjects, n_subjects_source = _resolve_n_subjects(profile, num_train)
     magnitude = loss_magnitude(profile, n_subjects)
@@ -322,8 +331,9 @@ def assess_risk(results: Any,
         measured=measured,
         declared=declared,
         combined=combined,
-        assumptions=_build_assumptions(profile, measured, n_subjects, n_subjects_source, num_train, extrapolated),
-        warnings=_build_warnings(profile, measured, skipped, num_train),
+        assumptions=_build_assumptions(profile, measured, n_usable, n_subjects, n_subjects_source, num_train,
+                                       extrapolated),
+        warnings=_build_warnings(profile, measured, skipped + below_chance, num_train),
         policy_version=POLICY_VERSION,
         leakpro_version=LEAKPRO_VERSION,
     )

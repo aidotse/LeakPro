@@ -1199,7 +1199,8 @@ def _measured_blocks(model: dict) -> dict[str, dict]:
     assessed views cannot disagree about the attack or its TPR. Computed on request rather than
     stored, so jobs that finished before this existed get it too.
 
-    Each value is ``{"measured": MiaVulnerability, "skipped": [reasons]}``, or ``{"error": reason}``
+    Each value is ``{"measured": MiaVulnerability, "skipped": [reasons], "below_chance": [warnings]}``,
+    or ``{"error": reason}``
     when no attack can be measured at that operating point (for example, every one is inverted).
     """
     from leakpro.risk import measure_strongest, result_from_mapping  # noqa: PLC0415
@@ -1211,10 +1212,11 @@ def _measured_blocks(model: dict) -> dict[str, dict]:
             blocks[str(alpha)] = {"error": "no attack results"}
             continue
         try:
-            measured, skipped, _ = measure_strongest(results, alpha=alpha, strict=False,
-                                                     train_test_gap=_train_test_gap(model),
-                                                     dp_epsilon=model.get("target_epsilon"))
-            blocks[str(alpha)] = {"measured": measured.model_dump(), "skipped": skipped}
+            measured, skipped, below_chance, _ = measure_strongest(results, alpha=alpha, strict=False,
+                                                                   train_test_gap=_train_test_gap(model),
+                                                                   dp_epsilon=model.get("target_epsilon"))
+            blocks[str(alpha)] = {"measured": measured.model_dump(), "skipped": skipped,
+                                  "below_chance": below_chance}
         except Exception as e:  # noqa: BLE001 - surfaced per operating point rather than failing the request
             blocks[str(alpha)] = {"error": str(e)}
     return blocks

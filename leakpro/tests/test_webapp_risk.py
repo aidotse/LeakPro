@@ -126,3 +126,9 @@ class TestResultsMeasuredBlock(_WithClient):
         job = _stored_job(make_result())
         self._measured(job)
         assert "measured" not in job["results"][0]
+
+    def test_should_serve_below_chance_warnings_with_the_measurement(self: Self) -> None:
+        """The pre-assessment view sees the same sub-0.5 warning the assessment would carry."""
+        served = self._measured(_stored_job(make_result(separation=-0.05, name="weakly_below")))["0.01"]
+        assert served["skipped"] == []
+        assert any("'weakly_below' has AUC" in w for w in served["below_chance"])

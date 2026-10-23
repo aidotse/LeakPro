@@ -301,8 +301,8 @@ export interface RiskMeasured {
 
 /** Either the strongest attack's measured block (plus why others were skipped), or why none could be measured. */
 export type MeasuredAtAlpha =
-  | { measured: RiskMeasured; skipped: string[]; error?: undefined }
-  | { error: string; measured?: undefined; skipped?: undefined };
+  | { measured: RiskMeasured; skipped: string[]; below_chance: string[]; error?: undefined }
+  | { error: string; measured?: undefined; skipped?: undefined; below_chance?: undefined };
 
 export interface RiskCombined {
   ppv?: number;

@@ -96,7 +96,7 @@ function num(v: number | undefined | null, digits = 0) {
 interface Measurement {
   /** Undefined when no attack could be measured at this operating point. */
   measured?: RiskMeasured;
-  /** Attacks the backend skipped, or why nothing could be measured. Shown as caveats. */
+  /** Attacks the backend skipped or flagged as below chance, or why nothing could be measured. Shown as caveats. */
   notes: string[];
 }
 
@@ -111,7 +111,7 @@ function measurementFor(m: ModelResult, a: RiskAssessment | undefined, alpha: nu
   const block = m.measured?.[String(alpha)];
   if (!block) return { notes: [] };
   if (block.error !== undefined) return { notes: [block.error] };
-  return { measured: block.measured, notes: block.skipped };
+  return { measured: block.measured, notes: [...block.skipped, ...block.below_chance] };
 }
 
 /** The measured block when its TPR means something; an unresolvable TPR of 0 is "not measured". */

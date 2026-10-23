@@ -203,3 +203,21 @@ class TestAssessRisk:
         assessment = assess_risk([result], UseCaseProfile(tolerated_fpr=0.01))
         assert assessment.policy_version
         assert assessment.leakpro_version
+
+
+class TestSelectionCaveats:
+    """Review of #445 (S4, S5): how the strongest attack was chosen is part of the statement."""
+
+    def test_should_name_the_selection_bias_when_choosing_among_several_attacks(self) -> None:
+        """Max over attacks on one audit set favours the attacker; one attack involves no selection."""
+        several = assess_risk([make_result(name="a", seed=1), make_result(name="b", seed=2, separation=2.0)],
+                              UseCaseProfile(tolerated_fpr=0.01))
+        assert any("strongest of 2 usable attacks" in a and "biased upward" in a for a in several.assumptions)
+
+        single = assess_risk([make_result()], UseCaseProfile(tolerated_fpr=0.01))
+        assert not any("biased upward" in a for a in single.assumptions)
+
+    def test_should_warn_when_an_accepted_attack_has_auc_below_one_half(self) -> None:
+        """A lone attack at AUC 0.48 is assessed, but the reader is told it could be a weakly inverted leak."""
+        assessment = assess_risk([make_result(separation=-0.05, name="weakly_below")], UseCaseProfile(tolerated_fpr=0.01))
+        assert any("'weakly_below' has AUC" in w and "orientation" in w for w in assessment.warnings)
