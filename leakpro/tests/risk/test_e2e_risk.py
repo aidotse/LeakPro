@@ -96,6 +96,36 @@ class TestEndToEnd:
         assert assessment.combined.risk is not None
         assert assessment.declared.n_subjects_source == "target num_train / records_per_subject"
 
+    def test_should_name_the_exposed_members_by_population_index(self, audited) -> None:
+        """LiRA reports audit_indices, so the exposed members can be named, and every one is a member.
+
+        Exposed records are flagged members, so each index must be in the target's training split. An
+        index outside it means the scores and the indices were misaligned somewhere between the attack
+        and the risk layer, which would name the wrong people.
+        """
+        leakpro, results, _ = audited
+        assessment = assess_risk(results, UseCaseProfile(tolerated_fpr=E2E_ALPHA),
+                                 num_train=leakpro.handler.target_model_metadata.num_train)
+        measured = assessment.measured
+
+        assert measured.attack_name.lower().startswith("lira")
+        assert measured.exposed_audit_indices is not None
+        assert len(measured.exposed_audit_indices) == measured.n_exposed_audit > 0
+        assert set(measured.exposed_audit_indices) <= {int(i) for i in TRAIN_INDICES}
+
+        # In this fixture the training split is population 0..N-1, which is also where members sit in
+        # the audit order, so the subset check alone cannot tell indices from positions. Check the
+        # alignment through the attack's own mapping: each exposed index is a member, and every
+        # exposed member outscores every member that was not exposed.
+        lira = next(r for r in results if r.result_name == measured.attack_name)
+        by_index = {int(i): (int(t), float(s))
+                    for i, t, s in zip(lira.audit_indices, lira.true, lira.signal_values)}
+        exposed = set(measured.exposed_audit_indices)
+        assert all(by_index[i][0] == 1 for i in exposed)
+        hidden_members = [s for i, (t, s) in by_index.items() if t == 1 and i not in exposed]
+        if hidden_members:
+            assert min(by_index[i][1] for i in exposed) > max(hidden_members)
+
     def test_should_write_a_self_contained_json_file(self, audited) -> None:
         """The saved file is the deliverable: it must carry every block plus provenance."""
         leakpro, results, _ = audited
