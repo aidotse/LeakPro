@@ -14,28 +14,13 @@ from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, KLDivLoss, Module
 from tqdm import tqdm
 
 from leakpro.attacks.utils.model_handler import ModelHandler
+from leakpro.attacks.utils.shadow_model_handler import singleton
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.schemas import DistillationModelTrainingSchema
 from leakpro.utils.device import get_device, mark_step
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 
-
-def singleton(cls):  # noqa: ANN001, ANN201
-    """Decorator to create a singleton with initialization parameters."""
-    instances = {}
-    params = {}
-
-    def get_instance(*args, **kwargs):  # noqa: ANN003, ANN002, ANN202
-        if cls not in instances:
-            # Store the initialization parameters when the singleton is first created
-            params[cls] = (args, kwargs)
-            instances[cls] = cls(*args, **kwargs)  # Create the singleton instance
-        elif args or kwargs:
-            instances[cls].__init__(*args, **kwargs)  # Update the singleton instance with new parameters
-        return instances[cls]
-
-    return get_instance
 
 @singleton
 class DistillationModelHandler(ModelHandler):

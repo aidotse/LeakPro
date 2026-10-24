@@ -7,6 +7,7 @@
 import os
 import pickle
 import re
+from typing import Callable
 
 import numpy as np
 import torch
@@ -72,6 +73,29 @@ class ShadowModelHandler(ModelHandler):
         self.metadata_storage_name = "metadata"
 
         self.device = get_device()
+        self._reference_pool = None
+
+    def use_reference_pool(self:Self, indices:list[int], model_loader:Callable,
+                           metadata_loader:Callable, logits_loader:Callable) -> None:
+        """Use an explicit reference pool supplied by the robustness runner.
+
+        The loaders belong to the runner, which owns target exclusion, model identity,
+        and cached-logit alignment. Normal audits continue to select and train shadows.
+        """
+        self._reference_pool = (list(indices), model_loader, metadata_loader, logits_loader)
+
+    def _select_reference_pool(self:Self, num_models:int, shadow_population:list, training_fraction:float) -> list[int]:
+        """Verify the wrapped attack can use the supplied pool without training replacements."""
+        indices, _, metadata_loader, _ = self._reference_pool
+        if num_models != len(indices):
+            raise ValueError("The attack's shadow count must equal the robustness reference-pool size")
+        # Recover integer ratios rounded just below their requested record count.
+        expected_size = int(np.nextafter(len(shadow_population) * training_fraction, np.inf))
+        for index in indices:
+            training_indices = np.asarray(metadata_loader(index).train_indices)
+            if len(training_indices) != expected_size or not np.all(np.isin(training_indices, shadow_population)):
+                raise ValueError("The attack requires shadow training data incompatible with the robustness pool")
+        return list(indices)
 
     def _freeze_value(self:Self, value: Union[List, Dict, Any]) -> Union[tuple, Any]:
         """Convert nested config values to a stable, comparable structure.
@@ -301,7 +325,7 @@ class ShadowModelHandler(ModelHandler):
         return A
 
 
-    def create_shadow_models(  # noqa: PLR0915
+    def create_shadow_models(  # noqa: C901, PLR0915 - fixed-pool selection adds an early return to the training path.
         self:Self,
         num_models:int,
         shadow_population: list,
@@ -327,6 +351,9 @@ class ShadowModelHandler(ModelHandler):
         """
         if num_models < 0:
             raise ValueError("Number of models cannot be negative")
+
+        if self._reference_pool is not None:
+            return self._select_reference_pool(num_models, shadow_population, training_fraction)
 
         # Get sampling_method from config if not explicitly provided
         if sampling_method is None:
@@ -458,6 +485,12 @@ class ShadowModelHandler(ModelHandler):
             Module: The loaded shadow model.
 
         """
+        if self._reference_pool is not None:
+            indices, model_loader, _, _ = self._reference_pool
+            if index not in indices:
+                raise ValueError("Model is not in this run's reference pool")
+            return model_loader(index)
+
         if index < 0:
             raise ValueError("Index cannot be negative")
         if index >= len(os.listdir(self.storage_path)):
@@ -490,6 +523,12 @@ class ShadowModelHandler(ModelHandler):
             Module: The loaded metadata.
 
         """
+        if self._reference_pool is not None:
+            indices, _, metadata_loader, _ = self._reference_pool
+            if index not in indices:
+                raise ValueError("Model is not in this run's reference pool")
+            return metadata_loader(index)
+
         if index < 0:
             raise ValueError("Index cannot be negative")
         if index >= len(os.listdir(self.storage_path)):
@@ -509,6 +548,13 @@ class ShadowModelHandler(ModelHandler):
 
     def load_logits(self:Self, name:str=None, indx:int=None) -> np.ndarray:
         """Load model logits, realigning rows to current index order if needed."""
+        if self._reference_pool is not None and indx is not None:
+            indices, _, _, logits_loader = self._reference_pool
+            if indx not in indices:
+                raise ValueError("Model is not in this run's reference pool")
+            data_indices = np.concatenate((self.handler.train_indices, self.handler.test_indices))
+            return logits_loader(indx, data_indices)
+
         if name is None and indx is not None:
             name = f"sm_{indx}_{self.population_hash}"
 
