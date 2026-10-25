@@ -274,7 +274,7 @@ class ModelHandler():
         # Then load the weights and insert them into the model
         try:
             with open(model_path, "rb") as f:
-                state_dict = load(f)
+                state_dict = load(f, weights_only=True)
             try:
                 model.load_state_dict(state_dict)
             except RuntimeError:

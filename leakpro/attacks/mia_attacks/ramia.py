@@ -27,7 +27,7 @@ from leakpro.reporting.mia_result import MIAResult
 from leakpro.utils.device import get_device
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
-from leakpro.utils.save_load import hash_attack
+from leakpro.utils.save_load import hash_attack, load_tensors
 
 
 class AttackRaMIA(AbstractMIA):
@@ -308,8 +308,8 @@ class AttackRaMIA(AbstractMIA):
 
         if os.path.exists(f"{augmented_data_dir}/{hash_str}"):
             logger.info("Loading existing augmented data...")
-            augmented_data = torch.load(f"{augmented_data_dir}/{hash_str}", weights_only=False)
-            labels = torch.load(f"{augmented_data_dir}/labels_{hash_str}", weights_only=False)
+            augmented_data = load_tensors(f"{augmented_data_dir}/{hash_str}")
+            labels = load_tensors(f"{augmented_data_dir}/labels_{hash_str}")
         else:
             logger.info("Creating new augmented data...")
             augmented_data = []
@@ -338,7 +338,7 @@ class AttackRaMIA(AbstractMIA):
         latent_files = f"{augmented_data_dir}/latent_features_{hash_str}.pt"
         if os.path.exists(latent_files):
             logger.info("Loading existing latent features...")
-            latent_features = torch.load(latent_files, weights_only=False).numpy()
+            latent_features = load_tensors(latent_files).numpy()
         else:
             logger.info("Creating new latent features...")
             if self.num_transforms > 2:

@@ -9,7 +9,6 @@ import gc
 import os
 from typing import Optional, Union
 
-import joblib
 import numpy as np
 import torch
 from pydantic import BaseModel, Field
@@ -17,7 +16,7 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from leakpro.utils.logger import logger
-from leakpro.utils.save_load import hash_model
+from leakpro.utils.save_load import hash_model, load_arrays, load_tensors, save_arrays
 
 
 def clear_cuda_cache(device: Union[torch.device, str, None] = None) -> None:
@@ -222,7 +221,7 @@ def get_p_reg(
 
     # Check if p_reg already exists
     if os.path.exists(os.path.join(args.save_path, f"p_reg_{hash}.pt")):
-        p_reg = torch.load(os.path.join(args.save_path, f"p_reg_{hash}.pt"), map_location="cpu")
+        p_reg = load_tensors(os.path.join(args.save_path, f"p_reg_{hash}.pt"))
         logger.info(f"Loaded p_reg from {os.path.join(args.save_path, f'p_reg_{hash}.pt')}")
         return p_reg.to(device=device)
 
@@ -289,9 +288,9 @@ class PseudoDataset(Dataset):
 
 def _load_pseudo_data(path: str) -> Optional[tuple[np.ndarray, np.ndarray]]:
     if os.path.exists(path):
-        pseudo_data, pseudo_labels = joblib.load(path)
+        cached = load_arrays(path)
         logger.info(f"Load data from {path}")
-        return pseudo_data, pseudo_labels
+        return cached["pseudo_data"], cached["pseudo_labels"]
     return None
 
 
@@ -373,7 +372,7 @@ def top_n_pseudo_label_dataset(
         )
 
     # Check if pseudo labeled data already exists
-    pseudo_path = os.path.join(save_dir, f"pseudo_data_{model_hash}.pkl")
+    pseudo_path = os.path.join(save_dir, f"pseudo_data_{model_hash}.npz")
     maybe_data = _load_pseudo_data(pseudo_path)
     if maybe_data is None:
         pseudo_data, pseudo_labels = _compute_pseudo_data(
@@ -384,7 +383,7 @@ def top_n_pseudo_label_dataset(
             top_n=top_n,
         )
         os.makedirs(save_dir, exist_ok=True)
-        joblib.dump((pseudo_data, pseudo_labels), pseudo_path)
+        save_arrays(pseudo_path, {"pseudo_data": pseudo_data, "pseudo_labels": pseudo_labels})
         logger.info(f"Save data to {pseudo_path}")
     else:
         pseudo_data, pseudo_labels = maybe_data
@@ -417,10 +416,11 @@ def extract_features(
     model_hash = hash_model(model)[:8]
 
     # Check if private feature data already exists
-    if os.path.exists(os.path.join(save_dir, f"private_features_{model_hash}.pkl")):
-        with open(os.path.join(save_dir, f"private_features_{model_hash}.pkl"), "rb") as file:
-            priv_features, idents = joblib.load(file)
-            logger.info(f"Load data from {os.path.join(save_dir, f'private_features_{model_hash}.pkl')}")
+    features_path = os.path.join(save_dir, f"private_features_{model_hash}.npz")
+    if os.path.exists(features_path):
+        cached = load_arrays(features_path)
+        priv_features, idents = cached["priv_features"], cached["idents"]
+        logger.info(f"Load data from {features_path}")
 
     # If not, compute the private features
     else:
@@ -446,9 +446,8 @@ def extract_features(
         clear_cuda_cache(device)
         # Save the private features for future use
         os.makedirs(save_dir, exist_ok=True)
-        with open(os.path.join(save_dir, f"private_features_{model_hash}.pkl"), "wb") as file:
-            joblib.dump((priv_features, idents), file)
-            logger.info(f"Save data to {os.path.join(save_dir, f'private_features_{model_hash}.pkl')}")
+        save_arrays(features_path, {"priv_features": priv_features, "idents": idents})
+        logger.info(f"Save data to {features_path}")
 
     return priv_features, idents
 

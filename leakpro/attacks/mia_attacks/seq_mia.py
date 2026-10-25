@@ -5,7 +5,6 @@
 """Implementation of the sequential MIA attack."""
 
 import os
-import pickle
 
 import numpy as np
 import torch
@@ -25,6 +24,7 @@ from leakpro.signals.signal import ModelLogits
 from leakpro.utils.device import get_device, mark_step
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
+from leakpro.utils.save_load import load_arrays, load_tensors, save_arrays
 
 
 class LSTM(nn.Module):
@@ -240,11 +240,10 @@ class AttackSeqMIA(AbstractMIA):
 
         """
 
-        dataset_name = "seqmia_train_data.pkl" if train_mode else "seqmia_test_data.pkl"
+        dataset_name = "seqmia_train_data.npz" if train_mode else "seqmia_test_data.npz"
         if os.path.exists(f"{self.storage_dir}/{dataset_name}"):
             logger.info(f"Loading MIA {dataset_name}: {len(data_indices)} points")
-            with open(f"{self.storage_dir}/{dataset_name}", "rb") as file:
-                data = pickle.load(file)  # noqa: S301
+            data = load_arrays(f"{self.storage_dir}/{dataset_name}")
         else:
             data = self._prepare_mia_data(data_indices,
                                           student_model,
@@ -253,8 +252,7 @@ class AttackSeqMIA(AbstractMIA):
         data["member_status"] = membership_status_shadow_train
 
         os.makedirs(self.storage_dir, exist_ok=True)
-        with open(f"{self.storage_dir}/{dataset_name}", "wb") as file:
-            pickle.dump(data, file)
+        save_arrays(f"{self.storage_dir}/{dataset_name}", data)
 
         mia_input = data["model_trajectory"]
         mia_dataset = TensorDataset(torch.tensor(mia_input), torch.tensor(data["member_status"]))
@@ -389,19 +387,12 @@ class AttackSeqMIA(AbstractMIA):
             loss_fn = nn.CrossEntropyLoss()
 
             train_loss, train_prec1 = self._train_mia_classifier(attack_model, attack_optimizer, loss_fn)
-            train_info = [train_loss, train_prec1]
-
             torch.save(attack_model.state_dict(), f"{self.storage_dir}/seqmia_model.pt")
-
-            with open(f"{self.storage_dir}/mia_model_losses.pkl", "wb") as file:
-                pickle.dump(train_info, file)
+            save_arrays(f"{self.storage_dir}/mia_model_losses.npz",
+                        {"train_loss": train_loss, "train_prec1": train_prec1})
         else:
             attack_model.load_state_dict(
-                torch.load(
-                    f"{self.storage_dir}/seqmia_model.pt",
-                    map_location=device,
-                    weights_only=True,
-                )
+                load_tensors(f"{self.storage_dir}/seqmia_model.pt", map_location=device)
             )
             logger.info("Loaded SeqMIA classifier")
 

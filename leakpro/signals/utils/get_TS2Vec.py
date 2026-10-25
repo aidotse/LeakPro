@@ -5,7 +5,6 @@
 """Utility functions for fitting and loading TS2Vec representation models."""
 
 import os
-import pickle
 import re
 from functools import partial
 from typing import Callable
@@ -18,6 +17,7 @@ from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.signals import functional
 from leakpro.utils.device import get_device
 from leakpro.utils.logger import logger
+from leakpro.utils.save_load import load_arrays, load_tensors, save_arrays
 
 
 def bind_ts2vec_encoder(
@@ -101,16 +101,16 @@ def get_ts2vec_model(
 
         # Get model metadata
         model_number = re.match(r"representation_model_(\d+)", model_file).group(1)
-        metadata_file = f"metadata_{model_number}.pkl"
+        metadata_file = f"metadata_{model_number}.npz"
         if metadata_file in files:
-            metadata_path = os.path.join(ts2vec_dir, metadata_file)
-            with open(metadata_path, "rb") as f:
-                metadata = pickle.load(f)  # noqa: S301
+            metadata = load_arrays(os.path.join(ts2vec_dir, metadata_file))
 
             # Compare representation indices and load model if match
             if np.array_equal(np.sort(metadata["representation_indices"]), np.sort(shadow_population_indices)):
                 model_path = os.path.join(ts2vec_dir, model_file)
-                ts2vec_model.load(model_path)
+                # TS2Vec.load() calls torch.load without weights_only; the file is a plain
+                # state dict (TS2Vec.save), so load it ourselves through the restricted path.
+                ts2vec_model.net.load_state_dict(load_tensors(model_path, map_location=device))
                 model_loaded = True
                 logger.info("Loaded TS2Vec representation model")
 
@@ -133,9 +133,7 @@ def get_ts2vec_model(
         metadata = {
             "representation_indices": shadow_population_indices
         }
-        metadata_path = os.path.join(ts2vec_dir, f"metadata_{model_number}.pkl")
-        with open(metadata_path, "wb") as f:
-            pickle.dump(metadata, f)
+        save_arrays(os.path.join(ts2vec_dir, f"metadata_{model_number}.npz"), metadata)
         logger.info(f"Representation model and metadata saved to {ts2vec_dir}")
 
     return ts2vec_model
