@@ -47,6 +47,9 @@ audit:  # Configurations for auditing
       num_shadow_models: 16
       var_calculation: "fixed"
       training_data_fraction: 0.5
+      # Optional: original target followed by eight distinct shadow targets.
+      # robustness:
+      #   n_runs: 9
 
 
 

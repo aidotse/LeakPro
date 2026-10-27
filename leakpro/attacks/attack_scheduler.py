@@ -56,20 +56,35 @@ class AttackScheduler:
 
         # Create factory
         attack_type = configs.audit.attack_type
+        if attack_type != "mia" and any(entry.get("robustness") is not None for entry in configs.audit.attack_list):
+            raise ValueError("robustness is only supported for MIA attacks")
         self._initialize_factory(attack_type)
 
-        self.attack_names = [entry["attack"] for entry in configs.audit.attack_list]
-        self.attack_configs = [{k: v for k, v in entry.items() if k != "attack"} for entry in configs.audit.attack_list]
-
+        self.attack_names = []
+        self.attack_configs = []
         self.attacks = []
-        for attack_name, attack_config in zip(self.attack_names, self.attack_configs):
-            try:
-                attack = self.attack_factory.create_attack(attack_name, attack_config, handler)
-                self.add_attack(attack)
-                logger.info(f"Added attack: {attack_name}")
-            except ValueError as e:
-                logger.info(e)
-                logger.info(f"Failed to create attack: {attack_name}, supported attacks: {self.attack_factory.attack_classes.keys()}")  # noqa: E501
+        self.robustness_runners = set()
+        for entry in configs.audit.attack_list:
+            attack_name = entry["attack"]
+            attack_config = {key: value for key, value in entry.items() if key not in {"attack", "robustness"}}
+            if entry.get("robustness") is not None:
+                from leakpro.attacks.robustness import Robustness  # noqa: PLC0415
+
+                options = Robustness.Config.model_validate(entry["robustness"]).model_dump(exclude_unset=True)
+                options.setdefault("seed", self.random_seed)
+                attack = Robustness(handler, attack_name, attack_config, output_dir=output_dir, **options)
+                self.robustness_runners.add(attack)
+            else:
+                try:
+                    attack = self.attack_factory.create_attack(attack_name, attack_config, handler)
+                except ValueError as e:
+                    logger.info(e)
+                    logger.info(f"Failed to create attack: {attack_name}, supported attacks: {self.attack_factory.attack_classes.keys()}")  # noqa: E501
+                    continue
+            self.add_attack(attack)
+            self.attack_names.append(attack_name)
+            self.attack_configs.append(attack_config)
+            logger.info(f"Added attack: {attack_name}")
 
         # Read all previous hashed attack objects from the report directory
         self.output_dir = output_dir
@@ -123,12 +138,22 @@ class AttackScheduler:
         self.attacks.append(attack)
 
     def run_attacks(self: Self, use_optuna:bool=False) -> Dict[str, Any]:
-        """Run the attacks and return the results."""
+        """Run attacks, returning one result per target for robustness entries.
+
+        Robustness entries use their runner as attack_object and retain each run's
+        target/reference provenance in metadata. Normal entries keep their existing contract.
+        """
+        if use_optuna and self.robustness_runners:
+            raise ValueError("Robustness requires a fixed attack configuration; use_optuna must be False")
         results = []
         for attack_obj, attack_type in zip(self.attacks, self.attack_names):
             # Re-seed before every attack so each attack sees the same random state
             # regardless of which earlier attacks ran or were loaded from cache.
             seed_everything(self.random_seed)
+            if attack_obj in self.robustness_runners:
+                results.extend({"attack_type": attack_type, "attack_object": attack_obj, **entry}
+                               for entry in attack_obj.run())
+                continue
             run_with_optuna = use_optuna and attack_obj.optuna_params > 0
 
             # If Optuna is used, the attack should not be loaded even if it already exists
