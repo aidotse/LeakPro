@@ -30,6 +30,7 @@ attack. The objective must return an :class:`ObjectiveResult` whose ``tpr`` is t
 attack TPR at the search's ``proxy_fpr``.
 """
 
+import inspect
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -83,6 +84,9 @@ def optimize(  # noqa: PLR0913
     Args:
         objective_fn: config -> :class:`ObjectiveResult`. Trains and audits one
             configuration. Its ``tpr`` must be the attack TPR at ``proxy_fpr``.
+            If it accepts a ``trial_number`` keyword it receives Optuna's trial
+            number, so per-trial artifacts can be keyed on something unique:
+            two trials with identical knobs are still two trials.
         knob_space: The searched configuration space.
         output_dir: Where the study database (``study.db``) is written; an
             existing database with the same ``study_name`` resumes the run.
@@ -131,6 +135,8 @@ def optimize(  # noqa: PLR0913
         for anchor in anchors:
             study.enqueue_trial(anchor)
 
+    wants_trial_number = "trial_number" in inspect.signature(objective_fn).parameters
+
     def _objective(trial: optuna.trial.Trial) -> tuple[float, float]:
         config = knob_space.suggest(trial)
         # Record the *resolved* configuration (searched + fixed knobs): Optuna's
@@ -144,7 +150,7 @@ def optimize(  # noqa: PLR0913
         # its own seeded RNG and is unaffected by this.)
         seed_everything((seed * 1_000_003 + trial.number) % (2**31 - 1))
         logger.info(f"Trial {trial.number}: {config}")
-        result = objective_fn(config)
+        result = objective_fn(config, trial_number=trial.number) if wants_trial_number else objective_fn(config)
         trial.set_user_attr("utility", result.utility)
         trial.set_user_attr("tpr", result.tpr)
         for key, value in result.extras.items():

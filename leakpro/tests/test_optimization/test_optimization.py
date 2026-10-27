@@ -130,6 +130,22 @@ class TestSearchIsModelBased:
         # Pruned trials still consume budget (each one trained a model).
         assert len([t for t in study.trials if t.state.is_finished()]) == 12
 
+    def test_trial_number_is_passed_when_the_objective_accepts_it(self, tmp_path):
+        """An objective keyed on the trial number sees Optuna's numbering; a plain one is called as before."""
+        space = KnobSpace([Knob("x", 0.0, 1.0)])
+        seen: list[int] = []
+
+        def keyed(config: dict, trial_number: int) -> ObjectiveResult:
+            seen.append(trial_number)
+            return ObjectiveResult(utility=config["x"], tpr=0.5)
+
+        def plain(config: dict) -> ObjectiveResult:
+            return ObjectiveResult(utility=config["x"], tpr=0.5)
+
+        optimize(keyed, space, tmp_path / "k", n_trials=3, seed=0, study_name="k")
+        assert seen == [0, 1, 2]
+        optimize(plain, space, tmp_path / "p", n_trials=2, seed=0, study_name="p")
+
     def test_anchor_is_evaluated_first(self, tmp_path):
         space = default_dpsgd_space()
         anchor = {"noise_multiplier": 0.4, "max_grad_norm": 10.0, "learning_rate": 0.05, "batch_size": 128}

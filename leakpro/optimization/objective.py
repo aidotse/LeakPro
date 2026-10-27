@@ -25,6 +25,17 @@ directly, so any preprocessing hidden in a ``__getitem__`` would reach the targe
 but not the shadow models. :func:`materialize_population` builds such a file from
 any dataset by reading it through its own ``__getitem__`` once.
 
+The objective trains the target on rows of that same population file, never on
+the recipe's own dataset: ``train_indices`` are population positions, and a loader
+built on any other dataset would train on one set of records while the audit
+labels another set as members. ``recipe.make_loader`` is therefore not used here.
+
+Per-trial artifacts are keyed on the Optuna trial number
+(:func:`trial_dir_for`), not on the configuration: two trials with identical knobs
+(every knob pinned, or a sampler revisiting a point) are two models, and keying on
+the knobs would let the second overwrite the first's saved target while the
+first's record still pointed at it.
+
 Population layout follows the mimicry rule documented in
 ``leakpro.optimization.audit``: the audit population is exactly twice the target's
 training set, so RMIA's balanced shadow sampling trains each reference on as many
@@ -46,7 +57,13 @@ from torch.utils.data import DataLoader, Dataset, Subset
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.leakpro import LeakPro
-from leakpro.optimization.audit import TABULATED_FPRS, resolved_proxy_tpr, run_rmia_audit, tpr_at_fixed_fpr
+from leakpro.optimization.audit import (
+    TABULATED_FPRS,
+    clopper_pearson_ci,
+    resolved_proxy_tpr,
+    run_rmia_audit,
+    tpr_at_fixed_fpr,
+)
 from leakpro.optimization.search import ObjectiveResult
 from leakpro.optimization.training import (
     DEFAULT_ACCOUNTANT,
@@ -208,14 +225,39 @@ class DPSGDAuditHandler(AbstractInputHandler, role="full"):
 class Population:
     """An audit population on disk plus the index roles the objective uses.
 
-    ``train_indices`` are the target's members; ``test_indices`` are the
-    non-members and the utility split. Both index into the population file.
+    ``train_indices`` are the target's members and ``test_indices`` the audit's
+    non-members; ``utility_indices`` is the split utility is scored on, which
+    defaults to the non-members. All three are positions in the population file.
     """
 
     path: str
     train_indices: list[int]
     test_indices: list[int]
     num_classes: int
+    utility_indices: list[int] | None = None
+
+    @property
+    def utility_split(self) -> list[int]:
+        """Positions utility is scored on."""
+        return self.test_indices if self.utility_indices is None else self.utility_indices
+
+
+def _write_population(dataset: Dataset, order: list[int], path: Path) -> torch.Tensor:
+    """Read ``dataset[order]`` through ``__getitem__`` once and pickle it as a ``UserDataset``.
+
+    Returns the targets, for the class count.
+    """
+    loader = DataLoader(Subset(dataset, [int(i) for i in order]), batch_size=512, shuffle=False)
+    xs, ys = [], []
+    for xb, yb in loader:
+        xs.append(xb.float())
+        ys.append(yb.view(-1).long())
+    data, targets = torch.cat(xs), torch.cat(ys)
+    population = DPSGDAuditHandler.UserDataset(data, targets)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as f:
+        pickle.dump(population, f)
+    return targets
 
 
 def materialize_population(  # noqa: PLR0913
@@ -230,7 +272,10 @@ def materialize_population(  # noqa: PLR0913
     """Write a normalised audit population of ``2 * n_target`` samples and carve its roles.
 
     Samples are read through ``dataset.__getitem__`` so whatever normalisation the
-    dataset applies is baked into the file; the audit then slices tensors.
+    dataset applies is baked into the file; the audit then slices tensors. That
+    read happens exactly once: a random augmentation in ``__getitem__`` is frozen
+    into the file, so every trial and every shadow model sees the same augmented
+    copy of each record rather than a fresh draw per epoch.
 
     Args:
         dataset: the full dataset, ``__getitem__ -> (x, y)``.
@@ -251,24 +296,73 @@ def materialize_population(  # noqa: PLR0913
         raise ValueError(f"n_test={n_test} must be in (0, n_target={n_target}].")
 
     order = np.random.default_rng(seed).permutation(n)[:2 * n_target]
-    loader = DataLoader(Subset(dataset, [int(i) for i in order]), batch_size=512, shuffle=False)
-    xs, ys = [], []
-    for xb, yb in loader:
-        xs.append(xb.float())
-        ys.append(yb.view(-1).long())
-    data, targets = torch.cat(xs), torch.cat(ys)
-    population = DPSGDAuditHandler.UserDataset(data, targets)
-
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    path = out_dir / name
-    with path.open("wb") as f:
-        pickle.dump(population, f)
-    logger.info(f"Population of {len(population)} samples written to {path} "
+    path = Path(out_dir) / name
+    targets = _write_population(dataset, [int(i) for i in order], path)
+    logger.info(f"Population of {len(targets)} samples written to {path} "
                 f"(members {n_target}, held-out {n_test}).")
     return Population(path=str(path), train_indices=list(range(n_target)),
                       test_indices=list(range(n_target, n_target + n_test)),
                       num_classes=int(targets.max().item()) + 1)
+
+
+def materialize_split(  # noqa: PLR0913
+    dataset: Dataset,
+    out_dir: str | Path,
+    *,
+    members: list[int],
+    non_members: list[int],
+    utility: list[int] | None = None,
+    name: str = POPULATION_NAME,
+) -> Population:
+    """Write a population from an explicit split: a model's own members plus chosen non-members.
+
+    This is how a setting is measured on the user's model rather than on a search
+    subset: ``members`` are that model's training records, ``non_members`` the
+    records the audit treats as never seen, and ``utility`` (a subset of
+    ``non_members``, defaulting to all of them) the records utility is scored on,
+    e.g. the model's own test split. All three are dataset indices; the returned
+    roles are positions in the written file, members first.
+
+    The mimicry rule wants ``len(non_members) == len(members)``; a smaller
+    non-member pool is written as given and logged, since the alternative is
+    silently dropping members from the model being measured.
+    """
+    members = [int(i) for i in members]
+    non_members = [int(i) for i in non_members]
+    if set(members) & set(non_members):
+        raise ValueError("members and non_members overlap.")
+    if not members or not non_members:
+        raise ValueError("Both members and non_members must be non-empty.")
+    if len(non_members) != len(members):
+        logger.warning(f"Population is not 2 x members: {len(members)} members, {len(non_members)} non-members. "
+                       "Reference models will train on a different number of points than the target.")
+    position = {idx: pos for pos, idx in enumerate(members + non_members)}
+    utility_positions = None
+    if utility is not None:
+        missing = [i for i in utility if int(i) not in position or int(i) in set(members)]
+        if missing:
+            raise ValueError("utility indices must be a subset of non_members.")
+        utility_positions = [position[int(i)] for i in utility]
+
+    path = Path(out_dir) / name
+    targets = _write_population(dataset, members + non_members, path)
+    logger.info(f"Population of {len(targets)} samples written to {path} "
+                f"(members {len(members)}, non-members {len(non_members)}).")
+    return Population(path=str(path), train_indices=list(range(len(members))),
+                      test_indices=list(range(len(members), len(members) + len(non_members))),
+                      num_classes=int(targets.max().item()) + 1, utility_indices=utility_positions)
+
+
+def majority_rate(targets: torch.Tensor | np.ndarray) -> float:
+    """Share of the most common label: the accuracy of a model that always predicts it.
+
+    This is the utility gate's threshold. ``1 / num_classes`` is only the chance
+    level of a balanced problem; on an imbalanced one a constant predictor
+    passes it, gets audited, and its near-constant scores can sit on the
+    frontier looking private.
+    """
+    counts = np.bincount(np.asarray(targets).astype(int).ravel())
+    return float(counts.max() / counts.sum()) if counts.sum() else 0.0
 
 
 def resolution_warning(n_nonmembers: int, proxy_fpr: float) -> str | None:
@@ -293,11 +387,43 @@ def resolution_warning(n_nonmembers: int, proxy_fpr: float) -> str | None:
 # Per-trial artifacts
 # --------------------------------------------------------------------------- #
 
+def trial_dir_for(out_dir: str | Path, trial_number: int) -> Path:
+    """Per-trial directory, keyed on the trial number so identical configurations never share one."""
+    return Path(out_dir) / "trials" / f"trial_{int(trial_number):04d}"
+
+
 def config_dir(out_dir: str | Path, config: dict) -> Path:
-    """Stable per-configuration directory, so a resumed run reuses a config's artifacts."""
+    """Per-configuration directory, used only when the objective is called outside a study.
+
+    Inside :func:`~leakpro.optimization.search.optimize` the trial number is the
+    key (:func:`trial_dir_for`); two trials with the same knobs must not share a
+    directory, or the later one overwrites the earlier one's saved target.
+    """
     key = json.dumps({k: round(float(v), 8) for k, v in sorted(config.items())})
     tag = hashlib.sha1(key.encode()).hexdigest()[:10]  # noqa: S324 - a directory name, not security
     return Path(out_dir) / "trials" / f"config_{tag}"
+
+
+def tpr_uncertainty(result: MIAResult, tpr: float | None, realized_fpr: float | None) -> dict:
+    """Binomial sampling error behind a TPR at an FPR, as the counts that produced it.
+
+    Returns ``n_members``, ``n_non_members``, ``n_nonmember_false_positives`` (how
+    many non-member events the threshold rests on) and ``attack_tpr_ci``, the
+    95% Clopper-Pearson interval of the TPR over the members. The interval
+    covers audit-point sampling only, not training or reference-model noise, so
+    it is a floor on the uncertainty: a setting whose interval contains the FPR
+    is indistinguishable from guessing at this audit size.
+    """
+    labels = np.asarray(result.true).ravel() if result.true is not None else np.zeros(0)
+    n_members = int((labels == 1).sum())
+    n_non = int((labels == 0).sum())
+    ci = None
+    if tpr is not None and n_members > 0:
+        k = int(round(float(tpr) * n_members))
+        ci = list(clopper_pearson_ci(min(max(k, 0), n_members), n_members))
+    false_positives = int(round(float(realized_fpr) * n_non)) if realized_fpr is not None else None
+    return {"n_members": n_members, "n_non_members": n_non,
+            "n_nonmember_false_positives": false_positives, "attack_tpr_ci": ci}
 
 
 def write_audit_yaml(  # noqa: PLR0913
@@ -356,6 +482,122 @@ class AuditTarget:
     init_params: dict | None = None
 
 
+def train_and_audit(  # noqa: PLR0913
+    recipe: PETRecipe,
+    population: Population,
+    target: AuditTarget,
+    trial_dir: Path,
+    config: dict,
+    *,
+    proxy_fpr: float = 0.01,
+    delta: float = DEFAULT_DELTA,
+    accountant: str = DEFAULT_ACCOUNTANT,
+    max_physical_batch: int = DEFAULT_MAX_PHYSICAL_BATCH,
+    rmia_config: dict | None = None,
+    seed: int = 0,
+    device: str | None = None,
+    utility_gate: float | None = None,
+    handler_cls: type[AbstractInputHandler] = DPSGDAuditHandler,
+) -> tuple[ObjectiveResult, MIAResult | None]:
+    """Train one target under ``config`` on the population's members, then audit it with RMIA.
+
+    This is the one implementation behind the search objective and behind
+    measuring a chosen setting on a model's own split: the same code trains,
+    gates, persists and audits in both cases, so the number a user adopts is
+    produced exactly the way the number that ranked the setting was.
+
+    The train loader is built from the population rows (``Subset(pop,
+    train_indices)``, batch size from ``config``), never from ``recipe.make_loader``:
+    the audit labels population rows as members, so training on anything else
+    would score a model on records it never saw. Utility is scored on
+    ``population.utility_split``.
+
+    Returns the :class:`ObjectiveResult` and the RMIA result, which is None when
+    the trial was gated.
+    """
+    device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+    rmia_config = {**RMIA_DEFAULTS, **(rmia_config or {})}
+
+    with open(population.path, "rb") as f:
+        pop = pickle.load(f)  # noqa: S301 - written by materialize_population / materialize_split
+    train_idx = [int(i) for i in population.train_indices]
+    utility_idx = [int(i) for i in population.utility_split]
+    # The gate is the majority-class rate of the utility split: a constant
+    # predictor must not pass it on an imbalanced problem.
+    gate = utility_gate if utility_gate is not None else majority_rate(pop.targets[utility_idx])
+    utility_loader = DataLoader(Subset(pop, utility_idx), batch_size=512)
+
+    target_folder = trial_dir / "target"
+    target_folder.mkdir(parents=True, exist_ok=True)
+    epochs = int(config.get("epochs", recipe.epochs))
+
+    # 1. The DP-SGD knobs both the target and the shadow models read.
+    dpsgd_path = target_folder / DPSGD_CONFIG_NAME
+    with dpsgd_path.open("wb") as f:
+        pickle.dump({"noise_multiplier": float(config["noise_multiplier"]),
+                     "max_grad_norm": float(config["max_grad_norm"]),
+                     "delta": delta, "accountant": accountant,
+                     "max_physical_batch": max_physical_batch}, f)
+
+    # 2. Train the target on population rows through the same path the shadow models use.
+    train_loader = DataLoader(Subset(pop, train_idx), batch_size=int(config["batch_size"]), shuffle=True)
+    model = recipe.make_model(config)
+    optimizer = recipe.make_optimizer(model.parameters(), config)
+    train_result = dp_train(model, train_loader, recipe.criterion, optimizer, epochs, dpsgd_path, device)
+    epsilon = train_result.metrics.extra.get("epsilon")
+    acc_name = train_result.metrics.extra.get("accountant")
+    common = {"epsilon": epsilon, "accountant": acc_name, "delta": delta,
+              "train_accuracy": train_result.metrics.accuracy, "n_members": len(train_idx),
+              "tuning_accounted": False, "trial_dir": str(trial_dir)}
+
+    # 3. Utility, then the gate: a model at the majority-class rate has not
+    # learned, and its degenerate TPR would sit on the frontier looking like privacy.
+    test_result = evaluate(utility_loader, train_result.model, recipe.criterion, device)
+    utility = test_result.accuracy
+    if utility <= gate:
+        logger.warning(f"Utility {utility:.4f} is at or below the gate {gate:.4f} (majority-class rate): "
+                       "this model did not learn, skipping the attack.")
+        return ObjectiveResult(utility=utility, tpr=None, extras={**common, "gated": True, "gate": gate}), None
+
+    # 4. Persist the target in the layout MIAHandler reads.
+    with (target_folder / "target_model.pkl").open("wb") as f:
+        torch.save(unwrapped_state_dict(train_result.model), f)
+    metadata = LeakPro.make_mia_metadata(
+        train_result=train_result, optimizer=optimizer, loss_fn=recipe.criterion,
+        dataloader=train_loader, test_result=test_result, epochs=epochs,
+        train_indices=population.train_indices, test_indices=population.test_indices,
+        dataset_name=target.dataset_name)
+    with (target_folder / "model_metadata.pkl").open("wb") as f:
+        pickle.dump(metadata, f)
+
+    # 5. Audit the saved target with the real RMIA attack through the pipeline.
+    config_path = trial_dir / "audit.yaml"
+    write_audit_yaml(config_path, population_path=population.path, target_folder=target_folder,
+                     dpsgd_path=dpsgd_path, audit_dir=trial_dir / "audit",
+                     module_path=target.module_path, model_class=target.model_class,
+                     rmia_config=rmia_config, seed=seed, data_modality=target.data_modality,
+                     shadow_init_params=target.init_params)
+    result = run_rmia_audit(handler_cls, str(config_path))
+
+    tpr, realized_fpr, degenerate = resolved_proxy_tpr(result, proxy_fpr)
+    if tpr is None:
+        logger.warning("Degenerate audit (no ROC; every score saturated): not evidence of privacy, "
+                       "pruning the trial.")
+    return ObjectiveResult(
+        utility=utility, tpr=tpr,
+        extras={**common,
+                "tpr_fixed_fpr_table": None if degenerate else tpr_at_fixed_fpr(result, proxy_fpr),
+                # The accountant's epsilon covers ONE training run; selecting
+                # off a frontier of many is itself a mechanism whose cost is
+                # not included (Liu & Talwar 2019; Papernot & Steinke 2022).
+                "roc_auc": result.roc_auc,
+                "realized_fpr": realized_fpr,
+                "degenerate_audit": degenerate,
+                "n_shadow": int(rmia_config["num_shadow_models"]),
+                **tpr_uncertainty(result, tpr, realized_fpr)},
+    ), result
+
+
 def make_dpsgd_objective(  # noqa: PLR0913
     recipe: PETRecipe,
     population: Population,
@@ -371,12 +613,19 @@ def make_dpsgd_objective(  # noqa: PLR0913
     device: str | None = None,
     utility_gate: float | None = None,
     handler_cls: type[AbstractInputHandler] = DPSGDAuditHandler,
-) -> Callable[[dict], ObjectiveResult]:
+) -> Callable[..., ObjectiveResult]:
     """Build ``config -> ObjectiveResult`` for :func:`~leakpro.optimization.search.optimize`.
 
+    The returned callable accepts a ``trial_number`` keyword, which ``optimize``
+    supplies; artifacts of trial *n* live in ``out_dir/trials/trial_000n``
+    (:func:`trial_dir_for`). Called without one (outside a study), the directory
+    is keyed on the configuration instead (:func:`config_dir`).
+
     Args:
-        recipe: model / optimizer / loader factories and the loss.
-        population: the audit population and its index roles (:func:`materialize_population`).
+        recipe: model and optimizer factories and the loss. Its loader factory
+            is not used: members are rows of ``population`` (see :func:`train_and_audit`).
+        population: the audit population and its index roles
+            (:func:`materialize_population` or :func:`materialize_split`).
         target: how the audit should rebuild the model (arch file and class name).
         out_dir: run directory; trials live under ``out_dir/trials``.
         proxy_fpr: the FPR the search minimises TPR at; must be tabulated.
@@ -387,91 +636,19 @@ def make_dpsgd_objective(  # noqa: PLR0913
         seed: audit seed.
         device: training device; auto-detected when None.
         utility_gate: utility at or below which the model "did not learn" and the
-            trial is pruned without an audit; defaults to chance level.
+            trial is pruned without an audit; defaults to the majority-class
+            rate of the utility split (:func:`majority_rate`).
         handler_cls: the input handler LeakPro audits with.
 
     """
-    device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-    rmia_config = {**RMIA_DEFAULTS, **(rmia_config or {})}
-    binary = _is_binary(recipe.criterion)
-    gate = utility_gate if utility_gate is not None else (0.5 if binary else 1.0 / population.num_classes)
-
-    with open(population.path, "rb") as f:
-        pop = pickle.load(f)  # noqa: S301 - written by materialize_population
-    train_idx = np.asarray(population.train_indices)
-    test_idx = np.asarray(population.test_indices)
-    test_loader = DataLoader(Subset(pop, [int(i) for i in test_idx]), batch_size=512)
-
-    def objective_fn(config: dict) -> ObjectiveResult:
-        trial_dir = config_dir(out_dir, config)
-        target_folder = trial_dir / "target"
-        target_folder.mkdir(parents=True, exist_ok=True)
-        epochs = int(config.get("epochs", recipe.epochs))
-
-        # 1. The DP-SGD knobs both the target and the shadow models read.
-        dpsgd_path = target_folder / DPSGD_CONFIG_NAME
-        with dpsgd_path.open("wb") as f:
-            pickle.dump({"noise_multiplier": float(config["noise_multiplier"]),
-                         "max_grad_norm": float(config["max_grad_norm"]),
-                         "delta": delta, "accountant": accountant,
-                         "max_physical_batch": max_physical_batch}, f)
-
-        # 2. Train the target through the same path the shadow models use.
-        train_loader = recipe.make_loader(train_idx, config)
-        model = recipe.make_model(config)
-        optimizer = recipe.make_optimizer(model.parameters(), config)
-        train_result = dp_train(model, train_loader, recipe.criterion, optimizer, epochs, dpsgd_path, device)
-        epsilon = train_result.metrics.extra.get("epsilon")
-        acc_name = train_result.metrics.extra.get("accountant")
-
-        # 3. Utility, then the gate: a model at chance level has not learned, and
-        # its degenerate TPR would sit on the frontier looking like privacy.
-        test_result = evaluate(test_loader, train_result.model, recipe.criterion, device)
-        utility = test_result.accuracy
-        if utility <= gate:
-            logger.warning(f"Utility {utility:.4f} is at or below the gate {gate:.4f}: "
-                           "this model did not learn, skipping the attack.")
-            return ObjectiveResult(utility=utility, tpr=None,
-                                   extras={"epsilon": epsilon, "accountant": acc_name, "delta": delta,
-                                           "tuning_accounted": False, "gated": True})
-
-        # 4. Persist the target in the layout MIAHandler reads.
-        with (target_folder / "target_model.pkl").open("wb") as f:
-            torch.save(unwrapped_state_dict(train_result.model), f)
-        metadata = LeakPro.make_mia_metadata(
-            train_result=train_result, optimizer=optimizer, loss_fn=recipe.criterion,
-            dataloader=train_loader, test_result=test_result, epochs=epochs,
-            train_indices=population.train_indices, test_indices=population.test_indices,
-            dataset_name=target.dataset_name)
-        with (target_folder / "model_metadata.pkl").open("wb") as f:
-            pickle.dump(metadata, f)
-
-        # 5. Audit the saved target with the real RMIA attack through the pipeline.
-        config_path = trial_dir / "audit.yaml"
-        write_audit_yaml(config_path, population_path=population.path, target_folder=target_folder,
-                         dpsgd_path=dpsgd_path, audit_dir=trial_dir / "audit",
-                         module_path=target.module_path, model_class=target.model_class,
-                         rmia_config=rmia_config, seed=seed, data_modality=target.data_modality,
-                         shadow_init_params=target.init_params)
-        result = run_rmia_audit(handler_cls, str(config_path))
-
-        tpr, realized_fpr, degenerate = resolved_proxy_tpr(result, proxy_fpr)
-        if tpr is None:
-            logger.warning("Degenerate audit (no ROC; every score saturated): not evidence of privacy, "
-                           "pruning the trial.")
-        return ObjectiveResult(
-            utility=utility, tpr=tpr,
-            extras={"epsilon": epsilon, "accountant": acc_name, "delta": delta,
-                    "tpr_fixed_fpr_table": None if degenerate else tpr_at_fixed_fpr(result, proxy_fpr),
-                    # The accountant's epsilon covers ONE training run; selecting
-                    # off a frontier of many is itself a mechanism whose cost is
-                    # not included (Liu & Talwar 2019; Papernot & Steinke 2022).
-                    "tuning_accounted": False,
-                    "roc_auc": result.roc_auc,
-                    "realized_fpr": realized_fpr,
-                    "degenerate_audit": degenerate,
-                    "trial_dir": str(trial_dir)},
+    def objective_fn(config: dict, trial_number: int | None = None) -> ObjectiveResult:
+        trial_dir = trial_dir_for(out_dir, trial_number) if trial_number is not None else config_dir(out_dir, config)
+        result, _ = train_and_audit(
+            recipe, population, target, trial_dir, config,
+            proxy_fpr=proxy_fpr, delta=delta, accountant=accountant, max_physical_batch=max_physical_batch,
+            rmia_config=rmia_config, seed=seed, device=device, utility_gate=utility_gate, handler_cls=handler_cls,
         )
+        return result
 
     return objective_fn
 

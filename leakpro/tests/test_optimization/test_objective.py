@@ -17,11 +17,16 @@ from leakpro.optimization.objective import (
     AuditTarget,
     DPSGDAuditHandler,
     config_dir,
+    majority_rate,
     make_dpsgd_objective,
     materialize_population,
+    materialize_split,
     reaudit_trial,
     resolution_warning,
+    tpr_uncertainty,
+    trial_dir_for,
 )
+from leakpro.reporting.mia_result import MIAResult
 from leakpro.optimization.search import ObjectiveResult
 from leakpro.utils.seed import seed_everything
 
@@ -155,3 +160,102 @@ class TestObjective:
         with pytest.raises(FileNotFoundError, match="no saved target"):
             reaudit_trial(tmp_path / "nowhere", population_path=run["population"].path,
                           target=run["target"], rmia_config={})
+
+
+class TestTrialDirectories:
+    def test_identical_configs_get_separate_directories_inside_a_study(self, run):  # noqa: ANN001, ANN201
+        """Two trials with the same knobs are two models; the second must not overwrite the first."""
+        config = {"noise_multiplier": 0.0, "max_grad_norm": 1.0, "learning_rate": 0.05, "batch_size": 32}
+        first = run["objective"](config, trial_number=3)
+        second = run["objective"](config, trial_number=4)
+        assert first.extras["trial_dir"] == str(trial_dir_for(run["out"], 3))
+        assert second.extras["trial_dir"] == str(trial_dir_for(run["out"], 4))
+        assert (trial_dir_for(run["out"], 3) / "target" / "target_model.pkl").exists()
+        assert (trial_dir_for(run["out"], 4) / "target" / "target_model.pkl").exists()
+
+    def test_objective_advertises_the_trial_number_keyword(self, run):  # noqa: ANN001, ANN201
+        import inspect
+        assert "trial_number" in inspect.signature(run["objective"]).parameters
+
+
+class TestUtilityGate:
+    def test_gate_is_the_majority_class_rate(self):  # noqa: ANN201
+        assert majority_rate(np.array([0, 0, 0, 0, 1])) == pytest.approx(0.8)
+        assert majority_rate(torch.tensor([0, 1, 2])) == pytest.approx(1 / 3)
+
+    def test_constant_predictor_is_gated_on_imbalanced_labels(self, tmp_path):  # noqa: ANN001, ANN201
+        """A model that always predicts the majority class scores 0.8 on 80/20 labels; it must be gated."""
+        from leakpro.optimization.objective import train_and_audit
+        from leakpro.optimization.training import PETRecipe
+
+        seed_everything(0)
+        rng = np.random.default_rng(0)
+        n = 400
+        y = (rng.random(n) < 0.2).astype(np.int64)
+        x = rng.normal(size=(n, 4)).astype(np.float32)   # no signal: the model can only learn the prior
+        dataset = TensorDataset(torch.tensor(x), torch.tensor(y))
+        population = materialize_population(dataset, tmp_path, n_target=150, n_test=100, seed=0)
+        arch = tmp_path / "arch.py"
+        arch.write_text(ARCH)
+        with open(population.path, "rb") as f:
+            pop = pickle.load(f)
+        recipe = recipe_from_module(arch, pop, epochs=3, init_params={"num_classes": 2})
+        target = AuditTarget(module_path=str(arch), model_class="Net", data_modality="tabular",
+                             init_params={"num_classes": 2})
+        result, mia = train_and_audit(recipe, population, target, tmp_path / "t", {
+            "noise_multiplier": 0.0, "max_grad_norm": 1.0, "learning_rate": 0.05, "batch_size": 32},
+            proxy_fpr=PROXY_FPR, rmia_config={"num_shadow_models": 1}, seed=0, device="cpu")
+        assert result.extras["gate"] == pytest.approx(majority_rate(pop.targets[population.test_indices]))
+        assert result.extras["gate"] > 0.5, "the old 1/num_classes gate would have let this through"
+        assert result.tpr is None and result.extras["gated"] is True and mia is None
+
+
+class TestUncertainty:
+    def test_counts_and_interval_come_from_the_result(self):  # noqa: ANN201
+        labels = np.array([1] * 200 + [0] * 300)
+        scores = np.concatenate([np.linspace(1, 2, 200), np.linspace(0, 1, 300)])
+        result = MIAResult.from_full_scores(true_membership=labels, signal_values=scores, result_name="rmia")
+        u = tpr_uncertainty(result, tpr=0.25, realized_fpr=0.01)
+        assert u["n_members"] == 200 and u["n_non_members"] == 300
+        assert u["n_nonmember_false_positives"] == 3
+        lo, hi = u["attack_tpr_ci"]
+        assert lo < 0.25 < hi
+
+    def test_objective_records_the_interval(self, run):  # noqa: ANN001, ANN201
+        config = {"noise_multiplier": 0.0, "max_grad_norm": 1.0, "learning_rate": 0.05, "batch_size": 32}
+        result = run["objective"](config, trial_number=0)
+        assert result.tpr is not None
+        assert result.extras["n_members"] == N_TARGET
+        lo, hi = result.extras["attack_tpr_ci"]
+        assert 0.0 <= lo <= result.tpr <= hi <= 1.0
+        assert result.extras["n_shadow"] == 2
+
+
+class TestMaterializeSplit:
+    def test_members_first_then_non_members_and_utility_positions(self, tmp_path):  # noqa: ANN001, ANN201
+        dataset = _separable_dataset(n=300)
+        members = list(range(10, 110))
+        non_members = list(range(200, 300))
+        population = materialize_split(dataset, tmp_path, members=members, non_members=non_members,
+                                       utility=non_members[:40])
+        with open(population.path, "rb") as f:
+            pop = pickle.load(f)
+        assert len(pop) == 200
+        assert population.train_indices == list(range(100))
+        assert population.test_indices == list(range(100, 200))
+        assert population.utility_split == list(range(100, 140))
+        # Row 0 of the file is dataset[10]; row 100 is dataset[200].
+        assert torch.equal(pop.data[0], dataset[10][0]) and torch.equal(pop.data[100], dataset[200][0])
+
+    def test_overlap_and_foreign_utility_are_rejected(self, tmp_path):  # noqa: ANN001, ANN201
+        dataset = _separable_dataset(n=100)
+        with pytest.raises(ValueError, match="overlap"):
+            materialize_split(dataset, tmp_path, members=[0, 1], non_members=[1, 2])
+        with pytest.raises(ValueError, match="subset of non_members"):
+            materialize_split(dataset, tmp_path, members=[0, 1], non_members=[2, 3], utility=[0])
+
+    def test_unequal_pools_are_written_with_a_warning(self, tmp_path, caplog):  # noqa: ANN001, ANN201
+        dataset = _separable_dataset(n=100)
+        population = materialize_split(dataset, tmp_path, members=list(range(50)), non_members=list(range(50, 70)))
+        assert len(population.test_indices) == 20
+        assert "not 2 x members" in caplog.text
