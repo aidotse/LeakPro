@@ -302,7 +302,7 @@ class AttackLossTrajectory(AbstractMIA):
 
         """
         attack_model = self.mia_classifer
-        if not os.path.exists(f"{self.storage_dir}/trajectory_mia_model.pkl"):
+        if not os.path.exists(f"{self.storage_dir}/trajectory_mia_model.pt"):
             gpu_or_cpu = get_device()
             attack_optimizer = optim.SGD(attack_model.parameters(),
                                             lr=0.01, momentum=0.9, weight_decay=0.0001)
@@ -310,11 +310,11 @@ class AttackLossTrajectory(AbstractMIA):
             loss_fn = nn.CrossEntropyLoss()
 
             train_loss, train_prec1 = self._train_mia_classifier(attack_model, attack_optimizer, loss_fn)
-            save(attack_model.state_dict(), self.storage_dir + "/trajectory_mia_model.pkl")
+            save(attack_model.state_dict(), self.storage_dir + "/trajectory_mia_model.pt")
             save_arrays(f"{self.storage_dir}/mia_model_losses.npz",
                         {"train_loss": train_loss, "train_prec1": train_prec1})
         else:
-            attack_model.load_state_dict(load_tensors(f"{self.storage_dir}/trajectory_mia_model.pkl"))
+            attack_model.load_state_dict(load_tensors(f"{self.storage_dir}/trajectory_mia_model.pt"))
             logger.info("Loading Loss Trajectory classifier")
 
         return attack_model

@@ -127,7 +127,7 @@ def get_ts2vec_model(
 
         # Save representation model
         model_number = len(model_files)
-        ts2vec_model.save(os.path.join(ts2vec_dir, f"representation_model_{model_number}.pkl"))
+        ts2vec_model.save(os.path.join(ts2vec_dir, f"representation_model_{model_number}.pt"))
 
         # Save metadata
         metadata = {
