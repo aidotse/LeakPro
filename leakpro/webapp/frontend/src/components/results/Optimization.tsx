@@ -637,7 +637,13 @@ function SettingPanel({
 
         <div className="flex flex-col gap-2">
           <div className="grid grid-cols-2 gap-3">
-            <StatCard label={COPY.estimatedAttack} value={pct(setting.attack_tpr, 2)} sub={rangeLabel(setting.attack_tpr_ci)} />
+            <StatCard
+              label={COPY.estimatedAttack}
+              value={pct(setting.attack_tpr, 2)}
+              sub={[rangeLabel(setting.attack_tpr_ci),
+                    setting.attack_realized_fpr != null ? `at ${fprLabel(setting.attack_realized_fpr)} false alarms` : null]
+                .filter(Boolean).join(" · ") || null}
+            />
             <StatCard label={COPY.estimatedQuality} value={pct(setting.utility, 2)} />
           </div>
           {(setting.n_members ?? run?.n_members) != null && (
