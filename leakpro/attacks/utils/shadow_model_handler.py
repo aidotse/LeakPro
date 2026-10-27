@@ -5,7 +5,6 @@
 """Module for handling shadow models."""
 
 import os
-import pickle
 import re
 
 import numpy as np
@@ -20,7 +19,7 @@ from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.device import get_device
 from leakpro.utils.import_helper import Any, Dict, List, Self, Tuple, Union
 from leakpro.utils.logger import logger
-from leakpro.utils.save_load import unwrapped_state_dict
+from leakpro.utils.save_load import load_metadata_json, save_metadata_json, unwrapped_state_dict
 
 
 def singleton(cls):  # noqa: ANN001, ANN201
@@ -168,14 +167,23 @@ class ShadowModelHandler(ModelHandler):
 
         """
         entries = os.listdir(self.storage_path)
-        pattern = re.compile(rf"^{self.metadata_storage_name}_\d+\.pkl$")
-        files = [f for f in entries if pattern.match(f)]
-        all_indices = [int(re.search(r"\d+", f).group()) for f in files]
+        pattern = re.compile(rf"^{self.metadata_storage_name}_(\d+)\.(json|pkl)$")
+        matches = [m for m in map(pattern.match, entries) if m]
+        json_indices = sorted(int(m.group(1)) for m in matches if m.group(2) == "json")
+        legacy_indices = sorted(int(m.group(1)) for m in matches if m.group(2) == "pkl")
+        if legacy_indices:
+            # Metadata written before the JSON format is pickled and is never loaded (a planted
+            # pickle would execute). Its indices stay reserved so new models do not overwrite
+            # the old checkpoints or reuse their cached logits under the same name.
+            logger.warning(f"Ignoring {len(legacy_indices)} pickled shadow-model metadata file(s) in "
+                           f"{self.storage_path} ({self.metadata_storage_name}_<n>.pkl); those models are not "
+                           "reused. Delete the directory to retrain from scratch and reclaim the space.")
+        all_indices = sorted(set(json_indices) | set(legacy_indices))
 
         current_sig = self._current_training_signature(data_size)
 
         filtered_indices = []
-        for i in all_indices:
+        for i in json_indices:
             metadata = self._load_shadow_metadata(i)
             assert isinstance(metadata, ShadowModelTrainingSchema), "Shadow Model metadata is not of the correct type"
             if getattr(metadata, "population_hash", None) != self.population_hash:
@@ -432,8 +440,7 @@ class ShadowModelHandler(ModelHandler):
 
             ShadowModelHandler().cache_logits(PytorchModel(shadow_model, criterion), name=f"sm_{indx}_{self.population_hash}")
 
-            with open(f"{self.storage_path}/{self.metadata_storage_name}_{indx}.pkl", "wb") as f:
-                pickle.dump(meta_data, f)
+            save_metadata_json(f"{self.storage_path}/{self.metadata_storage_name}_{indx}.json", meta_data)
 
             meta_dic = meta_data.model_dump()
             filtered_meta_data = {
@@ -478,8 +485,8 @@ class ShadowModelHandler(ModelHandler):
             shadow_model_indices.append(i)
         return shadow_models, shadow_model_indices
 
-    def _load_shadow_metadata(self:Self, index:int) -> dict:
-        """Load a shadow model from a saved state.
+    def _load_shadow_metadata(self:Self, index:int) -> ShadowModelTrainingSchema:
+        """Load the training metadata of a shadow model.
 
         Args:
         ----
@@ -487,15 +494,15 @@ class ShadowModelHandler(ModelHandler):
 
         Returns:
         -------
-            Module: The loaded metadata.
+            ShadowModelTrainingSchema: The loaded metadata.
 
         """
         if index < 0:
             raise ValueError("Index cannot be negative")
         if index >= len(os.listdir(self.storage_path)):
             raise ValueError("Index out of range")
-        metadata_path = f"{self.storage_path}/{self.metadata_storage_name}_{index}.pkl"
-        return self._load_metadata(metadata_path)
+        metadata_path = f"{self.storage_path}/{self.metadata_storage_name}_{index}.json"
+        return load_metadata_json(metadata_path, ShadowModelTrainingSchema)
 
     def get_shadow_model_metadata(self:Self, model_indices:list[int]) -> list:
         """Load the the shadow model metadata."""
