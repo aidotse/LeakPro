@@ -148,8 +148,8 @@ export const api = {
     post<{ ok: boolean }>(`/jobs/${id}/pet/start?model_name=${encodeURIComponent(model)}`, params),
   getOptimization: (id: string, model: string) =>
     get<OptimizationRun>(`/jobs/${id}/pet/campaign?model_name=${encodeURIComponent(model)}`),
-  verifySetting: (id: string, model: string, index: number) =>
-    post<Verification>(`/jobs/${id}/pet/verify?model_name=${encodeURIComponent(model)}`, { index }),
+  verifySetting: (id: string, model: string, index: number, force = false) =>
+    post<Verification>(`/jobs/${id}/pet/verify?model_name=${encodeURIComponent(model)}`, { index, force }),
   getVerification: (id: string, model: string, index: number) =>
     get<Verification>(`/jobs/${id}/pet/verify?model_name=${encodeURIComponent(model)}&index=${index}`),
   adoptSetting: (id: string, model: string, index: number) =>

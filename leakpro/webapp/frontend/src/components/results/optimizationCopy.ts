@@ -95,6 +95,7 @@ export const COPY = {
   epsilonLabel: "Privacy budget (ε)",
   epsilonNone: "∞ (no DP guarantee)",
   epsilonNote: "ε is for one training run; choosing this setting from many tested ones is not accounted.",
+  remeasure: "Measure again (retrains from scratch)",
   adopt: "Adopt this configuration",
   adoptHelp: "Adds the measured model to your results as a normal row, with its own attack result.",
   adopted: "Added to your results as an optimized setting.",

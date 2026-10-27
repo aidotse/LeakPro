@@ -16,6 +16,7 @@ from leakpro.optimization.adapters import recipe_from_module
 from leakpro.optimization.objective import (
     AuditTarget,
     DPSGDAuditHandler,
+    Population,
     config_dir,
     majority_rate,
     make_dpsgd_objective,
@@ -246,6 +247,14 @@ class TestMaterializeSplit:
         assert population.utility_split == list(range(100, 140))
         # Row 0 of the file is dataset[10]; row 100 is dataset[200].
         assert torch.equal(pop.data[0], dataset[10][0]) and torch.equal(pop.data[100], dataset[200][0])
+        # Positions map back to the dataset indices they came from.
+        assert population.to_dataset_indices([0, 100, 199]) == [10, 200, 299]
+
+    def test_random_population_records_its_source_order(self, tmp_path):  # noqa: ANN001, ANN201
+        population = materialize_population(_separable_dataset(n=300), tmp_path, n_target=50, seed=3)
+        assert len(population.source_indices) == 100 and len(set(population.source_indices)) == 100
+        assert population.to_dataset_indices([0]) == [population.source_indices[0]]
+        assert Population(path="x", train_indices=[], test_indices=[], num_classes=2).to_dataset_indices([0]) is None
 
     def test_overlap_and_foreign_utility_are_rejected(self, tmp_path):  # noqa: ANN001, ANN201
         dataset = _separable_dataset(n=100)

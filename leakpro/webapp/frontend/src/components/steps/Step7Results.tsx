@@ -121,17 +121,18 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
   // its own attack result, so the row is re-read from the job rather than
   // synthesised here: the summary, the risk layer and every tab then show the
   // measured model exactly as they would any other.
-  const addOptimizedRow = async (base: ModelResult, _setting: Setting, _verification: Verification) => {
+  const addOptimizedRow = async (base: ModelResult, setting: Setting, _verification: Verification) => {
     const targetJob = base.job_id ?? jobId;
-    const name = `${base.orig_model_name ?? base.model_name} (optimized)`;
+    const backendName = base.orig_model_name ?? base.model_name;
     try {
       const r = await api.getResults(targetJob);
-      const row = r.results.find((m) => m.model_name === name);
+      const row = r.results.find((m) => m.optimized && m.pet?.setting_index === setting.index
+        && m.model_name.startsWith(`${backendName} (optimized`));
       if (!row) return;
-      const displayName = base.orig_model_name ? `${base.model_name} (optimized)` : name;
-      const fresh = { ...row, job_id: targetJob, model_name: displayName, orig_model_name: name };
+      const displayName = base.orig_model_name ? row.model_name.replace(backendName, base.model_name) : row.model_name;
+      const fresh = { ...row, job_id: targetJob, model_name: displayName, orig_model_name: row.model_name };
       setAllResults((prev) => [
-        ...(prev ?? []).filter((m) => !(m.job_id === targetJob && (m.orig_model_name ?? m.model_name) === name)),
+        ...(prev ?? []).filter((m) => !(m.job_id === targetJob && (m.orig_model_name ?? m.model_name) === row.model_name)),
         fresh,
       ]);
     } catch {

@@ -199,10 +199,15 @@ class TestPetFlow:
         if verified["attack_tpr"] is None:
             assert self._adopt(index).status_code == 409
             return
+        # A finished measurement is returned, not repeated, unless forced.
+        calls_before = len(self.calls)
+        again = self.client.post(f"/jobs/{self.job_id}/pet/verify", params={"model_name": MODEL},
+                                 json={"index": index}, headers=self.auth)
+        assert again.status_code == 200 and again.json()["status"] == "done" and len(self.calls) == calls_before
         res = self._adopt(index)
         assert res.status_code == 200, res.text
         rows = self.backend._jobs[self.job_id]["results"]
-        adopted = next(r for r in rows if r["model_name"] == f"{MODEL} (optimized)")
+        adopted = next(r for r in rows if r["model_name"] == f"{MODEL} (optimized, setting {index})")
         assert adopted["optimized"] is True and adopted["tuning_accounted"] is False
         assert adopted["pet"]["setting_index"] == index and adopted["pet"]["scope"] == "search_subset"
         assert set(adopted["pet"]["config"]) == {"noise_multiplier", "max_grad_norm", "learning_rate", "batch_size"}
@@ -212,7 +217,10 @@ class TestPetFlow:
         assert adopted["train_meta"]["noise_multiplier"] == adopted["pet"]["config"]["noise_multiplier"]
         # Persisted: a restart would reload it.
         state = json.loads((self.backend._job_dir(self.job_id) / "state.json").read_text())
-        assert any(r["model_name"] == f"{MODEL} (optimized)" for r in state["results"])
+        assert any(r["model_name"] == f"{MODEL} (optimized, setting {index})" for r in state["results"])
+        # Adopting the same setting again replaces its row; another setting adds one.
+        assert self._adopt(index).status_code == 200
+        assert sum(r.get("optimized", False) for r in self.backend._jobs[self.job_id]["results"]) == 1
 
         # Starting again resumes the study: one more trial, the first two kept.
         assert self._start(n_trials=3).status_code == 200
@@ -251,8 +259,14 @@ class TestPetFlow:
 
         assert self._adopt(index).status_code == 200
         adopted = next(r for r in self.backend._jobs[self.job_id]["results"]
-                       if r["model_name"] == f"{MODEL} (optimized)")
+                       if r["model_name"] == f"{MODEL} (optimized, setting {index})")
         assert adopted["num_train"] == 150
+        # Audit indices name dataset records (members are dataset 0..149), not population positions.
+        indices = adopted["attacks"][0]["audit_indices"]
+        labels = adopted["attacks"][0]["true_labels"]
+        assert indices is not None and len(indices) == 300
+        assert all((i < 150) == (lbl == 1) for i, lbl in zip(indices, labels))
+        assert set(indices) == set(range(300))
         assert adopted["test_accuracy"] == verified["utility"]
         assert adopted["train_accuracy"] == verified["train_accuracy"]
         assert adopted["pet"]["scope"] == "user_model" and adopted["pet"]["baseline_utility"] == 0.8
@@ -321,7 +335,7 @@ class TestPetFlow:
         job = self.backend._jobs[self.job_id]
         job["data_meta"] = {"data_type": "tabular", "n_classes": None, "n_samples": 400}
         assert self._start().status_code == 422
-        job["data_meta"] = {"data_type": "tabular", "n_classes": 380, "n_samples": 400}
+        job["data_meta"] = {"data_type": "tabular", "n_classes": 400, "n_samples": 400}
         res = self._start()
         assert res.status_code == 422 and "continuous" in res.text
         assert self.calls == []

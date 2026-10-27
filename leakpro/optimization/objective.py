@@ -235,6 +235,15 @@ class Population:
     test_indices: list[int]
     num_classes: int
     utility_indices: list[int] | None = None
+    # Dataset index of each population row, so an attack's audit indices
+    # (population positions) can be mapped back to the records they name.
+    source_indices: list[int] | None = None
+
+    def to_dataset_indices(self, positions: "list[int] | np.ndarray | None") -> list[int] | None:
+        """Map population positions to dataset indices; None when the mapping is unknown."""
+        if positions is None or self.source_indices is None:
+            return None
+        return [int(self.source_indices[int(p)]) for p in positions]
 
     @property
     def utility_split(self) -> list[int]:
@@ -295,14 +304,14 @@ def materialize_population(  # noqa: PLR0913
     if not 0 < n_test <= n_target:
         raise ValueError(f"n_test={n_test} must be in (0, n_target={n_target}].")
 
-    order = np.random.default_rng(seed).permutation(n)[:2 * n_target]
+    order = [int(i) for i in np.random.default_rng(seed).permutation(n)[:2 * n_target]]
     path = Path(out_dir) / name
-    targets = _write_population(dataset, [int(i) for i in order], path)
+    targets = _write_population(dataset, order, path)
     logger.info(f"Population of {len(targets)} samples written to {path} "
                 f"(members {n_target}, held-out {n_test}).")
     return Population(path=str(path), train_indices=list(range(n_target)),
                       test_indices=list(range(n_target, n_target + n_test)),
-                      num_classes=int(targets.max().item()) + 1)
+                      num_classes=int(targets.max().item()) + 1, source_indices=order)
 
 
 def materialize_split(  # noqa: PLR0913
@@ -329,18 +338,19 @@ def materialize_split(  # noqa: PLR0913
     """
     members = [int(i) for i in members]
     non_members = [int(i) for i in non_members]
-    if set(members) & set(non_members):
+    member_set = set(members)
+    if member_set & set(non_members):
         raise ValueError("members and non_members overlap.")
     if not members or not non_members:
         raise ValueError("Both members and non_members must be non-empty.")
     if len(non_members) != len(members):
         logger.warning(f"Population is not 2 x members: {len(members)} members, {len(non_members)} non-members. "
                        "Reference models will train on a different number of points than the target.")
-    position = {idx: pos for pos, idx in enumerate(members + non_members)}
+    order = members + non_members
+    position = {idx: pos for pos, idx in enumerate(order)}
     utility_positions = None
     if utility is not None:
-        missing = [i for i in utility if int(i) not in position or int(i) in set(members)]
-        if missing:
+        if any(int(i) not in position or int(i) in member_set for i in utility):
             raise ValueError("utility indices must be a subset of non_members.")
         utility_positions = [position[int(i)] for i in utility]
 
@@ -350,7 +360,8 @@ def materialize_split(  # noqa: PLR0913
                 f"(members {len(members)}, non-members {len(non_members)}).")
     return Population(path=str(path), train_indices=list(range(len(members))),
                       test_indices=list(range(len(members), len(members) + len(non_members))),
-                      num_classes=int(targets.max().item()) + 1, utility_indices=utility_positions)
+                      num_classes=int(targets.max().item()) + 1, utility_indices=utility_positions,
+                      source_indices=order)
 
 
 def majority_rate(targets: torch.Tensor | np.ndarray) -> float:

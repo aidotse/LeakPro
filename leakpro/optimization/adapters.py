@@ -96,7 +96,7 @@ def detect_binary(
         init_params: keyword arguments for the model constructor.
 
     """
-    cls = find_model_class(import_module_from_file(str(module_path)), model_class)
+    cls = find_model_class(import_module_from_file(str(module_path)), model_class, init_params)
     probe = cls(**dict(init_params or {}))
     probe.eval()
     with torch.no_grad():
@@ -138,7 +138,7 @@ def recipe_from_module(  # noqa: PLR0913
         raise ValueError(f"Unknown optimizer '{optimizer_name}'; use one of {sorted(optimizers)}.")
 
     module = import_module_from_file(str(module_path))
-    cls = find_model_class(module, model_class)
+    cls = find_model_class(module, model_class, init_params)
     kwargs = dict(init_params or {})
     optimizer_cls = optimizers[optimizer_name]
 

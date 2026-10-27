@@ -289,8 +289,10 @@ def _assert_classification(dataset: Any) -> None:  # noqa: ANN401
     """
     targets = getattr(dataset, "targets", None)
     if targets is None:
-        loader = torch.utils.data.DataLoader(dataset, batch_size=256, shuffle=False)
-        targets = next(iter(loader))[1]
+        # No label array to read: one pass over the labels, never a prefix (a
+        # label-sorted dataset would read as a single class).
+        loader = torch.utils.data.DataLoader(dataset, batch_size=1024, shuffle=False)
+        targets = torch.cat([yb.reshape(-1) for _, yb in loader])
     values = np.asarray(targets.cpu().numpy() if torch.is_tensor(targets) else targets).reshape(-1)
     if values.dtype.kind == "f" and not np.all(np.isclose(values, np.round(values))):
         raise ValueError("This job's targets are continuous values, not class labels. Protection settings can only "
@@ -355,7 +357,13 @@ def build(job: dict, job_dir: Path, model_name: str, request: dict) -> dict:
     cls = find_model_class(module, (job.get("arch_config") or {}).get("model_class"), recorded)
     sample = pop.data[:2]
     num_features = int(sample.shape[1]) if sample.ndim == 2 else None
-    kwargs = {**recorded, **model_kwargs(cls, population.num_classes, num_features, dpsgd=True)}
+    # The class count is the dataset's, not the subset's: a rare class missing
+    # from the subset would otherwise shrink the head below the user's model.
+    # The recorded constructor kwargs win over the derived ones; only the
+    # dpsgd flag is forced, since the retrain is private.
+    job_classes = (job.get("handler_config") or job.get("data_meta") or {}).get("n_classes")
+    derived = model_kwargs(cls, int(job_classes or population.num_classes), num_features, dpsgd=True)
+    kwargs = {**derived, **recorded, **({"dpsgd": True} if "dpsgd" in derived else {})}
     binary = detect_binary(arch, sample, cls.__name__, kwargs)
 
     training = _training_settings(model, _metadata(job_dir / "models" / model_name))
@@ -555,6 +563,20 @@ def _full_population(out: Path, dataset: Any, meta: Any, seed: int) -> Populatio
     return population
 
 
+def _attack_record(mia: Any, population: Population) -> dict:  # noqa: ANN401
+    """The RMIA result in the shape the results view reads, with audit indices as dataset indices.
+
+    The attack reports positions in the population file; every consumer of a
+    result row (the records tab, the risk layer's exposed members) indexes the
+    job's dataset, so the positions are mapped back through the population's
+    source order. A population written before that order was recorded yields
+    None, which the consumers already treat as "cannot be named".
+    """
+    record = _serialise_result(mia)
+    record["audit_indices"] = population.to_dataset_indices(record.get("audit_indices"))
+    return record
+
+
 def _write_verification(out: Path, index: int, **fields: Any) -> None:  # noqa: ANN401
     verification_path(out, index).write_text(json.dumps(json_safe({"pid": os.getpid(), "index": index, **fields}),
                                                         indent=2))
@@ -619,7 +641,7 @@ def run_verification(job_dir: Path, model_name: str, index: int) -> None:
         )
         scope = "user_model"
         if mia is not None:
-            verification_attack_path(out, index).write_text(json.dumps(json_safe(_serialise_result(mia))))
+            verification_attack_path(out, index).write_text(json.dumps(json_safe(_attack_record(mia, population))))
         resolution = None
         if result.extras.get("gated"):
             resolution = "the retrained model did not learn (utility at the majority-class rate), so it was not attacked"
@@ -654,7 +676,7 @@ def run_verification(job_dir: Path, model_name: str, index: int) -> None:
         mia = reaudit_trial(attrs["trial_dir"], population_path=parts["population"].path, target=parts["target"],
                             rmia_config={"num_shadow_models": VERIFY_N_SHADOW}, seed=parts["seed"])
         tpr, realized_fpr, degenerate = resolved_proxy_tpr(mia, proxy_fpr)
-        verification_attack_path(out, index).write_text(json.dumps(json_safe(_serialise_result(mia))))
+        verification_attack_path(out, index).write_text(json.dumps(json_safe(_attack_record(mia, parts["population"]))))
         verified = {
             "scope": "search_subset",
             "attack_tpr": tpr,

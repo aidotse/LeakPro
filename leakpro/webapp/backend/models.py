@@ -296,3 +296,7 @@ class PETIndex(BaseModel):
     """Body of the verify / adopt requests."""
 
     index: int = Field(..., ge=0)
+    # Verify only: measure again even though a finished measurement exists.
+    # A measurement is a full-size retrain plus its audit, so it is never
+    # repeated by accident.
+    force: bool = False

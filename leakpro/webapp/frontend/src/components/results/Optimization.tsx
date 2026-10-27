@@ -169,15 +169,26 @@ export default function Optimization({ jobId, model, onBack, onAdopted }: Props)
   const verification = selectedIndex == null ? null : verifications[selectedIndex] ?? null;
 
   // ── verification ─────────────────────────────────────────────────────────
-  const confirm = async (setting: Setting) => {
+  const confirm = async (setting: Setting, force = false) => {
     setError(null);
     try {
-      const v = await api.verifySetting(targetJob, targetName, setting.index);
+      const v = await api.verifySetting(targetJob, targetName, setting.index, force);
       setVerifications((prev) => ({ ...prev, [v.index]: v }));
     } catch (e) {
       fail(e);
     }
   };
+
+  // A measurement survives leaving the view (it is a full-size retrain), so a
+  // selected setting first looks for one on disk before offering Confirm.
+  const [probed, setProbed] = useState<Set<number>>(new Set());
+  useEffect(() => {
+    if (selectedIndex == null || probed.has(selectedIndex) || verifications[selectedIndex]) return;
+    setProbed((prev) => new Set(prev).add(selectedIndex));
+    api.getVerification(targetJob, targetName, selectedIndex)
+      .then((v) => setVerifications((prev) => (prev[v.index] ? prev : { ...prev, [v.index]: v })))
+      .catch(() => { /* 404: nothing measured yet */ });
+  }, [selectedIndex, probed, verifications, targetJob, targetName]);
 
   // Poll every running verification by its own index, so a result can never
   // land in another setting's panel. Errors stop that verification's polling
@@ -552,6 +563,7 @@ export default function Optimization({ jobId, model, onBack, onAdopted }: Props)
           adopted={adoptedIndex === selected.index}
           onClose={() => setSelectedIndex(null)}
           onConfirm={() => confirm(selected)}
+          onRemeasure={() => confirm(selected, true)}
           onAdopt={adopt}
         />
       )}
@@ -583,7 +595,7 @@ function epsilonLabel(epsilon: number | null | undefined): string {
 }
 
 function SettingPanel({
-  setting, run, verification, adopted, onClose, onConfirm, onAdopt,
+  setting, run, verification, adopted, onClose, onConfirm, onRemeasure, onAdopt,
 }: {
   setting: Setting;
   run: OptimizationRun | null;
@@ -591,6 +603,7 @@ function SettingPanel({
   adopted: boolean;
   onClose: () => void;
   onConfirm: () => void;
+  onRemeasure: () => void;
   onAdopt: () => void;
 }) {
   const verified = verification?.verified ?? null;
@@ -747,6 +760,11 @@ function SettingPanel({
               />
             </div>
 
+            {!adopted && (
+              <button onClick={onRemeasure} className="self-start text-xs text-slate-400 hover:text-primary underline">
+                {COPY.remeasure}
+              </button>
+            )}
             {adopted ? (
               <p className="text-sm font-semibold text-green-600 dark:text-green-400 flex items-center gap-2">
                 <span className="material-symbols-outlined text-base">check_circle</span>

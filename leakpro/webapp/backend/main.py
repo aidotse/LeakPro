@@ -1439,7 +1439,7 @@ def _pet_request_conflict(out: Path, params: dict) -> list[str]:
     previous = pet_runner.read_json(out / pet_runner.REQUEST_FILE)
     if not previous or not (out / pet_runner.STUDY_FILE).exists():
         return []
-    if not pet_runner.trial_records(pet_runner.load_study(out)):
+    if not pet_runner.trial_records(pet_runner.load_study(out)):  # a start, not a poll: the read is fine here
         return []
     return [f for f in _PET_LOCKED_FIELDS if (previous.get(f) or None) != (params.get(f) or None)]
 
@@ -1453,10 +1453,12 @@ def _pet_check_task(job: dict) -> None:
     if int(n_classes) < 2:
         raise HTTPException(status_code=422, detail="The dataset has a single class; there is nothing to classify.")
     n_samples = (job.get("data_meta") or {}).get("n_samples")
-    if n_samples and int(n_classes) > max(2, int(n_samples) // 10):
-        raise HTTPException(status_code=422, detail=f"{n_classes} distinct targets over {n_samples} records look like "
-                                                    "continuous values, not class labels. Regression and forecasting "
-                                                    "are not supported yet.")
+    if n_samples and int(n_classes) >= int(n_samples):
+        # Every record has its own target value: a regression target. Anything
+        # less clear-cut is left to the runner, which reads the labels themselves.
+        raise HTTPException(status_code=422, detail=f"Every one of the {n_samples} records has a distinct target, so "
+                                                    "these are continuous values, not class labels. Regression and "
+                                                    "forecasting are not supported yet.")
 
 
 def _pet_record_pid(path: Path, pid: int) -> None:
@@ -1466,6 +1468,32 @@ def _pet_record_pid(path: Path, pid: int) -> None:
     current = pet_runner.read_json(path) or {}
     if not current.get("pid"):
         path.write_text(json.dumps({**current, "pid": pid}))
+
+
+# Trial records per run directory, keyed on the study file's mtime: a poll
+# that finds the study unchanged does not reopen the sqlite database. The read
+# itself runs off the event loop; a read that collides with the runner's write
+# lock returns the last known records instead of failing the poll.
+_pet_records_cache: dict[str, tuple[float, list[dict]]] = {}
+
+
+async def _pet_records(out: Path) -> list[dict]:
+    from . import pet_runner  # noqa: PLC0415
+
+    db = out / pet_runner.STUDY_FILE
+    if not db.exists():
+        return []
+    mtime = db.stat().st_mtime
+    cached = _pet_records_cache.get(str(out))
+    if cached and cached[0] == mtime:
+        return cached[1]
+    try:
+        records = await asyncio.to_thread(lambda: pet_runner.trial_records(pet_runner.load_study(out)))
+    except Exception as e:  # noqa: BLE001 - typically sqlite "database is locked" while the runner writes
+        _logger.warning("PET study read failed for %s: %s", out, e)
+        return cached[1] if cached else []
+    _pet_records_cache[str(out)] = (mtime, records)
+    return records
 
 
 def _pet_spawn(job_id: str, model_name: str, extra: list[str]) -> int:
@@ -1554,7 +1582,7 @@ async def pet_campaign(job_id: str, model_name: str) -> PETRun:
         baseline_attack_tpr_ci=status.get("baseline_attack_tpr_ci"),
         baseline_source=status.get("baseline_source"),
         model_utility=status.get("model_utility"),
-        settings=pet_runner.trial_records(pet_runner.load_study(out)),
+        settings=await _pet_records(out),
         best_indices=status.get("best_indices", []),
         resolution_warning=status.get("resolution_warning"),
         error=error,
@@ -1578,6 +1606,11 @@ async def pet_verify(job_id: str, model_name: str, body: PETIndex) -> PETVerific
             raise HTTPException(status_code=409, detail="The search is still running; confirm a setting when it is done.")
         existing = pet_runner.read_json(pet_runner.verification_path(out, body.index))
         if existing and existing.get("status") == "running" and _pet_runner_alive(existing):
+            return PETVerification(**existing)
+        # A finished measurement is a full-size retrain plus its audit; it is
+        # returned, not repeated, unless the caller says so.
+        if (existing and existing.get("status") == "done" and not body.force
+                and pet_runner.verification_attack_path(out, body.index).exists()):
             return PETVerification(**existing)
 
         placeholder = {"status": "running", "index": body.index, "estimated": {"attack_tpr": None, "utility": None}}
@@ -1619,7 +1652,7 @@ async def pet_adopt(job_id: str, model_name: str, body: PETIndex) -> dict:
     if verified.get("attack_tpr") is None:
         raise HTTPException(status_code=409, detail="This setting's attack success could not be measured, so it "
                                                     "cannot be adopted: an unmeasured setting is not a protected one.")
-    record = next((r for r in pet_runner.trial_records(pet_runner.load_study(out)) if r["index"] == body.index), None)
+    record = next((r for r in await _pet_records(out) if r["index"] == body.index), None)
     if record is None:
         raise HTTPException(status_code=404, detail=f"No evaluated setting with index {body.index}.")
     attack = pet_runner.read_json(pet_runner.verification_attack_path(out, body.index))
@@ -1631,11 +1664,14 @@ async def pet_adopt(job_id: str, model_name: str, body: PETIndex) -> dict:
     # read it the way they read any other model. Nothing is inherited from the
     # original row except the architecture name.
     base = next((m for m in job.get("models", []) if m["name"] == model_name), {})
+    original_row = next((r for r in job.get("results", []) if r.get("model_name") == model_name), {})
     epsilon = verified.get("epsilon")
     config = dict(record["config"])
     train_params = base.get("train_params") or {}
     adopted = {
-        "model_name": f"{model_name} (optimized)",
+        # One row per adopted setting: adopting a second setting for the same
+        # model adds a row rather than replacing the first one's measurement.
+        "model_name": f"{model_name} (optimized, setting {body.index})",
         "source": "optimized",
         "optimized": True,
         "dpsgd": epsilon is not None and math.isfinite(float(epsilon)),
@@ -1644,7 +1680,7 @@ async def pet_adopt(job_id: str, model_name: str, body: PETIndex) -> dict:
         "test_accuracy": verified.get("utility"),
         "train_accuracy": verified.get("train_accuracy"),
         "num_train": verified.get("n_members"),
-        "model_class": base.get("model_class") or (base.get("arch_config") or {}).get("model_class"),
+        "model_class": original_row.get("model_class") or base.get("model_class"),
         "train_meta": {
             "epochs": train_params.get("epochs"),
             "learning_rate": config.get("learning_rate"),
@@ -1669,7 +1705,9 @@ async def pet_adopt(job_id: str, model_name: str, body: PETIndex) -> dict:
         },
     }
     job.setdefault("results", [])
-    job["results"] = [r for r in job["results"] if r.get("model_name") != adopted["model_name"]]
+    job["results"] = [r for r in job["results"]
+                      if not (r.get("optimized") and (r.get("pet") or {}).get("setting_index") == body.index
+                              and r.get("model_name", "").startswith(f"{model_name} (optimized"))]
     job["results"].append(adopted)
     _save_job(job_id)
     return {"ok": True}
