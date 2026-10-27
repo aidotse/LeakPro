@@ -59,7 +59,6 @@ from leakpro.utils.logger import logger  # noqa: E402
 from leakpro.webapp.backend.dataio import load_dataset  # noqa: E402
 from leakpro.webapp.backend.dataset_modules import register_job_dataset_modules  # noqa: E402
 from leakpro.webapp.backend.security import load_metadata_fields  # noqa: E402
-from leakpro.webapp.backend.worker import pick_model_class  # noqa: E402
 
 DEFAULT_N_TRIALS = 24
 DEFAULT_N_SHADOW = 2
@@ -263,14 +262,11 @@ def build(job: dict, job_dir: Path, model_name: str, request: dict) -> dict:
     with open(population.path, "rb") as f:
         pop = pickle.load(f)  # noqa: S301 - written by materialize_population above
 
-    # The class the webapp trained: the same rule the training step and the
+    # The class the webapp trained: the one rule the training step and the
     # audit worker apply, so the search retrains what the user's model is.
     module = import_module_from_file(str(arch))
     recorded = _metadata_init_params(job_dir / "models" / model_name)
-    named = (job.get("arch_config") or {}).get("model_class")
-    cls = find_model_class(module, named) if named else pick_model_class(module, recorded)
-    if cls is None:
-        raise ValueError("No nn.Module subclass found in arch.py.")
+    cls = find_model_class(module, (job.get("arch_config") or {}).get("model_class"), recorded)
     sample = pop.data[:2]
     num_features = int(sample.shape[1]) if sample.ndim == 2 else None
     kwargs = {**recorded, **model_kwargs(cls, population.num_classes, num_features, dpsgd=True)}

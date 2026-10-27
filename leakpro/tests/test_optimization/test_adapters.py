@@ -67,11 +67,22 @@ class TestModelDiscovery:
     def test_single_class_is_found_without_naming_it(self, arch):  # noqa: ANN001, ANN201
         assert find_model_class(import_module_from_file(str(arch(MULTICLASS)))).__name__ == "Net"
 
-    def test_ambiguous_module_requires_a_name(self, arch):  # noqa: ANN001, ANN201
+    def test_ambiguous_module_takes_the_first_defined_unless_named(self, arch, caplog):  # noqa: ANN001, ANN201
         module = import_module_from_file(str(arch(TWO_MODELS)))
-        with pytest.raises(ValueError, match="Cannot choose a model class"):
-            find_model_class(module)
+        assert find_model_class(module).__name__ == "Net"
+        assert "using the first" in caplog.text
         assert find_model_class(module, "Other").__name__ == "Other"
+
+    def test_recorded_init_params_pick_the_class_that_accepts_them(self, arch):  # noqa: ANN001, ANN201
+        module = import_module_from_file(str(arch(TWO_MODELS)))
+        assert find_model_class(module, init_params={"num_classes": 10}).__name__ == "Net"
+
+    def test_imported_classes_are_never_candidates(self, tmp_path):  # noqa: ANN001, ANN201
+        """Issue #484: an imported block (torchvision's BasicBlock) is not the user's model."""
+        path = tmp_path / "arch_imports.py"
+        path.write_text("from torch.nn import Linear\nimport torch.nn as nn\n"
+                        "class Net(nn.Module):\n    def __init__(self): super().__init__(); self.fc = Linear(2, 2)\n")
+        assert find_model_class(import_module_from_file(str(path))).__name__ == "Net"
 
     def test_unknown_class_name_rejected(self, arch):  # noqa: ANN001, ANN201
         # user_imports.get_class_from_module raises ValueError, not KeyError.

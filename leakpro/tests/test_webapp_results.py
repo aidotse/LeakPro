@@ -68,6 +68,21 @@ class TestPickModelClass:
                            "class Net(nn.Module):\n    def __init__(self, num_classes=3): super().__init__()\n")
         assert pick_model_class(mod, {"num_classes": 10}).__name__ == "Net"
 
+    def test_imported_class_is_not_a_candidate(self: Self) -> None:
+        """Issue #484: torchvision's BasicBlock imported at the top of arch.py must not win."""
+        from leakpro.webapp.backend.worker import pick_model_class
+
+        mod = self._module("import torch.nn as nn\nfrom torch.nn import Linear\n"
+                           "class Net(nn.Module):\n    def __init__(self, num_classes=3): super().__init__()\n")
+        assert pick_model_class(mod).__name__ == "Net"
+
+    def test_a_name_wins_over_the_rule(self: Self) -> None:
+        from leakpro.webapp.backend.worker import pick_model_class
+
+        mod = self._module("import torch.nn as nn\nclass Block(nn.Module):\n    def __init__(self, k): super().__init__()\n"
+                           "class Net(nn.Module):\n    def __init__(self, num_classes=3): super().__init__()\n")
+        assert pick_model_class(mod, model_class="Net").__name__ == "Net"
+
     def test_no_module_subclass_is_none(self: Self) -> None:
         from leakpro.webapp.backend.worker import pick_model_class
 

@@ -34,38 +34,21 @@ class _QueueHandler(logging.Handler):
 # Which class in an uploaded arch.py is "the model"
 # ---------------------------------------------------------------------------
 
-def model_class_candidates(module: Any) -> list[type]:  # noqa: ANN401
-    """Every ``nn.Module`` subclass in the module's namespace, in definition order.
-
-    Imported classes count too (that is how torchvision's ``BasicBlock`` can win,
-    see issue #484); the order is the order the names were bound in the file.
-    """
-    from torch import nn  # noqa: PLC0415 - keep torch off the import path of this module
-
-    return [v for v in vars(module).values() if isinstance(v, type) and issubclass(v, nn.Module) and v is not nn.Module]
-
-
-def pick_model_class(module: Any, init_params: dict | None = None) -> type | None:  # noqa: ANN401
+def pick_model_class(module: Any, init_params: dict | None = None,  # noqa: ANN401
+                     model_class: str | None = None) -> type | None:
     """The class the webapp trains, audits and re-trains from an uploaded arch.py.
 
-    With ``init_params`` (from ``model_metadata.pkl``) the first candidate whose
-    constructor accepts every recorded kwarg wins, so a helper block defined
-    before the network does not shadow it. Without them, the first candidate
-    wins: the rule the training step applies. One implementation for the
-    training step, the audit worker and the PET runner; the compatibility
-    checker repeats it inside its isolated subprocess script.
+    A thin wrapper over :func:`leakpro.optimization.adapters.find_model_class`, the
+    one rule (a name when the user gave one; else the class defined in the file
+    whose constructor accepts the recorded ``init_params``; else the only or the
+    first defined one). Returns None instead of raising when the file defines no
+    ``nn.Module`` subclass, which callers report in their own words.
     """
-    import inspect  # noqa: PLC0415
+    from leakpro.optimization.adapters import find_model_class, model_classes_defined_in  # noqa: PLC0415
 
-    candidates = model_class_candidates(module)
-    if not candidates:
+    if not model_class and not model_classes_defined_in(module):
         return None
-    if init_params:
-        keys = set(init_params)
-        for cls in candidates:
-            if keys <= (set(inspect.signature(cls.__init__).parameters) - {"self"}):
-                return cls
-    return candidates[0]
+    return find_model_class(module, model_class, init_params)
 
 
 # ---------------------------------------------------------------------------
@@ -272,7 +255,7 @@ def run_audit_job(
                     _init_params = dict(_joblib.load(target_folder_path / "model_metadata.pkl").init_params or {})
                 except Exception:  # noqa: BLE001 - no metadata yet: fall back to the first class
                     _init_params = None
-                chosen = pick_model_class(_mod, _init_params)
+                chosen = pick_model_class(_mod, _init_params, (job_state.get("arch_config") or {}).get("model_class"))
                 if chosen is not None:
                     config["target"]["model_class"] = chosen.__name__
 

@@ -12,11 +12,16 @@ those by hand is fine in a script; a caller that only has "a .py file defining a
 adapter. That is this module.
 
 The loader factory wraps the dataset in :class:`torch.utils.data.Subset`, so the
-model trains on exactly what ``dataset.__getitem__`` yields. The audit later reads
-the same dataset through the same ``__getitem__`` (via the input handler), which
-keeps training-time and attack-time preprocessing identical by construction.
+model trains on exactly what ``dataset.__getitem__`` yields. Note that
+:func:`leakpro.optimization.objective.make_dpsgd_objective` does not use that
+factory: it trains on rows of the materialised audit population, because the
+audit labels population rows as members and a loader over any other dataset
+would train one set of records while another is labelled as seen. Pass that
+population here when the recipe feeds the objective; the factory matters for
+:func:`leakpro.optimization.train_with_dpsgd`.
 """
 
+import inspect
 from pathlib import Path
 
 import numpy as np
@@ -33,25 +38,42 @@ from leakpro.optimization.training import PETRecipe
 from leakpro.utils.logger import logger
 
 
-def find_model_class(module, model_class: str | None = None) -> type:  # noqa: ANN001
-    """Pick the nn.Module subclass to train, by name or as the only candidate.
+def model_classes_defined_in(module) -> list[type]:  # noqa: ANN001
+    """The ``nn.Module`` subclasses *defined* in ``module``, in definition order.
 
-    Named lookup delegates to ``user_imports.get_class_from_module``, the
-    repo's existing helper. Only the "exactly one candidate, infer it" case is
-    added here, which the webapp needs because an uploaded arch.py usually
-    defines a single model and the user is not asked to name it.
+    Imported classes are excluded on purpose: an ``from torchvision.models.resnet
+    import BasicBlock`` at the top of an arch file is not the user's model, and
+    picking it was issue #484.
+    """
+    return [obj for obj in vars(module).values()
+            if isinstance(obj, type) and issubclass(obj, nn.Module) and obj.__module__ == module.__name__]
+
+
+def find_model_class(module, model_class: str | None = None, init_params: dict | None = None) -> type:  # noqa: ANN001
+    """The one rule for which class in an architecture file is the model.
+
+    In order: a name, when the caller has one (``user_imports.get_class_from_module``);
+    otherwise, among the classes defined in the file, the first whose constructor
+    accepts every recorded ``init_params`` key (so a helper block defined before
+    the network does not shadow it); otherwise the only candidate; otherwise the
+    first one defined, with a warning naming the choice. Shared by the webapp's
+    training step, audit worker and PET runner, so the model that was trained,
+    the one that is audited and the one that is retrained are the same class.
     """
     if model_class:
         return get_class_from_module(module, model_class)
-    candidates = {
-        name: obj for name, obj in vars(module).items()
-        if isinstance(obj, type) and issubclass(obj, nn.Module) and obj.__module__ == module.__name__
-    }
-    if len(candidates) != 1:
-        raise ValueError(
-            f"Cannot choose a model class automatically: {sorted(candidates)}. Pass model_class explicitly."
-        )
-    return next(iter(candidates.values()))
+    candidates = model_classes_defined_in(module)
+    if not candidates:
+        raise ValueError(f"{module.__name__} defines no nn.Module subclass.")
+    if init_params:
+        keys = set(init_params)
+        for cls in candidates:
+            if keys <= (set(inspect.signature(cls.__init__).parameters) - {"self"}):
+                return cls
+    if len(candidates) > 1:
+        logger.warning(f"{module.__name__} defines {[c.__name__ for c in candidates]}; "
+                       f"using the first, {candidates[0].__name__}. Name model_class to choose.")
+    return candidates[0]
 
 
 def detect_binary(
@@ -95,7 +117,9 @@ def recipe_from_module(  # noqa: PLR0913
 
     Args:
         module_path: a .py file defining the architecture.
-        dataset: the full dataset; loaders take ``Subset(dataset, indices)``.
+        dataset: what ``make_loader`` indexes. For the DP-SGD objective this is
+            the materialised population (its ``train_indices`` are positions in
+            it); the objective itself trains on the population directly.
         epochs: training epochs, held fixed across the search.
         model_class: which nn.Module to use; inferred when the file defines one.
         init_params: keyword arguments for the model constructor. Pass the same

@@ -898,7 +898,7 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
                 _sys.modules[_arch_mod_name] = _arch_mod  # register before exec so relative imports work
                 _arch_spec.loader.exec_module(_arch_mod)
 
-                _arch_cls = pick_model_class(_arch_mod)
+                _arch_cls = pick_model_class(_arch_mod, model_class=(job.get("arch_config") or {}).get("model_class"))
                 if _arch_cls is None:
                     raise ValueError(
                         "No nn.Module subclass found in arch.py. "
