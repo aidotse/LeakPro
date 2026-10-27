@@ -170,6 +170,13 @@ class ModelResult(BaseModel):
     train_meta: dict | None = None   # epochs, lr, batch_size, optimizer, data info
     num_train: int | None = None     # target training-set size, used to scale risk to the population
     attacks: list[AttackResult] = []
+    # Set on a row that came from adopting an optimization setting. The row is a
+    # normal audited model otherwise: its attack result is the verification's.
+    optimized: bool = False
+    # The accountant's epsilon covers one training run; the setting was chosen
+    # from many on the same private data, and that selection is not accounted.
+    tuning_accounted: bool | None = None
+    pet: dict | None = None          # setting index, config, proxy FPR, scope, baseline utility
     # str(alpha) -> {"measured": MiaVulnerability, "skipped": [...], "below_chance": [...]} or
     # {"error": reason}. Derived by
     # leakpro.risk.measure_strongest when the results are served, never stored with the job.
@@ -230,7 +237,13 @@ class PETSetting(BaseModel):
     index: int
     config: dict[str, float]
     utility: float
+    train_accuracy: float | None = None
     attack_tpr: float | None = None          # None: pruned (see attack_resolution_warning)
+    # 95% Clopper-Pearson interval of attack_tpr over the members: audit-point
+    # sampling error only, a floor on the uncertainty.
+    attack_tpr_ci: list[float] | None = None
+    n_members: int | None = None
+    n_nonmember_false_positives: int | None = None
     proxy_fpr: float | None = None
     attack_realized_fpr: float | None = None
     attack_resolution_warning: str | None = None
@@ -248,7 +261,17 @@ class PETRun(BaseModel):
     model_name: str
     n_trials: int | None = None
     proxy_fpr: float | None = None
+    # Members per trial. The search runs on a subset; the confirm step measures
+    # the chosen setting at the user's own size.
+    n_members: int | None = None
+    # Quality of an unprotected model trained on the same subset: what every
+    # trial's quality is compared against, so the gap is protection cost only.
     baseline_utility: float | None = None
+    baseline_attack_tpr: float | None = None
+    baseline_attack_tpr_ci: list[float] | None = None
+    baseline_source: str | None = None        # "search_subset"
+    # The clicked model's own accuracy, for display; not the comparison basis.
+    model_utility: float | None = None
     settings: list[PETSetting] = []
     best_indices: list[int] = []
     resolution_warning: str | None = None
@@ -256,11 +279,15 @@ class PETRun(BaseModel):
 
 
 class PETVerification(BaseModel):
-    """A stronger re-audit of one setting's saved model."""
+    """One setting measured on the user's own model (retrained at full size and audited).
+
+    ``verified.scope`` is ``"user_model"``, or ``"search_subset"`` when the
+    model's split is unknown and only the search-scale model could be re-audited.
+    """
 
     status: str                               # running | done | failed
     index: int
-    estimated: dict[str, float | None] = {}
+    estimated: dict[str, Any] = {}
     verified: dict[str, Any] | None = None
     error: str | None = None
 

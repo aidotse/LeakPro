@@ -51,14 +51,18 @@ from leakpro.optimization.objective import (  # noqa: E402
     Population,
     make_dpsgd_objective,
     materialize_population,
+    materialize_split,
     reaudit_trial,
     resolution_warning,
+    tpr_uncertainty,
+    train_and_audit,
 )
 from leakpro.optimization.search import DEFAULT_STUDY_NAME, ObjectiveResult  # noqa: E402
 from leakpro.utils.logger import logger  # noqa: E402
 from leakpro.webapp.backend.dataio import load_dataset  # noqa: E402
 from leakpro.webapp.backend.dataset_modules import register_job_dataset_modules  # noqa: E402
 from leakpro.webapp.backend.security import load_metadata_fields  # noqa: E402
+from leakpro.webapp.backend.worker import _serialise_result  # noqa: E402
 
 DEFAULT_N_TRIALS = 24
 DEFAULT_N_SHADOW = 2
@@ -72,11 +76,21 @@ MIN_PHYSICAL_BATCH = 4
 # audit. It re-attacks one setting's saved model with more shadow models, so the
 # number the user adopts is not the one the search guessed with.
 VERIFY_N_SHADOW = 6
-# Population caps: members (= target training set) and held-out non-members.
-# The population is 2 x MAX_TARGET at most (RMIA mimicry rule, see
-# leakpro.optimization.audit); the CIFAR example uses the same sizes.
+# Search-subset caps: members (= each trial's training set) and held-out
+# non-members. The search ranks settings; it does not measure the user's model.
+# A trial is one DP-SGD training plus n_shadow more for its audit, and at 24
+# trials that is 72 trainings, so trials run on at most MAX_TARGET members:
+# about five times cheaper than CIFAR-10's default 25,000-member split. The
+# population is 2 x MAX_TARGET (RMIA mimicry rule, leakpro.optimization.audit);
+# MAX_TEST non-members resolve a 1% FPR with about 20 false positives. The
+# chosen setting is then measured at the user's own size by run_verification,
+# which is where the adopted numbers come from.
 MAX_TARGET = 5000
 MAX_TEST = 2000
+# Training settings used when neither the model's metadata nor the job's
+# training step recorded one (an uploaded model with a sparse metadata file).
+DEFAULT_LEARNING_RATE = 1e-3
+DEFAULT_BATCH_SIZE = 64
 # The false-alarm rate every reported figure uses, search and verification
 # alike, so the two are directly comparable. Falls back to the coarser level
 # when the held-out split cannot resolve 1% (see resolution_warning).
@@ -87,6 +101,10 @@ STUDY_FILE = "study.db"
 STATUS_FILE = "status.json"
 REQUEST_FILE = "request.json"
 POPULATION_META = "population.json"
+BASELINE_FILE = "baseline.json"
+# The user's-size population a verification audits, cached per model.
+FULL_POPULATION_META = "population_full.json"
+FULL_POPULATION_NAME = "population_full.pkl"
 
 
 # --------------------------------------------------------------------------- #
@@ -166,7 +184,11 @@ def trial_records(study: optuna.study.Study | None) -> list[dict]:
             "index": trial.number,
             "config": attrs.get("config", trial.params),
             "utility": attrs.get("utility"),
+            "train_accuracy": attrs.get("train_accuracy"),
             "attack_tpr": attrs.get("tpr"),
+            "attack_tpr_ci": attrs.get("attack_tpr_ci"),
+            "n_members": attrs.get("n_members"),
+            "n_nonmember_false_positives": attrs.get("n_nonmember_false_positives"),
             "proxy_fpr": proxy_fpr,
             "attack_realized_fpr": attrs.get("realized_fpr"),
             "attack_resolution_warning": reason,
@@ -201,19 +223,82 @@ def model_kwargs(cls: type, num_classes: int, num_features: int | None, dpsgd: b
     return kwargs
 
 
-def _metadata_init_params(model_dir: Path) -> dict:
-    """Constructor kwargs recorded in the model's metadata, when there is one."""
+def _metadata(model_dir: Path) -> Any:  # noqa: ANN401
+    """The model's ``model_metadata.pkl`` for field inspection, or None when absent or unreadable."""
     path = model_dir / "model_metadata.pkl"
     if not path.exists():
-        return {}
+        return None
     try:
-        meta = load_metadata_fields(path)
-    except Exception:  # noqa: BLE001 - a malformed file means "no recorded params", not a crash
-        return {}
-    params = getattr(meta, "init_params", None)
-    if params is None and isinstance(meta, dict):
-        params = meta.get("init_params")
-    return dict(params or {})
+        return load_metadata_fields(path)
+    except Exception:  # noqa: BLE001 - a malformed file means "no metadata", not a crash
+        return None
+
+
+def _field(meta: Any, name: str, default: Any = None) -> Any:  # noqa: ANN401
+    """Read a metadata field from the real schema object or from a stubbed one.
+
+    The restricted unpickler returns a stub whose ``__dict__`` is pydantic's
+    pickled state (``{"__dict__": fields, "__pydantic_fields_set__": ...}``),
+    so the fields sit one level down; nested configs are stubs of the same shape.
+    """
+    if meta is None:
+        return default
+    if isinstance(meta, dict):
+        return meta.get(name, default)
+    value = getattr(meta, name, None)
+    if value is None:
+        state = getattr(meta, "__dict__", None)
+        if isinstance(state, dict) and isinstance(state.get("__dict__"), dict):
+            state = state["__dict__"]
+        if isinstance(state, dict):
+            value = state.get(name)
+    return default if value is None else value
+
+
+def _metadata_init_params(model_dir: Path) -> dict:
+    """Constructor kwargs recorded in the model's metadata, when there is one."""
+    return dict(_field(_metadata(model_dir), "init_params", {}) or {})
+
+
+def _training_settings(model: dict, meta: Any) -> dict:  # noqa: ANN401
+    """How the user's model was trained: epochs, optimizer, learning rate, batch size.
+
+    The metadata is the record of what actually ran (the training step writes
+    it, and an upload must carry it); the job's training request is the
+    fallback for a model whose metadata could not be saved; the defaults cover
+    an upload with a sparse file.
+    """
+    train_params = model.get("train_params") or {}
+    optimizer = _field(meta, "optimizer")
+    opt_params = dict(_field(optimizer, "params", {}) or {})
+    loader_params = dict(_field(_field(meta, "data_loader"), "params", {}) or {})
+    return {
+        "epochs": int(_field(meta, "epochs") or train_params.get("epochs") or DEFAULT_EPOCHS),
+        "optimizer": str(_field(optimizer, "name") or train_params.get("optimizer") or "adam").lower(),
+        "learning_rate": float(opt_params.get("lr") or train_params.get("learning_rate") or DEFAULT_LEARNING_RATE),
+        "batch_size": int(loader_params.get("batch_size") or train_params.get("batch_size") or DEFAULT_BATCH_SIZE),
+    }
+
+
+def _assert_classification(dataset: Any) -> None:  # noqa: ANN401
+    """Refuse a dataset whose targets are not class labels.
+
+    The population writer casts targets with ``.long()`` and the objective
+    scores accuracy, so a regression or forecasting target would be truncated
+    to integers and the search would run on garbage without a single error.
+    """
+    targets = getattr(dataset, "targets", None)
+    if targets is None:
+        loader = torch.utils.data.DataLoader(dataset, batch_size=256, shuffle=False)
+        targets = next(iter(loader))[1]
+    values = np.asarray(targets.cpu().numpy() if torch.is_tensor(targets) else targets).reshape(-1)
+    if values.dtype.kind == "f" and not np.all(np.isclose(values, np.round(values))):
+        raise ValueError("This job's targets are continuous values, not class labels. Protection settings can only "
+                         "be searched for a classification model; regression and forecasting are not supported yet.")
+    if values.dtype.kind not in "iufb":
+        raise ValueError(f"Targets of dtype {values.dtype} are not class labels.")
+    if len(np.unique(values)) < 2:
+        raise ValueError("The dataset has a single class; there is nothing to classify or to protect.")
 
 
 def _population(out: Path, dataset: Any, seed: int) -> Population:  # noqa: ANN401
@@ -258,6 +343,7 @@ def build(job: dict, job_dir: Path, model_name: str, request: dict) -> dict:
     # way the audit worker does, so normalisation in its __getitem__ is kept.
     register_job_dataset_modules(job_dir)
     dataset = load_dataset(Path(data_path))
+    _assert_classification(dataset)
     population = _population(out, dataset, seed)
     with open(population.path, "rb") as f:
         pop = pickle.load(f)  # noqa: S301 - written by materialize_population above
@@ -272,12 +358,12 @@ def build(job: dict, job_dir: Path, model_name: str, request: dict) -> dict:
     kwargs = {**recorded, **model_kwargs(cls, population.num_classes, num_features, dpsgd=True)}
     binary = detect_binary(arch, sample, cls.__name__, kwargs)
 
-    train_params = model.get("train_params") or {}
+    training = _training_settings(model, _metadata(job_dir / "models" / model_name))
     recipe = recipe_from_module(
         module_path=arch, dataset=pop,
-        epochs=int(train_params.get("epochs") or DEFAULT_EPOCHS),
+        epochs=training["epochs"],
         model_class=cls.__name__, init_params=kwargs,
-        optimizer_name=str(train_params.get("optimizer") or "adam").lower(),
+        optimizer_name=training["optimizer"],
         binary=binary,
     )
     target = AuditTarget(module_path=str(arch), model_class=cls.__name__,
@@ -297,7 +383,8 @@ def build(job: dict, job_dir: Path, model_name: str, request: dict) -> dict:
             raise ValueError(f"Dataset too small: {n_test} non-members cannot resolve even {FALLBACK_FPR:.0%} FPR.")
 
     return {"recipe": recipe, "population": population, "target": target, "space": space,
-            "proxy_fpr": proxy_fpr, "resolution_warning": warning, "model": model, "seed": seed}
+            "proxy_fpr": proxy_fpr, "resolution_warning": warning, "model": model, "seed": seed,
+            "dataset": dataset, "training": training}
 
 
 def _apply_advanced(space: KnobSpace, advanced: dict) -> KnobSpace:
@@ -327,10 +414,12 @@ def _with_oom_backoff(make_objective, max_physical_batch: int):  # noqa: ANN001,
     """
     state = {"cap": max_physical_batch, "objective": make_objective(max_physical_batch)}
 
-    def objective_fn(config: dict) -> ObjectiveResult:
+    # Keeps the trial_number keyword, so optimize() still keys each trial's
+    # directory on its number through the wrapper.
+    def objective_fn(config: dict, trial_number: int | None = None) -> ObjectiveResult:
         while True:
             try:
-                return state["objective"](config)
+                return state["objective"](config, trial_number=trial_number)
             except Exception as exc:  # noqa: BLE001
                 if not _is_oom(exc) or state["cap"] <= MIN_PHYSICAL_BATCH:
                     raise
@@ -347,6 +436,48 @@ def _with_oom_backoff(make_objective, max_physical_batch: int):  # noqa: ANN001,
 # Entry points
 # --------------------------------------------------------------------------- #
 
+def _baseline_config(training: dict) -> dict:
+    """The unprotected reference: the user's own learning rate and batch size, no noise, no clipping."""
+    return {"noise_multiplier": 0.0, "max_grad_norm": 1.0,
+            "learning_rate": training["learning_rate"], "batch_size": training["batch_size"]}
+
+
+def _search_baseline(parts: dict, out: Path, *, n_shadow: int, delta: float,  # noqa: PLR0913
+                     max_physical_batch: int, device: str) -> dict:
+    """Train and audit an unprotected model on the search subset, once per run.
+
+    Every trial is a model trained on the subset, so the quality it is compared
+    against must be one too: comparing against the user's model, trained on
+    the whole split, would charge the trials for training on less data as well
+    as for the protection. This is the one extra training (plus its audit) that
+    makes "quality loss" during the search mean protection cost only. It is not
+    the user's model; the confirm step measures that.
+    """
+    cached = read_json(out / BASELINE_FILE)
+    if cached and Path(cached.get("trial_dir", "")).exists():
+        return cached
+    config = _baseline_config(parts["training"])
+    logger.info(f"Training the unprotected reference on the search subset: {config}")
+    result, mia = train_and_audit(
+        parts["recipe"], parts["population"], parts["target"], out / "baseline", config,
+        proxy_fpr=parts["proxy_fpr"], delta=delta, max_physical_batch=max_physical_batch,
+        rmia_config={"num_shadow_models": n_shadow}, seed=parts["seed"], device=device,
+    )
+    record = json_safe({
+        "scope": "search_subset",
+        "config": config,
+        "utility": result.utility,
+        "train_accuracy": result.extras.get("train_accuracy"),
+        "attack_tpr": result.tpr,
+        "attack_tpr_ci": result.extras.get("attack_tpr_ci"),
+        "n_members": result.extras.get("n_members"),
+        "gated": bool(result.extras.get("gated")),
+        "trial_dir": result.extras.get("trial_dir"),
+    })
+    (out / BASELINE_FILE).write_text(json.dumps(record, indent=2))
+    return record
+
+
 def run_search(job_dir: Path, model_name: str) -> None:
     """Run (or resume) the whole search, then record the best trade-offs."""
     out = pet_dir(job_dir, model_name)
@@ -362,9 +493,18 @@ def run_search(job_dir: Path, model_name: str) -> None:
     if parts["resolution_warning"]:
         logger.warning(parts["resolution_warning"])
 
-    write_status(out, status="running", model_name=model_name, n_trials=n_trials,
-                 proxy_fpr=parts["proxy_fpr"], baseline_utility=parts["model"].get("test_accuracy"),
-                 resolution_warning=parts["resolution_warning"])
+    def status(**fields: Any) -> None:  # noqa: ANN401
+        write_status(out, model_name=model_name, n_trials=n_trials, proxy_fpr=parts["proxy_fpr"],
+                     resolution_warning=parts["resolution_warning"],
+                     n_members=len(parts["population"].train_indices),
+                     model_utility=parts["model"].get("test_accuracy"), **fields)
+
+    status(status="running")
+    baseline = _search_baseline(parts, out, n_shadow=n_shadow, delta=delta,
+                                max_physical_batch=max_physical_batch, device=device)
+    baseline_fields = {"baseline_utility": baseline.get("utility"), "baseline_attack_tpr": baseline.get("attack_tpr"),
+                       "baseline_attack_tpr_ci": baseline.get("attack_tpr_ci"), "baseline_source": baseline.get("scope")}
+    status(status="running", **baseline_fields)
 
     def make_objective(cap: int):  # noqa: ANN202
         return make_dpsgd_objective(
@@ -377,9 +517,7 @@ def run_search(job_dir: Path, model_name: str) -> None:
                      n_trials=n_trials, proxy_fpr=parts["proxy_fpr"], seed=parts["seed"])
 
     front = pareto_trials(study)
-    write_status(out, status="done", model_name=model_name, n_trials=n_trials,
-                 proxy_fpr=parts["proxy_fpr"], baseline_utility=parts["model"].get("test_accuracy"),
-                 best_indices=[t.number for t in front], resolution_warning=parts["resolution_warning"])
+    status(status="done", best_indices=[t.number for t in front], **baseline_fields)
     logger.info(f"Search finished: {len(study.trials)} trials, {len(front)} on the frontier.")
 
 
@@ -388,49 +526,159 @@ def verification_path(out: Path, index: int) -> Path:
     return out / f"verification_{index}.json"
 
 
+def verification_attack_path(out: Path, index: int) -> Path:
+    """Where the RMIA result behind a verification is kept, in the shape the results view reads."""
+    return out / f"verification_{index}_attack.json"
+
+
+def _full_population(out: Path, dataset: Any, meta: Any, seed: int) -> Population:  # noqa: ANN401
+    """The user's-size audit population: the model's own members plus as many non-members.
+
+    Non-members are the model's own test split first (so utility is scored on
+    exactly the records the user's accuracy was), then other records the model
+    never trained on, until there are as many as members. Cached per model.
+    """
+    members = [int(i) for i in _field(meta, "train_indices")]
+    test_split = [int(i) for i in _field(meta, "test_indices") or []]
+    cached = read_json(out / FULL_POPULATION_META)
+    if cached and Path(cached.get("path", "")).exists() and cached.get("n_members") == len(members):
+        cached.pop("n_members", None)
+        return Population(**cached)
+    seen = set(members)
+    test_split = [i for i in test_split if i not in seen]
+    unseen = set(test_split)
+    rest = [i for i in np.random.default_rng(seed).permutation(len(dataset)).tolist() if i not in seen and i not in unseen]
+    non_members = test_split + rest[:max(0, len(members) - len(test_split))]
+    population = materialize_split(dataset, out, members=members, non_members=non_members,
+                                   utility=test_split or None, name=FULL_POPULATION_NAME)
+    (out / FULL_POPULATION_META).write_text(json.dumps({**population.__dict__, "n_members": len(members)}))
+    return population
+
+
+def _write_verification(out: Path, index: int, **fields: Any) -> None:  # noqa: ANN401
+    verification_path(out, index).write_text(json.dumps(json_safe({"pid": os.getpid(), "index": index, **fields}),
+                                                        indent=2))
+
+
 def run_verification(job_dir: Path, model_name: str, index: int) -> None:
-    """Re-audit one trial's saved model with more shadow models than the search used."""
+    """Measure one setting on the user's own model: retrain at full size, then audit it.
+
+    The search ranked the setting on a subset; the number the user adopts must
+    describe their model. So the setting is retrained on the clicked model's own
+    training split, audited with a population of its members plus as many
+    non-members (the 2:1 rule, at the user's size), and its utility is scored
+    on the model's own test split and compared with the model's own accuracy.
+    Quality loss is then the cost of protection alone, and the epsilon is the
+    one that holds at the user's N and step count.
+
+    When the model's split is unknown (no usable model_metadata.pkl) the
+    setting's search-subset model is re-audited instead, with more shadow
+    models, and the result says so: it then describes a 5,000-member model,
+    not the user's.
+    """
     out = pet_dir(job_dir, model_name)
     job = json.loads((job_dir / "state.json").read_text())
     request = read_json(out / REQUEST_FILE) or {}
-    target_path = verification_path(out, index)
 
     study = load_study(out)
     trial = next((t for t in (study.trials if study else []) if t.number == index), None)
     if trial is None or "trial_dir" not in trial.user_attrs:
         raise KeyError(f"No evaluated setting with index {index}.")
     attrs = trial.user_attrs
-    estimated = {"attack_tpr": attrs.get("tpr"), "utility": attrs.get("utility")}
-    target_path.write_text(json.dumps(json_safe({"status": "running", "index": index, "estimated": estimated}),
-                                      indent=2))
+    estimated = {"attack_tpr": attrs.get("tpr"), "attack_tpr_ci": attrs.get("attack_tpr_ci"),
+                 "utility": attrs.get("utility"), "n_members": attrs.get("n_members")}
+    _write_verification(out, index, status="running", estimated=estimated)
 
     parts = build(job, job_dir, model_name, request)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     proxy_fpr = float(study.user_attrs.get("proxy_fpr", parts["proxy_fpr"]))
-    result = reaudit_trial(attrs["trial_dir"], population_path=parts["population"].path, target=parts["target"],
-                           rmia_config={"num_shadow_models": VERIFY_N_SHADOW}, seed=parts["seed"])
-    tpr, realized_fpr, degenerate = resolved_proxy_tpr(result, proxy_fpr)
+    delta = float(request.get("delta") or DEFAULT_DELTA)
+    max_physical_batch = int(request.get("max_physical_batch") or DEFAULT_MAX_PHYSICAL_BATCH)
+    config = dict(attrs.get("config") or trial.params)
+    meta = _metadata(job_dir / "models" / model_name)
+    model_utility = parts["model"].get("test_accuracy")
+    if model_utility is None:
+        model_utility = _field(_field(meta, "test_result"), "accuracy")
+    notes: list[str] = []
 
-    target_path.write_text(json.dumps(json_safe({
-        "status": "done",
-        "index": index,
-        "estimated": estimated,
-        "verified": {
+    if _field(meta, "train_indices"):
+        population = _full_population(out, parts["dataset"], meta, parts["seed"])
+        n_members, n_non = len(population.train_indices), len(population.test_indices)
+        if n_non < n_members:
+            notes.append(f"Only {n_non} records the model never trained on were available as non-members for "
+                         f"{n_members} members, so the reference models trained on fewer points than yours.")
+        warning = resolution_warning(n_non, proxy_fpr)
+        if warning:
+            raise ValueError(f"{n_non} non-members cannot resolve the search's {proxy_fpr:.0%} false-alarm rate.")
+        logger.info(f"Retraining setting {index} on the model's own split: {n_members} members, "
+                    f"{n_non} non-members, config={config}")
+        result, mia = train_and_audit(
+            parts["recipe"], population, parts["target"], out / "confirm" / f"trial_{index:04d}", config,
+            proxy_fpr=proxy_fpr, delta=delta, max_physical_batch=max_physical_batch,
+            rmia_config={"num_shadow_models": VERIFY_N_SHADOW}, seed=parts["seed"], device=device,
+        )
+        scope = "user_model"
+        if mia is not None:
+            verification_attack_path(out, index).write_text(json.dumps(json_safe(_serialise_result(mia))))
+        resolution = None
+        if result.extras.get("gated"):
+            resolution = "the retrained model did not learn (utility at the majority-class rate), so it was not attacked"
+        elif result.extras.get("degenerate_audit"):
+            resolution = "every attack score tied, so no operating point could be resolved"
+        verified = {
+            "scope": scope,
+            "attack_tpr": result.tpr,
+            "attack_tpr_table": (None if result.extras.get("degenerate_audit") or mia is None
+                                 else tpr_at_fixed_fpr(mia, proxy_fpr)),
+            "attack_tpr_ci": result.extras.get("attack_tpr_ci"),
+            "n_members": n_members,
+            "n_non_members": n_non,
+            "n_nonmember_false_positives": result.extras.get("n_nonmember_false_positives"),
+            "utility": result.utility,
+            "train_accuracy": result.extras.get("train_accuracy"),
+            "baseline_utility": model_utility,
+            "epsilon": result.extras.get("epsilon"),
+            "delta": delta,
+            "accountant": result.extras.get("accountant"),
+            "n_shadow": VERIFY_N_SHADOW,
+            "proxy_fpr": proxy_fpr,
+            "realized_fpr": result.extras.get("realized_fpr"),
+            "resolution_warning": resolution,
+            "trial_dir": result.extras.get("trial_dir"),
+            "notes": notes,
+        }
+    else:
+        notes.append("The model's own training split is unknown (no usable model_metadata.pkl), so this re-audits "
+                     "the search-scale model with more reference models. It describes a model trained on "
+                     f"{len(parts['population'].train_indices)} records, not yours, and quality is not compared.")
+        mia = reaudit_trial(attrs["trial_dir"], population_path=parts["population"].path, target=parts["target"],
+                            rmia_config={"num_shadow_models": VERIFY_N_SHADOW}, seed=parts["seed"])
+        tpr, realized_fpr, degenerate = resolved_proxy_tpr(mia, proxy_fpr)
+        verification_attack_path(out, index).write_text(json.dumps(json_safe(_serialise_result(mia))))
+        verified = {
+            "scope": "search_subset",
             "attack_tpr": tpr,
-            "attack_tpr_table": None if degenerate else tpr_at_fixed_fpr(result, proxy_fpr),
+            "attack_tpr_table": None if degenerate else tpr_at_fixed_fpr(mia, proxy_fpr),
+            **tpr_uncertainty(mia, tpr, realized_fpr),
             # The model is not retrained, so its utility and epsilon are the trial's.
             "utility": attrs.get("utility"),
+            "train_accuracy": attrs.get("train_accuracy"),
+            "baseline_utility": None,
             "epsilon": attrs.get("epsilon"),
+            "delta": attrs.get("delta"),
+            "accountant": attrs.get("accountant"),
             "n_shadow": VERIFY_N_SHADOW,
-            # The operating point behind the verified number. Without it the UI
-            # cannot tell a resolved measurement from one the audit set was too
-            # coarse to resolve; both arrive as a bare TPR.
+            "proxy_fpr": proxy_fpr,
             "realized_fpr": realized_fpr,
             "resolution_warning": ("every attack score tied, so no operating point could be resolved"
                                    if degenerate else None),
-        },
-    }), indent=2))
-    logger.info(f"Verified setting {index}: TPR {tpr} at realized FPR {realized_fpr} "
-                f"(search estimated {estimated['attack_tpr']}).")
+            "trial_dir": attrs["trial_dir"],
+            "notes": notes,
+        }
+
+    _write_verification(out, index, status="done", estimated=estimated, verified=verified)
+    logger.info(f"Verified setting {index} ({verified['scope']}): TPR {verified['attack_tpr']} at realized FPR "
+                f"{verified['realized_fpr']} (search estimated {estimated['attack_tpr']}).")
 
 
 def main() -> None:
@@ -453,9 +701,8 @@ def main() -> None:
         if args.verify is None:
             write_status(out, status="failed", model_name=args.model_name, error=str(exc))
         else:
-            verification_path(out, args.verify).write_text(json.dumps({
-                "status": "failed", "index": args.verify,
-                "estimated": {"attack_tpr": None, "utility": None}, "error": str(exc)}))
+            _write_verification(out, args.verify, status="failed",
+                                estimated={"attack_tpr": None, "utility": None}, error=str(exc))
         sys.exit(1)
 
 
