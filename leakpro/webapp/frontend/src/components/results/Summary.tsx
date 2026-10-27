@@ -92,6 +92,17 @@ function pct(v: number | undefined | null) {
   return v != null ? (v * 100).toFixed(1) + "%" : "—";
 }
 
+/**
+ * ε as a label. On an adopted optimization row the accountant's ε covers one
+ * training run, and the setting was chosen from many tested on the same
+ * private data; that selection is not accounted, so the number is marked.
+ */
+const EPS_PER_RUN = "ε is for one training run; the selection among tested settings is not accounted.";
+function epsilonLabel(m: ModelResult): string {
+  const eps = m.target_epsilon != null ? `ε=${m.target_epsilon}` : "Yes";
+  return m.tuning_accounted === false ? `${eps} (per run)` : eps;
+}
+
 function num(v: number | undefined | null, digits = 0) {
   return v != null ? v.toLocaleString(undefined, { maximumFractionDigits: digits }) : "—";
 }
@@ -347,7 +358,7 @@ export default function Summary({ results, risk, onRiskChange, onOptimize }: Pro
         r?.roc_auc?.toFixed(6) ?? "",
         m.train_accuracy?.toFixed(6) ?? "",
         m.test_accuracy?.toFixed(6) ?? "",
-        m.dpsgd ? `eps=${m.target_epsilon}` : "No",
+        m.dpsgd ? `eps=${m.target_epsilon}${m.tuning_accounted === false ? " (per run, selection not accounted)" : ""}` : "No",
         a?.declared.attacker_prior ?? "",
         a?.combined.ppv?.toFixed(6) ?? "",
         a?.combined.ppv_balanced?.toFixed(6) ?? "",
@@ -390,7 +401,11 @@ export default function Summary({ results, risk, onRiskChange, onOptimize }: Pro
                 </p>
                 <p className="font-bold text-sm mt-2">{m.model_name}</p>
                 {m.model_class && <p className="text-xs font-mono text-slate-400 mt-0.5">{m.model_class}</p>}
-                {m.dpsgd && <p className="text-xs text-blue-500 mt-1">DP-SGD{m.target_epsilon != null ? ` ε=${m.target_epsilon}` : ""}</p>}
+                {m.dpsgd && (
+                  <p className="text-xs text-blue-500 mt-1" title={m.tuning_accounted === false ? EPS_PER_RUN : undefined}>
+                    DP-SGD {epsilonLabel(m)}
+                  </p>
+                )}
               </div>
             );
           })}
@@ -556,7 +571,7 @@ export default function Summary({ results, risk, onRiskChange, onOptimize }: Pro
                     </td>
                     <td className="px-4 py-3">
                       {m.dpsgd
-                        ? <span className="text-blue-500 font-semibold">{m.target_epsilon != null ? `ε=${m.target_epsilon}` : "Yes"}</span>
+                        ? <span className="text-blue-500 font-semibold" title={m.tuning_accounted === false ? EPS_PER_RUN : undefined}>{epsilonLabel(m)}</span>
                         : <span className="text-slate-400">No</span>}
                     </td>
                     <td className="px-4 py-3">

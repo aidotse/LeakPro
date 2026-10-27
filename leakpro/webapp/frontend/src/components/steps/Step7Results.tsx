@@ -117,27 +117,26 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
     setLoadingJobId(null);
   };
 
-  // An adopted setting becomes a normal summary row, tagged so it reads as
-  // the outcome of optimization rather than another audited model. The
-  // backend persisted the same row; this keeps the open view in step.
-  const addOptimizedRow = (base: ModelResult, setting: Setting, verification: Verification) => {
-    const verified = verification.verified;
-    if (!verified) return;
-    const name = `${base.model_name} (optimized)`;
-    setAllResults((prev) => [
-      ...(prev ?? []).filter((m) => !(m.job_id === base.job_id && m.model_name === name)),
-      {
-        ...base,
-        model_name: name,
-        source: "optimized",
-        optimized: true,
-        dpsgd: true,
-        target_epsilon: setting.epsilon ?? undefined,
-        test_accuracy: verified.utility ?? undefined,
-        train_accuracy: undefined,
-        attacks: [],
-      },
-    ]);
+  // An adopted setting is stored by the backend as a normal result row with
+  // its own attack result, so the row is re-read from the job rather than
+  // synthesised here: the summary, the risk layer and every tab then show the
+  // measured model exactly as they would any other.
+  const addOptimizedRow = async (base: ModelResult, _setting: Setting, _verification: Verification) => {
+    const targetJob = base.job_id ?? jobId;
+    const name = `${base.orig_model_name ?? base.model_name} (optimized)`;
+    try {
+      const r = await api.getResults(targetJob);
+      const row = r.results.find((m) => m.model_name === name);
+      if (!row) return;
+      const displayName = base.orig_model_name ? `${base.model_name} (optimized)` : name;
+      const fresh = { ...row, job_id: targetJob, model_name: displayName, orig_model_name: name };
+      setAllResults((prev) => [
+        ...(prev ?? []).filter((m) => !(m.job_id === targetJob && (m.orig_model_name ?? m.model_name) === name)),
+        fresh,
+      ]);
+    } catch {
+      // The row is persisted; it appears on the next load.
+    }
   };
 
   const confirmRename = () => {
