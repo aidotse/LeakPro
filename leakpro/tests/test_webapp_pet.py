@@ -249,11 +249,15 @@ class TestPetFlow:
         assert verified["notes"] == []
         out = self.pet_runner.pet_dir(self.backend._job_dir(self.job_id), MODEL)
         assert (out / "population_full.pkl").exists()
-        assert (out / "confirm" / f"trial_{index:04d}" / "target" / "target_model.pkl").exists()
+        target_dir = out / "confirm" / f"trial_{index:04d}" / "target"
+        assert (target_dir / "dpsgd_dic.pkl").exists()  # written before training, gated or not
         if verified["attack_tpr"] is None:
+            # A gated retrain is never persisted or attacked, so there is no model to adopt.
             assert verified["resolution_warning"]
+            assert not (target_dir / "target_model.pkl").exists()
             assert self._adopt(index).status_code == 409
             return
+        assert (target_dir / "target_model.pkl").exists()
         lo, hi = verified["attack_tpr_ci"]
         assert lo <= verified["attack_tpr"] <= hi
 
