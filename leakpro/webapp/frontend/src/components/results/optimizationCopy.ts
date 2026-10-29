@@ -136,6 +136,13 @@ export const COPY = {
     "Too few records separated the protected model's answers, so no attack figure could be read " +
     "at this false-alarm rate. Treat it as unknown, not as proof of protection.",
   noResults: "No settings were tested successfully.",
+  allUnmeasured: (n: number) =>
+    `All ${n} tested setting${n === 1 ? "" : "s"} could not be measured, so there is nothing to rank.`,
+  allUnmeasuredReasons: "Why:",
+  allUnmeasuredHelp:
+    "A setting whose model does not learn is never attacked: its low attack number would look like protection. " +
+    "This search is finished; pinning a lower noise multiplier or a higher learning rate under Advanced needs a " +
+    "new search, on a copy of the model, so the two searches never share one frontier.",
   failed: "The optimization run failed.",
   retry: "Try again",
   retryHint: "You can start it again — finished settings are kept.",

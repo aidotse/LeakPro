@@ -344,7 +344,9 @@ export default function Optimization({ jobId, model, adoptedIndices, onBack, onA
       type: "scatter",
       name: COPY.baselinePoint,
       text: [COPY.baselinePoint],
-      textposition: "bottom right",
+      // The unprotected model is usually the rightmost point (it leaks most), and
+      // while it is the only point the axis ends on it: label to the left so it stays inside the plot.
+      textposition: "bottom left",
       textfont: { size: 11, color: BASELINE },
       marker: { size: 11, color: BASELINE, symbol: "diamond" },
       hovertemplate: `${COPY.baselinePoint}: attack success %{x:.2f}%, quality %{y:.2f}%<extra></extra>`,
@@ -567,7 +569,19 @@ export default function Optimization({ jobId, model, adoptedIndices, onBack, onA
               <span className="text-xs opacity-80 break-words">{run.error ?? ""}</span>
             </div>
           ) : tested.length === 0 && phase === "done" ? (
-            <p className="text-sm text-slate-400 italic">{COPY.noResults}</p>
+            unmeasured > 0 ? (
+              // Every trial was pruned: say so, say why, and say what a new search would need.
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-600 dark:text-amber-400 flex flex-col gap-1">
+                <span className="font-bold">{COPY.allUnmeasured(unmeasured)}</span>
+                <span className="text-xs">
+                  {COPY.allUnmeasuredReasons}{" "}
+                  {Array.from(new Set((run?.settings ?? []).map((s) => s.attack_resolution_warning).filter(Boolean))).join("; ")}
+                </span>
+                <span className="text-xs opacity-80">{COPY.allUnmeasuredHelp}</span>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-400 italic">{COPY.noResults}</p>
+            )
           ) : (
             <>
               <Plot
