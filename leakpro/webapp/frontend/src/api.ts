@@ -362,7 +362,8 @@ export interface OptimizationParams {
 }
 
 export interface OptimizationRun {
-  status: "idle" | "running" | "done" | "failed";
+  /** "stale": the model under this name changed since the run; its results no longer describe it. */
+  status: "idle" | "running" | "done" | "failed" | "stale";
   model_name: string;
   /** Total settings the run intends to test; absent until the run reports it. */
   n_trials?: number | null;

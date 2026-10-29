@@ -173,6 +173,12 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
       <Optimization
         jobId={jobId}
         model={optimizing}
+        adoptedIndices={new Set(
+          (allResults ?? [])
+            .filter((m) => m.optimized && m.pet && (m.job_id ?? jobId) === (optimizing.job_id ?? jobId)
+              && (m.orig_model_name ?? m.model_name).startsWith(`${optimizing.orig_model_name ?? optimizing.model_name} (optimized`))
+            .map((m) => m.pet!.setting_index),
+        )}
         onBack={() => setOptimizing(null)}
         onAdopted={(setting, verification) => addOptimizedRow(optimizing, setting, verification)}
       />

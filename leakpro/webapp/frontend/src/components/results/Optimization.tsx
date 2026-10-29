@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Plot from "react-plotly.js";
-import { api, ModelResult, OptimizationRun, Setting, Verification } from "../../api";
+import { api, getToken, ModelResult, OptimizationRun, Setting, Verification, Verified } from "../../api";
 import { COPY, fprLabel, tagsFor } from "./optimizationCopy";
 
 const ACCENT = "#f5a623";
@@ -8,10 +8,14 @@ const TESTED = "#94a3b8";
 const BASELINE = "#ef4444";
 const POLL_MS = 2000;
 const MAX_HIGHLIGHTS = 5;
+// Transient backend errors while a run is in progress: retry this many polls before giving up.
+const POLL_RETRIES = 3;
 
 interface Props {
   jobId: string;
   model: ModelResult;
+  /** Settings already adopted for this model, read from the job's results (survives reopening the view). */
+  adoptedIndices: Set<number>;
   onBack: () => void;
   /** Called after the backend has stored the adopted row; the parent re-reads the job's results. */
   onAdopted: (setting: Setting, verification: Verification) => void;
@@ -23,11 +27,27 @@ const pct = (v: number | null | undefined, digits = 1) =>
 const rangeLabel = (ci: [number, number] | null | undefined) =>
   ci == null ? null : `${pct(ci[0], 2)} – ${pct(ci[1], 2)}`;
 
-/** A setting whose likely range of attack success includes the false-alarm rate itself. */
-function atChance(s: Pick<Setting, "attack_tpr_ci">, proxyFpr: number | null | undefined): boolean {
-  if (s.attack_tpr_ci == null || proxyFpr == null) return false;
-  return s.attack_tpr_ci[0] <= proxyFpr && proxyFpr <= s.attack_tpr_ci[1];
+/**
+ * Whether an attack figure beat guessing. Chance level is the false-alarm rate
+ * the attack was actually read at (the realized rate when the scores were too
+ * coarse for the requested one). A likely range that reaches down to that rate,
+ * or lies entirely below it, is noise around chance, not protection. Without a
+ * range nothing can be said, and the setting is neither ranked nor tagged safe.
+ */
+type Evidence = "measured" | "chance" | "unknown";
+function evidence(
+  ci: [number, number] | null | undefined,
+  realizedFpr: number | null | undefined,
+  proxyFpr: number | null | undefined,
+): Evidence {
+  const rate = realizedFpr ?? proxyFpr;
+  if (ci == null || rate == null) return "unknown";
+  return ci[0] <= rate ? "chance" : "measured";
 }
+const evidenceOf = (s: Setting, proxyFpr: number | null | undefined) =>
+  evidence(s.attack_tpr_ci, s.attack_realized_fpr, proxyFpr);
+const evidenceOfVerified = (v: Verified, proxyFpr: number | null | undefined) =>
+  evidence(v.attack_tpr_ci, v.realized_fpr, v.proxy_fpr ?? proxyFpr);
 
 /**
  * The 3-5 settings the view labels, spread evenly over the frontier so the
@@ -42,7 +62,7 @@ function pickHighlights(frontier: Setting[], max = MAX_HIGHLIGHTS): Setting[] {
 
 const isAuthError = (e: unknown) => e instanceof Error && e.message.startsWith("Unauthorized");
 
-export default function Optimization({ jobId, model, onBack, onAdopted }: Props) {
+export default function Optimization({ jobId, model, adoptedIndices, onBack, onAdopted }: Props) {
   // A model loaded from a previous session belongs to its own job, which owns
   // the dataset and architecture the search retrains from. Optimize against
   // that job under the model's original name, not the current session's job or
@@ -58,52 +78,80 @@ export default function Optimization({ jobId, model, onBack, onAdopted }: Props)
   // One verification per setting, so reselecting a measured setting shows its
   // result instead of resetting, and a failed one can be retried.
   const [verifications, setVerifications] = useState<Record<number, Verification>>({});
+  // Immediate feedback after Adopt; the durable answer is adoptedIndices from the job's results.
   const [adoptedIndex, setAdoptedIndex] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [adopting, setAdopting] = useState(false);
+  // Set on a 401 and cleared by the next successful request. While set, nothing
+  // polls (each attempt would prompt for a token); the banner offers one retry.
   const [authLost, setAuthLost] = useState(false);
 
   const fail = useCallback((e: unknown) => {
     if (isAuthError(e)) { setAuthLost(true); setError(COPY.authLost); return; }
     setError(e instanceof Error ? e.message : String(e));
   }, []);
+  const recovered = useCallback(() => { setAuthLost(false); }, []);
+  const retryAuth = () => {
+    getToken();  // prompts once, on the user's click, never from a poll
+    setError(null);
+    setAuthLost(false);
+  };
 
   // ── polling ──────────────────────────────────────────────────────────────
   // A setTimeout chain, never setInterval: requests cannot overlap, so a late
   // "running" response can never land after "done" and flip the view back. The
   // sequence number drops responses from a chain that was replaced or unmounted.
   const pollSeq = useRef(0);
-  const fetchRun = useCallback(async (seq: number) => {
+  const pollFailures = useRef(0);
+  const fetchRun = useCallback(async (seq: number): Promise<OptimizationRun | null | "error"> => {
     try {
       const next = await api.getOptimization(targetJob, targetName);
       if (seq !== pollSeq.current) return null;
+      pollFailures.current = 0;
       setRun(next);
       setError(null);
+      recovered();
       return next;
     } catch (e) {
       if (seq !== pollSeq.current) return null;
+      pollFailures.current += 1;
       fail(e);
-      return null;
+      return "error";
     }
-  }, [targetJob, targetName, fail]);
+  }, [targetJob, targetName, fail, recovered]);
 
   // The chain (re)starts whenever the run enters "running", which is how a
-  // start or a resume picks up polling without a second loop.
+  // start or a resume picks up polling without a second loop. A transient
+  // error does not end it: the chain retries a few times, says so, then stops.
   const polling = run?.status === "running";
   useEffect(() => {
+    if (authLost) return;
     const seq = ++pollSeq.current;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const tick = async () => {
       const next = await fetchRun(seq);
       if (seq !== pollSeq.current) return;
-      if (next?.status === "running" && !authLost) timer = setTimeout(tick, POLL_MS);
+      if (next === "error") {
+        if (!polling || isAuthError(new Error(""))) return;
+        if (pollFailures.current <= POLL_RETRIES) {
+          setError(COPY.pollRetrying);
+          timer = setTimeout(tick, POLL_MS * 2);
+        } else {
+          setError(COPY.pollGaveUp);
+        }
+        return;
+      }
+      if (next?.status === "running") timer = setTimeout(tick, POLL_MS);
     };
     tick();
     return () => { pollSeq.current++; if (timer) clearTimeout(timer); };
   }, [fetchRun, authLost, polling]);
 
   const phase: "setup" | "running" | "done" =
-    run == null || run.status === "idle" ? "setup" : run.status === "running" ? "running" : "done";
+    run == null || run.status === "idle" || run.status === "stale" ? "setup"
+      : run.status === "running" ? "running" : "done";
 
   const start = async () => {
     setStarting(true);
@@ -150,17 +198,27 @@ export default function Optimization({ jobId, model, onBack, onAdopted }: Props)
       .sort((a, b) => a.attack_tpr! - b.attack_tpr!);
   }, [run]);
   const frontierWithin = useMemo(() => frontier.filter(withinLimit), [frontier, withinLimit]);
-  // Settings the audit cannot tell from guessing are shown but not ranked or tagged.
-  const chanceCount = tested.filter((s) => atChance(s, proxyFpr)).length;
+  // Settings the audit cannot tell from guessing, or cannot judge at all, are
+  // shown but never ranked or tagged.
+  const chanceCount = tested.filter((s) => evidenceOf(s, proxyFpr) === "chance").length;
+  const unknownCount = tested.filter((s) => evidenceOf(s, proxyFpr) === "unknown").length;
   const highlights = useMemo(
-    () => pickHighlights(frontierWithin.filter((s) => !atChance(s, proxyFpr))),
+    () => pickHighlights(frontierWithin.filter((s) => evidenceOf(s, proxyFpr) === "measured")),
     [frontierWithin, proxyFpr],
   );
   const tags = tagsFor(highlights.length);
   const tagOf = (s: Setting) => {
     const i = highlights.findIndex((h) => h.index === s.index);
-    return i >= 0 ? tags[i] : atChance(s, proxyFpr) ? COPY.chanceTag : undefined;
+    if (i >= 0) return tags[i];
+    const ev = evidenceOf(s, proxyFpr);
+    return ev === "chance" ? COPY.chanceTag : ev === "unknown" ? COPY.unknownTag : undefined;
   };
+  // Rates the attack was actually read at, when any differ from the requested one.
+  const realizedRange = useMemo<[number, number] | null>(() => {
+    const rates = tested.map((s) => s.attack_realized_fpr).filter((r): r is number => r != null);
+    if (rates.length === 0 || proxyFpr == null || rates.every((r) => r === proxyFpr)) return null;
+    return [Math.min(...rates), Math.max(...rates)];
+  }, [tested, proxyFpr]);
 
   const selected = useMemo(
     () => (selectedIndex == null ? null : run?.settings.find((s) => s.index === selectedIndex) ?? null),
@@ -170,12 +228,17 @@ export default function Optimization({ jobId, model, onBack, onAdopted }: Props)
 
   // ── verification ─────────────────────────────────────────────────────────
   const confirm = async (setting: Setting, force = false) => {
+    if (confirming) return;
+    setConfirming(true);
     setError(null);
     try {
       const v = await api.verifySetting(targetJob, targetName, setting.index, force);
       setVerifications((prev) => ({ ...prev, [v.index]: v }));
+      recovered();
     } catch (e) {
       fail(e);
+    } finally {
+      setConfirming(false);
     }
   };
 
@@ -186,9 +249,13 @@ export default function Optimization({ jobId, model, onBack, onAdopted }: Props)
     if (selectedIndex == null || probed.has(selectedIndex) || verifications[selectedIndex]) return;
     setProbed((prev) => new Set(prev).add(selectedIndex));
     api.getVerification(targetJob, targetName, selectedIndex)
-      .then((v) => setVerifications((prev) => (prev[v.index] ? prev : { ...prev, [v.index]: v })))
-      .catch(() => { /* 404: nothing measured yet */ });
-  }, [selectedIndex, probed, verifications, targetJob, targetName]);
+      .then((v) => { setVerifications((prev) => (prev[v.index] ? prev : { ...prev, [v.index]: v })); recovered(); })
+      .catch((e: unknown) => {
+        // 404 means nothing has been measured yet; anything else is a real error and is shown.
+        if (e instanceof Error && /No verification/.test(e.message)) return;
+        fail(e);
+      });
+  }, [selectedIndex, probed, verifications, targetJob, targetName, fail, recovered]);
 
   // Poll every running verification by its own index, so a result can never
   // land in another setting's panel. Errors stop that verification's polling
@@ -206,6 +273,7 @@ export default function Optimization({ jobId, model, onBack, onAdopted }: Props)
           const v = await api.getVerification(targetJob, targetName, index);
           if (cancelled) return;
           setVerifications((prev) => ({ ...prev, [index]: v }));
+          recovered();
           if (v.status === "running") timers.push(setTimeout(tick, POLL_MS));
         } catch (e) {
           if (cancelled) return;
@@ -219,16 +287,20 @@ export default function Optimization({ jobId, model, onBack, onAdopted }: Props)
       timers.push(setTimeout(tick, POLL_MS));
     });
     return () => { cancelled = true; timers.forEach(clearTimeout); };
-  }, [runningKey, targetJob, targetName, authLost, fail]);
+  }, [runningKey, targetJob, targetName, authLost, fail, recovered]);
 
   const adopt = async () => {
-    if (!selected || !verification || verification.index !== selected.index) return;
+    if (!selected || !verification || verification.index !== selected.index || adopting) return;
+    setAdopting(true);
     try {
       await api.adoptSetting(targetJob, targetName, selected.index);
       setAdoptedIndex(selected.index);
+      recovered();
       onAdopted(selected, verification);
     } catch (e) {
       fail(e);
+    } finally {
+      setAdopting(false);
     }
   };
 
@@ -302,7 +374,10 @@ export default function Optimization({ jobId, model, onBack, onAdopted }: Props)
       textfont: { size: 12, color: ACCENT },
       marker: {
         size: frontier.map((s) => (highlights.some((h) => h.index === s.index) ? 15 : 10)) as unknown as number,
-        color: frontier.map((s) => (atChance(s, proxyFpr) ? "#ffffff" : ACCENT)) as unknown as string,
+        color: frontier.map((s) => {
+          const ev = evidenceOf(s, proxyFpr);
+          return ev === "chance" ? "#ffffff" : ev === "unknown" ? TESTED : ACCENT;
+        }) as unknown as string,
         // plotly.js accepts per-point arrays here; its typings do not.
         opacity: frontier.map((s) => (withinLimit(s) ? 1 : 0.3)) as unknown as number,
         line: { width: 2, color: ACCENT },
@@ -344,8 +419,20 @@ export default function Optimization({ jobId, model, onBack, onAdopted }: Props)
       </div>
 
       {error && (
-        <div role="alert" className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-500">
-          {error}
+        <div role="alert" className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-500 flex items-center gap-4 flex-wrap">
+          <span>{error}</span>
+          {authLost && (
+            <button onClick={retryAuth} className="ml-auto px-3 py-1 rounded border border-red-500/60 font-bold hover:bg-red-500/10">
+              {COPY.enterToken}
+            </button>
+          )}
+        </div>
+      )}
+
+      {run?.status === "stale" && (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-600 dark:text-amber-400 flex items-start gap-2">
+          <span className="material-symbols-outlined text-base shrink-0">history</span>
+          <span><span className="font-bold">{COPY.stale}</span> {run.error}</span>
         </div>
       )}
 
@@ -362,10 +449,15 @@ export default function Optimization({ jobId, model, onBack, onAdopted }: Props)
               type="range" min={0} max={0.5} step={0.01}
               value={maxQualityLoss}
               onChange={(e) => setMaxQualityLoss(Number(e.target.value))}
-              className="w-full accent-primary"
+              disabled={phase !== "setup" && baseline === undefined}
+              className="w-full accent-primary disabled:opacity-40"
               aria-valuetext={`${(maxQualityLoss * 100).toFixed(0)}%`}
             />
-            <p className="text-xs text-slate-400 mt-1">{COPY.constraintHelp}</p>
+            <p className="text-xs text-slate-400 mt-1">
+              {phase !== "setup" && baseline === undefined
+                ? (phase === "running" ? COPY.noBaselineYet : COPY.noBaselineAtAll)
+                : COPY.constraintHelp}
+            </p>
           </div>
           <div className="flex gap-6 text-sm">
             <div>
@@ -433,8 +525,8 @@ export default function Optimization({ jobId, model, onBack, onAdopted }: Props)
             disabled={starting || authLost}
             className="self-start px-8 py-2.5 rounded-lg bg-slate-700 text-cream border border-primary font-bold hover:bg-slate-600 transition-colors flex items-center gap-2 disabled:opacity-50"
           >
-            <span className="material-symbols-outlined text-base">{run?.status === "failed" ? "refresh" : "rocket_launch"}</span>
-            {starting ? "…" : run?.status === "failed" ? COPY.retry : COPY.start}
+            <span className="material-symbols-outlined text-base">{run?.status === "failed" || run?.status === "stale" ? "refresh" : "rocket_launch"}</span>
+            {starting ? "…" : run?.status === "failed" ? COPY.retry : run?.status === "stale" ? COPY.searchAgain : COPY.start}
           </button>
         )}
       </div>
@@ -503,9 +595,13 @@ export default function Optimization({ jobId, model, onBack, onAdopted }: Props)
                   if (hit) select(hit);
                 }}
               />
-              <p className="text-xs text-slate-400">{COPY.fprNote(proxyFpr)}</p>
+              <p className="text-xs text-slate-400">{COPY.fprNote(proxyFpr, realizedRange)}</p>
+              <p className="text-xs text-slate-400">{COPY.intervalFloorNote}</p>
               {chanceCount > 0 && (
                 <p className="text-xs text-slate-400">{COPY.chanceNote(chanceCount, proxyFpr)}</p>
+              )}
+              {unknownCount > 0 && (
+                <p className="text-xs text-slate-400">{COPY.unknownNote(unknownCount)}</p>
               )}
               {unmeasured > 0 && (
                 <p className="text-xs text-slate-400">{COPY.unmeasured(unmeasured)}</p>
@@ -560,7 +656,9 @@ export default function Optimization({ jobId, model, onBack, onAdopted }: Props)
           setting={selected}
           run={run}
           verification={verification?.index === selected.index ? verification : null}
-          adopted={adoptedIndex === selected.index}
+          adopted={adoptedIndices.has(selected.index) || adoptedIndex === selected.index}
+          maxQualityLoss={maxQualityLoss}
+          busy={confirming || adopting}
           onClose={() => setSelectedIndex(null)}
           onConfirm={() => confirm(selected)}
           onRemeasure={() => confirm(selected, true)}
@@ -595,12 +693,14 @@ function epsilonLabel(epsilon: number | null | undefined): string {
 }
 
 function SettingPanel({
-  setting, run, verification, adopted, onClose, onConfirm, onRemeasure, onAdopt,
+  setting, run, verification, adopted, maxQualityLoss, busy, onClose, onConfirm, onRemeasure, onAdopt,
 }: {
   setting: Setting;
   run: OptimizationRun | null;
   verification: Verification | null;
   adopted: boolean;
+  maxQualityLoss: number;
+  busy: boolean;
   onClose: () => void;
   onConfirm: () => void;
   onRemeasure: () => void;
@@ -610,15 +710,40 @@ function SettingPanel({
   const proxyFpr = run?.proxy_fpr ?? undefined;
   const estimatedCi = verification?.estimated.attack_tpr_ci ?? setting.attack_tpr_ci ?? null;
   const estimatedTpr = verification?.estimated.attack_tpr ?? setting.attack_tpr ?? null;
+  const onUserModel = verified?.scope === "user_model";
+
+  // A dialog: focus moves in, stays in, and Escape closes it. Focus goes back
+  // to where it was when the panel closes.
+  const panelRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    const panel = panelRef.current;
+    const focusable = () => Array.from(
+      panel?.querySelectorAll<HTMLElement>("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])") ?? [],
+    ).filter((el) => !el.hasAttribute("disabled"));
+    focusable()[0]?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.preventDefault(); onClose(); return; }
+      if (e.key !== "Tab") return;
+      const items = focusable();
+      if (items.length === 0) return;
+      const first = items[0], last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("keydown", onKey); previous?.focus?.(); };
+  }, [onClose]);
 
   // "Optimistic" is decided on intervals, not on a relative margin: a 20%
   // difference between two numbers each resting on a handful of records is
-  // noise. The measured interval must lie entirely above the estimated one.
-  // An estimate of exactly 0 is covered the same way (its interval is [0, hi]).
+  // noise. The measured interval must lie entirely above the estimated one;
+  // when the estimate has no interval, above its point value.
+  const estimatedUpper = estimatedCi != null ? estimatedCi[1] : estimatedTpr;
   const optimistic =
-    verified?.attack_tpr != null && verified.attack_tpr_ci != null && estimatedCi != null &&
-    verified.attack_tpr_ci[0] > estimatedCi[1];
-  const measuredAtChance = verified != null && atChance(verified, verified.proxy_fpr ?? proxyFpr);
+    verified?.attack_tpr != null && verified.attack_tpr_ci != null && estimatedUpper != null &&
+    verified.attack_tpr_ci[0] > estimatedUpper;
+  const measuredEvidence = verified == null ? null : evidenceOfVerified(verified, proxyFpr);
 
   const rows: Array<[string, string]> = [
     [COPY.epsilonLabel, epsilonLabel(verified ? verified.epsilon : setting.epsilon)],
@@ -628,10 +753,12 @@ function SettingPanel({
     ["Batch size", setting.config.batch_size?.toString() ?? "—"],
   ];
 
+  // Measured loss against the user's own model (only meaningful on the user's model).
   const qualityLoss =
-    verified?.utility != null && verified.baseline_utility != null && verified.baseline_utility > 0
+    onUserModel && verified?.utility != null && verified.baseline_utility != null && verified.baseline_utility > 0
       ? 1 - verified.utility / verified.baseline_utility
       : null;
+  const overLimit = qualityLoss != null && qualityLoss > maxQualityLoss;
   const measuredFpr = verified?.realized_fpr ?? verified?.proxy_fpr ?? proxyFpr;
   const canConfirm = verification == null || verification.status === "failed";
 
@@ -639,7 +766,9 @@ function SettingPanel({
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <aside
+        ref={panelRef}
         role="dialog"
+        aria-modal="true"
         aria-label={COPY.panelTitle}
         className="relative w-full max-w-md h-full overflow-y-auto bg-white dark:bg-surface border-l border-slate-200 dark:border-surface-border p-6 flex flex-col gap-6"
       >
@@ -662,8 +791,11 @@ function SettingPanel({
           {(setting.n_members ?? run?.n_members) != null && (
             <p className="text-xs text-slate-400">{COPY.estimatedScale((setting.n_members ?? run?.n_members)!)}</p>
           )}
-          {atChance(setting, proxyFpr) && (
-            <p className="text-xs text-slate-400">{COPY.chanceNote(1, proxyFpr)}</p>
+          {evidenceOf(setting, proxyFpr) === "chance" && (
+            <p className="text-xs text-slate-400">{COPY.chanceNote(1, setting.attack_realized_fpr ?? proxyFpr)}</p>
+          )}
+          {evidenceOf(setting, proxyFpr) === "unknown" && setting.attack_tpr != null && (
+            <p className="text-xs text-slate-400">{COPY.unknownNote(1)}</p>
           )}
         </div>
 
@@ -681,10 +813,11 @@ function SettingPanel({
           <div className="flex flex-col gap-2">
             <button
               onClick={onConfirm}
-              className="px-6 py-2.5 rounded-lg bg-slate-700 text-cream border border-primary font-bold hover:bg-slate-600 transition-colors flex items-center justify-center gap-2"
+              disabled={busy}
+              className="px-6 py-2.5 rounded-lg bg-slate-700 text-cream border border-primary font-bold hover:bg-slate-600 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
             >
               <span className="material-symbols-outlined text-base">verified</span>
-              {verification?.status === "failed" ? COPY.retryConfirm : COPY.confirm}
+              {busy ? "…" : verification?.status === "failed" ? COPY.retryConfirm : COPY.confirm}
             </button>
             <p className="text-xs text-slate-400">{COPY.confirmHelp}</p>
           </div>
@@ -716,8 +849,10 @@ function SettingPanel({
               <span className="material-symbols-outlined text-sm shrink-0">{verified.scope === "user_model" ? "person_check" : "science"}</span>
               <span>
                 <span className="font-bold">{verified.scope === "user_model" ? COPY.verifiedOnYourModel : COPY.verifiedOnSubset}</span>
-                {verified.scope !== "user_model" && <> {COPY.subsetScopeHelp}</>}
-                {verified.n_members != null && verified.scope === "user_model" && (
+                {!onUserModel && (
+                  <> {COPY.subsetScopeHelp} {measuredFpr != null && COPY.measuredFprLine(fprLabel(measuredFpr))}</>
+                )}
+                {verified.n_members != null && onUserModel && (
                   <> {verified.n_members.toLocaleString()} training records, {verified.n_shadow} reference models,
                     false-alarm rate {measuredFpr != null ? fprLabel(measuredFpr) : "—"}
                     {verified.n_nonmember_false_positives != null && ` (${verified.n_nonmember_false_positives} false alarms behind the threshold)`}.</>
@@ -741,27 +876,53 @@ function SettingPanel({
                 <span><span className="font-bold">{COPY.notMeasurable}</span> {verified.resolution_warning ?? COPY.notMeasurableHelp}</span>
               </div>
             )}
-            {measuredAtChance && (
-              <p className="text-xs text-slate-400">{COPY.chanceNote(1, verified.proxy_fpr ?? proxyFpr)}</p>
+            {measuredEvidence === "chance" && (
+              <p className="text-xs text-slate-400">{COPY.chanceNote(1, measuredFpr)}</p>
+            )}
+            {measuredEvidence === "unknown" && verified.attack_tpr != null && (
+              <p className="text-xs text-slate-400">{COPY.unknownNote(1)}</p>
+            )}
+            {overLimit && qualityLoss != null && (
+              <div role="alert" className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-600 dark:text-amber-400 flex items-start gap-2">
+                <span className="material-symbols-outlined text-sm shrink-0">warning</span>
+                <span>{COPY.exceedsMeasuredLimit(pct(qualityLoss, 1), `${(maxQualityLoss * 100).toFixed(0)}%`)}</span>
+              </div>
             )}
             <div className="grid grid-cols-2 gap-3">
               <StatCard label={`${COPY.estimate} — attack`} value={pct(estimatedTpr, 2)} sub={rangeLabel(estimatedCi)} />
               <StatCard
                 label={`${COPY.verified} — attack`}
                 value={pct(verified.attack_tpr, 2)}
-                sub={rangeLabel(verified.attack_tpr_ci)}
+                sub={[rangeLabel(verified.attack_tpr_ci),
+                      measuredFpr != null ? `at ${fprLabel(measuredFpr)} false alarms` : null].filter(Boolean).join(" · ") || null}
                 tone={optimistic ? "amber" : undefined}
               />
-              <StatCard label={`${COPY.estimate} — quality`} value={pct(verification?.estimated.utility, 2)} />
-              <StatCard
-                label={`${COPY.verified} — quality`}
-                value={pct(verified.utility, 2)}
-                sub={qualityLoss != null ? `${COPY.qualityLoss} ${pct(qualityLoss, 1)} ${COPY.qualityLossHelp(pct(verified.baseline_utility, 1))}` : null}
-              />
+              {onUserModel ? (
+                <>
+                  <StatCard label={`${COPY.estimate} — quality`} value={pct(verification?.estimated.utility, 2)} />
+                  <StatCard
+                    label={`${COPY.verified} — quality`}
+                    value={pct(verified.utility, 2)}
+                    tone={overLimit ? "amber" : undefined}
+                    sub={qualityLoss == null ? null
+                      : qualityLoss >= 0
+                        ? `${COPY.qualityLoss} ${pct(qualityLoss, 1)} ${COPY.qualityLossHelp(pct(verified.baseline_utility, 1))}`
+                        : `${COPY.qualityGain} ${pct(-qualityLoss, 1)} ${COPY.qualityLossHelp(pct(verified.baseline_utility, 1))}`}
+                  />
+                </>
+              ) : (
+                // The search-scale model was not retrained: there is one quality
+                // number, the trial's estimate, and it is labelled as such.
+                <StatCard label={`${COPY.estimate} — ${COPY.estimateQualitySubset}`} value={pct(verified.utility, 2)} />
+              )}
             </div>
+            {qualityLoss != null && qualityLoss < 0 && (
+              <p className="text-xs text-slate-400">{COPY.qualityGainHelp}</p>
+            )}
+            <p className="text-xs text-slate-400">{COPY.intervalFloorNote}</p>
 
             {!adopted && (
-              <button onClick={onRemeasure} className="self-start text-xs text-slate-400 hover:text-primary underline">
+              <button onClick={onRemeasure} disabled={busy} className="self-start text-xs text-slate-400 hover:text-primary underline disabled:opacity-50">
                 {COPY.remeasure}
               </button>
             )}
@@ -774,13 +935,13 @@ function SettingPanel({
               <div className="flex flex-col gap-2">
                 <button
                   onClick={onAdopt}
-                  disabled={verified.attack_tpr == null}
+                  disabled={verified.attack_tpr == null || !onUserModel || busy}
                   className="px-6 py-2.5 rounded-lg bg-slate-700 text-cream border border-primary font-bold hover:bg-slate-600 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   <span className="material-symbols-outlined text-base">check</span>
-                  {COPY.adopt}
+                  {busy ? "…" : COPY.adopt}
                 </button>
-                <p className="text-xs text-slate-400">{COPY.adoptHelp}</p>
+                <p className="text-xs text-slate-400">{onUserModel ? COPY.adoptHelp : COPY.subsetScopeHelp}</p>
               </div>
             )}
           </div>

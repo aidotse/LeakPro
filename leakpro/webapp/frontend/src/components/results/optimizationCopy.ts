@@ -7,10 +7,10 @@
  * place rather than scattered through JSX.
  */
 
-/** "1%", "0.1%", "2.5%": as many decimals as the rate needs, never rounded to a different rate. */
+/** "1%", "0.1%", "1.01%", "2.5%": as many decimals as the rate has (to three), never rounded to a different rate. */
 export const fprLabel = (fpr: number) => {
   const pct = fpr * 100;
-  return `${Number.isInteger(pct) ? pct : parseFloat(pct.toPrecision(2))}%`;
+  return `${Number.isInteger(pct) ? pct : parseFloat(pct.toFixed(3))}%`;
 };
 
 const count = (n: number) => n.toLocaleString();
@@ -31,6 +31,11 @@ export const COPY = {
   constraintHelp:
     "Relative to the unprotected model: 5% means a model that keeps at least 95% of its quality. " +
     "Settings below the line are shown but not recommended.",
+  noBaselineYet:
+    "The unprotected reference model is still training; the quality limit applies once its quality is known.",
+  noBaselineAtAll:
+    "This run has no unprotected reference model (it was searched before one was measured), so the quality " +
+    "limit cannot be applied to it. Start a new search to get one.",
   baselineLabel: "Quality without protection",
   baselineHelp: (members: number) => `an unprotected model trained on the same ${count(members)} records`,
   modelUtilityLabel: "Your model's quality",
@@ -46,13 +51,28 @@ export const COPY = {
 
   axisAttack: "Attack success (%) — lower is safer",
   axisQuality: "Model quality (%) — higher is better",
-  fprNote: (fpr: number | undefined) =>
+  fprNote: (fpr: number | undefined, realized?: [number, number] | null) =>
     "Attack success is the share of training records an attacker correctly identifies, " +
-    (fpr == null ? "measured at the run's false-alarm rate." : `measured at a ${fprLabel(fpr)} false-alarm rate.`),
+    (fpr == null ? "measured at the run's false-alarm rate." : `measured at a ${fprLabel(fpr)} false-alarm rate.`) +
+    (realized == null ? "" :
+      ` Where the data could not express that rate exactly, the setting shows the rate it was actually read at` +
+      ` (${fprLabel(realized[0])}${realized[0] === realized[1] ? "" : ` to ${fprLabel(realized[1])}`}).`),
+  intervalFloorNote:
+    "Likely ranges cover only which training records were audited. The threshold itself rests on a few " +
+    "false alarms, so the true uncertainty is at least this wide.",
   chanceNote: (n: number, fpr: number | undefined) =>
-    `${n} setting${n === 1 ? "" : "s"} cannot be told apart from guessing: the attack's likely range includes ` +
-    `the false-alarm rate${fpr == null ? "" : ` (${fprLabel(fpr)})`} itself. ` +
+    `${n} setting${n === 1 ? "" : "s"} cannot be told apart from guessing: the attack's likely range reaches ` +
+    `down to the false-alarm rate${fpr == null ? "" : ` (${fprLabel(fpr)})`} the attack was read at. ` +
+    "An attack at or below its false-alarm rate is noise around chance, not protection. " +
     "They are shown hollow and not ranked; the audit is too small to separate them.",
+  unknownNote: (n: number) =>
+    `${n} setting${n === 1 ? "" : "s"} ${n === 1 ? "has" : "have"} no likely range (no interval was recorded), ` +
+    "so it cannot be told whether the attack beat guessing. Shown grey and not ranked.",
+  pollRetrying: "Lost contact with the backend while the run is in progress; retrying…",
+  pollGaveUp: "Stopped checking the run after repeated errors. Reload the page to resume; the run itself continues.",
+  stale: "These results are from a previous model under this name.",
+  searchAgain: "Search again",
+  enterToken: "Enter the token and retry",
   baselinePoint: "Unprotected",
 
   resultsTitle: "Best trade-offs",
@@ -66,6 +86,7 @@ export const COPY = {
   frontierList: "Settings on the line",
   frontierNone: "No setting stays within your quality limit. Move the slider to see what the search found.",
   chanceTag: "≈ guessing",
+  unknownTag: "range unknown",
 
   panelTitle: "Protection setting",
   estimatedAttack: "Estimated attack success",
@@ -89,7 +110,16 @@ export const COPY = {
     "Your model's own training split is unknown, so this re-attacks the search-scale model with more " +
     "reference models. It describes that model, not yours, and quality is not compared.",
   qualityLoss: "Quality loss",
+  qualityGain: "Quality gain",
   qualityLossHelp: (yours: string) => `vs your model's ${yours}`,
+  qualityGainHelp:
+    "The protected model scored higher than your model on its own test split: the noise acted as " +
+    "regularisation, or your model was itself trained privately.",
+  exceedsMeasuredLimit: (loss: string, limit: string) =>
+    `Measured on your model, the quality loss is ${loss}, above the ${limit} limit you set. ` +
+    "The estimate was made on the search model; this is the number that counts.",
+  estimateQualitySubset: "quality (search model)",
+  measuredFprLine: (fpr: string) => `False-alarm rate ${fpr}.`,
   range: "likely range",
   optimistic: "The estimate was optimistic: the measured attack is clearly above it.",
   epsilonLabel: "Privacy budget (ε)",
@@ -114,12 +144,15 @@ export const COPY = {
 } as const;
 
 /** Tags for the highlighted settings, ordered from most protective to highest quality. */
+// "Safest measurable", not "Safest": settings at chance level are excluded
+// before the tags are handed out, so the top tag names the most protective
+// setting whose attack could still be measured.
 const TAGS: Record<number, readonly string[]> = {
   1: ["Balanced"],
-  2: ["Safest", "Best quality"],
-  3: ["Safest", "Balanced", "Best quality"],
-  4: ["Safest", "Safer", "Better quality", "Best quality"],
-  5: ["Safest", "Safer", "Balanced", "Better quality", "Best quality"],
+  2: ["Safest measurable", "Best quality"],
+  3: ["Safest measurable", "Balanced", "Best quality"],
+  4: ["Safest measurable", "Safer", "Better quality", "Best quality"],
+  5: ["Safest measurable", "Safer", "Balanced", "Better quality", "Best quality"],
 };
 
 export function tagsFor(count: number): readonly string[] {
