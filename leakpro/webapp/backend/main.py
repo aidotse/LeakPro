@@ -721,6 +721,7 @@ async def check_compat(job_id: str, model_name: str) -> CompatResult:
         weights_path=weights_path if weights_path.exists() else None,
         data_shape=data_shape,
         data_path=Path(data_path_str) if data_path_str else None,
+        model_class=(job.get("arch_config") or {}).get("model_class"),
     )
     # Register model in job state so set_attack_config and the worker can find it
     job_models = job.setdefault("models", [])

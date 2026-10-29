@@ -355,22 +355,10 @@ def run_audit_job(
                 lp = LeakPro(handler_cls, str(temp_yaml))
                 results = lp.run_audit(create_pdf=False)
 
-                # Detect model class name for display in results
+                # The class label on the result row is the class the audit ran
+                # on (chosen above by the one model-class rule), not a second probe.
                 _preset_class_map = {"cifar_image": "ResNet18", "cifar_wrn": "ResNet18"}
-                _model_class: str | None = _preset_class_map.get(preset)  # type: ignore[arg-type]
-                if _model_class is None and (job_dir / "arch.py").exists():
-                    try:
-                        import importlib.util as _ilu3
-                        import torch.nn as _nn3
-                        _s3 = _ilu3.spec_from_file_location("_mc_probe", job_dir / "arch.py")
-                        _m3 = _ilu3.module_from_spec(_s3)
-                        _s3.loader.exec_module(_m3)
-                        _mc3 = next((v for v in vars(_m3).values()
-                                     if isinstance(v, type) and issubclass(v, _nn3.Module)
-                                     and v is not _nn3.Module), None)
-                        _model_class = _mc3.__name__ if _mc3 else None
-                    except Exception:
-                        pass
+                _model_class: str | None = _preset_class_map.get(preset) or config["target"].get("model_class")  # type: ignore[arg-type]
                 if model_spec.get("dpsgd") and _model_class == "ResNet18":
                     _model_class = "ResNet18 (DP-SGD)"
 
