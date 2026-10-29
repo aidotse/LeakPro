@@ -257,7 +257,7 @@ class PETSetting(BaseModel):
 class PETRun(BaseModel):
     """Everything the optimization view needs for one model, read off disk."""
 
-    status: str                               # idle | running | done | failed
+    status: str                               # idle | running | done | failed | stale
     model_name: str
     n_trials: int | None = None
     proxy_fpr: float | None = None

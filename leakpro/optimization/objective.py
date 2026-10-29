@@ -44,6 +44,7 @@ points as the target saw.
 
 import hashlib
 import json
+import os
 import pickle
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -264,8 +265,12 @@ def _write_population(dataset: Dataset, order: list[int], path: Path) -> torch.T
     data, targets = torch.cat(xs), torch.cat(ys)
     population = DPSGDAuditHandler.UserDataset(data, targets)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("wb") as f:
+    # Written beside the target and moved into place, so a reader never opens
+    # a half-written population: it sees the previous file or the whole new one.
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    with tmp.open("wb") as f:
         pickle.dump(population, f)
+    os.replace(tmp, path)
     return targets
 
 

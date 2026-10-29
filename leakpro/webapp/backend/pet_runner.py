@@ -21,12 +21,15 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
+import hashlib
 import inspect
 import json
 import math
 import os
 import pickle
 import sys
+import tempfile
 import traceback
 from pathlib import Path
 from typing import Any
@@ -105,6 +108,9 @@ BASELINE_FILE = "baseline.json"
 # The user's-size population a verification audits, cached per model.
 FULL_POPULATION_META = "population_full.json"
 FULL_POPULATION_NAME = "population_full.pkl"
+# What the search and its confirms were computed for: the model's members and
+# training settings. A different model under the same name makes them stale.
+FINGERPRINT_FILE = "model_fingerprint.json"
 
 
 # --------------------------------------------------------------------------- #
@@ -134,10 +140,28 @@ def json_safe(value: Any) -> Any:  # noqa: ANN401
     return value
 
 
+def write_json_atomic(path: Path, value: Any) -> None:  # noqa: ANN401
+    """Write a JSON file so a concurrent reader sees the old file or the new one, never a partial one.
+
+    The API polls these files while the runner writes them, and the API and
+    the runner both write some of them. A plain ``write_text`` truncates first,
+    so a read in between returns nothing or half a document.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(json_safe(value), indent=2))
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
 def write_status(out: Path, **fields: Any) -> None:  # noqa: ANN401
     """Overwrite status.json; the API reads this rather than tracking the process."""
-    out.mkdir(parents=True, exist_ok=True)
-    (out / STATUS_FILE).write_text(json.dumps(json_safe({"pid": os.getpid(), **fields}), indent=2))
+    write_json_atomic(out / STATUS_FILE, {"pid": os.getpid(), **fields})
 
 
 def read_json(path: Path) -> dict | None:
@@ -223,7 +247,7 @@ def model_kwargs(cls: type, num_classes: int, num_features: int | None, dpsgd: b
     return kwargs
 
 
-def _metadata(model_dir: Path) -> Any:  # noqa: ANN401
+def read_metadata(model_dir: Path) -> Any:  # noqa: ANN401
     """The model's ``model_metadata.pkl`` for field inspection, or None when absent or unreadable."""
     path = model_dir / "model_metadata.pkl"
     if not path.exists():
@@ -257,10 +281,10 @@ def _field(meta: Any, name: str, default: Any = None) -> Any:  # noqa: ANN401
 
 def _metadata_init_params(model_dir: Path) -> dict:
     """Constructor kwargs recorded in the model's metadata, when there is one."""
-    return dict(_field(_metadata(model_dir), "init_params", {}) or {})
+    return dict(_field(read_metadata(model_dir), "init_params", {}) or {})
 
 
-def _training_settings(model: dict, meta: Any) -> dict:  # noqa: ANN401
+def training_settings(model: dict, meta: Any) -> dict:  # noqa: ANN401
     """How the user's model was trained: epochs, optimizer, learning rate, batch size.
 
     The metadata is the record of what actually ran (the training step writes
@@ -278,6 +302,21 @@ def _training_settings(model: dict, meta: Any) -> dict:  # noqa: ANN401
         "learning_rate": float(opt_params.get("lr") or train_params.get("learning_rate") or DEFAULT_LEARNING_RATE),
         "batch_size": int(loader_params.get("batch_size") or train_params.get("batch_size") or DEFAULT_BATCH_SIZE),
     }
+
+
+def model_fingerprint(model: dict, meta: Any) -> dict:  # noqa: ANN401
+    """What a search and its confirms are valid for: the model's members and how it was trained.
+
+    A model retrained under the same name with another split, or other epochs,
+    optimizer, learning rate or batch size, is a different model: its confirm
+    would otherwise retrain on the previous members and compare with the new
+    accuracy. The fingerprint is stored with the run and checked on every read.
+    """
+    members = sorted(int(i) for i in (_field(meta, "train_indices") or []))
+    training = training_settings(model, meta)
+    payload = json.dumps({"train_indices": members, "training": training}, sort_keys=True)
+    return {"fingerprint": hashlib.sha256(payload.encode()).hexdigest(),
+            "n_members": len(members) or None, "training": training}
 
 
 def _assert_classification(dataset: Any) -> None:  # noqa: ANN401
@@ -308,11 +347,14 @@ def _population(out: Path, dataset: Any, seed: int) -> Population:  # noqa: ANN4
     meta = read_json(out / POPULATION_META)
     if meta and Path(meta.get("path", "")).exists():
         return Population(**meta)
+    # The label check reads every target when the dataset keeps no label array,
+    # so it runs once per run directory: a population exists only if it passed.
+    _assert_classification(dataset)
     n_target = min(len(dataset) // 2, MAX_TARGET)
     if n_target == 0:
         raise ValueError("The dataset is too small to carve a population from.")
     population = materialize_population(dataset, out, n_target=n_target, n_test=min(n_target, MAX_TEST), seed=seed)
-    (out / POPULATION_META).write_text(json.dumps(population.__dict__))
+    write_json_atomic(out / POPULATION_META, population.__dict__)
     return population
 
 
@@ -345,7 +387,6 @@ def build(job: dict, job_dir: Path, model_name: str, request: dict) -> dict:
     # way the audit worker does, so normalisation in its __getitem__ is kept.
     register_job_dataset_modules(job_dir)
     dataset = load_dataset(Path(data_path))
-    _assert_classification(dataset)
     population = _population(out, dataset, seed)
     with open(population.path, "rb") as f:
         pop = pickle.load(f)  # noqa: S301 - written by materialize_population above
@@ -366,7 +407,7 @@ def build(job: dict, job_dir: Path, model_name: str, request: dict) -> dict:
     kwargs = {**derived, **recorded, **({"dpsgd": True} if "dpsgd" in derived else {})}
     binary = detect_binary(arch, sample, cls.__name__, kwargs)
 
-    training = _training_settings(model, _metadata(job_dir / "models" / model_name))
+    training = training_settings(model, read_metadata(job_dir / "models" / model_name))
     recipe = recipe_from_module(
         module_path=arch, dataset=pop,
         epochs=training["epochs"],
@@ -482,7 +523,7 @@ def _search_baseline(parts: dict, out: Path, *, n_shadow: int, delta: float,  # 
         "gated": bool(result.extras.get("gated")),
         "trial_dir": result.extras.get("trial_dir"),
     })
-    (out / BASELINE_FILE).write_text(json.dumps(record, indent=2))
+    write_json_atomic(out / BASELINE_FILE, record)
     return record
 
 
@@ -539,17 +580,20 @@ def verification_attack_path(out: Path, index: int) -> Path:
     return out / f"verification_{index}_attack.json"
 
 
-def _full_population(out: Path, dataset: Any, meta: Any, seed: int) -> Population:  # noqa: ANN401
+def _full_population(out: Path, dataset: Any, meta: Any, seed: int, fingerprint: str) -> Population:  # noqa: ANN401
     """The user's-size audit population: the model's own members plus as many non-members.
 
     Non-members are the model's own test split first (so utility is scored on
     exactly the records the user's accuracy was), then other records the model
-    never trained on, until there are as many as members. Cached per model.
+    never trained on, until there are as many as members. Cached per model and
+    keyed on the model's fingerprint, so a retrained model with a same-size but
+    different split never reuses the previous model's members.
     """
     members = [int(i) for i in _field(meta, "train_indices")]
     test_split = [int(i) for i in _field(meta, "test_indices") or []]
     cached = read_json(out / FULL_POPULATION_META)
-    if cached and Path(cached.get("path", "")).exists() and cached.get("n_members") == len(members):
+    if cached and Path(cached.get("path", "")).exists() and cached.get("fingerprint") == fingerprint:
+        cached.pop("fingerprint", None)
         cached.pop("n_members", None)
         return Population(**cached)
     seen = set(members)
@@ -559,7 +603,7 @@ def _full_population(out: Path, dataset: Any, meta: Any, seed: int) -> Populatio
     non_members = test_split + rest[:max(0, len(members) - len(test_split))]
     population = materialize_split(dataset, out, members=members, non_members=non_members,
                                    utility=test_split or None, name=FULL_POPULATION_NAME)
-    (out / FULL_POPULATION_META).write_text(json.dumps({**population.__dict__, "n_members": len(members)}))
+    write_json_atomic(out / FULL_POPULATION_META, {**population.__dict__, "fingerprint": fingerprint})
     return population
 
 
@@ -578,8 +622,7 @@ def _attack_record(mia: Any, population: Population) -> dict:  # noqa: ANN401
 
 
 def _write_verification(out: Path, index: int, **fields: Any) -> None:  # noqa: ANN401
-    verification_path(out, index).write_text(json.dumps(json_safe({"pid": os.getpid(), "index": index, **fields}),
-                                                        indent=2))
+    write_json_atomic(verification_path(out, index), {"pid": os.getpid(), "index": index, **fields})
 
 
 def run_verification(job_dir: Path, model_name: str, index: int) -> None:
@@ -617,14 +660,15 @@ def run_verification(job_dir: Path, model_name: str, index: int) -> None:
     delta = float(request.get("delta") or DEFAULT_DELTA)
     max_physical_batch = int(request.get("max_physical_batch") or DEFAULT_MAX_PHYSICAL_BATCH)
     config = dict(attrs.get("config") or trial.params)
-    meta = _metadata(job_dir / "models" / model_name)
+    meta = read_metadata(job_dir / "models" / model_name)
     model_utility = parts["model"].get("test_accuracy")
     if model_utility is None:
         model_utility = _field(_field(meta, "test_result"), "accuracy")
     notes: list[str] = []
 
     if _field(meta, "train_indices"):
-        population = _full_population(out, parts["dataset"], meta, parts["seed"])
+        population = _full_population(out, parts["dataset"], meta, parts["seed"],
+                                      model_fingerprint(parts["model"], meta)["fingerprint"])
         n_members, n_non = len(population.train_indices), len(population.test_indices)
         if n_non < n_members:
             notes.append(f"Only {n_non} records the model never trained on were available as non-members for "
@@ -641,7 +685,7 @@ def run_verification(job_dir: Path, model_name: str, index: int) -> None:
         )
         scope = "user_model"
         if mia is not None:
-            verification_attack_path(out, index).write_text(json.dumps(json_safe(_attack_record(mia, population))))
+            write_json_atomic(verification_attack_path(out, index), _attack_record(mia, population))
         resolution = None
         if result.extras.get("gated"):
             resolution = "the retrained model did not learn (utility at the majority-class rate), so it was not attacked"
@@ -676,7 +720,7 @@ def run_verification(job_dir: Path, model_name: str, index: int) -> None:
         mia = reaudit_trial(attrs["trial_dir"], population_path=parts["population"].path, target=parts["target"],
                             rmia_config={"num_shadow_models": VERIFY_N_SHADOW}, seed=parts["seed"])
         tpr, realized_fpr, degenerate = resolved_proxy_tpr(mia, proxy_fpr)
-        verification_attack_path(out, index).write_text(json.dumps(json_safe(_attack_record(mia, parts["population"]))))
+        write_json_atomic(verification_attack_path(out, index), _attack_record(mia, parts["population"]))
         verified = {
             "scope": "search_subset",
             "attack_tpr": tpr,
