@@ -192,35 +192,19 @@ class TestPetFlow:
         assert any("not yours" in n for n in verified["notes"])
         assert "attack_tpr" in verified and verified["n_members"] == 120
 
-        # Adopting an unverified setting is refused; the verified one lands as a
-        # normal result row carrying the verification's RMIA result.
+        # Adopting an unverified setting is refused. So is this one: it was
+        # measured on the search subset, not on the user's model, and an adopted
+        # row is read everywhere as the user's model, protected.
         other = next(s["index"] for s in run["settings"] if s["index"] != index)
         assert self._adopt(other).status_code == 409
-        if verified["attack_tpr"] is None:
-            assert self._adopt(index).status_code == 409
-            return
+        res = self._adopt(index)
+        assert res.status_code == 409 and "search subset" in res.text
+        assert not any(r.get("optimized") for r in self.backend._jobs[self.job_id].get("results", []))
         # A finished measurement is returned, not repeated, unless forced.
         calls_before = len(self.calls)
         again = self.client.post(f"/jobs/{self.job_id}/pet/verify", params={"model_name": MODEL},
                                  json={"index": index}, headers=self.auth)
         assert again.status_code == 200 and again.json()["status"] == "done" and len(self.calls) == calls_before
-        res = self._adopt(index)
-        assert res.status_code == 200, res.text
-        rows = self.backend._jobs[self.job_id]["results"]
-        adopted = next(r for r in rows if r["model_name"] == f"{MODEL} (optimized, setting {index})")
-        assert adopted["optimized"] is True and adopted["tuning_accounted"] is False
-        assert adopted["pet"]["setting_index"] == index and adopted["pet"]["scope"] == "search_subset"
-        assert set(adopted["pet"]["config"]) == {"noise_multiplier", "max_grad_norm", "learning_rate", "batch_size"}
-        assert adopted["pet"]["proxy_fpr"] == 0.1
-        assert adopted["attacks"][0]["attack_name"].upper() == "RMIA"
-        assert adopted["attacks"][0]["signal_values"]
-        assert adopted["train_meta"]["noise_multiplier"] == adopted["pet"]["config"]["noise_multiplier"]
-        # Persisted: a restart would reload it.
-        state = json.loads((self.backend._job_dir(self.job_id) / "state.json").read_text())
-        assert any(r["model_name"] == f"{MODEL} (optimized, setting {index})" for r in state["results"])
-        # Adopting the same setting again replaces its row; another setting adds one.
-        assert self._adopt(index).status_code == 200
-        assert sum(r.get("optimized", False) for r in self.backend._jobs[self.job_id]["results"]) == 1
 
         # Starting again resumes the study: one more trial, the first two kept.
         assert self._start(n_trials=3).status_code == 200
@@ -276,7 +260,20 @@ class TestPetFlow:
         assert adopted["pet"]["scope"] == "user_model" and adopted["pet"]["baseline_utility"] == 0.8
         assert adopted["dpsgd"] is (adopted["target_epsilon"] is not None)
         assert adopted["attacks"][0]["attack_name"].upper() == "RMIA"
+        assert adopted["attacks"][0]["signal_values"]
         assert len(adopted["attacks"][0]["true_labels"]) == 300
+        assert adopted["optimized"] is True and adopted["tuning_accounted"] is False
+        assert adopted["pet"]["setting_index"] == index and adopted["pet"]["proxy_fpr"] == 0.1
+        assert set(adopted["pet"]["config"]) == {"noise_multiplier", "max_grad_norm", "learning_rate", "batch_size"}
+        assert adopted["train_meta"]["noise_multiplier"] == adopted["pet"]["config"]["noise_multiplier"]
+        # Epochs and optimizer are how the model was trained (its metadata), not the job's request.
+        assert adopted["train_meta"]["epochs"] == 5 and adopted["train_meta"]["optimizer"] == "adam"
+        # Persisted: a restart would reload it.
+        state = json.loads((self.backend._job_dir(self.job_id) / "state.json").read_text())
+        assert any(r["model_name"] == f"{MODEL} (optimized, setting {index})" for r in state["results"])
+        # Adopting the same setting again replaces its row rather than adding one.
+        assert self._adopt(index).status_code == 200
+        assert sum(r.get("optimized", False) for r in self.backend._jobs[self.job_id]["results"]) == 1
 
     # ── rejection paths, cheap ────────────────────────────────────────────
     def test_unknown_model_is_404(self: Self) -> None:
@@ -327,6 +324,85 @@ class TestPetFlow:
         res = self.client.post(f"/jobs/{self.job_id}/pet/verify", params={"model_name": MODEL},
                                json={"index": 0}, headers=self.auth)
         assert res.status_code == 200 and self.calls == [["--verify", "0"]]
+
+    def test_one_pet_process_per_model(self: Self) -> None:
+        """A live measurement blocks another measurement and a new search; a dead one blocks nothing."""
+        out = self.pet_runner.pet_dir(self.backend._job_dir(self.job_id), MODEL)
+        out.mkdir(parents=True)
+        (out / "study.db").write_bytes(b"")
+        self.pet_runner.verification_path(out, 3).write_text(json.dumps(
+            {"status": "running", "index": 3, "estimated": {}, "pid": os.getpid()}))
+        res = self.client.post(f"/jobs/{self.job_id}/pet/verify", params={"model_name": MODEL},
+                               json={"index": 0}, headers=self.auth)
+        assert res.status_code == 409 and "setting 3" in res.text
+        res = self._start()
+        assert res.status_code == 409 and "setting 3" in res.text
+        # Asking about the running one again returns it rather than refusing.
+        res = self.client.post(f"/jobs/{self.job_id}/pet/verify", params={"model_name": MODEL},
+                               json={"index": 3}, headers=self.auth)
+        assert res.status_code == 200 and res.json()["status"] == "running"
+        assert self.calls == []
+
+    def test_changed_model_makes_its_results_stale(self: Self) -> None:
+        """A different model under the same name: results read as stale, confirm and adopt refuse, start moves them aside."""
+        out = self.pet_runner.pet_dir(self.backend._job_dir(self.job_id), MODEL)
+        out.mkdir(parents=True)
+        (out / "study.db").write_bytes(b"")
+        (out / "status.json").write_text(json.dumps({"status": "done", "model_name": MODEL, "pid": 2**22 + 7}))
+        (out / self.pet_runner.FINGERPRINT_FILE).write_text(json.dumps({"fingerprint": "previous-model"}))
+        self.pet_runner.verification_path(out, 0).write_text(json.dumps(
+            {"status": "done", "index": 0, "estimated": {}, "verified": {"attack_tpr": 0.2, "scope": "user_model"}}))
+        run = self._campaign()
+        assert run["status"] == "stale" and "changed" in run["error"] and run["settings"] == []
+        res = self.client.post(f"/jobs/{self.job_id}/pet/verify", params={"model_name": MODEL},
+                               json={"index": 0}, headers=self.auth)
+        assert res.status_code == 409 and "changed" in res.text
+        assert self._adopt(0).status_code == 409
+        # A new start keeps the old directory for the record and searches afresh.
+        self.pet_runner.run_search = lambda *a, **k: None  # type: ignore[assignment]
+        assert self._start().status_code == 200
+        assert self.calls == [[]]
+        stale = list(out.parent.glob(f"{MODEL}.stale-*"))
+        assert len(stale) == 1 and (stale[0] / "verification_0.json").exists()
+        current = json.loads((out / self.pet_runner.FINGERPRINT_FILE).read_text())
+        assert current["fingerprint"] != "previous-model" and current["training"]["epochs"] == 5
+        assert json.loads((out / "status.json").read_text())["pid"] == os.getpid()
+
+    def test_fingerprint_follows_the_split_and_the_training_settings(self: Self) -> None:
+        model = self.backend._jobs[self.job_id]["models"][0]
+        self._write_metadata(train=list(range(0, 150)), test=list(range(150, 300)))
+        meta = self.pet_runner.read_metadata(self.backend._job_dir(self.job_id) / "models" / MODEL)
+        first = self.pet_runner.model_fingerprint(model, meta)
+        assert first["n_members"] == 150 and first["training"]["learning_rate"] == 0.05
+        self._write_metadata(train=list(range(1, 151)), test=list(range(151, 300)))  # same size, other members
+        meta = self.pet_runner.read_metadata(self.backend._job_dir(self.job_id) / "models" / MODEL)
+        assert self.pet_runner.model_fingerprint(model, meta)["fingerprint"] != first["fingerprint"]
+
+    def test_remove_model_clears_its_pet_state(self: Self) -> None:
+        out = self.pet_runner.pet_dir(self.backend._job_dir(self.job_id), MODEL)
+        out.mkdir(parents=True)
+        (out / "study.db").write_bytes(b"")
+        stale = out.with_name(f"{MODEL}.stale-1")
+        stale.mkdir()
+        res = self.client.delete(f"/jobs/{self.job_id}/models/{MODEL}", headers=self.auth)
+        assert res.status_code == 200
+        assert not out.exists() and not stale.exists()
+        assert self.backend._jobs[self.job_id]["models"] == []
+        # The name reaches the filesystem, so it goes through safe_name like every other model_name.
+        import asyncio
+
+        from fastapi import HTTPException
+        with pytest.raises(HTTPException) as err:
+            asyncio.run(self.backend.remove_model(self.job_id, "../x"))
+        assert err.value.status_code == 400
+
+    def test_write_json_atomic_replaces_whole_files(self: Self, tmp_path: Path) -> None:
+        folder = tmp_path / "atomic"
+        path = folder / "status.json"
+        self.pet_runner.write_json_atomic(path, {"status": "running", "eps": float("inf")})
+        self.pet_runner.write_json_atomic(path, {"status": "done", "n": np.int64(3)})
+        assert json.loads(path.read_text()) == {"status": "done", "n": 3}
+        assert [p.name for p in folder.iterdir()] == ["status.json"]  # no temp file left behind
 
     def test_unmeasured_setting_cannot_be_adopted(self: Self) -> None:
         out = self.pet_runner.pet_dir(self.backend._job_dir(self.job_id), MODEL)

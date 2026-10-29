@@ -10,6 +10,7 @@ import logging
 import queue
 import shutil
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -761,10 +762,19 @@ async def check_compat(job_id: str, model_name: str) -> CompatResult:
 
 @app.delete("/jobs/{job_id}/models/{model_name}")
 async def remove_model(job_id: str, model_name: str) -> dict:
-    """Remove a model entry from the job state."""
+    """Remove a model entry from the job state, with the optimization state computed for it."""
     job = _get_job(job_id)
+    model_name = safe_name(model_name, "model_name")
     job["models"] = [m for m in job.get("models", []) if m["name"] != model_name]
     _save_job(job_id)
+    # The search, baseline and full-size population describe this model; a
+    # later model under the same name must not inherit them.
+    pet_root = _job_dir(job_id) / "pet"
+    if pet_root.exists():
+        for path in [pet_root / model_name, *pet_root.glob(f"{model_name}.stale-*")]:
+            if path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+                _pet_records_cache.pop(str(path), None)
     return {"ok": True}
 
 
@@ -1461,13 +1471,65 @@ def _pet_check_task(job: dict) -> None:
                                                     "forecasting are not supported yet.")
 
 
-def _pet_record_pid(path: Path, pid: int) -> None:
-    """Write the spawned pid into a status or verification file unless the runner already reported its own."""
+def _pet_busy(out: Path) -> str | None:
+    """What is running for this model right now: the search, one verification, or nothing.
+
+    One PET process per model at a time: a confirm is a full-size target plus
+    its shadow models, two of them share a GPU badly, and both the search and
+    every confirm write into the same directory.
+    """
     from . import pet_runner  # noqa: PLC0415
 
+    status = pet_runner.read_json(out / pet_runner.STATUS_FILE)
+    if status and status.get("status") == "running" and _pet_runner_alive(status):
+        return "search"
+    for path in sorted(out.glob("verification_*.json")) if out.exists() else []:
+        if path.name.endswith("_attack.json"):
+            continue
+        record = pet_runner.read_json(path)
+        if record and record.get("status") == "running" and _pet_runner_alive(record):
+            return f"measurement of setting {record.get('index')}"
+    return None
+
+
+def _pet_fingerprint(job: dict, job_id: str, model_name: str) -> dict:
+    """The current model's fingerprint: what any PET state under its name must have been computed for."""
+    from . import pet_runner  # noqa: PLC0415
+
+    model = next((m for m in job.get("models", []) if m["name"] == model_name), {})
+    return pet_runner.model_fingerprint(model, pet_runner.read_metadata(_job_dir(job_id) / "models" / model_name))
+
+
+def _pet_is_stale(out: Path, current: dict) -> bool:
+    """Whether the state in ``out`` was computed for a different model than the one now under this name."""
+    from . import pet_runner  # noqa: PLC0415
+
+    stored = pet_runner.read_json(out / pet_runner.FINGERPRINT_FILE)
+    return bool(stored) and stored.get("fingerprint") != current["fingerprint"]
+
+
+_PET_STALE_MESSAGE = ("The model under this name has changed since these results were computed (a different "
+                      "training split or training settings), so they no longer describe it. Start again to "
+                      "search for the current model; the previous results stay on disk.")
+
+
+def _pet_launch(job_id: str, model_name: str, path: Path, record: dict, extra: list[str]) -> dict:
+    """Spawn the runner, then record it in ``path`` with its pid in one atomic write.
+
+    Spawning first means the file never says "running" without a pid, so a
+    poll between the two steps cannot read the launch as a dead process. The
+    runner's own heartbeat comes seconds later, after its imports; if it is
+    already there (the in-process test runner, or a very fast start), it wins.
+    """
+    from . import pet_runner  # noqa: PLC0415
+
+    pid = _pet_spawn(job_id, model_name, extra)
     current = pet_runner.read_json(path) or {}
-    if not current.get("pid"):
-        path.write_text(json.dumps({**current, "pid": pid}))
+    if current.get("pid") == pid:
+        return current
+    record = {**record, "pid": pid}
+    pet_runner.write_json_atomic(path, record)
+    return record
 
 
 # Trial records per run directory, keyed on the study file's mtime: a poll
@@ -1528,10 +1590,18 @@ async def pet_start(job_id: str, model_name: str, params: PETStartParams) -> dic
     _pet_check_task(job)
 
     out = _pet_dir(job_id, model_name)
+    current = _pet_fingerprint(job, job_id, model_name)
     async with _pet_lock(job_id, model_name):
-        status = pet_runner.read_json(out / pet_runner.STATUS_FILE)
-        if status and status.get("status") == "running" and _pet_runner_alive(status):
-            raise HTTPException(status_code=409, detail="An optimization run is already in progress.")
+        busy = _pet_busy(out)
+        if busy:
+            raise HTTPException(status_code=409, detail=f"This model's {busy} is still running; one optimization "
+                                                        "process per model at a time.")
+        if _pet_is_stale(out, current):
+            # A different model now carries this name: its search, baseline and
+            # full-size population are kept aside for the record, never reused.
+            stale = out.with_name(f"{out.name}.stale-{int(time.time())}")
+            out.rename(stale)
+            _pet_records_cache.pop(str(out), None)
         conflict = _pet_request_conflict(out, params.model_dump())
         if conflict:
             raise HTTPException(
@@ -1541,13 +1611,10 @@ async def pet_start(job_id: str, model_name: str, params: PETStartParams) -> dic
                        "resume, or optimize a copy of the model to search again.")
 
         out.mkdir(parents=True, exist_ok=True)
-        (out / pet_runner.REQUEST_FILE).write_text(json.dumps(params.model_dump(), indent=2))
-        # Written here rather than in the runner so a poll landing before the
-        # subprocess has started does not read the previous run's status; the pid
-        # follows as soon as the process exists, so a runner that dies before its
-        # first heartbeat reads as failed, not as running forever.
-        (out / pet_runner.STATUS_FILE).write_text(json.dumps({"status": "running", "model_name": model_name}))
-        _pet_record_pid(out / pet_runner.STATUS_FILE, _pet_spawn(job_id, model_name, []))
+        pet_runner.write_json_atomic(out / pet_runner.REQUEST_FILE, params.model_dump())
+        pet_runner.write_json_atomic(out / pet_runner.FINGERPRINT_FILE, current)
+        _pet_launch(job_id, model_name, out / pet_runner.STATUS_FILE,
+                    {"status": "running", "model_name": model_name}, [])
     return {"ok": True}
 
 
@@ -1556,12 +1623,14 @@ async def pet_campaign(job_id: str, model_name: str) -> PETRun:
     """Everything the optimization view needs, read straight off disk."""
     from . import pet_runner  # noqa: PLC0415
 
-    _get_job(job_id)
+    job = _get_job(job_id)
     model_name = safe_name(model_name, "model_name")
     out = _pet_dir(job_id, model_name)
     status = pet_runner.read_json(out / pet_runner.STATUS_FILE)
     if status is None:
         return PETRun(status="idle", model_name=model_name)
+    if _pet_is_stale(out, _pet_fingerprint(job, job_id, model_name)):
+        return PETRun(status="stale", model_name=model_name, error=_PET_STALE_MESSAGE)
 
     state = status.get("status", "idle")
     error = status.get("error")
@@ -1594,16 +1663,15 @@ async def pet_verify(job_id: str, model_name: str, body: PETIndex) -> PETVerific
     """Re-audit one setting's saved model with more shadow models than the search used."""
     from . import pet_runner  # noqa: PLC0415
 
-    _get_job(job_id)
+    job = _get_job(job_id)
     model_name = safe_name(model_name, "model_name")
     out = _pet_dir(job_id, model_name)
     if not (out / pet_runner.STUDY_FILE).exists():
         raise HTTPException(status_code=404, detail="This model has no optimization results to verify.")
+    if _pet_is_stale(out, _pet_fingerprint(job, job_id, model_name)):
+        raise HTTPException(status_code=409, detail=_PET_STALE_MESSAGE)
 
     async with _pet_lock(job_id, model_name):
-        search = pet_runner.read_json(out / pet_runner.STATUS_FILE)
-        if search and search.get("status") == "running" and _pet_runner_alive(search):
-            raise HTTPException(status_code=409, detail="The search is still running; confirm a setting when it is done.")
         existing = pet_runner.read_json(pet_runner.verification_path(out, body.index))
         if existing and existing.get("status") == "running" and _pet_runner_alive(existing):
             return PETVerification(**existing)
@@ -1612,12 +1680,15 @@ async def pet_verify(job_id: str, model_name: str, body: PETIndex) -> PETVerific
         if (existing and existing.get("status") == "done" and not body.force
                 and pet_runner.verification_attack_path(out, body.index).exists()):
             return PETVerification(**existing)
+        busy = _pet_busy(out)
+        if busy:
+            raise HTTPException(status_code=409, detail=f"This model's {busy} is still running; confirm a setting "
+                                                        "when it is done.")
 
         placeholder = {"status": "running", "index": body.index, "estimated": {"attack_tpr": None, "utility": None}}
-        pet_runner.verification_path(out, body.index).write_text(json.dumps(placeholder))
-        _pet_record_pid(pet_runner.verification_path(out, body.index),
-                        _pet_spawn(job_id, model_name, ["--verify", str(body.index)]))
-    return PETVerification(**placeholder)
+        launched = _pet_launch(job_id, model_name, pet_runner.verification_path(out, body.index), placeholder,
+                               ["--verify", str(body.index)])
+    return PETVerification(**launched)
 
 
 @app.get("/jobs/{job_id}/pet/verify", response_model=PETVerification)
@@ -1644,6 +1715,9 @@ async def pet_adopt(job_id: str, model_name: str, body: PETIndex) -> dict:
     job = _get_job(job_id)
     model_name = safe_name(model_name, "model_name")
     out = _pet_dir(job_id, model_name)
+    current = _pet_fingerprint(job, job_id, model_name)
+    if _pet_is_stale(out, current):
+        raise HTTPException(status_code=409, detail=_PET_STALE_MESSAGE)
 
     verification = pet_runner.read_json(pet_runner.verification_path(out, body.index))
     if not verification or verification.get("status") != "done":
@@ -1652,6 +1726,14 @@ async def pet_adopt(job_id: str, model_name: str, body: PETIndex) -> dict:
     if verified.get("attack_tpr") is None:
         raise HTTPException(status_code=409, detail="This setting's attack success could not be measured, so it "
                                                     "cannot be adopted: an unmeasured setting is not a protected one.")
+    if verified.get("scope") != "user_model":
+        # The adopted row is read everywhere as this model, protected. A
+        # measurement of the search-scale model describes a different model
+        # (other members, another size), so it must not become a row.
+        raise HTTPException(status_code=409, detail="This setting was measured on the search subset, not on this "
+                                                    "model, because the model's training split is unknown. It can be "
+                                                    "compared but not adopted; measuring on your own model needs its "
+                                                    "model_metadata.pkl with the training indices.")
     record = next((r for r in await _pet_records(out) if r["index"] == body.index), None)
     if record is None:
         raise HTTPException(status_code=404, detail=f"No evaluated setting with index {body.index}.")
@@ -1667,7 +1749,9 @@ async def pet_adopt(job_id: str, model_name: str, body: PETIndex) -> dict:
     original_row = next((r for r in job.get("results", []) if r.get("model_name") == model_name), {})
     epsilon = verified.get("epsilon")
     config = dict(record["config"])
-    train_params = base.get("train_params") or {}
+    # The retrain used the model's own epochs and optimizer (what the runner
+    # derived from its metadata) with the setting's learning rate and batch size.
+    training = current["training"]
     adopted = {
         # One row per adopted setting: adopting a second setting for the same
         # model adds a row rather than replacing the first one's measurement.
@@ -1682,10 +1766,10 @@ async def pet_adopt(job_id: str, model_name: str, body: PETIndex) -> dict:
         "num_train": verified.get("n_members"),
         "model_class": original_row.get("model_class") or base.get("model_class"),
         "train_meta": {
-            "epochs": train_params.get("epochs"),
+            "epochs": training.get("epochs"),
             "learning_rate": config.get("learning_rate"),
             "batch_size": config.get("batch_size"),
-            "optimizer": train_params.get("optimizer"),
+            "optimizer": training.get("optimizer"),
             "noise_multiplier": config.get("noise_multiplier"),
             "max_grad_norm": config.get("max_grad_norm"),
             "target_delta": verified.get("delta"),
