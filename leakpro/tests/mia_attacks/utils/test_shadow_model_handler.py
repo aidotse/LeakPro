@@ -5,6 +5,7 @@
 """Test the shadow model handler module."""
 import os
 import pickle
+from pathlib import Path
 
 import numpy as np
 from pytest import raises
@@ -13,7 +14,28 @@ from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler, audit
 from leakpro.schemas import EvalOutput, LossConfig, OptimizerConfig, ShadowModelConfig, ShadowModelTrainingSchema, TrainingOutput
 from leakpro.tests.constants import get_shadow_model_config
 from leakpro.tests.input_handler.image_input_handler import ImageInputHandler
-from leakpro.utils.save_load import hash_indices
+from leakpro.utils.save_load import hash_indices, load_metadata_json, save_metadata_json
+
+def _metadata_kwargs(sm: ShadowModelHandler) -> dict:
+    """Shadow metadata matching ``sm``'s current training signature and population."""
+    return {
+        "init_params": sm.init_params,
+        "train_indices": [0, 1, 2, 3, 4],
+        "num_train": 5,
+        "optimizer": sm.optimizer_name,
+        "optimizer_params": sm.optimizer_config,
+        "criterion": sm.criterion_name,
+        "criterion_params": sm.loss_config,
+        "epochs": sm.epochs,
+        "batch_size": sm.batch_size,
+        "train_result": EvalOutput(accuracy=0.0, loss=0.0),
+        "test_result": EvalOutput(accuracy=0.0, loss=0.0),
+        "model_class": sm.model_class,
+        "model_module_path": sm.model_path,
+        "target_model_hash": sm.target_model_hash,
+        "population_hash": sm.population_hash,
+    }
+
 
 def test_shadow_model_handler_singleton(image_handler:ImageInputHandler) -> None:
     """Test that only one instance gets created."""
@@ -76,11 +98,11 @@ def test_shadow_model_creation_and_loading(image_handler:ImageInputHandler) -> N
     entries = os.listdir(sm.storage_path)
     n_entries_phase1 = len(entries)
     assert n_entries_phase1 - n_entries_start == 2*n_models
-    assert f"metadata_{indx}.pkl" in entries
+    assert f"metadata_{indx}.json" in entries
     assert f"shadow_model_{indx}.pkl" in entries
 
     # Test loading
-    meta= sm._load_metadata(sm.storage_path + f"/metadata_{indx}.pkl")
+    meta = load_metadata_json(sm.storage_path + f"/metadata_{indx}.json", ShadowModelTrainingSchema)
     assert meta.num_train == training_fraction * len(image_handler.test_indices)
     assert meta.batch_size == image_handler.configs.shadow_model.batch_size
     assert meta.optimizer_params == image_handler.configs.shadow_model.optimizer.params
@@ -234,14 +256,43 @@ def test_shadow_model_filter_requires_full_config_match(image_handler: ImageInpu
         }
     )
 
-    with open(tmp_path / "metadata_0.pkl", "wb") as file:
-        pickle.dump(matching_metadata, file)
-    with open(tmp_path / "metadata_1.pkl", "wb") as file:
-        pickle.dump(stale_metadata, file)
+    save_metadata_json(tmp_path / "metadata_0.json", matching_metadata)
+    save_metadata_json(tmp_path / "metadata_1.json", stale_metadata)
 
     all_indices, filtered_indices = sm._filter(data_size=5)
 
     assert sorted(all_indices) == [0, 1]
+    assert filtered_indices == [0]
+
+
+class _Marker:
+    """Pickle payload that touches a file when unpickled, so execution is observable."""
+
+    def __init__(self, marker: str) -> None:
+        self.marker = marker
+
+    def __reduce__(self):  # noqa: ANN204
+        return (Path(self.marker).touch, ())
+
+
+def test_filter_ignores_legacy_pickled_metadata_without_loading_it(image_handler: ImageInputHandler, tmp_path) -> None:
+    """metadata_<n>.pkl from older versions must never be unpickled, but its index stays reserved."""
+    image_handler.configs.shadow_model = ShadowModelConfig(**get_shadow_model_config())
+    if ShadowModelHandler.is_created() is True:
+        ShadowModelHandler.delete_instance()
+    sm = ShadowModelHandler(image_handler)
+    sm.storage_path = str(tmp_path)
+
+    matching_metadata = ShadowModelTrainingSchema(**_metadata_kwargs(sm))
+    save_metadata_json(tmp_path / "metadata_0.json", matching_metadata)
+    marker = tmp_path / "executed"
+    with open(tmp_path / "metadata_3.pkl", "wb") as file:
+        pickle.dump(_Marker(str(marker)), file)
+
+    all_indices, filtered_indices = sm._filter(data_size=5)
+
+    assert not marker.exists(), "legacy pickle must not be loaded"
+    assert all_indices == [0, 3]
     assert filtered_indices == [0]
 
 
@@ -320,8 +371,7 @@ def test_filter_rejects_shadow_models_from_different_population(image_handler: I
         "population_hash": "stale_hash_from_old_split",
     }
     stale_metadata = ShadowModelTrainingSchema(**metadata_kwargs)
-    with open(tmp_path / "metadata_0.pkl", "wb") as f:
-        pickle.dump(stale_metadata, f)
+    save_metadata_json(tmp_path / "metadata_0.json", stale_metadata)
 
     all_indices, filtered_indices = sm._filter(data_size=5)
 

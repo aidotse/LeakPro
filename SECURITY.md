@@ -29,13 +29,12 @@ not the inputs themselves. Concretely:
   pickle-free formats (`.npz` with `allow_pickle=False`, `torch.load` with
   `weights_only=True`), so a tampered cache file fails to load rather than
   executing. This holds only on `torch>=2.6`, which the package requires; on
-  older releases `weights_only=True` could be bypassed (CVE-2025-32434). One
-  pickled cache remains: the shadow and distillation model metadata
-  (`attack_objects/shadow_model/metadata_<n>.pkl` and
-  `attack_objects/distillation_model/<pair>_metadata_<n>.pkl`), which is
-  loaded with `joblib` when an attack looks for reusable models. Until that is
-  migrated, keep the output directory on storage that only the operator can
-  write.
+  older releases `weights_only=True` could be bypassed (CVE-2025-32434).
+  Shadow and distillation training metadata is stored as JSON and validated
+  against its schema on read. Metadata files from older versions
+  (`attack_objects/shadow_model/metadata_<n>.pkl`) are ignored, never loaded,
+  and their models are retrained. Keep the output directory on storage that
+  only the operator can write.
 - **Example data preparation scripts run with the operator's credentials.** The
   MIMIC-III build recipes and extraction scripts under `examples/mia/LOS/` are
   vendored third-party code that take a database password on the command line

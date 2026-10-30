@@ -5,7 +5,6 @@
 """Module for handling shadow models."""
 
 import copy
-import pickle
 
 import numpy as np
 import torch.nn.functional as F  # noqa: N812
@@ -19,6 +18,7 @@ from leakpro.schemas import DistillationModelTrainingSchema
 from leakpro.utils.device import get_device, mark_step
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
+from leakpro.utils.save_load import save_metadata_json
 
 
 def singleton(cls):  # noqa: ANN001, ANN201
@@ -176,8 +176,7 @@ class DistillationModelHandler(ModelHandler):
 
             validated_meta_data = DistillationModelTrainingSchema(**meta_data)
 
-            with open(f"{self.storage_path}/{model_pair_name}_metadata_{d}.pkl", "wb") as f:
-                pickle.dump(validated_meta_data, f)
+            save_metadata_json(f"{self.storage_path}/{model_pair_name}_metadata_{d}.json", validated_meta_data)
 
             logger.info(f"Metadata for distillation model stored in {self.storage_path}")
 

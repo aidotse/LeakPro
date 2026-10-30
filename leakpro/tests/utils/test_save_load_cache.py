@@ -9,6 +9,7 @@ Covers:
 - object arrays are refused at write time (they would need pickling to read back)
 - a pickle payload planted at a cache path raises instead of executing (GHSA-rw6c-3h2x-wh83, finding 1)
 - load_tensors reads a torch.save'd tensor / state dict and refuses a pickled callable
+- save_metadata_json / load_metadata_json round-trip pydantic metadata (numpy values included) and never unpickle
 """
 import pickle
 from pathlib import Path
@@ -17,7 +18,8 @@ import numpy as np
 import pytest
 import torch
 
-from leakpro.utils.save_load import load_arrays, load_tensors, save_arrays
+from leakpro.schemas import EvalOutput, ShadowModelTrainingSchema
+from leakpro.utils.save_load import load_arrays, load_metadata_json, load_tensors, save_arrays, save_metadata_json
 
 
 def test_save_and_load_arrays_round_trip(tmp_path: Path) -> None:
@@ -85,3 +87,49 @@ def test_load_tensors_round_trip_and_rejects_callables(tmp_path: Path) -> None:
     with pytest.raises(pickle.UnpicklingError):
         load_tensors(str(tmp_path / "planted.pt"))
     assert not marker.exists(), "planted callable must not run under load_tensors"
+
+
+def _shadow_metadata(**overrides: object) -> ShadowModelTrainingSchema:
+    fields = {
+        "init_params": {"num_classes": 3},
+        "train_indices": [0, 2, 4],
+        "num_train": 3,
+        "optimizer": "sgd",
+        "optimizer_params": {"lr": 0.01},
+        "criterion": "crossentropyloss",
+        "criterion_params": {},
+        "epochs": 1,
+        "batch_size": 8,
+        "train_result": EvalOutput(accuracy=0.5, loss=1.0, extra={"auc": np.float32(0.75), "hist": np.arange(2)}),
+        "test_result": EvalOutput(accuracy=0.25, loss=2.0),
+        "model_class": "ConvNet",
+        "model_module_path": None,
+        "target_model_hash": "abc",
+        "population_hash": "def",
+    }
+    return ShadowModelTrainingSchema(**{**fields, **overrides})
+
+
+def test_metadata_json_round_trip_with_numpy_values(tmp_path: Path) -> None:
+    path = tmp_path / "metadata_0.json"
+    save_metadata_json(str(path), _shadow_metadata())
+    loaded = load_metadata_json(str(path), ShadowModelTrainingSchema)
+
+    assert isinstance(loaded, ShadowModelTrainingSchema)
+    assert loaded.train_indices == [0, 2, 4]
+    assert loaded.train_result.extra == {"auc": 0.75, "hist": [0, 1]}
+    assert loaded.model_dump(exclude={"train_result"}) == _shadow_metadata().model_dump(exclude={"train_result"})
+
+
+def test_load_metadata_json_rejects_planted_pickle_and_wrong_schema(tmp_path: Path) -> None:
+    marker = tmp_path / "executed"
+    planted = tmp_path / "metadata_0.json"
+    with open(planted, "wb") as handle:
+        pickle.dump(_Marker(str(marker)), handle)
+    with pytest.raises((ValueError, UnicodeDecodeError)):
+        load_metadata_json(str(planted), ShadowModelTrainingSchema)
+    assert not marker.exists(), "planted pickle must not run under load_metadata_json"
+
+    planted.write_text('{"epochs": 1, "unexpected": "field"}')
+    with pytest.raises(ValueError):
+        load_metadata_json(str(planted), ShadowModelTrainingSchema)

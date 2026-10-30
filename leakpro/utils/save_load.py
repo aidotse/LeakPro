@@ -10,6 +10,7 @@ from typing import Callable
 
 import numpy as np
 import torch
+from pydantic import BaseModel
 from torch.nn import Module
 from torch.nn.modules.utils import consume_prefix_in_state_dict_if_present
 
@@ -161,3 +162,34 @@ def load_tensors(path: str, map_location: str = "cpu"):  # noqa: ANN201
     containers, so a cache file cannot carry executable objects.
     """
     return torch.load(path, map_location=map_location, weights_only=True)
+
+
+def _json_default(value):  # noqa: ANN001, ANN202
+    """Serialise numpy / torch scalars and arrays that end up in metadata (e.g. ``EvalOutput.extra``)."""
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if torch.is_tensor(value):
+        return value.detach().cpu().tolist()
+    raise TypeError(f"Metadata value of type {type(value).__name__} is not JSON-serialisable")
+
+
+def save_metadata_json(path: str, metadata: BaseModel) -> None:
+    """Write a pydantic metadata object to ``path`` as JSON.
+
+    Cache metadata (shadow / distillation training records) is only ever read
+    back through :func:`load_metadata_json`, so it must not be pickled.
+    """
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(metadata.model_dump(), f, default=_json_default)
+
+
+def load_metadata_json(path: str, schema: type[BaseModel]) -> BaseModel:
+    """Read JSON written by :func:`save_metadata_json` and validate it against ``schema``.
+
+    ``json.load`` only builds plain data, so a tampered or planted file either
+    validates or raises; nothing in it can execute.
+    """
+    with open(path, encoding="utf-8") as f:
+        return schema.model_validate(json.load(f))
