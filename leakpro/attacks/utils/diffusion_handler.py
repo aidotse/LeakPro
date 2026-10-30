@@ -17,6 +17,7 @@ from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.input_handler.user_imports import get_class_from_module, import_module_from_file
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
+from leakpro.utils.save_load import load_tensors
 
 
 class DiffMiHandler():
@@ -415,8 +416,5 @@ class DiffMiHandler():
 
     @staticmethod
     def _safe_torch_load(path: str) -> dict:
-        """Load state dicts in a version-compatible way with safe defaults."""
-        try:
-            return torch.load(path, map_location="cpu", weights_only=True)
-        except TypeError:
-            return torch.load(path, map_location="cpu")
+        """Load a state dict through the restricted ``weights_only`` path, never the unrestricted one."""
+        return load_tensors(path)
