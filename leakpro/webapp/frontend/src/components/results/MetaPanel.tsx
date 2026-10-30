@@ -14,11 +14,28 @@ export default function MetaPanel({ r }: { r: ModelResult }) {
   if (r.dpsgd) {
     const dp = [`DP-SGD  ε=${r.target_epsilon ?? "?"}`];
     if (m?.target_delta != null) dp.push(`δ=${m.target_delta}`);
+    if (m?.noise_multiplier != null) dp.push(`noise=${m.noise_multiplier}`);
     if (m?.max_grad_norm != null) dp.push(`clip=${m.max_grad_norm}`);
     if (m?.virtual_batch_size != null) dp.push(`vbs=${m.virtual_batch_size}`);
+    if (m?.accountant) dp.push(`accountant=${m.accountant}`);
     rows.push({ label: "Privacy", value: dp.join("  ") });
+    if (r.tuning_accounted === false) {
+      rows.push({ label: "ε covers", value: "one training run; the choice among tested settings is not accounted" });
+    }
   } else {
     rows.push({ label: "Privacy", value: "Standard training (no DP)" });
+  }
+
+  if (r.pet) {
+    const scope = r.pet.scope === "user_model"
+      ? `measured on this model's own training split${r.num_train != null ? ` (${r.num_train.toLocaleString()} records)` : ""}`
+      : "measured on the search-scale model, not this model's own split";
+    rows.push({ label: "Optimized", value: `setting #${r.pet.setting_index}, ${scope}` });
+    if (r.pet.baseline_utility != null && r.test_accuracy != null) {
+      const loss = 1 - r.test_accuracy / r.pet.baseline_utility;
+      rows.push({ label: "Quality vs original", value: `${pct(r.test_accuracy)} vs ${pct(r.pet.baseline_utility)}  (loss ${pct(loss)})` });
+    }
+    r.pet.notes.forEach((n, i) => rows.push({ label: r.pet!.notes.length > 1 ? `Note ${i + 1}` : "Note", value: n }));
   }
 
   if (m) {

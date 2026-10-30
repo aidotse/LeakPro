@@ -170,6 +170,13 @@ class ModelResult(BaseModel):
     train_meta: dict | None = None   # epochs, lr, batch_size, optimizer, data info
     num_train: int | None = None     # target training-set size, used to scale risk to the population
     attacks: list[AttackResult] = []
+    # Set on a row that came from adopting an optimization setting. The row is a
+    # normal audited model otherwise: its attack result is the verification's.
+    optimized: bool = False
+    # The accountant's epsilon covers one training run; the setting was chosen
+    # from many on the same private data, and that selection is not accounted.
+    tuning_accounted: bool | None = None
+    pet: dict | None = None          # setting index, config, proxy FPR, scope, baseline utility
     # str(alpha) -> {"measured": MiaVulnerability, "skipped": [...], "below_chance": [...]} or
     # {"error": reason}. Derived by
     # leakpro.risk.measure_strongest when the results are served, never stored with the job.
@@ -198,3 +205,98 @@ class RiskResponse(BaseModel):
     job_id: str
     assessments: dict[str, dict] = {}   # model_name -> RiskAssessment.model_dump()
     unassessable: dict[str, str] = {}   # model_name -> reason
+
+
+# ---------------------------------------------------------------------------
+# PET optimization — see pet_runner.py for the on-disk layout and
+# leakpro/optimization for everything that scores a configuration.
+# ---------------------------------------------------------------------------
+
+class PETStartParams(BaseModel):
+    """Request to begin (or resume) a privacy-utility search for one model."""
+
+    # Display-side constraint: it dims settings that fall below the user's
+    # quality floor, but never gates the search, so moving the slider
+    # afterwards re-reads the same results instead of invalidating them.
+    max_quality_loss: float = Field(default=0.05, ge=0.0, le=1.0)
+    # Any knob named here is pinned to that value; the rest stay searched.
+    advanced: dict[str, float] = {}
+    n_trials: int | None = Field(default=None, ge=1, le=500)
+    # Shadow models per audit during the search; verification always uses more.
+    n_shadow: int | None = Field(default=None, ge=1, le=32)
+    delta: float | None = Field(default=None, gt=0.0, lt=1.0)
+    # Per-sample-gradient memory cap under DP-SGD. Lower it to fit a big model
+    # or a busy GPU; it changes speed only, never the privacy accounting.
+    max_physical_batch: int = Field(default=32, ge=1, le=4096)
+    seed: int = Field(default=0, ge=0)
+
+
+class PETSetting(BaseModel):
+    """One evaluated configuration (an Optuna trial), as the optimization view renders it."""
+
+    index: int
+    config: dict[str, float]
+    utility: float
+    train_accuracy: float | None = None
+    attack_tpr: float | None = None          # None: pruned (see attack_resolution_warning)
+    # 95% Clopper-Pearson interval of attack_tpr over the members: audit-point
+    # sampling error only, a floor on the uncertainty.
+    attack_tpr_ci: list[float] | None = None
+    n_members: int | None = None
+    n_nonmember_false_positives: int | None = None
+    proxy_fpr: float | None = None
+    attack_realized_fpr: float | None = None
+    attack_resolution_warning: str | None = None
+    epsilon: float | None = None             # None: non-private (infinite)
+    delta: float | None = None
+    accountant: str | None = None
+    roc_auc: float | None = None
+    tuning_accounted: bool = False
+
+
+class PETRun(BaseModel):
+    """Everything the optimization view needs for one model, read off disk."""
+
+    status: str                               # idle | running | done | failed | stale
+    model_name: str
+    n_trials: int | None = None
+    proxy_fpr: float | None = None
+    # Members per trial. The search runs on a subset; the confirm step measures
+    # the chosen setting at the user's own size.
+    n_members: int | None = None
+    # Quality of an unprotected model trained on the same subset: what every
+    # trial's quality is compared against, so the gap is protection cost only.
+    baseline_utility: float | None = None
+    baseline_attack_tpr: float | None = None
+    baseline_attack_tpr_ci: list[float] | None = None
+    baseline_source: str | None = None        # "search_subset"
+    # The clicked model's own accuracy, for display; not the comparison basis.
+    model_utility: float | None = None
+    settings: list[PETSetting] = []
+    best_indices: list[int] = []
+    resolution_warning: str | None = None
+    error: str | None = None
+
+
+class PETVerification(BaseModel):
+    """One setting measured on the user's own model (retrained at full size and audited).
+
+    ``verified.scope`` is ``"user_model"``, or ``"search_subset"`` when the
+    model's split is unknown and only the search-scale model could be re-audited.
+    """
+
+    status: str                               # running | done | failed
+    index: int
+    estimated: dict[str, Any] = {}
+    verified: dict[str, Any] | None = None
+    error: str | None = None
+
+
+class PETIndex(BaseModel):
+    """Body of the verify / adopt requests."""
+
+    index: int = Field(..., ge=0)
+    # Verify only: measure again even though a finished measurement exists.
+    # A measurement is a full-size retrain plus its audit, so it is never
+    # repeated by accident.
+    force: bool = False

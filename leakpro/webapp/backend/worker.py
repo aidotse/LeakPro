@@ -12,6 +12,8 @@ import yaml
 from pathlib import Path
 from typing import Any
 
+from .dataset_modules import register_job_dataset_modules
+
 logger = logging.getLogger("leakpro.webapp.worker")
 
 
@@ -26,6 +28,27 @@ class _QueueHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         self._q.put(self.format(record))
+
+
+# ---------------------------------------------------------------------------
+# Which class in an uploaded arch.py is "the model"
+# ---------------------------------------------------------------------------
+
+def pick_model_class(module: Any, init_params: dict | None = None,  # noqa: ANN401
+                     model_class: str | None = None) -> type | None:
+    """The class the webapp trains, audits and re-trains from an uploaded arch.py.
+
+    A thin wrapper over :func:`leakpro.optimization.adapters.find_model_class`, the
+    one rule (a name when the user gave one; else the class defined in the file
+    whose constructor accepts the recorded ``init_params``; else the only or the
+    first defined one). Returns None instead of raising when the file defines no
+    ``nn.Module`` subclass, which callers report in their own words.
+    """
+    from leakpro.optimization.adapters import find_model_class, model_classes_defined_in  # noqa: PLC0415
+
+    if not model_class and not model_classes_defined_in(module):
+        return None
+    return find_model_class(module, model_class, init_params)
 
 
 # ---------------------------------------------------------------------------
@@ -224,28 +247,16 @@ def run_audit_job(
             # Detect model class from arch.py using init_params matching
             if arch_py.exists():
                 import importlib.util as _ilu
-                import torch.nn as _nn
-                import inspect as _inspect
                 import joblib as _joblib
                 _spec = _ilu.spec_from_file_location("_arch_probe", arch_py)
                 _mod = _ilu.module_from_spec(_spec)
                 _spec.loader.exec_module(_mod)
-                _candidates = [
-                    v for v in vars(_mod).values()
-                    if isinstance(v, type) and issubclass(v, _nn.Module) and v is not _nn.Module
-                ]
-                if _candidates:
-                    chosen = _candidates[0]
-                    try:
-                        _meta = _joblib.load(target_folder_path / "model_metadata.pkl")
-                        _init_keys = set(_meta.init_params.keys())
-                        for _cls in _candidates:
-                            _sig_params = set(_inspect.signature(_cls.__init__).parameters) - {"self"}
-                            if _init_keys.issubset(_sig_params):
-                                chosen = _cls
-                                break
-                    except Exception:
-                        pass
+                try:
+                    _init_params = dict(_joblib.load(target_folder_path / "model_metadata.pkl").init_params or {})
+                except Exception:  # noqa: BLE001 - no metadata yet: fall back to the first class
+                    _init_params = None
+                chosen = pick_model_class(_mod, _init_params, (job_state.get("arch_config") or {}).get("model_class"))
+                if chosen is not None:
                     config["target"]["model_class"] = chosen.__name__
 
             if attack_list:
@@ -294,27 +305,8 @@ def run_audit_job(
 
                 # Register dataset_handler.py under its original module name so joblib can
                 # deserialise population pickles that reference the original class path.
-                # Original name is inferred from the handler class name:
-                #   CelebADataHandler → celebA_data_handler
-                #   CifarDataHandler  → cifar_data_handler
-                _dh_path = job_dir / "dataset_handler.py"
-                if _dh_path.exists():
-                    import importlib.util as _ilu_dh
-                    _dh_spec = _ilu_dh.spec_from_file_location("dataset_handler", _dh_path)
-                    _dh_mod = _ilu_dh.module_from_spec(_dh_spec)
-                    _dh_spec.loader.exec_module(_dh_mod)
-                    sys.modules["dataset_handler"] = _dh_mod
-                    for _attr in dir(_dh_mod):
-                        _obj = getattr(_dh_mod, _attr, None)
-                        if (isinstance(_obj, type)
-                                and hasattr(_obj, "UserDataset")
-                                and _attr not in ("AbstractInputHandler", "object")):
-                            _orig = _attr.replace("DataHandler", "_data_handler") \
-                                        .replace("InputHandler", "_input_handler")
-                            _orig = _orig[0].lower() + _orig[1:]
-                            if _orig not in sys.modules:
-                                sys.modules[_orig] = _dh_mod
-                                log_q.put(f"[worker] Registered dataset_handler.py as '{_orig}' for pickle deserialization")
+                # Shared with the PET runner, which unpickles the same file.
+                register_job_dataset_modules(job_dir)
 
                 # Stub out leakpro.dataset so joblib can deserialise old GeneralDataset pickles.
                 # MIAHandler._load_population accesses .data and .targets; the old class stored
@@ -363,22 +355,10 @@ def run_audit_job(
                 lp = LeakPro(handler_cls, str(temp_yaml))
                 results = lp.run_audit(create_pdf=False)
 
-                # Detect model class name for display in results
+                # The class label on the result row is the class the audit ran
+                # on (chosen above by the one model-class rule), not a second probe.
                 _preset_class_map = {"cifar_image": "ResNet18", "cifar_wrn": "ResNet18"}
-                _model_class: str | None = _preset_class_map.get(preset)  # type: ignore[arg-type]
-                if _model_class is None and (job_dir / "arch.py").exists():
-                    try:
-                        import importlib.util as _ilu3
-                        import torch.nn as _nn3
-                        _s3 = _ilu3.spec_from_file_location("_mc_probe", job_dir / "arch.py")
-                        _m3 = _ilu3.module_from_spec(_s3)
-                        _s3.loader.exec_module(_m3)
-                        _mc3 = next((v for v in vars(_m3).values()
-                                     if isinstance(v, type) and issubclass(v, _nn3.Module)
-                                     and v is not _nn3.Module), None)
-                        _model_class = _mc3.__name__ if _mc3 else None
-                    except Exception:
-                        pass
+                _model_class: str | None = _preset_class_map.get(preset) or config["target"].get("model_class")  # type: ignore[arg-type]
                 if model_spec.get("dpsgd") and _model_class == "ResNet18":
                     _model_class = "ResNet18 (DP-SGD)"
 

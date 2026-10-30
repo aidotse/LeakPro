@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
 import sys
 import textwrap
@@ -23,6 +24,7 @@ arch_path    = sys.argv[1]
 weights_path = sys.argv[2]
 shape_json   = sys.argv[3]
 data_path    = sys.argv[4] if len(sys.argv) > 4 else "none"
+model_class  = sys.argv[5] if len(sys.argv) > 5 and sys.argv[5] != "none" else None
 
 data_shape = json.loads(shape_json)
 
@@ -31,14 +33,15 @@ try:
     mod  = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
 
-    import torch.nn as nn
     import inspect
-    candidates = [
-        v for v in vars(mod).values()
-        if isinstance(v, type) and issubclass(v, nn.Module) and v is not nn.Module
-    ]
-    if not candidates:
-        raise ValueError("No nn.Module subclass found in arch file")
+    # The one rule for which class in arch.py is the model (shared with the
+    # training step, the audit worker and the PET runner): classes defined in
+    # the file, never imported helpers; a name when the user gave one; else
+    # the class whose constructor accepts the recorded init_params.
+    from leakpro.optimization.adapters import find_model_class, model_classes_defined_in
+    candidates = model_classes_defined_in(mod)
+    if not candidates and not model_class:
+        raise ValueError("No nn.Module subclass defined in arch file")
 
     # --- Priority 1: init_params from model_metadata.pkl ---
     init_params = {}
@@ -81,14 +84,8 @@ try:
             if _auto:
                 init_params = _auto
 
-    # --- Pick the class that accepts all detected init_params keys ---
-    cls = candidates[-1]
-    if init_params:
-        for _cls in candidates:
-            _sig = set(inspect.signature(_cls.__init__).parameters) - {"self"}
-            if set(init_params.keys()).issubset(_sig):
-                cls = _cls
-                break
+    # --- Pick the class: the user's name, else the one that accepts the detected init_params ---
+    cls = find_model_class(mod, model_class, init_params or None)
 
     # --- Instantiate: try init_params, fill missing required args with common defaults ---
     def _try_init(c, params):
@@ -174,6 +171,7 @@ def run_check(
     weights_path: Path | None,
     data_shape: list[int],
     data_path: Path | None = None,
+    model_class: str | None = None,
 ) -> CompatResult:
     """Run compat check in an isolated subprocess. Returns CompatResult."""
     runner = Path(arch_path).parent / "_leakpro_check_runner.py"
@@ -184,15 +182,21 @@ def run_check(
         str(arch_path),
         str(weights_path) if weights_path else "none",
         json.dumps(data_shape),
+        str(data_path) if data_path is not None else "none",
+        model_class or "none",
     ]
-    if data_path is not None:
-        cmd.append(str(data_path))
+    # The runner script lives next to the user's arch.py, so Python's import
+    # path starts there, not in this checkout; the one model-class rule it
+    # imports from leakpro must resolve to the same code the webapp runs.
+    repo_root = str(Path(__file__).parents[3])
+    env = {**os.environ, "PYTHONPATH": repo_root + os.pathsep + os.environ.get("PYTHONPATH", "")}
     try:
         result = subprocess.run(  # noqa: S603
             cmd,
             capture_output=True,
             text=True,
             timeout=60,
+            env=env,
         )
         raw = result.stdout.strip()
         if not raw:

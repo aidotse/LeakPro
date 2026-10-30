@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { api, ModelResult, JobListItem } from "../../api";
+import { api, ModelResult, JobListItem, Setting, Verification } from "../../api";
 import Summary, { RiskState, initialRiskState } from "../results/Summary";
+import Optimization from "../results/Optimization";
 import RocChart from "../results/RocChart";
 import Histograms from "../results/Histograms";
 import Records from "../results/Records";
@@ -39,6 +40,9 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
 
   // Rename dialog state
   const [pendingRename, setPendingRename] = useState<PendingRename | null>(null);
+
+  // The model whose optimization view is open; null shows the result tabs.
+  const [optimizing, setOptimizing] = useState<ModelResult | null>(null);
 
   // Risk assessment state. Held here rather than in Summary because the tab bar unmounts the tab
   // components, which would throw away a completed assessment when the user looks at the ROC curves.
@@ -79,7 +83,9 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
 
   const mergeResults = (pastJobId: string, newResults: ModelResult[], renames: Record<string, string>) => {
     const renamed = newResults.map((m) =>
-      renames[m.model_name] ? { ...m, model_name: renames[m.model_name] } : m
+      // Keep the backend name so optimization can still find the model in its
+      // own job after the display name changes.
+      renames[m.model_name] ? { ...m, model_name: renames[m.model_name], orig_model_name: m.model_name } : m
     );
     setAllResults((prev) => {
       const base = prev ?? [];
@@ -111,6 +117,29 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
     setLoadingJobId(null);
   };
 
+  // An adopted setting is stored by the backend as a normal result row with
+  // its own attack result, so the row is re-read from the job rather than
+  // synthesised here: the summary, the risk layer and every tab then show the
+  // measured model exactly as they would any other.
+  const addOptimizedRow = async (base: ModelResult, setting: Setting, _verification: Verification) => {
+    const targetJob = base.job_id ?? jobId;
+    const backendName = base.orig_model_name ?? base.model_name;
+    try {
+      const r = await api.getResults(targetJob);
+      const row = r.results.find((m) => m.optimized && m.pet?.setting_index === setting.index
+        && m.model_name.startsWith(`${backendName} (optimized`));
+      if (!row) return;
+      const displayName = base.orig_model_name ? row.model_name.replace(backendName, base.model_name) : row.model_name;
+      const fresh = { ...row, job_id: targetJob, model_name: displayName, orig_model_name: row.model_name };
+      setAllResults((prev) => [
+        ...(prev ?? []).filter((m) => !(m.job_id === targetJob && (m.orig_model_name ?? m.model_name) === row.model_name)),
+        fresh,
+      ]);
+    } catch {
+      // The row is persisted; it appears on the next load.
+    }
+  };
+
   const confirmRename = () => {
     if (!pendingRename) return;
     mergeResults(pendingRename.pastJobId, pendingRename.results, pendingRename.renames);
@@ -138,6 +167,23 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
 
   const sessionCount = loadedJobIds.size;
   const hasResults = allResults.length > 0;
+
+  if (optimizing) {
+    return (
+      <Optimization
+        jobId={jobId}
+        model={optimizing}
+        adoptedIndices={new Set(
+          (allResults ?? [])
+            .filter((m) => m.optimized && m.pet && (m.job_id ?? jobId) === (optimizing.job_id ?? jobId)
+              && (m.orig_model_name ?? m.model_name).startsWith(`${optimizing.orig_model_name ?? optimizing.model_name} (optimized`))
+            .map((m) => m.pet!.setting_index),
+        )}
+        onBack={() => setOptimizing(null)}
+        onAdopted={(setting, verification) => addOptimizedRow(optimizing, setting, verification)}
+      />
+    );
+  }
 
   return (
     <div className="flex flex-col gap-8">
@@ -307,7 +353,7 @@ export default function Step7Results({ jobId, onRestart, autoOpenCompare }: Prop
           </div>
 
           <div>
-            {tab === "summary"    && <Summary    results={allResults} risk={risk} onRiskChange={setRisk} />}
+            {tab === "summary"    && <Summary    results={allResults} risk={risk} onRiskChange={setRisk} onOptimize={setOptimizing} />}
             {tab === "roc"        && <RocChart   results={allResults} />}
             {tab === "histograms" && <Histograms results={allResults} />}
             {tab === "records"    && <Records    results={allResults} jobId={jobId} />}

@@ -3,6 +3,7 @@ import { api, ModelResult, RiskAssessment, RiskMeasured, RiskRequest } from "../
 import InfoButton, { Detail } from "../InfoButton";
 import MetaPanel from "./MetaPanel";
 import RiskDiagram from "./RiskDiagram";
+import { COPY as OPTIMIZE } from "./optimizationCopy";
 
 /**
  * Risk is never scored here. The measured half (TPR at the chosen operating point) comes straight from
@@ -46,6 +47,8 @@ interface Props {
   results: ModelResult[];
   risk: RiskState;
   onRiskChange: (next: RiskState) => void;
+  /** Opens the optimization view for one model. Omitted when unavailable. */
+  onOptimize?: (model: ModelResult) => void;
 }
 
 function modelKey(m: ModelResult) {
@@ -87,6 +90,17 @@ function bandStyle(band?: string) {
 
 function pct(v: number | undefined | null) {
   return v != null ? (v * 100).toFixed(1) + "%" : "—";
+}
+
+/**
+ * ε as a label. On an adopted optimization row the accountant's ε covers one
+ * training run, and the setting was chosen from many tested on the same
+ * private data; that selection is not accounted, so the number is marked.
+ */
+const EPS_PER_RUN = "ε is for one training run; the selection among tested settings is not accounted.";
+function epsilonLabel(m: ModelResult): string {
+  const eps = m.target_epsilon != null ? `ε=${m.target_epsilon}` : "Yes";
+  return m.tuning_accounted === false ? `${eps} (per run)` : eps;
 }
 
 function num(v: number | undefined | null, digits = 0) {
@@ -283,7 +297,7 @@ const ABOUT_BAND = (
   </>
 );
 
-export default function Summary({ results, risk, onRiskChange }: Props) {
+export default function Summary({ results, risk, onRiskChange, onOptimize }: Props) {
   // Ephemeral view state only. Anything the user would be annoyed to lose lives in `risk`.
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [wizard, setWizard] = useState(false);
@@ -344,7 +358,7 @@ export default function Summary({ results, risk, onRiskChange }: Props) {
         r?.roc_auc?.toFixed(6) ?? "",
         m.train_accuracy?.toFixed(6) ?? "",
         m.test_accuracy?.toFixed(6) ?? "",
-        m.dpsgd ? `eps=${m.target_epsilon}` : "No",
+        m.dpsgd ? `eps=${m.target_epsilon}${m.tuning_accounted === false ? " (per run, selection not accounted)" : ""}` : "No",
         a?.declared.attacker_prior ?? "",
         a?.combined.ppv?.toFixed(6) ?? "",
         a?.combined.ppv_balanced?.toFixed(6) ?? "",
@@ -387,7 +401,11 @@ export default function Summary({ results, risk, onRiskChange }: Props) {
                 </p>
                 <p className="font-bold text-sm mt-2">{m.model_name}</p>
                 {m.model_class && <p className="text-xs font-mono text-slate-400 mt-0.5">{m.model_class}</p>}
-                {m.dpsgd && <p className="text-xs text-blue-500 mt-1">DP-SGD{m.target_epsilon != null ? ` ε=${m.target_epsilon}` : ""}</p>}
+                {m.dpsgd && (
+                  <p className="text-xs text-blue-500 mt-1" title={m.tuning_accounted === false ? EPS_PER_RUN : undefined}>
+                    DP-SGD {epsilonLabel(m)}
+                  </p>
+                )}
               </div>
             );
           })}
@@ -483,6 +501,11 @@ export default function Summary({ results, risk, onRiskChange }: Props) {
                             {m.model_class}
                           </span>
                         )}
+                        {m.optimized && (
+                          <span className="text-[11px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-bold uppercase tracking-wider">
+                            optimized
+                          </span>
+                        )}
                         <button
                           onClick={() => toggleInfo(key)}
                           title="Show model info"
@@ -490,6 +513,16 @@ export default function Summary({ results, risk, onRiskChange }: Props) {
                         >
                           info
                         </button>
+                        {onOptimize && !m.optimized && (
+                          <button
+                            onClick={() => onOptimize(m)}
+                            title={OPTIMIZE.entry}
+                            className="flex items-center gap-1 px-2 py-0.5 rounded border border-primary/40 text-primary text-xs font-bold hover:bg-primary/10 transition-colors"
+                          >
+                            <span className="material-symbols-outlined text-sm">tune</span>
+                            {OPTIMIZE.entry}
+                          </button>
+                        )}
                         {a && (
                           <button
                             onClick={() => setDetails(key)}
@@ -538,7 +571,7 @@ export default function Summary({ results, risk, onRiskChange }: Props) {
                     </td>
                     <td className="px-4 py-3">
                       {m.dpsgd
-                        ? <span className="text-blue-500 font-semibold">{m.target_epsilon != null ? `ε=${m.target_epsilon}` : "Yes"}</span>
+                        ? <span className="text-blue-500 font-semibold" title={m.tuning_accounted === false ? EPS_PER_RUN : undefined}>{epsilonLabel(m)}</span>
                         : <span className="text-slate-400">No</span>}
                     </td>
                     <td className="px-4 py-3">

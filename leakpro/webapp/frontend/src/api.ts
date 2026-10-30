@@ -141,6 +141,19 @@ export const api = {
     if (!res.ok) throw new Error(await res.text());
     return URL.createObjectURL(await res.blob());
   },
+
+  // PET optimization. Everything that scores a setting runs in leakpro.optimization
+  // on the backend; these only start, poll, verify and adopt.
+  startOptimization: (id: string, model: string, params: OptimizationParams) =>
+    post<{ ok: boolean }>(`/jobs/${id}/pet/start?model_name=${encodeURIComponent(model)}`, params),
+  getOptimization: (id: string, model: string) =>
+    get<OptimizationRun>(`/jobs/${id}/pet/campaign?model_name=${encodeURIComponent(model)}`),
+  verifySetting: (id: string, model: string, index: number, force = false) =>
+    post<Verification>(`/jobs/${id}/pet/verify?model_name=${encodeURIComponent(model)}`, { index, force }),
+  getVerification: (id: string, model: string, index: number) =>
+    get<Verification>(`/jobs/${id}/pet/verify?model_name=${encodeURIComponent(model)}&index=${index}`),
+  adoptSetting: (id: string, model: string, index: number) =>
+    post<{ ok: boolean }>(`/jobs/${id}/pet/adopt?model_name=${encodeURIComponent(model)}`, { index }),
 };
 
 // ---------------------------------------------------------------------------
@@ -236,6 +249,9 @@ export interface JobListItem {
 }
 
 export interface TrainMeta {
+  /** DP-SGD knobs, recorded on an adopted optimization row. */
+  noise_multiplier?: number | null;
+  accountant?: string | null;
   epochs?: number;
   learning_rate?: number;
   batch_size?: number;
@@ -263,8 +279,148 @@ export interface ModelResult {
   train_meta?: TrainMeta;
   num_train?: number;
   attacks: AttackResult[];
+  /** Set when this row came from an adopted optimization result. */
+  optimized?: boolean;
+  /** False on an adopted row: the accountant's ε covers one training run; the selection among settings is not accounted. */
+  tuning_accounted?: boolean | null;
+  /** The adopted setting, its scope and what quality was compared against. */
+  pet?: {
+    setting_index: number;
+    config: SettingConfig;
+    scope: VerificationScope;
+    proxy_fpr?: number | null;
+    attack_tpr?: number | null;
+    attack_tpr_ci?: [number, number] | null;
+    baseline_utility?: number | null;
+    n_shadow?: number;
+    notes: string[];
+  };
+  /** Original backend name, kept when the compare view renames a row for display. */
+  orig_model_name?: string;
   /** Measured block per operating point, keyed by String(alpha). Computed by leakpro.risk on the backend. */
   measured?: Record<string, MeasuredAtAlpha>;
+}
+
+// ---------------------------------------------------------------------------
+// PET optimization (mirrors backend models.py PETSetting / PETRun / PETVerification)
+//
+// One Setting == one evaluated configuration (an Optuna trial). A pruned trial
+// keeps its utility and carries attack_tpr: null with the reason.
+// ---------------------------------------------------------------------------
+
+export interface SettingConfig {
+  noise_multiplier?: number;
+  max_grad_norm?: number;
+  learning_rate?: number;
+  batch_size?: number;
+  [knob: string]: number | undefined;
+}
+
+/** Where a measurement was taken: the user's own model, or the search subset. */
+export type VerificationScope = "user_model" | "search_subset";
+
+export interface Setting {
+  index: number;
+  config: SettingConfig;
+  /** Task performance on the search subset's held-out split, 0..1. Higher is better. */
+  utility: number;
+  train_accuracy?: number | null;
+  /** Attack success at `proxy_fpr`, 0..1. Lower is safer. null when the trial was pruned. */
+  attack_tpr?: number | null;
+  /** 95% interval of attack_tpr over the members (audit-point sampling only, a floor on the uncertainty). */
+  attack_tpr_ci?: [number, number] | null;
+  /** Members the trial trained on (the search subset). */
+  n_members?: number | null;
+  /** Non-member false alarms the threshold rests on. */
+  n_nonmember_false_positives?: number | null;
+  /** False-alarm rate the attack figure was measured at (0.01 == 1%). */
+  proxy_fpr?: number | null;
+  /** The false-alarm rate actually achievable in the data, which can be below
+   *  `proxy_fpr` when the score distribution is coarse. */
+  attack_realized_fpr?: number | null;
+  /** Why attack_tpr is null: the model did not learn, or every score tied. */
+  attack_resolution_warning?: string | null;
+  /** null means non-private (infinite). */
+  epsilon?: number | null;
+  delta?: number | null;
+  accountant?: string | null;
+  roc_auc?: number | null;
+  /** Always false today: the search over many configurations is not accounted for. */
+  tuning_accounted?: boolean;
+}
+
+export interface OptimizationParams {
+  /** Fraction of baseline quality the user is willing to give up, 0..1. */
+  max_quality_loss: number;
+  /** Knobs pinned to a value; omitted keys stay searched. */
+  advanced?: Record<string, number>;
+  n_trials?: number;
+  n_shadow?: number;
+  delta?: number;
+  max_physical_batch?: number;
+  seed?: number;
+}
+
+export interface OptimizationRun {
+  /** "stale": the model under this name changed since the run; its results no longer describe it. */
+  status: "idle" | "running" | "done" | "failed" | "stale";
+  model_name: string;
+  /** Total settings the run intends to test; absent until the run reports it. */
+  n_trials?: number | null;
+  proxy_fpr?: number | null;
+  /** Members per trial: the search subset, not the user's split. */
+  n_members?: number | null;
+  /** Quality of an unprotected model trained on the same subset: what trial quality is compared against. */
+  baseline_utility?: number | null;
+  baseline_attack_tpr?: number | null;
+  baseline_attack_tpr_ci?: [number, number] | null;
+  baseline_source?: "search_subset" | null;
+  /** The clicked model's own accuracy, for display; the confirm step compares against it. */
+  model_utility?: number | null;
+  settings: Setting[];
+  /** Indices of the best trade-offs (the frontier). */
+  best_indices: number[];
+  /** Set when the held-out split could not resolve the default false-alarm rate. */
+  resolution_warning?: string | null;
+  error?: string | null;
+}
+
+export interface Verified {
+  /** "user_model": retrained on the model's own split at full size. "search_subset": the search-scale model re-audited. */
+  scope: VerificationScope;
+  attack_tpr?: number | null;
+  attack_tpr_table?: number | null;
+  attack_tpr_ci?: [number, number] | null;
+  n_members?: number | null;
+  n_non_members?: number | null;
+  n_nonmember_false_positives?: number | null;
+  /** Accuracy on the model's own test split (user_model) or the trial's (search_subset). */
+  utility?: number | null;
+  train_accuracy?: number | null;
+  /** The user's model's own accuracy; null when unknown or not comparable. */
+  baseline_utility?: number | null;
+  /** ε for one training run at this size; the selection among settings is not accounted. */
+  epsilon?: number | null;
+  delta?: number | null;
+  accountant?: string | null;
+  n_shadow?: number;
+  proxy_fpr?: number | null;
+  realized_fpr?: number | null;
+  resolution_warning?: string | null;
+  notes: string[];
+}
+
+export interface Verification {
+  status: "running" | "done" | "failed";
+  index: number;
+  estimated: {
+    attack_tpr?: number | null;
+    attack_tpr_ci?: [number, number] | null;
+    utility?: number | null;
+    n_members?: number | null;
+  };
+  verified?: Verified | null;
+  error?: string | null;
 }
 
 // ---------------------------------------------------------------------------
