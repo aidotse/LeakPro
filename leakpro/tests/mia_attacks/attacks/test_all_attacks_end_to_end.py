@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import pickle
 import shutil
 import tempfile
@@ -732,5 +733,72 @@ def test_all_attacks_end_to_end(attack_name: str, monkeypatch: pytest.MonkeyPatc
             assert (output_dir / "data_objects").exists()
 
         assert not temp_root.exists()
+    finally:
+        _restore_optuna_metadata(optuna_metadata_snapshot)
+
+
+
+# Attacks that cache intermediate results under attack_objects/ and reload them on the next run:
+# attack name -> (module that calls the loaders, cache folder under output_dir, loader names to spy on).
+CACHE_REUSE_ATTACKS = {
+    "loss_traj": ("leakpro.attacks.mia_attacks.loss_trajectory", Path("attack_objects") / "loss_traj",
+                  ("load_arrays", "load_tensors")),
+    "ramia": ("leakpro.attacks.mia_attacks.ramia", Path("attack_objects") / "range_mia_data",
+              ("load_tensors",)),
+}
+
+
+@pytest.mark.parametrize("attack_name", sorted(CACHE_REUSE_ATTACKS))
+def test_attack_reuses_cache_from_previous_run(attack_name: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A second audit in the same output_dir must reload the first run's caches through the restricted loaders.
+
+    The regular E2E flow runs in a fresh directory, so it only covers the cache write path. This runs the
+    attack twice, spies on the pickle-free loaders the attack module imports, and checks that the second run
+    hits the cache through each of them, writes no new cache files, and that none of the files is a pickle.
+    """
+    module_name, cache_subdir, loader_names = CACHE_REUSE_ATTACKS[attack_name]
+    attack_module = importlib.import_module(module_name)
+    _set_seed()
+    optuna_metadata_snapshot = _snapshot_optuna_metadata()
+    try:
+        with tempfile.TemporaryDirectory(prefix=f"mia_cache_{attack_name}_") as temp_dir:
+            temp_root = Path(temp_dir)
+            monkeypatch.chdir(temp_root)
+            _clear_global_attack_cache()
+
+            run_dir = temp_root / attack_name
+            run_dir.mkdir(parents=True, exist_ok=True)
+            config_path = _create_image_e2e_config(run_dir, attack_name)
+
+            first = LeakPro(TinyImageInputHandler, str(config_path))
+            assert len(first.run_audit(create_pdf=False, use_optuna=False)) == 1
+
+            cache_dir = Path(first.handler.configs.audit.output_dir) / cache_subdir
+            cache_files = sorted(p.name for p in cache_dir.iterdir() if p.is_file())
+            assert cache_files, f"{attack_name} wrote no cache files to {cache_dir}"
+            assert not [name for name in cache_files if name.endswith(".pkl")], "cache must be pickle-free"
+
+            loaded: dict[str, set[str]] = {name: set() for name in loader_names}
+            for loader_name in loader_names:
+                original = getattr(attack_module, loader_name)
+
+                def spy(path: str, *args: Any, _name: str = loader_name, _original: Any = original, **kwargs: Any) -> Any:
+                    if Path(path).parent.resolve() == cache_dir.resolve():
+                        loaded[_name].add(Path(path).name)
+                    return _original(path, *args, **kwargs)
+
+                monkeypatch.setattr(attack_module, loader_name, spy)
+
+            _set_seed()
+            _clear_global_attack_cache()
+            second = LeakPro(TinyImageInputHandler, str(config_path))
+            second_results = second.run_audit(create_pdf=False, use_optuna=False)
+            assert len(second_results) == 1
+            assert isinstance(second_results[0], MIAResult)
+
+            for loader_name, names in loaded.items():
+                assert names, f"second run never called {loader_name} on a file in {cache_dir}"
+                assert names <= set(cache_files)
+            assert sorted(p.name for p in cache_dir.iterdir() if p.is_file()) == cache_files, "second run wrote new cache files"
     finally:
         _restore_optuna_metadata(optuna_metadata_snapshot)

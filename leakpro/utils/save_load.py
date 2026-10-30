@@ -110,3 +110,54 @@ def hash_attack(config:dict, target_model:Module, model_hasher: Callable[[Module
     model_hash = model_hasher(target_model)
     combined_hash = hashlib.sha256((config_hash + model_hash).encode("utf-8")).hexdigest()
     return combined_hash  # noqa: RET504
+
+
+# ---------------------------------------------------------------------------
+# Cache files
+#
+# Attacks cache intermediate results (trajectories, augmented data, features,
+# index metadata) under the audit output directory and reload them on the next
+# run. Those files must never be unpickled: a planted pickle executes on load.
+# Everything cached is plain arrays or tensors, so the helpers below only ever
+# read passive formats (``.npz`` with ``allow_pickle=False``, ``torch.load``
+# with ``weights_only=True``). Use them for every cache read in ``leakpro/``.
+# ---------------------------------------------------------------------------
+
+def _to_ndarray(value):  # noqa: ANN001, ANN202
+    """Convert arrays, tensors, scalars and (nested) lists of them to one ``ndarray``."""
+    if torch.is_tensor(value):
+        return value.detach().cpu().numpy()
+    if isinstance(value, (list, tuple)):
+        return np.asarray([_to_ndarray(item) for item in value])
+    return np.asarray(value)
+
+
+def save_arrays(path: str, arrays: dict) -> None:
+    """Write a ``{name: array-like}`` mapping to ``path`` as an uncompressed ``.npz``.
+
+    Values are converted to ``ndarray`` (tensors are moved to CPU first); object
+    arrays are refused because they would require pickling on the way back in.
+    """
+    converted = {name: _to_ndarray(value) for name, value in arrays.items()}
+    for name, value in converted.items():
+        if value.dtype == object:
+            raise TypeError(f"Refusing to cache object array {name!r}: cache files must be pickle-free")
+    np.savez(path, **converted)
+
+
+def load_arrays(path: str) -> dict:
+    """Read an ``.npz`` written by :func:`save_arrays` back into a ``{name: ndarray}`` dict.
+
+    ``allow_pickle=False`` means a tampered file raises instead of executing.
+    """
+    with np.load(path, allow_pickle=False) as archive:
+        return {name: archive[name] for name in archive.files}
+
+
+def load_tensors(path: str, map_location: str = "cpu"):  # noqa: ANN201
+    """Load a tensor, or a container of tensors, saved with ``torch.save``.
+
+    ``weights_only=True`` restricts unpickling to tensors and primitive
+    containers, so a cache file cannot carry executable objects.
+    """
+    return torch.load(path, map_location=map_location, weights_only=True)

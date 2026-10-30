@@ -5,12 +5,11 @@
 """Implementation of the loss trajectory attack."""
 
 import os
-import pickle
 
 import numpy as np
 import torch.nn.functional as F  # noqa: N812
 from pydantic import BaseModel, Field
-from torch import load, nn, no_grad, optim, save, tensor
+from torch import nn, no_grad, optim, save, tensor
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
@@ -23,6 +22,7 @@ from leakpro.signals.signal import ModelLogits
 from leakpro.utils.device import get_device, mark_step
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
+from leakpro.utils.save_load import load_arrays, load_tensors, save_arrays
 
 
 class AttackLossTrajectory(AbstractMIA):
@@ -204,11 +204,10 @@ class AttackLossTrajectory(AbstractMIA):
 
         """
 
-        dataset_name = "trajectory_train_data.pkl" if train_mode else "trajectory_test_data.pkl"
+        dataset_name = "trajectory_train_data.npz" if train_mode else "trajectory_test_data.npz"
         if os.path.exists(f"{self.storage_dir}/{dataset_name}"):
             logger.info(f"Loading MIA {dataset_name}: {len(data_indices)} points")
-            with open(f"{self.storage_dir}/{dataset_name}", "rb") as file:
-                data = pickle.load(file)  # noqa: S301
+            data = load_arrays(f"{self.storage_dir}/{dataset_name}")
         else:
             data = self._prepare_mia_data(data_indices,
                                           student_model,
@@ -218,8 +217,7 @@ class AttackLossTrajectory(AbstractMIA):
         data["member_status"] = membership_status_shadow_train
 
         os.makedirs(self.storage_dir, exist_ok=True)
-        with open(f"{self.storage_dir}/{dataset_name}", "wb") as file:
-            pickle.dump(data, file)
+        save_arrays(f"{self.storage_dir}/{dataset_name}", data)
 
         mia_input = np.concatenate((data["model_trajectory"], data["teacher_model_loss"][:, None]), axis=1)
         mia_dataset = TensorDataset(tensor(mia_input), tensor(data["member_status"]))
@@ -304,7 +302,7 @@ class AttackLossTrajectory(AbstractMIA):
 
         """
         attack_model = self.mia_classifer
-        if not os.path.exists(f"{self.storage_dir}/trajectory_mia_model.pkl"):
+        if not os.path.exists(f"{self.storage_dir}/trajectory_mia_model.pt"):
             gpu_or_cpu = get_device()
             attack_optimizer = optim.SGD(attack_model.parameters(),
                                             lr=0.01, momentum=0.9, weight_decay=0.0001)
@@ -312,15 +310,11 @@ class AttackLossTrajectory(AbstractMIA):
             loss_fn = nn.CrossEntropyLoss()
 
             train_loss, train_prec1 = self._train_mia_classifier(attack_model, attack_optimizer, loss_fn)
-            train_info = [train_loss, train_prec1]
-
-            save(attack_model.state_dict(), self.storage_dir + "/trajectory_mia_model.pkl")
-
-            with open(f"{self.storage_dir}/mia_model_losses.pkl", "wb") as file:
-                pickle.dump(train_info, file)
+            save(attack_model.state_dict(), self.storage_dir + "/trajectory_mia_model.pt")
+            save_arrays(f"{self.storage_dir}/mia_model_losses.npz",
+                        {"train_loss": train_loss, "train_prec1": train_prec1})
         else:
-            with open(f"{self.storage_dir}/trajectory_mia_model.pkl", "rb") as model:
-                attack_model.load_state_dict(load(model))
+            attack_model.load_state_dict(load_tensors(f"{self.storage_dir}/trajectory_mia_model.pt"))
             logger.info("Loading Loss Trajectory classifier")
 
         return attack_model
