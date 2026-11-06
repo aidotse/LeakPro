@@ -24,6 +24,8 @@
 | robustness 		    | MIT          	      | [License](https://github.com/madrylab/robustness) 	                           |
 | mpi4py 		        | BSD 3-Clause        | [License](https://github.com/mpi4py/mpi4py) 	                               |
 | blobfile 		        | Public Domain       | [License](https://github.com/blobfile/blobfile) 	                           |
+| torchmetrics          | Apache 2.0          | [License](https://github.com/Lightning-AI/torchmetrics/blob/master/LICENSE) |
+| pytorch-ignite        | BSD 3-Clause        | [License](https://github.com/pytorch/ignite/blob/master/LICENSE) |
 
 
 Packages we partially use or draw inspiration from
