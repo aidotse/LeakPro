@@ -588,7 +588,7 @@ def wh2xy(x):
 class ComputeLoss:
     def __init__(self, model):
         super().__init__()
-        with open(os.path.join('args.yaml'), errors='ignore') as f:
+        with open(os.path.join(os.path.dirname(__file__), 'args.yaml'), errors='ignore') as f:
             params = yaml.safe_load(f)
         if hasattr(model, 'module'):
             model = model.module
