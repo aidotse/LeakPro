@@ -8,10 +8,10 @@ from torch.utils.data import DataLoader
 from transformers import LongformerTokenizerFast
 
 import sys
-import os
+from pathlib import Path
 
 # Add the path where your module is located
-sys.path.append(os.path.abspath("examples/gia/pii_inverting_1_image"))
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 
 from data_.data_manipulation import training_raw
