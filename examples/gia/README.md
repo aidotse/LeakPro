@@ -2,7 +2,7 @@
 
 Examples of gradient inversion attacks, which try to reconstruct a client's private training data from the gradient(s) it shares during federated learning.
 
-**Start here:** [gia_modular_basic](gia_modular_basic/README.md) — the current, recommended modular framework for composing and running GIA attacks. The rest of the examples below predate it and each hard-code a single classic attack.
+**Start here:** the modular GIA framework, documented in [leakpro/attacks/gia_attacks/modular](../../leakpro/attacks/gia_attacks/modular/README.md), composes and runs gradient inversion attacks. The examples below predate it and each hard-code a single classic attack.
 
 ## Images (CIFAR / CelebA)
 
@@ -28,6 +28,5 @@ Examples of gradient inversion attacks, which try to reconstruct a client's priv
 
 | Example | Purpose |
 |---|---|
-| [gia_modular_basic](gia_modular_basic/README.md) | Modular GIA framework overview and usage (recommended entry point) |
 | [evaluating_gia_train/AMM_kit](evaluating_gia_train/AMM_kit/README.md) | Validates LeakPro's differentiable training loop matches plain PyTorch |
 | [bn_research](bn_research/README.md) | Experimental, not maintained — slated for removal |

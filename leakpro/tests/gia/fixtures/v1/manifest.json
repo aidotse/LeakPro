@@ -1,0 +1,2382 @@
+{
+  "cases": {
+    "labels-dimitrov-gradients": {
+      "file": "labels-dimitrov-gradients.pt",
+      "kind": "labels",
+      "settings": {
+        "compute_mode": "gradients",
+        "method": "dimitrov"
+      }
+    },
+    "labels-dimitrov-updates": {
+      "file": "labels-dimitrov-updates.pt",
+      "kind": "labels",
+      "settings": {
+        "compute_mode": "updates",
+        "method": "dimitrov"
+      }
+    },
+    "labels-geng-gradients": {
+      "file": "labels-geng-gradients.pt",
+      "kind": "labels",
+      "settings": {
+        "compute_mode": "gradients",
+        "method": "geng"
+      }
+    },
+    "labels-geng-updates": {
+      "file": "labels-geng-updates.pt",
+      "kind": "labels",
+      "settings": {
+        "compute_mode": "updates",
+        "method": "geng"
+      }
+    },
+    "labels-idlg-gradients": {
+      "file": "labels-idlg-gradients.pt",
+      "kind": "labels",
+      "settings": {
+        "compute_mode": "gradients",
+        "method": "idlg"
+      }
+    },
+    "labels-idlg-updates": {
+      "file": "labels-idlg-updates.pt",
+      "kind": "labels",
+      "settings": {
+        "compute_mode": "updates",
+        "method": "idlg"
+      }
+    },
+    "loss-gia_running": {
+      "file": "loss-gia_running.pt",
+      "kind": "loss_points",
+      "settings": {
+        "config": {
+          "checkpoint_dir": null,
+          "device": "cpu",
+          "epoch_handling": "repeated_same",
+          "fedavg": null,
+          "initialization": {
+            "id": null,
+            "params": {},
+            "type": "init.random_noise"
+          },
+          "label_inference": {
+            "id": null,
+            "params": {},
+            "type": "label_inference.oracle"
+          },
+          "num_seeds_per_image": 1,
+          "return_best_stage": false,
+          "schema_version": 1,
+          "seed": 42,
+          "seed_aggregation": {
+            "id": null,
+            "params": {},
+            "type": "aggregation.none"
+          },
+          "stages": [
+            {
+              "constraint": {
+                "id": null,
+                "params": {},
+                "type": "constraint.clip"
+              },
+              "freeze_input": false,
+              "gradient_noise_std": 0.0,
+              "kind": "optimizer",
+              "label_learning_rate": null,
+              "label_strategy": {
+                "id": null,
+                "params": {},
+                "type": "label_strategy.fixed"
+              },
+              "learning_rate": 0.1,
+              "log_interval": 100,
+              "losses": [
+                {
+                  "id": null,
+                  "params": {
+                    "loss_type": "cosine",
+                    "weight": 1.0
+                  },
+                  "type": "loss.gradient_matching"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "weight": 0.052
+                  },
+                  "type": "loss.tv"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "momentum": 0.1,
+                    "strategy": "inferred",
+                    "weight": 0.00016
+                  },
+                  "type": "loss.bn_stats"
+                }
+              ],
+              "max_iterations": 3000,
+              "optimizer_type": {
+                "id": null,
+                "params": {},
+                "type": "optimizer.adam"
+              },
+              "patience": 10000,
+              "representation": null,
+              "return_best": true,
+              "scheduler_type": {
+                "id": null,
+                "params": {},
+                "type": "scheduler.step"
+              },
+              "step_strategy": {
+                "id": null,
+                "params": {},
+                "type": "step.standard"
+              },
+              "use_gradient_sign": false,
+              "verbose": false
+            }
+          ],
+          "threat_model_type": "model_e",
+          "training_simulator": {
+            "batch_size": null,
+            "compute_mode": "updates",
+            "epochs": 1,
+            "meta_learning_rate": 0.01,
+            "mode": "attack",
+            "model_mode": "train"
+          },
+          "transitions": []
+        },
+        "overrides": {},
+        "preset": "gia_running",
+        "preset_defaults": {
+          "checkpoint_dir": null,
+          "device": "cpu",
+          "epoch_handling": "repeated_same",
+          "fedavg": null,
+          "initialization": {
+            "id": null,
+            "params": {},
+            "type": "init.random_noise"
+          },
+          "label_inference": {
+            "id": null,
+            "params": {},
+            "type": "label_inference.oracle"
+          },
+          "num_seeds_per_image": 1,
+          "return_best_stage": false,
+          "schema_version": 1,
+          "seed": 42,
+          "seed_aggregation": {
+            "id": null,
+            "params": {},
+            "type": "aggregation.none"
+          },
+          "stages": [
+            {
+              "constraint": {
+                "id": null,
+                "params": {},
+                "type": "constraint.clip"
+              },
+              "freeze_input": false,
+              "gradient_noise_std": 0.0,
+              "kind": "optimizer",
+              "label_learning_rate": null,
+              "label_strategy": {
+                "id": null,
+                "params": {},
+                "type": "label_strategy.fixed"
+              },
+              "learning_rate": 0.1,
+              "log_interval": 100,
+              "losses": [
+                {
+                  "id": null,
+                  "params": {
+                    "loss_type": "cosine",
+                    "weight": 1.0
+                  },
+                  "type": "loss.gradient_matching"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "weight": 0.052
+                  },
+                  "type": "loss.tv"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "momentum": 0.1,
+                    "strategy": "inferred",
+                    "weight": 0.00016
+                  },
+                  "type": "loss.bn_stats"
+                }
+              ],
+              "max_iterations": 3000,
+              "optimizer_type": {
+                "id": null,
+                "params": {},
+                "type": "optimizer.adam"
+              },
+              "patience": 10000,
+              "representation": null,
+              "return_best": true,
+              "scheduler_type": {
+                "id": null,
+                "params": {},
+                "type": "scheduler.step"
+              },
+              "step_strategy": {
+                "id": null,
+                "params": {},
+                "type": "step.standard"
+              },
+              "use_gradient_sign": false,
+              "verbose": false
+            }
+          ],
+          "threat_model_type": "model_e",
+          "training_simulator": {
+            "batch_size": null,
+            "compute_mode": "updates",
+            "epochs": 1,
+            "meta_learning_rate": 0.01,
+            "mode": "attack",
+            "model_mode": "train"
+          },
+          "transitions": []
+        }
+      }
+    },
+    "loss-huang": {
+      "file": "loss-huang.pt",
+      "kind": "loss_points",
+      "settings": {
+        "config": {
+          "checkpoint_dir": null,
+          "device": "cpu",
+          "epoch_handling": "repeated_same",
+          "fedavg": null,
+          "initialization": {
+            "id": null,
+            "params": {},
+            "type": "init.random_noise"
+          },
+          "label_inference": {
+            "id": null,
+            "params": {},
+            "type": "label_inference.oracle"
+          },
+          "num_seeds_per_image": 1,
+          "return_best_stage": false,
+          "schema_version": 1,
+          "seed": 42,
+          "seed_aggregation": {
+            "id": null,
+            "params": {},
+            "type": "aggregation.none"
+          },
+          "stages": [
+            {
+              "constraint": {
+                "id": null,
+                "params": {},
+                "type": "constraint.clip"
+              },
+              "freeze_input": false,
+              "gradient_noise_std": 0.0,
+              "kind": "optimizer",
+              "label_learning_rate": null,
+              "label_strategy": {
+                "id": null,
+                "params": {},
+                "type": "label_strategy.fixed"
+              },
+              "learning_rate": 0.1,
+              "log_interval": 100,
+              "losses": [
+                {
+                  "id": null,
+                  "params": {
+                    "loss_type": "cosine",
+                    "weight": 1.0
+                  },
+                  "type": "loss.gradient_matching"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "weight": 0.052
+                  },
+                  "type": "loss.tv"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "strategy": "running",
+                    "weight": 0.00016
+                  },
+                  "type": "loss.bn_stats"
+                }
+              ],
+              "max_iterations": 10000,
+              "optimizer_type": {
+                "id": null,
+                "params": {},
+                "type": "optimizer.adam"
+              },
+              "patience": 10000,
+              "representation": null,
+              "return_best": true,
+              "scheduler_type": {
+                "id": null,
+                "params": {},
+                "type": "scheduler.step"
+              },
+              "step_strategy": {
+                "id": null,
+                "params": {},
+                "type": "step.standard"
+              },
+              "use_gradient_sign": false,
+              "verbose": false
+            }
+          ],
+          "threat_model_type": "model_e",
+          "training_simulator": {
+            "batch_size": null,
+            "compute_mode": "updates",
+            "epochs": 1,
+            "meta_learning_rate": 0.01,
+            "mode": "attack",
+            "model_mode": "train"
+          },
+          "transitions": []
+        },
+        "overrides": {},
+        "preset": "huang",
+        "preset_defaults": {
+          "checkpoint_dir": null,
+          "device": "cpu",
+          "epoch_handling": "repeated_same",
+          "fedavg": null,
+          "initialization": {
+            "id": null,
+            "params": {},
+            "type": "init.random_noise"
+          },
+          "label_inference": {
+            "id": null,
+            "params": {},
+            "type": "label_inference.oracle"
+          },
+          "num_seeds_per_image": 1,
+          "return_best_stage": false,
+          "schema_version": 1,
+          "seed": 42,
+          "seed_aggregation": {
+            "id": null,
+            "params": {},
+            "type": "aggregation.none"
+          },
+          "stages": [
+            {
+              "constraint": {
+                "id": null,
+                "params": {},
+                "type": "constraint.clip"
+              },
+              "freeze_input": false,
+              "gradient_noise_std": 0.0,
+              "kind": "optimizer",
+              "label_learning_rate": null,
+              "label_strategy": {
+                "id": null,
+                "params": {},
+                "type": "label_strategy.fixed"
+              },
+              "learning_rate": 0.1,
+              "log_interval": 100,
+              "losses": [
+                {
+                  "id": null,
+                  "params": {
+                    "loss_type": "cosine",
+                    "weight": 1.0
+                  },
+                  "type": "loss.gradient_matching"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "weight": 0.052
+                  },
+                  "type": "loss.tv"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "strategy": "running",
+                    "weight": 0.00016
+                  },
+                  "type": "loss.bn_stats"
+                }
+              ],
+              "max_iterations": 10000,
+              "optimizer_type": {
+                "id": null,
+                "params": {},
+                "type": "optimizer.adam"
+              },
+              "patience": 10000,
+              "representation": null,
+              "return_best": true,
+              "scheduler_type": {
+                "id": null,
+                "params": {},
+                "type": "scheduler.step"
+              },
+              "step_strategy": {
+                "id": null,
+                "params": {},
+                "type": "step.standard"
+              },
+              "use_gradient_sign": false,
+              "verbose": false
+            }
+          ],
+          "threat_model_type": "model_e",
+          "training_simulator": {
+            "batch_size": null,
+            "compute_mode": "updates",
+            "epochs": 1,
+            "meta_learning_rate": 0.01,
+            "mode": "attack",
+            "model_mode": "train"
+          },
+          "transitions": []
+        }
+      }
+    },
+    "loss-idlg": {
+      "file": "loss-idlg.pt",
+      "kind": "loss_points",
+      "settings": {
+        "config": {
+          "checkpoint_dir": null,
+          "device": "cpu",
+          "epoch_handling": "repeated_same",
+          "fedavg": null,
+          "initialization": {
+            "id": null,
+            "params": {},
+            "type": "init.random_noise"
+          },
+          "label_inference": {
+            "id": null,
+            "params": {},
+            "type": "label_inference.idlg"
+          },
+          "num_seeds_per_image": 1,
+          "return_best_stage": false,
+          "schema_version": 1,
+          "seed": 42,
+          "seed_aggregation": {
+            "id": null,
+            "params": {},
+            "type": "aggregation.none"
+          },
+          "stages": [
+            {
+              "constraint": null,
+              "freeze_input": false,
+              "gradient_noise_std": 0.0,
+              "kind": "optimizer",
+              "label_learning_rate": null,
+              "label_strategy": {
+                "id": null,
+                "params": {},
+                "type": "label_strategy.fixed"
+              },
+              "learning_rate": 1.0,
+              "log_interval": 100,
+              "losses": [
+                {
+                  "id": null,
+                  "params": {
+                    "loss_type": "l2",
+                    "weight": 1.0
+                  },
+                  "type": "loss.gradient_matching"
+                }
+              ],
+              "max_iterations": 300,
+              "optimizer_type": {
+                "id": null,
+                "params": {},
+                "type": "optimizer.lbfgs"
+              },
+              "patience": 10000,
+              "representation": null,
+              "return_best": true,
+              "scheduler_type": null,
+              "step_strategy": {
+                "id": null,
+                "params": {},
+                "type": "step.standard"
+              },
+              "use_gradient_sign": false,
+              "verbose": false
+            }
+          ],
+          "threat_model_type": "model_a",
+          "training_simulator": {
+            "batch_size": null,
+            "compute_mode": "gradients",
+            "epochs": 1,
+            "meta_learning_rate": 0.01,
+            "mode": "attack",
+            "model_mode": "eval"
+          },
+          "transitions": []
+        },
+        "overrides": {},
+        "preset": "idlg",
+        "preset_defaults": {
+          "checkpoint_dir": null,
+          "device": "cpu",
+          "epoch_handling": "repeated_same",
+          "fedavg": null,
+          "initialization": {
+            "id": null,
+            "params": {},
+            "type": "init.random_noise"
+          },
+          "label_inference": {
+            "id": null,
+            "params": {},
+            "type": "label_inference.idlg"
+          },
+          "num_seeds_per_image": 1,
+          "return_best_stage": false,
+          "schema_version": 1,
+          "seed": 42,
+          "seed_aggregation": {
+            "id": null,
+            "params": {},
+            "type": "aggregation.none"
+          },
+          "stages": [
+            {
+              "constraint": null,
+              "freeze_input": false,
+              "gradient_noise_std": 0.0,
+              "kind": "optimizer",
+              "label_learning_rate": null,
+              "label_strategy": {
+                "id": null,
+                "params": {},
+                "type": "label_strategy.fixed"
+              },
+              "learning_rate": 1.0,
+              "log_interval": 100,
+              "losses": [
+                {
+                  "id": null,
+                  "params": {
+                    "loss_type": "l2",
+                    "weight": 1.0
+                  },
+                  "type": "loss.gradient_matching"
+                }
+              ],
+              "max_iterations": 300,
+              "optimizer_type": {
+                "id": null,
+                "params": {},
+                "type": "optimizer.lbfgs"
+              },
+              "patience": 10000,
+              "representation": null,
+              "return_best": true,
+              "scheduler_type": null,
+              "step_strategy": {
+                "id": null,
+                "params": {},
+                "type": "step.standard"
+              },
+              "use_gradient_sign": false,
+              "verbose": false
+            }
+          ],
+          "threat_model_type": "model_a",
+          "training_simulator": {
+            "batch_size": null,
+            "compute_mode": "gradients",
+            "epochs": 1,
+            "meta_learning_rate": 0.01,
+            "mode": "attack",
+            "model_mode": "eval"
+          },
+          "transitions": []
+        }
+      }
+    },
+    "loss-inverting_gradients": {
+      "file": "loss-inverting_gradients.pt",
+      "kind": "loss_points",
+      "settings": {
+        "config": {
+          "checkpoint_dir": null,
+          "device": "cpu",
+          "epoch_handling": "repeated_same",
+          "fedavg": null,
+          "initialization": {
+            "id": null,
+            "params": {},
+            "type": "init.random_noise"
+          },
+          "label_inference": {
+            "id": null,
+            "params": {},
+            "type": "label_inference.oracle"
+          },
+          "num_seeds_per_image": 1,
+          "return_best_stage": false,
+          "schema_version": 1,
+          "seed": 42,
+          "seed_aggregation": {
+            "id": null,
+            "params": {},
+            "type": "aggregation.none"
+          },
+          "stages": [
+            {
+              "constraint": {
+                "id": null,
+                "params": {},
+                "type": "constraint.clip"
+              },
+              "freeze_input": false,
+              "gradient_noise_std": 0.0,
+              "kind": "optimizer",
+              "label_learning_rate": null,
+              "label_strategy": {
+                "id": null,
+                "params": {},
+                "type": "label_strategy.fixed"
+              },
+              "learning_rate": 0.1,
+              "log_interval": 100,
+              "losses": [
+                {
+                  "id": null,
+                  "params": {
+                    "loss_type": "cosine",
+                    "weight": 1.0
+                  },
+                  "type": "loss.gradient_matching"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "weight": 0.001
+                  },
+                  "type": "loss.tv"
+                }
+              ],
+              "max_iterations": 4000,
+              "optimizer_type": {
+                "id": null,
+                "params": {},
+                "type": "optimizer.adam"
+              },
+              "patience": 10000,
+              "representation": null,
+              "return_best": true,
+              "scheduler_type": {
+                "id": null,
+                "params": {},
+                "type": "scheduler.step"
+              },
+              "step_strategy": {
+                "id": null,
+                "params": {
+                  "use_gradient_sign": true
+                },
+                "type": "step.standard"
+              },
+              "use_gradient_sign": true,
+              "verbose": false
+            }
+          ],
+          "threat_model_type": "model_b",
+          "training_simulator": {
+            "batch_size": null,
+            "compute_mode": "updates",
+            "epochs": 1,
+            "meta_learning_rate": 0.01,
+            "mode": "attack",
+            "model_mode": "eval"
+          },
+          "transitions": []
+        },
+        "overrides": {},
+        "preset": "inverting_gradients",
+        "preset_defaults": {
+          "checkpoint_dir": null,
+          "device": "cpu",
+          "epoch_handling": "repeated_same",
+          "fedavg": null,
+          "initialization": {
+            "id": null,
+            "params": {},
+            "type": "init.random_noise"
+          },
+          "label_inference": {
+            "id": null,
+            "params": {},
+            "type": "label_inference.oracle"
+          },
+          "num_seeds_per_image": 1,
+          "return_best_stage": false,
+          "schema_version": 1,
+          "seed": 42,
+          "seed_aggregation": {
+            "id": null,
+            "params": {},
+            "type": "aggregation.none"
+          },
+          "stages": [
+            {
+              "constraint": {
+                "id": null,
+                "params": {},
+                "type": "constraint.clip"
+              },
+              "freeze_input": false,
+              "gradient_noise_std": 0.0,
+              "kind": "optimizer",
+              "label_learning_rate": null,
+              "label_strategy": {
+                "id": null,
+                "params": {},
+                "type": "label_strategy.fixed"
+              },
+              "learning_rate": 0.1,
+              "log_interval": 100,
+              "losses": [
+                {
+                  "id": null,
+                  "params": {
+                    "loss_type": "cosine",
+                    "weight": 1.0
+                  },
+                  "type": "loss.gradient_matching"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "weight": 0.001
+                  },
+                  "type": "loss.tv"
+                }
+              ],
+              "max_iterations": 4000,
+              "optimizer_type": {
+                "id": null,
+                "params": {},
+                "type": "optimizer.adam"
+              },
+              "patience": 10000,
+              "representation": null,
+              "return_best": true,
+              "scheduler_type": {
+                "id": null,
+                "params": {},
+                "type": "scheduler.step"
+              },
+              "step_strategy": {
+                "id": null,
+                "params": {
+                  "use_gradient_sign": true
+                },
+                "type": "step.standard"
+              },
+              "use_gradient_sign": true,
+              "verbose": false
+            }
+          ],
+          "threat_model_type": "model_b",
+          "training_simulator": {
+            "batch_size": null,
+            "compute_mode": "updates",
+            "epochs": 1,
+            "meta_learning_rate": 0.01,
+            "mode": "attack",
+            "model_mode": "eval"
+          },
+          "transitions": []
+        }
+      }
+    },
+    "loss-see_through_gradients": {
+      "file": "loss-see_through_gradients.pt",
+      "kind": "loss_points",
+      "settings": {
+        "config": {
+          "checkpoint_dir": null,
+          "device": "cpu",
+          "epoch_handling": "repeated_same",
+          "fedavg": null,
+          "initialization": {
+            "id": null,
+            "params": {},
+            "type": "init.random_noise"
+          },
+          "label_inference": {
+            "id": null,
+            "params": {},
+            "type": "label_inference.oracle"
+          },
+          "num_seeds_per_image": 1,
+          "return_best_stage": false,
+          "schema_version": 1,
+          "seed": 42,
+          "seed_aggregation": {
+            "id": null,
+            "params": {},
+            "type": "aggregation.mean"
+          },
+          "stages": [
+            {
+              "constraint": {
+                "id": null,
+                "params": {},
+                "type": "constraint.clip"
+              },
+              "freeze_input": false,
+              "gradient_noise_std": 0.2,
+              "kind": "optimizer",
+              "label_learning_rate": null,
+              "label_strategy": {
+                "id": null,
+                "params": {},
+                "type": "label_strategy.fixed"
+              },
+              "learning_rate": 0.1,
+              "log_interval": 100,
+              "losses": [
+                {
+                  "id": null,
+                  "params": {
+                    "loss_type": "l2",
+                    "weight": 1.0
+                  },
+                  "type": "loss.gradient_matching"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "strategy": "running",
+                    "weight": 0.01
+                  },
+                  "type": "loss.bn_stats"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "weight": 0.0001
+                  },
+                  "type": "loss.tv"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "weight": 1e-06
+                  },
+                  "type": "loss.l2"
+                }
+              ],
+              "max_iterations": 8000,
+              "optimizer_type": {
+                "id": null,
+                "params": {},
+                "type": "optimizer.adam"
+              },
+              "patience": 10000,
+              "representation": null,
+              "return_best": true,
+              "scheduler_type": {
+                "id": null,
+                "params": {},
+                "type": "scheduler.cosine"
+              },
+              "step_strategy": {
+                "id": null,
+                "params": {
+                  "gradient_noise_std": 0.2
+                },
+                "type": "step.standard"
+              },
+              "use_gradient_sign": false,
+              "verbose": false
+            }
+          ],
+          "threat_model_type": "model_e",
+          "training_simulator": {
+            "batch_size": null,
+            "compute_mode": "updates",
+            "epochs": 1,
+            "meta_learning_rate": 0.01,
+            "mode": "attack",
+            "model_mode": "train"
+          },
+          "transitions": []
+        },
+        "overrides": {
+          "num_seeds": 1
+        },
+        "preset": "see_through_gradients",
+        "preset_defaults": {
+          "checkpoint_dir": null,
+          "device": "cpu",
+          "epoch_handling": "repeated_same",
+          "fedavg": null,
+          "initialization": {
+            "id": null,
+            "params": {},
+            "type": "init.random_noise"
+          },
+          "label_inference": {
+            "id": null,
+            "params": {},
+            "type": "label_inference.oracle"
+          },
+          "num_seeds_per_image": 4,
+          "return_best_stage": false,
+          "schema_version": 1,
+          "seed": 42,
+          "seed_aggregation": {
+            "id": null,
+            "params": {},
+            "type": "aggregation.mean"
+          },
+          "stages": [
+            {
+              "constraint": {
+                "id": null,
+                "params": {},
+                "type": "constraint.clip"
+              },
+              "freeze_input": false,
+              "gradient_noise_std": 0.2,
+              "kind": "optimizer",
+              "label_learning_rate": null,
+              "label_strategy": {
+                "id": null,
+                "params": {},
+                "type": "label_strategy.fixed"
+              },
+              "learning_rate": 0.1,
+              "log_interval": 100,
+              "losses": [
+                {
+                  "id": null,
+                  "params": {
+                    "loss_type": "l2",
+                    "weight": 1.0
+                  },
+                  "type": "loss.gradient_matching"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "strategy": "running",
+                    "weight": 0.01
+                  },
+                  "type": "loss.bn_stats"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "weight": 0.0001
+                  },
+                  "type": "loss.tv"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "weight": 1e-06
+                  },
+                  "type": "loss.l2"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "weight": 0.01
+                  },
+                  "type": "loss.group_consistency"
+                }
+              ],
+              "max_iterations": 8000,
+              "optimizer_type": {
+                "id": null,
+                "params": {},
+                "type": "optimizer.adam"
+              },
+              "patience": 10000,
+              "representation": null,
+              "return_best": true,
+              "scheduler_type": {
+                "id": null,
+                "params": {},
+                "type": "scheduler.cosine"
+              },
+              "step_strategy": {
+                "id": null,
+                "params": {
+                  "gradient_noise_std": 0.2
+                },
+                "type": "step.standard"
+              },
+              "use_gradient_sign": false,
+              "verbose": false
+            }
+          ],
+          "threat_model_type": "model_e",
+          "training_simulator": {
+            "batch_size": null,
+            "compute_mode": "updates",
+            "epochs": 1,
+            "meta_learning_rate": 0.01,
+            "mode": "attack",
+            "model_mode": "train"
+          },
+          "transitions": []
+        }
+      }
+    },
+    "signal-grad-eval": {
+      "file": "signal-grad-eval.pt",
+      "kind": "signal",
+      "settings": {
+        "batch_size": null,
+        "compute_mode": "gradients",
+        "epochs": 1,
+        "meta_lr": 0.01,
+        "model_mode": "eval"
+      }
+    },
+    "signal-grad-train": {
+      "file": "signal-grad-train.pt",
+      "kind": "signal",
+      "settings": {
+        "batch_size": null,
+        "compute_mode": "gradients",
+        "epochs": 1,
+        "meta_lr": 0.01,
+        "model_mode": "train"
+      }
+    },
+    "signal-upd-1ep": {
+      "file": "signal-upd-1ep.pt",
+      "kind": "signal",
+      "settings": {
+        "batch_size": null,
+        "compute_mode": "updates",
+        "epochs": 1,
+        "meta_lr": 0.01,
+        "model_mode": "train"
+      }
+    },
+    "signal-upd-2ep-bs2-eval": {
+      "file": "signal-upd-2ep-bs2-eval.pt",
+      "kind": "signal",
+      "settings": {
+        "batch_size": 2,
+        "compute_mode": "updates",
+        "epochs": 2,
+        "meta_lr": 0.01,
+        "model_mode": "eval"
+      }
+    },
+    "signal-upd-3ep": {
+      "file": "signal-upd-3ep.pt",
+      "kind": "signal",
+      "settings": {
+        "batch_size": null,
+        "compute_mode": "updates",
+        "epochs": 3,
+        "meta_lr": 0.01,
+        "model_mode": "train"
+      }
+    },
+    "signal-upd-3ep-bs1": {
+      "file": "signal-upd-3ep-bs1.pt",
+      "kind": "signal",
+      "settings": {
+        "batch_size": 1,
+        "compute_mode": "updates",
+        "epochs": 3,
+        "meta_lr": 0.01,
+        "model_mode": "train"
+      }
+    },
+    "traj-dimitrov": {
+      "file": "traj-dimitrov.pt",
+      "kind": "trajectory",
+      "settings": {
+        "config": {
+          "checkpoint_dir": null,
+          "device": "cpu",
+          "epoch_handling": "multi_epoch_separate",
+          "fedavg": {
+            "lambda_inv": 1e-06,
+            "matching_metric": "l2",
+            "order_invariant_fn": "mean"
+          },
+          "initialization": {
+            "id": null,
+            "params": {},
+            "type": "init.random_noise"
+          },
+          "label_inference": {
+            "id": null,
+            "params": {},
+            "type": "label_inference.oracle"
+          },
+          "num_seeds_per_image": 1,
+          "return_best_stage": false,
+          "schema_version": 1,
+          "seed": 42,
+          "seed_aggregation": {
+            "id": null,
+            "params": {},
+            "type": "aggregation.none"
+          },
+          "stages": [
+            {
+              "constraint": {
+                "id": null,
+                "params": {},
+                "type": "constraint.clip"
+              },
+              "freeze_input": false,
+              "gradient_noise_std": 0.0,
+              "kind": "optimizer",
+              "label_learning_rate": null,
+              "label_strategy": {
+                "id": null,
+                "params": {},
+                "type": "label_strategy.fixed"
+              },
+              "learning_rate": 1.0,
+              "log_interval": 100,
+              "losses": [
+                {
+                  "id": null,
+                  "params": {
+                    "loss_type": "cosine",
+                    "weight": 1.0
+                  },
+                  "type": "loss.gradient_matching"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "weight": 0.0001
+                  },
+                  "type": "loss.tv"
+                }
+              ],
+              "max_iterations": 50,
+              "optimizer_type": {
+                "id": null,
+                "params": {},
+                "type": "optimizer.adam"
+              },
+              "patience": 1000000000,
+              "representation": null,
+              "return_best": true,
+              "scheduler_type": {
+                "id": null,
+                "params": {},
+                "type": "scheduler.cosine"
+              },
+              "step_strategy": {
+                "id": null,
+                "params": {},
+                "type": "step.standard"
+              },
+              "use_gradient_sign": false,
+              "verbose": false
+            }
+          ],
+          "threat_model_type": "model_c",
+          "training_simulator": {
+            "batch_size": 1,
+            "compute_mode": "updates",
+            "epochs": 2,
+            "meta_learning_rate": 0.01,
+            "mode": "attack",
+            "model_mode": "eval"
+          },
+          "transitions": []
+        },
+        "overrides": {
+          "epochs": 2
+        },
+        "preset": "dimitrov",
+        "preset_defaults": {
+          "checkpoint_dir": null,
+          "device": "cpu",
+          "epoch_handling": "multi_epoch_separate",
+          "fedavg": {
+            "lambda_inv": 1e-06,
+            "matching_metric": "l2",
+            "order_invariant_fn": "mean"
+          },
+          "initialization": {
+            "id": null,
+            "params": {},
+            "type": "init.random_noise"
+          },
+          "label_inference": {
+            "id": null,
+            "params": {},
+            "type": "label_inference.oracle"
+          },
+          "num_seeds_per_image": 1,
+          "return_best_stage": false,
+          "schema_version": 1,
+          "seed": 42,
+          "seed_aggregation": {
+            "id": null,
+            "params": {},
+            "type": "aggregation.none"
+          },
+          "stages": [
+            {
+              "constraint": {
+                "id": null,
+                "params": {},
+                "type": "constraint.clip"
+              },
+              "freeze_input": false,
+              "gradient_noise_std": 0.0,
+              "kind": "optimizer",
+              "label_learning_rate": null,
+              "label_strategy": {
+                "id": null,
+                "params": {},
+                "type": "label_strategy.fixed"
+              },
+              "learning_rate": 1.0,
+              "log_interval": 100,
+              "losses": [
+                {
+                  "id": null,
+                  "params": {
+                    "loss_type": "cosine",
+                    "weight": 1.0
+                  },
+                  "type": "loss.gradient_matching"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "weight": 0.0001
+                  },
+                  "type": "loss.tv"
+                }
+              ],
+              "max_iterations": 8000,
+              "optimizer_type": {
+                "id": null,
+                "params": {},
+                "type": "optimizer.adam"
+              },
+              "patience": 10000,
+              "representation": null,
+              "return_best": true,
+              "scheduler_type": {
+                "id": null,
+                "params": {},
+                "type": "scheduler.cosine"
+              },
+              "step_strategy": {
+                "id": null,
+                "params": {},
+                "type": "step.standard"
+              },
+              "use_gradient_sign": false,
+              "verbose": false
+            }
+          ],
+          "threat_model_type": "model_c",
+          "training_simulator": {
+            "batch_size": 1,
+            "compute_mode": "updates",
+            "epochs": 3,
+            "meta_learning_rate": 0.01,
+            "mode": "attack",
+            "model_mode": "eval"
+          },
+          "transitions": []
+        }
+      }
+    },
+    "traj-gia_running": {
+      "file": "traj-gia_running.pt",
+      "kind": "trajectory",
+      "settings": {
+        "config": {
+          "checkpoint_dir": null,
+          "device": "cpu",
+          "epoch_handling": "repeated_same",
+          "fedavg": null,
+          "initialization": {
+            "id": null,
+            "params": {},
+            "type": "init.random_noise"
+          },
+          "label_inference": {
+            "id": null,
+            "params": {},
+            "type": "label_inference.oracle"
+          },
+          "num_seeds_per_image": 1,
+          "return_best_stage": false,
+          "schema_version": 1,
+          "seed": 42,
+          "seed_aggregation": {
+            "id": null,
+            "params": {},
+            "type": "aggregation.none"
+          },
+          "stages": [
+            {
+              "constraint": {
+                "id": null,
+                "params": {},
+                "type": "constraint.clip"
+              },
+              "freeze_input": false,
+              "gradient_noise_std": 0.0,
+              "kind": "optimizer",
+              "label_learning_rate": null,
+              "label_strategy": {
+                "id": null,
+                "params": {},
+                "type": "label_strategy.fixed"
+              },
+              "learning_rate": 0.1,
+              "log_interval": 100,
+              "losses": [
+                {
+                  "id": null,
+                  "params": {
+                    "loss_type": "cosine",
+                    "weight": 1.0
+                  },
+                  "type": "loss.gradient_matching"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "weight": 0.052
+                  },
+                  "type": "loss.tv"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "momentum": 0.1,
+                    "strategy": "inferred",
+                    "weight": 0.00016
+                  },
+                  "type": "loss.bn_stats"
+                }
+              ],
+              "max_iterations": 50,
+              "optimizer_type": {
+                "id": null,
+                "params": {},
+                "type": "optimizer.adam"
+              },
+              "patience": 1000000000,
+              "representation": null,
+              "return_best": true,
+              "scheduler_type": {
+                "id": null,
+                "params": {},
+                "type": "scheduler.step"
+              },
+              "step_strategy": {
+                "id": null,
+                "params": {},
+                "type": "step.standard"
+              },
+              "use_gradient_sign": false,
+              "verbose": false
+            }
+          ],
+          "threat_model_type": "model_e",
+          "training_simulator": {
+            "batch_size": null,
+            "compute_mode": "updates",
+            "epochs": 1,
+            "meta_learning_rate": 0.01,
+            "mode": "attack",
+            "model_mode": "train"
+          },
+          "transitions": []
+        },
+        "overrides": {},
+        "preset": "gia_running",
+        "preset_defaults": {
+          "checkpoint_dir": null,
+          "device": "cpu",
+          "epoch_handling": "repeated_same",
+          "fedavg": null,
+          "initialization": {
+            "id": null,
+            "params": {},
+            "type": "init.random_noise"
+          },
+          "label_inference": {
+            "id": null,
+            "params": {},
+            "type": "label_inference.oracle"
+          },
+          "num_seeds_per_image": 1,
+          "return_best_stage": false,
+          "schema_version": 1,
+          "seed": 42,
+          "seed_aggregation": {
+            "id": null,
+            "params": {},
+            "type": "aggregation.none"
+          },
+          "stages": [
+            {
+              "constraint": {
+                "id": null,
+                "params": {},
+                "type": "constraint.clip"
+              },
+              "freeze_input": false,
+              "gradient_noise_std": 0.0,
+              "kind": "optimizer",
+              "label_learning_rate": null,
+              "label_strategy": {
+                "id": null,
+                "params": {},
+                "type": "label_strategy.fixed"
+              },
+              "learning_rate": 0.1,
+              "log_interval": 100,
+              "losses": [
+                {
+                  "id": null,
+                  "params": {
+                    "loss_type": "cosine",
+                    "weight": 1.0
+                  },
+                  "type": "loss.gradient_matching"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "weight": 0.052
+                  },
+                  "type": "loss.tv"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "momentum": 0.1,
+                    "strategy": "inferred",
+                    "weight": 0.00016
+                  },
+                  "type": "loss.bn_stats"
+                }
+              ],
+              "max_iterations": 3000,
+              "optimizer_type": {
+                "id": null,
+                "params": {},
+                "type": "optimizer.adam"
+              },
+              "patience": 10000,
+              "representation": null,
+              "return_best": true,
+              "scheduler_type": {
+                "id": null,
+                "params": {},
+                "type": "scheduler.step"
+              },
+              "step_strategy": {
+                "id": null,
+                "params": {},
+                "type": "step.standard"
+              },
+              "use_gradient_sign": false,
+              "verbose": false
+            }
+          ],
+          "threat_model_type": "model_e",
+          "training_simulator": {
+            "batch_size": null,
+            "compute_mode": "updates",
+            "epochs": 1,
+            "meta_learning_rate": 0.01,
+            "mode": "attack",
+            "model_mode": "train"
+          },
+          "transitions": []
+        }
+      }
+    },
+    "traj-huang": {
+      "file": "traj-huang.pt",
+      "kind": "trajectory",
+      "settings": {
+        "config": {
+          "checkpoint_dir": null,
+          "device": "cpu",
+          "epoch_handling": "repeated_same",
+          "fedavg": null,
+          "initialization": {
+            "id": null,
+            "params": {},
+            "type": "init.random_noise"
+          },
+          "label_inference": {
+            "id": null,
+            "params": {},
+            "type": "label_inference.oracle"
+          },
+          "num_seeds_per_image": 1,
+          "return_best_stage": false,
+          "schema_version": 1,
+          "seed": 42,
+          "seed_aggregation": {
+            "id": null,
+            "params": {},
+            "type": "aggregation.none"
+          },
+          "stages": [
+            {
+              "constraint": {
+                "id": null,
+                "params": {},
+                "type": "constraint.clip"
+              },
+              "freeze_input": false,
+              "gradient_noise_std": 0.0,
+              "kind": "optimizer",
+              "label_learning_rate": null,
+              "label_strategy": {
+                "id": null,
+                "params": {},
+                "type": "label_strategy.fixed"
+              },
+              "learning_rate": 0.1,
+              "log_interval": 100,
+              "losses": [
+                {
+                  "id": null,
+                  "params": {
+                    "loss_type": "cosine",
+                    "weight": 1.0
+                  },
+                  "type": "loss.gradient_matching"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "weight": 0.052
+                  },
+                  "type": "loss.tv"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "strategy": "running",
+                    "weight": 0.00016
+                  },
+                  "type": "loss.bn_stats"
+                }
+              ],
+              "max_iterations": 50,
+              "optimizer_type": {
+                "id": null,
+                "params": {},
+                "type": "optimizer.adam"
+              },
+              "patience": 1000000000,
+              "representation": null,
+              "return_best": true,
+              "scheduler_type": {
+                "id": null,
+                "params": {},
+                "type": "scheduler.step"
+              },
+              "step_strategy": {
+                "id": null,
+                "params": {},
+                "type": "step.standard"
+              },
+              "use_gradient_sign": false,
+              "verbose": false
+            }
+          ],
+          "threat_model_type": "model_e",
+          "training_simulator": {
+            "batch_size": null,
+            "compute_mode": "updates",
+            "epochs": 1,
+            "meta_learning_rate": 0.01,
+            "mode": "attack",
+            "model_mode": "train"
+          },
+          "transitions": []
+        },
+        "overrides": {},
+        "preset": "huang",
+        "preset_defaults": {
+          "checkpoint_dir": null,
+          "device": "cpu",
+          "epoch_handling": "repeated_same",
+          "fedavg": null,
+          "initialization": {
+            "id": null,
+            "params": {},
+            "type": "init.random_noise"
+          },
+          "label_inference": {
+            "id": null,
+            "params": {},
+            "type": "label_inference.oracle"
+          },
+          "num_seeds_per_image": 1,
+          "return_best_stage": false,
+          "schema_version": 1,
+          "seed": 42,
+          "seed_aggregation": {
+            "id": null,
+            "params": {},
+            "type": "aggregation.none"
+          },
+          "stages": [
+            {
+              "constraint": {
+                "id": null,
+                "params": {},
+                "type": "constraint.clip"
+              },
+              "freeze_input": false,
+              "gradient_noise_std": 0.0,
+              "kind": "optimizer",
+              "label_learning_rate": null,
+              "label_strategy": {
+                "id": null,
+                "params": {},
+                "type": "label_strategy.fixed"
+              },
+              "learning_rate": 0.1,
+              "log_interval": 100,
+              "losses": [
+                {
+                  "id": null,
+                  "params": {
+                    "loss_type": "cosine",
+                    "weight": 1.0
+                  },
+                  "type": "loss.gradient_matching"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "weight": 0.052
+                  },
+                  "type": "loss.tv"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "strategy": "running",
+                    "weight": 0.00016
+                  },
+                  "type": "loss.bn_stats"
+                }
+              ],
+              "max_iterations": 10000,
+              "optimizer_type": {
+                "id": null,
+                "params": {},
+                "type": "optimizer.adam"
+              },
+              "patience": 10000,
+              "representation": null,
+              "return_best": true,
+              "scheduler_type": {
+                "id": null,
+                "params": {},
+                "type": "scheduler.step"
+              },
+              "step_strategy": {
+                "id": null,
+                "params": {},
+                "type": "step.standard"
+              },
+              "use_gradient_sign": false,
+              "verbose": false
+            }
+          ],
+          "threat_model_type": "model_e",
+          "training_simulator": {
+            "batch_size": null,
+            "compute_mode": "updates",
+            "epochs": 1,
+            "meta_learning_rate": 0.01,
+            "mode": "attack",
+            "model_mode": "train"
+          },
+          "transitions": []
+        }
+      }
+    },
+    "traj-idlg": {
+      "file": "traj-idlg.pt",
+      "kind": "trajectory",
+      "settings": {
+        "config": {
+          "checkpoint_dir": null,
+          "device": "cpu",
+          "epoch_handling": "repeated_same",
+          "fedavg": null,
+          "initialization": {
+            "id": null,
+            "params": {},
+            "type": "init.random_noise"
+          },
+          "label_inference": {
+            "id": null,
+            "params": {},
+            "type": "label_inference.idlg"
+          },
+          "num_seeds_per_image": 1,
+          "return_best_stage": false,
+          "schema_version": 1,
+          "seed": 42,
+          "seed_aggregation": {
+            "id": null,
+            "params": {},
+            "type": "aggregation.none"
+          },
+          "stages": [
+            {
+              "constraint": null,
+              "freeze_input": false,
+              "gradient_noise_std": 0.0,
+              "kind": "optimizer",
+              "label_learning_rate": null,
+              "label_strategy": {
+                "id": null,
+                "params": {},
+                "type": "label_strategy.fixed"
+              },
+              "learning_rate": 1.0,
+              "log_interval": 100,
+              "losses": [
+                {
+                  "id": null,
+                  "params": {
+                    "loss_type": "l2",
+                    "weight": 1.0
+                  },
+                  "type": "loss.gradient_matching"
+                }
+              ],
+              "max_iterations": 50,
+              "optimizer_type": {
+                "id": null,
+                "params": {},
+                "type": "optimizer.lbfgs"
+              },
+              "patience": 1000000000,
+              "representation": null,
+              "return_best": true,
+              "scheduler_type": null,
+              "step_strategy": {
+                "id": null,
+                "params": {},
+                "type": "step.standard"
+              },
+              "use_gradient_sign": false,
+              "verbose": false
+            }
+          ],
+          "threat_model_type": "model_a",
+          "training_simulator": {
+            "batch_size": null,
+            "compute_mode": "gradients",
+            "epochs": 1,
+            "meta_learning_rate": 0.01,
+            "mode": "attack",
+            "model_mode": "eval"
+          },
+          "transitions": []
+        },
+        "overrides": {},
+        "preset": "idlg",
+        "preset_defaults": {
+          "checkpoint_dir": null,
+          "device": "cpu",
+          "epoch_handling": "repeated_same",
+          "fedavg": null,
+          "initialization": {
+            "id": null,
+            "params": {},
+            "type": "init.random_noise"
+          },
+          "label_inference": {
+            "id": null,
+            "params": {},
+            "type": "label_inference.idlg"
+          },
+          "num_seeds_per_image": 1,
+          "return_best_stage": false,
+          "schema_version": 1,
+          "seed": 42,
+          "seed_aggregation": {
+            "id": null,
+            "params": {},
+            "type": "aggregation.none"
+          },
+          "stages": [
+            {
+              "constraint": null,
+              "freeze_input": false,
+              "gradient_noise_std": 0.0,
+              "kind": "optimizer",
+              "label_learning_rate": null,
+              "label_strategy": {
+                "id": null,
+                "params": {},
+                "type": "label_strategy.fixed"
+              },
+              "learning_rate": 1.0,
+              "log_interval": 100,
+              "losses": [
+                {
+                  "id": null,
+                  "params": {
+                    "loss_type": "l2",
+                    "weight": 1.0
+                  },
+                  "type": "loss.gradient_matching"
+                }
+              ],
+              "max_iterations": 300,
+              "optimizer_type": {
+                "id": null,
+                "params": {},
+                "type": "optimizer.lbfgs"
+              },
+              "patience": 10000,
+              "representation": null,
+              "return_best": true,
+              "scheduler_type": null,
+              "step_strategy": {
+                "id": null,
+                "params": {},
+                "type": "step.standard"
+              },
+              "use_gradient_sign": false,
+              "verbose": false
+            }
+          ],
+          "threat_model_type": "model_a",
+          "training_simulator": {
+            "batch_size": null,
+            "compute_mode": "gradients",
+            "epochs": 1,
+            "meta_learning_rate": 0.01,
+            "mode": "attack",
+            "model_mode": "eval"
+          },
+          "transitions": []
+        }
+      }
+    },
+    "traj-inverting_gradients": {
+      "file": "traj-inverting_gradients.pt",
+      "kind": "trajectory",
+      "settings": {
+        "config": {
+          "checkpoint_dir": null,
+          "device": "cpu",
+          "epoch_handling": "repeated_same",
+          "fedavg": null,
+          "initialization": {
+            "id": null,
+            "params": {},
+            "type": "init.random_noise"
+          },
+          "label_inference": {
+            "id": null,
+            "params": {},
+            "type": "label_inference.oracle"
+          },
+          "num_seeds_per_image": 1,
+          "return_best_stage": false,
+          "schema_version": 1,
+          "seed": 42,
+          "seed_aggregation": {
+            "id": null,
+            "params": {},
+            "type": "aggregation.none"
+          },
+          "stages": [
+            {
+              "constraint": {
+                "id": null,
+                "params": {},
+                "type": "constraint.clip"
+              },
+              "freeze_input": false,
+              "gradient_noise_std": 0.0,
+              "kind": "optimizer",
+              "label_learning_rate": null,
+              "label_strategy": {
+                "id": null,
+                "params": {},
+                "type": "label_strategy.fixed"
+              },
+              "learning_rate": 0.1,
+              "log_interval": 100,
+              "losses": [
+                {
+                  "id": null,
+                  "params": {
+                    "loss_type": "cosine",
+                    "weight": 1.0
+                  },
+                  "type": "loss.gradient_matching"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "weight": 0.001
+                  },
+                  "type": "loss.tv"
+                }
+              ],
+              "max_iterations": 50,
+              "optimizer_type": {
+                "id": null,
+                "params": {},
+                "type": "optimizer.adam"
+              },
+              "patience": 1000000000,
+              "representation": null,
+              "return_best": true,
+              "scheduler_type": {
+                "id": null,
+                "params": {},
+                "type": "scheduler.step"
+              },
+              "step_strategy": {
+                "id": null,
+                "params": {
+                  "use_gradient_sign": true
+                },
+                "type": "step.standard"
+              },
+              "use_gradient_sign": true,
+              "verbose": false
+            }
+          ],
+          "threat_model_type": "model_b",
+          "training_simulator": {
+            "batch_size": null,
+            "compute_mode": "updates",
+            "epochs": 1,
+            "meta_learning_rate": 0.01,
+            "mode": "attack",
+            "model_mode": "eval"
+          },
+          "transitions": []
+        },
+        "overrides": {},
+        "preset": "inverting_gradients",
+        "preset_defaults": {
+          "checkpoint_dir": null,
+          "device": "cpu",
+          "epoch_handling": "repeated_same",
+          "fedavg": null,
+          "initialization": {
+            "id": null,
+            "params": {},
+            "type": "init.random_noise"
+          },
+          "label_inference": {
+            "id": null,
+            "params": {},
+            "type": "label_inference.oracle"
+          },
+          "num_seeds_per_image": 1,
+          "return_best_stage": false,
+          "schema_version": 1,
+          "seed": 42,
+          "seed_aggregation": {
+            "id": null,
+            "params": {},
+            "type": "aggregation.none"
+          },
+          "stages": [
+            {
+              "constraint": {
+                "id": null,
+                "params": {},
+                "type": "constraint.clip"
+              },
+              "freeze_input": false,
+              "gradient_noise_std": 0.0,
+              "kind": "optimizer",
+              "label_learning_rate": null,
+              "label_strategy": {
+                "id": null,
+                "params": {},
+                "type": "label_strategy.fixed"
+              },
+              "learning_rate": 0.1,
+              "log_interval": 100,
+              "losses": [
+                {
+                  "id": null,
+                  "params": {
+                    "loss_type": "cosine",
+                    "weight": 1.0
+                  },
+                  "type": "loss.gradient_matching"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "weight": 0.001
+                  },
+                  "type": "loss.tv"
+                }
+              ],
+              "max_iterations": 4000,
+              "optimizer_type": {
+                "id": null,
+                "params": {},
+                "type": "optimizer.adam"
+              },
+              "patience": 10000,
+              "representation": null,
+              "return_best": true,
+              "scheduler_type": {
+                "id": null,
+                "params": {},
+                "type": "scheduler.step"
+              },
+              "step_strategy": {
+                "id": null,
+                "params": {
+                  "use_gradient_sign": true
+                },
+                "type": "step.standard"
+              },
+              "use_gradient_sign": true,
+              "verbose": false
+            }
+          ],
+          "threat_model_type": "model_b",
+          "training_simulator": {
+            "batch_size": null,
+            "compute_mode": "updates",
+            "epochs": 1,
+            "meta_learning_rate": 0.01,
+            "mode": "attack",
+            "model_mode": "eval"
+          },
+          "transitions": []
+        }
+      }
+    },
+    "traj-see_through_gradients": {
+      "file": "traj-see_through_gradients.pt",
+      "kind": "trajectory",
+      "settings": {
+        "config": {
+          "checkpoint_dir": null,
+          "device": "cpu",
+          "epoch_handling": "repeated_same",
+          "fedavg": null,
+          "initialization": {
+            "id": null,
+            "params": {},
+            "type": "init.random_noise"
+          },
+          "label_inference": {
+            "id": null,
+            "params": {},
+            "type": "label_inference.oracle"
+          },
+          "num_seeds_per_image": 4,
+          "return_best_stage": false,
+          "schema_version": 1,
+          "seed": 42,
+          "seed_aggregation": {
+            "id": null,
+            "params": {},
+            "type": "aggregation.mean"
+          },
+          "stages": [
+            {
+              "constraint": {
+                "id": null,
+                "params": {},
+                "type": "constraint.clip"
+              },
+              "freeze_input": false,
+              "gradient_noise_std": 0.0,
+              "kind": "optimizer",
+              "label_learning_rate": null,
+              "label_strategy": {
+                "id": null,
+                "params": {},
+                "type": "label_strategy.fixed"
+              },
+              "learning_rate": 0.1,
+              "log_interval": 100,
+              "losses": [
+                {
+                  "id": null,
+                  "params": {
+                    "loss_type": "l2",
+                    "weight": 1.0
+                  },
+                  "type": "loss.gradient_matching"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "strategy": "running",
+                    "weight": 0.01
+                  },
+                  "type": "loss.bn_stats"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "weight": 0.0001
+                  },
+                  "type": "loss.tv"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "weight": 1e-06
+                  },
+                  "type": "loss.l2"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "weight": 0.01
+                  },
+                  "type": "loss.group_consistency"
+                }
+              ],
+              "max_iterations": 50,
+              "optimizer_type": {
+                "id": null,
+                "params": {},
+                "type": "optimizer.adam"
+              },
+              "patience": 1000000000,
+              "representation": null,
+              "return_best": true,
+              "scheduler_type": {
+                "id": null,
+                "params": {},
+                "type": "scheduler.cosine"
+              },
+              "step_strategy": {
+                "id": null,
+                "params": {},
+                "type": "step.standard"
+              },
+              "use_gradient_sign": false,
+              "verbose": false
+            }
+          ],
+          "threat_model_type": "model_e",
+          "training_simulator": {
+            "batch_size": null,
+            "compute_mode": "updates",
+            "epochs": 1,
+            "meta_learning_rate": 0.01,
+            "mode": "attack",
+            "model_mode": "train"
+          },
+          "transitions": []
+        },
+        "overrides": {
+          "gradient_noise_std": 0.0
+        },
+        "preset": "see_through_gradients",
+        "preset_defaults": {
+          "checkpoint_dir": null,
+          "device": "cpu",
+          "epoch_handling": "repeated_same",
+          "fedavg": null,
+          "initialization": {
+            "id": null,
+            "params": {},
+            "type": "init.random_noise"
+          },
+          "label_inference": {
+            "id": null,
+            "params": {},
+            "type": "label_inference.oracle"
+          },
+          "num_seeds_per_image": 4,
+          "return_best_stage": false,
+          "schema_version": 1,
+          "seed": 42,
+          "seed_aggregation": {
+            "id": null,
+            "params": {},
+            "type": "aggregation.mean"
+          },
+          "stages": [
+            {
+              "constraint": {
+                "id": null,
+                "params": {},
+                "type": "constraint.clip"
+              },
+              "freeze_input": false,
+              "gradient_noise_std": 0.2,
+              "kind": "optimizer",
+              "label_learning_rate": null,
+              "label_strategy": {
+                "id": null,
+                "params": {},
+                "type": "label_strategy.fixed"
+              },
+              "learning_rate": 0.1,
+              "log_interval": 100,
+              "losses": [
+                {
+                  "id": null,
+                  "params": {
+                    "loss_type": "l2",
+                    "weight": 1.0
+                  },
+                  "type": "loss.gradient_matching"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "strategy": "running",
+                    "weight": 0.01
+                  },
+                  "type": "loss.bn_stats"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "weight": 0.0001
+                  },
+                  "type": "loss.tv"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "weight": 1e-06
+                  },
+                  "type": "loss.l2"
+                },
+                {
+                  "id": null,
+                  "params": {
+                    "weight": 0.01
+                  },
+                  "type": "loss.group_consistency"
+                }
+              ],
+              "max_iterations": 8000,
+              "optimizer_type": {
+                "id": null,
+                "params": {},
+                "type": "optimizer.adam"
+              },
+              "patience": 10000,
+              "representation": null,
+              "return_best": true,
+              "scheduler_type": {
+                "id": null,
+                "params": {},
+                "type": "scheduler.cosine"
+              },
+              "step_strategy": {
+                "id": null,
+                "params": {
+                  "gradient_noise_std": 0.2
+                },
+                "type": "step.standard"
+              },
+              "use_gradient_sign": false,
+              "verbose": false
+            }
+          ],
+          "threat_model_type": "model_e",
+          "training_simulator": {
+            "batch_size": null,
+            "compute_mode": "updates",
+            "epochs": 1,
+            "meta_learning_rate": 0.01,
+            "mode": "attack",
+            "model_mode": "train"
+          },
+          "transitions": []
+        }
+      }
+    }
+  },
+  "mean": [
+    0.4914,
+    0.4822,
+    0.4465
+  ],
+  "python": "3.11.17",
+  "std": [
+    0.247,
+    0.2435,
+    0.2616
+  ],
+  "torch": "2.14.1+cpu",
+  "v1_source": "previous modular framework (branch feat/gia-generative-attacks-and-refactor plus unpublished fixes)"
+}

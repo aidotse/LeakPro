@@ -5,7 +5,7 @@
 """Util functions relating to data."""
 from abc import ABC, abstractmethod
 from copy import deepcopy
-from typing import Any, List, Literal, Self
+from typing import Any, List, Literal
 
 import numpy as np
 import torch
