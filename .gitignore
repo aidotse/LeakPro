@@ -211,3 +211,6 @@ img_align_celeba
 optuna_results.txt
 echr*
 nohup*
+# GIA example outputs and downloaded weights
+examples/gia/**/outputs/
+examples/gia/**/model_cache/
