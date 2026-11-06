@@ -91,8 +91,8 @@ What to swap:
 | To change | Replace | With (from `leakpro.attacks.gia_attacks.modular.components...`) |
 |---|---|---|
 | Loss terms | the `losses` dict of a stage | `losses`: `CosineGradientLoss`, `L2GradientLoss`, `TVLoss`, `BNStatsLoss`, `L2ImageNormLoss`, `GroupConsistencyLoss`, `EpochOrderInvariantPrior` |
-| Representation | `rep` | `representations`: `PixelRepresentation`, `FixedRepresentation` |
-| Driver | `driver` | `drivers`: `GradientDriver` (Adam, L-BFGS, SGD) |
+| Representation | `rep` | `representations`: `PixelRepresentation`, `GANRepresentation`, `GIFDIntermediateRepresentation`, `UnfrozenGANRepresentation`, `DiffusionRepresentation`, `FixedRepresentation` |
+| Driver | `driver` | `drivers`: `GradientDriver` (Adam, L-BFGS, SGD), `DiffusionSamplingDriver`, `CMAESDriver` |
 | Target source | `target_source` | `targets`: `FixedTarget` (labels passed to `run_attack(target=...)`), `JointTarget` (labels optimised with the image), `NullTarget` |
 | Label inference | `Attack(target_inference=...)` | `target_inference`: `IDLGInference`, `DimitrovInference`, `GengInference` |
 | Aggregator | `aggregator` | `aggregators`: `BestLossAggregator`, `MeanAggregator`, `EpochMatchingAggregator`, `ChainAggregator` |
@@ -132,6 +132,11 @@ Import from `leakpro.attacks.gia_attacks.modular.presets`; each docstring lists 
 | `dimitrov` | Dimitrov et al. 2022 | FedAvg updates, epoch axis, Hungarian epoch alignment |
 | `combined` | LeakPro | multi-seed restarts combined with multi-epoch updates |
 | `gia_running`, `gia_estimate` | LeakPro | cosine matching with TV and a BN term; BN statistics from the observation (running) or a proxy dataset (estimate) |
+| `gias` | Jeon et al. 2021 | GAN latent search, then generator fine-tuning |
+| `gifd` | Fang et al. 2023 | progressive GAN feature-domain stages |
+| `ggl` | Li et al. 2022 | CMA-ES latent search, gradient-free; no gradient refinement |
+| `ggdm` | Gu et al. 2024 | diffusion sampling with similarity guidance |
+| `gradinvdiff` | Wang et al. 2025 | diffusion sampling with adaptive mean optimisation |
 
 ## Extending
 
@@ -160,6 +165,8 @@ All are part of the `federated` extra. Each feature raises an `ImportError` nami
 
 | Package | Needed for |
 |---|---|
+| `cma` | `CMAESDriver` (`ggl`) |
+| `diffusers` | loading pretrained diffusion models (`load_pretrained_ddpm`), `ggdm`, `gradinvdiff` |
 | `lpips` | LPIPS image metrics |
 | `torchmetrics` | SSIM in `ImageEvaluator` |
 | `pytorch-ignite` | the dataloader SSIM helpers in `leakpro.fl_utils.similarity_measurements` |
