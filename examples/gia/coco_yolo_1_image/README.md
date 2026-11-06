@@ -16,6 +16,21 @@ These changes allow meaningful visual reconstructions from shared gradients, rev
 
 ## How to Run
 
+### Modular framework
+
+`yolo_attack.py` attacks the YOLO model of this folder through LeakPro's modular `detection` preset. It runs on a synthetic image (no COCO download) with a FedAvg client, and recovers the image only: `ComputeLoss` gives the box coordinates no gradient, so the true boxes are passed to the attack and only image metrics are reported. Run it from the repository root:
+
+```bash
+python -m examples.gia.coco_yolo_1_image.yolo_attack --quick           # short CPU smoke run
+python -m examples.gia.coco_yolo_1_image.yolo_attack --device cuda     # full run
+```
+
+The tests of this folder (`tests/`) run with `pytest examples/gia/coco_yolo_1_image/tests`.
+
+### Legacy script (COCO)
+
+`main.py` predates the modular framework and uses the legacy attack classes on COCO val2017:
+
 1. Clone this repository and ensure dependencies are installed.
 2. Download the COCO dataset (val2017) by running:
 
@@ -39,5 +54,4 @@ This will launch the gradient inversion procedure against the modified YOLO mode
 
 ## License
 
-This example builds on Ultralytics' work and follows the **Ultralytics License** terms.  
-See the [LICENSE](https://github.com/ultralytics/ultralytics?tab=AGPL-3.0-1-ov-file) file in the original Ultralytics repository for details.
+The model code in this folder is derived from [jahongir7174/YOLOv8-pt](https://github.com/jahongir7174/YOLOv8-pt), a PyTorch re-implementation that references Ultralytics' YOLO. The folder carries the GNU Affero General Public License v3 (the Ultralytics code it ultimately derives from is AGPL-3.0); see the [LICENSE](./LICENSE) file next to this README. Nothing in the `leakpro` package, its tests included, imports from this folder: the tests that exercise this model live in [`tests/`](./tests) under the same licence and are not part of the installed package.
