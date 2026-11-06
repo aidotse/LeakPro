@@ -91,3 +91,32 @@ def tiny_cnn(num_classes: int = 10) -> nn.Module:
         nn.Conv2d(8, 8, 3, padding=1), nn.BatchNorm2d(8), nn.ReLU(), nn.AdaptiveAvgPool2d(2),
         nn.Flatten(), nn.Linear(32, num_classes),
     )
+
+
+class _TinyDCGAN(nn.Module):
+    """Latent ``[B, latent_dim]`` to a 3x16x16 image in the tanh range, as a ``main`` Sequential of ConvTranspose blocks."""
+
+    def __init__(self, latent_dim: int) -> None:
+        super().__init__()
+        self.latent_dim = latent_dim
+        self.main = nn.Sequential(
+            nn.ConvTranspose2d(latent_dim, 16, 4, 1, 0, bias=False), nn.BatchNorm2d(16), nn.ReLU(True),
+            nn.ConvTranspose2d(16, 8, 4, 2, 1, bias=False), nn.BatchNorm2d(8), nn.ReLU(True),
+            nn.ConvTranspose2d(8, 3, 4, 2, 1, bias=False), nn.Tanh(),
+        )
+
+    def forward(self, z, labels=None):  # noqa: ANN001, ANN201, ARG002
+        return self.main(z.view(z.shape[0], self.latent_dim, 1, 1))
+
+
+def tiny_dcgan_generator(latent_dim: int = 16) -> nn.Module:
+    """A random-weight DCGAN-style generator for 16x16 images (``--quick``); usable with GIAS, GGL and, wrapped, GIFD."""
+    return _TinyDCGAN(latent_dim).eval()
+
+
+def tiny_unet():  # noqa: ANN201
+    """A random-weight one-block diffusers UNet for 16x16 images, built from its config (no download)."""
+    from diffusers import UNet2DModel  # noqa: PLC0415
+
+    return UNet2DModel(sample_size=16, in_channels=3, out_channels=3, layers_per_block=1, block_out_channels=(8,),
+                       down_block_types=("DownBlock2D",), up_block_types=("UpBlock2D",), norm_num_groups=4).eval()
