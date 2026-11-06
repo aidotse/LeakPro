@@ -4,7 +4,7 @@ This example demonstrates **GIABase** (a.k.a. "GIA Estimate"), a variant of the 
 
 ## Goal
 
-The original Huang attack assumes the attacker can read the client's live batch norm statistics. GIA Estimate relaxes this: it only assumes access to a **proxy dataset** from a similar distribution, and estimates the needed BN statistics from that. This corresponds to a weaker, more realistic threat model (in the modular framework: the attacker sees only the gradients plus a proxy dataset: the `gia_estimate` preset, i.e. `ThreatModel()` with `run_attack(..., proxy_dataloader=...)`; see the [modular README](../../../leakpro/attacks/gia_attacks/modular/README.md)).
+The original Huang attack assumes the attacker can read the client's live batch norm statistics. GIA Estimate relaxes this: it only assumes access to a **proxy dataset** from a similar distribution, and estimates the needed BN statistics from that. This corresponds to a weaker, more realistic threat model (in the modular framework: the attacker sees only the gradients plus a proxy dataset: the `gia_estimate` preset, i.e. `ThreatModel()` with `run_attack(..., proxy_dataloader=...)`; see the [modular README](../../../../leakpro/attacks/gia_attacks/modular/README.md)).
 
 ## Setup
 

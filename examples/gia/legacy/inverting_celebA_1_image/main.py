@@ -8,9 +8,8 @@ from celebA import get_celeba_loader
 from torch import nn
 from torch.nn import BCEWithLogitsLoss
 
-from leakpro.attacks.gia_attacks.invertinggradients import InvertingConfig
-from leakpro.fl_utils.gia_train import train
-from leakpro.run import run_inverting
+from leakpro.attacks.gia_attacks.invertinggradients import InvertingConfig, InvertingGradients
+from leakpro.run import run_gia_attack
 
 if __name__ == "__main__":
     model = torchvision.models.resnet18(weights=None)
@@ -18,9 +17,6 @@ if __name__ == "__main__":
 
     client_dataloader, train_loader, val_loader, data_mean, data_std = get_celeba_loader(
         num_images=1, batch_size=1, num_workers=2, start_idx = 12)
-
-    # Meta train function designed to work with GIA
-    train_fn = train
 
     configs = InvertingConfig()
     configs.at_iterations = 24000
@@ -31,5 +27,6 @@ if __name__ == "__main__":
     configs.criterion = BCEWithLogitsLoss() #CrossEntropyLoss()
     configs.epochs = 1
 
-    result = run_inverting(model, client_dataloader, train_fn, data_mean, data_std, configs)
+    attack_object = InvertingGradients(model, client_dataloader, data_mean, data_std, configs=configs)
 
+    result = run_gia_attack(attack_object)

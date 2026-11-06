@@ -10,7 +10,6 @@ GIA attacks rely on simulating a client's local training step in a way that stay
 
 - **Models:** `CNN` and `ResNet` ([model.py](model.py)).
 - **Data:** CIFAR-10, loaded via [cifar.py](cifar.py).
-- **Comparison notebook:** [test.ipynb](test.ipynb) provides an interactive version of the same check.
 
 ## How to Run
 
@@ -18,4 +17,3 @@ GIA attacks rely on simulating a client's local training step in a way that stay
 python pytorch_leakpro_train_comparison.py
 ```
 
-or open [test.ipynb](test.ipynb) to run the comparison interactively.

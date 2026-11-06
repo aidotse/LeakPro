@@ -8,7 +8,7 @@ Text masking and named entity recognition (NER) models play a key role in automa
 |--------|-----------|---------|
 | Membership Inference (MIA) | ✅ | *private repo* |
 | Model Inversion (MInvA) | ❌ | — |
-| Gradient Inversion (GIA) | ✅ | [examples/gia/pii_inverting_masked_text/](../gia/pii_inverting_masked_text/) |
+| Gradient Inversion (GIA) | ✅ | [examples/gia/legacy/pii_inverting_masked_text/](../gia/legacy/pii_inverting_masked_text/) |
 | Synthetic Data Attacks (SynA) | ✅ | [examples/synthetic_data/syn_text_pii_scanner_example.ipynb](../synthetic_data/syn_text_pii_scanner_example.ipynb) |
 
 ## Notes
