@@ -31,7 +31,7 @@ dependencies = [
 mia = ["torch", "torchvision", "optuna", "opacus", "mne", "pytorch-tcn"]
 synthetic = ["numba", "pydantic", "transformers", "sentence-transformers"]
 federated = ["torch", "torchvision", "torchmetrics", "pytorch-ignite", "optuna", "albumentations",
-             "lpips"]
+             "diffusers>=0.27", "cma>=3.3", "lpips"]
 minv = ["torch", "torchvision", "optuna", "kornia", "blobfile", "lpips", "robustness", "mpi4py"]
 # LLM membership-inference attacks (leakpro/attacks/mia_attacks/llm). The attacks themselves
 # only need torch; the extras are for the example that fine-tunes and loads HuggingFace models.
@@ -63,6 +63,8 @@ dev = [
   "mpi4py",          # from minv
   "opacus",          # from mia
   "albumentations",  # federated example
+  "diffusers>=0.27",  # from federated (GIA diffusion priors and their tests)
+  "cma>=3.3",         # from federated (GIA CMA-ES driver and its tests)
   "ipywidgets",      # notebook progress bars for examples
   "requests",
   "pip-licenses",
