@@ -5,6 +5,7 @@
 """Presets for the modular gradient-inversion framework."""
 
 from leakpro.attacks.gia_attacks.modular.presets.combined_gia import combined
+from leakpro.attacks.gia_attacks.modular.presets.detection_gia import detection
 from leakpro.attacks.gia_attacks.modular.presets.dimitrov import dimitrov
 from leakpro.attacks.gia_attacks.modular.presets.dlg import dlg
 from leakpro.attacks.gia_attacks.modular.presets.ggdm import ggdm
@@ -23,5 +24,6 @@ from leakpro.attacks.gia_attacks.modular.presets.yin import yin as see_through_g
 __all__ = [
     "inverting_gradients", "dlg", "idlg", "huang", "dimitrov", "yin", "see_through_gradients",
     "combined",
+    "detection",
     "gia_running", "gia_estimate", "gias", "gifd", "ggl", "ggdm", "gradinvdiff",
 ]
