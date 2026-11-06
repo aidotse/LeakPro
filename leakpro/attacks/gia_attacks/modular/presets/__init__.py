@@ -18,12 +18,13 @@ from leakpro.attacks.gia_attacks.modular.presets.gradinvdiff import gradinvdiff
 from leakpro.attacks.gia_attacks.modular.presets.huang import huang
 from leakpro.attacks.gia_attacks.modular.presets.idlg import idlg
 from leakpro.attacks.gia_attacks.modular.presets.inverting_gradients import inverting_gradients
+from leakpro.attacks.gia_attacks.modular.presets.tabular_gia import tabular, tabular_raw_onehot
 from leakpro.attacks.gia_attacks.modular.presets.yin import yin
 from leakpro.attacks.gia_attacks.modular.presets.yin import yin as see_through_gradients
 
 __all__ = [
     "inverting_gradients", "dlg", "idlg", "huang", "dimitrov", "yin", "see_through_gradients",
-    "combined",
+    "combined", "tabular", "tabular_raw_onehot",
     "detection",
     "gia_running", "gia_estimate", "gias", "gifd", "ggl", "ggdm", "gradinvdiff",
 ]

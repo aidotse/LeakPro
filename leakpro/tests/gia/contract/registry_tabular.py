@@ -2,19 +2,22 @@
 # Copyright 2023-2026 Lindholmen Science Park AB
 # SPDX-License-Identifier: Apache-2.0
 #
-"""Contract-test cases of the tabular attacks: the tabular representation and modalities."""
+"""Contract-test cases of the tabular attacks: the tabular representation, modalities and evaluator."""
 from __future__ import annotations
 
 import pytest
 
+from leakpro.attacks.gia_attacks.modular.components.evaluators import TabularEvaluator
 from leakpro.attacks.gia_attacks.modular.components.modalities.tabular import RawTabularModality, TabularModality
 from leakpro.attacks.gia_attacks.modular.components.representations.tabular import TabularRepresentation
 from leakpro.attacks.gia_attacks.modular.components.tabular.schema import TabularSchema
 from leakpro.tests.gia.contract.registry import (
+    EVALUATORS,
     MARKS,
     MODALITIES,
     REPRESENTATIONS,
     TABULAR_SHAPE,
+    EvaluatorCase,
     ModalityCase,
     RepresentationCase,
     _tabular_rows,
@@ -34,6 +37,10 @@ MODALITIES.update({
     RawTabularModality: lambda: ModalityCase(RawTabularModality(), _tabular_rows()),
 })
 
+EVALUATORS.update({
+    TabularEvaluator: lambda: EvaluatorCase(TabularEvaluator(TABULAR_SCHEMA), _tabular_rows(), _tabular_rows(),
+                                            expected={"reconstruction_accuracy": 100.0}),
+})
 
 MARKS.update({
     TabularModality: (pytest.mark.xfail(
