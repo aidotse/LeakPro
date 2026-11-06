@@ -11,6 +11,7 @@ from leakpro.attacks.gia_attacks.modular.components.representations.gan import (
 )
 from leakpro.attacks.gia_attacks.modular.components.representations.gifd import GIFDIntermediateRepresentation
 from leakpro.attacks.gia_attacks.modular.components.representations.pixel import PixelRepresentation
+from leakpro.attacks.gia_attacks.modular.components.representations.tabular import TabularRepresentation
 
 __all__ = [
     "DiffusionRepresentation",
@@ -18,5 +19,6 @@ __all__ = [
     "GANRepresentation",
     "GIFDIntermediateRepresentation",
     "PixelRepresentation",
+    "TabularRepresentation",
     "UnfrozenGANRepresentation",
 ]
