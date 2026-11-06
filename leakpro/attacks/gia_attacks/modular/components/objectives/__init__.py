@@ -8,9 +8,17 @@ from leakpro.attacks.gia_attacks.modular.components.objectives.classification im
     CrossEntropy,
     MeanSquaredError,
 )
+from leakpro.attacks.gia_attacks.modular.components.objectives.detection import (
+    CriterionDetection,
+    HuggingFaceDetection,
+    TorchvisionDetection,
+)
 
 __all__ = [
     "BinaryCrossEntropy",
+    "CriterionDetection",
     "CrossEntropy",
+    "HuggingFaceDetection",
     "MeanSquaredError",
+    "TorchvisionDetection",
 ]
