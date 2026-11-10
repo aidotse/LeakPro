@@ -18,7 +18,7 @@ import yaml
 from pydantic import ValidationError
 from scipy.special import expit, logsumexp
 from torch import nn
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset, default_collate
 from torchvision.transforms import RandomHorizontalFlip
 
 from leakpro import LeakPro
@@ -77,11 +77,8 @@ def check_training_and_features(
             torch.testing.assert_close(shadow_call.args[0].model_obj.state_dict()[name], value, rtol=0, atol=0)
     np.testing.assert_array_equal(fit.call_args.args[0], attack.shadow_features)
     if not attack.use_attack or attack.use_attack_output == "logits":
-        with attack._model_cache("references", attack.reference_training_pool) as models:
-            references = models.get_shadow_model_metadata(attack.reference_model_indices)
-        if not online:
-            assert set(attack.reference_population).isdisjoint(np.concatenate((ids, attack.shadow_population)))
-        assert all(set(meta.train_indices).issubset(attack.reference_training_pool) for meta in references)
+        references = ShadowModelHandler().get_shadow_model_metadata(attack.reference_model_indices)
+        assert all(len(meta.train_indices) == int(attack.population_size * attack.training_data_fraction) for meta in references)
     for stage, values, indices in zip((0, 1), (attack.shadow_features, attack.signal_data), (attack.shadow_population, ids)):
         if attack.use_attack and attack.use_attack_output == "scores":
             mapping = dict(zip(*source_rows[stage]))
@@ -184,6 +181,36 @@ def test_rapid_runtime(
     check_cached_replay(audit, attack, result, monkeypatch)
 
 
+@pytest.mark.parametrize("source", ["lira", "rmia"])
+@pytest.mark.parametrize("output", ["ordinary", "logits"])
+def test_reuses_shared_references(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str, output: str
+) -> None:
+    """Existing LiRA/RMIA references need no retraining for ordinary RAPID or logits calibration."""
+    options = {} if output == "ordinary" else {"use_attack": source, "use_attack_output": output}
+    audit = create_audit(tmp_path, monkeypatch, **options)
+    attack = audit.attack_scheduler.attacks[0]
+    previous = AttackFactoryMIA.attack_classes[source](audit.handler, {
+        "num_shadow_models": attack.num_reference_models, "training_data_fraction": attack.training_data_fraction,
+    })
+    previous.prepare_attack()
+    models = ShadowModelHandler()
+    paths = models.storage_path, models.attack_cache_folder_path
+    references, _ = models.get_shadow_models(previous.shadow_model_indices)
+    weights = [deepcopy(model.model_obj.state_dict()) for model in references]
+    train = Mock(wraps=audit.handler.train)
+    monkeypatch.setattr(audit.handler, "train", train)
+    attack.prepare_attack()
+    assert train.call_count == 1  # Only RAPID's auxiliary shadow model is new.
+    np.testing.assert_array_equal(attack.reference_model_indices, previous.shadow_model_indices)
+    assert (models.storage_path, models.attack_cache_folder_path) == paths
+    references, _ = models.get_shadow_models(attack.reference_model_indices)
+    for model, state in zip(references, weights):
+        for name, value in state.items():
+            torch.testing.assert_close(model.model_obj.state_dict()[name], value, rtol=0, atol=0)
+    assert np.isfinite(attack.run_attack().signal_values).all()
+
+
 class QueryModel:
     """Provide known per-record logits across repeated and partial-batch queries."""
 
@@ -202,23 +229,33 @@ def unit_attack(labels: list) -> AttackRAPID:
     attack.configs = AttackRAPID.AttackConfig(batch_size=2, query_num=2)
     for key, value in attack.configs.model_dump().items():
         setattr(attack, key, value)
+    attack.source_configs = None
     dataset = TensorDataset(torch.arange(len(labels)).reshape(-1, 1), torch.as_tensor(labels))
+    dataset.targets = torch.as_tensor(labels)
     attack.handler = SimpleNamespace(get_dataloader=lambda *_args, **kwargs: DataLoader(
         dataset, batch_size=kwargs["batch_size"], shuffle=kwargs["shuffle"]
     ))
     return attack
 
 
-def test_loss_features_and_final_scores(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("source", [None, "lira"])
+def test_loss_features_and_final_scores(monkeypatch: pytest.MonkeyPatch, source: Optional[str]) -> None:
     """Independent loss and probability oracles catch wrong calibration, row order, direction, and partial batches."""
     labels = [1, 0, 2]
     target = np.array([[[0, 3, -2], [2, 0, 1], [4, 3, 1]], [[1, 1, 0], [-1, 2, 0], [0, 0, 0]]])
     references = np.array([[[0, 0, 0], [0, 1, -1], [0, 1, 2]], [[3, 2, 1], [1, 0, 3], [1, 2, -2]]])
     attack, model = unit_attack(labels), QueryModel(list(target))
+    attack.use_attack, attack.use_attack_output = source, "logits"
+    attack.reference_model_indices = [0, 1]
+    outside = np.array([[True, False, True], [False, True, True]])
+    monkeypatch.setattr("leakpro.attacks.mia_attacks.rapid.ShadowModelHandler", lambda: SimpleNamespace(
+        get_in_indices_mask=lambda *_args: ~outside.T
+    ))
     reference_models = [QueryModel([values]) for values in references]
     values = attack._get_mia_features(model, reference_models, np.array([17, 4, 29]))
     original = (logsumexp(target, axis=-1) - target[:, np.arange(3), labels]).mean(axis=0)
-    reference = (logsumexp(references, axis=-1) - references[:, np.arange(3), labels]).mean(axis=0)
+    losses = logsumexp(references, axis=-1) - references[:, np.arange(3), labels]
+    reference = np.where(outside, losses, 0).sum(axis=0) / outside.sum(axis=0)
     np.testing.assert_allclose(values, np.column_stack((original, original - reference)), rtol=1e-6, atol=1e-7)
     assert model.calls == 2
     assert all(ref.calls == 2 for ref in reference_models)
@@ -230,6 +267,31 @@ def test_loss_features_and_final_scores(monkeypatch: pytest.MonkeyPatch) -> None
     result = attack.run_attack()
     np.testing.assert_allclose(result.signal_values, expit(values @ [0.5, 2.0] - 0.25), rtol=1e-6)
     np.testing.assert_array_equal(result.true, [0, 0, 1])
+
+
+@pytest.mark.parametrize("scenario", ["collated_labels", "binary_heads"])
+def test_ordinary_losses_preserve_handler_outputs(monkeypatch: pytest.MonkeyPatch, scenario: str) -> None:
+    """OUT calibration supports emitted batch labels and different binary output widths."""
+    labels = np.array([0, 1, 0])
+    target = np.array([[0.0, 2.0], [3.0, 1.0], [1.0, 0.0]])
+    reference = target[:, :1] if scenario == "binary_heads" else target[:, ::-1]
+    attack = unit_attack(labels + (scenario == "collated_labels"))
+    loader = attack.handler.get_dataloader(None, batch_size=2, shuffle=False)
+    if scenario == "collated_labels":
+        def collate(batch: list) -> tuple:
+            data, stored_labels = default_collate(batch)
+            return data, stored_labels - 1
+        loader.collate_fn = collate
+    attack.handler.get_dataloader = lambda *_args, **_kwargs: loader
+    attack.reference_model_indices = [0]
+    monkeypatch.setattr("leakpro.attacks.mia_attacks.rapid.ShadowModelHandler", lambda: SimpleNamespace(
+        get_in_indices_mask=lambda *_args: np.zeros((3, 1), dtype=bool)
+    ))
+    values = attack._get_mia_features(QueryModel([target]), [QueryModel([reference])], np.array([17, 4, 29]))
+    original = logsumexp(target, axis=-1) - target[np.arange(3), labels]
+    reference_loss = (np.logaddexp(0, reference[:, 0]) - labels * reference[:, 0] if scenario == "binary_heads"
+                      else logsumexp(reference, axis=-1) - reference[np.arange(3), labels])
+    np.testing.assert_allclose(values, np.column_stack((original, original - reference_loss)), rtol=1e-6, atol=1e-7)
 
 
 @pytest.mark.parametrize(("labels", "logits", "error"), [
@@ -295,13 +357,14 @@ def test_source_result_order_and_reload(tmp_path: Path, monkeypatch: pytest.Monk
 
 
 @pytest.mark.parametrize(("options", "error", "message"), [
-    ({"shadow_data_fraction": 0.99}, ValueError, "at least 1 point"),
+    ({"shadow_data_fraction": 0.01}, ValueError, "at least 1 point"),
     ({"use_attack": "lira", "use_attack_output": "logits", "training_data_fraction": 0.1,
       "use_attack_config": {"online": True}}, ValueError, "IN and OUT references"),
     ({"use_attack": "population"}, RuntimeError, "source failed"),
     ({}, FileExistsError, "cache failed"),
     ({"use_attack": "lira", "use_attack_output": "logits", "use_attack_config": {"online": True}},
      ValueError, "Cached online references"),
+    ({"num_reference_models": 1}, ValueError, "RAPID references must cover"),
 ])
 def test_preparation_failure_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, options: dict, error: type[Exception], message: str
@@ -326,13 +389,12 @@ def test_preparation_failure_cleanup(
             mkdir(path, *args, **kwargs)
 
         monkeypatch.setattr(Path, "mkdir", fail_cache)
-    elif message.startswith("Cached"):
+    elif message.startswith(("Cached", "RAPID references")):
         torch.manual_seed(7)
         np.random.seed(7)
         indices = np.arange(attack.population_size)
-        with attack._model_cache("references", indices) as models:
-            refs = models.create_shadow_models(2, indices, training_fraction=0.5, sampling_method="random")
-            counts = models.get_in_indices_mask(refs, indices).sum(axis=1)
+        refs = handler.create_shadow_models(2, indices, training_fraction=0.5, sampling_method="random")
+        counts = handler.get_in_indices_mask(refs, indices).sum(axis=1)
         assert np.any((counts == 0) | (counts == 2))
     else:
         monkeypatch.setattr(audit.handler, "train", lambda *_args, **_kwargs: pytest.fail("Invalid pools trained a model"))

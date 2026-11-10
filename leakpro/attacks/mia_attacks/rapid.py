@@ -4,8 +4,8 @@
 #
 """RAPID membership inference (He et al., ACM CCS 2024, arXiv:2409.00426).
 
-This implementation follows the paper's offline attack and the reference
-implementation's positive-loss features: [loss, loss - mean reference loss].
+This implementation uses the reference implementation's positive-loss features:
+[loss, loss - mean OUT reference loss], reusing compatible shared reference models.
 Both inputs have the opposite sign to the scores in Equations 3 and 7, an
 equivalent convention for the learned scorer. Target membership labels are
 used only for reporting, never for fitting or selecting the scorer.
@@ -139,7 +139,7 @@ class AttackRAPID(AbstractMIA):
             "summary": "A learned scorer combines original losses with "
                        f"{self.use_attack.upper() + ' scores' if self.use_attack and self.use_attack_output == 'scores' else 'reference-calibrated losses'}.",  # noqa: E501
             "detailed": "RAPID fits a binary MLP using only shadow membership. It averages original and reference losses "
-                        "or reuses source scores. Reference membership follows the selected source's offline or online mode.",
+                        "or reuses source scores. Loss calibration uses only each sample's OUT reference models.",
         }
 
     def prepare_attack(self: Self) -> None:
@@ -164,14 +164,13 @@ class AttackRAPID(AbstractMIA):
             self.signal_data = self._get_mia_features(self.target_model, reference_models, self.audit_dataset["data"])
 
     def _prepare_shadow_models(self: Self) -> Tuple[PytorchModel, list[PytorchModel]]:
-        """Train the shadow model on auxiliary data and references under the source's membership policy."""
+        """Train an auxiliary shadow model and reuse compatible shared reference models."""
         auxiliary = self.sample_indices_from_population(include_train_indices=False, include_test_indices=False)
         split = int(len(auxiliary) * self.shadow_data_fraction)
         self.shadow_population = auxiliary[:split]
-        self.reference_population = auxiliary[split:]
         online = getattr(self.source_configs, "online", False)
         needs_references = self.use_attack is None or self.use_attack_output == "logits"
-        reference_training_pool = np.concatenate((auxiliary, self.audit_dataset["data"])) if online else self.reference_population
+        reference_training_pool = np.arange(self.population_size)
         shadow_handler = ShadowModelHandler()
         pools = (self.shadow_population, reference_training_pool) if needs_references else (self.shadow_population,)
         for pool in pools:
@@ -192,19 +191,16 @@ class AttackRAPID(AbstractMIA):
             self.shadow_membership = models.get_in_indices_mask(
                 self.shadow_model_indices, self.shadow_population
             )[:, 0].astype(np.float32)
-        self.reference_training_pool = reference_training_pool
         self.reference_model_indices, reference_models = [], []
         if needs_references:
-            with self._model_cache("references", reference_training_pool) as models:
-                self.reference_model_indices = models.create_shadow_models(
-                    self.num_reference_models, reference_training_pool, training_fraction=self.training_data_fraction,
-                    sampling_method="balanced" if online else "random"
-                )
-                if online:
-                    out_indices = ~models.get_in_indices_mask(self.reference_model_indices, reference_training_pool).T
-                    if not audit_points_with_reference_models(out_indices, require_in_models=True).all():
-                        raise ValueError("Cached online references must provide IN and OUT models for every point.")
-                reference_models, _ = models.get_shadow_models(self.reference_model_indices)
+            self.reference_model_indices = shadow_handler.create_shadow_models(
+                self.num_reference_models, reference_training_pool, training_fraction=self.training_data_fraction
+            )
+            if online:
+                out_indices = ~shadow_handler.get_in_indices_mask(self.reference_model_indices, reference_training_pool).T
+                if not audit_points_with_reference_models(out_indices, require_in_models=True).all():
+                    raise ValueError("Cached online references must provide IN and OUT models for every point.")
+            reference_models, _ = shadow_handler.get_shadow_models(self.reference_model_indices)
         if np.unique(self.shadow_membership).size != 2:
             raise ValueError("RAPID's shadow pool must contain both members and non-members.")
         return shadow_models[0], reference_models
@@ -230,7 +226,7 @@ class AttackRAPID(AbstractMIA):
 
     @contextmanager
     def _model_cache(self:Self, role:str, pool:np.ndarray) -> Iterator[Any]:
-        """Keep RAPID's roles and eligible training pools in separate existing handler caches."""
+        """Keep RAPID's auxiliary shadow model separate from shared reference models."""
         models = ShadowModelHandler()
         storage, logits = models.storage_path, models.attack_cache_folder_path
         key = hash_indices(pool, np.array([], dtype=pool.dtype))
@@ -300,17 +296,22 @@ class AttackRAPID(AbstractMIA):
 
     def _get_mia_features(self: Self, model: PytorchModel, references: list[PytorchModel], indices: np.ndarray) -> np.ndarray:
         """Pair original loss with calibration from source logits or source scores."""
+        if self.use_attack is None or self.use_attack_output == "logits":
+            out_indices = ~ShadowModelHandler().get_in_indices_mask(self.reference_model_indices, indices).T
+            if out_indices.shape != (len(references), len(indices)) or not audit_points_with_reference_models(
+                out_indices, require_in_models=getattr(self.source_configs, "online", False)
+            ).all():
+                raise ValueError("RAPID references must cover every requested sample on the required IN/OUT sides.")
         if self.use_attack is None:
             original = self._get_mean_loss(model, indices)
-            reference = np.zeros_like(original)
-            for reference_model in references:
-                reference += self._get_mean_loss(reference_model, indices)
-            calibrated = original - reference / len(references)
+            reference_losses = np.array([self._get_mean_loss(reference, indices) for reference in references])
+            reference = np.sum(np.where(out_indices, reference_losses, 0.0), axis=0) / np.sum(out_indices, axis=0)
+            calibrated = original - reference
         elif self.use_attack_output == "logits":
             original = np.zeros(len(indices), dtype=np.float64)
             calibrated = np.zeros_like(original)
             for _ in range(self.query_num):
-                target_logits, reference_logits, labels, out_indices = self._get_use_attack_logits(model, references, indices)
+                target_logits, reference_logits, labels = self._get_use_attack_logits(model, references, indices)
                 loss = self._classification_loss(target_logits, labels)
                 reference_losses = np.array([self._classification_loss(values, labels) for values in reference_logits])
                 reference = np.sum(np.where(out_indices, reference_losses, 0.0), axis=0) / np.sum(out_indices, axis=0)
@@ -340,20 +341,14 @@ class AttackRAPID(AbstractMIA):
         return features
 
     def _get_use_attack_logits(self:Self, model:PytorchModel, references:list[PytorchModel], indices:np.ndarray
-                              ) -> Tuple[np.ndarray, list[np.ndarray], np.ndarray, np.ndarray]:
+                              ) -> Tuple[np.ndarray, list[np.ndarray], np.ndarray]:
         """Query the source's aligned model inputs without using target membership labels."""
         loader = self._get_query_dataloader(indices)
         logits = ModelLogits()([model, *references], self.handler, indices, data_loader=loader)
         labels = torch.as_tensor(loader.dataset.targets).reshape(-1)
         for values in logits:
             self._validate_classification_logits(torch.as_tensor(values), labels)
-        with self._model_cache("references", self.reference_training_pool) as models:
-            out_indices = ~models.get_in_indices_mask(self.reference_model_indices, indices).T
-        if out_indices.shape != (len(references), len(indices)) or not audit_points_with_reference_models(
-            out_indices, require_in_models=getattr(self.source_configs, "online", False)
-        ).all():
-            raise ValueError("RAPID source references must cover every requested sample on the required IN/OUT sides.")
-        return logits[0], list(logits[1:]), labels.long().numpy(), out_indices
+        return logits[0], list(logits[1:]), labels.long().numpy()
 
     def _run_use_attack(self:Self, model:PytorchModel, indices:np.ndarray) -> Tuple[MIAResult, Optional[np.ndarray]]:
         """Run a registered source normally, isolating shared state and withholding true membership.
