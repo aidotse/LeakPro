@@ -73,7 +73,7 @@ class AuditConfig(BaseModel):
     """Configuration for the audit process."""
 
     random_seed: int = Field(default=42, ge=0, le=MAX_SEED, description="Random seed for reproducibility")
-    attack_type: Literal["mia", "gia", "minv", "synthetic"] = Field(..., description="Type of attack: must be one of ['mia', 'gia', 'minv', 'synthetic]")  # noqa: E501
+    attack_type: Literal["mia", "gia", "minv", "synthetic", "extraction"] = Field(..., description="Type of attack: must be one of ['mia', 'gia', 'minv', 'synthetic', 'extraction']")  # noqa: E501
     attack_list: List[Dict[str, Any]] = Field(..., min_length=1, description="Must have at least one attack")
     hyper_param_search: bool = Field(default=False, description="Whether to perform hyperparameter search")
     data_modality: Literal["image", "tabular", "text", "graph", "timeseries"] = Field(..., description="Type of data modality: must be one of ['image', 'tabular', 'text', 'graph', 'timeseries']")  # noqa: E501

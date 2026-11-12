@@ -1,0 +1,187 @@
+#
+# Copyright 2023-2026 Lindholmen Science Park AB
+# SPDX-License-Identifier: Apache-2.0
+#
+"""Result of a memorization extraction attack.
+
+Extraction has no membership labels and no ROC curve. The result holds counts per phase and
+prompting strategy, and the extracted (verified) sequences.
+
+Saved files:
+
+* ``<output_dir>/data_objects/<attack_id>.json``: config and metrics (same place as MIA results).
+* ``<output_dir>/results/<attack_id>/result.json``: config and metrics.
+* ``<output_dir>/results/<attack_id>/extracted.jsonl``: one record per extracted sequence. How much
+  text it contains is set by ``store_text``: ``full`` (the text and its matched windows), ``hash``
+  (SHA-256 digests instead of text) or ``none`` (no text at all).
+"""
+
+import hashlib
+import json
+from pathlib import Path
+from typing import Any, Dict, List, Literal, Optional
+
+from leakpro.reporting.audit_result import AuditResult, latex_escape
+from leakpro.utils.import_helper import Self
+
+StoreText = Literal["full", "hash", "none"]
+
+
+def _sha(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def redact(record: Dict[str, Any], store_text: StoreText) -> Dict[str, Any]:
+    """Apply the ``store_text`` policy to one extracted record."""
+    if store_text == "full":
+        return record
+    out = dict(record)
+    for key in ("prompt_text", "continuation", "full_text"):
+        if key in out:
+            out[key] = _sha(out[key]) if store_text == "hash" else None
+    for key in ("attacker_matches", "oracle_matches"):
+        out[key] = [
+            {**m, "window": _sha(m["window"]) if store_text == "hash" else None} for m in out.get(key, [])
+        ]
+    return out
+
+
+_PHASE_TITLES = {
+    "initial": "Phase 1: initial extraction",
+    "expansion": "Phase 2: expansion",
+    "finetuned": "Phase 4: re-extraction after fine-tuning",
+}
+# (metric key, column header); a column appears only when some row of the phase has a value for it.
+_COLUMNS = [
+    ("anchors", "Anchors"), ("generated", "Generated"), ("overlap_removed", "Overlap removed"), ("kept", "Kept"),
+    ("selected", "Selected"), ("verified", "Verified"), ("extraction_rate", "Rate"),
+    ("novel", "Novel"), ("oracle_verified", "Oracle verified"), ("oracle_rate", "Oracle rate"),
+]
+
+
+def _cell(key: str, value: Any) -> str:  # noqa: ANN401
+    if value is None:
+        return "--"
+    if key.endswith("rate"):
+        return f"{100 * value:.2f}\\%"
+    return latex_escape(value)
+
+
+class ExtractionResult(AuditResult):
+    """Counts and extracted sequences of one extraction attack.
+
+    Args:
+    ----
+        name: Attack name.
+        attack_id: Attack hash (also the result's id).
+        config: The attack config as a dict.
+        metrics: ``{phase: {strategy | "total": {count name: value}}}``.
+        extracted: Records of the sequences the attacker verifier confirmed.
+        store_text: How much extracted text is written to disk.
+
+    """
+
+    def __init__(
+        self: Self,
+        name: str,
+        attack_id: str,
+        config: Dict[str, Any],
+        metrics: Dict[str, Dict[str, Dict[str, Optional[float]]]],
+        extracted: List[Dict[str, Any]],
+        store_text: StoreText = "full",
+    ) -> None:
+        self.name = name
+        self.result_name = name
+        self.id = attack_id
+        self.config = config
+        self.metrics = metrics
+        self.extracted = extracted
+        self.store_text = store_text
+
+    report_title = "Training-data extraction"
+
+    def to_dict(self: Self) -> Dict[str, Any]:
+        """Config and metrics (no extracted text)."""
+        return {"name": self.name, "id": self.id, "config": self.config, "metrics": self.metrics}
+
+    def save(self: Self, attack_obj: Any = None, output_dir: str = ".") -> None:  # noqa: ANN401, ARG002
+        """Write the result files (see module docstring)."""
+        data_dir = Path(output_dir) / "data_objects"
+        result_dir = Path(output_dir) / "results" / self.id
+        data_dir.mkdir(parents=True, exist_ok=True)
+        result_dir.mkdir(parents=True, exist_ok=True)
+        summary = json.dumps(self.to_dict(), indent=2, default=str)
+        (data_dir / f"{self.id}.json").write_text(summary, encoding="utf-8")
+        (result_dir / "result.json").write_text(summary, encoding="utf-8")
+        with (result_dir / "extracted.jsonl").open("w", encoding="utf-8") as f:
+            for record in self.extracted:
+                f.write(json.dumps(redact(record, self.store_text), ensure_ascii=False) + "\n")
+
+    @classmethod
+    def load(cls, result_dir: str) -> "ExtractionResult":  # noqa: ANN102
+        """Read a result written by :meth:`save` from ``<output_dir>/results/<attack_id>``."""
+        path = Path(result_dir)
+        data = json.loads((path / "result.json").read_text(encoding="utf-8"))
+        extracted_path = path / "extracted.jsonl"
+        extracted = []
+        if extracted_path.exists():
+            with extracted_path.open(encoding="utf-8") as f:
+                extracted = [json.loads(line) for line in f if line.strip()]
+        return cls(data["name"], data["id"], data["config"], data["metrics"], extracted,
+                   store_text=data["config"].get("store_text", "full"))
+
+    def summary(self: Self) -> str:
+        """Human-readable table of the counts."""
+        lines = []
+        for phase, by_strategy in self.metrics.items():
+            lines.append(f"{phase}:")
+            for strategy, m in by_strategy.items():
+                verified = m.get("verified")
+                rate = m.get("extraction_rate")
+                extras = "".join(f"  {k} {m[k]}" for k in ("overlap_removed", "anchors", "novel", "finetune_corpus")
+                                 if k in m)
+                lines.append(
+                    f"  {strategy:<12} generated {m['generated']:>6}  kept {m['kept']:>6}  selected {m['selected']:>5}  "
+                    f"verified {'-' if verified is None else verified:>5}  "
+                    f"rate {'-' if rate is None else f'{100 * rate:.2f}%'}{extras}"
+                )
+        return "\n".join(lines)
+
+    @classmethod
+    def create_results(cls, results: List["ExtractionResult"], save_dir: str = "./") -> str:  # noqa: ANN102, ARG003
+        """LaTeX report section: one table of counts per phase for each result (no extracted text)."""
+        latex = (
+            "\nA sequence counts as extracted when one of its word windows occurs verbatim in the attacker's "
+            "reference corpus (\\emph{Verified}). \\emph{Oracle verified} counts the same selected sequences "
+            "found in the real training data; it is reported only and never used by the attack. "
+            "Rates are verified sequences over generated sequences.\n"
+        )
+        seen = set()
+        for res in results:
+            if res.id in seen:
+                continue
+            seen.add(res.id)
+            latex += f"\n\\subsection{{{latex_escape(res.name)} ({latex_escape(res.id[:12])})}}\n"
+            for phase, rows in res.metrics.items():
+                columns = [(k, h) for k, h in _COLUMNS if any(r.get(k) is not None for r in rows.values())]
+                spec = "l" + "r" * len(columns)
+                header = " & ".join(["Strategy"] + [h for _, h in columns])
+                body = " \\\\\n".join(
+                    " & ".join([latex_escape(name)] + [_cell(k, row.get(k)) for k, _ in columns])
+                    for name, row in rows.items()
+                )
+                title = _PHASE_TITLES.get(phase, phase)
+                extra = rows.get("total", {}).get("finetune_corpus")
+                note = f" Fine-tuning corpus: {extra} sequences." if extra is not None else ""
+                latex += (
+                    f"\n\\paragraph{{{latex_escape(title)}}}{note}\n"
+                    "\\begin{table}[ht]\n\\centering\n\\small\n"
+                    f"\\begin{{tabular}}{{{spec}}}\n\\hline\n{header} \\\\\n\\hline\n{body} \\\\\n"
+                    "\\hline\n\\end{tabular}\n\\end{table}\n"
+                )
+            latex += (
+                f"\nExtracted sequences: {len(res.extracted)}, listed in "
+                f"\\texttt{{results/{latex_escape(res.id)}/extracted.jsonl}} "
+                f"(text stored: {latex_escape(res.store_text)}).\n"
+            )
+        return latex

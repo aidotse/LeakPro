@@ -15,6 +15,7 @@ from torch.utils.data import DataLoader
 
 from leakpro.attacks.attack_scheduler import AttackScheduler
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.extraction_handler import ExtractionHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.input_handler.minv_handler import MINVHandler
 from leakpro.input_handler.modality_extensions.image_extension import ImageAugmentor
@@ -72,7 +73,12 @@ class LeakPro:
         add_file_handler(logger, log_path)
 
         # Initialize handler and attack scheduler
-        self.handler = self.setup_handler(user_input_handler, configs, model_handler)
+        # Extraction attacks only query the target (generation and scoring); they never train or
+        # evaluate it, so their handler needs no train()/eval() and no modality extension.
+        if configs.audit.attack_type == "extraction":
+            self.handler = ExtractionHandler(configs, user_input_handler)
+        else:
+            self.handler = self.setup_handler(user_input_handler, configs, model_handler)
         self.attack_scheduler = AttackScheduler(self.handler, output_dir=configs.audit.output_dir)
 
     def setup_handler(self:Self, user_input_handler:AbstractInputHandler, configs:dict,
