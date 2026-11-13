@@ -148,13 +148,19 @@ def main() -> None:
     print(f"config: {args.audit} -> {audit_yaml}")
     last = args.phase or configured[-1]
     result = run_phases(audit_yaml, [n for n in configured if n <= last])
-    print(result.summary())
-    if last < configured[-1]:
-        print(f"Phases 1-{last} done. Next: python run_extraction.py --phase {configured[configured.index(last) + 1]}")
-    total = lambda phase, key: result.metrics.get(phase, {}).get("total", {}).get(key)  # noqa: E731
+    # finish() has already logged the per-strategy table; only the totals follow here.
+    def total(phase: str, key: str) -> object:
+        value = result.metrics.get(phase, {}).get("total", {}).get(key)
+        return "not run yet" if value is None else value
+
     print(f"S0 (Phase 1 verified):    {total('initial', 'verified')}")
-    print(f"S1-novel (Phase 2):       {total('expansion', 'novel')}")
-    print(f"S_new (Phase 4 verified): {total('finetuned', 'verified')}")
+    if 2 in configured:
+        print(f"S1-novel (Phase 2):       {total('expansion', 'novel')}")
+    if 4 in configured:
+        print(f"S_new (Phase 4 verified): {total('finetuned', 'verified')}")
+    if last < configured[-1]:
+        done = f"Phase {last}" if last == 1 else f"Phases 1-{last}"
+        print(f"{done} done. Next: python run_extraction.py --phase {configured[configured.index(last) + 1]}")
     print(f"results: {output_dir}/results/{result.id}/")
 
 
