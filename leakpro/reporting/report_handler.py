@@ -7,6 +7,7 @@
 import subprocess
 
 from leakpro.metrics.attack_result import GIAResults
+from leakpro.reporting.audit_result import AuditResult, latex_escape
 from leakpro.reporting.mia_result import MIAResult
 from leakpro.risk.render import to_latex
 from leakpro.risk.schemas import RiskAssessment
@@ -50,9 +51,18 @@ class ReportHandler():
         for key in self.leakpro_types:
             self.pdf_results[key] = []
 
+        # Results of other types render themselves (AuditResult), grouped by class in first-seen order.
+        self.audit_result_types: dict[str, type] = {}
+
         self.results = []
         for res in results:
-            assert isinstance(res, (MIAResult, GIAResults, InferenceResults, LinkabilityResults, SinglingOutResults))
+            name = res.__class__.__name__
+            if isinstance(res, AuditResult):
+                if name not in self.leakpro_types:
+                    self.audit_result_types.setdefault(name, res.__class__)
+            elif not isinstance(res, tuple(self.leakpro_types.values())):
+                logger.warning(f"{name} cannot be rendered in the report; it is left out.")
+                continue
             self.results.append(res)
 
     def create_results(self:Self) -> None:
@@ -79,6 +89,14 @@ class ReportHandler():
             except Exception as e:
                 logger.info(f"Error in results all: {result_class}, {e}")
 
+        for name, result_class in self.audit_result_types.items():
+            results = [res for res in self.results if res.__class__.__name__ == name]
+            try:
+                self.pdf_results.setdefault(name, []).append(
+                    result_class.create_results(results=results, save_dir=self.report_dir))
+            except Exception as e:
+                logger.info(f"Error in results all: {result_class}, {e}")
+
     def create_report(self:Self) -> None:
         """Method to create PDF report."""
 
@@ -99,6 +117,11 @@ class ReportHandler():
             if len(self.pdf_results[result_type]) > 0:
                 self.latex_content += f"""\\section{{{result_type}}}"""
                 for res in self.pdf_results[result_type]:
+                    self.latex_content += res
+        for name, result_class in self.audit_result_types.items():
+            if self.pdf_results.get(name):
+                self.latex_content += f"""\\section{{{latex_escape(result_class.report_title)}}}"""
+                for res in self.pdf_results[name]:
                     self.latex_content += res
 
         # Compile the PDF

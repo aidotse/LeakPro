@@ -114,9 +114,20 @@ class AttackScheduler:
                 logger.error("Failed to import MINV attack module.")
                 raise ImportError("MINV attack module is not available.") from e
 
+        elif attack_type == "extraction":
+            try:
+                from leakpro.attacks.extraction_attacks.attack_factory_extraction import (  # noqa: I001, PLC0415
+                    AttackFactoryExtraction,
+                )
+                self.attack_factory = AttackFactoryExtraction
+                logger.info("Extraction attack factory loaded.")
+            except ImportError as e:
+                logger.error("Failed to import extraction attack module.")
+                raise ImportError("Extraction attack module is not available.") from e
+
         else:
-            logger.error(f"Unsupported attack type: {self.attack_type}")
-            raise ValueError(f"Unsupported attack type: {self.attack_type}. Must be 'mia' or 'gia'.")
+            logger.error(f"Unsupported attack type: {attack_type}")
+            raise ValueError(f"Unsupported attack type: {attack_type}. Must be 'mia', 'gia', 'minv' or 'extraction'.")
 
     def add_attack(self:Self, attack: Any) -> None:
         """Add an attack to the list of attacks."""
