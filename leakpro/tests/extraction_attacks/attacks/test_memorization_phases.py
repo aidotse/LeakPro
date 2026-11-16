@@ -2,14 +2,22 @@
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Dict, List
 
 import pytest
 import yaml
 
 from leakpro import LeakPro
-from leakpro.attacks.extraction_attacks.memorization_extraction import ExpansionConfig, MemorizationExtractionConfig
+from leakpro.attacks.extraction_attacks.memorization_extraction import (
+    AttackMemorizationExtraction,
+    ExpansionConfig,
+    MemorizationExtractionConfig,
+)
 from leakpro.attacks.utils.extraction import finetune as finetune_module
+from leakpro.attacks.utils.extraction.finetune import TokenWindowIndex
+from leakpro.attacks.utils.extraction.records import Candidate
+from leakpro.attacks.utils.extraction.store import ArtifactStore
 from leakpro.tests.extraction_attacks import fixtures
 from leakpro.tests.extraction_attacks.fixtures import SECRET, ExtractionInputHandler
 
@@ -191,3 +199,33 @@ def test_phases_one_at_a_time_match_run_attack(tmp_path: Path) -> None:
     result = attack.finish()
     assert result.metrics == full.metrics
     assert [r["phase"] for r in result.extracted] == [r["phase"] for r in full.extracted]
+
+
+class _WordTokenizer:
+    """One token per whitespace-separated word."""
+
+    def __init__(self) -> None:
+        self.vocab: Dict[str, int] = {}
+
+    def encode(self, text: str, add_special_tokens: bool = True) -> List[int]:  # noqa: ARG002
+        return [self.vocab.setdefault(word, len(self.vocab)) for word in text.split()]
+
+
+def test_overlap_checks_the_generated_text_not_the_prompt(tmp_path: Path) -> None:
+    finetune_text = " ".join(f"t{i}" for i in range(40))
+    index = TokenWindowIndex([finetune_text], _WordTokenizer(), window=10)
+    fresh = " ".join(f"g{i}" for i in range(40))
+
+    def candidate(name: str, prompt_text: str, continuation: str) -> Candidate:
+        return Candidate(id=name, phase="finetuned", strategy="conditional", prompt_ids=[], gen_ids=[],
+                         prompt_text=prompt_text, continuation=continuation,
+                         full_text=f"{prompt_text} {continuation}".strip())
+
+    generated = {"key": "k", "candidates": [
+        candidate("prefix-overlaps", finetune_text, fresh),       # only the prompt is fine-tuning text: kept
+        candidate("generation-overlaps", "a prefix", finetune_text.upper()),  # generated text overlaps: dropped
+        candidate("no-overlap", "", fresh),
+    ]}
+    attack = SimpleNamespace(store=ArtifactStore(str(tmp_path)))
+    out = AttackMemorizationExtraction._drop_overlap(attack, generated, index, "idx", "conditional", "finetuned")
+    assert [c.id for c in out["candidates"]] == ["prefix-overlaps", "no-overlap"]

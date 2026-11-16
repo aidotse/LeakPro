@@ -29,7 +29,8 @@ Phases 3 and 4 are an optional, stronger attack that needs the weights.
 least 20 words, normalized-deduplicated, shuffled).
 
 **Phase 4, re-extraction** (``finetune`` set): Phase 1's strategies on the fine-tuned model. A
-generation sharing any 30-token window with the fine-tuning corpus is dropped *before* filtering;
+generation whose generated text (without the prompt) shares any 30-token window with the fine-tuning
+corpus is dropped *before* filtering (both sides lowercased and whitespace-collapsed);
 filtering scores with the base model; verification as in Phase 1 -> **S_new**.
 
 **Evaluation** (auditor only): an optional audit oracle checks the selected candidates of every phase
@@ -192,7 +193,8 @@ class FinetuneConfig(BaseModel):
     lr: float = Field(default=1e-4, gt=0)
     warmup_steps: int = Field(default=10, ge=0, description="Linear warm-up steps, then a constant learning rate")
     max_length: int = Field(default=256, ge=2, description="Tokens per training text")
-    overlap_window: int = Field(default=30, ge=1, description="Phase 4: drop generations sharing a window this long (tokens)")
+    overlap_window: int = Field(default=30, ge=1,
+                                description="Phase 4: drop generations whose generated text shares a window this long (tokens)")
     strategies: Optional[List[GenStrategyConfig]] = Field(default=None, description="Phase 4 strategies; None: `initial`")
 
     model_config = ConfigDict(extra="forbid")
@@ -335,12 +337,16 @@ class AttackMemorizationExtraction(AbstractExtractionAttack):
 
     def _drop_overlap(self: Self, generated: Dict[str, Any], index: TokenWindowIndex, index_key: str,
                       name: str, phase: str) -> Dict[str, Any]:
-        """Phase 4: drop generations sharing a token window with the fine-tuning corpus (cached)."""
-        key = stage_key("overlap", generated["key"], index_key, index.window)
+        """Phase 4: drop generations whose generated text shares a token window with the fine-tuning corpus.
+
+        Only the continuation is checked, not the prompt: for conditional prompts the prefix is corpus
+        text the model did not generate. Cached.
+        """
+        key = stage_key("overlap", generated["key"], index_key, index.window, "continuation")
         stage = self.store.stage(f"{phase}-overlap-{name}", key)
         if stage.is_done():
             return {"key": key, "candidates": stage.read()}
-        kept = [c for c in generated["candidates"] if not index.overlaps(c.full_text)]
+        kept = [c for c in generated["candidates"] if not index.overlaps(c.continuation)]
         removed = len(generated["candidates"]) - len(kept)
         logger.info(f"{name}: dropped {removed} generations overlapping the fine-tuning data")
         stage.write(kept)
