@@ -186,7 +186,8 @@ interrupted run; changing a setting recomputes only the stages after it.
 - Each generation batch has its own seed, derived from `random_seed`, so runs reproduce exactly and
   an interrupted run resumes with the same samples.
 - Phase 2 anchors are cut from the generated text (original casing) at the first verified window.
-- Phase 3 trains LoRA with a plain PyTorch loop (AdamW, constant learning rate). The base model is
+- Phase 3 trains LoRA with a plain PyTorch loop (AdamW; the learning rate warms up linearly over
+  `warmup_steps`, default 10 optimizer steps, then stays constant). The base model is
   not quantized, and the trainable LoRA weights are float32.
 - **Hardware.** The same code runs on NVIDIA GPUs (CUDA) and Intel Gaudi (HPU), and on CPU for
   small tests. LeakPro picks the device (Gaudi, then CUDA, then CPU; set `LEAKPRO_DEVICE=cuda`,

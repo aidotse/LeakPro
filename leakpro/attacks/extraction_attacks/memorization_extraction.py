@@ -190,7 +190,7 @@ class FinetuneConfig(BaseModel):
     batch_size: int = Field(default=1, ge=1)
     grad_accum: int = Field(default=8, ge=1)
     lr: float = Field(default=1e-4, gt=0)
-    warmup_steps: int = Field(default=0, ge=0, description="Linear warm-up steps, then a constant learning rate")
+    warmup_steps: int = Field(default=10, ge=0, description="Linear warm-up steps, then a constant learning rate")
     max_length: int = Field(default=256, ge=2, description="Tokens per training text")
     overlap_window: int = Field(default=30, ge=1, description="Phase 4: drop generations sharing a window this long (tokens)")
     strategies: Optional[List[GenStrategyConfig]] = Field(default=None, description="Phase 4 strategies; None: `initial`")
