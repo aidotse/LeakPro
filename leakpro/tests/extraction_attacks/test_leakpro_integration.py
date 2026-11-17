@@ -28,6 +28,7 @@ from leakpro.attacks.extraction_attacks.attack_factory_extraction import AttackF
 from leakpro.attacks.extraction_attacks.carlini import AttackCarliniExtraction
 from leakpro.attacks.utils.diff_mi.script_util import create_gaussian_diffusion
 from leakpro.schemas import ExtractionTargetConfig, LeakProConfig, TargetConfig
+from leakpro.utils.save_load import hash_attack
 
 
 @pytest.mark.parametrize("attack_type", ["mia", "gia", "minv", "extraction"])
@@ -86,18 +87,6 @@ class TinyFeatureExtractor(nn.Module):
     def forward(self, images: torch.Tensor) -> torch.Tensor:
         means = images.mean(dim=(1, 2, 3))
         return torch.stack((means, 1.0 - means), dim=1)
-
-
-class TinyTimeClassifier(nn.Module):
-    """Small differentiable classifier used only by the integration test."""
-
-    def __init__(self, in_channels: int, num_classes: int) -> None:
-        super().__init__()
-        self.image = nn.Linear(in_channels * 4 * 4, num_classes)
-        self.time = nn.Linear(1, num_classes, bias=False)
-
-    def forward(self, images: torch.Tensor, timesteps: torch.Tensor) -> torch.Tensor:
-        return self.image(images.flatten(start_dim=1)) + self.time(timesteps.float().unsqueeze(1) / 10.0)
 
 
 def _alternating_samples(batch_size: int, conditions: Sequence[Any] | None, seed: int) -> torch.Tensor:
@@ -161,9 +150,6 @@ class SIDEProvider(AbstractExtractionInputHandler):
     def get_side_feature_metadata(self) -> dict[str, Any]:
         return {"extractor": {"architecture": "tiny_features_v1"}}
 
-    def get_side_classifier_factory(self) -> Any:
-        return TinyTimeClassifier
-
 
 def _write_config(
     tmp_path: Any,
@@ -174,6 +160,8 @@ def _write_config(
     config_name: str = "audit.yaml",
     output_dir: Any = None,
 ) -> str:
+    if attack == "side":
+        attack_config = {"classifier_base_width": 4, "classifier_blocks": [1, 1, 1, 1], **attack_config}
     config = {
         "audit": {
             "attack_type": "extraction",
@@ -284,16 +272,16 @@ def test_extraction_attack_seed_inherits_audit_seed_unless_overridden(
     """The public audit path applies its seed without replacing an explicit attack seed."""
     config_path = Path(_write_config(tmp_path, attack_name, {}))
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    config["audit"]["random_seed"] = 7
+    config["audit"]["random_seed"] = 0
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
 
     inherited = LeakPro(provider, str(config_path)).attack_scheduler.attacks[0]
-    assert inherited.config.random_seed == 7
+    assert inherited.config.random_seed == 0
 
-    config["audit"]["attack_list"][0]["random_seed"] = 11
+    config["audit"]["attack_list"][0]["random_seed"] = 2**32 - 1
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
     overridden = LeakPro(provider, str(config_path)).attack_scheduler.attacks[0]
-    assert overridden.config.random_seed == 11
+    assert overridden.config.random_seed == 2**32 - 1
     assert overridden.result_id != inherited.result_id
 
 
@@ -467,9 +455,16 @@ def test_carlini_public_path_persists_metrics(tmp_path: Any) -> None:
     assert (tmp_path / "output" / "data_objects" / f"{second.id}.json").exists()
 
 
-@pytest.mark.parametrize("seed", [42, 0, 2**32 - 1])
+def test_side_rejects_float64_default_before_sampling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    audit = LeakPro(SIDEProvider, _write_config(tmp_path, "side", {}))
+    monkeypatch.setattr(audit.attack_scheduler.attacks[0].adapter, "sample", Mock(side_effect=AssertionError("unexpected sample")))
+    monkeypatch.setattr(torch, "get_default_dtype", lambda: torch.float64)
+    with pytest.raises(ValueError, match="float64 PyTorch default dtype"):
+        audit.run_audit()
+
+
 def test_side_public_path_records_training_and_guidance(
-    tmp_path: Any, monkeypatch: pytest.MonkeyPatch, seed: int,
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     marked_devices: list[str] = []
     monkeypatch.setattr("leakpro.attacks.extraction_attacks.side.mark_step", lambda device: marked_devices.append(device.type))
@@ -477,7 +472,7 @@ def test_side_public_path_records_training_and_guidance(
         tmp_path,
         "side",
         {
-            "random_seed": seed,
+            "random_seed": 2**32 - 1,
             "compute_device": "cpu",
             "synthetic_samples": 8,
             "synthetic_batch_size": 4,
@@ -485,7 +480,7 @@ def test_side_public_path_records_training_and_guidance(
             "cohesion_threshold": 0.9,
             "min_cluster_size": 2,
             "classifier_epochs": 1,
-            "classifier_batch_size": 4,
+            "classifier_batch_size": 7,  # The eighth sample is a one-image batch.
             "classifier_learning_rate": 0.001,
             "num_generations": 4,
             "generation_batch_size": 2,
@@ -501,6 +496,8 @@ def test_side_public_path_records_training_and_guidance(
     assert result.metrics["synthetic_sampling_calls"] == 2
     assert result.metrics["guidance_calls"] == 2
     assert result.metrics["retained_clusters"] == 2
+    assert result.metrics["singleton_classifier_batches"] == 1
+    assert result.images.shape == (4, 1, 4, 4)
     assert not torch.allclose(result.images, torch.full_like(result.images, 0.5), atol=1e-6, rtol=0)
 
     repeated_config = yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
@@ -516,36 +513,6 @@ def test_side_public_path_records_training_and_guidance(
     rerun = audit.run_audit()[0]
     assert rerun.metrics == result.metrics
     torch.testing.assert_close(rerun.images, result.images, rtol=0, atol=0)
-
-
-def test_side_public_path_trains_default_classifier_with_a_singleton_batch(tmp_path: Path) -> None:
-    class DefaultClassifierProvider(SIDEProvider):
-        def get_side_classifier_factory(self) -> None:
-            return None
-
-    config_path = _write_config(
-        tmp_path,
-        "side",
-        {
-            "compute_device": "cpu",
-            "synthetic_samples": 3,
-            "clusters": 2,
-            "min_cluster_size": 1,
-            "cohesion_threshold": -1.0,
-            "classifier_epochs": 1,
-            "classifier_batch_size": 2,
-            "classifier_base_width": 4,
-            "classifier_blocks": [1, 1, 1, 1],
-            "timestep_embedding_dim": 8,
-            "num_generations": 2,
-            "generation_batch_size": 2,
-        },
-    )
-
-    result = LeakPro(DefaultClassifierProvider, config_path).run_audit()[0]
-    assert result.metrics["singleton_classifier_batches"] == 1
-    assert result.images.shape == (2, 1, 4, 4)
-    assert not torch.allclose(result.images, torch.full_like(result.images, 0.5), atol=1e-6, rtol=0)
 
 
 def test_public_path_rejects_nonfinite_generated_images(tmp_path: Path) -> None:
@@ -734,11 +701,15 @@ def test_public_result_identity_uses_weights_and_ignores_display_name(tmp_path: 
             return ["label"]
 
     path = _write_config(tmp_path, attack_name, {})
-    original = LeakPro(WeightedProvider, path).attack_scheduler.attacks[0].result_id
+    original = LeakPro(WeightedProvider, path).attack_scheduler.attacks[0]
+    if attack_name == "side":
+        legacy_identity = dict(original.identity_metadata)
+        assert legacy_identity.pop("classifier") == "TimeConditionedResNet"
+        assert original.result_id != f"side-extraction-{hash_attack(legacy_identity, original.adapter.model)[:16]}"
     renamed_path = _write_config(tmp_path, attack_name, {}, target_name="renamed", config_name="renamed.yaml")
     renamed = LeakPro(WeightedProvider, renamed_path).attack_scheduler.attacks[0].result_id
-    assert renamed == original
+    assert renamed == original.result_id
     with torch.no_grad():
         WeightedProvider.target_model.weight.add_(1)
     changed = LeakPro(WeightedProvider, path).attack_scheduler.attacks[0].result_id
-    assert changed != original
+    assert changed != original.result_id

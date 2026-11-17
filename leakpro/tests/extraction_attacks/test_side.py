@@ -21,19 +21,6 @@ class TwoFeatureExtractor(nn.Module):
         return torch.stack([mean, 1.0 - mean], dim=1)
 
 
-class TinyTimeClassifier(nn.Module):
-    """Small differentiable time-conditioned classifier for smoke testing."""
-
-    def __init__(self, in_channels: int, num_classes: int) -> None:
-        super().__init__()
-        self.image = nn.Linear(in_channels * 4 * 4, num_classes)
-        self.time = nn.Linear(1, num_classes, bias=False)
-
-    def forward(self, images: torch.Tensor, timesteps: torch.Tensor) -> torch.Tensor:
-        time = timesteps.to(dtype=images.dtype).unsqueeze(1) / 10.0
-        return self.image(images.flatten(start_dim=1)) + self.time(time)
-
-
 @pytest.mark.parametrize("seed", [-1, 2**32])
 def test_side_rejects_unsupported_kmeans_seeds_before_sampling(seed: int) -> None:
     def sample(*args, **kwargs):
@@ -141,6 +128,8 @@ def test_side_l2_results_use_zero_one_coordinates_for_minus_one_one_model(monkey
             "clusters": 2,
             "cohesion_threshold": 0.9,
             "min_cluster_size": 2,
+            "classifier_base_width": 4,
+            "classifier_blocks": [1, 1, 1, 1],
             "classifier_epochs": 1,
             "classifier_batch_size": 4,
             "num_generations": 1,
@@ -150,7 +139,6 @@ def test_side_l2_results_use_zero_one_coordinates_for_minus_one_one_model(monkey
         feature_metadata={"extractor": {"architecture": "two_feature_means_v1"}},
         target_name="side-minus-one-one-range",
         reference_images=torch.full((1, 1, 4, 4), -1.0),
-        classifier_factory=TinyTimeClassifier,
     )
 
     attack.prepare_attack()

@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from typing import Any
 
 from torch import Tensor, nn
@@ -58,10 +58,6 @@ class AbstractExtractionInputHandler(ABC):
         descriptor may be omitted only for the default identity transform.
         Module weights and buffers are hashed separately by SIDE.
         """
-        return None
-
-    def get_side_classifier_factory(self) -> Callable[[int, int], nn.Module] | None:
-        """Return a factory that creates a new time-dependent classifier."""
         return None
 
     def get_extraction_reference_score(self) -> PairwiseScore | None:

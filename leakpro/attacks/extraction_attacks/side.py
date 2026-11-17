@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 import numpy as np
 import torch
@@ -50,8 +50,6 @@ from leakpro.utils.device import get_device, mark_step
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
 from leakpro.utils.save_load import hash_attack, hash_config
-
-ClassifierFactory = Callable[[int, int], nn.Module]
 
 
 @contextmanager
@@ -133,7 +131,6 @@ class AttackSIDEExtraction(AbstractExtraction):
         target_name: str = "diffusion_target",
         reference_images: Tensor | None = None,
         feature_transform: FeatureTransform | None = None,
-        classifier_factory: ClassifierFactory | None = None,
         reference_score_fn: PairwiseScore | None = None,
         generation_metadata: dict[str, Any] | None = None,
         feature_metadata: dict[str, Any] | None = None,
@@ -147,7 +144,6 @@ class AttackSIDEExtraction(AbstractExtraction):
         self.reference_images = reference_images
         self.feature_transform = feature_transform or identity_feature_transform
         self.classifier: nn.Module | None = None
-        self.classifier_factory = classifier_factory
         self.reference_score_fn = reference_score_fn
         identity_config = self.config.model_dump(mode="json", exclude={"overwrite_results"})
         model = getattr(self.adapter, "model", None)
@@ -175,6 +171,7 @@ class AttackSIDEExtraction(AbstractExtraction):
             "config": identity_config,
             "generation": adapter_metadata(adapter, generation_metadata, guided=True),
             "features": features,
+            "classifier": TimeConditionedResNet.__name__,
         }
         result_hash = hash_attack(self.identity_metadata, model)[:16]
         self.result_id = f"side-extraction-{result_hash}"
@@ -205,7 +202,6 @@ class AttackSIDEExtraction(AbstractExtraction):
             target_name=handler.configs.target.name,
             reference_images=handler.get_extraction_reference_images(),
             feature_transform=handler.get_side_feature_transform(),
-            classifier_factory=handler.get_side_classifier_factory(),
             reference_score_fn=handler.get_extraction_reference_score(),
             generation_metadata=handler.get_extraction_metadata(),
             feature_metadata=handler.get_side_feature_metadata(),
@@ -284,14 +280,14 @@ class AttackSIDEExtraction(AbstractExtraction):
 
     def _validate_preparation_inputs(self) -> None:
         """Reject malformed white-box components before target sampling."""
+        if torch.get_default_dtype() == torch.float64:
+            raise ValueError("SIDE's built-in classifier does not support a float64 PyTorch default dtype.")
         self._validate_adapter()
         if not isinstance(self.feature_extractor, nn.Module):
             raise TypeError("feature_extractor must be a torch.nn.Module.")
         self._feature_extractor_dtype()
         if not callable(self.feature_transform):
             raise TypeError("feature_transform must be callable.")
-        if self.classifier_factory is not None and not callable(self.classifier_factory):
-            raise TypeError("classifier_factory must be callable.")
         if self.reference_score_fn is not None and not callable(self.reference_score_fn):
             raise TypeError("reference_score_fn must be callable.")
 
@@ -386,29 +382,13 @@ class AttackSIDEExtraction(AbstractExtraction):
     def _build_classifier(self) -> None:
         if self.cluster_centroids is None:
             raise RuntimeError("Surrogate clusters were not prepared.")
-        num_classes = self.cluster_centroids.shape[0]
-        in_channels = self.adapter.image_shape[0]
-        if self.classifier_factory is not None:
-            self.classifier = self.classifier_factory(in_channels, num_classes)
-            if not isinstance(self.classifier, nn.Module):
-                raise TypeError("classifier_factory must return a torch.nn.Module.")
-        if self.classifier is None:
-            self.classifier = TimeConditionedResNet(
-                in_channels=in_channels,
-                num_classes=num_classes,
-                base_width=self.config.classifier_base_width,
-                blocks=self.config.classifier_blocks,
-                timestep_embedding_dim=self.config.timestep_embedding_dim,
-            )
-        self.classifier.to(self.device)
-        classifier_dtype = self._classifier_dtype()
-        with torch.no_grad():
-            probe_images = torch.zeros((2, *self.adapter.image_shape), device=self.device, dtype=classifier_dtype)
-            probe_timesteps = self.adapter.classifier_timesteps(torch.zeros(2, dtype=torch.long, device=self.device))
-            probe_timesteps = probe_timesteps.to(self.device)
-            probe = self.classifier(probe_images, probe_timesteps)
-        if probe.shape != (2, num_classes):
-            raise ValueError(f"classifier must return shape (batch, {num_classes}); got {tuple(probe.shape)}.")
+        self.classifier = TimeConditionedResNet(
+            in_channels=self.adapter.image_shape[0],
+            num_classes=self.cluster_centroids.shape[0],
+            base_width=self.config.classifier_base_width,
+            blocks=self.config.classifier_blocks,
+            timestep_embedding_dim=self.config.timestep_embedding_dim,
+        ).to(self.device)
 
     def _train_classifier(self) -> None:
         if self.synthetic_images_uint8 is None or self.synthetic_labels is None:
