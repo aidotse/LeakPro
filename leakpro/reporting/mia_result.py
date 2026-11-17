@@ -181,6 +181,7 @@ class MIAResult:
             tpr = self.tpr,
             fpr = self.fpr,
             bootstrap = getattr(self, "bootstrap", None),
+            robustness = getattr(self, "robustness", None),
         )
 
     @staticmethod
@@ -250,6 +251,11 @@ class MIAResult:
     def set_bootstrap(self, block: dict) -> None:
         """Attach a :meth:`bootstrap_metrics` block so it is saved with the result and restored by :meth:`load`."""
         self.bootstrap = block
+        self.result = self._make_result_object()
+
+    def set_robustness(self, block: dict) -> None:
+        """Attach an empirical rotation summary for saving and loading with this result."""
+        self.robustness = block
         self.result = self._make_result_object()
 
     def _compute_confusion_arrays(self) -> None:
@@ -380,8 +386,8 @@ class MIAResult:
             os.makedirs(path)
 
     def _has_roc(self) -> bool:
-        """Return True if this result supports a meaningful ROC curve."""
-        return self.roc_mode != "none" and self.fpr is not None and len(self.fpr) > 1
+        """Return whether stored curves can be plotted, including results loaded from disk."""
+        return self.fpr is not None and self.tpr is not None and len(self.fpr) > 1
 
     def save(self:Self, attack_obj: Any, output_dir: str) -> None:
         """Save the MIAResults to disk."""
@@ -480,6 +486,7 @@ class MIAResult:
         obj.metadata = mia_data.config
         obj.fixed_fpr_table = mia_data.fixed_fpr if mia_data.fixed_fpr else None
         obj.bootstrap = mia_data.bootstrap
+        obj.robustness = mia_data.robustness
         obj.signal_values = mia_data.signal_values if mia_data.signal_values else None
         obj.true = mia_data.true_labels
         obj.tp = mia_data.tp
@@ -506,6 +513,7 @@ class MIAResult:
         # Create plot for results
         assert isinstance(result_objects, list), "Results must be a list of MIAResult objects"
 
+        result_objects = [result for result in result_objects if result._has_roc()]
         reduced_labels = reduce_to_unique_labels(result_objects)
         for res, label in zip(result_objects, reduced_labels):
             plt.fill_between(res.fpr, res.tpr, alpha=0.15)
@@ -591,8 +599,10 @@ class MIAResult:
         # Append all mia results to table
         for res in results:
             config = config_latex_style(res.id)
+            tpr = res.fixed_fpr_table or dict.fromkeys(
+                ("TPR@10%FPR", "TPR@1%FPR", "TPR@0.1%FPR", "TPR@0%FPR"), "N/A")
             latex_content += f"""
-            {"-".join(res.result_name.split("_"))} & {config} & {res.fixed_fpr_table["TPR@10%FPR"]} & {res.fixed_fpr_table["TPR@1%FPR"]} & {res.fixed_fpr_table["TPR@0.1%FPR"]} & {res.fixed_fpr_table["TPR@0%FPR"]} \\\\ \\hline """ # noqa: E501
+            {"-".join(res.result_name.split("_"))} & {config} & {tpr["TPR@10%FPR"]} & {tpr["TPR@1%FPR"]} & {tpr["TPR@0.1%FPR"]} & {tpr["TPR@0%FPR"]} \\\\ \\hline """ # noqa: E501
         latex_content += """
         \\end{tabularx}
         }

@@ -63,17 +63,19 @@ class AttackScheduler:
         self.attack_names = []
         self.attack_configs = []
         self.attacks = []
-        self.robustness_runners = set()
+        self.robustness_options = {}
         for entry in configs.audit.attack_list:
             attack_name = entry["attack"]
             attack_config = {key: value for key, value in entry.items() if key not in {"attack", "robustness"}}
             if entry.get("robustness") is not None:
-                from leakpro.attacks.robustness import Robustness  # noqa: PLC0415
+                from leakpro.attacks.robustness import RobustnessConfig  # noqa: PLC0415
 
-                options = Robustness.Config.model_validate(entry["robustness"]).model_dump(exclude_unset=True)
+                config = RobustnessConfig.model_validate(entry["robustness"])
+                options = config.model_dump(exclude_unset=True)
                 options.setdefault("seed", self.random_seed)
-                attack = Robustness(handler, attack_name, attack_config, output_dir=output_dir, **options)
-                self.robustness_runners.add(attack)
+                attack = self.attack_factory.create_attack(attack_name, attack_config, handler)
+                config.validate_attack(attack)
+                self.robustness_options[attack] = options
             else:
                 try:
                     attack = self.attack_factory.create_attack(attack_name, attack_config, handler)
@@ -140,19 +142,19 @@ class AttackScheduler:
     def run_attacks(self: Self, use_optuna:bool=False) -> Dict[str, Any]:
         """Run attacks, returning one result per target for robustness entries.
 
-        Robustness entries use their runner as attack_object and retain each run's
+        Robustness entries retain the actual attack object and each run's
         target/reference provenance in metadata. Normal entries keep their existing contract.
+        The Optuna flag applies only to ordinary entries.
         """
-        if use_optuna and self.robustness_runners:
-            raise ValueError("Robustness requires a fixed attack configuration; use_optuna must be False")
         results = []
         for attack_obj, attack_type in zip(self.attacks, self.attack_names):
             # Re-seed before every attack so each attack sees the same random state
             # regardless of which earlier attacks ran or were loaded from cache.
             seed_everything(self.random_seed)
-            if attack_obj in self.robustness_runners:
-                results.extend({"attack_type": attack_type, "attack_object": attack_obj, **entry}
-                               for entry in attack_obj.run())
+            if attack_obj in self.robustness_options:
+                results.extend({"attack_type": attack_type, "attack_object": attack_obj, "result_object": result}
+                               for result in attack_obj.run_robustness(output_dir=self.output_dir,
+                                                                      **self.robustness_options[attack_obj]))
                 continue
             run_with_optuna = use_optuna and attack_obj.optuna_params > 0
 

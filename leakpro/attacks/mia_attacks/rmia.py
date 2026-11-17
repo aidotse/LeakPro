@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 """Implementation of the RMIA attack."""
+from collections.abc import Iterator
 from typing import Optional
 
 import numpy as np
@@ -10,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import nn
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
+from leakpro.attacks.robustness import RobustnessConfig, save_robustness_results
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.attacks.utils.utils import (
     gaussian_residual_probability,
@@ -25,6 +27,7 @@ from leakpro.signals.signal import ModelLogits
 from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
+from leakpro.utils.seed import seed_everything
 
 
 class AttackRMIA(AbstractMIA):
@@ -190,7 +193,7 @@ shadow-model residuals on the z-population. Ignored for classification models, w
 
         return logits
 
-    def _resolve_scale(self:Self, shadow_logits_z: list, z_labels: np.ndarray) -> None:
+    def _estimate_scale(self:Self, shadow_logits_z: list, z_labels: np.ndarray) -> float:
         """Resolve the residual-likelihood scale used by the regression signal probability.
 
         With a user-provided sigma (residual std), it is mapped to the scale of the resolved
@@ -211,8 +214,7 @@ shadow-model residuals on the z-population. Ignored for classification models, w
             sigma_to_scale = {"gaussian": self.sigma ** 2,
                               "laplace": self.sigma / np.sqrt(2.0),
                               "huber": self.sigma ** 2}
-            self._scale = sigma_to_scale[self.likelihood_family]
-            return
+            return sigma_to_scale[self.likelihood_family]
 
         if self.likelihood_family == "gaussian":
             energies = [np.mean(mse(logits_z, z_labels)) for logits_z in shadow_logits_z]
@@ -221,14 +223,17 @@ shadow-model residuals on the z-population. Ignored for classification models, w
         else:
             energies = [np.mean(huber_energy(logits_z, z_labels, self._huber_delta)) for logits_z in shadow_logits_z]
 
-        self._scale = float(np.mean(energies))
-        if self._scale <= 0.0:
+        scale = float(np.mean(energies))
+        if scale <= 0.0:
             # Degenerate case: shadow models reproduce all z-targets exactly.
-            self._scale = self.epsilon
-        logger.info(f"Estimated {self.likelihood_family} residual scale = {self._scale:.6g} "
+            scale = self.epsilon
+        logger.info(f"Estimated {self.likelihood_family} residual scale = {scale:.6g} "
                     f"from {len(shadow_logits_z)} shadow model(s) on {len(z_labels)} z-points")
 
-    def _signal_probability(self:Self, logits: np.ndarray, labels: np.ndarray) -> np.ndarray:
+        return scale
+
+    def _signal_probability(self:Self, logits: np.ndarray, labels: np.ndarray,
+                            scale: Optional[float] = None) -> np.ndarray:
         """Compute the per-point probability of the true output given a model.
 
         Classification: temperature softmax indexed at the true class (RMIA paper, Sec. 3).
@@ -240,6 +245,7 @@ shadow-model residuals on the z-population. Ignored for classification models, w
         ----
             logits ( len(dataset) x ... ): Model outputs (class logits or forecasts).
             labels ( len(dataset) x ... ): True classes (int) or true outputs (float).
+            scale: Reference-only residual scale for a rotation; None uses the prepared scale.
 
         Returns:
         -------
@@ -247,13 +253,14 @@ shadow-model residuals on the z-population. Ignored for classification models, w
 
         """
         if self.is_regression:
-            if self._scale is None:
+            scale = self._scale if scale is None else scale
+            if scale is None:
                 raise RuntimeError("Residual likelihood scale is unresolved — prepare_attack must run first.")
             if self.likelihood_family == "gaussian":
-                return gaussian_residual_probability(logits, labels, self._scale)
+                return gaussian_residual_probability(logits, labels, scale)
             if self.likelihood_family == "laplace":
-                return laplace_residual_probability(logits, labels, self._scale)
-            return huber_residual_probability(logits, labels, self._scale, self._huber_delta)
+                return laplace_residual_probability(logits, labels, scale)
+            return huber_residual_probability(logits, labels, scale, self._huber_delta)
         return softmax_logits(logits, self.temperature)[np.arange(len(labels)), labels]
 
     def _prepare_shadow_models(self:Self) -> None:
@@ -274,15 +281,21 @@ shadow-model residuals on the z-population. Ignored for classification models, w
         if self.online is False:
             self.out_indices = ~ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"]).T
 
-    def prepare_attack(self:Self) -> None:
+    def prepare_attack(self:Self, seed: Optional[int] = None) -> None:
         """Prepare Data needed for running the attack on the target model and dataset.
 
         Signals are computed on the auxiliary model(s) and dataset.
+
+        Args:
+            seed: Optional seed for model preparation and z sampling, independent of cache hits.
+
         """
+        if seed is not None:
+            seed_everything(seed)
         logger.info("Preparing shadow models for RMIA attack")
 
         # If we already have one run, we dont need to check for shadow models as logits are stored
-        if not self.load_for_optuna:
+        if not self.load_for_optuna or seed is not None:
             self._prepare_shadow_models()
 
             self.ground_truth = self.handler.get_labels(self.audit_dataset["data"])
@@ -300,6 +313,8 @@ shadow-model residuals on the z-population. Ignored for classification models, w
         logit_row = {int(idx): i for i, idx in enumerate(all_cached)}
 
         n_z = int(self.attack_data_fraction * len(self.attack_data_indices))
+        if seed is not None:
+            seed_everything(seed)
         z_indices = np.random.choice(self.attack_data_indices, size=n_z, replace=False)
         z_labels = self.handler.get_labels(z_indices)
 
@@ -321,8 +336,11 @@ shadow-model residuals on the z-population. Ignored for classification models, w
             for sm, sm_logits in zip(self.shadow_models, self.logits_shadow_models)
         ]
 
+        self.z_labels = z_labels
+        self.logits_z_theta = logits_z_theta
+        self.logits_z_shadow_models = np.asarray(logits_z_shadow_models)
         if self.is_regression:
-            self._resolve_scale(logits_z_shadow_models, z_labels)
+            self._scale = self._estimate_scale(logits_z_shadow_models, z_labels)
 
         # p(z | target model)
         p_z_given_theta = np.atleast_2d(self._signal_probability(logits_z_theta, z_labels))
@@ -331,6 +349,10 @@ shadow-model residuals on the z-population. Ignored for classification models, w
         p_z_given_shadow_models = np.array(
             [self._signal_probability(logits_z, z_labels) for logits_z in logits_z_shadow_models])
 
+        self.ratio_z = self._compute_ratio_z(p_z_given_theta, p_z_given_shadow_models)
+
+    def _compute_ratio_z(self, p_z_given_theta: np.ndarray, p_z_given_shadow_models: np.ndarray) -> np.ndarray:
+        """Compute the z-reference ratio for the selected target and reference models."""
         # evaluate the marginal p(z)
         if self.online is True:
             p_z = np.mean(p_z_given_shadow_models, axis=0, keepdims=True)
@@ -339,42 +361,27 @@ shadow-model residuals on the z-population. Ignored for classification models, w
             p_z = np.mean(p_z_given_shadow_models, axis=0)
             p_z = 0.5*((self.offline_a + 1) * p_z + (1-self.offline_a))
 
-        self.ratio_z = p_z_given_theta / (p_z + self.epsilon)
+        return p_z_given_theta / (p_z + self.epsilon)
 
     def _run_attack(self:Self) -> None:
         mode = "online" if self.online else "offline"
         logger.info(f"Running RMIA {mode} attack")
 
         # probability of the true output for each audit point given the target model
-        n_audit_points = len(self.ground_truth)
         p_x_given_theta = np.atleast_2d(self._signal_probability(self.logits_theta, self.ground_truth))
 
         # same per shadow model, to compute the marginal p(x)
         p_x_given_shadow_models = np.array(
             [self._signal_probability(x, self.ground_truth) for x in self.logits_shadow_models])
 
-        if self.online is True:
-            p_x = np.mean(p_x_given_shadow_models, axis=0, keepdims=True)
-        else:
-            # compute the marginal p(x) from P_out and p_in where p_in = a*p_out+b
-            masked_values = np.where(self.out_indices, p_x_given_shadow_models, np.nan)
-            p_x_out = np.nanmean(masked_values, axis=0)
-            p_x = 0.5*((self.offline_a + 1) * p_x_out + (1-self.offline_a))
-
-        # compute the ratio of p(x|theta) to p(x)
-        ratio_x = p_x_given_theta / (p_x + self.epsilon)
-
-        # for each x, compute the score
-        score = np.zeros((1, n_audit_points))
-        for i in range(n_audit_points):
-            likelihoods = ratio_x[0,i] / self.ratio_z
-            score[0, i] = np.mean(likelihoods > self.gamma)
+        score = self._compute_scores(p_x_given_theta, p_x_given_shadow_models,
+                                     self.out_indices if not self.online else None, self.ratio_z)
 
         # pick out the in-members and out-members signals
         in_members = self.audit_dataset["in_members"]
         out_members = self.audit_dataset["out_members"]
-        self.in_member_signals = score[0,in_members].reshape(-1,1)
-        self.out_member_signals = score[0,out_members].reshape(-1,1)
+        self.in_member_signals = score[in_members].reshape(-1,1)
+        self.out_member_signals = score[out_members].reshape(-1,1)
 
     def run_attack(self:Self) -> MIAResult:
         """Run the attack on the target model and dataset.
@@ -413,3 +420,62 @@ shadow-model residuals on the z-population. Ignored for classification models, w
         self.prepare_attack()
 
 
+
+    def _compute_scores(self, p_x_given_theta: np.ndarray, p_x_given_shadow_models: np.ndarray,
+                        out_indices: np.ndarray, ratio_z: np.ndarray) -> np.ndarray:
+        """Evaluate RMIA's probability ratios for ordinary and rotated targets."""
+        if self.online is True:
+            p_x = np.mean(p_x_given_shadow_models, axis=0, keepdims=True)
+        else:
+            # compute the marginal p(x) from P_out and p_in where p_in = a*p_out+b
+            n_out = out_indices.sum(axis=0)
+            if np.any(n_out == 0):
+                raise ValueError("Offline RMIA needs at least one OUT reference model per audit point")
+            # NaNs exclude IN references; the count guard above rules out undefined means.
+            p_x_out = np.nanmean(np.where(out_indices, p_x_given_shadow_models, np.nan), axis=0)
+            p_x = 0.5*((self.offline_a + 1) * p_x_out + (1-self.offline_a))
+
+        # compute the ratio of p(x|theta) to p(x)
+        ratio_x = p_x_given_theta / (p_x + self.epsilon)
+
+        # for each x, compute the score
+        score = np.zeros(p_x_given_theta.shape[1])
+        for i in range(len(score)):
+            likelihoods = ratio_x[0,i] / ratio_z
+            score[i] = np.mean(likelihoods > self.gamma)
+
+        return score
+
+    def run_robustness(self, n_runs: int, seed: Optional[int] = None,
+                       output_dir: Optional[str] = None) -> list[MIAResult]:
+        """Rotate prepared audit/z outputs and membership through RMIA's scoring rule.
+
+        z points are sampled once. Each rotation recomputes marginals and any
+        residual scale from its selected references, leaving ordinary state intact.
+        """
+        config = RobustnessConfig(n_runs=n_runs, seed=seed)
+        config.validate_attack(self)
+        self.prepare_attack(seed=seed)
+        metadata = ShadowModelHandler().get_shadow_model_metadata(self.shadow_model_indices)
+        training_indices = [self.handler.train_indices, *[model.train_indices for model in metadata]]
+        membership = np.array([np.isin(self.audit_dataset["data"], indices) for indices in training_indices])
+        training_sizes = [len(indices) for indices in training_indices]
+        audit = np.concatenate((self.logits_theta[None], self.logits_shadow_models))
+        z = np.concatenate((self.logits_z_theta[None], self.logits_z_shadow_models))
+        targets = [0, *np.random.default_rng(seed).permutation(np.arange(1, len(audit)))[:config.n_runs - 1]]
+
+        def rotations() -> Iterator[tuple[int, np.ndarray, np.ndarray, np.ndarray]]:
+            for target in targets:
+                references = np.delete(np.arange(len(audit)), target)
+                scale = self._estimate_scale(z[references], self.z_labels) if self.is_regression else None
+                p_z_target = np.atleast_2d(self._signal_probability(z[target], self.z_labels, scale))
+                p_z_shadows = np.array([self._signal_probability(values, self.z_labels, scale) for values in z[references]])
+                ratio_z = self._compute_ratio_z(p_z_target, p_z_shadows)
+                p_x_target = np.atleast_2d(self._signal_probability(audit[target], self.ground_truth, scale))
+                p_x_shadows = np.array([self._signal_probability(values, self.ground_truth, scale)
+                                       for values in audit[references]])
+                scores = self._compute_scores(p_x_target, p_x_shadows, ~membership[references], ratio_z)
+                yield target, references, scores, np.ones(audit.shape[1], dtype=bool)
+
+        signals = {"audit": audit, "z": z, "audit_labels": self.ground_truth, "z_labels": self.z_labels}
+        return save_robustness_results(self, signals, membership, training_sizes, targets, rotations(), seed, output_dir)

@@ -336,6 +336,9 @@ class MIAResultSchema(BaseModel):
     bootstrap: Optional[Dict[str, Any]] = Field(
         None, description="Optional bootstrap mean/CI for roc_auc and the fixed-FPR table (see MIAResult.bootstrap_metrics)"
     )
+    robustness: Optional[Dict[str, Any]] = Field(
+        None, description="Empirical rotated-target summary; percentiles are not calibrated confidence intervals"
+    )
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # Prevent extra fields
 

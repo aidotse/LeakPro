@@ -48,6 +48,7 @@ audit:  # Configurations for auditing
       var_calculation: "fixed"
       training_data_fraction: 0.5
       # Optional: original target followed by eight distinct shadow targets.
+      # Use 0.4 to match the target training size, or keep 0.5 and report the difference.
       # robustness:
       #   n_runs: 9
 

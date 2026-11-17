@@ -2,29 +2,34 @@
 # Copyright 2023-2026 Lindholmen Science Park AB
 # SPDX-License-Identifier: Apache-2.0
 #
-"""Integration checks for target rotation and fixed reference-pool reuse."""
+"""Integration checks for attack-owned cached-signal target rotation."""
 
 import json
 import pickle
 from pathlib import Path
+from types import SimpleNamespace
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 import torch
 import yaml
+from scipy.special import logsumexp
+from scipy.stats import norm
 from torch import nn
 
 from leakpro import LeakPro
 from leakpro.attacks.attack_scheduler import AttackScheduler
+from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
-from leakpro.attacks.robustness import Robustness
-from leakpro.attacks.utils.distillation_model_handler import DistillationModelHandler
+from leakpro.attacks.robustness import summarize_robustness
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.reporting.mia_result import MIAResult
 from leakpro.schemas import EvalOutput, LeakProConfig, LossConfig, MIAMetaDataSchema, ShadowModelConfig, TrainingOutput
-from leakpro.utils.save_load import hash_model
+from leakpro.attacks.utils.utils import softmax_logits
+from leakpro.utils.save_load import hash_config, hash_model
 
 
 class TinyModel(nn.Module):
@@ -65,9 +70,20 @@ class TinyInputHandler(AbstractInputHandler):
     eval = TinyHandler.eval
 
 
+def test_each_attack_defines_robustness_without_a_base_interface():
+    assert not hasattr(AbstractMIA, "run_robustness")
+    assert not hasattr(AbstractMIA, "validate_robustness")
+    for name in ("lira", "base", "rmia"):
+        assert "run_robustness" in AttackFactoryMIA.attack_classes[name].__dict__
+
+
 @pytest.fixture
 def handler(tmp_path, monkeypatch):
     monkeypatch.setenv("LEAKPRO_DEVICE", "cpu")
+    # The factory clears class-level Optuna metadata for explicit hyperparameters.
+    for name in ("lira", "base", "rmia"):
+        for field in AttackFactoryMIA.attack_classes[name].AttackConfig.model_fields.values():
+            monkeypatch.setattr(field, "json_schema_extra", field.json_schema_extra)
     torch.manual_seed(12)
     handler = object.__new__(TinyHandler)
     handler.population = TinyHandler.UserDataset(torch.randn(60, 2), torch.arange(60) % 2)
@@ -96,118 +112,121 @@ def handler(tmp_path, monkeypatch):
     monkeypatch.setattr(MIAResult, "create_signal_histogram", lambda *args, **kwargs: None)
     yield handler
     ShadowModelHandler.delete_instance()
-    DistillationModelHandler.delete_instance()
     AttackFactoryMIA.shadow_model_handler = None
     AttackFactoryMIA.distillation_model_handler = None
 
 
-@pytest.mark.parametrize("name,extra", [
-    ("lira", {"online": True}), ("rmia", {"online": True}), ("base", {"online": True}), ("population", {}),
-])
-def test_real_attacks_rotate_target_and_reuse_pool(handler, monkeypatch, mocker, name, extra):
-    if name == "population":
-        handler.target_model = TinyModel(num_classes=1)
-        handler.population.targets = handler.population.targets.float().unsqueeze(1)
-        handler._criterion = nn.BCEWithLogitsLoss()
-        handler.target_model_metadata.init_params = {"num_classes": 1}
-        handler.target_model_metadata.criterion = LossConfig(name="bcewithlogitsloss")
-        handler.train(handler.get_dataloader(handler.train_indices), handler.target_model, handler.get_criterion(),
-                      handler.get_optimizer(handler.target_model), 1)
-    config = extra if name == "population" else {"num_shadow_models": 4, "training_data_fraction": 1 / 3, **extra}
-    captured = []
-    create = AttackFactoryMIA.create_attack
-
-    def capture(cls, *args, **kwargs):
-        attack = create(*args, **kwargs)
-        captured.append(attack)
-        return attack
-
-    monkeypatch.setattr(AttackFactoryMIA, "create_attack", classmethod(capture))
+@pytest.mark.parametrize("name", ["lira", "base", "rmia"])
+@pytest.mark.parametrize("online", [False, True])
+def test_attack_owns_rotation_and_reuses_native_pool(handler, mocker, name, online):
+    config = {"num_shadow_models": 4, "training_data_fraction": 0.5, "online": online}
+    if name == "lira":
+        config["var_calculation"] = "fixed"
+    attack = AttackFactoryMIA.create_attack(name, config, handler)
     training = mocker.spy(TinyHandler, "train")
-    original_model = handler.target_model
-    original_hash = hash_model(original_model)
+    preparation = mocker.spy(attack, "prepare_attack")
+    creation = mocker.spy(AttackFactoryMIA, "create_attack")
+    original_hash = hash_model(handler.target_model)
     original_config = handler.configs.model_dump()
-    wrapper = Robustness(handler, name, config, n_runs=3, num_shadow_models=4, seed=123)
-    runs = wrapper.run()
-
+    original_metadata = handler.target_model_metadata.model_dump()
+    runs = attack.run_robustness(n_runs=3, seed=123)
+    assert preparation.call_count == 1
     assert training.call_count == 4
-    assert [entry["metadata"]["target"] for entry in runs] == wrapper.target_indices
-    assert wrapper.target_indices[0] == -1
-    assert len(set(wrapper.target_indices)) == 3
-    assert len({hash_model(attack.handler.target_model) for attack in captured}) == 3
-    for attack, entry in zip(captured, runs):
-        metadata = entry["metadata"]
-        assert metadata["target"] not in metadata["references"]
-        assert len(metadata["references"]) == 4
-        assert set(metadata["references"]) | {metadata["target"]} == {-1, *wrapper._shadow_indices}
-        if metadata["target"] != -1:
-            assert -1 in metadata["references"]
-        expected_train = wrapper._metadata[metadata["target"]].train_indices
-        assert set(attack.handler.train_indices) == set(expected_train)
-        assert attack.handler.target_model_metadata.train_result == wrapper._metadata[metadata["target"]].train_result
-        assert attack.handler.target_model_metadata.test_result == wrapper._metadata[metadata["target"]].test_result
-        assert hash_model(attack.handler.target_model) == metadata["target_hash"]
-        assert entry["result_object"].true.sum() == metadata["member_count"]
-        if name == "lira":
-            labels = attack.handler.get_labels(attack.audit_dataset["data"])
-            expected = [attack.signal(wrapper._load_logits(index, attack.audit_dataset["data"]), labels)
-                        for index in metadata["references"]]
-            membership = np.array([np.isin(attack.audit_dataset["data"], wrapper._metadata[index].train_indices)
-                                   for index in metadata["references"]])
-            eligible = membership.any(axis=0) & (~membership).any(axis=0)
-            np.testing.assert_allclose(attack.shadow_models_signals, np.asarray(expected)[:, eligible])
-            np.testing.assert_array_equal(entry["result_object"].audit_indices, attack.audit_dataset["data"][eligible])
-        assert list((Path(attack.handler.configs.audit.output_dir) / "data_objects").glob("*.json"))
-    assert handler.target_model is original_model
-    assert hash_model(original_model) == original_hash
+    assert creation.call_count == 0
+    assert all(len(call.args[1].dataset) == 30 for call in training.call_args_list)
     assert handler.configs.model_dump() == original_config
+    assert handler.target_model_metadata.model_dump() == original_metadata
+    assert hash_model(handler.target_model) == original_hash
+    assert ShadowModelHandler().handler is handler
     np.testing.assert_array_equal(handler.train_indices, np.arange(20))
-    assert not ShadowModelHandler.is_created()
-    assert not DistillationModelHandler.is_created()
-    saved = json.loads((wrapper.output_dir / "summary.json").read_text())
-    assert saved["rotated_target_summary"]["n_targets"] == 2
-    assert saved["runs"][0]["target_hash"] == original_hash
+    membership = {-1: handler.train_indices}
+    membership.update((int(index), meta.train_indices) for index, meta in zip(
+        attack.shadow_model_indices, ShadowModelHandler().get_shadow_model_metadata(attack.shadow_model_indices)))
+    assert len({result.metadata["robustness"]["target"] for result in runs}) == 3
+    for result in runs:
+        provenance = result.metadata["robustness"]
+        target = provenance["target"]
+        assert target not in provenance["references"]
+        assert set(provenance["references"]) | {target} == set(membership)
+        assert len(provenance["references"]) == 4
+        assert provenance["target_training_size"] == len(membership[target])
+        assert provenance["reference_training_sizes"] == [len(membership[index]) for index in provenance["references"]]
+        np.testing.assert_array_equal(result.true, np.isin(result.audit_indices, membership[target]))
+        assert result.result.id == result.id
+        assert np.isfinite(result.signal_values).all()
+    # The original target must use exactly the same scoring rule and prepared values.
+    ordinary = attack.run_attack()
+    np.testing.assert_array_equal(runs[0].audit_indices, ordinary.audit_indices)
+    np.testing.assert_allclose(runs[0].signal_values, ordinary.signal_values)
+    directory = Path(handler.configs.audit.output_dir) / "robustness" / runs[0].metadata["robustness"]["experiment_id"]
+    summary = json.loads((directory / "summary.json").read_text())
+    assert summary["setup"]["targets"][0] == -1
+    assert summary["setup"]["training_sizes"] == [20, 30, 30, 30, 30]
 
 
-def test_cached_pool_and_seed_reproduce_runs(handler, mocker):
-    config = {"num_shadow_models": 4, "training_data_fraction": 1 / 3, "online": True}
-    first = Robustness(handler, "lira", config, 3, 4, seed=7)
-    first.run()
+@pytest.mark.parametrize("name", ["lira", "base", "rmia"])
+def test_cached_pool_seed_and_scores_repeat(handler, mocker, name):
+    config = {"num_shadow_models": 4, "training_data_fraction": 0.5, "online": True}
+    first = AttackFactoryMIA.create_attack(name, config, handler)
+    original = first.run_robustness(n_runs=3, seed=7)
     training = mocker.spy(TinyHandler, "train")
-    second = Robustness(handler, "lira", config, 3, 4, seed=7)
-    second.run()
+    second = AttackFactoryMIA.create_attack(name, config, handler)
+    repeated = second.run_robustness(n_runs=3, seed=7)
     assert training.call_count == 0
-    assert first.target_indices == second.target_indices
-    assert first.output_dir == second.output_dir
-    for old, new in zip(first.results, second.results):
-        np.testing.assert_allclose(old["result_object"].signal_values, new["result_object"].signal_values)
-    assert first.summary == second.summary
+    for before, after in zip(original, repeated):
+        assert before.metadata["robustness"] == after.metadata["robustness"]
+        np.testing.assert_allclose(before.signal_values, after.signal_values)
 
 
-@pytest.mark.parametrize("fraction,compatible", [(15 / 22, True), (14.9 / 22, False)])
-def test_target_training_count_survives_fraction_rounding(handler, mocker, fraction, compatible):
-    handler.population.data = handler.population.data[:22]
-    handler.population.targets = handler.population.targets[:22]
-    handler.population_size = 22
-    handler.train_indices = np.arange(15)
-    handler.test_indices = np.arange(15, 22)
-    handler.target_model_metadata.train_indices = handler.train_indices.tolist()
-    handler.target_model_metadata.test_indices = handler.test_indices.tolist()
-    handler.target_model_metadata.num_train = 15
-    handler.target_model = TinyModel()
-    handler.train(handler.get_dataloader(handler.train_indices), handler.target_model, handler.get_criterion(),
-                  handler.get_optimizer(handler.target_model), 1)
+@pytest.mark.parametrize("name", ["lira", "base", "rmia"])
+def test_original_result_carries_aggregate_through_save_load(handler, mocker, tmp_path, name):
+    attack = AttackFactoryMIA.create_attack(name, {"num_shadow_models": 4, "online": True}, handler)
+    saving = mocker.spy(MIAResult, "save")
+    results = attack.run_robustness(n_runs=3, seed=17)
+    original = results[0]
+    directory = Path(handler.configs.audit.output_dir) / "robustness" / original.metadata["robustness"]["experiment_id"]
+    summary = json.loads((directory / "summary.json").read_text())["rotated_target_summary"]
+    assert original.robustness == original.result.robustness == summary
+    assert original.id == original.result.id == f"{original.result_name}-{hash_config(original.metadata)[:16]}"
+    assert saving.call_count == len(results)
+    for result in results[1:]:
+        assert result.result.robustness is None
+    path = next((directory / "run_0" / "data_objects").glob("*.json"))
+    assert MIAResult.load(str(path)).robustness == summary
+    payload = json.loads(path.read_text())
+    assert payload.pop("robustness") == summary
+    legacy = tmp_path / "legacy-result.json"
+    legacy.write_text(json.dumps(payload))
+    assert MIAResult.load(str(legacy)).robustness is None
+
+
+@pytest.mark.parametrize("name", ["lira", "base", "rmia"])
+def test_rotations_do_not_train_load_models_or_run_forward_passes(handler, monkeypatch, mocker, name):
+    attack = AttackFactoryMIA.create_attack(name, {"num_shadow_models": 4, "online": True}, handler)
+    scorer = "_compute_scores" if name == "rmia" else "_score_signals"
+    score = getattr(attack, scorer)
+    calls = []
+
+    def check(*args):
+        # Preparation has finished when scoring starts. Every rotation must use arrays alone.
+        monkeypatch.setattr(TinyHandler, "train", lambda *args: pytest.fail("retraining during rotation"))
+        monkeypatch.setattr(ShadowModelHandler(), "_load_shadow_model", lambda *args: pytest.fail("model loading during rotation"))
+        monkeypatch.setattr(TinyModel, "forward", lambda *args: pytest.fail("forward pass during rotation"))
+        calls.append(args)
+        return score(*args)
+
+    monkeypatch.setattr(attack, scorer, check)
+    assert len(attack.run_robustness(n_runs=3, seed=19)) == 3
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize("name", ["population", "qmia", "HSJ", "multi_signal_lira"])
+def test_other_attacks_explicitly_reject_robustness_before_training(handler, mocker, name):
+    handler.configs.audit.attack_list = [{"attack": name, "robustness": {"n_runs": 2}}]
     training = mocker.spy(TinyHandler, "train")
-    wrapper = Robustness(handler, "lira", {"num_shadow_models": 4, "training_data_fraction": fraction,
-                                          "online": True}, 3, 4, seed=19)
-    if compatible:
-        assert len(wrapper.run()) == 3
-    else:
-        with pytest.raises(ValueError, match="incompatible with the robustness pool"):
-            wrapper.run()
-    assert training.call_count == 4
-    assert all(len(call.args[1].dataset) == 15 for call in training.call_args_list)
-    assert all(len(metadata.train_indices) == 15 for metadata in wrapper._metadata.values())
+    with pytest.raises(ValueError, match="does not support cached-signal robustness"):
+        AttackScheduler(handler, output_dir=handler.configs.audit.output_dir)
+    assert training.call_count == 0
 
 
 @pytest.fixture
@@ -226,28 +245,44 @@ def saved_audit_inputs(handler, tmp_path):
     return config, tmp_path / "audit.yaml"
 
 
-def test_documented_workflow_from_saved_leakpro_inputs(saved_audit_inputs):
+@pytest.mark.parametrize("field", ["optimizer", "criterion"])
+@pytest.mark.parametrize("params", ["omitted", None, {}, "explicit"])
+def test_metadata_parameter_defaults_through_yaml(saved_audit_inputs, field, params):
     config, config_path = saved_audit_inputs
+    metadata_path = Path(config["target"]["target_folder"]) / "model_metadata.pkl"
+    with metadata_path.open("rb") as stream:
+        metadata = pickle.load(stream).model_dump()
+    if params == "omitted":
+        metadata[field].pop("params")
+        params = {}
+    else:
+        if params == "explicit":
+            params = {"lr": 0.1} if field == "optimizer" else {"label_smoothing": 0.1}
+        metadata[field]["params"] = params
+    validated = MIAMetaDataSchema.model_validate(metadata)
+    with metadata_path.open("wb") as stream:
+        pickle.dump(validated, stream)
     config["audit"]["attack_list"] = [{"attack": "lira", "num_shadow_models": 4,
-                                       "training_data_fraction": 1 / 3, "online": True}]
+                                       "training_data_fraction": 1 / 3, "online": True,
+                                       "robustness": {"n_runs": 2}}]
     config_path.write_text(yaml.safe_dump(config))
     audit = LeakPro(TinyInputHandler, str(config_path))
-    existing = ShadowModelHandler()
-    old_state = dict(vars(existing))
-    runner = Robustness(audit.handler, "lira", {key: value for key, value in config["audit"]["attack_list"][0].items()
-                                              if key != "attack"}, 3, 4, seed=11)
-    runs = runner.run()
-    assert len(runs) == 3
-    assert runner._pool_handler.handler.train.__self__ is runner._pool_handler.handler
-    assert runner._copy_handler().train.__self__ is not audit.handler
-    assert vars(ShadowModelHandler()) == old_state
-    assert json.loads((runner.output_dir / "summary.json").read_text())["setup"]["targets"][0] == -1
+    original = audit.handler.target_model_metadata.model_dump()
+    results = audit.run_audit()
+    assert len(results) == 2
+    assert getattr(audit.handler.target_model_metadata, field).params == params
+    assert audit.handler.target_model_metadata.model_dump() == original
+    if params:
+        if field == "optimizer":
+            assert audit.handler.get_optimizer(audit.handler.target_model).defaults["lr"] == params["lr"]
+        else:
+            assert audit.handler.get_criterion().label_smoothing == params["label_smoothing"]
 
 
-@pytest.mark.parametrize("name", ["lira", "rmia"])
-def test_yaml_robustness_runs_through_normal_audit(saved_audit_inputs, mocker, name):
+@pytest.mark.parametrize("name", ["lira", "base", "rmia"])
+def test_yaml_runs_actual_attacks_with_mixed_training_sizes(saved_audit_inputs, mocker, caplog, name):
     config, config_path = saved_audit_inputs
-    attack_config = {"num_shadow_models": 4, "training_data_fraction": 1 / 3, "online": True}
+    attack_config = {"num_shadow_models": 4, "training_data_fraction": 0.5, "online": True}
     config["audit"]["random_seed"] = 11
     config["audit"]["attack_list"] = [
         {"attack": "unknown"},
@@ -263,30 +298,62 @@ def test_yaml_robustness_runs_through_normal_audit(saved_audit_inputs, mocker, n
     assert len(results) == 5
     assert len({result.id for result in results}) == 5
     assert all(result.result.id == result.id for result in results)
-    assert audit.attack_scheduler.attack_names == ["lira", name, "base"]
-    runner = audit.attack_scheduler.attacks[1]
-    assert isinstance(runner, Robustness)
-    assert runner.seed == 11
-    assert runner.num_shadow_models == 4
-    assert all(actual is entry["result_object"] for actual, entry in zip(results[1:4], runner.results))
+    attack = audit.attack_scheduler.attacks[1]
+    assert isinstance(attack, AttackFactoryMIA.attack_classes[name])
+    assert training.call_count == 4  # All entries reuse the attack's ordinary pool.
+    assert "training sizes differ" in caplog.text
     assert audit.handler.configs.audit.attack_list == config["audit"]["attack_list"]
-    assert training.call_count == 8  # Four ordinary shadows and one reusable four-model robustness pool.
+    directory = Path(config["audit"]["output_dir"]) / "robustness" / results[1].metadata["robustness"]["experiment_id"]
+    saved = json.loads((directory / "summary.json").read_text())
+    assert results[1].robustness == saved["rotated_target_summary"]
+    assert saved["setup"]["targets"] == [-1, *np.random.default_rng(11).permutation(4)[:2].tolist()]
+    assert saved["runs"][0]["target_training_size"] == 20
+    assert saved["runs"][0]["reference_training_sizes"] == [30] * 4
+    assert all(-1 in entry["references"] for entry in saved["runs"][1:])
     report.assert_called_once_with(results=results, report_dir=audit.report_dir)
     report.return_value.create_report.assert_called_once_with()
-    saved = json.loads((runner.output_dir / "summary.json").read_text())
-    assert saved["setup"]["targets"] == [-1, *np.random.default_rng(11).permutation(4)[:2].tolist()]
-    assert len(saved["runs"]) == 3
-    assert all(entry["target"] not in entry["references"] for entry in saved["runs"])
-    assert all(-1 in entry["references"] for entry in saved["runs"][1:])
-    assert len(list((Path(config["audit"]["output_dir"]) / "data_objects").glob("*.json"))) == 2
     report_dir = Path(config["audit"]["output_dir"]) / "report-check"
     MIAResult.create_results(results, save_dir=str(report_dir))
     assert all((report_dir / result.id).is_dir() for result in results)
 
 
+def test_seeded_rmia_experiments_keep_native_ids_and_saved_reports(saved_audit_inputs):
+    config, config_path = saved_audit_inputs
+    config["audit"]["attack_list"] = [
+        {"attack": "rmia", "num_shadow_models": 4, "online": True, "gamma": 1.0,
+         "robustness": {"n_runs": 3, "seed": seed}} for seed in (17, 29)
+    ]
+    config_path.write_text(yaml.safe_dump(config))
+    results = LeakPro(TinyInputHandler, str(config_path)).run_audit()
+    assert len(results) == len({result.id for result in results}) == 6
+    assert not np.array_equal(results[0].signal_values, results[3].signal_values)
+    for result in results:
+        assert result.id == result.result.id == f"RMIA-{hash_config(result.metadata)[:16]}"
+    root = Path(config["audit"]["output_dir"])
+    loaded = [MIAResult.load(str(path)) for path in root.glob("robustness/*/run_*/data_objects/*.json")]
+    assert {result.id for result in loaded} == {result.id for result in results}
+    MIAResult.create_results(loaded, save_dir=str(root / "report-check"))
+    assert all((root / "report-check" / result.id).is_dir() for result in results)
+
+
+@pytest.mark.parametrize("seed", [7, None])
+def test_yaml_seed_override_and_output_directory(handler, tmp_path, seed):
+    handler.configs.audit.attack_list = [{"attack": "lira", "num_shadow_models": 4,
+                                         "robustness": {"n_runs": 2, "seed": seed}}]
+    output_dir = tmp_path / "custom"
+    scheduler = AttackScheduler(handler, output_dir=str(output_dir))
+    records = scheduler.run_attacks()
+    attack = scheduler.attacks[0]
+    assert scheduler.robustness_options[attack]["seed"] is seed
+    assert len(records) == 2
+    assert all(entry["attack_type"] == "lira" and entry["attack_object"] is attack for entry in records)
+    directory = output_dir / "robustness" / records[0]["result_object"].metadata["robustness"]["experiment_id"]
+    assert (directory / "summary.json").is_file()
+
+
 @pytest.mark.parametrize("options", [
     {}, False, {"n_runs": True}, {"n_runs": 1}, {"n_runs": 6},
-    {"n_runs": 2, "seed": -1}, {"n_runs": 2, "typo": 4}, {"n_runs": 2, "num_shadow_models": 3},
+    {"n_runs": 2, "seed": -1}, {"n_runs": 2, "typo": 4},
 ])
 def test_invalid_yaml_robustness_rejected_before_training(handler, mocker, options):
     handler.configs.audit.attack_list = [{"attack": "lira", "num_shadow_models": 4,
@@ -297,129 +364,48 @@ def test_invalid_yaml_robustness_rejected_before_training(handler, mocker, optio
     assert training.call_count == 0
 
 
-@pytest.mark.parametrize("seed", [7, None])
-def test_yaml_robustness_seed_override_and_output_directory(handler, tmp_path, seed):
+def test_robustness_rejects_non_mia_before_factory_initialization(handler, mocker):
     handler.configs.audit.attack_list = [{"attack": "lira", "num_shadow_models": 4,
                                          "training_data_fraction": 1 / 3,
-                                         "robustness": {"n_runs": 2, "seed": seed}}]
-    output_dir = tmp_path / "custom"
-    scheduler = AttackScheduler(handler, output_dir=str(output_dir))
-    records = scheduler.run_attacks()
-    runner = scheduler.attacks[0]
-    assert runner.seed is seed
-    assert len(records) == 2
-    assert all(entry["attack_type"] == "lira" and entry["attack_object"] is runner for entry in records)
-    assert runner.output_dir.is_relative_to(output_dir)
-    assert (runner.output_dir / "summary.json").is_file()
-    assert not (Path(handler.configs.audit.output_dir) / "robustness").exists()
-
-
-def test_robustness_rejects_non_mia_and_optuna_before_training(handler, mocker):
-    handler.configs.audit.attack_list = [{"attack": "lira", "num_shadow_models": 4,
                                          "robustness": {"n_runs": 2}}]
     handler.configs.audit.attack_type = "minv"
     initialize = mocker.spy(AttackScheduler, "_initialize_factory")
     with pytest.raises(ValueError, match="only supported for MIA"):
         AttackScheduler(handler, output_dir=handler.configs.audit.output_dir)
     assert initialize.call_count == 0
-    handler.configs.audit.attack_type = "mia"
-    training = mocker.spy(TinyHandler, "train")
+
+
+def test_global_optuna_flag_tunes_only_ordinary_entries(handler, mocker):
+    handler.configs.audit.attack_list = [
+        {"attack": "rmia", "num_shadow_models": 4, "online": True, "robustness": {"n_runs": 3}},
+        {"attack": "rmia", "num_shadow_models": 4, "online": True},
+    ]
     scheduler = AttackScheduler(handler, output_dir=handler.configs.audit.output_dir)
-    with pytest.raises(ValueError, match="use_optuna must be False"):
-        scheduler.run_attacks(use_optuna=True)
-    assert training.call_count == 0
-
-
-@pytest.mark.parametrize("fail_second", [False, True])
-def test_gradient_attack_preserves_caller_model_state(handler, monkeypatch, fail_second):
-    model = handler.target_model
-    model.train()
-    original_hash = hash_model(model)
-    hooks = [dict(module._forward_hooks) for module in model.modules()]
-    training = [module.training for module in model.modules()]
-    gradients = [parameter.grad.clone() for parameter in model.parameters()]
-    attack_class = AttackFactoryMIA.attack_classes["yoqo"]
-    run_attack = attack_class.run_attack
-    calls = []
-
-    def run_then_fail(attack):
-        result = run_attack(attack)
-        calls.append(result)
-        if fail_second and len(calls) == 2:
-            raise RuntimeError("injected gradient attack failure")
-        return result
-
-    monkeypatch.setattr(attack_class, "run_attack", run_then_fail)
-    runner = Robustness(handler, "yoqo", {"num_shadow_models": 4, "training_data_fraction": 1 / 3,
-                                          "online": True, "max_iterations": 1}, 2, 4, seed=123)
-    if fail_second:
-        with pytest.raises(RuntimeError, match="injected gradient attack failure"):
-            runner.run()
-    else:
-        assert len(runner.run()) == 2
-    assert len(calls) == 2
-    assert handler.target_model is model
-    assert hash_model(model) == original_hash
-    assert [dict(module._forward_hooks) for module in model.modules()] == hooks
-    assert [module.training for module in model.modules()] == training
-    for actual, expected in zip(model.parameters(), gradients):
-        torch.testing.assert_close(actual.grad, expected, rtol=0, atol=0)
-
-
-@pytest.mark.parametrize("runs,pool,seed", [(1, 4, 1), (6, 4, 1), (True, 4, 1), (2, 0, 1), (2, 4, -1)])
-def test_invalid_schedule_rejected_before_training(handler, mocker, runs, pool, seed):
+    robust, ordinary = scheduler.attacks
+    # Exercise both active-tuner branches without running a numerical Optuna study.
+    robust.optuna_params = ordinary.optuna_params = 1
+    robust_tuning = mocker.patch.object(robust, "run_with_optuna")
+    ordinary_tuning = mocker.patch.object(
+        ordinary, "run_with_optuna", return_value=SimpleNamespace(best_params={"temperature": 3.0}))
     training = mocker.spy(TinyHandler, "train")
-    with pytest.raises(ValueError):
-        Robustness(handler, "population", {}, runs, pool, seed=seed)
-    assert training.call_count == 0
-
-
-def test_training_setup_mismatch_restores_existing_handler(handler, mocker):
-    existing = ShadowModelHandler(handler)
-    original_state = dict(vars(existing))
-    handler.configs.shadow_model = ShadowModelConfig(epochs=2)
-    training = mocker.spy(TinyHandler, "train")
-    with pytest.raises(ValueError, match="same target and shadow training setup"):
-        Robustness(handler, "population", {}, 2, 2, seed=3).run()
-    assert training.call_count == 0
-    assert vars(ShadowModelHandler()) == original_state
-
-
-def test_incompatible_attack_population_does_not_train_replacements(handler, mocker):
-    training = mocker.spy(TinyHandler, "train")
-    config = {"num_shadow_models": 4, "training_data_fraction": 0.5, "online": True}
-    with pytest.raises(ValueError, match="incompatible with the robustness pool"):
-        Robustness(handler, "lira", config, 3, 4, seed=123).run()
+    expected = scheduler.run_attacks(use_optuna=False)
+    robust_config = robust.configs.model_dump()
+    actual = scheduler.run_attacks(use_optuna=True)
+    robust_tuning.assert_not_called()
+    ordinary_tuning.assert_called_once_with()
+    assert robust.configs.model_dump() == robust_config
+    assert actual[-1]["result_object"].metadata["temperature"] == 3.0
+    assert len(actual) == len(expected) == 4
     assert training.call_count == 4
-    assert not ShadowModelHandler.is_created()
-
-
-def test_attack_failure_restores_shared_state(handler, monkeypatch):
-    existing = ShadowModelHandler(handler)
-    old_state = dict(vars(existing))
-    attack_class = AttackFactoryMIA.attack_classes["lira"]
-    original_run = attack_class.run_attack
-    calls = []
-
-    def fail_second(attack):
-        calls.append(attack.handler.target_model)
-        if len(calls) == 2:
-            raise RuntimeError("injected attack failure")
-        return original_run(attack)
-
-    monkeypatch.setattr(attack_class, "run_attack", fail_second)
-    with pytest.raises(RuntimeError, match="injected attack failure"):
-        Robustness(handler, "lira", {"num_shadow_models": 4, "training_data_fraction": 1 / 3}, 3, 4, seed=6).run()
-    assert vars(ShadowModelHandler()) == old_state
-    assert handler.target_model is not calls[0]
+    for before, after in zip(expected[:3], actual[:3]):
+        assert before["result_object"].id == after["result_object"].id
+        np.testing.assert_array_equal(before["result_object"].signal_values, after["result_object"].signal_values)
 
 
 def test_summary_uses_upper_roc_ties_and_excludes_original():
     original = MIAResult.from_full_scores([0, 0, 1, 1], [4, 3, 2, 1], result_name="test")
     rotated = MIAResult.from_full_scores([1, 1, 0, 1, 0], [5, 4, 3, 2, 1], result_name="test")
-    wrapper = object.__new__(Robustness)
-    wrapper.results = [{"result_object": result} for result in [original, rotated, rotated]]
-    summary = wrapper._summarize()
+    summary = summarize_robustness([original, rotated, rotated])
     assert summary["roc_auc"]["mean"] == rotated.roc_auc
     assert summary["roc"]["fpr"][0] == 0
     assert summary["roc"]["mean_tpr"][0] == pytest.approx(2 / 3)
@@ -431,10 +417,258 @@ def test_summary_uses_upper_roc_ties_and_excludes_original():
 def test_summary_includes_roc_origin_for_tied_scores(all_tied):
     tied = MIAResult.from_full_scores([1, 0, 1, 0], [2, 2, 1, 1], result_name="tied")
     other = tied if all_tied else MIAResult.from_full_scores([1, 0, 1, 0], [4, 3, 2, 1], result_name="untied")
-    wrapper = object.__new__(Robustness)
-    wrapper.results = [{"result_object": result} for result in [tied, tied, other]]
-    summary = wrapper._summarize()["roc"]
+    summary = summarize_robustness([tied, tied, other])["roc"]
     assert summary["fpr"][0] == 0.0
     assert summary["mean_tpr"][0] == pytest.approx(0.0 if all_tied else 0.25)
     expected = [0.0, 0.0] if all_tied else [0.0125, 0.4875]
     np.testing.assert_allclose(np.array(summary["pointwise_tpr_percentiles_2_5_97_5"])[:, 0], expected)
+
+
+@pytest.mark.parametrize("name", ["lira", "base", "rmia"])
+@pytest.mark.parametrize("online", [False, True])
+def test_rotated_scores_match_independent_equations(handler, name, online):
+    # Noncontiguous records expose positional membership and cached-row mistakes.
+    records = np.random.default_rng(45).permutation(60)[:40]
+    handler.train_indices, handler.test_indices = records[:20], records[20:]
+    handler.target_model_metadata.train_indices = handler.train_indices.tolist()
+    handler.target_model_metadata.test_indices = handler.test_indices.tolist()
+    handler.target_model = TinyModel()
+    handler.train(handler.get_dataloader(handler.train_indices), handler.target_model, handler.get_criterion(),
+                  handler.get_optimizer(handler.target_model), 1)
+    config = {"num_shadow_models": 4, "online": online}
+    if name == "lira":
+        config["var_calculation"] = "carlini"
+    if name == "rmia":
+        config["gamma"] = 1.0
+    attack = AttackFactoryMIA.create_attack(name, config, handler)
+    runs = attack.run_robustness(n_runs=3, seed=29)
+    pool = ShadowModelHandler()
+    ids = [-1, *map(int, attack.shadow_model_indices)]
+    logits = [pool.load_logits(name=f"target_{pool.target_model_hash}")]
+    logits.extend(pool.load_logits(indx=index) for index in attack.shadow_model_indices)
+    labels = handler.get_labels(records)
+    training = [handler.train_indices, *[meta.train_indices for meta in pool.get_shadow_model_metadata(attack.shadow_model_indices)]]
+    membership = np.array([np.isin(records, indices) for indices in training])
+    values = (np.array([attack.signal(raw, labels) for raw in logits]) if name == "lira" else
+              np.array([softmax_logits(raw, attack.temperature)[np.arange(len(labels)), labels] for raw in logits]))
+    for result in runs:
+        target = ids.index(result.metadata["robustness"]["target"])
+        references = [index for index in range(5) if index != target]
+        out = ~membership[references]
+        kept = np.ones(len(records), dtype=bool)
+        if name == "lira":
+            kept = out.any(axis=0) & ((~out).any(axis=0) if online else True)
+            reference_values, reference_out = values[references][:, kept], out[:, kept]
+            out_std = np.std(reference_values[reference_out])
+            in_std = np.std(reference_values[~reference_out]) if online else None
+            expected = []
+            for column, target_value in enumerate(values[target, kept]):
+                v, mask = reference_values[:, column], reference_out[:, column]
+                score = -norm.logpdf(target_value, v[mask].mean(), out_std + 1e-30)
+                if online:
+                    score += norm.logpdf(target_value, v[~mask].mean(), in_std + 1e-30)
+                expected.append(score)
+            expected = np.array(expected)
+        elif name == "base":
+            log_conf = np.log(values + attack.epsilon)
+            ref_conf = log_conf[references]
+            threshold = (logsumexp(ref_conf, axis=0) - np.log(4) if online else
+                         logsumexp(np.where(out, ref_conf, -np.inf), axis=0) - np.log(out.sum(axis=0)))
+            expected = log_conf[target] - (threshold if online else attack.offline_scale_factor * threshold)
+        else:
+            z_logits = [attack.logits_z_theta, *attack.logits_z_shadow_models]
+            z_prob = np.array([softmax_logits(raw, attack.temperature)[np.arange(len(attack.z_labels)), attack.z_labels]
+                               for raw in z_logits])
+            p_z = z_prob[references].mean(axis=0)
+            p_x = values[references].mean(axis=0) if online else np.nanmean(np.where(out, values[references], np.nan), axis=0)
+            if not online:
+                p_z = 0.5 * ((attack.offline_a + 1) * p_z + (1 - attack.offline_a))
+                p_x = 0.5 * ((attack.offline_a + 1) * p_x + (1 - attack.offline_a))
+            ratio_z = z_prob[target] / (p_z + attack.epsilon)
+            ratio_x = values[target] / (p_x + attack.epsilon)
+            expected = (ratio_x[:, None] / ratio_z[None] > attack.gamma).mean(axis=1)
+        expected_by_record = dict(zip(records[kept], expected))
+        np.testing.assert_allclose(result.signal_values.ravel(), [expected_by_record[index] for index in result.audit_indices])
+
+
+@pytest.mark.parametrize("criterion", [nn.MSELoss(), nn.L1Loss(), nn.HuberLoss()])
+def test_rmia_regression_uses_reference_only_scale_without_changing_ordinary_state(handler, criterion):
+    handler.population.targets = torch.randn(60, 2)
+    handler._criterion = criterion
+    handler.target_model_metadata.criterion = LossConfig(name=type(criterion).__name__.lower())
+    handler.target_model = TinyModel()
+    handler.train(handler.get_dataloader(handler.train_indices), handler.target_model, criterion,
+                  handler.get_optimizer(handler.target_model), 1)
+    attack = AttackFactoryMIA.create_attack("rmia", {"num_shadow_models": 4, "online": True, "gamma": 1.0}, handler)
+    runs = attack.run_robustness(n_runs=3, seed=18)
+    ordinary_scale = attack._scale
+    ids = [-1, *map(int, attack.shadow_model_indices)]
+    audit_values = np.array([attack.logits_theta, *attack.logits_shadow_models])
+    z_values = np.array([attack.logits_z_theta, *attack.logits_z_shadow_models])
+    for result in runs:
+        target = ids.index(result.metadata["robustness"]["target"])
+        references = [index for index in range(5) if index != target]
+        z_residual = z_values[references] - attack.z_labels
+        if isinstance(criterion, nn.MSELoss):
+            scale = (z_residual ** 2).mean()
+            energy = lambda residual: np.mean(residual ** 2, axis=1) / (2 * scale)
+        elif isinstance(criterion, nn.L1Loss):
+            scale = np.abs(z_residual).mean()
+            energy = lambda residual: np.mean(np.abs(residual), axis=1) / scale
+        else:
+            huber = lambda r: np.where(np.abs(r) <= 1, r ** 2 / 2, np.abs(r) - 0.5)
+            scale = huber(z_residual).mean()
+            energy = lambda residual: huber(residual).mean(axis=1) / scale
+        p_x = np.array([np.exp(-energy(raw - attack.ground_truth)) for raw in audit_values])
+        p_z = np.array([np.exp(-energy(raw - attack.z_labels)) for raw in z_values])
+        ratio_x = p_x[target] / (p_x[references].mean(axis=0) + attack.epsilon)
+        ratio_z = p_z[target] / (p_z[references].mean(axis=0) + attack.epsilon)
+        expected = (ratio_x[:, None] / ratio_z[None] > attack.gamma).mean(axis=1)
+        by_record = dict(zip(attack.audit_dataset["data"], expected))
+        np.testing.assert_allclose(result.signal_values.ravel(), [by_record[index] for index in result.audit_indices])
+    assert attack._scale == ordinary_scale
+    np.testing.assert_allclose(runs[0].signal_values, attack.run_attack().signal_values)
+
+
+@pytest.mark.parametrize("name", ["lira", "base", "rmia"])
+def test_failed_rotation_removes_stale_summary_and_preserves_handler(handler, monkeypatch, name):
+    attack = AttackFactoryMIA.create_attack(name, {"num_shadow_models": 4, "online": True}, handler)
+    runs = attack.run_robustness(n_runs=3, seed=7)
+    directory = Path(handler.configs.audit.output_dir) / "robustness" / runs[0].metadata["robustness"]["experiment_id"]
+    summary_path = directory / "summary.json"
+    assert summary_path.exists()
+    scorer = "_compute_scores" if name == "rmia" else "_score_signals"
+    score = getattr(attack, scorer)
+    calls = []
+
+    def fail_second(*args):
+        calls.append(1)
+        if len(calls) == 2:
+            raise RuntimeError("injected rotation failure")
+        return score(*args)
+
+    monkeypatch.setattr(attack, scorer, fail_second)
+    original_model = handler.target_model
+    with pytest.raises(RuntimeError, match="injected rotation failure"):
+        attack.run_robustness(n_runs=3, seed=7)
+    assert not summary_path.exists()
+    assert handler.target_model is original_model
+    assert ShadowModelHandler().handler is handler
+    np.testing.assert_array_equal(handler.train_indices, np.arange(20))
+
+
+def test_rmia_preserves_float64_strict_threshold(handler):
+    attack = AttackFactoryMIA.create_attack("rmia", {"online": True, "num_shadow_models": 2, "gamma": 1.0}, handler)
+    attack.epsilon = 0
+    scores = attack._compute_scores(np.array([[1 + 1e-12, 1.0, 1 - 1e-12]]), np.ones((2, 3)), None, np.array([[1.0]]))
+    np.testing.assert_array_equal(scores, [1.0, 0.0, 0.0])
+
+
+@pytest.mark.parametrize("overrides", [
+    {"epochs": 2}, {"batch_size": 5}, {"init_params": {"num_classes": 3}},
+    {"optimizer": {"name": "sgd", "params": {"lr": 0.2}}},
+    {"criterion": {"name": "crossentropyloss", "params": {"label_smoothing": 0.1}}},
+])
+def test_training_setup_still_matches_before_training(handler, mocker, overrides):
+    handler.configs.shadow_model = ShadowModelConfig(**overrides)
+    handler.configs.audit.attack_list = [{"attack": "lira", "num_shadow_models": 4, "robustness": {"n_runs": 2}}]
+    training = mocker.spy(TinyHandler, "train")
+    with pytest.raises(ValueError, match="same target and shadow training setup"):
+        AttackScheduler(handler, output_dir=handler.configs.audit.output_dir)
+    assert training.call_count == 0
+
+
+
+def test_lira_new_target_in_existing_output_uses_current_cached_logits(handler):
+    config = {"num_shadow_models": 4, "online": True}
+    first = AttackFactoryMIA.create_attack("lira", config, handler)
+    first.run_robustness(n_runs=2, seed=17)
+    old_hash = hash_model(handler.target_model)
+    with torch.no_grad():
+        handler.target_model.linear.weight.copy_(torch.tensor([[4., -3.], [-4., 3.]]))
+        handler.target_model.linear.bias.copy_(torch.tensor([2., -2.]))
+    assert hash_model(handler.target_model) != old_hash
+    second = AttackFactoryMIA.create_attack("lira", config, handler)
+    second.run_robustness(n_runs=2, seed=17)
+    pool = ShadowModelHandler()
+    current_logits = pool.load_logits(name=f"target_{pool.target_model_hash}")
+    expected = second.signal(current_logits, handler.get_labels(second.audit_dataset["data"]))
+    np.testing.assert_allclose(second._unfiltered_signals[0], expected)
+
+
+def test_seeded_rmia_follows_ordinary_lifecycle_with_same_native_pool(handler, mocker):
+    config = {"num_shadow_models": 4, "online": True, "gamma": 1.0}
+    used = AttackFactoryMIA.create_attack("rmia", config, handler)
+    used.prepare_attack(seed=31)
+    used.run_attack()
+    training = mocker.spy(TinyHandler, "train")
+    before = used.run_robustness(n_runs=3, seed=17)
+    fresh = AttackFactoryMIA.create_attack("rmia", config, handler)
+    after = fresh.run_robustness(n_runs=3, seed=17)
+    assert training.call_count == 0
+    np.testing.assert_array_equal(used.shadow_model_indices, fresh.shadow_model_indices)
+    np.testing.assert_array_equal(used.attack_data_indices, fresh.attack_data_indices)
+    for old, new in zip(before, after):
+        assert old.metadata["robustness"] == new.metadata["robustness"]
+        np.testing.assert_array_equal(old.signal_values, new.signal_values)
+
+
+@pytest.mark.parametrize("name", ["lira", "base", "rmia"])
+def test_preparation_failure_keeps_prior_artifacts(handler, monkeypatch, name):
+    attack = AttackFactoryMIA.create_attack(name, {"num_shadow_models": 4, "online": True}, handler)
+    runs = attack.run_robustness(n_runs=3, seed=17)
+    directory = Path(handler.configs.audit.output_dir) / "robustness" / runs[0].metadata["robustness"]["experiment_id"]
+    completed = directory / "summary.json"
+    prior_summary = completed.read_bytes()
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("injected preparation failure")
+
+    monkeypatch.setattr(attack, "prepare_attack", fail)
+    with pytest.raises(RuntimeError, match="injected preparation failure"):
+        attack.run_robustness(n_runs=2, seed=19)
+    assert completed.read_bytes() == prior_summary
+
+
+def test_rmia_rejects_fraction_that_selects_no_z_points(handler):
+    attack = AttackFactoryMIA.create_attack(
+        "rmia", {"num_shadow_models": 2, "online": True, "attack_data_fraction": 0.01}, handler)
+    with pytest.raises(ValueError, match="Dataset indices are empty"):
+        attack.run_robustness(n_runs=2, seed=17)
+
+
+@pytest.mark.parametrize("mixed", [False, True])
+@pytest.mark.parametrize("from_disk", [False, True])
+def test_report_handles_tied_results_without_plot_mocks(tmp_path, mixed, from_disk):
+    tied = MIAResult.from_full_scores([1, 1, 0, 0], [0.5] * 4, result_name="tied")
+    results = [tied]
+    if mixed:
+        results.append(MIAResult.from_full_scores([1, 1, 0, 0], [4, 3, 2, 1], result_name="scored"))
+    with plt.rc_context({"figure.figsize": (2.5, 2.5)}):
+        if from_disk:
+            saved_dir = tmp_path / "saved"
+            for index, result in enumerate(results):
+                result.save(attack_obj=SimpleNamespace(attack_id=result.id), output_dir=str(saved_dir))
+                results[index] = MIAResult.load(str(saved_dir / "data_objects" / f"{result.id}.json"))
+        tex = MIAResult.create_results(results, save_dir=str(tmp_path))
+    assert tex.count("N/A") >= 4
+    assert (tmp_path / "ROC.png").is_file()
+    assert (tmp_path / tied.id / "ROC.png").is_file()
+
+
+def test_offline_rmia_preserves_float32_marginal_at_strict_threshold(handler):
+    attack = AttackFactoryMIA.create_attack("rmia", {"num_shadow_models": 3}, handler)
+    target = np.array([[0.3, 0.7]], dtype=np.float32)
+    references = np.array([[0.13, 0.2], [0.36, 0.3], [0.61, 0.4]], dtype=np.float32)
+    out = np.array([[True, True], [True, False], [True, True]])
+    # Reference the original masked-mean arithmetic, including its float32 rounding.
+    original_mean = np.nanmean(np.where(out, references, np.nan), axis=0)
+    original_ratio = target / (0.5 * ((attack.offline_a + 1) * original_mean + (1 - attack.offline_a)) + attack.epsilon)
+    promoted_mean = np.where(out, references, 0).sum(axis=0) / out.sum(axis=0)
+    promoted_ratio = target / (0.5 * ((attack.offline_a + 1) * promoted_mean + (1 - attack.offline_a)) + attack.epsilon)
+    attack.gamma = float((float(original_ratio[0, 0]) + promoted_ratio[0, 0]) / 2)
+    expected = (original_ratio.astype(np.float64).ravel() > attack.gamma).astype(float)
+    actual = attack._compute_scores(target, references, out, np.array([[1.0]]))
+    np.testing.assert_array_equal(actual, expected)
+    with pytest.raises(ValueError, match="OUT reference model"):
+        attack._compute_scores(target, references, np.zeros_like(out), np.array([[1.0]]))
