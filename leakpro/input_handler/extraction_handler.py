@@ -22,9 +22,6 @@ class ExtractionHandler:
         self.configs = configs
         self.provider_class = provider_class
         self._provider: AbstractExtractionInputHandler | None = None
-        self._provider_methods = {
-            name for name, _method in inspect.getmembers(AbstractExtractionInputHandler, predicate=inspect.isfunction)
-        }
 
     def _get_provider(self) -> AbstractExtractionInputHandler:
         if self._provider is None:
@@ -50,6 +47,6 @@ class ExtractionHandler:
 
     def __getattr__(self, name: str) -> object:
         """Lazily bind only methods declared by the extraction provider contract."""
-        if name not in self.__dict__.get("_provider_methods", set()):
+        if not inspect.isfunction(getattr(AbstractExtractionInputHandler, name, None)):
             raise AttributeError(name)
         return getattr(self._get_provider(), name)

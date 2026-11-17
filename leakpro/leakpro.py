@@ -203,5 +203,6 @@ class LeakPro:
             # Create the report by compiling the latex text
             report_handler.create_report()
 
-        logger.info("Auditing completed")
+        logger.info("Auditing completed. Returned results for %d of %d configured attacks.",
+                    len(results), len(self.handler.configs.audit.attack_list))
         return results

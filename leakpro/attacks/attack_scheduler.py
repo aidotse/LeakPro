@@ -49,8 +49,8 @@ class AttackScheduler:
                 self.attack_configs.append(attack_config)
                 logger.info(f"Added attack: {attack_name}")
             except ValueError as e:
-                logger.info(e)
-                logger.info(f"Failed to create attack: {attack_name}, supported attacks: {self.attack_factory.attack_classes.keys()}")  # noqa: E501
+                logger.warning("Failed to create attack: %s. Skipping this entry. %s (supported attacks: %s)",
+                               attack_name, e, ", ".join(self.attack_factory.attack_classes))
 
         # Read all previous hashed attack objects from the report directory
         self.output_dir = output_dir

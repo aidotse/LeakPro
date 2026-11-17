@@ -34,6 +34,7 @@ from leakpro.schemas import ExtractionTargetConfig, LeakProConfig, TargetConfig
 def test_scheduler_skips_failed_creation_without_mislabeling_survivors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, attack_type: str,
 ) -> None:
+    caplog.set_level("WARNING", logger="leakpro")
     result = SimpleNamespace(save=Mock())
     attack = SimpleNamespace(
         result_id="valid-result", config=SimpleNamespace(overwrite_results=False), optuna_params=0,
@@ -55,28 +56,28 @@ def test_scheduler_skips_failed_creation_without_mislabeling_survivors(
     assert scheduler.attack_configs == [{"random_seed": 7}]
     assert results == [{"attack_type": "valid", "attack_object": attack, "result_object": result}]
     assert "Failed to create attack: broken" in caplog.text
+    assert "provider unavailable" in caplog.text
     attack.prepare_attack.assert_called_once_with()
     attack.run_attack.assert_called_once_with()
     result.save.assert_called_once_with(attack_obj=attack, output_dir=str(tmp_path))
 
 
-def test_public_extraction_import_does_not_require_non_extraction_image_or_text_stacks() -> None:
+def test_public_imports_without_optional_stacks() -> None:
     script = """
-import builtins
-real_import = builtins.__import__
-def guarded_import(name, *args, **kwargs):
-    if name.split('.')[0] in {'torchvision', 'transformers'}:
-        raise ModuleNotFoundError(name)
-    return real_import(name, *args, **kwargs)
-builtins.__import__ = guarded_import
-from leakpro import AbstractExtractionInputHandler, LeakPro
-assert AbstractExtractionInputHandler is not None
-assert LeakPro is not None
+import sys
+sys.modules.update(dict.fromkeys(("torchvision", "transformers")))
+class NoOptuna:
+    def find_spec(self, name, *args):
+        if name == "optuna":
+            raise AssertionError("ordinary public imports attempted to load Optuna")
+sys.meta_path.insert(0, NoOptuna())
+from leakpro import AbstractInputHandler, LeakPro
+assert "leakpro.attacks.extraction_attacks" not in sys.modules
+assert "leakpro.input_handler.extraction_handler" not in sys.modules
+from leakpro import AbstractExtractionInputHandler
+assert all(isinstance(cls, type) for cls in (LeakPro, AbstractInputHandler, AbstractExtractionInputHandler))
 """
-
-    completed = subprocess.run([sys.executable, "-c", script], check=False, capture_output=True, text=True)
-
-    assert completed.returncode == 0, completed.stderr
+    subprocess.run([sys.executable, "-c", script], check=True)
 
 
 class TinyFeatureExtractor(nn.Module):
@@ -656,24 +657,6 @@ def test_public_side_path_rejects_ignored_guidance_without_persisting(tmp_path: 
     assert not any((tmp_path / "output" / "results").iterdir())
     data_objects = tmp_path / "output" / "data_objects"
     assert not data_objects.exists() or not any(data_objects.iterdir())
-
-
-def test_core_import_does_not_load_extraction_attacks() -> None:
-    """Extraction remains optional until an extraction API is requested."""
-    script = """
-import builtins
-real_import = builtins.__import__
-def guarded_import(name, *args, **kwargs):
-    if name.startswith('leakpro.attacks.extraction_attacks') or name == 'leakpro.input_handler.extraction_handler':
-        raise ImportError('extraction must stay lazy')
-    return real_import(name, *args, **kwargs)
-builtins.__import__ = guarded_import
-from leakpro import LeakPro, AbstractInputHandler
-assert LeakPro is not None
-assert AbstractInputHandler is not None
-"""
-    completed = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=False)
-    assert completed.returncode == 0, completed.stderr
 
 
 def test_both_attacks_run_through_the_vendored_unconditional_diffusion(tmp_path: Path) -> None:

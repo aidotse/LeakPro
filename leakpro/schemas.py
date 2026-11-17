@@ -4,12 +4,31 @@
 #
 """Module that contains the schema definitions for the input handler."""
 
-from typing import Annotated, Any, Callable, Dict, List, Literal, Optional, Union
+from typing import TYPE_CHECKING, Annotated, Any, Dict, List, Literal, Optional, Union
 
 import numpy as np
-import optuna
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from torch.nn import Module
+
+if TYPE_CHECKING:
+    from leakpro.attacks.utils.hyperparameter_tuning.config import OptunaConfig
+
+
+def __getattr__(name: str) -> object:
+    """Load the tuning schema when a caller requests it."""
+    if name == "OptunaConfig":
+        from leakpro.attacks.utils.hyperparameter_tuning.config import OptunaConfig  # noqa: PLC0415
+
+        return OptunaConfig
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+__all__ = [
+    "ArrayOrScalar", "AuditConfig", "DataLoaderConfig", "DistillationModelConfig", "DistillationModelTrainingSchema",
+    "EvalModelConfig", "EvalOutput", "ExtractionAuditConfig", "ExtractionTargetConfig", "LeakProConfig", "LossConfig",
+    "MIAMetaDataSchema", "MIAResultSchema", "MinvResultSchema", "OptimizerConfig", "OptunaConfig",
+    "ReconstructionConfig", "ShadowModelConfig", "ShadowModelTrainingSchema", "TargetConfig", "TrainingOutput",
+]
 
 ArrayOrScalar = Union[np.ndarray, np.integer, int, list]
 
@@ -243,23 +262,6 @@ class DistillationModelTrainingSchema(BaseModel):
     label_only: bool = Field(..., description="Whether the distillation process is label-only")
 
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields
-
-class OptunaConfig(BaseModel):
-    """Configuration for the Optuna hyperparameter search."""
-
-    seed: int = Field(default=1234,
-                      description="Random seed for reproducibility")
-    n_trials: int = Field(default=100,
-                          description="Number of trials to find the optimal hyperparameters")
-    check_interval: int = Field(default=3000,
-                          description="Interval of steps between checks")
-    direction: Literal["maximize", "minimize"] = Field("maximize",
-                                                       description="Direction of the optimization, minimize or maximize")
-    pruner: optuna.pruners.BasePruner = Field(default=optuna.pruners.MedianPruner(n_warmup_steps=5),
-                                              description="Number of steps before pruning of experiments will be available")
-    objective: Callable[[Any], float] = Field(lambda x: x, description="Objective function to optimize")
-
-    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # Prevent extra fields
 
 class MIAResultSchema(BaseModel):
     """Schema for the MIA attack results."""

@@ -39,30 +39,19 @@ def test_save_uses_standard_directories_and_replaces_files(tmp_path: Path) -> No
         np.testing.assert_array_equal(arrays["images"], newer.images.numpy())
 
 
-@pytest.mark.parametrize("failure", ["json", "npz"])
-def test_save_propagates_write_errors(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
-) -> None:
-    def fail_write(*args: object, **kwargs: object) -> None:
-        del args, kwargs
-        raise OSError("disk full")
-
-    if failure == "json":
-        monkeypatch.setattr(json, "dumps", fail_write)
-    else:
-        monkeypatch.setattr(np, "savez_compressed", fail_write)
-    with pytest.raises(OSError, match="disk full"):
+@pytest.mark.parametrize("filename", ["data_objects/safe-id.json", "results/safe-id/candidates.npz"])
+def test_save_propagates_write_errors(tmp_path: Path, filename: str) -> None:
+    destination = tmp_path / filename
+    destination.mkdir(parents=True)
+    with pytest.raises((IsADirectoryError, PermissionError)) as error:
         _make_result().save(output_dir=tmp_path)
+    assert Path(error.value.filename) == destination
 
 
 @pytest.mark.parametrize("result_id", ["../escape", ".", ".."])
-def test_result_rejects_path_traversal_id(tmp_path: Path, result_id: str) -> None:
-    existing = tmp_path / "results" / "existing" / "keep.txt"
-    existing.parent.mkdir(parents=True)
-    existing.write_text("keep", encoding="utf-8")
+def test_result_rejects_path_traversal_id(result_id: str) -> None:
     with pytest.raises(ValueError, match="unsafe"):
         ExtractionResult(
             name="test", result_id=result_id, config={}, images=torch.empty((0, 1, 2, 2)),
             candidates=[], metrics={}, provenance={},
-        ).save(output_dir=tmp_path)
-    assert existing.read_text(encoding="utf-8") == "keep"
+        )
