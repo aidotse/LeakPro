@@ -16,6 +16,7 @@ from torch import Tensor, nn
 from leakpro.attacks.extraction_attacks.abstract_extraction import AbstractExtraction, ExtractionConfig
 from leakpro.attacks.extraction_attacks.protocols import ExtractionAdapter
 from leakpro.attacks.extraction_attacks.utils_generative import (
+    adapter_metadata,
     json_safe,
     normalize_conditions,
     progress_batches,
@@ -23,6 +24,7 @@ from leakpro.attacks.extraction_attacks.utils_generative import (
     validate_image_batch,
 )
 from leakpro.attacks.extraction_attacks.utils_generative.carlini_graph import (
+    CLIQUE_SEARCH_POLICY,
     DEFAULT_MAX_CLIQUE_SEARCH_NODES,
     clique_medoid,
     maximum_clique,
@@ -63,7 +65,7 @@ class AttackCarliniExtraction(AbstractExtraction):
         min_clique_size: int = Field(default=10, ge=2)
         max_clique_search_nodes: int = Field(
             default=DEFAULT_MAX_CLIQUE_SEARCH_NODES, ge=1, strict=True,
-            description="Maximum search states per condition; exhaustion aborts without a partial result.",
+            description="Maximum search states per condition; exhaustion saves an explicitly incomplete result.",
         )
         verification_l2_threshold: float = Field(default=0.15, gt=0)
         reference_alpha: float = Field(default=0.5, gt=0)
@@ -94,6 +96,7 @@ class AttackCarliniExtraction(AbstractExtraction):
         target_name: str = "diffusion_target",
         conditions: Sequence[Any] | None = None,
         reference_images: Tensor | None = None,
+        generation_metadata: dict[str, Any] | None = None,
     ) -> None:
         self.adapter = adapter
         self.config = configs if isinstance(configs, self.AttackConfig) else self.AttackConfig(**configs)
@@ -102,16 +105,23 @@ class AttackCarliniExtraction(AbstractExtraction):
         self.conditions = normalize_conditions(conditions)
         self.target_name = target_name
         self.reference_images = reference_images
-        # Resource limits do not change the exact result of a completed search.
-        identity_config = self.config.model_dump(mode="json", exclude={"overwrite_results", "max_clique_search_nodes"})
+        identity_config = self.config.model_dump(mode="json", exclude={"overwrite_results"})
         if self.config.mode == "unconditional_reference_audit":
             identity_config["reference_score"] = "candidate_neighbors"
         model = getattr(self.adapter, "model", None)
         if not isinstance(model, nn.Module):
             raise ValueError("Weight-based extraction result IDs require adapter.model to contain the audited torch model.")
-        identity = {"config": identity_config}
+        identity = {
+            "config": identity_config,
+            "generation": adapter_metadata(
+                adapter, generation_metadata, guided=False, conditional=self.config.mode == "conditional_black_box",
+            ),
+        }
+        if self.config.mode == "conditional_black_box":
+            identity["clique_search_policy"] = CLIQUE_SEARCH_POLICY
         if self.conditions is not None:
             identity["conditions"] = [hash_config({"condition": json_safe(condition)}) for condition in self.conditions]
+        self.identity_metadata = identity
         result_hash = hash_attack(identity, model)[:16]
         self.result_id = f"carlini-diffusion-extraction-{result_hash}"
         self.attack_id = self.result_id
@@ -128,6 +138,7 @@ class AttackCarliniExtraction(AbstractExtraction):
             target_name=handler.configs.target.name,
             conditions=handler.get_extraction_conditions(),
             reference_images=handler.get_extraction_reference_images(),
+            generation_metadata=handler.get_extraction_metadata(),
         )
 
     def description(self) -> dict[str, str]:
@@ -146,7 +157,9 @@ class AttackCarliniExtraction(AbstractExtraction):
                 "Implements Sections 4.2.1 and 5.1. The unpublished tiled-L2 graph-edge threshold remains configurable "
                 "and must be calibrated for the audited generator. Selecting the clique medoid as the retained image "
                 "is an implementation-defined representative policy; the paper specifies clique qualification and "
-                "condition ranking, but not that selection rule."
+                "condition ranking, but not that selection rule. Search retains the first maximum in deterministic "
+                "traversal order, without exploring equal-size ties. On budget exhaustion, clique size is a lower "
+                "bound; below-threshold conditions are inconclusive and retained candidates/rankings are provisional."
             ),
         }
 
@@ -227,14 +240,27 @@ class AttackCarliniExtraction(AbstractExtraction):
             )
             adjacency = distances.le(self.config.tiled_l2_threshold)
             adjacency.fill_diagonal_(False)
-            clique = maximum_clique(adjacency, max_search_nodes=self.config.max_clique_search_nodes)
+            density = float(adjacency.sum()) / (images.shape[0] * (images.shape[0] - 1))
+            if density > 0.3:
+                logger.warning(
+                    "Carlini condition %s has %s vertices and edge density %.3f; check tiled-L2 threshold "
+                    "calibration and sampling diversity. Density alone does not invalidate a clique or predict search cost.",
+                    condition_index, images.shape[0], density,
+                )
+            search = maximum_clique(adjacency, max_search_nodes=self.config.max_clique_search_nodes)
+            clique = search.clique
+            qualified = len(clique) >= self.config.min_clique_size
             summary = {
                 "condition_index": condition_index,
                 "condition_hash": hash,
-                "largest_clique_size": len(clique),
-                "qualified": len(clique) >= self.config.min_clique_size,
+                "edge_density": density,
+                "clique_search_exact": search.exact,
+                "clique_search_nodes": search.search_nodes,
+                "clique_size_lower_bound": len(clique),
+                "largest_clique_size": len(clique) if search.exact else None,
+                "qualified": qualified if search.exact or qualified else None,
             }
-            if len(clique) >= self.config.min_clique_size:
+            if qualified:
                 medoid_index, mean_distance = clique_medoid(clique, distances)
                 image_index = len(retained_images)
                 retained_images.append(images[medoid_index])
@@ -248,7 +274,10 @@ class AttackCarliniExtraction(AbstractExtraction):
                             "condition_index": condition_index,
                             "condition_hash": hash,
                             "medoid_generation_index": medoid_index,
-                            "largest_clique_size": len(clique),
+                            "largest_clique_size": summary["largest_clique_size"],
+                            "clique_size_lower_bound": len(clique),
+                            "clique_search_exact": search.exact,
+                            "provisional": not search.exact,
                             "tiled_l2_threshold": self.config.tiled_l2_threshold,
                         },
                     )
@@ -300,9 +329,11 @@ class AttackCarliniExtraction(AbstractExtraction):
                 "candidate_count": len(records),
                 "sampling_calls": self._sampling_calls,
                 "verified_count": verified_count if self._references_zero_one is not None else None,
+                "ranking_provisional": any(not summary["clique_search_exact"] for summary in condition_summaries),
+                "candidate_count_scope": "observed qualifying cliques",
                 "condition_summaries": condition_summaries,
             },
-            provenance={**self.description(), "target": self.target_name},
+            provenance={**self.description(), "target": self.target_name, "identity": self.identity_metadata},
         )
 
     def _unconditional_reference_attack(self) -> ExtractionResult:
@@ -380,7 +411,7 @@ class AttackCarliniExtraction(AbstractExtraction):
                 "unique_reference_matches": len(records),
                 "ratio_threshold": self.config.ratio_threshold,
             },
-            provenance={**self.description(), "target": self.target_name},
+            provenance={**self.description(), "target": self.target_name, "identity": self.identity_metadata},
         )
 
     def run_attack(self) -> ExtractionResult:

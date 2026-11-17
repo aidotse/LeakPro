@@ -58,6 +58,7 @@ def test_side_default_uses_raw_feature_space_kmeans() -> None:
             "min_cluster_size": 1,
             "cohesion_threshold": -1.0,
         },
+        feature_metadata={"extractor": {"architecture": "two_feature_means_v1"}},
         target_name="raw-kmeans-test",
     )
     attack._synthetic_features = torch.tensor(  # noqa: SLF001 - direct algorithm boundary test
@@ -85,6 +86,7 @@ def test_side_reassigns_samples_from_a_rejected_cluster() -> None:
             "min_cluster_size": 1,
             "cohesion_threshold": 0.5,
         },
+        feature_metadata={"extractor": {"architecture": "two_feature_means_v1"}},
         target_name="reassignment-test",
     )
     attack._synthetic_features = torch.tensor(  # noqa: SLF001 - fixed clustering input
@@ -145,6 +147,7 @@ def test_side_l2_results_use_zero_one_coordinates_for_minus_one_one_model(monkey
             "generation_batch_size": 1,
             "l2_bands": {"near": {"lower": 0.675, "upper": 0.7}},
         },
+        feature_metadata={"extractor": {"architecture": "two_feature_means_v1"}},
         target_name="side-minus-one-one-range",
         reference_images=torch.full((1, 1, 4, 4), -1.0),
         classifier_factory=TinyTimeClassifier,

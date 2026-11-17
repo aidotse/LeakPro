@@ -67,17 +67,23 @@ def test_maximum_clique_matches_brute_force_on_random_graphs() -> None:
     for _ in range(20):
         upper = torch.rand((8, 8), generator=generator).lt(0.35).triu(diagonal=1)
         adjacency = upper | upper.transpose(0, 1)
-        assert maximum_clique(adjacency) == _brute_maximum_clique(adjacency)
+        result = maximum_clique(adjacency)
+        assert result.exact
+        assert len(result.clique) == len(_brute_maximum_clique(adjacency))
+        assert all(adjacency[left, right] for left, right in combinations(result.clique, 2))
+        assert maximum_clique(adjacency) == result
 
 
-def test_maximum_clique_preserves_the_selected_group_when_sizes_tie() -> None:
+def test_maximum_clique_retains_the_first_maximum_when_sizes_tie() -> None:
     adjacency = torch.zeros((8, 8), dtype=torch.bool)
     edges = [(0, 3), (0, 5), (0, 6), (0, 7), (1, 2), (1, 5), (1, 6), (2, 3), (2, 4),
              (2, 5), (2, 7), (3, 4), (3, 6), (4, 5), (4, 6), (4, 7), (5, 6), (6, 7)]
     for left, right in edges:
         adjacency[left, right] = adjacency[right, left] = True
 
-    assert maximum_clique(adjacency) == [0, 3, 6]
+    result = maximum_clique(adjacency)
+    assert result.exact and result.clique == [1, 2, 5]
+    assert len(result.clique) == len(_brute_maximum_clique(adjacency))
 
 
 def test_maximum_clique_prunes_many_equal_dense_choices() -> None:
@@ -89,26 +95,38 @@ def test_maximum_clique_prunes_many_equal_dense_choices() -> None:
         adjacency[2 * pair + 1, 2 * pair] = False
 
     start = perf_counter()
-    assert maximum_clique(adjacency) == list(range(0, 2 * parts, 2))
+    result = maximum_clique(adjacency)
+    assert result.exact and result.clique == list(range(0, 2 * parts, 2))
     assert perf_counter() - start < 10.0
 
 
-def test_maximum_clique_budget_warns_and_rejects_an_unfinished_search(caplog: pytest.LogCaptureFixture) -> None:
-    adjacency = torch.zeros((3, 3), dtype=torch.bool)
+def test_maximum_clique_budget_returns_a_witness_before_its_leaf_is_popped(caplog: pytest.LogCaptureFixture) -> None:
+    adjacency = ~torch.eye(4, dtype=torch.bool)
 
     for _ in range(2):
-        with pytest.raises(RuntimeError, match="budget of 2 search nodes.*No exact result was returned"):
-            maximum_clique(adjacency, max_search_nodes=2)
+        result = maximum_clique(adjacency, max_search_nodes=2)
+        assert not result.exact and result.clique == [0, 1] and result.search_nodes == 2
 
     assert len(caplog.records) == 2
     assert all(record.levelname == "WARNING" for record in caplog.records)
     assert caplog.records[0].message == caplog.records[1].message
     assert "increase max_clique_search_nodes" in caplog.text
 
-    # Four popped states finish this graph, retaining the original tie break.
     caplog.clear()
-    assert maximum_clique(adjacency, max_search_nodes=4) == _brute_maximum_clique(adjacency) == [0]
+    result = maximum_clique(adjacency, max_search_nodes=5)
+    assert result.exact and result.clique == [0, 1, 2, 3]
     assert not caplog.records
+
+
+def test_maximum_clique_matches_all_five_vertex_graph_sizes() -> None:
+    edges = list(combinations(range(5), 2))
+    for bits in range(1 << len(edges)):
+        adjacency = torch.zeros((5, 5), dtype=torch.bool)
+        for position, (left, right) in enumerate(edges):
+            adjacency[left, right] = adjacency[right, left] = bool(bits & (1 << position))
+        result = maximum_clique(adjacency)
+        assert result.exact and len(result.clique) == len(_brute_maximum_clique(adjacency))
+        assert all(adjacency[left, right] for left, right in combinations(result.clique, 2))
 
 
 @pytest.mark.parametrize(

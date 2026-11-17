@@ -27,9 +27,12 @@ from leakpro.attacks.extraction_attacks.protocols import (
     identity_feature_transform,
 )
 from leakpro.attacks.extraction_attacks.utils_generative import (
+    adapter_metadata,
     batch_ranges,
     decode_uint8,
     encode_uint8,
+    json_safe,
+    module_metadata,
     progress_batches,
     seeded_torch_rng,
     to_zero_one,
@@ -132,6 +135,8 @@ class AttackSIDEExtraction(AbstractExtraction):
         feature_transform: FeatureTransform | None = None,
         classifier_factory: ClassifierFactory | None = None,
         reference_score_fn: PairwiseScore | None = None,
+        generation_metadata: dict[str, Any] | None = None,
+        feature_metadata: dict[str, Any] | None = None,
     ) -> None:
         self.adapter = adapter
         self.feature_extractor = feature_extractor
@@ -148,7 +153,30 @@ class AttackSIDEExtraction(AbstractExtraction):
         model = getattr(self.adapter, "model", None)
         if not isinstance(model, nn.Module):
             raise ValueError("Weight-based extraction result IDs require adapter.model to contain the audited torch model.")
-        result_hash = hash_attack(identity_config, model)[:16]
+        if not isinstance(feature_metadata, dict):
+            raise ValueError("SIDE requires feature_metadata describing the extractor and preprocessing configuration.")
+        features = {"extractor": module_metadata(feature_extractor, feature_metadata.get("extractor"))}
+        transform_config = feature_metadata.get("transform")
+        # Registered hooks can change an Identity module's output.
+        plain_identity = self.feature_transform is identity_feature_transform or (
+            type(self.feature_transform) is nn.Identity
+            and not self.feature_transform._forward_hooks
+            and not self.feature_transform._forward_pre_hooks
+        )
+        if plain_identity and transform_config is None:
+            features["transform"] = {"kind": "identity"}
+        elif isinstance(self.feature_transform, nn.Module):
+            features["transform"] = module_metadata(self.feature_transform, transform_config)
+        else:
+            if not isinstance(transform_config, dict) or not transform_config:
+                raise ValueError("Custom feature transforms require a non-empty transform configuration and behavior revision.")
+            features["transform"] = {"config": json_safe(transform_config)}
+        self.identity_metadata = {
+            "config": identity_config,
+            "generation": adapter_metadata(adapter, generation_metadata, guided=True),
+            "features": features,
+        }
+        result_hash = hash_attack(self.identity_metadata, model)[:16]
         self.result_id = f"side-extraction-{result_hash}"
         self.attack_id = self.result_id
         self.device = get_device() if self.config.compute_device == "auto" else torch.device(self.config.compute_device)
@@ -179,6 +207,8 @@ class AttackSIDEExtraction(AbstractExtraction):
             feature_transform=handler.get_side_feature_transform(),
             classifier_factory=handler.get_side_classifier_factory(),
             reference_score_fn=handler.get_extraction_reference_score(),
+            generation_metadata=handler.get_extraction_metadata(),
+            feature_metadata=handler.get_side_feature_metadata(),
         )
 
     def description(self) -> dict[str, str]:
@@ -196,7 +226,10 @@ class AttackSIDEExtraction(AbstractExtraction):
                 "concrete timestep-conditioned ResNet are recorded implementation choices because the paper does not "
                 "fully specify them. Singleton classifier batches use stored BatchNorm statistics so no synthetic "
                 "sample is discarded. The separate Stable-Diffusion LoRA branch is excluded because its conditioning "
-                "and code details are insufficient for a model-agnostic faithful implementation."
+                "and code details are insufficient for a model-agnostic faithful implementation. min_cluster_size "
+                "is an implementation extension that filters centroids before all-sample reassignment. Optional "
+                "DDIM clip_guided projects guided clean predictions to [-1, 1]; this is an extension beyond "
+                "Algorithm 1, disabled by default in the library and recorded in sampler metadata."
             ),
         }
 
@@ -606,5 +639,5 @@ class AttackSIDEExtraction(AbstractExtraction):
             images=images,
             candidates=records,
             metrics=metrics,
-            provenance={**self.description(), "target": self.target_name},
+            provenance={**self.description(), "target": self.target_name, "identity": self.identity_metadata},
         )

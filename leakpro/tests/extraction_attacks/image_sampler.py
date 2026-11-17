@@ -11,8 +11,13 @@ def image_sampler(image_shape, sample_fn, *, model=None, num_timesteps=0, q_samp
     def guided(batch_size, *, labels, gradient_fn, seed):
         return guided_sample_fn(batch_size, labels, gradient_fn, seed)
 
+    def metadata(*, guided=False):
+        return {"target": {"fixture": "controlled_images_v1"},
+                "sampler": {"kind": "controlled_images_v1", "num_timesteps": num_timesteps, "guided": guided}}
+
     return SimpleNamespace(
         image_shape=image_shape, model=model, num_timesteps=num_timesteps,
         sample=sample, q_sample=q_sample_fn, classifier_timesteps=lambda timesteps: timesteps,
         sample_with_classifier_guidance=guided if guided_sample_fn is not None else None,
+        get_extraction_metadata=metadata,
     )

@@ -13,10 +13,11 @@ import torch
 from torch import Tensor, nn
 
 from leakpro.attacks.extraction_attacks.protocols import ConditionGradient, ExtractionAdapter
-from leakpro.attacks.extraction_attacks.utils_generative import seeded_torch_rng
+from leakpro.attacks.extraction_attacks.utils_generative import json_safe, seeded_torch_rng
 from leakpro.attacks.utils.diff_mi.gaussian_diffusion import GaussianDiffusion
 from leakpro.attacks.utils.diff_mi.respace import SpacedDiffusion, space_timesteps
 from leakpro.utils.device import get_device, mark_step
+from leakpro.utils.save_load import hash_config
 
 ConditionEncoder = Callable[[Sequence[Any]], dict[str, Any]]
 
@@ -43,6 +44,9 @@ class DiffusionAdapter(ExtractionAdapter[Tensor]):
         clip_denoised: bool = True,
         sampling_steps: int | None = None,
         clip_guided: bool = False,
+        target_config: dict[str, Any] | None = None,
+        diffusion_config: dict[str, Any] | None = None,
+        condition_config: dict[str, Any] | None = None,
     ) -> None:
         if not hasattr(diffusion, "q_sample") or not hasattr(diffusion, "p_sample_loop"):
             raise TypeError("diffusion must provide q_sample() and p_sample_loop().")
@@ -56,6 +60,9 @@ class DiffusionAdapter(ExtractionAdapter[Tensor]):
         self.num_timesteps = int(diffusion.num_timesteps)
         self.sampling_diffusion: SpacedDiffusion | None = None
         self.clip_guided = clip_guided
+        self.target_config = target_config
+        self.diffusion_config = diffusion_config
+        self.condition_config = condition_config
         if sampling_steps is not None:
             if not isinstance(diffusion, GaussianDiffusion):
                 raise TypeError("sampling_steps requires LeakPro's vendored GaussianDiffusion process.")
@@ -73,6 +80,52 @@ class DiffusionAdapter(ExtractionAdapter[Tensor]):
                 w=getattr(diffusion, "w", 1.0),
             )
         self.model.to(self.device).eval()
+
+    def get_extraction_metadata(self, *, guided: bool = False, conditional: bool = True) -> dict[str, Any]:
+        """Describe effective sampling, with explicit configs for opaque components.
+
+        ``target_config`` declares architecture and non-state behavior. A custom
+        diffusion process or an active condition encoder must declare its settings.
+        Classifier guidance and unconditional sampling do not use the encoder.
+        Defaults and timestep maps are resolved from the process actually used.
+        """
+        process = self.diffusion if self.sampling_diffusion is None else self.sampling_diffusion
+        if type(self.diffusion) not in (GaussianDiffusion, SpacedDiffusion) and (
+            not isinstance(self.diffusion_config, dict) or not self.diffusion_config
+        ):
+            raise ValueError("Custom diffusion processes require diffusion_config for result identity.")
+        if isinstance(self.diffusion, GaussianDiffusion):
+            diffusion = {
+                "implementation": "leakpro.diff_mi",
+                "config": self.diffusion_config,
+                "original_num_steps": getattr(process, "original_num_steps", self.num_timesteps),
+                "num_timesteps": int(process.num_timesteps),
+                "timestep_map": list(getattr(process, "timestep_map", range(process.num_timesteps))),
+                "forward_betas_hash": hash_config({"betas": json_safe(self.diffusion.betas)}),
+                "reverse_betas_hash": hash_config({"betas": json_safe(process.betas)}),
+                "model_mean_type": process.model_mean_type.name,
+                "model_var_type": process.model_var_type.name,
+                "rescale_timesteps": bool(process.rescale_timesteps),
+                "classifier_free_guidance_weight": float(process.w),
+            }
+        else:
+            diffusion = {"implementation": "provider", "config": self.diffusion_config,
+                         "num_timesteps": self.num_timesteps}
+        uses_encoder = conditional and not guided and self.condition_encoder is not None
+        if uses_encoder and not self.condition_config:
+            raise ValueError("A condition_encoder requires condition_config for result identity.")
+        return {
+            "target": self.target_config,
+            "sampler": {
+                "kind": "ancestral" if self.sampling_diffusion is None else "ddim",
+                "diffusion": diffusion,
+                "clip_denoised": self.clip_denoised,
+                "clip_guided": bool(guided and self.sampling_diffusion is not None and self.clip_guided),
+                "ddim_eta": None if self.sampling_diffusion is None else 0.0,
+                "model_kwargs": json_safe(self.base_model_kwargs),
+                "condition_encoder": self.condition_config if uses_encoder else None,
+            },
+        }
 
     def _model_kwargs(self, conditions: Sequence[Any] | None) -> dict[str, Any]:
         kwargs = dict(self.base_model_kwargs)

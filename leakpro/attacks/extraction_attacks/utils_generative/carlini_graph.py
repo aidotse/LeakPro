@@ -6,12 +6,23 @@
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 import torch
 from torch import Tensor
 
 from leakpro.utils.logger import logger
 
-DEFAULT_MAX_CLIQUE_SEARCH_NODES = 20_000
+DEFAULT_MAX_CLIQUE_SEARCH_NODES = 2_000_000
+CLIQUE_SEARCH_POLICY = "bounded_first_maximum_v1"
+
+
+class CliqueSearchResult(NamedTuple):
+    """A valid clique, whether its maximum size was proved, and work spent."""
+
+    clique: list[int]
+    exact: bool
+    search_nodes: int
 
 
 def _population_count(value: int) -> int:
@@ -56,27 +67,20 @@ def _color_bound(candidates: int, neighbors: list[int]) -> int:
 
 
 def _can_improve(candidates: int, clique: tuple[int, ...], best: tuple[int, ...], neighbors: list[int]) -> bool:
-    """Keep branches that can improve clique size or its deterministic tie break."""
+    """Keep only branches that can improve size; retain the first maximum on ties."""
     possible_size = len(clique) + _population_count(candidates)
     if best and possible_size > len(best):
         possible_size = len(clique) + _color_bound(candidates, neighbors)
-    if possible_size != len(best):
-        return possible_size > len(best)
-    optimistic = list(clique)
-    remaining = candidates
-    while len(optimistic) < len(best):
-        bit = remaining & -remaining
-        optimistic.append(bit.bit_length() - 1)
-        remaining ^= bit
-    return tuple(sorted(optimistic)) < best
+    return possible_size > len(best)
 
 
-def maximum_clique(  # noqa: C901 - keep budget enforcement in the exact search traversal
+def maximum_clique(  # noqa: C901 - keep the bounded traversal and incumbent updates together
     adjacency: Tensor, *, max_search_nodes: int = DEFAULT_MAX_CLIQUE_SEARCH_NODES,
-) -> list[int]:
-    """Return an exact clique, or warn and fail when the search budget is exhausted.
+) -> CliqueSearchResult:
+    """Return the first maximum, or a valid lower bound on budget exhaustion.
 
     Count popped branch-and-bound states, including pruned states, rather than elapsed time.
+    Traversal is deterministic. Equal-size cliques do not replace the incumbent.
     """
     if isinstance(max_search_nodes, bool) or not isinstance(max_search_nodes, int):
         raise TypeError("max_search_nodes must be a positive integer.")
@@ -104,19 +108,14 @@ def maximum_clique(  # noqa: C901 - keep budget enforcement in the exact search 
         if search_nodes >= max_search_nodes:
             message = (
                 f"Maximum-clique search exhausted its budget of {max_search_nodes} search nodes "
-                f"for a {vertex_count}-vertex graph. No exact result was returned; "
+                f"for a {vertex_count}-vertex graph. Returning a lower bound of {len(best)}; "
                 "increase max_clique_search_nodes to allow more search work."
             )
             logger.warning(message)
-            raise RuntimeError(message)
+            return CliqueSearchResult(list(best), False, search_nodes)
         search_nodes += 1
         candidates, clique = stack.pop()
         if not _can_improve(candidates, clique, best, neighbors):
-            continue
-        if candidates == 0:
-            canonical = tuple(sorted(clique))
-            if len(canonical) > len(best) or (len(canonical) == len(best) and canonical < best):
-                best = canonical
             continue
         pivot = choose_pivot(candidates)
         extensions = candidates & ~neighbors[pivot]
@@ -124,14 +123,18 @@ def maximum_clique(  # noqa: C901 - keep budget enforcement in the exact search 
         while extensions:
             bit = extensions & -extensions
             vertex = bit.bit_length() - 1
-            children.append((candidates & neighbors[vertex], clique + (vertex,)))
+            extended = clique + (vertex,)
+            # Every constructed clique is a witness, even if the cap prevents its pop.
+            if len(extended) > len(best):
+                best = tuple(sorted(extended))
+            children.append((candidates & neighbors[vertex], extended))
             candidates &= ~bit
             extensions &= ~bit
             if not _can_improve(candidates, clique, best, neighbors):
                 break
         stack.extend(reversed(children))
 
-    return list(best)
+    return CliqueSearchResult(list(best), True, search_nodes)
 
 
 def clique_medoid(clique: list[int], distances: Tensor) -> tuple[int, float]:

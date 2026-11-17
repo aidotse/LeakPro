@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import inspect
 import math
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -15,8 +16,10 @@ from typing import Any, Literal
 import numpy as np
 import torch
 from pydantic import BaseModel
-from torch import Tensor
+from torch import Tensor, nn
 from tqdm.auto import tqdm
+
+from leakpro.utils.save_load import hash_model
 
 
 # seed_everything changes process-wide RNG state; sampling must restore the
@@ -157,3 +160,55 @@ def json_safe(value: object) -> object:
     else:
         raise TypeError(f"Unsupported result metadata type: {type(value).__name__}.")
     return converted
+
+
+def module_metadata(
+    module: nn.Module, config: dict[str, Any] | None, *, include_state_hash: bool = True,
+) -> dict[str, Any]:
+    """Combine declared behavior with module state; weights alone omit non-state settings.
+
+    The caller must describe architecture, nested settings and behavior revisions
+    accurately. Arbitrary Python behavior cannot be inferred from a module's type.
+    """
+    if not isinstance(config, dict) or not config:
+        raise ValueError("Module identity requires a non-empty configuration describing its effective behavior.")
+    metadata = {
+        "type": f"{type(module).__module__}.{type(module).__qualname__}",
+        "config": json_safe(config),
+        "state_layout": {
+            name: {"shape": list(value.shape), "dtype": str(value.dtype)}
+            for name, value in module.state_dict().items()
+        },
+    }
+    if include_state_hash:
+        metadata["state_hash"] = hash_model(module)
+    return metadata
+
+
+def adapter_metadata(
+    adapter: object, declared: dict[str, Any] | None, *, guided: bool, conditional: bool = True,
+) -> dict[str, Any]:
+    """Resolve provider/adapter settings before generation and bind the actual model state."""
+    if declared is None:
+        getter = getattr(adapter, "get_extraction_metadata", None)
+        if not callable(getter):
+            raise ValueError("Provide generation_metadata or adapter.get_extraction_metadata() for result identity.")
+        # Pass conditioning context when supported; keep existing custom getters usable.
+        kwargs = {"guided": guided}
+        try:
+            parameter = inspect.signature(getter).parameters.get("conditional")
+            if parameter is not None and parameter.kind in (
+                inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY,
+            ):
+                kwargs["conditional"] = conditional
+        except (TypeError, ValueError):
+            pass
+        declared = getter(**kwargs)
+    if not isinstance(declared, dict) or not isinstance(declared.get("sampler"), dict) or not declared["sampler"]:
+        raise ValueError("Extraction metadata requires non-empty target and sampler configurations.")
+    return {
+        # hash_attack already hashes the target's weights; do not read them twice.
+        "target": module_metadata(adapter.model, declared.get("target"), include_state_hash=False),
+        "sampler": json_safe(declared["sampler"]),
+        "image_shape": list(adapter.image_shape),
+    }

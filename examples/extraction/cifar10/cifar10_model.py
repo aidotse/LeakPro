@@ -22,6 +22,7 @@ from torchvision.models import ResNet18_Weights, resnet18
 from tqdm.auto import tqdm
 
 from leakpro.attacks.extraction_attacks.protocols import FeatureTransform
+from leakpro.attacks.utils.diff_mi.nn import update_ema
 from leakpro.attacks.utils.diff_mi.respace import SpacedDiffusion
 from leakpro.attacks.utils.diff_mi.script_util import (
     create_gaussian_diffusion,
@@ -75,7 +76,7 @@ MODEL_FORMAT_VERSION = 3
 CHECKPOINT_EVERY_EPOCHS = 100
 
 
-def _model_options(train: TrainConfig) -> dict[str, Any]:
+def target_model_config(train: TrainConfig) -> dict[str, Any]:
     """Use the Improved DDPM CIFAR-10 L_hybrid model configuration."""
     options = model_and_diffusion_defaults()
     options.update(
@@ -99,7 +100,7 @@ def _model_options(train: TrainConfig) -> dict[str, Any]:
 def create_target_model(train: TrainConfig, device: torch.device) -> nn.Module:
     """Construct the official U-Net."""
     device = get_device() if str(device) == "auto" else torch.device(device)
-    model, _diffusion = create_model_and_diffusion(**_model_options(train))
+    model, _diffusion = create_model_and_diffusion(**target_model_config(train))
     return model.to(device)
 
 
@@ -124,13 +125,6 @@ def load_cifar10(
     audited_train = Subset(full_train, range(train.train_size))
     references = torch.stack([audited_train[index][0] for index in range(train.reference_size)])
     return audited_train, references
-
-
-def _update_ema(ema_model: nn.Module, model: nn.Module, decay: float) -> None:
-    """Update the sampling model after one optimizer step."""
-    with torch.no_grad():
-        for ema_parameter, parameter in zip(ema_model.parameters(), model.parameters()):
-            ema_parameter.mul_(decay).add_(parameter, alpha=1.0 - decay)
 
 
 def _save_checkpoint(path: Path, state: dict[str, Any]) -> None:
@@ -182,7 +176,8 @@ def _train_epoch(
             loss_sum += float(losses.detach().sum())
         mark_step(device)
         optimizer.step()
-        _update_ema(ema_model, model, decay=train.ema_decay)
+        with torch.no_grad():
+            update_ema(ema_model.parameters(), model.parameters(), rate=train.ema_decay)
         mark_step(device)
         image_count += batch_count
     return loss_sum / image_count

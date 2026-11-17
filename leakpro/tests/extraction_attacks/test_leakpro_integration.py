@@ -157,6 +157,9 @@ class SIDEProvider(AbstractExtractionInputHandler):
     def get_side_feature_extractor(self) -> nn.Module:
         return TinyFeatureExtractor()
 
+    def get_side_feature_metadata(self) -> dict[str, Any]:
+        return {"extractor": {"architecture": "tiny_features_v1"}}
+
     def get_side_classifier_factory(self) -> Any:
         return TinyTimeClassifier
 
@@ -184,24 +187,55 @@ def _write_config(
     return str(config_path)
 
 
-def test_public_clique_budget_failure_publishes_no_partial_result(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture,
+@pytest.mark.parametrize("budget, expected_qualified", [(8, None), (9, True)])
+def test_public_clique_budget_keeps_earlier_work_and_continues(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, budget: int, expected_qualified: bool | None,
 ) -> None:
-    settings = {"num_generations_per_condition": 4, "min_clique_size": 2, "max_clique_search_nodes": 1}
-    config_path = _write_config(tmp_path, "carlini_diffusion", settings)
-    audit = LeakPro(CarliniProvider, config_path)
-    with pytest.raises(RuntimeError, match="budget of 1 search nodes"):
-        audit.run_audit()
-    assert "No exact result was returned" in caplog.text
-    assert not list((tmp_path / "output").rglob("result.txt"))
-    assert not list((tmp_path / "output").rglob("candidates.npz"))
+    sampled = []
 
-    settings["max_clique_search_nodes"] = 5
-    recovered = LeakPro(CarliniProvider, _write_config(tmp_path, "carlini_diffusion", settings))
-    assert recovered.attack_scheduler.attacks[0].result_id == audit.attack_scheduler.attacks[0].result_id
-    results = recovered.run_audit()
-    assert len(results) == 1 and len(results[0].candidates) == 1
-    assert len(list((tmp_path / "output").rglob("result.txt"))) == 1
+    class ThreeConditionProvider(CarliniProvider):
+        def get_extraction_conditions(self):
+            return ["easy", "two_cliques", "later"]
+
+        def get_diffusion_adapter(self):
+            def sample(count, conditions, seed):
+                sampled.append(conditions[0])
+                images = torch.zeros((count, 1, 4, 4))
+                if conditions[0] == "two_cliques":
+                    images[3:] = 1
+                return images
+            return image_sampler((1, 4, 4), sample, model=nn.Identity())
+
+    settings = {"num_generations_per_condition": 7, "generation_batch_size": 7,
+                "min_clique_size": 4, "max_clique_search_nodes": budget}
+    config_path = Path(_write_config(tmp_path, "carlini_diffusion", settings))
+    config = yaml.safe_load(config_path.read_text())
+    # Run an earlier and a subsequent attack through the real scheduler as well.
+    config["audit"]["attack_list"] = [
+        {"attack": "carlini_diffusion", **settings, "random_seed": seed} for seed in (1, 2, 3)
+    ]
+    config_path.write_text(yaml.safe_dump(config))
+    results = LeakPro(ThreeConditionProvider, str(config_path)).run_audit()
+    assert len(results) == 3
+    assert sampled == ["easy", "two_cliques", "later"] * 3
+    assert len(list((tmp_path / "output").rglob("candidates.npz"))) == 3
+    for result in results:
+        summaries = result.metrics["condition_summaries"]
+        assert summaries[0]["clique_search_exact"] and summaries[0]["largest_clique_size"] == 7
+        assert summaries[2]["clique_search_exact"] and summaries[2]["qualified"] is True
+        incomplete = summaries[1]
+        assert incomplete["clique_search_exact"] is False
+        assert incomplete["largest_clique_size"] is None
+        assert incomplete["qualified"] is expected_qualified
+        assert incomplete["clique_size_lower_bound"] == (3 if budget == 8 else 4)
+        assert result.metrics["ranking_provisional"] is True
+        candidates = [record for record in result.candidates if record.metadata["condition_index"] == 1]
+        assert len(candidates) == (0 if expected_qualified is None else 1)
+        if candidates:
+            assert candidates[0].metadata["provisional"] is True
+        saved = json.loads((tmp_path / "output" / "data_objects" / f"{result.id}.json").read_text())
+        assert saved["metrics"]["condition_summaries"] == summaries
+    assert "edge density" in caplog.text and "Returning a lower bound" in caplog.text
 
 
 def test_extraction_schema_does_not_change_standard_target_parsing(tmp_path: Any) -> None:
@@ -337,6 +371,7 @@ def test_factory_constructs_a_registered_subclass_through_the_public_path(
         adapter=image_sampler((1, 4, 4), _alternating_samples, model=nn.Identity()),
         references=torch.stack((torch.zeros((1, 4, 4)), torch.ones((1, 4, 4)))),
         feature_extractor=TinyFeatureExtractor(), feature_transform=nn.Identity(),
+        feature_metadata={"extractor": {"architecture": "tiny_features_v1"}},
     )
     monkeypatch.setitem(AttackFactoryExtraction.attack_classes, "registered_carlini", RegisteredCarlini)
     config_path = _write_config(
@@ -668,7 +703,7 @@ def test_both_attacks_run_through_the_vendored_unconditional_diffusion(tmp_path:
             )
             return TracedAdapter(
                 model=UnconditionalDenoiser(), diffusion=diffusion, image_shape=(1, 4, 4),
-                sampling_steps=3, clip_guided=True,
+                sampling_steps=3, clip_guided=True, target_config={"architecture": "unconditional_denoiser_v1"},
             )
 
     config_path = Path(_write_config(tmp_path, "side", {

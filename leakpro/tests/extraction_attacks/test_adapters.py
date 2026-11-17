@@ -207,6 +207,7 @@ def test_side_rejects_improved_diffusion_loop_before_sampling() -> None:
     adapter = DiffusionAdapter(
         model=nn.Identity(),
         diffusion=diffusion,
+        target_config={"architecture": "identity"}, diffusion_config={"implementation": "improved_only_v1"},
         image_shape=(1, 2, 2),
     )
     attack = AttackSIDEExtraction(
@@ -218,6 +219,7 @@ def test_side_rejects_improved_diffusion_loop_before_sampling() -> None:
             "min_cluster_size": 1,
         },
         target_name="improved-only-test",
+        feature_metadata={"extractor": {"start_dim": 1}},
     )
 
     with pytest.raises(ValueError, match="cond_fn"):
@@ -234,6 +236,9 @@ def test_attacks_check_their_own_adapter_requirements() -> None:
         image_shape = (1, 4, 4)
         num_timesteps = 10
 
+        def get_extraction_metadata(self, *, guided=False):
+            return {"target": {"architecture": "identity"}, "sampler": {"kind": "zero_images_v1"}}
+
         def sample(self, batch_size: int, *, conditions: Sequence[object] | None, seed: int) -> torch.Tensor:
             del conditions, seed
             return torch.zeros((batch_size, *self.image_shape))
@@ -247,7 +252,8 @@ def test_attacks_check_their_own_adapter_requirements() -> None:
     )
     carlini.prepare_attack()
 
-    side = AttackSIDEExtraction(sampler, nn.Identity(), {}, target_name="sampler-only")
+    side = AttackSIDEExtraction(sampler, nn.Identity(), {}, target_name="sampler-only",
+                                feature_metadata={"extractor": {"architecture": "identity"}})
     with pytest.raises(TypeError, match="classifier_timesteps"):
         side.prepare_attack()
 

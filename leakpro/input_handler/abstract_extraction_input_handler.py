@@ -26,6 +26,15 @@ class AbstractExtractionInputHandler(ABC):
     def get_diffusion_adapter(self) -> ExtractionAdapter[Tensor]:
         """Return the audited generator through a supported adapter."""
 
+    def get_extraction_metadata(self) -> dict[str, Any] | None:
+        """Declare target/sampler configs for custom adapters, or use the adapter's getter.
+
+        Return ``{"target": {...}, "sampler": {...}}`` describing effective
+        architecture, sampling, conditioning and non-state behavior. Accurate
+        provider declarations are required; callables cannot be fingerprinted.
+        """
+        return None
+
     def get_extraction_conditions(self) -> Sequence[Any] | None:
         """Return prompts or labels for conditional Carlini extraction."""
         return None
@@ -40,6 +49,15 @@ class AbstractExtractionInputHandler(ABC):
 
     def get_side_feature_transform(self) -> FeatureTransform | None:
         """Return preprocessing compatible with the feature extractor."""
+        return None
+
+    def get_side_feature_metadata(self) -> dict[str, Any] | None:
+        """Declare extractor/preprocessing architecture, nested settings and revisions.
+
+        Return ``{"extractor": {...}, "transform": {...}}``. The transform
+        descriptor may be omitted only for the default identity transform.
+        Module weights and buffers are hashed separately by SIDE.
+        """
         return None
 
     def get_side_classifier_factory(self) -> Callable[[int, int], nn.Module] | None:

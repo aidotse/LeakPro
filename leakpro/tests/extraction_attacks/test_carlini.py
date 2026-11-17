@@ -113,13 +113,13 @@ def test_prompt_and_label_hashes_use_shared_json_utilities() -> None:
     adapter = image_sampler((1, 4, 4), lambda *args, **kwargs: None, model=model)
     conditions = ["1", 1, np.int64(2)]
     attack = AttackCarliniExtraction(adapter, {}, conditions=conditions)
-    identity = {"config": attack.config.model_dump(mode="json", exclude={"overwrite_results", "max_clique_search_nodes"}),
-                "conditions": [hash_config({"condition": json_safe(value)}) for value in conditions]}
+    identity = attack.identity_metadata
+    assert identity["conditions"] == [hash_config({"condition": json_safe(value)}) for value in conditions]
     assert attack.result_id.endswith(hash_attack(identity, model)[:16])
     assert identity["conditions"][0] != identity["conditions"][1]
 
 
-def test_clique_budget_does_not_change_successful_results_or_their_identity() -> None:
+def test_clique_budget_separates_ids_even_when_completed_candidates_agree() -> None:
     adapter = image_sampler(
         (1, 4, 4), lambda count, conditions, seed: torch.zeros((count, 1, 4, 4)), model=torch.nn.Identity(),
     )
@@ -130,7 +130,7 @@ def test_clique_budget_does_not_change_successful_results_or_their_identity() ->
         attack.prepare_attack()
         results.append(attack.run_attack())
 
-    assert results[0].id == results[1].id
+    assert results[0].id != results[1].id
     assert results[0].candidates == results[1].candidates
     assert results[0].metrics == results[1].metrics
     torch.testing.assert_close(results[0].images, results[1].images, rtol=0, atol=0)
@@ -146,3 +146,19 @@ def test_missing_weights_cannot_fall_back_to_a_target_name() -> None:
     adapter = image_sampler((1, 4, 4), lambda *args, **kwargs: None)
     with pytest.raises(ValueError, match="adapter.model"):
         AttackCarliniExtraction(adapter, {}, target_name="not-a-model-hash")
+
+
+def test_threshold_first_stopping_would_change_the_retained_representative() -> None:
+    from leakpro.attacks.extraction_attacks.utils_generative.carlini_graph import clique_medoid, maximum_clique
+    from leakpro.attacks.extraction_attacks.utils_generative.image_metrics import tiled_l2_pairwise
+
+    images = torch.tensor([0, 1 / 32, 2 / 32, 1 / 2, 17 / 32, 18 / 32, 20 / 32]).view(7, 1, 1, 1)
+    distances = tiled_l2_pairwise(images, tile_grid=(1, 1))
+    adjacency = distances.le(0.13)
+    adjacency.fill_diagonal_(False)
+    search = maximum_clique(adjacency)
+    assert search.exact and search.clique == [3, 4, 5, 6]
+    maximum_medoid, maximum_mean = clique_medoid(search.clique, distances)
+    first_medoid, first_mean = clique_medoid([0, 1, 2], distances)
+    assert maximum_medoid == 4 and first_medoid == 1
+    assert maximum_mean != first_mean

@@ -8,6 +8,7 @@ import hashlib
 import json
 
 import numpy as np
+import torch
 from torch.nn import Module
 
 
@@ -31,8 +32,9 @@ def hash_model(model: Module) -> str:
     # Sort keys to ensure consistent ordering across models
     for key in sorted(state_dict.keys()):
         hasher.update(key.encode("utf-8"))
-        # Convert tensor to CPU, detach, convert to numpy and then to bytes
-        tensor_bytes = state_dict[key].detach().cpu().numpy().tobytes()
+        # A raw-byte view also supports types without a NumPy dtype, such as BF16.
+        tensor = state_dict[key].detach().cpu().contiguous().reshape(-1)
+        tensor_bytes = tensor.view(torch.uint8).numpy().tobytes()
         hasher.update(tensor_bytes)
 
     return hasher.hexdigest()
