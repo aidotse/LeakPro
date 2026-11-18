@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import inspect
 import math
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from importlib import import_module
 from typing import Any, Literal
@@ -185,6 +185,22 @@ def module_metadata(
     return metadata
 
 
+def read_extraction_metadata(
+    getter: Callable[..., dict[str, Any] | None], *, conditional: bool, guided: bool | None = None,
+) -> dict[str, Any] | None:
+    """Pass conditioning context when the metadata getter accepts it."""
+    kwargs = {} if guided is None else {"guided": guided}
+    try:
+        signature = inspect.signature(getter)
+        if not any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values()):
+            signature.bind_partial(conditional=conditional)
+    except (TypeError, ValueError):
+        pass
+    else:
+        kwargs["conditional"] = conditional
+    return getter(**kwargs)
+
+
 def adapter_metadata(
     adapter: object, declared: dict[str, Any] | None, *, guided: bool, conditional: bool = True,
 ) -> dict[str, Any]:
@@ -193,17 +209,7 @@ def adapter_metadata(
         getter = getattr(adapter, "get_extraction_metadata", None)
         if not callable(getter):
             raise ValueError("Provide generation_metadata or adapter.get_extraction_metadata() for result identity.")
-        # Pass conditioning context when supported; keep existing custom getters usable.
-        kwargs = {"guided": guided}
-        try:
-            parameter = inspect.signature(getter).parameters.get("conditional")
-            if parameter is not None and parameter.kind in (
-                inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY,
-            ):
-                kwargs["conditional"] = conditional
-        except (TypeError, ValueError):
-            pass
-        declared = getter(**kwargs)
+        declared = read_extraction_metadata(getter, guided=guided, conditional=conditional)
     if not isinstance(declared, dict) or not isinstance(declared.get("sampler"), dict) or not declared["sampler"]:
         raise ValueError("Extraction metadata requires non-empty target and sampler configurations.")
     return {

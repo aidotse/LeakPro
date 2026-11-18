@@ -20,6 +20,7 @@ from leakpro.attacks.extraction_attacks.utils_generative import (
     json_safe,
     normalize_conditions,
     progress_batches,
+    read_extraction_metadata,
     to_zero_one,
     validate_image_batch,
 )
@@ -102,7 +103,8 @@ class AttackCarliniExtraction(AbstractExtraction):
         self.config = configs if isinstance(configs, self.AttackConfig) else self.AttackConfig(**configs)
         self.configs = self.config
         self.optuna_params = 0
-        self.conditions = normalize_conditions(conditions)
+        conditional = self.config.mode == "conditional_black_box"
+        self.conditions = normalize_conditions(conditions) if conditional else None
         self.target_name = target_name
         self.reference_images = reference_images
         identity_config = self.config.model_dump(mode="json", exclude={"overwrite_results"})
@@ -114,10 +116,10 @@ class AttackCarliniExtraction(AbstractExtraction):
         identity = {
             "config": identity_config,
             "generation": adapter_metadata(
-                adapter, generation_metadata, guided=False, conditional=self.config.mode == "conditional_black_box",
+                adapter, generation_metadata, guided=False, conditional=conditional,
             ),
         }
-        if self.config.mode == "conditional_black_box":
+        if conditional:
             identity["clique_search_policy"] = CLIQUE_SEARCH_POLICY
         if self.conditions is not None:
             identity["conditions"] = [hash_config({"condition": json_safe(condition)}) for condition in self.conditions]
@@ -132,13 +134,14 @@ class AttackCarliniExtraction(AbstractExtraction):
     def from_handler(cls, handler: ExtractionHandler, attack_config: dict[str, Any]) -> Self:
         """Validate settings and obtain Carlini inputs from the audit handler."""
         config = cls.AttackConfig(**{"random_seed": handler.configs.audit.random_seed, **attack_config})
+        conditional = config.mode == "conditional_black_box"
         return cls(
             handler.get_diffusion_adapter(),
             config,
             target_name=handler.configs.target.name,
-            conditions=handler.get_extraction_conditions(),
+            conditions=handler.get_extraction_conditions() if conditional else None,
             reference_images=handler.get_extraction_reference_images(),
-            generation_metadata=handler.get_extraction_metadata(),
+            generation_metadata=read_extraction_metadata(handler.get_extraction_metadata, conditional=conditional),
         )
 
     def description(self) -> dict[str, str]:

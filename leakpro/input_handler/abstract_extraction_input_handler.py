@@ -31,7 +31,8 @@ class AbstractExtractionInputHandler(ABC):
 
         Return ``{"target": {...}, "sampler": {...}}`` describing effective
         architecture, sampling, conditioning and non-state behavior. Accurate
-        provider declarations are required; callables cannot be fingerprinted.
+        declarations are required for custom components. Carlini supplies the
+        actual mode via the conditional keyword if this method accepts it.
         """
         return None
 
@@ -61,5 +62,9 @@ class AbstractExtractionInputHandler(ABC):
         return None
 
     def get_extraction_reference_score(self) -> PairwiseScore | None:
-        """Return an optional pairwise similarity scorer, such as SSCD."""
+        """Return an optional pairwise similarity scorer, such as SSCD.
+
+        When SIDE uses similarity bands, set its reference_score_id to identify
+        this scorer and its settings in the saved report.
+        """
         return None

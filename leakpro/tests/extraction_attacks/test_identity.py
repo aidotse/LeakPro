@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 from pathlib import Path
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
@@ -16,6 +17,7 @@ from leakpro.attacks.extraction_attacks.adapters import DiffusionAdapter
 from leakpro.attacks.extraction_attacks.carlini import AttackCarliniExtraction
 from leakpro.attacks.extraction_attacks.side import AttackSIDEExtraction
 from leakpro.attacks.extraction_attacks.utils_generative import adapter_metadata
+from leakpro.attacks.extraction_attacks.utils_generative.image_metrics import SimilarityBand
 from leakpro.attacks.utils.diff_mi.gaussian_diffusion import ModelMeanType
 from leakpro.attacks.utils.diff_mi.respace import SpacedDiffusion
 from leakpro.attacks.utils.diff_mi.script_util import create_gaussian_diffusion
@@ -107,6 +109,157 @@ def test_public_sampler_variants_have_executed_metadata_and_separate_artifacts(t
     else:
         # Guided-x0 clipping is inactive in Carlini, so it is canonicalized off.
         assert results[1].id == results[3].id
+
+
+def test_side_similarity_report_id_depends_on_the_active_scorer(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    scorer = Mock(side_effect=AssertionError("Identity must be determined before scoring"))
+
+    class ScorerProvider(SIDEProvider):
+        def get_extraction_reference_score(self):
+            return scorer
+
+    def side(settings):
+        config_path = _write_config(tmp_path, "side", settings)
+        return LeakPro(ScorerProvider, config_path).attack_scheduler.attacks[0]
+
+    bands = {"match": {"lower": 0.5, "upper": 1.0}}
+    first = side({"similarity_bands": bands, "reference_score_id": "scorer-v1"})
+    second = side({"similarity_bands": bands, "reference_score_id": "scorer-v2"})
+    with pytest.raises(AttributeError, match="reference_score_fn"):
+        first.reference_score_fn = Mock()
+    assert first.reference_score_fn is scorer
+    assert first.identity_metadata["config"]["reference_score_id"] == "scorer-v1"
+    assert first.result_id != second.result_id
+    missing_id = LeakPro(ScorerProvider, _write_config(tmp_path, "side", {"similarity_bands": bands}))
+    assert not missing_id.attack_scheduler.attacks
+    assert "reference_score_id" in caplog.text
+
+    baseline = side({})
+    for scorer_id in ("unused", "   "):
+        unused = side({"reference_score_id": scorer_id})
+        assert "reference_score_id" not in unused.identity_metadata["config"]
+        assert baseline.result_id == unused.result_id
+    scorer.assert_not_called()
+
+
+@pytest.mark.parametrize(("setting", "new_value"), [
+    ("reference_score_id", "scorer-v2"),
+    ("l2_bands", {"near": SimilarityBand(lower=0.0, upper=0.75)}),
+])
+def test_side_rejects_changed_report_settings_on_an_existing_audit(setting: str, new_value: object) -> None:
+    provider = SIDEProvider()
+    adapter = provider.get_diffusion_adapter()
+    adapter.sample = Mock(side_effect=AssertionError("Changed report settings must be rejected before sampling"))
+    config = AttackSIDEExtraction.AttackConfig(
+        similarity_bands={"match": {"lower": 0.5, "upper": 1.0}}, reference_score_id="scorer-v1",
+        l2_bands={"near": {"lower": 0.0, "upper": 0.25}},
+    )
+    attack = AttackSIDEExtraction(
+        adapter, provider.get_side_feature_extractor(), config,
+        feature_metadata=provider.get_side_feature_metadata(),
+        reference_images=provider.get_extraction_reference_images(), reference_score_fn=Mock(),
+    )
+    setattr(config, setting, new_value)
+    attack.identity_metadata["config"][setting] = config.model_dump(mode="json")[setting]
+    with pytest.raises(ValueError, match="Start a new audit"):
+        attack.prepare_attack()
+    adapter.sample.assert_not_called()
+
+
+def test_side_report_uses_the_assigned_scoring_bands(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    provider = SIDEProvider()
+    band = SimilarityBand(lower=0.5, upper=1.0)
+    near = SimilarityBand(lower=0.0, upper=0.25)
+    changed = SimilarityBand(lower=0.9, upper=1.0)
+    config = AttackSIDEExtraction.AttackConfig(
+        similarity_bands={"match": band}, reference_score_id="scorer-v1", l2_bands={"near": near},
+        num_generations=1, distance_block_size=1, compute_device="cpu",
+    )
+    scores = iter(((0.7, changed), (0.0, band)))
+
+    def sample(*args, **kwargs):
+        config.l2_bands["near"] = changed
+        config.image_range = "minus_one_one"
+        return torch.zeros(1, 1, 4, 4)
+
+    def scorer(candidates, references):
+        config.l2_bands["near"] = near
+        config.image_range = "zero_one"
+        value, band_for_call = next(scores)
+        config.similarity_bands["match"] = band_for_call
+        return torch.full((len(candidates), len(references)), value)
+
+    attack = AttackSIDEExtraction(
+        provider.get_diffusion_adapter(), provider.get_side_feature_extractor(), config,
+        feature_metadata=provider.get_side_feature_metadata(), reference_score_fn=scorer,
+    )
+    attack.identity_metadata["config"]["reference_score_id"] = "edited metadata"
+    attack.classifier = nn.Identity()
+    attack.cluster_centroids = torch.zeros(2, 2)
+    attack._references_zero_one = torch.zeros(2, 1, 4, 4)
+    monkeypatch.setattr(attack, "_sample_guided_batch", sample)
+    result = attack.run_attack()
+    assert not torch.count_nonzero(result.images)
+    result.save(output_dir=tmp_path)
+    saved = json.loads((tmp_path / "data_objects" / f"{attack.result_id}.json").read_text())
+    assert saved["provenance"]["identity"]["config"]["reference_score_id"] == "scorer-v1"
+    assert saved["metrics"]["l2_band_scores"]["near"]["unique_references"] == 2
+    assert saved["metrics"]["similarity_band_scores"]["match"]["unique_references"] == 1
+    assert saved["provenance"]["identity"]["config"]["similarity_bands"]["match"] == band.model_dump()
+
+
+@pytest.mark.parametrize("scorer_config", [{}, {"reference_score_id": "   "}])
+def test_side_similarity_bands_require_a_scorer_id(scorer_config: dict) -> None:
+    with pytest.raises(ValueError, match="reference_score_id"):
+        AttackSIDEExtraction.AttackConfig(
+            similarity_bands={"match": {"lower": 0.5, "upper": 1.0}}, **scorer_config,
+        )
+
+    config = AttackSIDEExtraction.AttackConfig(**scorer_config)
+    config.similarity_bands["match"] = SimilarityBand(lower=0.5, upper=1.0)
+    provider = SIDEProvider()
+    with pytest.raises(ValueError, match="reference_score_id"):
+        AttackSIDEExtraction(
+            provider.get_diffusion_adapter(), provider.get_side_feature_extractor(), config,
+            feature_metadata=provider.get_side_feature_metadata(),
+        )
+
+
+def test_unconditional_carlini_ignores_provider_conditions(tmp_path: Path) -> None:
+    class ConditionProvider(SIDEProvider):
+        get_extraction_conditions = Mock(side_effect=AssertionError("Unconditional audits do not use conditions"))
+
+        def get_diffusion_adapter(self):
+            adapter = super().get_diffusion_adapter()
+            metadata = adapter.get_extraction_metadata
+
+            def sampler_metadata(*, guided=False, **kwargs):
+                payload = metadata(guided=guided)
+                payload["sampler"]["conditional"] = kwargs.get("conditional", True)
+                return payload
+
+            adapter.get_extraction_metadata = sampler_metadata
+            return adapter
+
+    settings = {"mode": "unconditional_reference_audit"}
+    config_path = _write_config(tmp_path, "carlini_diffusion", settings)
+    actual = LeakPro(ConditionProvider, config_path).attack_scheduler.attacks[0]
+    a = AttackCarliniExtraction(actual.adapter, settings, conditions=["unused-a"])
+    b = AttackCarliniExtraction(actual.adapter, settings, conditions=["unused-b"])
+    assert a.result_id == b.result_id == actual.result_id
+    assert "conditions" not in actual.identity_metadata
+    assert actual.identity_metadata["generation"]["sampler"]["conditional"] is False
+    ConditionProvider.get_extraction_conditions.assert_not_called()
+
+
+def test_unconditional_carlini_passes_mode_to_provider_metadata(tmp_path: Path) -> None:
+    class Provider(SIDEProvider):
+        def get_extraction_metadata(self, *, conditional: bool):
+            return {"target": {"kind": "stand-in"}, "sampler": {"conditional": conditional}}
+
+    settings = {"mode": "unconditional_reference_audit"}
+    audit = LeakPro(Provider, _write_config(tmp_path, "carlini_diffusion", settings))
+    assert audit.attack_scheduler.attacks[0].identity_metadata["generation"]["sampler"] == {"conditional": False}
 
 
 def test_default_resolved_json_metadata_and_equivalent_reconstruction_preserve_identity() -> None:
