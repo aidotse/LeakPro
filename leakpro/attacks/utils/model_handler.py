@@ -5,6 +5,10 @@
 """Abstract class for the model handler."""
 
 import os
+from hashlib import sha256
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from zipfile import BadZipFile
 
 import joblib
 import numpy as np
@@ -20,9 +24,9 @@ from leakpro.input_handler.user_imports import (
 )
 from leakpro.signals.signal import ModelLogits
 from leakpro.signals.signal_extractor import PytorchModel
-from leakpro.utils.import_helper import Any, Self, Tuple, Union
+from leakpro.utils.import_helper import Any, Optional, Self, Tuple, Union
 from leakpro.utils.logger import logger
-from leakpro.utils.save_load import hash_indices, hash_model
+from leakpro.utils.save_load import hash_config, hash_indices, hash_model
 
 
 class ModelHandler():
@@ -61,19 +65,18 @@ class ModelHandler():
         else:
             raise ValueError("Storage path not provided")
 
-        # Create the hash for the target model weights
-        self.target_model_hash = hash_model(self.handler.target_model)
+        target = handler.configs.target
+        self.target_model_hash = hash_config({
+            "weights": hash_model(handler.target_model), "class": target.model_class,
+            "definition": sha256(Path(target.module_path).read_bytes()).hexdigest(),
+            "init_params": handler.target_model_metadata.init_params or {},
+        })
 
-        # Create the hash for the data split — order-sensitive so logit row order is always valid
-        self.population_hash = hash_indices(self.handler.train_indices, self.handler.test_indices)
+        self.population_hash = hash_indices(handler.train_indices, handler.test_indices)
 
-        # Folder to store intermediate results — scoped to the job/model so stale
-        # logits from a previous run never bleed into a new one.
+        # Use a fresh audit directory when the dataset or preprocessing changes.
         self.attack_cache_folder_path = f"{storage_path}/attack_cache"
         os.makedirs(self.attack_cache_folder_path, exist_ok=True)
-
-        criterion = self.handler.get_criterion()
-        self.cache_logits(PytorchModel(self.handler.target_model, criterion), name=f"target_{self.target_model_hash}")
 
     def _load_model_setup(self:Self, caller_configs) -> Tuple[str, str]:  # noqa: ANN001
         """Load the effective model, optimizer, and criterion setup."""
@@ -87,7 +90,7 @@ class ModelHandler():
             self.optimizer_config = (target_setup.optimizer.params or {}).copy()
             self.loss_config = (target_setup.criterion.params or {}).copy()
             self.epochs = target_setup.epochs
-            self.batch_size = target_setup.data_loader.params.get("batch_size")
+            self.batch_size = target_setup.data_loader.params.get("batch_size", 1)
             return target_setup.optimizer.name, target_setup.criterion.name
 
         # Allow partial shadow model config by inheriting from the target setup.
@@ -114,7 +117,7 @@ class ModelHandler():
         self.loss_config = (criterion_cfg.params or {}).copy()
         caller_epochs = self._get_config_value(caller_configs, "epochs")
         self.epochs = caller_epochs if caller_epochs is not None else target_setup.epochs
-        target_batch_size = target_setup.data_loader.params.get("batch_size")
+        target_batch_size = target_setup.data_loader.params.get("batch_size", 1)
         caller_batch_size = self._get_config_value(caller_configs, "batch_size")
         self.batch_size = caller_batch_size if caller_batch_size is not None else target_batch_size
         return optimizer_cfg.name, criterion_cfg.name
@@ -131,65 +134,55 @@ class ModelHandler():
 
 
 
-    def cache_logits(self:Self, model:Union[Module, list[Module]], name:str) -> None:
-        """Cache the target model logits."""
-        cache_file = f"{self.attack_cache_folder_path}/{name}_logits.npy"
-        indices_file = f"{self.attack_cache_folder_path}/{name}_indices.npy"
-        data_indices = np.concatenate((self.handler.train_indices, self.handler.test_indices))
+    def cache_logits(self:Self, model:Union[Module, list[Module]], name:str) -> np.ndarray:
+        """Compute predictions and publish them together with their record order."""
+        indices = np.concatenate((self.handler.train_indices, self.handler.test_indices))
+        models = model if isinstance(model, list) else [model]
+        logits = np.array(ModelLogits()(models, self.handler, indices)).squeeze(axis=0)
+        destination = Path(self.attack_cache_folder_path) / f"{name}.npz"
+        with TemporaryDirectory(dir=destination.parent) as staging:
+            pending = Path(staging) / destination.name
+            np.savez(pending, logits=logits, indices=indices)
+            pending.replace(destination)
+        return logits
 
-        # Require BOTH files to exist. If only logits exist (old cache without companion),
-        # treat as miss so both are rewritten with a correct index record. If both exist but
-        # were cached for a different sample set (e.g. the audit config changed since the last
-        # run), also treat as a miss so the stale pair gets overwritten instead of silently
-        # reused — load_logits() would otherwise never be able to load them.
-        if os.path.exists(cache_file) and os.path.exists(indices_file):
-            cached_indices = np.load(indices_file)
-            # np.array_equal on sorted arrays, not a set comparison: a set comparison
-            # would treat two index arrays as equal even if one had a duplicate and the
-            # other didn't (multiplicity is invisible to sets), silently reusing a cache
-            # of the wrong length if train/test indices ever overlap.
-            if np.array_equal(np.sort(cached_indices), np.sort(data_indices)):
-                logger.info(f"Logits already cached at {cache_file}")
-                return
-            logger.info(f"Cached indices at {indices_file} no longer match the current run — recomputing")
+    def load_logits(self:Self, name:str) -> Optional[np.ndarray]:
+        """Load predictions in audit order, computing the target on its first use."""
+        target = f"target_{self.target_model_hash}"
+        if name == "target":
+            name = target
+        values = self._read_cached_logits(name)
+        if values is None and name == target:
+            model = PytorchModel(self.handler.target_model, self.handler.get_criterion())
+            return self.cache_logits(model, name)
+        return values
 
-        if not isinstance(model, list):
-            model = [model]
-        # ModelLogits returns one (N, num_classes) entry per model; cache_logits always
-        # caches a single model, so drop only the leading model-list axis. A bare
-        # .squeeze() would also collapse the class axis of a single-logit binary head
-        # (1, N, 1) -> (N,), breaking attacks that index logits as [rows, labels].
-        # squeeze(axis=0) leaves N and num_classes intact and raises if more than one
-        # model was passed, surfacing that misuse instead of silently mangling the cache.
-        logits = np.array(ModelLogits()(model, self.handler, data_indices)).squeeze(axis=0)
-        np.save(cache_file, logits)
-        np.save(indices_file, data_indices)
-        logger.info(f"Saved logits to {cache_file}")
-
-    def load_logits(self:Self, name:str) -> np.ndarray:
-        """Load cached logits, reordering rows if index order has changed since caching."""
-        cache_file = f"{self.attack_cache_folder_path}/{name}_logits.npy"
-        indices_file = f"{self.attack_cache_folder_path}/{name}_indices.npy"
-
-        if not os.path.exists(cache_file) or not os.path.exists(indices_file):
-            return None  # Cache miss — caller must recompute
-
-        cached_indices = np.load(indices_file)
-        current_indices = np.concatenate((self.handler.train_indices, self.handler.test_indices))
-        logits = np.load(cache_file)
-
-        if np.array_equal(cached_indices, current_indices):
-            logger.info(f"Loaded logits from {cache_file}")
-            return logits
-
-        # Same set of samples, different order — reorder rows to match current run.
-        cached_pos = {int(idx): row for row, idx in enumerate(cached_indices)}
+    def _read_cached_logits(self:Self, name:str) -> Optional[np.ndarray]:
+        """Read an intact cache entry for the current records."""
+        path = Path(self.attack_cache_folder_path) / f"{name}.npz"
         try:
-            reorder = np.array([cached_pos[int(idx)] for idx in current_indices])
-        except KeyError:
-            return None  # Different sample set — treat as miss
-        logger.info(f"Loaded and reordered logits from {cache_file}")
-        return logits[reorder]
+            with np.load(path, allow_pickle=False) as cached:
+                indices = cached["indices"]
+                current = np.concatenate((self.handler.train_indices, self.handler.test_indices))
+                if indices.shape != current.shape:
+                    return None
+                aligned = None
+                if not np.array_equal(indices, current):
+                    order = indices.argsort(kind="stable")
+                    current_order = current.argsort(kind="stable")
+                    if not np.array_equal(indices[order], current[current_order]):
+                        return None
+                    aligned = np.empty_like(order)
+                    aligned[current_order] = order
+                logits = cached["logits"]
+        except FileNotFoundError:
+            return None
+        except (BadZipFile, EOFError, KeyError, ValueError, TypeError):
+            logger.warning(f"Recomputing unreadable cached predictions at {path}")
+            return None
+        if logits.ndim < 1 or len(logits) != len(indices):
+            return None
+        return logits if aligned is None else logits[aligned]
 
     def _import_model_from_path(self:Self, module_path:str, model_class:str)->None:
         """Import the model from the given path.

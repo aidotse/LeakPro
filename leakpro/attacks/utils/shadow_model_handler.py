@@ -7,6 +7,9 @@
 import os
 import pickle
 import re
+from hashlib import sha256
+from marshal import dumps
+from uuid import uuid4
 
 import numpy as np
 import torch
@@ -14,13 +17,14 @@ from torch import Tensor, jit, save
 from torch.nn import Module
 
 from leakpro.attacks.utils.model_handler import ModelHandler
+from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.schemas import ShadowModelTrainingSchema, TrainingOutput
 from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.device import get_device
-from leakpro.utils.import_helper import Any, Dict, List, Self, Tuple, Union
+from leakpro.utils.import_helper import Any, Dict, List, Optional, Self, Tuple, Union
 from leakpro.utils.logger import logger
-from leakpro.utils.save_load import unwrapped_state_dict
+from leakpro.utils.save_load import hash_config, unwrapped_state_dict
 
 
 def singleton(cls):  # noqa: ANN001, ANN201
@@ -70,6 +74,7 @@ class ShadowModelHandler(ModelHandler):
         # Set up the names of the shadow model
         self.model_storage_name = "shadow_model"
         self.metadata_storage_name = "metadata"
+        self.checkpoint_hashes: dict[int, str] = {}
 
         self.device = get_device()
 
@@ -152,13 +157,28 @@ class ShadowModelHandler(ModelHandler):
             self._freeze_value(metadata.init_params),
         )
 
-    def _filter(self:Self, data_size:int) -> tuple[list[int], list[int]]:
+    def _sampler_hash(self, sampling_method: str, training_fraction: float) -> Optional[str]:
+        """Identify the custom random sampler and its exact fraction."""
+        if sampling_method != "random":
+            return None
+        hook = self.handler.sample_shadow_indices
+        function = getattr(hook, "__func__", hook)
+        if function is AbstractInputHandler.sample_shadow_indices:
+            return None
+        code = getattr(function, "__code__", None)
+        implementation = sha256(dumps(code, 2)).hexdigest() if code is not None else uuid4().hex
+        return hash_config({"implementation": implementation, "training_fraction": float(training_fraction)})
+
+    def _filter(self:Self, data_size:int, sampling_method:str="balanced",
+                sampler_hash:Optional[str]=None) -> tuple[list[int], list[int]]:
         """Find cached shadow models compatible with the current configuration.
 
         Args:
         ----
             data_size (int): Number of samples that should be used for each
                 shadow-model training run.
+            sampling_method: Requested shadow training sampler.
+            sampler_hash: Identity and requested fraction of an overridden random sampler.
 
         Returns:
         -------
@@ -175,11 +195,14 @@ class ShadowModelHandler(ModelHandler):
         current_sig = self._current_training_signature(data_size)
 
         filtered_indices = []
-        for i in all_indices:
+        for i in sorted(all_indices):
             metadata = self._load_shadow_metadata(i)
             assert isinstance(metadata, ShadowModelTrainingSchema), "Shadow Model metadata is not of the correct type"
+            stored_sampler = (getattr(metadata, "sampling_method", None), getattr(metadata, "sampler_hash", None))
             if getattr(metadata, "population_hash", None) != self.population_hash:
                 logger.debug(f"Shadow model {i} skipped — population_hash mismatch")
+            elif stored_sampler != (sampling_method, sampler_hash):
+                logger.debug(f"Shadow model {i} skipped — sampling method mismatch")
             elif self._metadata_training_signature(metadata) != current_sig:
                 logger.debug(f"Shadow model {i} skipped — training signature mismatch")
             else:
@@ -344,7 +367,8 @@ class ShadowModelHandler(ModelHandler):
 
         self._validate_training_size(data_size, len(shadow_population), training_fraction)
 
-        all_indices, filtered_indices = self._filter(data_size)
+        sampler_hash = self._sampler_hash(sampling_method, training_fraction)
+        all_indices, filtered_indices = self._filter(data_size, sampling_method, sampler_hash)
 
         # Create a list of indices to use for the new shadow models
         n_existing_models = len(filtered_indices)
@@ -427,10 +451,12 @@ class ShadowModelHandler(ModelHandler):
                 model_class = self.model_class,
                 model_module_path = self.model_path,
                 target_model_hash= self.target_model_hash,
+                sampling_method = sampling_method,
+                sampler_hash = sampler_hash,
                 population_hash = self.population_hash
             )
 
-            ShadowModelHandler().cache_logits(PytorchModel(shadow_model, criterion), name=f"sm_{indx}_{self.population_hash}")
+            self.cache_logits(PytorchModel(shadow_model, criterion), name=self._shadow_prediction_key(indx))
 
             with open(f"{self.storage_path}/{self.metadata_storage_name}_{indx}.pkl", "wb") as f:
                 pickle.dump(meta_data, f)
@@ -507,28 +533,24 @@ class ShadowModelHandler(ModelHandler):
             metadata.append(self._load_shadow_metadata(i))
         return metadata
 
+    def _shadow_prediction_key(self, index: int, name: str = None) -> str:
+        """Bind predictions to the saved checkpoint, even if its model number is reused."""
+        digest = sha256()
+        with open(f"{self.storage_path}/{self.model_storage_name}_{index}.pkl", "rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+        fingerprint = digest.hexdigest()
+        self.checkpoint_hashes[index] = fingerprint
+        prefix = name or f"sm_{index}_{self.population_hash}"
+        return f"{prefix}_{fingerprint}"
+
     def load_logits(self:Self, name:str=None, indx:int=None) -> np.ndarray:
         """Load model logits, realigning rows to current index order if needed."""
-        if name is None and indx is not None:
-            name = f"sm_{indx}_{self.population_hash}"
-
-        logits = super().load_logits(name)
-        if logits is not None:
-            return logits
-
-        # Cache miss — recompute.
-        logger.info(f"Cache miss for logits '{name}' — recomputing")
-        if indx is not None:
-            self.cache_logits(self._load_shadow_model(indx), name=name)
-        else:
-            # Target model logits: re-cache using target model.
-            criterion = self.handler.get_criterion()
-            self.cache_logits(PytorchModel(self.handler.target_model, criterion), name=name)
-
-        logits = super().load_logits(name)
-        if logits is None:
-            raise RuntimeError(f"Logits for '{name}' could not be loaded after recomputation.")
-        return logits
+        if indx is None:
+            return super().load_logits(name)
+        name = self._shadow_prediction_key(indx, name)
+        logits = self._read_cached_logits(name)
+        return self.cache_logits(self._load_shadow_model(indx), name) if logits is None else logits
 
     def get_in_indices_mask(self:Self, shadow_model_indices:list[int], dataset_indices:np.ndarray) -> np.ndarray:
         """Get the mask indicating which indices in the dataset are present in the shadow model training set.

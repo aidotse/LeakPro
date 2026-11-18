@@ -4,14 +4,12 @@
 #
 """Module that contains the AttackScheduler class, which is responsible for creating and executing attacks."""
 
-from collections.abc import Mapping
 from pathlib import Path
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
-from leakpro.schemas import AuditConfig
 from leakpro.utils.import_helper import Any, Dict, Self
 from leakpro.utils.logger import logger
-from leakpro.utils.seed import MAX_SEED, seed_everything
+from leakpro.utils.seed import get_audit_seed, seed_everything
 
 
 class AttackScheduler:
@@ -34,24 +32,7 @@ class AttackScheduler:
         """
         configs = handler.configs
 
-        # Seed once at audit start so attack construction (e.g. audit-data sampling)
-        # is reproducible. Non-int guard keeps DotMap-based configs working: a DotMap
-        # yields an empty DotMap for a missing key instead of raising. A value that is
-        # present but not an int is a config error, so it warns rather than defaulting
-        # silently. The same goes for an int outside [0, MAX_SEED], which would otherwise
-        # crash np.random.seed() inside seed_everything().
-        seed = getattr(configs.audit, "random_seed", None)
-        default_seed = AuditConfig.model_fields["random_seed"].default
-        if isinstance(seed, int) and not isinstance(seed, bool) and 0 <= seed <= MAX_SEED:
-            self.random_seed = seed
-        else:
-            seed_is_absent = seed is None or (isinstance(seed, Mapping) and len(seed) == 0)
-            if not seed_is_absent:
-                logger.warning(
-                    f"audit.random_seed={seed!r} is not an integer in [0, {MAX_SEED}]; "
-                    f"falling back to the default seed {default_seed}."
-                )
-            self.random_seed = default_seed
+        self.random_seed = get_audit_seed(configs.audit)
         seed_everything(self.random_seed)
 
         # Create factory

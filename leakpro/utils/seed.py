@@ -4,6 +4,7 @@
 #
 """Function to seed randomness for different libraries."""
 import random
+from collections.abc import Mapping
 
 import numpy as np
 import torch
@@ -13,6 +14,18 @@ from leakpro.utils.logger import logger
 
 # np.random.seed() rejects anything outside [0, 2**32 - 1], so this is the legal seed range.
 MAX_SEED = 2**32 - 1
+DEFAULT_AUDIT_SEED = 42
+
+
+def get_audit_seed(audit: object) -> int:
+    """Resolve the audit seed, including older configs with a missing or invalid value."""
+    seed = getattr(audit, "random_seed", None)
+    if isinstance(seed, int) and not isinstance(seed, bool) and 0 <= seed <= MAX_SEED:
+        return seed
+    if seed is not None and not (isinstance(seed, Mapping) and not seed):
+        logger.warning(f"audit.random_seed={seed!r} is not an integer in [0, {MAX_SEED}]; "
+                       f"falling back to the default seed {DEFAULT_AUDIT_SEED}.")
+    return DEFAULT_AUDIT_SEED
 
 
 def seed_everything(seed: int) -> None:

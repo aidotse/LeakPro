@@ -33,12 +33,13 @@ from leakpro.utils.save_load import hash_config, hash_model
 
 
 class TinyModel(nn.Module):
-    def __init__(self, num_classes=2):
+    def __init__(self, num_classes=2, gain=1.0):
         super().__init__()
         self.linear = nn.Linear(2, num_classes)
+        self.gain = gain
 
     def forward(self, inputs):
-        return self.linear(inputs)
+        return self.linear(inputs) * self.gain
 
 
 class TinyHandler(MIAHandler):
@@ -326,7 +327,9 @@ def test_seeded_rmia_experiments_keep_native_ids_and_saved_reports(saved_audit_i
     config_path.write_text(yaml.safe_dump(config))
     results = LeakPro(TinyInputHandler, str(config_path)).run_audit()
     assert len(results) == len({result.id for result in results}) == 6
-    assert not np.array_equal(results[0].signal_values, results[3].signal_values)
+    np.testing.assert_array_equal(results[0].signal_values, results[3].signal_values)
+    assert [r.metadata["robustness"]["target"] for r in results[:3]] != [
+        r.metadata["robustness"]["target"] for r in results[3:]]
     for result in results:
         assert result.id == result.result.id == f"RMIA-{hash_config(result.metadata)[:16]}"
     root = Path(config["audit"]["output_dir"])
@@ -672,3 +675,224 @@ def test_offline_rmia_preserves_float32_marginal_at_strict_threshold(handler):
     np.testing.assert_array_equal(actual, expected)
     with pytest.raises(ValueError, match="OUT reference model"):
         attack._compute_scores(target, references, np.zeros_like(out), np.array([[1.0]]))
+
+
+def test_changed_population_uses_fresh_audit_directory(handler, mocker, tmp_path):
+    from copy import copy
+    from leakpro.signals.signal import ModelLogits
+
+    settings = {"num_shadow_models": 4, "online": True}
+    first = AttackFactoryMIA.create_attack("base", settings, handler)
+    first_result, _ = first.run_robustness(n_runs=2, seed=7)
+    pool = ShadowModelHandler()
+    cache_key = f"target_{pool.target_model_hash}"
+    old_logits = pool.load_logits(name=cache_key)
+    other = copy(handler)
+    other.population = TinyHandler.UserDataset(handler.population.data + 3, handler.population.targets)
+    other.configs = handler.configs.model_copy(deep=True)
+    other.configs.audit.output_dir = str(tmp_path / "revised-audit")
+    train = mocker.spy(TinyHandler, "train")
+    second = AttackFactoryMIA.create_attack("base", settings, other)
+    second_result, _ = second.run_robustness(n_runs=2, seed=7)
+    for audit, result in ((handler, first_result), (other, second_result)):
+        experiment_id = result.metadata["robustness"]["experiment_id"]
+        directory = Path(audit.configs.audit.output_dir) / "robustness" / experiment_id
+        assert (directory / "summary.json").is_file()
+    expected = ModelLogits()([second.target_model], other, second.audit_dataset["data"])[0]
+    actual = ShadowModelHandler().load_logits(name=cache_key)
+    np.testing.assert_array_equal(actual, expected)
+    assert not np.array_equal(old_logits, actual)
+    assert train.call_count == 4
+    third = AttackFactoryMIA.create_attack("base", settings, other)
+    third.run_robustness(n_runs=2, seed=7)
+    assert train.call_count == 4
+    with pytest.raises(ValueError, match="different audit"):
+        first.run_robustness(n_runs=2, seed=7)
+
+
+def test_shadow_sampling_change_builds_then_reuses_new_pool(handler, mocker):
+    settings = {"num_shadow_models": 4, "online": True}
+    first = AttackFactoryMIA.create_attack("base", settings, handler)
+    first.run_robustness(n_runs=2, seed=7)
+    train = mocker.spy(TinyHandler, "train")
+    handler.configs.shadow_model = ShadowModelConfig(sampling_method="random")
+    second = AttackFactoryMIA.create_attack("base", settings, handler)
+    second.run_robustness(n_runs=2, seed=7)
+    assert train.call_count == 4
+    assert set(first.shadow_model_indices).isdisjoint(second.shadow_model_indices)
+    second.run_robustness(n_runs=2, seed=7)
+    assert train.call_count == 4
+
+
+def test_random_pool_follows_the_handler_sampler(saved_audit_inputs):
+    class FirstHalf(TinyInputHandler):
+        def sample_shadow_indices(self, shadow_population, data_fraction):
+            return np.sort(shadow_population)[:int(len(shadow_population) * data_fraction)]
+
+    class LastHalf(TinyInputHandler):
+        def sample_shadow_indices(self, shadow_population, data_fraction):
+            return np.sort(shadow_population)[-int(len(shadow_population) * data_fraction):]
+
+    config, path = saved_audit_inputs
+    config["shadow_model"] = {"sampling_method": "random"}
+    config["audit"]["attack_list"] = [
+        {"attack": "base", "online": True, "num_shadow_models": 2, "robustness": {"n_runs": 2, "seed": 17}}
+    ]
+    path.write_text(yaml.safe_dump(config))
+
+    def splits(handler_type):
+        original, _ = LeakPro(handler_type, str(path)).run_audit()
+        indices = original.metadata["robustness"]["references"]
+        metadata = ShadowModelHandler().get_shadow_model_metadata(indices)
+        return indices, [list(model.train_indices) for model in metadata]
+
+    first, lower = splits(FirstHalf)
+    assert lower == [list(range(30))] * 2
+    replacement, upper = splits(LastHalf)
+    assert upper == [list(range(30, 60))] * 2
+    assert set(first).isdisjoint(replacement)
+    assert splits(LastHalf) == (replacement, upper)
+
+
+@pytest.mark.parametrize("custom_sampler", [False, True], ids=["built-in", "custom"])
+def test_random_pool_matches_fraction_sensitive_sampler(saved_audit_inputs, tmp_path, custom_sampler):
+    class FractionSampler(TinyInputHandler):
+        def sample_shadow_indices(self, shadow_population, data_fraction):
+            records = np.sort(shadow_population)
+            count = int(len(records) * data_fraction)
+            return records[:count] if data_fraction < 0.405 else records[-count:]
+
+    handler_type = FractionSampler if custom_sampler else TinyInputHandler
+    config, path = saved_audit_inputs
+    config["shadow_model"] = {"sampling_method": "random"}
+    entries = [
+        {"attack": "base", "online": True, "num_shadow_models": 2, "training_data_fraction": fraction,
+         "robustness": {"n_runs": 2, "seed": 17}}
+        for fraction in (0.40, 0.41)
+    ]
+    config["audit"]["attack_list"] = entries
+    path.write_text(yaml.safe_dump(config))
+    first, _, changed, _ = LeakPro(handler_type, str(path)).run_audit()
+
+    def splits(result):
+        indices = result.metadata["robustness"]["references"]
+        return indices, [list(model.train_indices) for model in ShadowModelHandler().get_shadow_model_metadata(indices)]
+
+    first_ids, first_rows = splits(first)
+    changed_ids, changed_rows = splits(changed)
+    if custom_sampler:
+        assert first_rows == [list(range(24))] * 2
+        assert changed_rows == [list(range(36, 60))] * 2
+        assert set(first_ids).isdisjoint(changed_ids)
+    else:
+        assert (first_ids, first_rows) == (changed_ids, changed_rows)
+
+    config["audit"].update(output_dir=str(tmp_path / "fresh"), attack_list=entries[1:])
+    path.write_text(yaml.safe_dump(config))
+    fresh, _ = LeakPro(handler_type, str(path)).run_audit()
+    assert splits(fresh)[1] == changed_rows
+    np.testing.assert_array_equal(fresh.signal_values, changed.signal_values)
+
+
+def test_predictions_follow_forward_settings_with_same_weights(saved_audit_inputs):
+    config, yaml_path = saved_audit_inputs
+    config["audit"]["attack_list"] = [{"attack": "base", "online": True, "num_shadow_models": 2,
+                                      "robustness": {"n_runs": 2, "seed": 17}}]
+    yaml_path.write_text(yaml.safe_dump(config))
+    metadata_file = Path(config["target"]["target_folder"]) / "model_metadata.pkl"
+    first = LeakPro(TinyInputHandler, str(yaml_path))
+    first.run_audit()
+    predictions = ShadowModelHandler().load_logits(name="target")
+    metadata = first.handler.target_model_metadata.model_copy(update={"init_params": {"gain": 2.0}})
+    metadata_file.write_bytes(pickle.dumps(metadata))
+    warm = LeakPro(TinyInputHandler, str(yaml_path)).run_audit()
+    np.testing.assert_array_equal(ShadowModelHandler().load_logits(name="target"), 2 * predictions)
+    config["audit"]["output_dir"] += "-fresh"
+    yaml_path.write_text(yaml.safe_dump(config))
+    cold = LeakPro(TinyInputHandler, str(yaml_path)).run_audit()
+    for reused, fresh in zip(warm, cold):
+        np.testing.assert_array_equal(reused.signal_values, fresh.signal_values)
+
+
+def test_reused_mixed_rmia_audit_reloads_changed_checkpoint(saved_audit_inputs):
+    config, path = saved_audit_inputs
+    normal = {"attack": "rmia", "num_shadow_models": 4, "online": True, "gamma": 1.0}
+    config["audit"]["attack_list"] = [normal, {**normal, "robustness": {"n_runs": 2, "seed": 17}}]
+    path.write_text(yaml.safe_dump(config))
+    audit = LeakPro(TinyInputHandler, str(path))
+    initial, original, *_ = audit.run_audit()
+    np.testing.assert_array_equal(initial.signal_values, original.signal_values)
+
+    pool = ShadowModelHandler()
+    checkpoint = Path(pool.storage_path) / "shadow_model_0.pkl"
+    weights = torch.load(checkpoint, weights_only=True)
+    torch.save({name: torch.zeros_like(value) for name, value in weights.items()}, checkpoint)
+
+    reused, rotated, *_ = audit.run_audit()
+    assert np.any(initial.signal_values != rotated.signal_values)
+    np.testing.assert_array_equal(reused.signal_values, rotated.signal_values)
+    fresh, *_ = LeakPro(TinyInputHandler, str(path)).run_audit()
+    np.testing.assert_array_equal(reused.signal_values, fresh.signal_values)
+
+
+def test_replacing_one_shadow_checkpoint_refreshes_only_its_predictions(handler, mocker):
+    settings = {"num_shadow_models": 2, "online": True}
+    attack = AttackFactoryMIA.create_attack("base", settings, handler)
+    before = attack.run_robustness(n_runs=3, seed=17)
+    pool = ShadowModelHandler()
+    checkpoint = Path(pool.storage_path) / "shadow_model_0.pkl"
+    state = torch.load(checkpoint, weights_only=True)
+    torch.save({name: torch.zeros_like(value) for name, value in state.items()}, checkpoint)
+    infer = mocker.spy(pool, "cache_logits")
+    after = attack.run_robustness(n_runs=3, seed=17)
+    assert infer.call_count == 1
+    assert np.all(pool.load_logits(indx=0) == 0)
+    assert before[0].id != after[0].id
+    assert np.any(before[0].signal_values != after[0].signal_values)
+    assert attack.run_robustness(n_runs=3, seed=17)[0].id == after[0].id
+    assert infer.call_count == 1
+
+
+@pytest.mark.parametrize("model", ["target", "shadow"])
+def test_experiment_distinguishes_checkpoints_with_identical_scores(handler, tmp_path, model):
+    handler.population.data[:, 1] = 0
+    settings = {"num_shadow_models": 2, "online": True}
+    output = tmp_path / "reports"
+    attack = AttackFactoryMIA.create_attack("base", settings, handler)
+    before = attack.run_robustness(n_runs=3, seed=17, output_dir=str(output))
+    if model == "target":
+        with torch.no_grad():
+            handler.target_model.linear.weight[:, 1].add_(1)
+        # Separate training output reuses the same model ordinals without sharing metadata.
+        handler.configs.audit.output_dir = str(tmp_path / "second-pool")
+        attack = AttackFactoryMIA.create_attack("base", settings, handler)
+    else:
+        pool = ShadowModelHandler()
+        checkpoint = Path(pool.storage_path) / f"shadow_model_{attack.shadow_model_indices[0]}.pkl"
+        weights = torch.load(checkpoint, weights_only=True)
+        weights["linear.weight"][:, 1].add_(1)
+        torch.save(weights, checkpoint)
+
+    after = attack.run_robustness(n_runs=3, seed=17, output_dir=str(output))
+    for original, updated in zip(before, after):
+        np.testing.assert_array_equal(original.signal_values, updated.signal_values)
+        assert original.id != updated.id
+    assert len(list((output / "robustness").glob("*/summary.json"))) == 2
+
+
+@pytest.mark.parametrize("target_params,compatible", [({}, True), ({"batch_size": None}, False)])
+def test_loader_default_batch_size_through_yaml(saved_audit_inputs, target_params, compatible):
+    config, path = saved_audit_inputs
+    metadata_path = Path(config["target"]["target_folder"]) / "model_metadata.pkl"
+    metadata = pickle.loads(metadata_path.read_bytes())
+    metadata.data_loader.params = target_params
+    metadata_path.write_bytes(pickle.dumps(metadata))
+    config["shadow_model"] = {"batch_size": 1}
+    config["audit"]["attack_list"] = [{"attack": "base", "num_shadow_models": 2, "online": True,
+                                      "robustness": {"n_runs": 2}}]
+    path.write_text(yaml.safe_dump(config))
+    if compatible:
+        assert len(LeakPro(TinyInputHandler, str(path)).run_audit()) == 2
+    else:
+        with pytest.raises(ValueError, match="same target and shadow training setup"):
+            LeakPro(TinyInputHandler, str(path))

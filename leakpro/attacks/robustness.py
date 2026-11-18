@@ -42,10 +42,12 @@ class RobustnessConfig(BaseModel):
         if self.n_runs > attack.num_shadow_models + 1:
             raise ValueError("n_runs must be between 2 and num_shadow_models + 1")
         setup, pool = attack.handler.target_model_metadata, ShadowModelHandler()
+        if pool.handler is not attack.handler:
+            raise ValueError("The active shadow pool belongs to a different audit. Recreate this audit before running it.")
         expected = (attack.handler.target_model_blueprint.__name__, attack.handler.configs.target.module_path,
                     setup.init_params, setup.optimizer.name.lower(), setup.optimizer.params or {},
                     setup.criterion.name.lower(), setup.criterion.params or {}, setup.epochs,
-                    setup.data_loader.params.get("batch_size"))
+                    setup.data_loader.params.get("batch_size", 1))
         actual = (pool.model_class, pool.model_path, pool.init_params, pool.optimizer_name, pool.optimizer_config,
                   pool.criterion_name, pool.loss_config, pool.epochs, pool.batch_size)
         if actual != expected:
@@ -65,6 +67,8 @@ def save_robustness_results(attack: "AbstractMIA", signals: dict[str, np.ndarray
     """
     records = attack.audit_dataset["data"]
     model_ids = [-1, *map(int, attack.shadow_model_indices)]
+    pool = ShadowModelHandler()
+    checkpoints = [pool.target_model_hash, *(pool.checkpoint_hashes[index] for index in model_ids[1:])]
     if len(set(training_sizes)) > 1:
         logger.warning(f"Robustness target/shadow training sizes differ: {training_sizes}. "
                        "Results mix training sizes; compare the original and rotated targets accordingly.")
@@ -74,7 +78,7 @@ def save_robustness_results(attack: "AbstractMIA", signals: dict[str, np.ndarray
         digest.update(np.ascontiguousarray(values).data)
         signal_hashes[name] = digest.hexdigest()
     identity = {"attack": type(attack).__name__, "config": attack.configs.model_dump(), "seed": seed,
-                "targets": [model_ids[index] for index in targets], "models": model_ids,
+                "targets": [model_ids[index] for index in targets], "models": model_ids, "checkpoints": checkpoints,
                 "records": records.tolist(), "membership": membership.tolist(),
                 "training_sizes": training_sizes, "signals": signal_hashes}
     root = Path(attack.handler.configs.audit.output_dir if output_dir is None else output_dir)

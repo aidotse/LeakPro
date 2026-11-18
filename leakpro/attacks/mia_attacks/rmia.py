@@ -27,7 +27,7 @@ from leakpro.signals.signal import ModelLogits
 from leakpro.signals.signal_extractor import PytorchModel
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
-from leakpro.utils.seed import seed_everything
+from leakpro.utils.seed import get_audit_seed, seed_everything
 
 
 class AttackRMIA(AbstractMIA):
@@ -140,7 +140,6 @@ shadow-model residuals on the z-population. Ignored for classification models, w
         logger.info(f"RMIA signal probability mode: {self.likelihood_family or 'softmax'} "
                     f"(criterion: {type(criterion).__name__})")
 
-        self.load_for_optuna = False
         self.attack_cache_folder_path = ShadowModelHandler().attack_cache_folder_path
         self.bayesian_optimization = False
 
@@ -287,23 +286,24 @@ shadow-model residuals on the z-population. Ignored for classification models, w
         Signals are computed on the auxiliary model(s) and dataset.
 
         Args:
-            seed: Optional seed for model preparation and z sampling, independent of cache hits.
+            seed: Optional seed for z sampling. Shared models use the audit seed.
 
         """
-        if seed is not None:
-            seed_everything(seed)
         logger.info("Preparing shadow models for RMIA attack")
 
-        # If we already have one run, we dont need to check for shadow models as logits are stored
-        if not self.load_for_optuna or seed is not None:
-            self._prepare_shadow_models()
+        audit_seed = get_audit_seed(self.handler.configs.audit)
+        seed_everything(audit_seed)
+        self._prepare_shadow_models()
+        pool = ShadowModelHandler()
+        self.ground_truth = self.handler.get_labels(self.audit_dataset["data"])
+        self.logits_theta = pool.load_logits(name=f"target_{pool.target_model_hash}")
+        self.logits_shadow_models = [pool.load_logits(indx=index) for index in self.shadow_model_indices]
+        # A warm pool skips training and consumes fewer random draws.
+        seed_everything(audit_seed if seed is None else seed)
+        self._prepare_z_signals()
 
-            self.ground_truth = self.handler.get_labels(self.audit_dataset["data"])
-            self.logits_theta = ShadowModelHandler().load_logits(name=f"target_{ShadowModelHandler().target_model_hash}")
-            self.logits_shadow_models = []
-            for indx in self.shadow_model_indices:
-                self.logits_shadow_models.append(ShadowModelHandler().load_logits(indx=indx))
-
+    def _prepare_z_signals(self) -> None:
+        """Sample the auxiliary records and compute their probability ratios."""
         # Sample z from full population per Algorithm 1 of the RMIA paper.
         # Build a cache lookup (global index → row) once — identical for target and all shadow models.
         all_cached = np.concatenate([
@@ -313,8 +313,6 @@ shadow-model residuals on the z-population. Ignored for classification models, w
         logit_row = {int(idx): i for i, idx in enumerate(all_cached)}
 
         n_z = int(self.attack_data_fraction * len(self.attack_data_indices))
-        if seed is not None:
-            seed_everything(seed)
         z_indices = np.random.choice(self.attack_data_indices, size=n_z, replace=False)
         z_labels = self.handler.get_labels(z_indices)
 
@@ -398,9 +396,6 @@ shadow-model residuals on the z-population. Ignored for classification models, w
         true_labels = np.concatenate([np.ones(len(self.in_member_signals)), np.zeros(len(self.out_member_signals)),])
         signal_values = np.concatenate([self.in_member_signals, self.out_member_signals])
 
-        # Ensure we use the stored quantities from now
-        self.load_for_optuna = True
-
         # Save the results
         return MIAResult.from_full_scores(true_membership=true_labels,
                                           signal_values=signal_values,
@@ -409,15 +404,19 @@ shadow-model residuals on the z-population. Ignored for classification models, w
                                           audit_indices=self.scored_population_indices())
 
     def reset_attack(self: Self, config:BaseModel) -> None:
-        """Reset attack to initial state."""
-
-        # Assign the new configuration parameters to the object
+        """Apply tuning parameters and reuse the pool prepared for this study."""
+        tuned = {"gamma", "offline_a"}
+        reuse_pool = (
+            self.shadow_model_indices is not None
+            and self.configs.model_dump(exclude=tuned) == config.model_dump(exclude=tuned)
+        )
         self.configs = config
         for key, value in config.model_dump().items():
             setattr(self, key, value)
-
-        # new hyperparameters have been set, let's prepare the attack again
-        self.prepare_attack()
+        if reuse_pool:
+            self._prepare_z_signals()
+        else:
+            self.prepare_attack()
 
 
 
@@ -455,7 +454,7 @@ shadow-model residuals on the z-population. Ignored for classification models, w
         """
         config = RobustnessConfig(n_runs=n_runs, seed=seed)
         config.validate_attack(self)
-        self.prepare_attack(seed=seed)
+        self.prepare_attack(seed=get_audit_seed(self.handler.configs.audit))
         metadata = ShadowModelHandler().get_shadow_model_metadata(self.shadow_model_indices)
         training_indices = [self.handler.train_indices, *[model.train_indices for model in metadata]]
         membership = np.array([np.isin(self.audit_dataset["data"], indices) for indices in training_indices])

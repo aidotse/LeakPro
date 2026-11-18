@@ -54,6 +54,8 @@ audit:  # Configurations for auditing
 
 
 
+  # Use a fresh output directory when the dataset or preprocessing changes.
+  # Robustness results are saved in its robustness/ subfolder.
   output_dir: "./leakpro_output"
   attack_type: "mia" #mia, gia
   data_modality: "image" #image, tabular

@@ -8,6 +8,8 @@ import importlib.util
 import inspect
 import os
 import sys
+from hashlib import sha256
+from pathlib import Path
 
 from torch import nn, optim
 
@@ -23,8 +25,12 @@ def import_module_from_file(filepath: str) -> ModuleType:
 
     module_name = os.path.splitext(os.path.basename(filepath))[0]
 
+    source = Path(filepath).read_bytes()
+    source_hash = sha256(source).hexdigest()
     existing = sys.modules.get(module_name)
-    if existing is not None and os.path.abspath(getattr(existing, "__file__", "")) == filepath:
+    if (existing is not None and getattr(existing, "__file__", None) == filepath
+            and getattr(existing, "__leakpro_source_hash__", source_hash) == source_hash):
+        existing.__leakpro_source_hash__ = source_hash
         return existing
 
     spec = importlib.util.spec_from_file_location(module_name, filepath)
@@ -36,7 +42,8 @@ def import_module_from_file(filepath: str) -> ModuleType:
     previous = sys.modules.get(module_name)
     sys.modules[module_name] = module
     try:
-        spec.loader.exec_module(module)
+        exec(compile(source, filepath, "exec"), module.__dict__)  # noqa: S102
+        module.__leakpro_source_hash__ = source_hash
     except Exception:
         if previous is not None:
             sys.modules[module_name] = previous
