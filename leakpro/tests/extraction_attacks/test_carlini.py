@@ -45,7 +45,8 @@ def test_conditional_black_box_retains_repeatability_clique() -> None:
     assert result.metrics["candidate_count"] == 1
 
 
-def test_unconditional_reference_mode_deduplicates_reference_matches() -> None:
+@pytest.mark.parametrize("max_extractions", [None, 1])
+def test_unconditional_reference_mode_deduplicates_reference_matches(max_extractions: int | None) -> None:
     references = torch.stack([torch.full((1, 2, 2), value) for value in (0.0, 0.2, 0.4, 0.6)])
 
     def sample(batch_size: int, conditions: Sequence[Any] | None, seed: int) -> torch.Tensor:
@@ -58,6 +59,7 @@ def test_unconditional_reference_mode_deduplicates_reference_matches() -> None:
         adapter,
         {
             "mode": "unconditional_reference_audit",
+            "max_extractions": max_extractions,
             "num_unconditional_generations": 6,
             "generation_batch_size": 2,
             "reference_neighbors": 3,
@@ -70,8 +72,10 @@ def test_unconditional_reference_mode_deduplicates_reference_matches() -> None:
     )
     attack.prepare_attack()
     result = attack.run_attack()
-    assert result.images.shape[0] == 2
-    assert {record.nearest_reference_index for record in result.candidates} == {0, 1}
+    retained_references = [0, 1][:max_extractions]
+    assert result.metrics["unique_reference_matches"] == 2
+    assert result.metrics["candidate_count"] == result.images.shape[0] == len(retained_references)
+    assert [record.nearest_reference_index for record in result.candidates] == retained_references
     assert all(record.score == 0.0 for record in result.candidates)
 
 

@@ -55,10 +55,7 @@ class ExtractionResult:
         images = images.to(dtype=torch.float32)
         if not torch.isfinite(images).all():
             raise ValueError("ExtractionResult.images contains NaN or infinity.")
-        if len(candidates) != images.shape[0]:
-            raise ValueError("Candidate metadata count must match the number of images.")
-        if any(candidate.image_index >= images.shape[0] for candidate in candidates):
-            raise ValueError("Candidate image index is outside the image batch.")
+        self._validate_candidate_indices([candidate.image_index for candidate in candidates], images.shape[0])
         self.name = name
         self.id = result_id
         self.config = config.model_dump(mode="json") if isinstance(config, BaseModel) else dict(config)
@@ -67,17 +64,28 @@ class ExtractionResult:
         self.metrics = json_safe(metrics)
         self.provenance = json_safe(provenance)
 
+    @staticmethod
+    def _validate_candidate_indices(indices: list[int], image_count: int) -> None:
+        if (
+            len(indices) != image_count
+            or any(type(index) is not int or not 0 <= index < image_count for index in indices)
+            or len(set(indices)) != image_count
+        ):
+            raise ValueError("Each output image must have exactly one candidate record.")
+
     @property
     def result(self) -> dict[str, Any]:
         """Return metadata without embedding the image arrays."""
+        candidates = [candidate.model_dump(mode="json") for candidate in self.candidates]
+        self._validate_candidate_indices([candidate["image_index"] for candidate in candidates], self.images.shape[0])
         return {
             "name": self.name,
             "id": self.id,
             "config": json_safe(self.config),
             "metrics": self.metrics,
             "provenance": self.provenance,
-            "candidate_count": len(self.candidates),
-            "candidates": [candidate.model_dump(mode="json") for candidate in self.candidates],
+            "candidate_count": len(candidates),
+            "candidates": candidates,
         }
 
     def save(self, attack_obj: object | None = None, output_dir: str | os.PathLike[str] = "./leakpro_output") -> None:  # noqa: ARG002
@@ -86,11 +94,11 @@ class ExtractionResult:
         The scheduler checks overwrite policy before compute. Like other result
         writers, direct saves replace existing files and propagate write errors.
         """
+        metadata = json.dumps(self.result, indent=2, sort_keys=True, allow_nan=False) + "\n"
         result_dir = Path(output_dir) / "results" / self.id
         data_dir = Path(output_dir) / "data_objects"
         result_dir.mkdir(parents=True, exist_ok=True)
         data_dir.mkdir(parents=True, exist_ok=True)
-        metadata = json.dumps(self.result, indent=2, sort_keys=True, allow_nan=False) + "\n"
-        (data_dir / f"{self.id}.json").write_text(metadata, encoding="utf-8")
-        (result_dir / "result.txt").write_text(metadata, encoding="utf-8")
         np.savez_compressed(result_dir / "candidates.npz", images=self.images.numpy())
+        (result_dir / "result.txt").write_text(metadata, encoding="utf-8")
+        (data_dir / f"{self.id}.json").write_text(metadata, encoding="utf-8")

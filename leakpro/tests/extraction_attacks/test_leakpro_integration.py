@@ -47,20 +47,42 @@ def test_scheduler_skips_failed_creation_without_mislabeling_survivors(
     )
     monkeypatch.setattr(AttackScheduler, "_initialize_factory", lambda self, name: setattr(self, "attack_factory", factory))
     handler = SimpleNamespace(configs=SimpleNamespace(audit=SimpleNamespace(
-        attack_type=attack_type, attack_list=[{"attack": "broken"}, {"attack": "valid", "random_seed": 7}],
+        attack_type=attack_type, attack_list=[{}, {"attack": []}, {"attack": "broken"}, {"attack": "valid", "random_seed": 7}],
     )))
 
     scheduler = AttackScheduler(handler, str(tmp_path))
-    results = scheduler.run_attacks()
+    audit = LeakPro.__new__(LeakPro)
+    audit.handler, audit.attack_scheduler = handler, scheduler
+    with caplog.at_level("INFO", logger="leakpro"):
+        results = audit.run_audit()
 
     assert scheduler.attack_names == ["valid"]
     assert scheduler.attack_configs == [{"random_seed": 7}]
-    assert results == [{"attack_type": "valid", "attack_object": attack, "result_object": result}]
+    assert results == [result]
+    assert "Returned results for 1 of 4 configured attacks." in caplog.text
+    assert "Skipping audit entry 1" in caplog.text
+    assert "Skipping audit entry 2" in caplog.text
     assert "Failed to create attack: broken" in caplog.text
     assert "provider unavailable" in caplog.text
     attack.prepare_attack.assert_called_once_with()
     attack.run_attack.assert_called_once_with()
     result.save.assert_called_once_with(attack_obj=attack, output_dir=str(tmp_path))
+
+
+def test_metadata_alone_protects_a_saved_result(tmp_path: Path) -> None:
+    scheduler = AttackScheduler.__new__(AttackScheduler)
+    scheduler.report_dir = tmp_path / "results"
+    scheduler.data_object_dir = tmp_path / "data_objects"
+    scheduler.data_object_dir.mkdir()
+    metadata = scheduler.data_object_dir / "saved.json"
+    metadata.write_text("previous result")
+    entry = SimpleNamespace(result_id="saved", config=SimpleNamespace(overwrite_results=False))
+    scheduler.attacks = [entry]
+    with pytest.raises(FileExistsError, match="saved"):
+        scheduler._preflight_extraction_results()
+    entry.config.overwrite_results = True
+    scheduler._preflight_extraction_results()
+    assert metadata.read_text() == "previous result"
 
 
 def test_public_imports_without_optional_stacks() -> None:

@@ -411,7 +411,7 @@ class AttackCarliniExtraction(AbstractExtraction):
                 "images_generated": total_generated,
                 "candidate_count": len(records),
                 "sampling_calls": self._sampling_calls,
-                "unique_reference_matches": len(records),
+                "unique_reference_matches": len(best_by_reference),
                 "ratio_threshold": self.config.ratio_threshold,
             },
             provenance={**self.description(), "target": self.target_name, "identity": self.identity_metadata},

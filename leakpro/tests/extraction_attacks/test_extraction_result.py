@@ -46,6 +46,26 @@ def test_save_propagates_write_errors(tmp_path: Path, filename: str) -> None:
     with pytest.raises((IsADirectoryError, PermissionError)) as error:
         _make_result().save(output_dir=tmp_path)
     assert Path(error.value.filename) == destination
+    if destination.suffix == ".npz":
+        assert not (tmp_path / "data_objects" / "safe-id.json").exists()
+        assert not destination.with_name("result.txt").exists()
+
+
+@pytest.mark.parametrize("indices", [[0, 0], [0, 2], [0], [0, 1, 1]])
+def test_each_image_needs_one_candidate(indices: list[int]) -> None:
+    with pytest.raises(ValueError, match="exactly one"):
+        ExtractionResult(
+            name="test", result_id="safe-id", config={}, images=torch.zeros((2, 1, 2, 2)),
+            candidates=[CandidateRecord(image_index=i, source="unit") for i in indices], metrics={}, provenance={},
+        )
+
+
+def test_save_rejects_an_invalid_candidate_mapping_before_writing(tmp_path: Path) -> None:
+    result = _make_result()
+    result.candidates.append(result.candidates[0])
+    with pytest.raises(ValueError, match="exactly one"):
+        result.save(output_dir=tmp_path)
+    assert not list(tmp_path.iterdir())
 
 
 @pytest.mark.parametrize("result_id", ["../escape", ".", ".."])

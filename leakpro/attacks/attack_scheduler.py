@@ -39,9 +39,12 @@ class AttackScheduler:
         self.attacks = []
         self.attack_names = []
         self.attack_configs = []
-        for entry in configs.audit.attack_list:
-            attack_name = entry["attack"]
-            attack_config = {key: value for key, value in entry.items() if key != "attack"}
+        for position, entry in enumerate(configs.audit.attack_list, start=1):
+            attack_config = entry.copy()
+            attack_name = attack_config.pop("attack", None)
+            if not isinstance(attack_name, str) or not attack_name.strip():
+                logger.warning("Skipping audit entry %d because it has no valid attack name.", position)
+                continue
             try:
                 attack = self.attack_factory.create_attack(attack_name, attack_config, handler)
                 self.add_attack(attack)
@@ -152,8 +155,7 @@ class AttackScheduler:
         for attack in self.attacks:
             if attack.config.overwrite_results:
                 continue
-            result_dir = self.report_dir / attack.result_id
-            if result_dir.exists():
+            if (self.report_dir / attack.result_id).exists() or (self.data_object_dir / f"{attack.result_id}.json").exists():
                 raise FileExistsError(
                     f"Extraction result {attack.result_id!r} already exists. "
                     "Set overwrite_results=true to replace it."
