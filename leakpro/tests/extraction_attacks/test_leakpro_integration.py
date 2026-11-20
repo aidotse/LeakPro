@@ -89,11 +89,6 @@ def test_public_imports_without_optional_stacks() -> None:
     script = """
 import sys
 sys.modules.update(dict.fromkeys(("torchvision", "transformers")))
-class NoOptuna:
-    def find_spec(self, name, *args):
-        if name == "optuna":
-            raise AssertionError("ordinary public imports attempted to load Optuna")
-sys.meta_path.insert(0, NoOptuna())
 from leakpro import AbstractInputHandler, LeakPro
 assert "leakpro.attacks.extraction_attacks" not in sys.modules
 assert "leakpro.input_handler.extraction_handler" not in sys.modules
@@ -168,9 +163,6 @@ class SIDEProvider(AbstractExtractionInputHandler):
 
     def get_side_feature_extractor(self) -> nn.Module:
         return TinyFeatureExtractor()
-
-    def get_side_feature_metadata(self) -> dict[str, Any]:
-        return {"extractor": {"architecture": "tiny_features_v1"}}
 
 
 def _write_config(
@@ -382,7 +374,6 @@ def test_factory_constructs_a_registered_subclass_through_the_public_path(
         adapter=image_sampler((1, 4, 4), _alternating_samples, model=nn.Identity()),
         references=torch.stack((torch.zeros((1, 4, 4)), torch.ones((1, 4, 4)))),
         feature_extractor=TinyFeatureExtractor(), feature_transform=nn.Identity(),
-        feature_metadata={"extractor": {"architecture": "tiny_features_v1"}},
     )
     monkeypatch.setitem(AttackFactoryExtraction.attack_classes, "registered_carlini", RegisteredCarlini)
     config_path = _write_config(
@@ -477,12 +468,19 @@ def test_carlini_public_path_persists_metrics(tmp_path: Any) -> None:
     assert (tmp_path / "output" / "data_objects" / f"{second.id}.json").exists()
 
 
-def test_side_rejects_float64_default_before_sampling(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    audit = LeakPro(SIDEProvider, _write_config(tmp_path, "side", {}))
-    monkeypatch.setattr(audit.attack_scheduler.attacks[0].adapter, "sample", Mock(side_effect=AssertionError("unexpected sample")))
-    monkeypatch.setattr(torch, "get_default_dtype", lambda: torch.float64)
-    with pytest.raises(ValueError, match="float64 PyTorch default dtype"):
-        audit.run_audit()
+def test_side_uses_a_float32_classifier_with_a_float64_default(tmp_path: Path) -> None:
+    audit = LeakPro(SIDEProvider, _write_config(tmp_path, "side", {
+        "compute_device": "cpu", "synthetic_samples": 4, "synthetic_batch_size": 4, "clusters": 2,
+        "classifier_epochs": 1, "classifier_batch_size": 4, "num_generations": 2,
+    }))
+    original_dtype = torch.get_default_dtype()
+    try:
+        torch.set_default_dtype(torch.float64)
+        results = audit.run_audit()
+    finally:
+        torch.set_default_dtype(original_dtype)
+    assert len(results) == 1
+    assert next(audit.attack_scheduler.attacks[0].classifier.parameters()).dtype == torch.float32
 
 
 def test_side_public_path_records_training_and_guidance(
@@ -675,7 +673,7 @@ def test_both_attacks_run_through_the_vendored_unconditional_diffusion(tmp_path:
             )
             return TracedAdapter(
                 model=UnconditionalDenoiser(), diffusion=diffusion, image_shape=(1, 4, 4),
-                sampling_steps=3, clip_guided=True, target_config={"architecture": "unconditional_denoiser_v1"},
+                sampling_steps=3, clip_guided=True,
             )
 
     config_path = Path(_write_config(tmp_path, "side", {

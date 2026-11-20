@@ -11,16 +11,15 @@ from typing import Any, Literal
 
 import torch
 from pydantic import Field, field_validator, model_validator
-from torch import Tensor, nn
+from torch import Tensor
 
 from leakpro.attacks.extraction_attacks.abstract_extraction import AbstractExtraction, ExtractionConfig
+from leakpro.attacks.extraction_attacks.adapters import adapter_metadata
 from leakpro.attacks.extraction_attacks.protocols import ExtractionAdapter
 from leakpro.attacks.extraction_attacks.utils_generative import (
-    adapter_metadata,
     json_safe,
     normalize_conditions,
     progress_batches,
-    read_extraction_metadata,
     to_zero_one,
     validate_image_batch,
 )
@@ -39,7 +38,7 @@ from leakpro.input_handler.extraction_handler import ExtractionHandler
 from leakpro.reporting.extraction_result import CandidateRecord, ExtractionResult
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
-from leakpro.utils.save_load import hash_attack, hash_config
+from leakpro.utils.save_load import hash_config
 
 
 class AttackCarliniExtraction(AbstractExtraction):
@@ -97,7 +96,6 @@ class AttackCarliniExtraction(AbstractExtraction):
         target_name: str = "diffusion_target",
         conditions: Sequence[Any] | None = None,
         reference_images: Tensor | None = None,
-        generation_metadata: dict[str, Any] | None = None,
     ) -> None:
         self.adapter = adapter
         self.config = configs if isinstance(configs, self.AttackConfig) else self.AttackConfig(**configs)
@@ -110,21 +108,16 @@ class AttackCarliniExtraction(AbstractExtraction):
         identity_config = self.config.model_dump(mode="json", exclude={"overwrite_results"})
         if self.config.mode == "unconditional_reference_audit":
             identity_config["reference_score"] = "candidate_neighbors"
-        model = getattr(self.adapter, "model", None)
-        if not isinstance(model, nn.Module):
-            raise ValueError("Weight-based extraction result IDs require adapter.model to contain the audited torch model.")
-        identity = {
-            "config": identity_config,
-            "generation": adapter_metadata(
-                adapter, generation_metadata, guided=False, conditional=conditional,
-            ),
-        }
+        generation = adapter_metadata(adapter, guided=False, conditional=conditional)
+        identity = {"config": identity_config, "generation": generation}
         if conditional:
             identity["clique_search_policy"] = CLIQUE_SEARCH_POLICY
         if self.conditions is not None:
-            identity["conditions"] = [hash_config({"condition": json_safe(condition)}) for condition in self.conditions]
+            identity["conditions"] = [
+                hash_config({"condition": json_safe(condition)}) for condition in self.conditions
+            ]
         self.identity_metadata = identity
-        result_hash = hash_attack(identity, model)[:16]
+        result_hash = hash_config(identity)[:16]
         self.result_id = f"carlini-diffusion-extraction-{result_hash}"
         self.attack_id = self.result_id
         self._references_zero_one: Tensor | None = None
@@ -141,7 +134,6 @@ class AttackCarliniExtraction(AbstractExtraction):
             target_name=handler.configs.target.name,
             conditions=handler.get_extraction_conditions() if conditional else None,
             reference_images=handler.get_extraction_reference_images(),
-            generation_metadata=read_extraction_metadata(handler.get_extraction_metadata, conditional=conditional),
         )
 
     def description(self) -> dict[str, str]:
@@ -173,15 +165,8 @@ class AttackCarliniExtraction(AbstractExtraction):
         if (
             not isinstance(self.adapter, ExtractionAdapter)
             or not callable(getattr(self.adapter, "sample", None))
-            or not hasattr(self.adapter, "image_shape")
         ):
-            raise TypeError("Carlini requires an adapter with sample() and image_shape.")
-        if (
-            not isinstance(self.adapter.image_shape, tuple)
-            or len(self.adapter.image_shape) != 3
-            or any(not isinstance(size, int) or isinstance(size, bool) or size < 1 for size in self.adapter.image_shape)
-        ):
-            raise ValueError("adapter.image_shape must be a positive CHW tuple.")
+            raise TypeError("Carlini requires an adapter with sample().")
         if self.config.mode == "conditional_black_box" and not self.conditions:
             raise ValueError("conditional_black_box mode requires at least one condition.")
         if self.config.mode == "conditional_black_box" and any(condition is None for condition in self.conditions or []):
@@ -228,8 +213,8 @@ class AttackCarliniExtraction(AbstractExtraction):
         if self.conditions is None:
             raise RuntimeError("Conditional inputs were not prepared.")
         for condition_index, condition in enumerate(self.conditions):
-            hash = hash_config({"condition": json_safe(condition)})
-            condition_id = f"condition:{condition_index}:{hash[:12]}"
+            condition_hash = self.identity_metadata["conditions"][condition_index]
+            condition_id = f"condition:{condition_index}:{condition_hash[:12]}"
             images = self._generate(
                 self.config.num_generations_per_condition,
                 condition,
@@ -255,7 +240,7 @@ class AttackCarliniExtraction(AbstractExtraction):
             qualified = len(clique) >= self.config.min_clique_size
             summary = {
                 "condition_index": condition_index,
-                "condition_hash": hash,
+                "condition_hash": condition_hash,
                 "edge_density": density,
                 "clique_search_exact": search.exact,
                 "clique_search_nodes": search.search_nodes,
@@ -275,7 +260,7 @@ class AttackCarliniExtraction(AbstractExtraction):
                         support_indices=clique,
                         metadata={
                             "condition_index": condition_index,
-                            "condition_hash": hash,
+                            "condition_hash": condition_hash,
                             "medoid_generation_index": medoid_index,
                             "largest_clique_size": summary["largest_clique_size"],
                             "clique_size_lower_bound": len(clique),

@@ -13,10 +13,16 @@ import torch
 from torch import Tensor, nn
 
 from leakpro.attacks.extraction_attacks.protocols import ConditionGradient, ExtractionAdapter
-from leakpro.attacks.extraction_attacks.utils_generative import json_safe, seeded_torch_rng
+from leakpro.attacks.extraction_attacks.utils_generative import (
+    component_metadata,
+    json_safe,
+    qualified_name,
+    seeded_torch_rng,
+)
 from leakpro.attacks.utils.diff_mi.gaussian_diffusion import GaussianDiffusion
 from leakpro.attacks.utils.diff_mi.respace import SpacedDiffusion, space_timesteps
 from leakpro.utils.device import get_device, mark_step
+from leakpro.utils.logger import logger
 from leakpro.utils.save_load import hash_config
 
 ConditionEncoder = Callable[[Sequence[Any]], dict[str, Any]]
@@ -44,9 +50,6 @@ class DiffusionAdapter(ExtractionAdapter[Tensor]):
         clip_denoised: bool = True,
         sampling_steps: int | None = None,
         clip_guided: bool = False,
-        target_config: dict[str, Any] | None = None,
-        diffusion_config: dict[str, Any] | None = None,
-        condition_config: dict[str, Any] | None = None,
     ) -> None:
         if not hasattr(diffusion, "q_sample") or not hasattr(diffusion, "p_sample_loop"):
             raise TypeError("diffusion must provide q_sample() and p_sample_loop().")
@@ -60,9 +63,6 @@ class DiffusionAdapter(ExtractionAdapter[Tensor]):
         self.num_timesteps = int(diffusion.num_timesteps)
         self.sampling_diffusion: SpacedDiffusion | None = None
         self.clip_guided = clip_guided
-        self.target_config = target_config
-        self.diffusion_config = diffusion_config
-        self.condition_config = condition_config
         if sampling_steps is not None:
             if not isinstance(diffusion, GaussianDiffusion):
                 raise TypeError("sampling_steps requires LeakPro's vendored GaussianDiffusion process.")
@@ -81,50 +81,56 @@ class DiffusionAdapter(ExtractionAdapter[Tensor]):
             )
         self.model.to(self.device).eval()
 
-    def get_extraction_metadata(self, *, guided: bool = False, conditional: bool = True) -> dict[str, Any]:
-        """Describe effective sampling, with explicit configs for opaque components.
+    def get_extraction_metadata(self, *, guided: bool = False) -> dict[str, Any]:
+        """Describe sampler settings for the selected audit mode.
 
-        ``target_config`` declares architecture and non-state behavior. A custom
-        diffusion process or an active condition encoder must declare its settings.
-        Classifier guidance and unconditional sampling do not use the encoder.
-        Defaults and timestep maps are resolved from the process actually used.
+        This covers adapter options and the vendored diffusion schedule.
+        Override this getter to add settings specific to a custom process.
         """
         process = self.diffusion if self.sampling_diffusion is None else self.sampling_diffusion
-        if type(self.diffusion) not in (GaussianDiffusion, SpacedDiffusion) and (
-            not isinstance(self.diffusion_config, dict) or not self.diffusion_config
+        built_in = type(process) in (GaussianDiffusion, SpacedDiffusion)
+        diffusion = {
+            "implementation": qualified_name(type(self.diffusion)),
+            "num_timesteps": int(process.num_timesteps),
+        }
+        if built_in:
+            timestep_map = getattr(process, "timestep_map", None)
+            if timestep_map is None:
+                timestep_map = range(process.num_timesteps)
+            weight = getattr(process, "w", 1.0)
+            diffusion.update(
+                timestep_map=json_safe(list(timestep_map)),
+                rescale_timesteps=bool(getattr(process, "rescale_timesteps", False)),
+                original_num_steps=int(getattr(process, "original_num_steps", self.num_timesteps)),
+                classifier_free_guidance_weight=float(weight) if weight is not None else None,
+                model_mean_type=process.model_mean_type.name,
+                model_var_type=process.model_var_type.name,
+                forward_betas_hash=hash_config({"betas": json_safe(self.diffusion.betas)}),
+            )
+            diffusion["reverse_betas_hash"] = (
+                diffusion["forward_betas_hash"] if process is self.diffusion
+                else hash_config({"betas": json_safe(process.betas)})
+            )
+        if guided and self.sampling_diffusion is not None:
+            diffusion["guidance_input_rescaled"] = bool(self.diffusion.rescale_timesteps)
+        elif guided and not built_in and (
+            getattr(self.classifier_timesteps, "__func__", None) is DiffusionAdapter.classifier_timesteps
         ):
-            raise ValueError("Custom diffusion processes require diffusion_config for result identity.")
-        if isinstance(self.diffusion, GaussianDiffusion):
-            diffusion = {
-                "implementation": "leakpro.diff_mi",
-                "config": self.diffusion_config,
-                "original_num_steps": getattr(process, "original_num_steps", self.num_timesteps),
-                "num_timesteps": int(process.num_timesteps),
-                "timestep_map": list(getattr(process, "timestep_map", range(process.num_timesteps))),
-                "forward_betas_hash": hash_config({"betas": json_safe(self.diffusion.betas)}),
-                "reverse_betas_hash": hash_config({"betas": json_safe(process.betas)}),
-                "model_mean_type": process.model_mean_type.name,
-                "model_var_type": process.model_var_type.name,
-                "rescale_timesteps": bool(process.rescale_timesteps),
-                "classifier_free_guidance_weight": float(process.w),
-            }
-        else:
-            diffusion = {"implementation": "provider", "config": self.diffusion_config,
-                         "num_timesteps": self.num_timesteps}
-        uses_encoder = conditional and not guided and self.condition_encoder is not None
-        if uses_encoder and not self.condition_config:
-            raise ValueError("A condition_encoder requires condition_config for result identity.")
+            timestep_map = getattr(self.diffusion, "timestep_map", None)
+            if timestep_map is not None:
+                diffusion["timestep_map"] = json_safe(list(timestep_map))
+                diffusion["rescale_timesteps"] = bool(getattr(self.diffusion, "rescale_timesteps", False))
+                if diffusion["rescale_timesteps"]:
+                    diffusion["original_num_steps"] = int(self.diffusion.original_num_steps)
         return {
-            "target": self.target_config,
-            "sampler": {
-                "kind": "ancestral" if self.sampling_diffusion is None else "ddim",
-                "diffusion": diffusion,
-                "clip_denoised": self.clip_denoised,
-                "clip_guided": bool(guided and self.sampling_diffusion is not None and self.clip_guided),
-                "ddim_eta": None if self.sampling_diffusion is None else 0.0,
-                "model_kwargs": json_safe(self.base_model_kwargs),
-                "condition_encoder": self.condition_config if uses_encoder else None,
-            },
+            "kind": "ancestral" if self.sampling_diffusion is None else "ddim",
+            "device": str(self.device),
+            "diffusion": diffusion,
+            "clip_denoised": self.clip_denoised,
+            "clip_guided": bool(guided and self.sampling_diffusion is not None and self.clip_guided),
+            "ddim_eta": None if self.sampling_diffusion is None else 0.0,
+            "model_kwargs": _ordered_settings(self.base_model_kwargs),
+            "torch_default_dtype": str(torch.get_default_dtype()),
         }
 
     def _model_kwargs(self, conditions: Sequence[Any] | None) -> dict[str, Any]:
@@ -244,3 +250,77 @@ class DiffusionAdapter(ExtractionAdapter[Tensor]):
             return gradient
 
         return self._sample(batch_size, dict(self.base_model_kwargs), seed, condition)
+
+
+def _ordered_settings(settings: dict[str, Any]) -> object:
+    """Encode bindings as pairs so sorting JSON object keys cannot change their order."""
+    try:
+        return json_safe(settings, ordered=True)
+    except TypeError as error:
+        raise ValueError(f"Invalid sampler metadata. {error}") from error
+
+
+def _declared_sampler_settings(
+    getter: Callable[..., Any], *, guided: bool, optional_mode: bool = False,
+) -> dict[str, Any]:
+    try:
+        settings = getter(guided=guided)
+    except NotImplementedError:
+        return {}
+    except ValueError as error:
+        if not optional_mode:
+            raise
+        logger.warning("Could not read optional unguided sampler settings: %s", error)
+        return {}
+    if settings is None:
+        return {}
+    if not isinstance(settings, dict):
+        raise ValueError("get_extraction_metadata() must return a dictionary or None.")
+    if settings.keys() == {"target", "sampler"} and all(isinstance(value, dict) for value in settings.values()):
+        return {key: _ordered_settings(value) for key, value in settings.items()}
+    return {"sampler": _ordered_settings(settings)}
+
+
+def _adapter_sampler_metadata(adapter: ExtractionAdapter[Tensor], *, guided: bool) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    getter = getattr(adapter, "get_extraction_metadata", None)
+    if isinstance(adapter, DiffusionAdapter):
+        metadata["sampler"] = DiffusionAdapter.get_extraction_metadata(adapter, guided=guided)
+        if getattr(getter, "__func__", None) is DiffusionAdapter.get_extraction_metadata:
+            return metadata
+    if callable(getter):
+        declared = _declared_sampler_settings(getter, guided=guided)
+        if declared:
+            metadata["declared_settings"] = declared
+        if guided:
+            synthetic = _declared_sampler_settings(getter, guided=False, optional_mode=True)
+            if synthetic:
+                metadata["declared_synthetic_settings"] = synthetic
+    return metadata
+
+
+def adapter_metadata(
+    adapter: ExtractionAdapter[Tensor], *, guided: bool, conditional: bool,
+) -> dict[str, Any]:
+    """Record the model, adapter options, and applicable optional sampler settings."""
+    shape = getattr(adapter, "image_shape", None)
+    if (
+        not isinstance(shape, tuple) or len(shape) != 3
+        or any(not isinstance(size, int) or isinstance(size, bool) or size < 1 for size in shape)
+    ):
+        raise ValueError("adapter.image_shape must be a positive CHW tuple.")
+
+    model = getattr(adapter, "model", None)
+    if not isinstance(model, nn.Module):
+        raise ValueError("Weight-based extraction result IDs require adapter.model to contain the audited torch model.")
+    metadata = {
+        "adapter": qualified_name(type(adapter)),
+        "target": component_metadata(model),
+        "image_shape": list(shape),
+        **_adapter_sampler_metadata(adapter, guided=guided),
+    }
+    if guided and isinstance(timesteps := getattr(adapter, "num_timesteps", None), int):
+        metadata["forward_steps"] = timesteps
+    if conditional and (encoder := getattr(adapter, "condition_encoder", None)) is not None:
+        metadata["condition_encoder"] = component_metadata(encoder)
+    return metadata

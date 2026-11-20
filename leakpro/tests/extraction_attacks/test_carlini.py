@@ -111,7 +111,7 @@ def test_unsupported_conditions_fail_before_sampling(condition) -> None:
 
 def test_prompt_and_label_hashes_use_shared_json_utilities() -> None:
     from leakpro.attacks.extraction_attacks.utils_generative import json_safe
-    from leakpro.utils.save_load import hash_attack, hash_config
+    from leakpro.utils.save_load import hash_config
 
     model = torch.nn.Linear(1, 1)
     adapter = image_sampler((1, 4, 4), lambda *args, **kwargs: None, model=model)
@@ -119,7 +119,7 @@ def test_prompt_and_label_hashes_use_shared_json_utilities() -> None:
     attack = AttackCarliniExtraction(adapter, {}, conditions=conditions)
     identity = attack.identity_metadata
     assert identity["conditions"] == [hash_config({"condition": json_safe(value)}) for value in conditions]
-    assert attack.result_id.endswith(hash_attack(identity, model)[:16])
+    assert attack.result_id.endswith(hash_config(identity)[:16])
     assert identity["conditions"][0] != identity["conditions"][1]
 
 

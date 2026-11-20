@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from copy import deepcopy
 from typing import Any, Literal
 
 import numpy as np
@@ -21,6 +20,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from tqdm.auto import tqdm
 
 from leakpro.attacks.extraction_attacks.abstract_extraction import AbstractExtraction, ExtractionConfig
+from leakpro.attacks.extraction_attacks.adapters import adapter_metadata
 from leakpro.attacks.extraction_attacks.protocols import (
     ExtractionAdapter,
     FeatureTransform,
@@ -28,12 +28,10 @@ from leakpro.attacks.extraction_attacks.protocols import (
     identity_feature_transform,
 )
 from leakpro.attacks.extraction_attacks.utils_generative import (
-    adapter_metadata,
     batch_ranges,
+    component_metadata,
     decode_uint8,
     encode_uint8,
-    json_safe,
-    module_metadata,
     progress_batches,
     seeded_torch_rng,
     to_zero_one,
@@ -50,7 +48,7 @@ from leakpro.reporting.extraction_result import CandidateRecord, ExtractionResul
 from leakpro.utils.device import get_device, mark_step
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
-from leakpro.utils.save_load import hash_attack, hash_config
+from leakpro.utils.save_load import hash_config
 
 
 @contextmanager
@@ -109,10 +107,6 @@ class AttackSIDEExtraction(AbstractExtraction):
         num_generations: int = Field(default=10_000, ge=1)
         l2_bands: dict[str, SimilarityBand] = Field(default_factory=dict)
         similarity_bands: dict[str, SimilarityBand] = Field(default_factory=dict)
-        reference_score_id: str | None = Field(
-            default=None,
-            description="Stable identifier for the reference scorer and its settings. Use a new audit for a different scorer.",
-        )
 
         @model_validator(mode="after")
         def validate_sample_and_cluster_counts(self) -> Self:
@@ -125,9 +119,6 @@ class AttackSIDEExtraction(AbstractExtraction):
                 raise ValueError("classifier_blocks entries must be positive.")
             if any(band.lower < 0 or band.upper > 1 for band in self.l2_bands.values()):
                 raise ValueError("SIDE l2_bands must use distances on the [0, 1] image scale.")
-            scorer_id = self.reference_score_id
-            if self.similarity_bands and (not isinstance(scorer_id, str) or not scorer_id.strip()):
-                raise ValueError("similarity_bands requires a reference_score_id identifying the scorer and its settings.")
             return self
 
     def __init__(
@@ -140,52 +131,31 @@ class AttackSIDEExtraction(AbstractExtraction):
         reference_images: Tensor | None = None,
         feature_transform: FeatureTransform | None = None,
         reference_score_fn: PairwiseScore | None = None,
-        generation_metadata: dict[str, Any] | None = None,
-        feature_metadata: dict[str, Any] | None = None,
     ) -> None:
         self.adapter = adapter
-        self.feature_extractor = feature_extractor
         self.config = self.AttackConfig.model_validate(configs)
         self.configs = self.config
-        self._audit_config = self.config.model_copy(deep=True)
         self.optuna_params = 0
         self.target_name = target_name
         self.reference_images = reference_images
-        self.feature_transform = feature_transform or identity_feature_transform
+        self.feature_transform = identity_feature_transform if feature_transform is None else feature_transform
         self.classifier: nn.Module | None = None
-        self._reference_score_fn = reference_score_fn
-        identity_config = self._report_identity_config(self._audit_config.model_dump(mode="json"))
-        model = getattr(self.adapter, "model", None)
-        if not isinstance(model, nn.Module):
-            raise ValueError("Weight-based extraction result IDs require adapter.model to contain the audited torch model.")
-        if not isinstance(feature_metadata, dict):
-            raise ValueError("SIDE requires feature_metadata describing the extractor and preprocessing configuration.")
-        features = {"extractor": module_metadata(feature_extractor, feature_metadata.get("extractor"))}
-        transform_config = feature_metadata.get("transform")
-        # Registered hooks can change an Identity module's output.
-        plain_identity = self.feature_transform is identity_feature_transform or (
-            type(self.feature_transform) is nn.Identity
-            and not self.feature_transform._forward_hooks
-            and not self.feature_transform._forward_pre_hooks
-        )
-        if plain_identity and transform_config is None:
-            features["transform"] = {"kind": "identity"}
-        elif isinstance(self.feature_transform, nn.Module):
-            features["transform"] = module_metadata(self.feature_transform, transform_config)
-        else:
-            if not isinstance(transform_config, dict) or not transform_config:
-                raise ValueError("Custom feature transforms require a non-empty transform configuration and behavior revision.")
-            features["transform"] = {"config": json_safe(transform_config)}
-        self._identity_metadata = {
-            "config": identity_config,
-            "generation": adapter_metadata(adapter, generation_metadata, guided=True),
-            "features": features,
+        self.reference_score_fn = reference_score_fn
+        self.feature_extractor = feature_extractor
+        extractor_metadata = component_metadata(self.feature_extractor)
+        transform_metadata = component_metadata(self.feature_transform)
+        self.identity_metadata = {
+            "config": self.config.model_dump(mode="json", exclude={"overwrite_results"}),
+            "features": {"extractor": extractor_metadata, "transform": transform_metadata},
             "classifier": TimeConditionedResNet.__name__,
         }
-        result_hash = hash_attack(self._identity_metadata, model)[:16]
+        if self.config.similarity_bands and reference_score_fn is not None:
+            self.identity_metadata["reference_score"] = component_metadata(reference_score_fn)
+        self.identity_metadata["generation"] = adapter_metadata(adapter, guided=True, conditional=False)
+        result_hash = hash_config(self.identity_metadata)[:16]
         self.result_id = f"side-extraction-{result_hash}"
         self.attack_id = self.result_id
-        device = self._audit_config.compute_device
+        device = self.config.compute_device
         self.device = get_device() if device == "auto" else torch.device(device)
         self.synthetic_images_uint8: Tensor | None = None
         self.synthetic_labels: Tensor | None = None
@@ -213,8 +183,6 @@ class AttackSIDEExtraction(AbstractExtraction):
             reference_images=handler.get_extraction_reference_images(),
             feature_transform=handler.get_side_feature_transform(),
             reference_score_fn=handler.get_extraction_reference_score(),
-            generation_metadata=handler.get_extraction_metadata(),
-            feature_metadata=handler.get_side_feature_metadata(),
         )
 
     def description(self) -> dict[str, str]:
@@ -239,35 +207,8 @@ class AttackSIDEExtraction(AbstractExtraction):
             ),
         }
 
-    @property
-    def reference_score_fn(self) -> PairwiseScore | None:
-        """Return the scorer supplied when the audit was created."""
-        return self._reference_score_fn
-
-    @property
-    def identity_metadata(self) -> dict[str, Any]:
-        """Return a copy of the metadata used to assign the report ID."""
-        return deepcopy(self._identity_metadata)
-
-    @staticmethod
-    def _report_identity_config(config: dict[str, Any]) -> dict[str, Any]:
-        """Exclude file replacement policy and unused scorer IDs from the hash."""
-        identity_config = config.copy()
-        identity_config.pop("overwrite_results")
-        if not identity_config["similarity_bands"]:
-            identity_config.pop("reference_score_id")
-        return identity_config
-
-    def _checked_report_config(self) -> dict[str, Any]:
-        """Return the settings only if they still match the assigned report ID."""
-        config = self.config.model_dump(mode="json")
-        if self._report_identity_config(config) != self._identity_metadata["config"]:
-            raise ValueError("SIDE report settings changed. Start a new audit to use the updated settings.")
-        return config
-
     def prepare_attack(self) -> None:
         """Create surrogate labels and train the time-dependent classifier."""
-        self._checked_report_config()
         logger.info("Preparing SIDE extraction attack")
         self.classifier = None
         self.cluster_centroids = None
@@ -286,7 +227,7 @@ class AttackSIDEExtraction(AbstractExtraction):
         logger.info("Clustering SIDE synthetic training data")
         self._fit_surrogate_clusters()
         logger.info("Training SIDE time-dependent classifier")
-        with seeded_torch_rng(self.device, self._audit_config.random_seed):
+        with seeded_torch_rng(self.device, self.config.random_seed):
             self._build_classifier()
             self._train_classifier()
 
@@ -308,17 +249,9 @@ class AttackSIDEExtraction(AbstractExtraction):
             or self.adapter.num_timesteps < 2
         ):
             raise ValueError("adapter.num_timesteps must be at least 2.")
-        if (
-            not isinstance(getattr(self.adapter, "image_shape", None), tuple)
-            or len(self.adapter.image_shape) != 3
-            or any(not isinstance(size, int) or isinstance(size, bool) or size < 1 for size in self.adapter.image_shape)
-        ):
-            raise ValueError("adapter.image_shape must be a positive CHW tuple.")
 
     def _validate_preparation_inputs(self) -> None:
         """Reject malformed white-box components before target sampling."""
-        if torch.get_default_dtype() == torch.float64:
-            raise ValueError("SIDE's built-in classifier does not support a float64 PyTorch default dtype.")
         self._validate_adapter()
         if not isinstance(self.feature_extractor, nn.Module):
             raise TypeError("feature_extractor must be a torch.nn.Module.")
@@ -332,10 +265,10 @@ class AttackSIDEExtraction(AbstractExtraction):
         """Validate reference-dependent metrics before target sampling."""
         if self.reference_images is not None:
             references = validate_image_batch(self.reference_images, self.adapter.image_shape)
-            self._references_zero_one = to_zero_one(references.detach().cpu(), self._audit_config.image_range)
-        if self._audit_config.similarity_bands and self.reference_score_fn is None:
+            self._references_zero_one = to_zero_one(references.detach().cpu(), self.config.image_range)
+        if self.config.similarity_bands and self.reference_score_fn is None:
             raise ValueError("similarity_bands requires a reference_score_fn.")
-        if (self._audit_config.l2_bands or self._audit_config.similarity_bands) and self.reference_images is None:
+        if (self.config.l2_bands or self.config.similarity_bands) and self.reference_images is None:
             raise ValueError("Reference score bands require reference_images.")
 
     def _build_synthetic_dataset(self) -> None:
@@ -344,22 +277,22 @@ class AttackSIDEExtraction(AbstractExtraction):
         self.feature_extractor.to(self.device).eval()
         feature_dtype = self._feature_extractor_dtype()
         for parameter in self.feature_extractor.parameters():
-            parameter.requires_grad_(False)
+            parameter.requires_grad = False
         for batch_index, (start, end) in enumerate(
             progress_batches(
-                self._audit_config.synthetic_samples, self._audit_config.synthetic_batch_size, "SIDE synthetic generation",
+                self.config.synthetic_samples, self.config.synthetic_batch_size, "SIDE synthetic generation",
             )
         ):
             batch = self.adapter.sample(
                 end - start,
                 conditions=None,
                 seed=int(hash_config({
-                    "seed": self._audit_config.random_seed, "attack": "side", "phase": "synthetic", "batch": batch_index,
+                    "seed": self.config.random_seed, "attack": "side", "phase": "synthetic", "batch": batch_index,
                 })[:8], 16),
             )
             self._sampling_calls += 1
             batch = validate_image_batch(batch, self.adapter.image_shape, expected_count=end - start)
-            zero_one = to_zero_one(batch.detach(), self._audit_config.image_range)
+            zero_one = to_zero_one(batch.detach(), self.config.image_range)
             stored_images.append(encode_uint8(zero_one))
             with torch.no_grad():
                 transformed = self.feature_transform(zero_one.to(self.device))
@@ -381,9 +314,9 @@ class AttackSIDEExtraction(AbstractExtraction):
     def _fit_surrogate_clusters(self) -> None:
         features = self._synthetic_features.float()
         kmeans = KMeans(
-            n_clusters=self._audit_config.clusters,
-            n_init=self._audit_config.kmeans_n_init,
-            random_state=self._audit_config.random_seed,
+            n_clusters=self.config.clusters,
+            n_init=self.config.kmeans_n_init,
+            random_state=self.config.random_seed,
             algorithm="lloyd",
         )
         raw_labels = torch.from_numpy(kmeans.fit_predict(features.numpy())).long()
@@ -393,13 +326,13 @@ class AttackSIDEExtraction(AbstractExtraction):
 
         retained_centroids: list[Tensor] = []
         retained_cohesion: list[float] = []
-        for cluster_index in range(self._audit_config.clusters):
+        for cluster_index in range(self.config.clusters):
             member_mask = raw_labels.eq(cluster_index)
             member_count = int(member_mask.sum())
-            if member_count < self._audit_config.min_cluster_size:
+            if member_count < self.config.min_cluster_size:
                 continue
             cohesion = float((normalized_features[member_mask] @ normalized_centroids[cluster_index]).mean())
-            if cohesion >= self._audit_config.cohesion_threshold:
+            if cohesion >= self.config.cohesion_threshold:
                 retained_centroids.append(raw_centroids[cluster_index])
                 retained_cohesion.append(cohesion)
         if len(retained_centroids) < 2:
@@ -410,7 +343,7 @@ class AttackSIDEExtraction(AbstractExtraction):
         reassigned = torch.cat(
             [
                 torch.cdist(features[start:end], centroids).argmin(dim=1)
-                for start, end in batch_ranges(features.shape[0], self._audit_config.synthetic_batch_size)
+                for start, end in batch_ranges(features.shape[0], self.config.synthetic_batch_size)
             ]
         )
         self.synthetic_labels = reassigned.long()
@@ -424,10 +357,10 @@ class AttackSIDEExtraction(AbstractExtraction):
         self.classifier = TimeConditionedResNet(
             in_channels=self.adapter.image_shape[0],
             num_classes=self.cluster_centroids.shape[0],
-            base_width=self._audit_config.classifier_base_width,
-            blocks=self._audit_config.classifier_blocks,
-            timestep_embedding_dim=self._audit_config.timestep_embedding_dim,
-        ).to(self.device)
+            base_width=self.config.classifier_base_width,
+            blocks=self.config.classifier_blocks,
+            timestep_embedding_dim=self.config.timestep_embedding_dim,
+        ).to(device=self.device, dtype=torch.float32)
 
     def _train_classifier(self) -> None:
         if self.synthetic_images_uint8 is None or self.synthetic_labels is None:
@@ -435,29 +368,28 @@ class AttackSIDEExtraction(AbstractExtraction):
         if self.classifier is None:
             raise RuntimeError("The SIDE classifier was not prepared.")
         dataset = TensorDataset(self.synthetic_images_uint8, self.synthetic_labels)
-        loader_generator = torch.Generator(device="cpu").manual_seed(self._audit_config.random_seed)
+        loader_generator = torch.Generator(device="cpu").manual_seed(self.config.random_seed)
         loader = DataLoader(
             dataset,
-            batch_size=self._audit_config.classifier_batch_size,
+            batch_size=self.config.classifier_batch_size,
             shuffle=True,
             generator=loader_generator,
             num_workers=0,
         )
         optimizer = torch.optim.AdamW(
             self.classifier.parameters(),
-            lr=self._audit_config.classifier_learning_rate,
-            weight_decay=self._audit_config.classifier_weight_decay,
+            lr=self.config.classifier_learning_rate,
+            weight_decay=self.config.classifier_weight_decay,
         )
-        noise_generator = torch.Generator(device="cpu").manual_seed(self._audit_config.random_seed + 17)
-        classifier_dtype = self._classifier_dtype()
+        noise_generator = torch.Generator(device="cpu").manual_seed(self.config.random_seed + 17)
         self.classifier.train()
-        with tqdm(total=self._audit_config.classifier_epochs * len(loader), desc="SIDE classifier training",
+        with tqdm(total=self.config.classifier_epochs * len(loader), desc="SIDE classifier training",
                   unit="batch", dynamic_ncols=True) as progress:
-            for epoch in range(self._audit_config.classifier_epochs):
+            for epoch in range(self.config.classifier_epochs):
                 loss_sum = 0.0
                 sample_count = 0
                 for encoded_images, batch_labels in loader:
-                    clean = decode_uint8(encoded_images, self._audit_config.image_range).to(self.device)
+                    clean = decode_uint8(encoded_images, self.config.image_range).to(self.device)
                     target_labels = batch_labels.to(self.device)
                     timesteps = torch.randint(
                         0,
@@ -466,10 +398,12 @@ class AttackSIDEExtraction(AbstractExtraction):
                         generator=noise_generator,
                         device="cpu",
                     ).to(self.device)
-                    noise = torch.randn(clean.shape, generator=noise_generator, device="cpu").to(self.device)
+                    noise = torch.randn(
+                        clean.shape, generator=noise_generator, device="cpu", dtype=clean.dtype,
+                    ).to(self.device)
                     noisy = self.adapter.q_sample(clean, timesteps, noise)
                     noisy = validate_image_batch(noisy, self.adapter.image_shape, expected_count=clean.shape[0])
-                    classifier_inputs = noisy.to(device=self.device, dtype=classifier_dtype)
+                    classifier_inputs = noisy.to(device=self.device, dtype=torch.float32)
                     classifier_timesteps = self.adapter.classifier_timesteps(timesteps).to(self.device)
                     if clean.shape[0] == 1:
                         self._singleton_classifier_batches += 1
@@ -485,7 +419,7 @@ class AttackSIDEExtraction(AbstractExtraction):
                     mark_step(self.device)
                     loss_sum += float(loss.detach()) * clean.shape[0]
                     sample_count += clean.shape[0]
-                    progress.set_postfix(epoch=f"{epoch + 1}/{self._audit_config.classifier_epochs}",
+                    progress.set_postfix(epoch=f"{epoch + 1}/{self.config.classifier_epochs}",
                                          loss=f"{loss_sum / sample_count:.4f}", refresh=False)
                     progress.update(1)
                 if sample_count == 0:
@@ -501,7 +435,7 @@ class AttackSIDEExtraction(AbstractExtraction):
         original_device = noisy_images.device
         original_dtype = noisy_images.dtype
         with torch.enable_grad():
-            inputs = noisy_images.detach().to(device=self.device, dtype=self._classifier_dtype()).requires_grad_(True)
+            inputs = noisy_images.detach().to(device=self.device, dtype=torch.float32).requires_grad_(True)
             classifier_timesteps = timesteps.to(self.device)
             selected_labels = labels.to(device=self.device, dtype=torch.long)
             logits = self.classifier(inputs, classifier_timesteps)
@@ -510,27 +444,10 @@ class AttackSIDEExtraction(AbstractExtraction):
         if not torch.isfinite(gradient).all():
             raise RuntimeError("SIDE classifier guidance produced NaN or infinity.")
         self._guidance_calls += 1
-        guided = (gradient * self._audit_config.guidance_scale).to(device=original_device, dtype=original_dtype)
+        guided = (gradient * self.config.guidance_scale).to(device=original_device, dtype=original_dtype)
         if not torch.isfinite(guided).all():
             raise RuntimeError("SIDE classifier guidance overflowed on the sampling device or dtype.")
         return guided
-
-    def _classifier_dtype(self) -> torch.dtype:
-        """Return the classifier's single floating-point parameter dtype."""
-        if self.classifier is None:
-            raise RuntimeError("The SIDE classifier was not prepared.")
-        state_tensors = list(self.classifier.parameters()) + list(self.classifier.buffers())
-        if any(tensor.is_complex() for tensor in state_tensors):
-            raise ValueError("SIDE classifier parameters and buffers must not use complex dtypes.")
-        dtypes = {
-            parameter.dtype
-            for parameter in self.classifier.parameters()
-            if parameter.is_floating_point()
-        }
-        dtypes.update(buffer.dtype for buffer in self.classifier.buffers() if buffer.is_floating_point())
-        if len(dtypes) > 1:
-            raise ValueError("SIDE classifier floating-point parameters must use one dtype.")
-        return next(iter(dtypes), torch.float32)
 
     def _feature_extractor_dtype(self) -> torch.dtype:
         """Return the extractor's single floating-point parameter dtype."""
@@ -558,8 +475,6 @@ class AttackSIDEExtraction(AbstractExtraction):
 
     def run_attack(self) -> ExtractionResult:
         """Generate cluster-guided candidates and optionally evaluate them against references."""
-        self._checked_report_config()
-        reference_score_fn = self.reference_score_fn
         logger.info("Running SIDE extraction attack")
         sampling_calls_before = self._sampling_calls
         guidance_calls_before = self._guidance_calls
@@ -567,10 +482,10 @@ class AttackSIDEExtraction(AbstractExtraction):
             raise RuntimeError("Surrogate clusters were not prepared.")
         generated: list[Tensor] = []
         generated_labels: list[Tensor] = []
-        label_generator = torch.Generator(device="cpu").manual_seed(self._audit_config.random_seed + 29)
+        label_generator = torch.Generator(device="cpu").manual_seed(self.config.random_seed + 29)
         for batch_index, (start, end) in enumerate(
             progress_batches(
-                self._audit_config.num_generations, self._audit_config.generation_batch_size, "SIDE guided generation",
+                self.config.num_generations, self.config.generation_batch_size, "SIDE guided generation",
             )
         ):
             labels = torch.randint(
@@ -584,10 +499,10 @@ class AttackSIDEExtraction(AbstractExtraction):
                 end - start,
                 labels=labels,
                 seed=int(hash_config({
-                    "seed": self._audit_config.random_seed, "attack": "side", "phase": "guided", "batch": batch_index,
+                    "seed": self.config.random_seed, "attack": "side", "phase": "guided", "batch": batch_index,
                 })[:8], 16),
             )
-            generated.append(to_zero_one(batch, self._audit_config.image_range))
+            generated.append(to_zero_one(batch, self.config.image_range))
             generated_labels.append(labels)
         images = torch.cat(generated)
         labels = torch.cat(generated_labels)
@@ -600,7 +515,7 @@ class AttackSIDEExtraction(AbstractExtraction):
             "retained_clusters": self.cluster_centroids.shape[0],
             "cluster_cohesion": self.cluster_cohesion,
             "classifier_epoch_losses": self.training_history,
-            "guidance_scale": self._audit_config.guidance_scale,
+            "guidance_scale": self.config.guidance_scale,
             "sampling_calls": self._synthetic_sampling_calls + self._sampling_calls - sampling_calls_before,
             "synthetic_sampling_calls": self._synthetic_sampling_calls,
             "guidance_calls": self._guidance_calls - guidance_calls_before,
@@ -610,9 +525,9 @@ class AttackSIDEExtraction(AbstractExtraction):
             nearest_indices, nearest_distances, band_metrics = l2_band_scores(
                 images,
                 self._references_zero_one,
-                self._audit_config.l2_bands,
-                block_size=self._audit_config.distance_block_size,
-                device=self._audit_config.distance_device,
+                self.config.l2_bands,
+                block_size=self.config.distance_block_size,
+                device=self.config.distance_device,
                 return_nearest=True,
             )
             metrics.update(
@@ -624,18 +539,18 @@ class AttackSIDEExtraction(AbstractExtraction):
                     "l2_coordinate_range": "zero_one",
                 }
             )
-            if self._audit_config.similarity_bands:
-                if reference_score_fn is None:
+            if self.config.similarity_bands:
+                if self.reference_score_fn is None:
                     raise RuntimeError("The configured reference score function was not prepared.")
                 if self._references_zero_one is None:
                     raise RuntimeError("Reference images were not prepared for the configured similarity score.")
                 metrics["similarity_band_scores"] = pairwise_band_scores(
                     images,
                     self._references_zero_one,
-                    self._audit_config.similarity_bands,
-                    reference_score_fn,
-                    block_size=self._audit_config.distance_block_size,
-                    device=self._audit_config.distance_device,
+                    self.config.similarity_bands,
+                    self.reference_score_fn,
+                    block_size=self.config.distance_block_size,
+                    device=self.config.distance_device,
                 )
 
         records: list[CandidateRecord] = []
@@ -658,9 +573,9 @@ class AttackSIDEExtraction(AbstractExtraction):
         return ExtractionResult(
             name="SIDE Extraction Result",
             result_id=self.result_id,
-            config=self._checked_report_config(),
+            config=self.config,
             images=images,
             candidates=records,
             metrics=metrics,
-            provenance={**self.description(), "target": self.target_name, "identity": self._identity_metadata},
+            provenance={**self.description(), "target": self.target_name, "identity": self.identity_metadata},
         )

@@ -6,11 +6,11 @@
 
 from __future__ import annotations
 
-import inspect
 import math
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from importlib import import_module
+from types import BuiltinFunctionType, FunctionType, MethodType
 from typing import Any, Literal
 
 import numpy as np
@@ -137,22 +137,23 @@ def normalize_conditions(conditions: Sequence[Any] | None) -> list[Any] | None:
     return normalized
 
 
-def json_safe(value: object) -> object:
+def json_safe(value: object, *, ordered: bool = False) -> object:
     """Convert common scientific Python values into strict JSON-compatible values."""
     if isinstance(value, BaseModel):
-        converted: object = json_safe(value.model_dump(mode="json"))
+        converted: object = json_safe(value.model_dump(mode="json"), ordered=ordered)
     elif isinstance(value, dict):
         if any(not isinstance(key, str) for key in value):
             raise TypeError("Result metadata dictionaries require string keys.")
-        converted = {key: json_safe(item) for key, item in value.items()}
+        entries = {key: json_safe(item, ordered=ordered) for key, item in value.items()}
+        converted = {"items": [[key, item] for key, item in entries.items()]} if ordered else entries
     elif isinstance(value, (list, tuple)):
-        converted = [json_safe(item) for item in value]
+        converted = [json_safe(item, ordered=ordered) for item in value]
     elif isinstance(value, np.ndarray):
-        converted = json_safe(value.tolist())
+        converted = json_safe(value.tolist(), ordered=ordered)
     elif isinstance(value, np.generic):
-        converted = json_safe(value.item())
+        converted = json_safe(value.item(), ordered=ordered)
     elif isinstance(value, Tensor):
-        converted = json_safe(value.detach().cpu().tolist())
+        converted = json_safe(value.detach().cpu().tolist(), ordered=ordered)
     elif isinstance(value, float) and not math.isfinite(value):
         raise ValueError("Result metadata must not contain NaN or infinity.")
     elif value is None or isinstance(value, (str, int, float, bool)):
@@ -162,59 +163,17 @@ def json_safe(value: object) -> object:
     return converted
 
 
-def module_metadata(
-    module: nn.Module, config: dict[str, Any] | None, *, include_state_hash: bool = True,
-) -> dict[str, Any]:
-    """Combine declared behavior with module state; weights alone omit non-state settings.
-
-    The caller must describe architecture, nested settings and behavior revisions
-    accurately. Arbitrary Python behavior cannot be inferred from a module's type.
-    """
-    if not isinstance(config, dict) or not config:
-        raise ValueError("Module identity requires a non-empty configuration describing its effective behavior.")
-    metadata = {
-        "type": f"{type(module).__module__}.{type(module).__qualname__}",
-        "config": json_safe(config),
-        "state_layout": {
-            name: {"shape": list(value.shape), "dtype": str(value.dtype)}
-            for name, value in module.state_dict().items()
-        },
-    }
-    if include_state_hash:
-        metadata["state_hash"] = hash_model(module)
-    return metadata
+def qualified_name(value: object) -> str:
+    """Name a function or method by its definition and other values by their type."""
+    if type(value) in (FunctionType, MethodType, BuiltinFunctionType):
+        module = value.__module__
+        return f"{module}.{value.__qualname__}" if module else value.__qualname__
+    cls = value if issubclass(type(value), type) else type(value)
+    return f"{cls.__module__}.{cls.__qualname__}"
 
 
-def read_extraction_metadata(
-    getter: Callable[..., dict[str, Any] | None], *, conditional: bool, guided: bool | None = None,
-) -> dict[str, Any] | None:
-    """Pass conditioning context when the metadata getter accepts it."""
-    kwargs = {} if guided is None else {"guided": guided}
-    try:
-        signature = inspect.signature(getter)
-        if not any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in signature.parameters.values()):
-            signature.bind_partial(conditional=conditional)
-    except (TypeError, ValueError):
-        pass
-    else:
-        kwargs["conditional"] = conditional
-    return getter(**kwargs)
-
-
-def adapter_metadata(
-    adapter: object, declared: dict[str, Any] | None, *, guided: bool, conditional: bool = True,
-) -> dict[str, Any]:
-    """Resolve provider/adapter settings before generation and bind the actual model state."""
-    if declared is None:
-        getter = getattr(adapter, "get_extraction_metadata", None)
-        if not callable(getter):
-            raise ValueError("Provide generation_metadata or adapter.get_extraction_metadata() for result identity.")
-        declared = read_extraction_metadata(getter, guided=guided, conditional=conditional)
-    if not isinstance(declared, dict) or not isinstance(declared.get("sampler"), dict) or not declared["sampler"]:
-        raise ValueError("Extraction metadata requires non-empty target and sampler configurations.")
-    return {
-        # hash_attack already hashes the target's weights; do not read them twice.
-        "target": module_metadata(adapter.model, declared.get("target"), include_state_hash=False),
-        "sampler": json_safe(declared["sampler"]),
-        "image_shape": list(adapter.image_shape),
-    }
+def component_metadata(value: object) -> dict[str, str]:
+    """Describe a module's tensor state or a plain callback's name."""
+    if issubclass(type(value), nn.Module):
+        return {"name": qualified_name(value), "state_hash": hash_model(value)}
+    return {"name": qualified_name(value)}

@@ -20,21 +20,24 @@ from leakpro.attacks.extraction_attacks.protocols import (
 
 
 class AbstractExtractionInputHandler(ABC):
-    """Provide model-specific objects without assuming a classifier target."""
+    """Provide the model and other inputs for an extraction audit.
+
+    Report identity assumes a fixed reference dataset. Modules contribute the
+    tensor state used by LeakPro's model hash. Plain callbacks contribute their
+    qualified name. Custom adapters can supply a sampler dictionary or the
+    legacy ``{"target": ..., "sampler": ...}`` envelope through the optional
+    ``get_extraction_metadata(*, guided)`` method. SIDE asks for both guided and
+    unguided settings. Return ``None`` or raise ``NotImplementedError`` if a mode
+    has no metadata. Configure any conditioning-specific settings on the
+    adapter before constructing the audit.
+
+    Use a separate output directory when changing the reference dataset or
+    when changing behavior outside the saved state and declared settings.
+    """
 
     @abstractmethod
     def get_diffusion_adapter(self) -> ExtractionAdapter[Tensor]:
         """Return the audited generator through a supported adapter."""
-
-    def get_extraction_metadata(self) -> dict[str, Any] | None:
-        """Declare target/sampler configs for custom adapters, or use the adapter's getter.
-
-        Return ``{"target": {...}, "sampler": {...}}`` describing effective
-        architecture, sampling, conditioning and non-state behavior. Accurate
-        declarations are required for custom components. Carlini supplies the
-        actual mode via the conditional keyword if this method accepts it.
-        """
-        return None
 
     def get_extraction_conditions(self) -> Sequence[Any] | None:
         """Return prompts or labels for conditional Carlini extraction."""
@@ -52,19 +55,6 @@ class AbstractExtractionInputHandler(ABC):
         """Return preprocessing compatible with the feature extractor."""
         return None
 
-    def get_side_feature_metadata(self) -> dict[str, Any] | None:
-        """Declare extractor/preprocessing architecture, nested settings and revisions.
-
-        Return ``{"extractor": {...}, "transform": {...}}``. The transform
-        descriptor may be omitted only for the default identity transform.
-        Module weights and buffers are hashed separately by SIDE.
-        """
-        return None
-
     def get_extraction_reference_score(self) -> PairwiseScore | None:
-        """Return an optional pairwise similarity scorer, such as SSCD.
-
-        When SIDE uses similarity bands, set its reference_score_id to identify
-        this scorer and its settings in the saved report.
-        """
+        """Return an optional pairwise similarity scorer, such as SSCD."""
         return None

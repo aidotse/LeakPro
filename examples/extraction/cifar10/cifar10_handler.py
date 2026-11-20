@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import ClassVar
 
 from torch import Tensor, nn
 
@@ -21,7 +21,6 @@ class CIFAR10ExtractionHandler(AbstractExtractionInputHandler):
     references: ClassVar[Tensor | None] = None
     feature_extractor: ClassVar[nn.Module | None] = None
     feature_transform: ClassVar[nn.Module | None] = None
-    feature_metadata: ClassVar[dict[str, Any] | None] = None
 
     @classmethod
     def configure(
@@ -31,14 +30,12 @@ class CIFAR10ExtractionHandler(AbstractExtractionInputHandler):
         references: Tensor,
         feature_extractor: nn.Module,
         feature_transform: nn.Module,
-        feature_metadata: dict[str, Any],
     ) -> None:
         """Set the objects required by the extraction scheduler."""
         cls.adapter = adapter
         cls.references = references
         cls.feature_extractor = feature_extractor
         cls.feature_transform = feature_transform
-        cls.feature_metadata = feature_metadata
 
     def get_diffusion_adapter(self) -> ExtractionAdapter[Tensor]:
         """Return the trained unconditional DDPM adapter."""
@@ -63,7 +60,3 @@ class CIFAR10ExtractionHandler(AbstractExtractionInputHandler):
         if self.feature_transform is None:
             raise RuntimeError("Configure CIFAR10ExtractionHandler before creating LeakPro.")
         return self.feature_transform
-
-    def get_side_feature_metadata(self) -> dict[str, Any] | None:
-        """Describe the configured feature architecture and preprocessing."""
-        return self.feature_metadata
