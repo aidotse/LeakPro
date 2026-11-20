@@ -21,7 +21,6 @@ from leakpro.reporting.mia_result import MIAResult
 from leakpro.signals.signal import ModelLogits
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
-from leakpro.utils.seed import seed_everything
 
 
 class BASEConfig(BaseModel):
@@ -100,17 +99,12 @@ class AttackBASE(AbstractMIA):
         probs = softmax_logits(logits, self.temperature)
         return np.log(probs + self.epsilon)[np.arange(n_points), ground_truth_indices]
 
-    def prepare_attack(self:Self, seed: Optional[int] = None) -> None:
+    def prepare_attack(self:Self) -> None:
         """Prepare data needed for running the attack on the target model and dataset.
 
         Signals are computed on the auxiliary model(s) and dataset.
 
-        Args:
-            seed: Optional seed for model preparation.
-
         """
-        if seed is not None:
-            seed_everything(seed)
         logger.info("Preparing shadow models for BASE attack")
 
         # Get all available indices for attack dataset, if self.online = True, include training and test data
@@ -245,7 +239,7 @@ class AttackBASE(AbstractMIA):
                        out_indices: np.ndarray) -> np.ndarray:
         """Evaluate BASE on the supplied target and reference log confidences."""
         if self.online is True:
-            threshold = logsumexp(log_conf_shadow_models, axis=0) - np.log(self.num_shadow_models)
+            threshold = logsumexp(log_conf_shadow_models, axis=0) - np.log(len(log_conf_shadow_models))
         else:
             n_out_models = np.sum(out_indices, axis=0)
             self._check_out_models_available(n_out_models)
@@ -255,28 +249,26 @@ class AttackBASE(AbstractMIA):
 
         return log_conf_target - threshold if self.online else log_conf_target - self.offline_scale_factor * threshold
 
-    def run_robustness(self, n_runs: int, seed: Optional[int] = None,
+    def run_robustness(self, n_runs: Optional[int] = None, seed: Optional[int] = None,
                        output_dir: Optional[str] = None) -> list[MIAResult]:
         """Rotate cached log confidences and OUT masks through BASE's ordinary scorer.
 
-        The original target runs first, followed by distinct shadow targets.
         Every target is excluded from its references and uses its recorded membership.
         """
         config = RobustnessConfig(n_runs=n_runs, seed=seed)
         config.validate_attack(self)
-        self.prepare_attack(seed=seed)
+        self.prepare_attack()
         metadata = ShadowModelHandler().get_shadow_model_metadata(self.shadow_model_indices)
         training_indices = [self.handler.train_indices, *[model.train_indices for model in metadata]]
         membership = np.array([np.isin(self.audit_dataset["data"], indices) for indices in training_indices])
         training_sizes = [len(indices) for indices in training_indices]
         signals = self._get_cached_signals()
-        targets = [0, *np.random.default_rng(seed).permutation(np.arange(1, len(signals)))[:config.n_runs - 1]]
+        references_by_target = config.reference_models(self.attack_data_indices, training_indices)
 
         def rotations() -> Iterator[tuple[int, np.ndarray, np.ndarray, np.ndarray]]:
-            for target in targets:
-                references = np.delete(np.arange(len(signals)), target)
+            for target, references in references_by_target.items():
                 scores = self._score_signals(signals[target], signals[references], ~membership[references])
                 yield target, references, scores, np.ones(signals.shape[1], dtype=bool)
 
-        return save_robustness_results(self, {"audit": signals}, membership, training_sizes, targets,
-                                       rotations(), seed, output_dir)
+        return save_robustness_results(self, {"audit": signals}, membership, training_sizes,
+                                       references_by_target, rotations(), seed, output_dir)

@@ -29,9 +29,9 @@ if TYPE_CHECKING:
 
 
 class RobustnessConfig(BaseModel):
-    """Original target followed by distinct shadow targets from the attack's own pool."""
+    """Draw targets from a prepared pool and omit their complementary splits from references."""
 
-    n_runs: StrictInt = Field(ge=2)
+    n_runs: Optional[StrictInt] = Field(default=None, ge=2)
     seed: Optional[StrictInt] = Field(default=None, ge=0, le=MAX_SEED)
     model_config = ConfigDict(extra="forbid")
 
@@ -39,7 +39,7 @@ class RobustnessConfig(BaseModel):
         """Check support, pool size and training settings before model preparation."""
         if not callable(getattr(attack, "run_robustness", None)):
             raise ValueError(f"{type(attack).__name__} does not support cached-signal robustness")
-        if self.n_runs > attack.num_shadow_models + 1:
+        if self.n_runs is not None and self.n_runs > attack.num_shadow_models + 1:
             raise ValueError("n_runs must be between 2 and num_shadow_models + 1")
         setup, pool = attack.handler.target_model_metadata, ShadowModelHandler()
         if pool.handler is not attack.handler:
@@ -54,8 +54,24 @@ class RobustnessConfig(BaseModel):
             raise ValueError("Robustness requires the same target and shadow training setup; training sizes may differ")
 
 
+    def reference_models(self, population: np.ndarray, training_indices: list) -> dict[int, np.ndarray]:
+        """Draw distinct targets and return the references available to each one."""
+        n_runs = self.n_runs if self.n_runs is not None else len(training_indices) - 1
+        assignments = [np.isin(population, split) for split in training_indices]
+        keys = [np.packbits(members).tobytes() for members in assignments]
+        targets = np.random.default_rng(self.seed).permutation(len(keys))[:n_runs]
+        references_by_target = {}
+        for target in targets.tolist():
+            complement = np.packbits(~assignments[target]).tobytes()
+            references = [row for row, key in enumerate(keys) if row != target and key != complement]
+            if not references:
+                raise ValueError("Robustness needs a reference model outside the target's complementary split")
+            references_by_target[target] = np.asarray(references, dtype=int)
+        return references_by_target
+
+
 def save_robustness_results(attack: "AbstractMIA", signals: dict[str, np.ndarray], membership: np.ndarray,
-                            training_sizes: list[int], targets: list[int], rotations: Iterable[tuple],
+                            training_sizes: list[int], references_by_target: dict[int, np.ndarray], rotations: Iterable[tuple],
                             seed: Optional[int], output_dir: Optional[str]) -> list[MIAResult]:
     """Save attack-produced scores and summarize completed rotations.
 
@@ -63,7 +79,7 @@ def save_robustness_results(attack: "AbstractMIA", signals: dict[str, np.ndarray
     Model rows are original target first, followed by the attack's shadow-model order.
     This consumer only records results; the attack selects and evaluates every rotation.
     Native result metadata identifies the saved experiment under ``robustness/<experiment_id>``.
-    The original-target result carries the aggregate of the rotated targets.
+    The original result carries the aggregate when drawn. Otherwise the first run carries it.
     """
     records = attack.audit_dataset["data"]
     model_ids = [-1, *map(int, attack.shadow_model_indices)]
@@ -78,7 +94,9 @@ def save_robustness_results(attack: "AbstractMIA", signals: dict[str, np.ndarray
         digest.update(np.ascontiguousarray(values).data)
         signal_hashes[name] = digest.hexdigest()
     identity = {"attack": type(attack).__name__, "config": attack.configs.model_dump(), "seed": seed,
-                "targets": [model_ids[index] for index in targets], "models": model_ids, "checkpoints": checkpoints,
+                "targets": [model_ids[index] for index in references_by_target],
+                "references": [[model_ids[index] for index in rows] for rows in references_by_target.values()],
+                "models": model_ids, "checkpoints": checkpoints,
                 "records": records.tolist(), "membership": membership.tolist(),
                 "training_sizes": training_sizes, "signals": signal_hashes}
     root = Path(attack.handler.configs.audit.output_dir if output_dir is None else output_dir)
@@ -102,9 +120,11 @@ def save_robustness_results(attack: "AbstractMIA", signals: dict[str, np.ndarray
                                            audit_indices=records[kept])
         results.append(result)
     summary = summarize_robustness(results)
-    results[0].set_robustness(summary)
+    original = next((res for res in results if res.metadata["robustness"]["target"] == -1), results[0])
+    original.set_robustness(summary)
     for run_index, result in enumerate(results):
         result.save(attack_obj=attack, output_dir=str(directory / f"run_{run_index}"))
+    MIAResult.create_roc_plot(results, str(directory), rotation_summary=summary)
     temporary = directory / ".summary.json.tmp"
     temporary.write_text(json.dumps({"setup": identity,
                                      "runs": [result.metadata["robustness"] for result in results],
@@ -114,23 +134,35 @@ def save_robustness_results(attack: "AbstractMIA", signals: dict[str, np.ndarray
 
 
 def summarize_robustness(results: list[MIAResult]) -> dict[str, Any]:
-    """Adapt PR #351's pointwise percentile aggregation to rotated-target results."""
-    rotated = results[1:]
+    """Average defined AUCs. Report ROC percentiles when every run defines a curve."""
     summary = {}
-    aucs = [result.roc_auc for result in rotated if result.roc_auc is not None]
+    aucs = [result.roc_auc for result in results if result.roc_auc is not None]
     if aucs:
-        summary["roc_auc"] = {"mean": float(np.mean(aucs)),
+        summary["roc_auc"] = {"mean": float(np.mean(aucs)), "n_defined": len(aucs), "n_total": len(results),
                               "percentiles_2_5_97_5": np.percentile(aucs, [2.5, 97.5]).tolist()}
-    if all(result.roc_mode == "full" for result in rotated):
-        fpr_grid = np.unique(np.concatenate([[0.0], *[result.fpr for result in rotated]]))
-        curves = []
-        for result in rotated:
-            # MIAResult omits the origin. Include it before taking upper values
-            # at repeated FPRs so tied scores do not inflate low-FPR summaries.
-            fpr, inverse = np.unique(np.concatenate(([0.0], result.fpr)), return_inverse=True)
-            upper_tpr = np.zeros(len(fpr))
-            np.maximum.at(upper_tpr, inverse, np.concatenate(([0.0], result.tpr)))
-            curves.append(np.interp(fpr_grid, fpr, upper_tpr))
-        summary["roc"] = {"fpr": fpr_grid.tolist(), "mean_tpr": np.mean(curves, axis=0).tolist(),
-                          "pointwise_tpr_percentiles_2_5_97_5": np.percentile(curves, [2.5, 97.5], axis=0).tolist()}
+    if results and all(result.roc_mode == "full" for result in results):
+        fpr_grid = np.unique(np.concatenate([[0.0], *[result.fpr for result in results]]))
+        # Include both endpoints of each vertical segment, including rises at FPR zero.
+        jumps = np.unique(np.concatenate([
+            r.fpr[(np.diff(r.fpr, prepend=0.0) == 0) & (np.diff(r.tpr, prepend=0.0) > 0)] for r in results
+        ]))
+        fpr_grid = np.sort(np.r_[fpr_grid, jumps])
+        curves = np.empty((len(results), len(fpr_grid)))
+        for row, result in enumerate(results):
+            # A vertical segment contributes its upper TPR at the knot. The
+            # preceding segment ends at the lower TPR of that same knot.
+            knots, first, counts = np.unique(np.r_[0.0, result.fpr], return_index=True, return_counts=True)
+            tpr = np.r_[0.0, result.tpr]
+            upper = tpr[first + counts - 1]
+            slopes = np.r_[(tpr[first[1:]] - upper[:-1]) / np.diff(knots), 0.0]
+            left = np.searchsorted(knots, fpr_grid, side="right") - 1
+            curve = upper[left] + (fpr_grid - knots[left]) * slopes[left]
+            vertical = np.isin(knots, jumps)
+            curve[np.searchsorted(fpr_grid, knots[vertical])] = tpr[first[vertical]]
+            curves[row] = curve
+        summary["roc"] = {
+            "fpr": fpr_grid.tolist(),
+            "mean_tpr": np.mean(curves, axis=0).tolist(),
+            "pointwise_tpr_percentiles_2_5_97_5": np.percentile(curves, [2.5, 97.5], axis=0, overwrite_input=True).tolist(),
+        }
     return summary

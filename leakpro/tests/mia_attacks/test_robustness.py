@@ -22,7 +22,7 @@ from leakpro import LeakPro
 from leakpro.attacks.attack_scheduler import AttackScheduler
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
-from leakpro.attacks.robustness import summarize_robustness
+from leakpro.attacks.robustness import RobustnessConfig, summarize_robustness
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.input_handler.mia_handler import MIAHandler
@@ -30,6 +30,7 @@ from leakpro.reporting.mia_result import MIAResult
 from leakpro.schemas import EvalOutput, LeakProConfig, LossConfig, MIAMetaDataSchema, ShadowModelConfig, TrainingOutput
 from leakpro.attacks.utils.utils import softmax_logits
 from leakpro.utils.save_load import hash_config, hash_model
+from leakpro.utils.seed import seed_everything
 
 
 class TinyModel(nn.Module):
@@ -131,7 +132,7 @@ def test_attack_owns_rotation_and_reuses_native_pool(handler, mocker, name, onli
     original_config = handler.configs.model_dump()
     original_metadata = handler.target_model_metadata.model_dump()
     runs = attack.run_robustness(n_runs=3, seed=123)
-    assert preparation.call_count == 1
+    preparation.assert_called_once_with()
     assert training.call_count == 4
     assert creation.call_count == 0
     assert all(len(call.args[1].dataset) == 30 for call in training.call_args_list)
@@ -147,9 +148,9 @@ def test_attack_owns_rotation_and_reuses_native_pool(handler, mocker, name, onli
     for result in runs:
         provenance = result.metadata["robustness"]
         target = provenance["target"]
-        assert target not in provenance["references"]
-        assert set(provenance["references"]) | {target} == set(membership)
-        assert len(provenance["references"]) == 4
+        complement = set(range(handler.population_size)) - set(membership[target])
+        assert provenance["references"] == [index for index, split in membership.items()
+                                             if index != target and set(split) != complement]
         assert provenance["target_training_size"] == len(membership[target])
         assert provenance["reference_training_sizes"] == [len(membership[index]) for index in provenance["references"]]
         np.testing.assert_array_equal(result.true, np.isin(result.audit_indices, membership[target]))
@@ -157,11 +158,12 @@ def test_attack_owns_rotation_and_reuses_native_pool(handler, mocker, name, onli
         assert np.isfinite(result.signal_values).all()
     # The original target must use exactly the same scoring rule and prepared values.
     ordinary = attack.run_attack()
-    np.testing.assert_array_equal(runs[0].audit_indices, ordinary.audit_indices)
-    np.testing.assert_allclose(runs[0].signal_values, ordinary.signal_values)
+    original = original_rotation(runs)
+    np.testing.assert_array_equal(original.audit_indices, ordinary.audit_indices)
+    np.testing.assert_allclose(original.signal_values, ordinary.signal_values)
     directory = Path(handler.configs.audit.output_dir) / "robustness" / runs[0].metadata["robustness"]["experiment_id"]
     summary = json.loads((directory / "summary.json").read_text())
-    assert summary["setup"]["targets"][0] == -1
+    assert summary["setup"]["targets"] == [r.metadata["robustness"]["target"] for r in runs]
     assert summary["setup"]["training_sizes"] == [20, 30, 30, 30, 30]
 
 
@@ -184,15 +186,16 @@ def test_original_result_carries_aggregate_through_save_load(handler, mocker, tm
     attack = AttackFactoryMIA.create_attack(name, {"num_shadow_models": 4, "online": True}, handler)
     saving = mocker.spy(MIAResult, "save")
     results = attack.run_robustness(n_runs=3, seed=17)
-    original = results[0]
+    original = original_rotation(results)
     directory = Path(handler.configs.audit.output_dir) / "robustness" / original.metadata["robustness"]["experiment_id"]
     summary = json.loads((directory / "summary.json").read_text())["rotated_target_summary"]
     assert original.robustness == original.result.robustness == summary
     assert original.id == original.result.id == f"{original.result_name}-{hash_config(original.metadata)[:16]}"
     assert saving.call_count == len(results)
-    for result in results[1:]:
-        assert result.result.robustness is None
-    path = next((directory / "run_0" / "data_objects").glob("*.json"))
+    for result in results:
+        if result is not original:
+            assert result.result.robustness is None
+    path = next((directory / f"run_{results.index(original)}" / "data_objects").glob("*.json"))
     assert MIAResult.load(str(path)).robustness == summary
     payload = json.loads(path.read_text())
     assert payload.pop("robustness") == summary
@@ -288,7 +291,7 @@ def test_yaml_runs_actual_attacks_with_mixed_training_sizes(saved_audit_inputs, 
     config["audit"]["attack_list"] = [
         {"attack": "unknown"},
         {"attack": "lira", **attack_config, "robustness": None},
-        {"attack": name, **attack_config, "robustness": {"n_runs": 3}},
+        {"attack": name, **attack_config, "robustness": {}},
         {"attack": "base", **attack_config},
     ]
     config_path.write_text(yaml.safe_dump(config))
@@ -296,8 +299,8 @@ def test_yaml_runs_actual_attacks_with_mixed_training_sizes(saved_audit_inputs, 
     report = mocker.patch("leakpro.leakpro.ReportHandler")
     audit = LeakPro(TinyInputHandler, str(config_path))
     results = audit.run_audit(create_pdf=True)
-    assert len(results) == 5
-    assert len({result.id for result in results}) == 5
+    assert len(results) == 6
+    assert len({result.id for result in results}) == 6
     assert all(result.result.id == result.id for result in results)
     attack = audit.attack_scheduler.attacks[1]
     assert isinstance(attack, AttackFactoryMIA.attack_classes[name])
@@ -307,10 +310,10 @@ def test_yaml_runs_actual_attacks_with_mixed_training_sizes(saved_audit_inputs, 
     directory = Path(config["audit"]["output_dir"]) / "robustness" / results[1].metadata["robustness"]["experiment_id"]
     saved = json.loads((directory / "summary.json").read_text())
     assert results[1].robustness == saved["rotated_target_summary"]
-    assert saved["setup"]["targets"] == [-1, *np.random.default_rng(11).permutation(4)[:2].tolist()]
-    assert saved["runs"][0]["target_training_size"] == 20
-    assert saved["runs"][0]["reference_training_sizes"] == [30] * 4
-    assert all(-1 in entry["references"] for entry in saved["runs"][1:])
+    assert saved["setup"]["targets"] == [0, 3, 1, 2]
+    assert saved["setup"]["references"] == [[-1, 2, 3], [-1, 0, 1], [-1, 2, 3], [-1, 0, 1]]
+    assert all(run["target_training_size"] == 30 for run in saved["runs"])
+    assert all(run["reference_training_sizes"] == [20, 30, 30] for run in saved["runs"])
     report.assert_called_once_with(results=results, report_dir=audit.report_dir)
     report.return_value.create_report.assert_called_once_with()
     report_dir = Path(config["audit"]["output_dir"]) / "report-check"
@@ -318,7 +321,7 @@ def test_yaml_runs_actual_attacks_with_mixed_training_sizes(saved_audit_inputs, 
     assert all((report_dir / result.id).is_dir() for result in results)
 
 
-def test_seeded_rmia_experiments_keep_native_ids_and_saved_reports(saved_audit_inputs):
+def test_seeded_rmia_experiments_keep_native_ids_and_saved_reports(saved_audit_inputs, mocker):
     config, config_path = saved_audit_inputs
     config["audit"]["attack_list"] = [
         {"attack": "rmia", "num_shadow_models": 4, "online": True, "gamma": 1.0,
@@ -327,7 +330,11 @@ def test_seeded_rmia_experiments_keep_native_ids_and_saved_reports(saved_audit_i
     config_path.write_text(yaml.safe_dump(config))
     results = LeakPro(TinyInputHandler, str(config_path)).run_audit()
     assert len(results) == len({result.id for result in results}) == 6
-    np.testing.assert_array_equal(results[0].signal_values, results[3].signal_values)
+    first = {item.metadata["robustness"]["target"]: item for item in results[:3]}
+    second = {item.metadata["robustness"]["target"]: item for item in results[3:]}
+    assert -1 in first and -1 not in second
+    for target in first.keys() & second.keys():
+        np.testing.assert_array_equal(first[target].signal_values, second[target].signal_values)
     assert [r.metadata["robustness"]["target"] for r in results[:3]] != [
         r.metadata["robustness"]["target"] for r in results[3:]]
     for result in results:
@@ -335,7 +342,14 @@ def test_seeded_rmia_experiments_keep_native_ids_and_saved_reports(saved_audit_i
     root = Path(config["audit"]["output_dir"])
     loaded = [MIAResult.load(str(path)) for path in root.glob("robustness/*/run_*/data_objects/*.json")]
     assert {result.id for result in loaded} == {result.id for result in results}
+    plot = mocker.spy(MIAResult, "create_roc_plot")
     MIAResult.create_results(loaded, save_dir=str(root / "report-check"))
+    overlays = [call for call in plot.call_args_list if "rotation_summary" in call.kwargs]
+    assert len(overlays) == 2
+    for call in overlays:
+        group = call.args[0]
+        assert len(group) == 3
+        assert len({item.metadata["robustness"]["experiment_id"] for item in group}) == 1
     assert all((root / "report-check" / result.id).is_dir() for result in results)
 
 
@@ -355,7 +369,7 @@ def test_yaml_seed_override_and_output_directory(handler, tmp_path, seed):
 
 
 @pytest.mark.parametrize("options", [
-    {}, False, {"n_runs": True}, {"n_runs": 1}, {"n_runs": 6},
+    False, {"n_runs": True}, {"n_runs": 1}, {"n_runs": 6},
     {"n_runs": 2, "seed": -1}, {"n_runs": 2, "typo": 4},
 ])
 def test_invalid_yaml_robustness_rejected_before_training(handler, mocker, options):
@@ -405,26 +419,29 @@ def test_global_optuna_flag_tunes_only_ordinary_entries(handler, mocker):
         np.testing.assert_array_equal(before["result_object"].signal_values, after["result_object"].signal_values)
 
 
-def test_summary_uses_upper_roc_ties_and_excludes_original():
+def test_summary_includes_first_run_and_uses_upper_roc_ties():
     original = MIAResult.from_full_scores([0, 0, 1, 1], [4, 3, 2, 1], result_name="test")
     rotated = MIAResult.from_full_scores([1, 1, 0, 1, 0], [5, 4, 3, 2, 1], result_name="test")
     summary = summarize_robustness([original, rotated, rotated])
-    assert summary["roc_auc"]["mean"] == rotated.roc_auc
-    assert summary["roc"]["fpr"][0] == 0
-    assert summary["roc"]["mean_tpr"][0] == pytest.approx(2 / 3)
-    np.testing.assert_allclose(summary["roc"]["pointwise_tpr_percentiles_2_5_97_5"],
-                               [summary["roc"]["mean_tpr"]] * 2)
+    assert summary["roc_auc"]["mean"] == pytest.approx((original.roc_auc + 2 * rotated.roc_auc) / 3)
+    assert summary["roc_auc"]["n_total"] == 3
+    assert summary["roc"]["fpr"][:2] == [0.0, 0.0]
+    np.testing.assert_allclose(summary["roc"]["mean_tpr"][:2], [0.0, 4 / 9])
+    np.testing.assert_allclose(np.asarray(summary["roc"]["pointwise_tpr_percentiles_2_5_97_5"])[:, 1],
+                               [1 / 30, 2 / 3])
 
 
 @pytest.mark.parametrize("all_tied", [False, True])
 def test_summary_includes_roc_origin_for_tied_scores(all_tied):
     tied = MIAResult.from_full_scores([1, 0, 1, 0], [2, 2, 1, 1], result_name="tied")
     other = tied if all_tied else MIAResult.from_full_scores([1, 0, 1, 0], [4, 3, 2, 1], result_name="untied")
-    summary = summarize_robustness([tied, tied, other])["roc"]
+    summary = summarize_robustness([tied, other])["roc"]
     assert summary["fpr"][0] == 0.0
-    assert summary["mean_tpr"][0] == pytest.approx(0.0 if all_tied else 0.25)
+    assert summary["mean_tpr"][0] == 0.0
+    upper = np.searchsorted(summary["fpr"], 0.0, side="right") - 1
+    assert summary["mean_tpr"][upper] == pytest.approx(0.0 if all_tied else 0.25)
     expected = [0.0, 0.0] if all_tied else [0.0125, 0.4875]
-    np.testing.assert_allclose(np.array(summary["pointwise_tpr_percentiles_2_5_97_5"])[:, 0], expected)
+    np.testing.assert_allclose(np.array(summary["pointwise_tpr_percentiles_2_5_97_5"])[:, upper], expected)
 
 
 @pytest.mark.parametrize("name", ["lira", "base", "rmia"])
@@ -456,7 +473,7 @@ def test_rotated_scores_match_independent_equations(handler, name, online):
               np.array([softmax_logits(raw, attack.temperature)[np.arange(len(labels)), labels] for raw in logits]))
     for result in runs:
         target = ids.index(result.metadata["robustness"]["target"])
-        references = [index for index in range(5) if index != target]
+        references = expected_reference_rows(training, target)
         out = ~membership[references]
         kept = np.ones(len(records), dtype=bool)
         if name == "lira":
@@ -475,7 +492,7 @@ def test_rotated_scores_match_independent_equations(handler, name, online):
         elif name == "base":
             log_conf = np.log(values + attack.epsilon)
             ref_conf = log_conf[references]
-            threshold = (logsumexp(ref_conf, axis=0) - np.log(4) if online else
+            threshold = (logsumexp(ref_conf, axis=0) - np.log(len(references)) if online else
                          logsumexp(np.where(out, ref_conf, -np.inf), axis=0) - np.log(out.sum(axis=0)))
             expected = log_conf[target] - (threshold if online else attack.offline_scale_factor * threshold)
         else:
@@ -508,9 +525,11 @@ def test_rmia_regression_uses_reference_only_scale_without_changing_ordinary_sta
     ids = [-1, *map(int, attack.shadow_model_indices)]
     audit_values = np.array([attack.logits_theta, *attack.logits_shadow_models])
     z_values = np.array([attack.logits_z_theta, *attack.logits_z_shadow_models])
+    training = [handler.train_indices, *(meta.train_indices for meta in
+                ShadowModelHandler().get_shadow_model_metadata(attack.shadow_model_indices))]
     for result in runs:
         target = ids.index(result.metadata["robustness"]["target"])
-        references = [index for index in range(5) if index != target]
+        references = expected_reference_rows(training, target)
         z_residual = z_values[references] - attack.z_labels
         if isinstance(criterion, nn.MSELoss):
             scale = (z_residual ** 2).mean()
@@ -530,7 +549,7 @@ def test_rmia_regression_uses_reference_only_scale_without_changing_ordinary_sta
         by_record = dict(zip(attack.audit_dataset["data"], expected))
         np.testing.assert_allclose(result.signal_values.ravel(), [by_record[index] for index in result.audit_indices])
     assert attack._scale == ordinary_scale
-    np.testing.assert_allclose(runs[0].signal_values, attack.run_attack().signal_values)
+    np.testing.assert_allclose(original_rotation(runs).signal_values, attack.run_attack().signal_values)
 
 
 @pytest.mark.parametrize("name", ["lira", "base", "rmia"])
@@ -602,7 +621,7 @@ def test_lira_new_target_in_existing_output_uses_current_cached_logits(handler):
 def test_seeded_rmia_follows_ordinary_lifecycle_with_same_native_pool(handler, mocker):
     config = {"num_shadow_models": 4, "online": True, "gamma": 1.0}
     used = AttackFactoryMIA.create_attack("rmia", config, handler)
-    used.prepare_attack(seed=31)
+    used.prepare_attack()
     used.run_attack()
     training = mocker.spy(TinyHandler, "train")
     before = used.run_robustness(n_runs=3, seed=17)
@@ -820,7 +839,8 @@ def test_reused_mixed_rmia_audit_reloads_changed_checkpoint(saved_audit_inputs):
     config["audit"]["attack_list"] = [normal, {**normal, "robustness": {"n_runs": 2, "seed": 17}}]
     path.write_text(yaml.safe_dump(config))
     audit = LeakPro(TinyInputHandler, str(path))
-    initial, original, *_ = audit.run_audit()
+    results = audit.run_audit()
+    initial, original = results[0], original_rotation(results)
     np.testing.assert_array_equal(initial.signal_values, original.signal_values)
 
     pool = ShadowModelHandler()
@@ -828,7 +848,8 @@ def test_reused_mixed_rmia_audit_reloads_changed_checkpoint(saved_audit_inputs):
     weights = torch.load(checkpoint, weights_only=True)
     torch.save({name: torch.zeros_like(value) for name, value in weights.items()}, checkpoint)
 
-    reused, rotated, *_ = audit.run_audit()
+    results = audit.run_audit()
+    reused, rotated = results[0], original_rotation(results)
     assert np.any(initial.signal_values != rotated.signal_values)
     np.testing.assert_array_equal(reused.signal_values, rotated.signal_values)
     fresh, *_ = LeakPro(TinyInputHandler, str(path)).run_audit()
@@ -859,6 +880,8 @@ def test_experiment_distinguishes_checkpoints_with_identical_scores(handler, tmp
     settings = {"num_shadow_models": 2, "online": True}
     output = tmp_path / "reports"
     attack = AttackFactoryMIA.create_attack("base", settings, handler)
+    audit_seed = handler.configs.audit.random_seed
+    seed_everything(audit_seed)
     before = attack.run_robustness(n_runs=3, seed=17, output_dir=str(output))
     if model == "target":
         with torch.no_grad():
@@ -873,6 +896,7 @@ def test_experiment_distinguishes_checkpoints_with_identical_scores(handler, tmp
         weights["linear.weight"][:, 1].add_(1)
         torch.save(weights, checkpoint)
 
+    seed_everything(audit_seed)
     after = attack.run_robustness(n_runs=3, seed=17, output_dir=str(output))
     for original, updated in zip(before, after):
         np.testing.assert_array_equal(original.signal_values, updated.signal_values)
@@ -896,3 +920,59 @@ def test_loader_default_batch_size_through_yaml(saved_audit_inputs, target_param
     else:
         with pytest.raises(ValueError, match="same target and shadow training setup"):
             LeakPro(TinyInputHandler, str(path))
+
+
+def original_rotation(results):
+    return next(result for result in results if result.metadata.get("robustness", {}).get("target") == -1)
+
+
+def expected_reference_rows(training, target):
+    complement = set(range(60)) - set(training[target])
+    return [row for row, split in enumerate(training) if row != target and set(split) != complement]
+
+
+def test_default_draw_keeps_both_targets_but_excludes_their_partners():
+    population = np.arange(10, 16)
+    # Two pairs in nonadjacent slots. Seed 11 draws all shadows and omits the original.
+    training_indices = [[10, 11], [10, 11, 12], [10, 12, 14], [13, 14, 15], [11, 13, 15]]
+    plan = RobustnessConfig(seed=11).reference_models(population, training_indices)
+    assert list(plan) == [1, 4, 2, 3]
+    assert {target: refs.tolist() for target, refs in plan.items()} == {
+        1: [0, 2, 4], 4: [0, 1, 3], 2: [0, 1, 3], 3: [0, 2, 4]
+    }
+
+    # Complementary-looking audit rows alone do not make two full splits a pair.
+    overlapping = [[10, 11, 14], [12, 13, 14], [10, 15]]
+    refs = RobustnessConfig(seed=17).reference_models(population, overlapping)
+    np.testing.assert_array_equal(refs[0], [1, 2])
+
+
+def test_robustness_plot_shows_all_runs_and_pointwise_percentiles(tmp_path, mocker):
+    results = [MIAResult.from_full_scores([1, 0, 1, 0], scores, result_name="LiRA")
+               for scores in ([4, 3, 2, 1], [3, 4, 1, 2])]
+    summary = summarize_robustness(results)
+    plot = mocker.spy(plt, "plot")
+    with plt.rc_context({"figure.figsize": (2.5, 2.5)}):
+        MIAResult.create_roc_plot(results, str(tmp_path), rotation_summary=summary)
+    assert (tmp_path / "ROC.png").is_file()
+    gray = [call for call in plot.call_args_list if call.kwargs.get("color") == "gray"]
+    assert len(gray) == 2
+    for call, result in zip(gray, results):
+        assert 0 < call.kwargs["alpha"] < 1
+        np.testing.assert_array_equal(call.args[0], result.fpr)
+        np.testing.assert_array_equal(call.args[1], result.tpr)
+    red = [call for call in plot.call_args_list if call.kwargs.get("color") == "#c62828"]
+    assert [call.kwargs["label"] for call in red] == ["2.5th percentile", "97.5th percentile"]
+    for call, values in zip(red, summary["roc"]["pointwise_tpr_percentiles_2_5_97_5"]):
+        np.testing.assert_array_equal(call.args[0], summary["roc"]["fpr"])
+        np.testing.assert_array_equal(call.args[1], values)
+
+
+def test_roc_does_not_move_vertical_jump_into_preceding_segment():
+    first = MIAResult.from_full_scores([0, 0, 1, 1, 0, 0], [6, 5, 4, 3, 2, 1], result_name="first")
+    second = MIAResult.from_full_scores([0, 1, 0, 1], [4, 3, 2, 1], result_name="second")
+    roc = summarize_robustness([first, second])["roc"]
+    assert roc["mean_tpr"][roc["fpr"].index(0.25)] == 0
+    at_jump = np.asarray(roc["fpr"]) == 0.5
+    np.testing.assert_allclose(np.asarray(roc["mean_tpr"])[at_jump], [0, 0.75])
+    assert np.trapz(roc["mean_tpr"], roc["fpr"]) == pytest.approx((first.roc_auc + second.roc_auc) / 2)

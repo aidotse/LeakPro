@@ -47,10 +47,11 @@ audit:  # Configurations for auditing
       num_shadow_models: 16
       var_calculation: "fixed"
       training_data_fraction: 0.5
-      # Optional: original target followed by eight distinct shadow targets.
-      # Use 0.4 to match the target training size, or keep 0.5 and report the difference.
-      # robustness:
-      #   n_runs: 9
+      # Optional: draw targets from the original and all shadows.
+      # Runs 16 targets by default. A target's complementary split is left out of its references.
+      # The audit seed controls training. The robustness seed controls the draw.
+      # Use 0.4 to match the saved target size, or keep 0.5 and report both sizes.
+      # robustness: {}
 
 
 

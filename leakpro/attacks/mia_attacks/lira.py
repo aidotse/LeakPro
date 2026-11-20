@@ -21,7 +21,6 @@ from leakpro.signals import functional
 from leakpro.signals.utils.get_TS2Vec import bind_ts2vec_encoder
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
-from leakpro.utils.seed import seed_everything
 
 
 class AttackLiRA(AbstractMIA):
@@ -101,20 +100,14 @@ class AttackLiRA(AbstractMIA):
             "detailed": detailed_str,
         }
 
-    def prepare_attack(self:Self, seed: Optional[int] = None)->None:
+    def prepare_attack(self:Self)->None:
         """Prepares data to obtain metric on the target model and dataset, using signals computed on the auxiliary model/dataset.
 
         It selects a balanced subset of data samples from in-group and out-group members
         of the audit dataset, prepares the data for evaluation, and computes the configured
         signal for both shadow models and the target model.
 
-        Args:
-            seed: Optional seed for model preparation and cached-signal computation.
-
         """
-
-        if seed is not None:
-            seed_everything(seed)
 
         # Fixed variance is used when the number of shadow models is below 32 (64, IN and OUT models)
         #       from (Membership Inference Attacks From First Principles)
@@ -134,8 +127,6 @@ class AttackLiRA(AbstractMIA):
         # ts2vec carries a fitted artefact, and the target and shadow values below are only
         # comparable if they share it. Fit it once on the shadow population; other signals are
         # returned unchanged.
-        if seed is not None:
-            seed_everything(seed)
         self.signal = bind_ts2vec_encoder(self.signal, self.handler, self.attack_data_indices)
 
         # The signal is applied to the cached logits, so these hold signal values (rescaled logits,
@@ -238,7 +229,8 @@ class AttackLiRA(AbstractMIA):
             )
         return signal_values
 
-    def get_std(self:Self, signals: list, mask: list, is_in: bool, var_calculation: str) -> np.ndarray:
+    def get_std(self:Self, signals: list, mask: list, is_in: bool, var_calculation: str,
+                num_references: Optional[int] = None) -> np.ndarray:
         """A function to define what method to use for calculating variance for LiRA."""
 
         # Fixed/Global variance calculation.
@@ -247,7 +239,8 @@ class AttackLiRA(AbstractMIA):
 
         # Variance calculation as in the paper ( Membership Inference Attacks From First Principles )
         if var_calculation == "carlini":
-            return self._carlini_variance(signals, mask, is_in)
+            return self._carlini_variance(signals, mask, is_in,
+                                          self.num_shadow_models if num_references is None else num_references)
 
         # Variance calculation as in the paper ( Membership Inference Attacks From First Principles )
         #   but check IN and OUT samples individualy
@@ -261,9 +254,9 @@ class AttackLiRA(AbstractMIA):
             return np.array([None])
         return np.std(signals[mask])
 
-    def _carlini_variance(self:Self, signals: list, mask: list, is_in: bool) -> np.ndarray:
-        if self.num_shadow_models >= self.fix_var_threshold*2:
-                return np.std(signals[mask])
+    def _carlini_variance(self:Self, signals: list, mask: list, is_in: bool, num_references: int) -> np.ndarray:
+        if num_references >= self.fix_var_threshold * 2:
+            return np.std(signals[mask])
         if is_in:
             return self.fixed_in_std
         return self.fixed_out_std
@@ -329,7 +322,7 @@ class AttackLiRA(AbstractMIA):
             sm_signals = shadow_signals[:,i]
 
             out_mean = np.mean(sm_signals[out_mask])
-            out_std = self.get_std(sm_signals, out_mask, False, self.var_calculation)
+            out_std = self.get_std(sm_signals, out_mask, False, self.var_calculation, len(shadow_signals))
 
             # Get the signal from the target model for the current sample
             target_signal = target_signals[i]
@@ -337,7 +330,7 @@ class AttackLiRA(AbstractMIA):
             # Calculate the log probability density function value
             if self.online:
                 in_mean = np.mean(sm_signals[~out_mask])
-                in_std = self.get_std(sm_signals, ~out_mask, True, self.var_calculation)
+                in_std = self.get_std(sm_signals, ~out_mask, True, self.var_calculation, len(shadow_signals))
 
                 pr_in = norm.logpdf(target_signal, in_mean, in_std + 1e-30)
                 pr_out = norm.logpdf(target_signal, out_mean, out_std + 1e-30)
@@ -354,28 +347,26 @@ class AttackLiRA(AbstractMIA):
 
         return score
 
-    def run_robustness(self, n_runs: int, seed: Optional[int] = None,
+    def run_robustness(self, n_runs: Optional[int] = None, seed: Optional[int] = None,
                        output_dir: Optional[str] = None) -> list[MIAResult]:
         """Prepare once, then rotate cached signals and recompute LiRA's reference groups.
 
-        The original target runs first. Each shadow target is excluded from its
-        references, which include the original target. Membership follows recorded
-        training indices; reference filtering and Gaussian statistics are recomputed.
+        Each target uses its recorded training indices and is excluded from its
+        references. Reference filtering and Gaussian statistics are recomputed.
         """
         config = RobustnessConfig(n_runs=n_runs, seed=seed)
         config.validate_attack(self)
-        self.prepare_attack(seed=seed)
+        self.prepare_attack()
         metadata = ShadowModelHandler().get_shadow_model_metadata(self.shadow_model_indices)
         training_indices = [self.handler.train_indices, *[model.train_indices for model in metadata]]
         membership = np.array([np.isin(self.audit_dataset["data"], indices) for indices in training_indices])
         training_sizes = [len(indices) for indices in training_indices]
         target, shadows = self._unfiltered_signals
         signals = np.concatenate((target[None], shadows))
-        targets = [0, *np.random.default_rng(seed).permutation(np.arange(1, len(signals)))[:config.n_runs - 1]]
+        references_by_target = config.reference_models(self.attack_data_indices, training_indices)
 
         def rotations() -> Iterator[tuple[int, np.ndarray, np.ndarray, np.ndarray]]:
-            for target in targets:
-                references = np.delete(np.arange(len(signals)), target)
+            for target, references in references_by_target.items():
                 out_indices = ~membership[references]
                 kept = audit_points_with_reference_models(out_indices, require_in_models=self.online)
                 if not kept.all():
@@ -383,5 +374,5 @@ class AttackLiRA(AbstractMIA):
                 scores = self._score_signals(signals[target, kept], signals[references][:, kept], out_indices[:, kept])
                 yield target, references, scores, kept
 
-        return save_robustness_results(self, {"audit": signals}, membership, training_sizes, targets,
-                                       rotations(), seed, output_dir)
+        return save_robustness_results(self, {"audit": signals}, membership, training_sizes,
+                                       references_by_target, rotations(), seed, output_dir)

@@ -498,13 +498,14 @@ class MIAResult:
 
 
     @staticmethod
-    def create_roc_plot(result_objects:list, save_dir: str) -> None:
+    def create_roc_plot(result_objects:list, save_dir: str, *, rotation_summary: Optional[dict] = None) -> None:
         """Plot method for MIAResult. This method can be used by individual result objects or multiple.
 
         Args:
         ----
             result_objects (list): List of MIAResult objects to plot.
             save_dir (str): Directory to save the plot.
+            rotation_summary: Saved aggregate for a single robustness experiment.
 
         """
 
@@ -514,10 +515,20 @@ class MIAResult:
         assert isinstance(result_objects, list), "Results must be a list of MIAResult objects"
 
         result_objects = [result for result in result_objects if result._has_roc()]
-        reduced_labels = reduce_to_unique_labels(result_objects)
-        for res, label in zip(result_objects, reduced_labels):
-            plt.fill_between(res.fpr, res.tpr, alpha=0.15)
-            plt.plot(res.fpr, res.tpr, label=label)
+        if rotation_summary is None:
+            reduced_labels = reduce_to_unique_labels(result_objects)
+            for res, label in zip(result_objects, reduced_labels):
+                plt.fill_between(res.fpr, res.tpr, alpha=0.15)
+                plt.plot(res.fpr, res.tpr, label=label)
+        else:
+            for index, res in enumerate(result_objects):
+                plt.plot(res.fpr, res.tpr, color="gray", alpha=0.35, linewidth=1,
+                         label=f"Target runs ({len(result_objects)})" if index == 0 else None)
+            roc = rotation_summary.get("roc")
+            if roc:
+                lower, upper = roc["pointwise_tpr_percentiles_2_5_97_5"]
+                plt.plot(roc["fpr"], lower, color="#c62828", linestyle="--", label="2.5th percentile")
+                plt.plot(roc["fpr"], upper, color="#c62828", label="97.5th percentile")
 
         # Plot baseline (random guess)
         range01 = np.linspace(0, 1)
@@ -528,13 +539,15 @@ class MIAResult:
         plt.xscale("log")
         plt.xlim(left=1e-5)
         plt.ylim(bottom=1e-5)
-        plt.tight_layout()
         plt.grid()
-        plt.legend(bbox_to_anchor =(0.5,-0.27), loc="lower center")
-
         plt.xlabel("False positive rate (FPR)")
         plt.ylabel("True positive rate (TPR)")
         plt.title("ROC Curve")
+        if rotation_summary is None:
+            plt.legend(bbox_to_anchor=(0.5, -0.27), loc="lower center")
+        else:
+            plt.legend(bbox_to_anchor=(0.5, -0.17), loc="upper center", ncol=2)
+        plt.tight_layout()
         plt.savefig(fname=f"{filename}.png", dpi=1000, bbox_inches="tight")
         plt.close()
 
@@ -548,13 +561,9 @@ class MIAResult:
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
 
-        latex = ""
-
         seen_ids = set()
         attack_results = [result for result in results if not (result.id in seen_ids or seen_ids.add(result.id))]
-        # Create plot for all results
-        MIAResult.create_roc_plot(attack_results, save_dir)
-        latex += MIAResult._latex(attack_results, save_dir = save_dir, section_title = "All results")
+        latex = MIAResult._create_report_roc_plots(attack_results, save_dir)
 
         # Create individual plot for results
         for res in attack_results:
@@ -564,6 +573,39 @@ class MIAResult:
             MIAResult.create_roc_plot([res], attack_folder)
             latex += MIAResult._latex([res], save_dir = attack_folder, section_title = res.id)
 
+        return latex
+
+    @staticmethod
+    def _create_report_roc_plots(results: list, save_dir: str) -> str:
+        """Render separate percentile curves for each robustness experiment."""
+        experiments = {}
+        for res in results:
+            run = (getattr(res, "metadata", None) or {}).get("robustness")
+            if isinstance(run, dict) and run.get("experiment_id"):
+                experiments.setdefault(run["experiment_id"], []).append(res)
+
+        # A report with one experiment can show its percentile curves on the main plot.
+        main_summary = None
+        if len(experiments) == 1:
+            group = next(iter(experiments.values()))
+            if len(group) == len(results):
+                main_summary = next((res.robustness for res in group if getattr(res, "robustness", None) is not None), None)
+        if main_summary is None:
+            MIAResult.create_roc_plot(results, save_dir)
+        else:
+            MIAResult.create_roc_plot(results, save_dir, rotation_summary=main_summary)
+        latex = MIAResult._latex(results, save_dir=save_dir, section_title="All results")
+
+        if main_summary is None:
+            for index, (experiment, group) in enumerate(experiments.items(), start=1):
+                summary = next((res.robustness for res in group if getattr(res, "robustness", None) is not None), None)
+                if summary is None:
+                    continue
+                folder = f"{save_dir}/robustness-{index}"
+                os.makedirs(folder, exist_ok=True)
+                MIAResult.create_roc_plot(group, folder, rotation_summary=summary)
+                title = f"{group[0].result_name} robustness ({experiment[:8]})"
+                latex += MIAResult._latex(group, save_dir=folder, section_title=title)
         return latex
 
     @staticmethod

@@ -280,13 +280,10 @@ shadow-model residuals on the z-population. Ignored for classification models, w
         if self.online is False:
             self.out_indices = ~ShadowModelHandler().get_in_indices_mask(self.shadow_model_indices, self.audit_dataset["data"]).T
 
-    def prepare_attack(self:Self, seed: Optional[int] = None) -> None:
+    def prepare_attack(self:Self) -> None:
         """Prepare Data needed for running the attack on the target model and dataset.
 
         Signals are computed on the auxiliary model(s) and dataset.
-
-        Args:
-            seed: Optional seed for z sampling. Shared models use the audit seed.
 
         """
         logger.info("Preparing shadow models for RMIA attack")
@@ -299,7 +296,7 @@ shadow-model residuals on the z-population. Ignored for classification models, w
         self.logits_theta = pool.load_logits(name=f"target_{pool.target_model_hash}")
         self.logits_shadow_models = [pool.load_logits(indx=index) for index in self.shadow_model_indices]
         # A warm pool skips training and consumes fewer random draws.
-        seed_everything(audit_seed if seed is None else seed)
+        seed_everything(audit_seed)
         self._prepare_z_signals()
 
     def _prepare_z_signals(self) -> None:
@@ -445,7 +442,7 @@ shadow-model residuals on the z-population. Ignored for classification models, w
 
         return score
 
-    def run_robustness(self, n_runs: int, seed: Optional[int] = None,
+    def run_robustness(self, n_runs: Optional[int] = None, seed: Optional[int] = None,
                        output_dir: Optional[str] = None) -> list[MIAResult]:
         """Rotate prepared audit/z outputs and membership through RMIA's scoring rule.
 
@@ -454,18 +451,17 @@ shadow-model residuals on the z-population. Ignored for classification models, w
         """
         config = RobustnessConfig(n_runs=n_runs, seed=seed)
         config.validate_attack(self)
-        self.prepare_attack(seed=get_audit_seed(self.handler.configs.audit))
+        self.prepare_attack()
         metadata = ShadowModelHandler().get_shadow_model_metadata(self.shadow_model_indices)
         training_indices = [self.handler.train_indices, *[model.train_indices for model in metadata]]
         membership = np.array([np.isin(self.audit_dataset["data"], indices) for indices in training_indices])
         training_sizes = [len(indices) for indices in training_indices]
         audit = np.concatenate((self.logits_theta[None], self.logits_shadow_models))
         z = np.concatenate((self.logits_z_theta[None], self.logits_z_shadow_models))
-        targets = [0, *np.random.default_rng(seed).permutation(np.arange(1, len(audit)))[:config.n_runs - 1]]
+        references_by_target = config.reference_models(self.attack_data_indices, training_indices)
 
         def rotations() -> Iterator[tuple[int, np.ndarray, np.ndarray, np.ndarray]]:
-            for target in targets:
-                references = np.delete(np.arange(len(audit)), target)
+            for target, references in references_by_target.items():
                 scale = self._estimate_scale(z[references], self.z_labels) if self.is_regression else None
                 p_z_target = np.atleast_2d(self._signal_probability(z[target], self.z_labels, scale))
                 p_z_shadows = np.array([self._signal_probability(values, self.z_labels, scale) for values in z[references]])
@@ -477,4 +473,5 @@ shadow-model residuals on the z-population. Ignored for classification models, w
                 yield target, references, scores, np.ones(audit.shape[1], dtype=bool)
 
         signals = {"audit": audit, "z": z, "audit_labels": self.ground_truth, "z_labels": self.z_labels}
-        return save_robustness_results(self, signals, membership, training_sizes, targets, rotations(), seed, output_dir)
+        return save_robustness_results(self, signals, membership, training_sizes,
+                                       references_by_target, rotations(), seed, output_dir)
