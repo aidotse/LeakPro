@@ -4,6 +4,8 @@
 #
 """Module that contains the AttackFactory class which is responsible for creating the attack objects."""
 
+from contextlib import ExitStack, contextmanager
+from typing import Iterator
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.mia_attacks.attack_p import AttackP
@@ -11,6 +13,8 @@ from leakpro.attacks.mia_attacks.base import AttackBASE
 from leakpro.attacks.mia_attacks.dts import AttackDTS
 from leakpro.attacks.mia_attacks.HSJ import AttackHopSkipJump
 from leakpro.attacks.mia_attacks.lira import AttackLiRA
+from leakpro.attacks.mia_attacks.llm.ez_mia import AttackEZMIA
+from leakpro.attacks.mia_attacks.llm.wbc import AttackWBC
 from leakpro.attacks.mia_attacks.loss_trajectory import AttackLossTrajectory
 from leakpro.attacks.mia_attacks.multi_signal_lira import AttackMSLiRA
 from leakpro.attacks.mia_attacks.oslo import AttackOSLO
@@ -23,7 +27,6 @@ from leakpro.attacks.mia_attacks.yoqo import AttackYOQO
 from leakpro.attacks.utils.distillation_model_handler import DistillationModelHandler
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
-from leakpro.utils.logger import logger
 
 
 class AttackFactoryMIA:
@@ -43,6 +46,8 @@ class AttackFactoryMIA:
         "multi_signal_lira": AttackMSLiRA,
         "dts": AttackDTS,
         "oslo": AttackOSLO,
+        "ez_mia": AttackEZMIA,
+        "wbc": AttackWBC,
         "rapid": AttackRAPID,
     }
 
@@ -70,22 +75,31 @@ class AttackFactoryMIA:
 
         """
 
-        if AttackFactoryMIA.shadow_model_handler is None:
-            logger.info("Creating shadow model handler singleton")
-            AttackFactoryMIA.shadow_model_handler = ShadowModelHandler(handler)
-        else:
-            logger.info("Shadow model handler singleton already exists, updating state")
-            AttackFactoryMIA.shadow_model_handler = ShadowModelHandler(handler)
+        attack_cls = cls.attack_classes.get(name)
+        if attack_cls is None:
+            raise ValueError(f"Unknown attack type: {name}")
 
-        if AttackFactoryMIA.distillation_model_handler is None:
-            logger.info("Creating distillation model handler singleton")
-            AttackFactoryMIA.distillation_model_handler = DistillationModelHandler(handler)
-        else:
-            logger.info("Distillation model handler singleton already exists, updating state")
-            AttackFactoryMIA.distillation_model_handler = DistillationModelHandler(handler)
+        with cls._model_handlers(attack_cls, handler) as (shadow, distillation):
+            if shadow is not None:
+                cls.shadow_model_handler = shadow
+            if distillation is not None:
+                cls.distillation_model_handler = distillation
+            attack_object = attack_cls(handler, attack_config)
+        attack_object.set_effective_optuna_metadata(attack_config) # remove optuna metadata if params not will be optimized
+        return attack_object
 
-        if name in cls.attack_classes:
-            attack_object = cls.attack_classes[name](handler, attack_config)
-            attack_object.set_effective_optuna_metadata(attack_config) # remove optuna metadata if params not will be optimized
-            return attack_object
-        raise ValueError(f"Unknown attack type: {name}")
+    @staticmethod
+    @contextmanager
+    def _model_handlers(attack_cls: type[AbstractMIA], handler: MIAHandler, *, isolated: bool = False) -> Iterator[tuple]:
+        """Set up the requested model handlers within the audit's scope."""
+        with ExitStack() as scope:
+            shadow, distillation = None, None
+            if getattr(attack_cls, "requires_shadow_models", True):
+                if isolated:
+                    scope.enter_context(ShadowModelHandler.isolated_instance())
+                shadow = ShadowModelHandler(handler, precompute_logits=getattr(attack_cls, "precompute_shadow_logits", True))
+            if getattr(attack_cls, "requires_distillation_models", True):
+                if isolated:
+                    scope.enter_context(DistillationModelHandler.isolated_instance())
+                distillation = DistillationModelHandler(handler)
+            yield shadow, distillation

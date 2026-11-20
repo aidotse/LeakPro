@@ -15,7 +15,7 @@ import pytest
 import torch
 import yaml
 from torch import nn, optim
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, default_collate
 
 from leakpro import LeakPro
 from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
@@ -42,6 +42,11 @@ RMIA_N_TRAIN = N_SAMPLES // 2
 RMIA_TRAIN_INDICES = list(range(0, RMIA_N_TRAIN))
 RMIA_TEST_INDICES = list(range(RMIA_N_TRAIN, N_SAMPLES))
 REPO_ROOT = Path(__file__).resolve().parents[4]
+
+# LLM attacks audit a tiny causal LM over token sequences instead of the image population.
+LLM_E2E_ATTACKS = ("ez_mia", "wbc")
+TEXT_VOCAB = 16
+TEXT_SEQ_LEN = 12
 
 
 class TinyImageTargetModel(nn.Module):
@@ -71,6 +76,28 @@ class TinyTimeSeriesTargetModel(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         last_step = x[:, -1:, :].repeat(1, self.horizon, 1)
         return self.linear(last_step)
+
+
+class TinyCausalLMTargetModel(nn.Module):
+    """Tiny causal LM for LLM E2E tests: embedding -> causal prefix-sum -> vocab head.
+
+    Returns the bare (B, L, vocab) logits tensor, which CausalLMModel duck-types like an HF
+    output with ``.logits``. Constructor args are stored under their own names so
+    get_model_init_params can round-trip them through model_metadata.pkl.
+    """
+
+    def __init__(self, vocab_size: int = TEXT_VOCAB, dim: int = 8) -> None:
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.dim = dim
+        self.embed = nn.Embedding(vocab_size, dim)
+        self.head = nn.Linear(dim, vocab_size)
+
+    def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor | None = None) -> torch.Tensor:
+        emb = self.embed(input_ids)
+        if attention_mask is not None:
+            emb = emb * attention_mask.unsqueeze(-1).to(emb.dtype)
+        return self.head(torch.cumsum(emb, dim=1))
 
 
 class TinyImageInputHandler(AbstractInputHandler):
@@ -225,6 +252,38 @@ class TinyTimeSeriesInputHandler(AbstractInputHandler):
             return len(self.targets)
 
 
+class TinyTextInputHandler(AbstractInputHandler):
+    """Minimal token-sequence handler for LLM attacks. train/eval are never called: these attacks train nothing."""
+
+    def train(
+        self,
+        dataloader: DataLoader,
+        model: nn.Module = None,
+        criterion: nn.Module = None,
+        optimizer: optim.Optimizer = None,
+        epochs: int = None,
+    ) -> TrainingOutput:
+        return TrainingOutput(model=model, metrics=EvalOutput(accuracy=0.5, loss=1.0))
+
+    def eval(self, dataloader: DataLoader, model: nn.Module, criterion: nn.Module) -> EvalOutput:
+        return EvalOutput(accuracy=0.5, loss=1.0)
+
+    class UserDataset(AbstractInputHandler.UserDataset):
+        """Fixed-length token-id sequences; labels are the ids themselves (causal-LM convention)."""
+
+        def __init__(self, data: torch.Tensor, targets: torch.Tensor, **kwargs: dict) -> None:
+            self.data = data.long()
+            self.targets = targets.long()
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+
+        def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
+            return self.data[idx], self.targets[idx]
+
+        def __len__(self) -> int:
+            return len(self.targets)
+
+
 def _set_seed(seed: int = 1234) -> None:
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -273,6 +332,11 @@ def _build_tiny_timeseries_population() -> TinyTimeSeriesInputHandler.UserDatase
     data = torch.rand(N_SAMPLES, 4, 2)
     targets = torch.rand(N_SAMPLES, 2, 2)
     return TinyTimeSeriesInputHandler.UserDataset(data, targets)
+
+
+def _build_tiny_text_population() -> TinyTextInputHandler.UserDataset:
+    ids = torch.randint(0, TEXT_VOCAB, (N_SAMPLES, TEXT_SEQ_LEN))
+    return TinyTextInputHandler.UserDataset(ids, ids)
 
 
 def _get_schema_floor(field_schema: dict[str, Any], default_value: Any) -> Any:
@@ -379,9 +443,6 @@ def _build_attack_config(attack_name: str) -> dict:
         candidate["batch_size"] = max(candidate["batch_size"], 1)
     if "temperature" in candidate:
         candidate["temperature"] = max(candidate["temperature"], 1e-3)
-    if attack_name == "rmia":
-        # Temperature is not a runtime budget; its numeric floor underflows softmax probabilities.
-        candidate["temperature"] = default_config["temperature"]
     if "max_num_evals" in candidate and "initial_num_evals" in candidate:
         if candidate["max_num_evals"] <= candidate["initial_num_evals"]:
             candidate["max_num_evals"] = candidate["initial_num_evals"] + 1
@@ -408,7 +469,7 @@ def _build_attack_config(attack_name: str) -> dict:
 
     if attack_name == "rapid":
         candidate.update(shadow_data_fraction=0.5, training_data_fraction=0.5,
-                         num_reference_models=2, query_num=2, mia_classifier_epochs=2,
+                         num_reference_models=2, query_num=2, mia_classifier_patience=2,
                          learning_rate=0.0002, random_seed=1234)
 
     if attack_name == "oslo":
@@ -419,6 +480,16 @@ def _build_attack_config(attack_name: str) -> dict:
         candidate["n_audits"] = max(candidate.get("n_audits", 2), 2)
         if candidate["n_audits"] % 2 != 0:
             candidate["n_audits"] += 1
+
+    if attack_name in LLM_E2E_ATTACKS:
+        # A frozen reference is required and cannot be derived from the schema. random_init (not
+        # self) so delta != 0 and the ROC is non-degenerate.
+        candidate["references"] = [{"source": "random_init"}]
+        candidate["batch_size"] = 4
+        candidate["pad_token_id"] = 0
+    if attack_name == "wbc":
+        # Sequences are TEXT_SEQ_LEN tokens (11 scored positions): keep a small, valid window grid.
+        candidate["w_min"], candidate["w_max"], candidate["n_windows"] = 2, 4, 3
 
     validated_config = config_cls(**candidate)
     return validated_config.model_dump()
@@ -537,6 +608,22 @@ def _create_timeseries_e2e_config(run_dir: Path, attack_name: str) -> Path:
     return _create_audit_yaml(run_dir, attack_name, "timeseries", "TinyTimeSeriesTargetModel", data_path, target_dir)
 
 
+def _create_text_e2e_config(run_dir: Path, attack_name: str) -> Path:
+    population = _build_tiny_text_population()
+    target_model = TinyCausalLMTargetModel()
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(target_model.parameters(), lr=0.01)
+    data_path, target_dir = _create_target_artifacts(
+        run_dir=run_dir,
+        population=population,
+        target_model=target_model,
+        criterion=criterion,
+        optimizer=optimizer,
+        dataset_name="tiny_text",
+    )
+    return _create_audit_yaml(run_dir, attack_name, "text", "TinyCausalLMTargetModel", data_path, target_dir)
+
+
 E2E_TESTED_MIA_ATTACKS = (
     "population",
     "rmia",
@@ -551,13 +638,39 @@ E2E_TESTED_MIA_ATTACKS = (
     "multi_signal_lira",
     "dts",
     "oslo",
+    "ez_mia",
+    "wbc",
     "rapid",
 )
 
+# Attacks that report, on MIAResult.audit_indices, the population index of every
+# score they return. Every other attack must leave it None rather than guess
+# (loss_traj scores a shuffled set, see #476; qmia reports no per-point scores).
+ATTACKS_REPORTING_SCORED_INDICES = frozenset({"rmia", "lira", "base", "multi_signal_lira", "rapid", "population", "dts"})
+
+
+def _assert_scored_indices_contract(attack_name: str, result: MIAResult,
+                                    handler: AbstractInputHandler) -> None:
+    """audit_indices is either absent or a faithful map from each score to a population point."""
+    indices = result.audit_indices
+    if attack_name not in ATTACKS_REPORTING_SCORED_INDICES:
+        assert indices is None, f"{attack_name} attached audit_indices but is not in the reporting set"
+        return
+    assert indices is not None, f"{attack_name} must report which population points it scored"
+    assert len(indices) == len(result.signal_values) == len(result.true)
+    train = {int(i) for i in handler.train_indices}
+    test = {int(i) for i in handler.test_indices}
+    for idx, is_member in zip(indices.tolist(), result.true.tolist()):
+        assert idx in train or idx in test, f"{attack_name}: scored index {idx} is not an audit point"
+        assert (idx in train) == bool(is_member), (
+            f"{attack_name}: index {idx} labelled member={is_member} but train membership is {idx in train}"
+        )
+
 ATTACK_PARAMETERS = [
-    pytest.param(attack_name, id=f"{attack_name}-real")
+    pytest.param(attack_name, False, id=f"{attack_name}-real")
     for attack_name in E2E_TESTED_MIA_ATTACKS
 ]
+ATTACK_PARAMETERS.append(pytest.param("dts", True, id="dts-custom-collate"))
 
 
 def test_attack_factory_attack_list_is_covered() -> None:
@@ -584,8 +697,8 @@ def test_target_split_keeps_aux_population() -> None:
     assert len(RMIA_TRAIN_INDICES) + len(RMIA_TEST_INDICES) == N_SAMPLES
 
 
-@pytest.mark.parametrize("attack_name", ATTACK_PARAMETERS)
-def test_all_attacks_end_to_end(attack_name: str, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(("attack_name", "reverse_collate"), ATTACK_PARAMETERS)
+def test_all_attacks_end_to_end(attack_name: str, reverse_collate: bool, monkeypatch: pytest.MonkeyPatch) -> None:
     """Run a minimal real E2E flow for each MIA attack in AttackFactoryMIA."""
     _set_seed()
     optuna_metadata_snapshot = _snapshot_optuna_metadata()
@@ -601,11 +714,22 @@ def test_all_attacks_end_to_end(attack_name: str, monkeypatch: pytest.MonkeyPatc
             if attack_name == "dts":
                 config_path = _create_timeseries_e2e_config(run_dir, attack_name)
                 user_handler = TinyTimeSeriesInputHandler
+                if reverse_collate:
+                    config = yaml.safe_load(config_path.read_text())
+                    config["audit"]["attack_list"][0]["clf_batch_size"] = 4
+                    config_path.write_text(yaml.safe_dump(config))
+            elif attack_name in LLM_E2E_ATTACKS:
+                config_path = _create_text_e2e_config(run_dir, attack_name)
+                user_handler = TinyTextInputHandler
             else:
                 config_path = _create_image_e2e_config(run_dir, attack_name)
                 user_handler = TinyImageInputHandler
 
             leakpro = LeakPro(user_handler, str(config_path))
+            if reverse_collate:
+                monkeypatch.setitem(
+                    leakpro.handler.dataloader_config.params, "collate_fn", lambda batch: default_collate(batch[::-1])
+                )
             results = leakpro.run_audit(create_pdf=False, use_optuna=False)
 
             assert len(results) == 1
@@ -615,6 +739,12 @@ def test_all_attacks_end_to_end(attack_name: str, monkeypatch: pytest.MonkeyPatc
             assert hasattr(result, "id")
             assert isinstance(result.id, str)
             assert result.id
+            _assert_scored_indices_contract(attack_name, result, leakpro.handler)
+
+            if reverse_collate:
+                attack, = leakpro.attack_scheduler.attacks
+                targets = leakpro.handler.population.targets[result.audit_indices]
+                torch.testing.assert_close(attack.target_features[..., :targets.size(-1)], targets)
 
             if attack_name == "rapid":
                 np.testing.assert_array_equal(result.true, [1] * N_TRAIN + [0] * N_TEST)

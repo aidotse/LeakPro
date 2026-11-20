@@ -262,7 +262,7 @@ _PRESET_ARCHS: dict[str, str] = {
 }
 
 from .checker import run_check
-from .dataio import convert_upload
+from .dataio import convert_upload, load_dataset
 from .inspector import inspect
 from .security import (
     ALLOWED_ORIGINS,
@@ -289,6 +289,8 @@ from .models import (
     JobSummary,
     ModelAttackConfig,
     ModelInfo,
+    RiskRequest,
+    RiskResponse,
     TrainParams,
 )
 from .worker import run_audit_job
@@ -845,59 +847,7 @@ async def train_model(job_id: str, params: TrainParams) -> dict:
             # Load dataset, apply f_train fraction
             data_path = Path(job.get("data_path", ""))
             if data_path.exists():
-                import pickle
-
-                def _safe_load_dataset(path: Path):
-                    """Load a dataset pickle, falling back to SafeUnpickler for missing modules."""
-                    try:
-                        with open(path, "rb") as _f:
-                            return pickle.load(_f)
-                    except Exception:
-                        pass
-                    # Fall back: stub out missing classes, then reconstruct as TensorDataset.
-                    # NOTE: compatibility shim, not a security boundary — it resolves real
-                    # classes whenever the import succeeds (see security.RestrictedUnpickler).
-                    class _LenientUnpickler(pickle.Unpickler):
-                        def find_class(self, module, name):
-                            try:
-                                return super().find_class(module, name)
-                            except (ImportError, AttributeError):
-                                return type(name, (), {})
-                    with open(path, "rb") as _f:
-                        raw = _LenientUnpickler(_f).load()
-                    import numpy as np
-                    # Use __dict__ directly — bypasses any descriptor protocol on the stub class
-                    attrs = getattr(raw, "__dict__", {})
-                    data_arr = targets_arr = None
-                    for data_attr in ("data", "x", "X", "features", "samples"):
-                        val = attrs.get(data_attr)
-                        if val is not None:
-                            data_arr = val if isinstance(val, np.ndarray) else (val.numpy() if hasattr(val, "numpy") else None)
-                            if data_arr is not None:
-                                break
-                    for tgt_attr in ("targets", "y", "Y", "labels"):
-                        val = attrs.get(tgt_attr)
-                        if val is not None:
-                            targets_arr = val if isinstance(val, (list, np.ndarray)) else (val.tolist() if hasattr(val, "tolist") else None)
-                            if targets_arr is not None:
-                                break
-                    if data_arr is None:
-                        raise ValueError(
-                            f"Cannot extract data array from {type(raw).__name__}. "
-                            f"Available keys: {list(attrs.keys())}"
-                        )
-                    _raw_np = np.array(data_arr)
-                    x = torch.from_numpy(_raw_np.astype("float32"))
-                    # Only normalize if data is raw uint8 pixels — already-normalized floats must not be touched
-                    if _raw_np.dtype == np.uint8 or (_raw_np.dtype != np.float32 and _raw_np.dtype != np.float64 and x.max() > 1.0):
-                        x = x / 255.0
-                    # Channel-last (N,H,W,C) → channel-first (N,C,H,W)
-                    if x.ndim == 4 and x.shape[-1] in (1, 3, 4) and x.shape[1] > 4:
-                        x = x.permute(0, 3, 1, 2).contiguous()
-                    y = torch.tensor(np.array(targets_arr), dtype=torch.long) if targets_arr is not None else torch.zeros(len(x), dtype=torch.long)
-                    return torch.utils.data.TensorDataset(x, y)
-
-                dataset = _safe_load_dataset(data_path)
+                dataset = load_dataset(data_path)
                 if not isinstance(dataset, torch.utils.data.Dataset):
                     raise ValueError(f"Loaded object is not a Dataset: {type(dataset)}")
             else:
@@ -1229,6 +1179,49 @@ async def start_audit(job_id: str) -> dict:
 # Step 7 — Results
 # ---------------------------------------------------------------------------
 
+# Operating points the results view offers before a use case is declared. Must match ALPHAS in
+# frontend/src/components/results/Summary.tsx, which looks the blocks up by str(alpha).
+MEASURED_ALPHAS = (0.01, 0.001, 0.0001)
+
+
+def _train_test_gap(model: dict) -> float | None:
+    """Train accuracy minus test accuracy for a stored model result, when both are known."""
+    if model.get("train_accuracy") is None or model.get("test_accuracy") is None:
+        return None
+    return float(model["train_accuracy"]) - float(model["test_accuracy"])
+
+
+def _measured_blocks(model: dict) -> dict[str, dict]:
+    """The measured block per operating point for one stored model, through the library's own path.
+
+    This is what the results view shows before a use case is declared, and it is computed by
+    leakpro.risk.measure_strongest, the same function assess_risk uses, so the pre-assessment and
+    assessed views cannot disagree about the attack or its TPR. Computed on request rather than
+    stored, so jobs that finished before this existed get it too.
+
+    Each value is ``{"measured": MiaVulnerability, "skipped": [reasons], "below_chance": [warnings]}``,
+    or ``{"error": reason}``
+    when no attack can be measured at that operating point (for example, every one is inverted).
+    """
+    from leakpro.risk import measure_strongest, result_from_mapping  # noqa: PLC0415
+
+    results = [result_from_mapping(a) for a in model.get("attacks", [])]
+    blocks: dict[str, dict] = {}
+    for alpha in MEASURED_ALPHAS:
+        if not results:
+            blocks[str(alpha)] = {"error": "no attack results"}
+            continue
+        try:
+            measured, skipped, below_chance, _ = measure_strongest(results, alpha=alpha, strict=False,
+                                                                   train_test_gap=_train_test_gap(model),
+                                                                   dp_epsilon=model.get("target_epsilon"))
+            blocks[str(alpha)] = {"measured": measured.model_dump(), "skipped": skipped,
+                                  "below_chance": below_chance}
+        except Exception as e:  # noqa: BLE001 - surfaced per operating point rather than failing the request
+            blocks[str(alpha)] = {"error": str(e)}
+    return blocks
+
+
 @app.get("/jobs/{job_id}/results")
 async def get_results(job_id: str) -> dict:
     job = _get_job(job_id)
@@ -1239,20 +1232,66 @@ async def get_results(job_id: str) -> dict:
     # sample images from the correct dataset even in cross-session comparisons.
     for r in results:
         r["job_id"] = job_id
-    return {"job_id": job_id, "results": results}
+    # The measured blocks go on copies: they are derived, so they are never persisted with the job.
+    return {"job_id": job_id, "results": [{**r, "measured": _measured_blocks(r)} for r in results]}
+
+
+@app.post("/jobs/{job_id}/risk", response_model=RiskResponse)
+async def assess_job_risk(job_id: str, req: RiskRequest) -> RiskResponse:
+    """Assess use-case risk for a finished job's attack results.
+
+    All scoring lives in leakpro.risk: this endpoint adapts the stored results, calls the library once
+    per model, and returns the assessments untouched. Nothing here decides what is risky.
+    """
+    from leakpro.risk import UseCaseProfile, assess_risk, result_from_mapping  # noqa: PLC0415
+
+    job = _get_job(job_id)
+    if job["status"] != JobStatus.done:
+        raise HTTPException(status_code=425, detail=f"Job status: {job['status']}")
+
+    # req was validated as a UseCaseProfile on the way in; strip model_name so the profile echoed into
+    # the assessment is exactly the library type.
+    profile = UseCaseProfile(**req.model_dump(exclude={"model_name"}))
+
+    assessments: dict[str, dict] = {}
+    unassessable: dict[str, str] = {}
+    for model in job.get("results", []):
+        name = model.get("model_name", "?")
+        if req.model_name is not None and name != req.model_name:
+            continue
+        results = [result_from_mapping(a) for a in model.get("attacks", [])]
+        if not results:
+            unassessable[name] = "no attack results"
+            continue
+        try:
+            assessment = assess_risk(
+                results,
+                profile,
+                num_train=model.get("num_train"),
+                train_test_gap=_train_test_gap(model),
+                dp_epsilon=model.get("target_epsilon"),
+                strict=False,
+            )
+            assessments[name] = assessment.model_dump()
+        except Exception as e:  # noqa: BLE001 - surfaced per model rather than failing the request
+            unassessable[name] = str(e)
+
+    if not assessments and not unassessable:
+        raise HTTPException(status_code=404, detail="No models found for this job")
+    return RiskResponse(job_id=job_id, assessments=assessments, unassessable=unassessable)
 
 
 @app.get("/jobs/{job_id}/sample_data/{index}")
 async def get_sample_data(job_id: str, index: int):
     """Return tabular feature values for a single sample as JSON."""
-    import joblib, torch
+    import torch
     import numpy as np
     job = _get_job(job_id)
     data_path = job.get("data_path")
     if not data_path or not Path(data_path).exists():
         raise HTTPException(status_code=404, detail="Dataset not found")
     try:
-        dataset = joblib.load(data_path)
+        dataset = load_dataset(Path(data_path))
         row = dataset.data[index]
         if isinstance(row, torch.Tensor):
             row = row.tolist()
@@ -1274,7 +1313,6 @@ async def get_sample_data(job_id: str, index: int):
 async def get_sample_image(job_id: str, index: int):
     """Return a single sample image from the job's dataset as PNG."""
     import io
-    import joblib
     import numpy as np
     from PIL import Image
     from fastapi.responses import Response
@@ -1284,7 +1322,7 @@ async def get_sample_image(job_id: str, index: int):
     if not data_path or not Path(data_path).exists():
         raise HTTPException(status_code=404, detail="Dataset not found")
 
-    dataset = joblib.load(data_path)
+    dataset = load_dataset(Path(data_path))
 
     try:
         img = dataset.data[index]

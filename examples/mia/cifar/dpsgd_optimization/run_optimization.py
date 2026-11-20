@@ -63,6 +63,7 @@ from leakpro.optimization import (  # noqa: E402
 )
 from leakpro.schemas import PrivacyUtilityConfig  # noqa: E402
 from leakpro.utils.logger import logger  # noqa: E402
+from leakpro.utils.save_load import unwrapped_state_dict  # noqa: E402
 
 NUM_CLASSES = 10
 
@@ -199,7 +200,8 @@ def make_objective(cfg: PrivacyUtilityConfig, pop: dict, out_dir: Path, device: 
         with dpsgd_path.open("wb") as f:
             pickle.dump({"noise_multiplier": config["noise_multiplier"],
                          "max_grad_norm": config["max_grad_norm"],
-                         "delta": cfg.delta}, f)
+                         "delta": cfg.delta,
+                         "accountant": cfg.accountant}, f)
 
         # 2. Train the target under the knobs (the same dp_train the shadow models use).
         batch_size = int(config["batch_size"])
@@ -211,6 +213,7 @@ def make_objective(cfg: PrivacyUtilityConfig, pop: dict, out_dir: Path, device: 
         criterion = nn.CrossEntropyLoss()
         train_result = dp_train(model, train_loader, criterion, optimizer, epochs, str(dpsgd_path), device)
         epsilon = train_result.metrics.extra.get("epsilon")
+        accountant = train_result.metrics.extra.get("accountant")
 
         # 3. Utility on the disjoint test split, then the gate: a model at or
         # below chance level has not learned — attacking it spends a full audit
@@ -222,11 +225,11 @@ def make_objective(cfg: PrivacyUtilityConfig, pop: dict, out_dir: Path, device: 
             logger.warning(f"Utility {utility:.4f} ({cfg.utility.metric}) is at or below the gate "
                            f"{gate:.4f}: this model did not learn, skipping the attack.")
             return ObjectiveResult(utility=utility, tpr=None,
-                                   extras={"epsilon": epsilon, "tuning_accounted": False, "gated": True})
+                                   extras={"epsilon": epsilon, "accountant": accountant,
+                                           "tuning_accounted": False, "gated": True})
 
         # 4. Persist the target in the layout LeakPro's MIAHandler reads.
-        state_dict = {k.replace("_module.", "").replace("module.", ""): v
-                      for k, v in train_result.model.state_dict().items()}
+        state_dict = unwrapped_state_dict(train_result.model)
         with (target_folder / "target_model.pkl").open("wb") as f:
             torch.save(state_dict, f)
         test_result = CifarDPHandler().eval(test_loader, train_result.model, criterion)
@@ -260,6 +263,7 @@ def make_objective(cfg: PrivacyUtilityConfig, pop: dict, out_dir: Path, device: 
         return ObjectiveResult(
             utility=utility, tpr=tpr,
             extras={"epsilon": epsilon,
+                    "accountant": accountant,
                     "tpr_fixed_fpr_table": None if degenerate else tpr_at_fixed_fpr(result, cfg.proxy_fpr),
                     # The accountant's epsilon covers ONE training run. Tuning
                     # over many configurations on the same private data and

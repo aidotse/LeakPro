@@ -3,13 +3,14 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 """Implementation of the RMIA attack."""
-from typing import Optional
+from typing import Iterator, Optional
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from torch import nn
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
+from leakpro.attacks.utils.model_handler import LogitQuery
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.attacks.utils.utils import (
     gaussian_residual_probability,
@@ -159,38 +160,30 @@ shadow-model residuals on the z-population. Ignored for classification models, w
             "detailed": detailed_str,
         }
 
-    def _get_z_logits(self:Self,
-                      logits_cached: np.ndarray,
-                      model,  # noqa: ANN001
-                      z_indices: np.ndarray,
-                      cached_mask: np.ndarray,
-                      logit_row: dict) -> np.ndarray:
-        """Return logits for z_indices, reading from cache where available and computing on-the-fly otherwise."""
+    def _get_z_query(self:Self, cached_query:LogitQuery, model:nn.Module | PytorchModel,
+                     z_indices:np.ndarray, cached_mask:np.ndarray, logit_row:dict) -> LogitQuery:
+        """Collect paired logits and labels for z records, using the cache when available."""
+        logits_cached, labels_cached = cached_query
         n = len(z_indices)
-        logits = np.zeros((n, *logits_cached.shape[1:]))
+        logits = np.empty((n, *logits_cached.shape[1:]))
+        labels = np.empty((n, *labels_cached.shape[1:]), dtype=labels_cached.dtype)
 
         if cached_mask.any():
             rows = np.array([logit_row[int(idx)] for idx in z_indices[cached_mask]])
             logits[cached_mask] = logits_cached[rows]
+            labels[cached_mask] = labels_cached[rows]
 
-        if (~cached_mask).any():
-            # Shadow models are already PytorchModel wrappers; target model is a raw nn.Module.
+        uncached = ~cached_mask
+        if uncached.any():
             model_wrapped = model if isinstance(model, PytorchModel) else PytorchModel(model, self.handler.get_criterion())
-            # squeeze(axis=0) drops only the single-model axis ModelLogits() always adds.
-            # A bare .squeeze() also collapses the num_classes axis for single-logit (binary)
-            # models, turning (n_uncached, 1) into (n_uncached,) and making np.atleast_2d
-            # reshape it to (1, n_uncached) instead of (n_uncached, 1) — the shape mismatch
-            # the reviewer hit on binary/tabular models.
-            unc = np.array(ModelLogits()(
-                [model_wrapped],
-                self.handler,
-                z_indices[~cached_mask],
-            )).squeeze(axis=0)
-            logits[~cached_mask] = unc
+            queried_logits, queried_labels = ModelLogits()(
+                [model_wrapped], self.handler, z_indices[uncached], with_labels=True,
+            )
+            logits[uncached], labels[uncached] = queried_logits[0], queried_labels[0]
 
-        return logits
+        return logits, labels
 
-    def _resolve_scale(self:Self, shadow_logits_z: list, z_labels: np.ndarray) -> None:
+    def _resolve_scale(self:Self, shadow_queries: list[LogitQuery]) -> None:
         """Resolve the residual-likelihood scale used by the regression signal probability.
 
         With a user-provided sigma (residual std), it is mapped to the scale of the resolved
@@ -203,8 +196,7 @@ shadow-model residuals on the z-population. Ignored for classification models, w
 
         Args:
         ----
-            shadow_logits_z (list): Per-shadow-model predictions on the z-points.
-            z_labels (np.ndarray): True outputs for the z-points, same shape as each prediction.
+            shadow_queries: Paired predictions and labels for each shadow model's z records.
 
         """
         if self.sigma is not None:
@@ -215,18 +207,18 @@ shadow-model residuals on the z-population. Ignored for classification models, w
             return
 
         if self.likelihood_family == "gaussian":
-            energies = [np.mean(mse(logits_z, z_labels)) for logits_z in shadow_logits_z]
+            energies = [np.mean(mse(*query)) for query in shadow_queries]
         elif self.likelihood_family == "laplace":
-            energies = [np.mean(mae(logits_z, z_labels)) for logits_z in shadow_logits_z]
+            energies = [np.mean(mae(*query)) for query in shadow_queries]
         else:
-            energies = [np.mean(huber_energy(logits_z, z_labels, self._huber_delta)) for logits_z in shadow_logits_z]
+            energies = [np.mean(huber_energy(*query, self._huber_delta)) for query in shadow_queries]
 
         self._scale = float(np.mean(energies))
         if self._scale <= 0.0:
             # Degenerate case: shadow models reproduce all z-targets exactly.
             self._scale = self.epsilon
         logger.info(f"Estimated {self.likelihood_family} residual scale = {self._scale:.6g} "
-                    f"from {len(shadow_logits_z)} shadow model(s) on {len(z_labels)} z-points")
+                    f"from {len(shadow_queries)} shadow model(s) on {len(shadow_queries[0][1])} z-points")
 
     def _signal_probability(self:Self, logits: np.ndarray, labels: np.ndarray) -> np.ndarray:
         """Compute the per-point probability of the true output given a model.
@@ -255,6 +247,11 @@ shadow-model residuals on the z-population. Ignored for classification models, w
                 return laplace_residual_probability(logits, labels, self._scale)
             return huber_residual_probability(logits, labels, self._scale, self._huber_delta)
         return softmax_logits(logits, self.temperature)[np.arange(len(labels)), labels]
+
+    def get_audit_logits(self:Self, reference_indices:list[int]) -> tuple[LogitQuery, Iterator[LogitQuery]]:
+        """Return paired logits and labels for the target and then each reference."""
+        models = ShadowModelHandler()
+        return models.load_logit_query(name="target"), (models.load_logit_query(indx=index) for index in reference_indices)
 
     def _prepare_shadow_models(self:Self) -> None:
 
@@ -285,11 +282,8 @@ shadow-model residuals on the z-population. Ignored for classification models, w
         if not self.load_for_optuna:
             self._prepare_shadow_models()
 
-            self.ground_truth = self.handler.get_labels(self.audit_dataset["data"])
-            self.logits_theta = ShadowModelHandler().load_logits(name=f"target_{ShadowModelHandler().target_model_hash}")
-            self.logits_shadow_models = []
-            for indx in self.shadow_model_indices:
-                self.logits_shadow_models.append(ShadowModelHandler().load_logits(indx=indx))
+            self.target_query, reference_queries = self.get_audit_logits(self.shadow_model_indices)
+            self.shadow_queries = list(reference_queries)
 
         # Sample z from full population per Algorithm 1 of the RMIA paper.
         # Build a cache lookup (global index → row) once — identical for target and all shadow models.
@@ -300,36 +294,36 @@ shadow-model residuals on the z-population. Ignored for classification models, w
         logit_row = {int(idx): i for i, idx in enumerate(all_cached)}
 
         n_z = int(self.attack_data_fraction * len(self.attack_data_indices))
+        if n_z == 0:
+            raise ValueError("RMIA needs at least one z record. Increase attack_data_fraction.")
         z_indices = np.random.choice(self.attack_data_indices, size=n_z, replace=False)
-        z_labels = self.handler.get_labels(z_indices)
-
-        if self.is_regression != np.issubdtype(z_labels.dtype, np.floating):
-            logger.warning(f"Label dtype ({z_labels.dtype}) does not match the task resolved from the "
-                           f"criterion ({'regression' if self.is_regression else 'classification'}). "
-                           "Check that the target metadata criterion matches the model output.")
 
         # cached_mask is True for z-points present in the logit cache (train+test).
         # Auxiliary population points not in the cache are computed on-the-fly.
         # For configs where f_train + f_test = 1.0 this mask is all-True and no forward pass is needed.
         cached_mask = np.array([int(idx) in logit_row for idx in z_indices])
 
-        # Collect raw model outputs on the z-points for the target and all shadow models
-        logits_z_theta = self._get_z_logits(
-            self.logits_theta, self.handler.target_model, z_indices, cached_mask, logit_row)
-        logits_z_shadow_models = [
-            self._get_z_logits(sm_logits, sm, z_indices, cached_mask, logit_row)
-            for sm, sm_logits in zip(self.shadow_models, self.logits_shadow_models)
+        z_target = self._get_z_query(
+            self.target_query, self.handler.target_model, z_indices, cached_mask, logit_row)
+        z_references = [
+            self._get_z_query(query, model, z_indices, cached_mask, logit_row)
+            for model, query in zip(self.shadow_models, self.shadow_queries)
         ]
 
+        z_labels = z_target[1]
+        if self.is_regression != np.issubdtype(z_labels.dtype, np.floating):
+            logger.warning(f"Label dtype ({z_labels.dtype}) does not match the task resolved from the "
+                           f"criterion ({'regression' if self.is_regression else 'classification'}). "
+                           "Check that the target metadata criterion matches the model output.")
+
         if self.is_regression:
-            self._resolve_scale(logits_z_shadow_models, z_labels)
+            self._resolve_scale(z_references)
 
         # p(z | target model)
-        p_z_given_theta = np.atleast_2d(self._signal_probability(logits_z_theta, z_labels))
+        p_z_given_theta = np.atleast_2d(self._signal_probability(*z_target))
 
         # p(z | each shadow model)
-        p_z_given_shadow_models = np.array(
-            [self._signal_probability(logits_z, z_labels) for logits_z in logits_z_shadow_models])
+        p_z_given_shadow_models = np.array([self._signal_probability(*query) for query in z_references])
 
         # evaluate the marginal p(z)
         if self.online is True:
@@ -346,12 +340,11 @@ shadow-model residuals on the z-population. Ignored for classification models, w
         logger.info(f"Running RMIA {mode} attack")
 
         # probability of the true output for each audit point given the target model
-        n_audit_points = len(self.ground_truth)
-        p_x_given_theta = np.atleast_2d(self._signal_probability(self.logits_theta, self.ground_truth))
+        n_audit_points = len(self.target_query[0])
+        p_x_given_theta = np.atleast_2d(self._signal_probability(*self.target_query))
 
         # same per shadow model, to compute the marginal p(x)
-        p_x_given_shadow_models = np.array(
-            [self._signal_probability(x, self.ground_truth) for x in self.logits_shadow_models])
+        p_x_given_shadow_models = np.array([self._signal_probability(*query) for query in self.shadow_queries])
 
         if self.online is True:
             p_x = np.mean(p_x_given_shadow_models, axis=0, keepdims=True)
@@ -398,7 +391,8 @@ shadow-model residuals on the z-population. Ignored for classification models, w
         return MIAResult.from_full_scores(true_membership=true_labels,
                                           signal_values=signal_values,
                                           result_name="RMIA",
-                                          metadata=self.configs.model_dump())
+                                          metadata=self.configs.model_dump(),
+                                          audit_indices=self.scored_population_indices())
 
     def reset_attack(self: Self, config:BaseModel) -> None:
         """Reset attack to initial state."""

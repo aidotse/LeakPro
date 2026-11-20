@@ -8,10 +8,12 @@ import subprocess
 
 from leakpro.metrics.attack_result import GIAResults
 from leakpro.reporting.mia_result import MIAResult
+from leakpro.risk.render import to_latex
+from leakpro.risk.schemas import RiskAssessment
 from leakpro.synthetic_data_attacks.inference_utils import InferenceResults
 from leakpro.synthetic_data_attacks.linkability_utils import LinkabilityResults
 from leakpro.synthetic_data_attacks.singling_out_utils import SinglingOutResults
-from leakpro.utils.import_helper import Self, Union
+from leakpro.utils.import_helper import Optional, Self, Union
 from leakpro.utils.logger import logger
 
 ResultList = Union[list[MIAResult],
@@ -25,11 +27,17 @@ ResultList = Union[list[MIAResult],
 class ReportHandler():
     """Implementation of the report handler."""
 
-    def __init__(self:Self, results:ResultList, report_dir: str) -> None:
+    def __init__(self:Self, results:ResultList, report_dir: str,
+                 risk_assessment: Optional[RiskAssessment] = None) -> None:
         logger.info("Initializing report handler...")
 
         self.report_dir = report_dir
         logger.info(f"report_dir set to: {self.report_dir}")
+
+        # Optional use-case risk assessment, produced by leakpro.risk.assess_risk. run_audit builds
+        # its own ReportHandler and knows nothing about risk, so this is only populated when the
+        # caller constructs the handler directly.
+        self.risk_assessment = risk_assessment
 
         self.pdf_results = {}
         self.leakpro_types = {"MIAResult" : MIAResult,
@@ -81,6 +89,10 @@ class ReportHandler():
 
         # Create initial part of the document.
         self._init_pdf()
+
+        # Risk assessment first: it frames the attack results that follow.
+        if self.risk_assessment is not None:
+            self.latex_content += to_latex(self.risk_assessment)
 
         # Append all results to the document
         for result_type in self.leakpro_types:

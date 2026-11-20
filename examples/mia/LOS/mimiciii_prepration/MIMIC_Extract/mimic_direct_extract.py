@@ -761,7 +761,7 @@ if __name__ == "__main__":
     # Parse args
     args = vars(ap.parse_args())
     for key in sorted(args.keys()):
-        print(key, args[key])
+        print(key, "<redacted>" if key == "psql_password" else args[key])
 
     if not isdir(args["resource_path"]):
         raise ValueError("Invalid resource_path: %s" % args["resource_path"])

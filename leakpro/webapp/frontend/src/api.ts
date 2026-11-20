@@ -21,6 +21,17 @@ export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
 }
 
+/**
+ * Log-stream WebSocket URL for a job. Browsers cannot set an Authorization
+ * header on a WebSocket, so the backend takes the token as a query parameter
+ * on this one route. Every caller must go through here so an auth change
+ * cannot miss a call site again.
+ */
+export function logsSocketUrl(jobId: string): string {
+  const scheme = location.protocol === "https:" ? "wss" : "ws";
+  return `${scheme}://${location.host}/jobs/${jobId}/logs?token=${encodeURIComponent(getToken())}`;
+}
+
 function authHeaders(extra?: Record<string, string>): Record<string, string> {
   return { Authorization: `Bearer ${getToken()}`, ...(extra ?? {}) };
 }
@@ -117,8 +128,19 @@ export const api = {
 
   // Step 7
   getResults: (id: string) => get<{ job_id: string; results: ModelResult[] }>(`/jobs/${id}/results`),
+  // Risk assessment. All scoring happens in leakpro/risk on the backend; this posts the declared
+  // use-case profile and renders whatever comes back.
+  assessRisk: (id: string, profile: RiskRequest) => post<RiskResponse>(`/jobs/${id}/risk`, profile),
   getSampleData: (jobId: string, index: number) =>
     get<{ index: number; label: number; features: number[]; feature_names?: string[] }>(`/jobs/${jobId}/sample_data/${index}`),
+  // An <img src> cannot carry the Authorization header, so fetch the PNG with
+  // the token and hand back an object URL (caller revokes it).
+  getSampleImageUrl: async (jobId: string, index: number): Promise<string> => {
+    const res = await fetch(`${BASE}/jobs/${jobId}/sample_image/${index}`, { headers: authHeaders() });
+    if (res.status === 401) { clearToken(); throw new Error("Unauthorized"); }
+    if (!res.ok) throw new Error(await res.text());
+    return URL.createObjectURL(await res.blob());
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -158,6 +180,7 @@ export interface CompatResult {
   param_count?: number;
   error?: string;
   sample_outputs?: Array<{ sample: number; top1_class: number; confidence: number; true_label: number | null }>;
+  sample_error?: string;
 }
 
 export interface MetaValidationResult {
@@ -201,6 +224,7 @@ export interface AttackResult {
   tpr?: number[];
   signal_values?: number[];
   true_labels?: number[];
+  audit_indices?: number[] | null;  // population index per signal entry
 }
 
 export interface JobListItem {
@@ -237,5 +261,74 @@ export interface ModelResult {
   model_class?: string;
   job_id?: string;
   train_meta?: TrainMeta;
+  num_train?: number;
   attacks: AttackResult[];
+  /** Measured block per operating point, keyed by String(alpha). Computed by leakpro.risk on the backend. */
+  measured?: Record<string, MeasuredAtAlpha>;
+}
+
+// ---------------------------------------------------------------------------
+// Risk assessment (mirrors leakpro/risk/schemas.py and backend models.py)
+// ---------------------------------------------------------------------------
+
+/** Declared harm parameters. Field names follow Sion et al.'s Loss Magnitude decomposition. */
+export interface RiskRequest {
+  model_name?: string;
+  tolerated_fpr: number;          // alpha; required on purpose, no default
+  attacker_prior?: number;        // pi
+  n_subjects?: number;            // NDS
+  records_per_subject?: number;   // NR
+  data_type_sensitivity?: number; // DTS
+  subject_type_weight?: number;   // DST
+  cost_per_exposed_subject?: number;
+  extrapolate_to_population?: boolean;
+  notes?: string;
+}
+
+export interface RiskMeasured {
+  attack_name: string;
+  operating_point: number;
+  success_rate: number;
+  advantage: number;
+  lift: number;
+  resolvable: boolean;
+  roc_auc?: number;
+  n_members_audit: number;
+  n_non_members_audit: number;
+  n_exposed_audit?: number;
+  min_resolvable_fpr: number;
+}
+
+/** Either the strongest attack's measured block (plus why others were skipped), or why none could be measured. */
+export type MeasuredAtAlpha =
+  | { measured: RiskMeasured; skipped: string[]; below_chance: string[]; error?: undefined }
+  | { error: string; measured?: undefined; skipped?: undefined; below_chance?: undefined };
+
+export interface RiskCombined {
+  ppv?: number;
+  ppv_balanced?: number;
+  gamma: number;
+  loss_magnitude?: number;
+  loss_event_frequency: number;
+  risk?: number;
+  expected_exposed_subjects?: number;
+  expected_cost?: number;
+  extrapolated_exposed_records?: number;
+  vulnerability_band?: string;
+}
+
+export interface RiskAssessment {
+  measured: RiskMeasured;
+  declared: Record<string, unknown> & { n_subjects?: number; n_subjects_source: string; attacker_prior: number };
+  combined: RiskCombined;
+  assumptions: string[];
+  warnings: string[];
+  policy_version: string;
+  leakpro_version: string;
+}
+
+export interface RiskResponse {
+  job_id: string;
+  assessments: Record<string, RiskAssessment>;
+  unassessable: Record<string, string>;
 }

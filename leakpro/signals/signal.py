@@ -14,6 +14,7 @@ from torch.utils.data.sampler import SequentialSampler
 from tqdm import tqdm
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
+from leakpro.input_handler.mia_handler import ordered_query_dataloader
 from leakpro.signals.signal_extractor import Model
 from leakpro.signals.utils.dtw import mv_dtw_distance
 from leakpro.signals.utils.get_TS2Vec import get_ts2vec_model
@@ -58,18 +59,26 @@ class Signal(ABC):
         handler: AbstractInputHandler,
         indices: np.ndarray,
         data_loader: Optional[DataLoader] = None,
+        *,
+        with_labels: bool = False,
     ) -> Tuple[np.ndarray, np.ndarray]:
         if data_loader is None:
             data_loader = handler.get_dataloader(indices, shuffle=False) # NOTE: Shuffle must be false to maintain indices order
         assert self._is_shuffling(data_loader) is False, "DataLoader must not shuffle data to maintain order of indices"
         model_logits = []
-        for data, _ in data_loader:
-            # Get logits for each data point
+        query_labels = []
+        for data, labels in data_loader:
             logits = model.get_logits(data)
             model_logits.extend(logits)
-        model_logits = np.array(model_logits)
+            if with_labels:
+                labels = np.atleast_1d(np.asarray(labels))
+                if len(labels) != len(logits):
+                    raise ValueError("Each query batch must emit one label per logit row.")
+                query_labels.extend(labels)
+        if with_labels:
+            return np.asarray(model_logits), np.asarray(query_labels)
         model_targets = np.array(data_loader.dataset.targets)
-        return model_logits, model_targets
+        return np.asarray(model_logits), model_targets
 
 class ModelLogits(Signal):
     """Inherits from the Signal class, used to represent any type of signal that can be obtained from a Model and/or a Dataset.
@@ -82,8 +91,10 @@ class ModelLogits(Signal):
         models: List[Model],
         handler: AbstractInputHandler,
         indices: np.ndarray,
-        data_loader: Optional[list] = None,
-    ) -> List[np.ndarray]:
+        data_loader: Optional[DataLoader] = None,
+        *,
+        with_labels: bool = False,
+    ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
         """Built-in call method.
 
         Args:
@@ -92,10 +103,11 @@ class ModelLogits(Signal):
             handler: The input handler object.
             indices: List of indices in population dataset that can be queried from handler.
             data_loader: Optional DataLoader to use instead of creating a new one from the handler.
+            with_labels: Also return the labels emitted in each model's query batches.
 
         Returns:
         -------
-            The signal value.
+            Model logits, with the paired label array if requested.
 
         """        # Compute the signal for each model
 
@@ -105,10 +117,14 @@ class ModelLogits(Signal):
             data_loader = handler.get_dataloader(indices, shuffle=False)
         assert self._is_shuffling(data_loader) is False, "DataLoader must not shuffle data to maintain order of indices"
 
-        results = []
+        results, labels = [], []
         for model in tqdm(models, desc="Getting Model Logits"):
-            model_logits, _ = self._get_model_output(model, None, None, data_loader)
+            model_logits, model_labels = self._get_model_output(model, None, None, data_loader, with_labels=with_labels)
             results.append(model_logits)
+            if with_labels:
+                labels.append(model_labels)
+        if with_labels:
+            return np.asarray(results), np.asarray(labels)
         return np.array(results)
 
 class ModelRescaledLogits(Signal):
@@ -180,8 +196,7 @@ class ModelLoss(Signal):
 
         """
         # Compute the signal for each model
-        data_loader = handler.get_dataloader(indices, shuffle=False)
-        assert self._is_shuffling(data_loader) is False, "DataLoader must not shuffle data to maintain order of indices"
+        data_loader = ordered_query_dataloader(handler.get_dataloader, indices)
 
         results = []
         for m, model in enumerate(models):

@@ -59,6 +59,10 @@ class LeakPro:
         except FileNotFoundError as e:
             raise FileNotFoundError(f"File {configs_path} not found") from e
 
+        # Deployment context for risk assessment, when declared in the config. Nothing is computed
+        # here: pass it to leakpro.risk.assess_risk together with the results of run_audit().
+        self.use_case_profile = configs.use_case
+
         # Create report directory
         self.report_dir = f"{configs.audit.output_dir}/results"
         Path(self.report_dir).mkdir(parents=True, exist_ok=True)

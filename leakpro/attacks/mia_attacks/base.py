@@ -241,4 +241,5 @@ class AttackBASE(AbstractMIA):
         return MIAResult.from_full_scores(true_membership=true_labels,
                                     signal_values=signal_values,
                                     result_name="BASE",
-                                    metadata=self.configs.model_dump())
+                                    metadata=self.configs.model_dump(),
+                                    audit_indices=self.scored_population_indices())

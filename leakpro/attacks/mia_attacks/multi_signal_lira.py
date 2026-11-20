@@ -201,8 +201,8 @@ class AttackMSLiRA(AbstractMIA):
                 "fraction towards 0.5, or raise num_shadow_models, to score the full audit set."
             )
 
-        # Filter the audit data
-        self.audit_data_indices = audit_indices[mask]
+        # Filter the audit data (population indices of the points that will be scored)
+        self.audit_data_indices = self.scored_population_indices(mask)
         self.in_indices_masks = self.in_indices_masks[mask, :]
         self.shadow_models_signals = self.shadow_models_signals[mask]
         self.target_signals = self.target_signals[mask]
@@ -382,4 +382,5 @@ class AttackMSLiRA(AbstractMIA):
         return MIAResult.from_full_scores(true_membership=true_labels,
                                     signal_values=signal_values,
                                     result_name="MS-LiRA",
-                                    metadata=self.configs.model_dump())
+                                    metadata=self.configs.model_dump(),
+                                    audit_indices=self.audit_data_indices)

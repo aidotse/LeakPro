@@ -4,7 +4,7 @@
 #
 """Implementation of the LiRA attack."""
 
-from typing import Literal
+from typing import Iterator, Literal
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -12,6 +12,7 @@ from scipy.stats import norm
 from tqdm import tqdm
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
+from leakpro.attacks.utils.model_handler import LogitQuery
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler, audit_points_with_reference_models
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.reporting.mia_result import MIAResult
@@ -128,26 +129,26 @@ class AttackLiRA(AbstractMIA):
 
         # The signal is applied to the cached logits, so these hold signal values (rescaled logits,
         # an error, a distance, ...) rather than logits; named accordingly, as in MS-LiRA.
-        true_labels = self.handler.get_labels(self.audit_dataset["data"])
-        target_logits = ShadowModelHandler().load_logits(name="target")
+        target_query, reference_queries = self.get_audit_logits(self.shadow_model_indices)
+        self.target_signals = self._query_signal(target_query)
+        self.shadow_models_signals = np.array([self._query_signal(query) for query in reference_queries])
+        self._drop_unscorable_audit_points()
+
+    def _query_signal(self: Self, query: LogitQuery) -> np.ndarray:
+        """Score the labels emitted by the same query as the logits."""
+        logits, labels = query
         # Classification labels arrive with a spurious singleton axis (e.g. (N, 1)) that must be
         # dropped before rescaled_logits/loss index them as (N,). Forecasting targets, though,
         # already match the cached logits' shape (N, horizon, num_variables) — squeezing them
         # would strip the real num_variables axis and break the mse/dtw/msm/... shape assert.
-        if true_labels.shape != target_logits.shape:
-            true_labels = true_labels.squeeze()
-        self.target_signals = self._check_signal_shape(self.signal(target_logits, true_labels),
-                                                       n_audit_points=target_logits.shape[0])
-        self.shadow_models_signals = []
-        for indx in self.shadow_model_indices:
-            shadow_logits = ShadowModelHandler().load_logits(indx=indx)
-            self.shadow_models_signals.append(
-                self._check_signal_shape(self.signal(shadow_logits, true_labels),
-                                         n_audit_points=shadow_logits.shape[0])
-            )
-        self.shadow_models_signals = np.array(self.shadow_models_signals)
+        if labels.shape != logits.shape:
+            labels = labels.squeeze()
+        return self._check_signal_shape(self.signal(logits, labels), n_audit_points=len(logits))
 
-        self._drop_unscorable_audit_points()
+    def get_audit_logits(self:Self, reference_indices:list[int]) -> tuple[LogitQuery, Iterator[LogitQuery]]:
+        """Return paired logits and labels for the target and then each reference."""
+        models = ShadowModelHandler()
+        return models.load_logit_query(name="target"), (models.load_logit_query(indx=index) for index in reference_indices)
 
     def _drop_unscorable_audit_points(self:Self) -> None:
         """Restrict the audit set to points that have the reference models this variant needs.
@@ -168,6 +169,7 @@ class AttackLiRA(AbstractMIA):
         if n_dropped == 0:
             self.in_members = self.audit_dataset["in_members"]
             self.out_members = self.audit_dataset["out_members"]
+            self.kept_audit_points = None
             return
 
         side = "IN and OUT" if self.online else "OUT"
@@ -179,6 +181,7 @@ class AttackLiRA(AbstractMIA):
             "fraction towards 0.5, or raise num_shadow_models, to score the full audit set."
         )
 
+        self.kept_audit_points = mask
         self.out_indices = self.out_indices[:, mask]
         self.target_signals = self.target_signals[mask]
         self.shadow_models_signals = self.shadow_models_signals[:, mask]
@@ -329,4 +332,5 @@ class AttackLiRA(AbstractMIA):
         return MIAResult.from_full_scores(true_membership=true_labels,
                                     signal_values=signal_values,
                                     result_name="LiRA",
-                                    metadata=self.configs.model_dump())
+                                    metadata=self.configs.model_dump(),
+                                    audit_indices=self.scored_population_indices(self.kept_audit_points))

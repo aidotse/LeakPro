@@ -145,6 +145,160 @@ class TestConvertUpload:
             assert convert_upload(src, Path(tmp)) is None
 
 
+class TestScalingDecidedPerDataset:
+    """Pixel scaling follows the dataset's data_type, decided once, never per row."""
+
+    def test_integer_time_series_is_not_scaled(self: Self) -> None:
+        """Integer (N, T, F) is time_series at upload; it must not be treated as pixels."""
+        from leakpro.webapp.backend.dataio import ArrayDataset
+
+        data = np.full((3, 24, 5), 7, dtype=np.int64)
+        ds = ArrayDataset(data, np.array([0, 1, 0]))
+        assert ds.data_type == "time_series"
+        assert ds.scale_to_unit is False
+        assert float(ds[0][0].max()) == 7.0
+
+    def test_flat_uint8_images_are_scaled(self: Self) -> None:
+        """uint8 (N, 3072) is image at upload (flat CIFAR); it scales like any image."""
+        from leakpro.webapp.backend.dataio import ArrayDataset
+
+        ds = ArrayDataset(np.full((2, 3072), 255, dtype=np.uint8), np.array([0, 1]))
+        assert ds.data_type == "image"
+        assert ds.scale_to_unit is True
+        assert float(ds[0][0].max()) == 1.0
+
+    def test_upload_metadata_and_dataset_agree_on_data_type(self: Self) -> None:
+        """convert_upload's DataMeta.data_type is the dataset's own decision, not a second one."""
+        import joblib
+
+        from leakpro.webapp.backend.dataio import convert_upload
+
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "up.npz"
+            np.savez(src, data=np.zeros((4, 24, 5), dtype=np.int64), targets=np.arange(4) % 2)
+            path, meta = convert_upload(src, Path(tmp))
+            assert meta.data_type == joblib.load(path).data_type == "time_series"
+
+    def test_tabular_rows_are_never_rescaled(self: Self) -> None:
+        """A row whose max exceeds 1 must not be divided by 255 (the #474 review finding)."""
+        from leakpro.webapp.backend.dataio import ArrayDataset
+
+        data = np.array([[0.4, 0.9, 1.0], [0.4, 0.9, 1.5], [37.0, 0.9, 1.0]], dtype=np.float32)
+        ds = ArrayDataset(data, np.array([0, 1, 0]), feature_names=["a", "b", "c"])
+        assert ds.data_type == "tabular"
+        assert ds.scale_to_unit is False
+        for i in range(3):
+            x, _ = ds[i]
+            assert np.allclose(x.numpy(), data[i])
+
+    def test_unnamed_feature_vectors_are_never_rescaled(self: Self) -> None:
+        """Tabular .npz (no column names) is still tabular: 2-D data is left alone."""
+        from leakpro.webapp.backend.dataio import ArrayDataset
+
+        data = np.array([[0.5, 300.0], [2.0, 0.1]], dtype=np.float32)
+        ds = ArrayDataset(data, np.array([0, 1]))
+        assert ds.scale_to_unit is False
+        assert np.allclose(ds[0][0].numpy(), data[0])
+
+    def test_uint8_images_are_scaled_once(self: Self) -> None:
+        """Raw pixels go to [0, 1]; the decision holds for rows whose max is below 1 too."""
+        from leakpro.webapp.backend.dataio import ArrayDataset
+
+        data = np.zeros((2, 3, 4, 4), dtype=np.uint8)
+        data[0] = 255
+        data[1] = 0  # a row that would not trip a per-row "max > 1" check
+        ds = ArrayDataset(data, np.array([0, 1]))
+        assert ds.scale_to_unit is True
+        assert float(ds[0][0].max()) == 1.0
+        assert float(ds[1][0].max()) == 0.0
+
+    def test_float_images_are_taken_as_normalised(self: Self) -> None:
+        """ImageNet-style floats outside [0, 1] are not rescaled."""
+        from leakpro.webapp.backend.dataio import ArrayDataset
+
+        data = np.full((2, 3, 4, 4), 2.1, dtype=np.float32)
+        ds = ArrayDataset(data, np.array([0, 1]))
+        assert ds.scale_to_unit is False
+        assert float(ds[0][0].max()) == np.float32(2.1)
+
+    def test_channels_last_images_are_presented_channels_first(self: Self) -> None:
+        """(N, H, W, C) arrays come out as (C, H, W) tensors."""
+        from leakpro.webapp.backend.dataio import ArrayDataset
+
+        ds = ArrayDataset(np.zeros((2, 8, 8, 3), dtype=np.uint8), np.array([0, 1]))
+        assert ds.channels_last is True
+        assert tuple(ds[0][0].shape) == (3, 8, 8)
+
+
+class TestLoadDataset:
+    """One loader for every webapp path: joblib files, plain pickles, stubbed classes."""
+
+    def test_joblib_written_dataset_loads(self: Self) -> None:
+        """The converter writes with joblib; the training path must read it (#473)."""
+        import joblib
+
+        from leakpro.webapp.backend.dataio import ArrayDataset, load_dataset
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "d.pkl"
+            joblib.dump(ArrayDataset(np.zeros((3, 4), np.float32), np.arange(3)), path)
+            ds = load_dataset(path)
+            assert isinstance(ds, ArrayDataset)
+            assert len(ds) == 3
+
+    def test_plain_pickle_dataset_loads(self: Self) -> None:
+        """A dataset written with plain pickle still loads."""
+        import pickle
+
+        from leakpro.webapp.backend.dataio import ArrayDataset, load_dataset
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "d.pkl"
+            with open(path, "wb") as f:
+                pickle.dump(ArrayDataset(np.zeros((3, 4), np.float32), np.arange(3)), f)
+            assert len(load_dataset(path)) == 3
+
+    def test_unimportable_class_is_rebuilt_from_its_arrays(self: Self) -> None:
+        """A legacy pickle whose class no longer exists becomes an ArrayDataset."""
+        import importlib
+        import pickle
+        import sys
+
+        from leakpro.webapp.backend.dataio import ArrayDataset, load_dataset
+
+        with tempfile.TemporaryDirectory() as tmp:
+            # Pickle an instance of a class from a throwaway module, then make that
+            # module unimportable before loading, as with an old handler file.
+            (Path(tmp) / "old_handler_mod.py").write_text(
+                "import numpy as np\nclass OldDataset:\n    def __init__(self):\n"
+                "        self.x = np.ones((4, 2), dtype=np.float32)\n"
+                "        self.y = np.array([0, 1, 0, 1])\n")
+            sys.path.insert(0, tmp)
+            try:
+                mod = importlib.import_module("old_handler_mod")
+                path = Path(tmp) / "legacy.pkl"
+                with open(path, "wb") as f:
+                    pickle.dump(mod.OldDataset(), f)
+            finally:
+                sys.path.remove(tmp)
+                sys.modules.pop("old_handler_mod", None)
+            ds = load_dataset(path)
+            assert isinstance(ds, ArrayDataset)
+            assert len(ds) == 4
+            assert int(ds.targets[1]) == 1
+            assert np.allclose(ds[0][0].numpy(), [1.0, 1.0])
+
+    def test_unreadable_file_reports_both_loader_errors(self: Self) -> None:
+        """When every loader fails, the message names the joblib error, not just 'invalid load key'."""
+        from leakpro.webapp.backend.dataio import load_dataset
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "garbage.pkl"
+            path.write_bytes(b"\x02not a pickle at all")
+            with pytest.raises(RuntimeError, match="joblib failed"):
+                load_dataset(path)
+
+
 class TestUploadEndpoint:
     """The upload endpoint converts safe formats at the trust boundary."""
 
@@ -185,6 +339,79 @@ class TestUploadEndpoint:
         sample = client.get(f"/jobs/{job_id}/sample_data/0", headers=auth)
         assert sample.status_code == 200, sample.text
         assert len(sample.json()["features"]) == 4
+
+    def test_npz_upload_trains(self: Self) -> None:
+        """Regression for #473: /train must read the joblib-written converted upload.
+
+        The training path used plain pickle and failed with "invalid load key".
+        """
+        import io
+        import queue
+
+        from leakpro.webapp.backend import main as backend_main
+
+        client, auth = self._client()
+        job_id = client.post("/jobs", headers=auth).json()["job_id"]
+
+        rng = np.random.default_rng(0)
+        buf = io.BytesIO()
+        np.savez(buf, data=rng.normal(size=(24, 4)).astype(np.float32),
+                 targets=np.arange(24) % 3)
+        buf.seek(0)
+        res = client.post(f"/jobs/{job_id}/upload/data",
+                          files={"file": ("d.npz", buf, "application/octet-stream")},
+                          headers=auth)
+        assert res.status_code == 200, res.text
+        assert client.post(f"/jobs/{job_id}/arch-config", headers=auth,
+                           json={"preset": "tabular_mlp"}).status_code == 200
+
+        res = client.post(f"/jobs/{job_id}/train", headers=auth,
+                          json={"name": "m1", "epochs": 1, "learning_rate": 0.01,
+                                "batch_size": 8, "optimizer": "adam",
+                                "f_train": 0.5, "f_test": 0.5, "dpsgd": False})
+        assert res.status_code == 200, res.text
+
+        log_q = backend_main._log_queues[job_id]
+        lines = []
+        while True:
+            try:
+                line = log_q.get(timeout=120)
+            except queue.Empty:
+                pytest.fail("training did not finish; log so far:\n" + "\n".join(lines))
+            lines.append(line)
+            if line == "__TRAIN_DONE__":
+                break
+        failed = [ln for ln in lines if ln.startswith("[train] FAILED")]
+        assert not failed, "\n".join(lines)
+
+        model = next(m for m in backend_main._jobs[job_id]["models"] if m["name"] == "m1")
+        assert model["status"] == "ready", "\n".join(lines)
+        assert (Path(model["target_folder"]) / "model_metadata.pkl").exists()
+
+    def test_check_reads_converted_upload(self: Self) -> None:
+        """The compatibility check must produce sample outputs from a converted upload.
+
+        Before #473 the checker's plain-pickle read failed and silently dropped them.
+        """
+        from leakpro.webapp.backend.checker import run_check
+        from leakpro.webapp.backend.dataio import convert_upload
+        from leakpro.webapp.backend.main import _PRESET_ARCHS
+
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "up.npz"
+            # 10 features: the preset MLP's default input width.
+            np.savez(src, data=np.random.rand(5, 10).astype(np.float32),
+                     targets=np.arange(5) % 2)
+            data_path, _ = convert_upload(src, Path(tmp))
+            arch = Path(tmp) / "arch.py"
+            arch.write_text(_PRESET_ARCHS["tabular_mlp"])
+
+            result = run_check(arch_path=arch, weights_path=None,
+                               data_shape=[10], data_path=data_path)
+            assert result.ok, result.error
+            assert result.sample_outputs is not None
+            assert len(result.sample_outputs) == 2
+            assert result.sample_outputs[0]["true_label"] in (0, 1)
 
     def test_truncated_npz_upload_rejected(self: Self) -> None:
         """A corrupt upload gets 400 through the endpoint, not an unhandled 500."""

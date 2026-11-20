@@ -8,8 +8,11 @@ from typing import Annotated, Any, Callable, Dict, List, Literal, Optional, Unio
 
 import numpy as np
 import optuna
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
 from torch.nn import Module
+
+from leakpro.risk.schemas import UseCaseProfile
+from leakpro.utils.seed import MAX_SEED
 
 ArrayOrScalar = Union[np.ndarray, np.integer, int, list]
 
@@ -69,7 +72,7 @@ class ReconstructionConfig(BaseModel):
 class AuditConfig(BaseModel):
     """Configuration for the audit process."""
 
-    random_seed: int = Field(default=42, description="Random seed for reproducibility")
+    random_seed: int = Field(default=42, ge=0, le=MAX_SEED, description="Random seed for reproducibility")
     attack_type: Literal["mia", "gia", "minv", "synthetic"] = Field(..., description="Type of attack: must be one of ['mia', 'gia', 'minv', 'synthetic]")  # noqa: E501
     attack_list: List[Dict[str, Any]] = Field(..., min_length=1, description="Must have at least one attack")
     hyper_param_search: bool = Field(default=False, description="Whether to perform hyperparameter search")
@@ -141,6 +144,9 @@ class LeakProConfig(BaseModel):
     target: TargetConfig
     shadow_model: Optional[ShadowModelConfig] = Field(None, description="Shadow model config")
     distillation_model: Optional[DistillationModelConfig] = Field(None, description="Distillation model config")
+    # Deployment context for risk assessment, not an audit parameter, hence top level. Declaring it
+    # does not trigger anything: assessment is an explicit assess_risk() call on the audit results.
+    use_case: Optional[UseCaseProfile] = Field(None, description="Use-case profile for risk assessment")
     model_config = ConfigDict(extra="forbid")  # Prevent extra fields
 
 
@@ -277,6 +283,11 @@ class PrivacyUtilityConfig(BaseModel):
                              description="FPR level the loop minimizes TPR at (one of 0.0001, 0.001, 0.01, 0.1)")
     delta: float = Field(default=1e-5, gt=0.0, lt=1.0,
                          description="DP delta used for epsilon accounting; choose well below 1/n_target")
+    accountant: Literal["prv", "rdp"] = Field(
+        default="prv",
+        description="Opacus privacy accountant; PRV is tighter than RDP, so epsilons from different accountants "
+                    "are not comparable and the choice is recorded with every reported epsilon. GDP is not "
+                    "offered: Opacus's GDP accountant is experimental and can underestimate epsilon")
     epochs: int = Field(default=15, ge=1,
                         description="Training epochs (fixed unless 'epochs' is listed as a knob)")
     output_dir: str = Field(..., description="Output directory (study.db, per-config artifacts)")
@@ -320,12 +331,16 @@ class MIAResultSchema(BaseModel):
     accuracy: Union[List[float], float] = Field(..., description="Attack accuracy")
     fixed_fpr: Union[Dict[str, float], None] = Field(..., description="Fixed FPR values")
     signal_values: Union[List[float], None] = Field(..., description="Signal values")
+    audit_indices: Optional[List[StrictInt]] = Field(None, description="Population index for each reported score")
     true_labels: List[int] = Field(..., description="True labels")
     config: Dict[str, Any] = Field(..., description="Configuration of the attack")
     tp: Union[ArrayOrScalar, None] = Field(None, description="TP alues")
     fp: Union[ArrayOrScalar, None] = Field(None, description="FP values")
     tn: Union[ArrayOrScalar, None] = Field(None, description="TN values")
     fn: Union[ArrayOrScalar, None] = Field(None, description="FN values")
+    bootstrap: Optional[Dict[str, Any]] = Field(
+        None, description="Optional bootstrap mean/CI for roc_auc and the fixed-FPR table (see MIAResult.bootstrap_metrics)"
+    )
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")  # Prevent extra fields
 

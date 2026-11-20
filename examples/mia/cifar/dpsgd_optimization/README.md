@@ -29,9 +29,12 @@ Nothing about the attack lives in this example. The optimization loop is
   returns the RMIA `MIAResult`.
 - `tpr_at_fixed_fpr(result, 0.01)` — reads TPR@1% from `MIAResult.fixed_fpr_table`.
 
-This example provides only *training* (which LeakPro always leaves to the user's
-handler): `dp_handler.py` defines `SmallCNN`, a `CifarDPHandler`, and one DP-SGD
-training function used for **both** the target and the RMIA shadow models.
+This example provides only the *model and data* (which LeakPro always leaves to
+the user's handler): `dp_handler.py` defines `SmallCNN` and a `CifarDPHandler`
+whose `train` forwards to `leakpro.optimization.fit_dpsgd`, the library's one
+DP-SGD loop, for **both** the target and the RMIA shadow models. The accountant
+(`accountant:` in the yaml, default `prv`) is written next to every reported
+epsilon, because PRV and RDP epsilons for the same noise are not comparable.
 
 ## Prerequisites
 
