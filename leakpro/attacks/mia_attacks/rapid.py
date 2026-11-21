@@ -10,11 +10,8 @@ Each reference model takes a turn as the shadow target while fitting the
 scorer. Target membership labels are used only for reporting.
 """
 
-from contextlib import contextmanager
-from copy import copy, deepcopy
-from pathlib import Path
-from types import MethodType
-from typing import Iterator, Literal, Optional, Union
+from copy import deepcopy
+from typing import Literal, Optional, Union
 
 import numpy as np
 import torch
@@ -24,7 +21,6 @@ from torch.nn.functional import binary_cross_entropy_with_logits, cross_entropy
 from torch.utils.data import DataLoader, TensorDataset
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
-from leakpro.attacks.utils.model_handler import LogitQuery
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler, audit_points_with_reference_models
 from leakpro.input_handler.mia_handler import MIAHandler, ordered_query_dataloader
 from leakpro.reporting.mia_result import MIAResult
@@ -32,12 +28,11 @@ from leakpro.signals.signal_extractor import PytorchModel, align_loss_targets
 from leakpro.utils.device import get_device, mark_step
 from leakpro.utils.import_helper import Self
 from leakpro.utils.logger import logger
-from leakpro.utils.save_load import unwrapped_state_dict
 from leakpro.utils.seed import seed_everything
 
 
 class AttackRAPID(AbstractMIA):
-    """Implementation of RAPID with optional registered MIA input reuse."""
+    """Calibrate classification losses against a shared pool of reference models."""
 
     requires_distillation_models = False
     precompute_shadow_logits = False
@@ -64,46 +59,21 @@ class AttackRAPID(AbstractMIA):
         learning_rate: float = Field(default=0.0002, gt=0.0, allow_inf_nan=False, description="MIA classifier Adam learning rate")
         weight_decay: float = Field(default=5e-4, ge=0.0, allow_inf_nan=False, description="MIA classifier weight decay")
         random_seed: int = Field(default=42, ge=0, le=2**32 - 1, description="Inherits audit.random_seed unless overridden.")
-        use_attack: Optional[str] = Field(default=None,
-            description="Registered MIA source; None or RAPID selects ordinary RAPID.")
-        use_attack_output: Optional[Literal["logits"]] = Field(default=None,
-            description="Source output for computing RAPID's loss features. Logits are used when a source is configured.")
-        use_attack_config: dict = Field(default_factory=dict, description="Parameters for the selected source attack")
+        use_attack: None = Field(default=None, exclude=True, description="Legacy selector for ordinary RAPID")
 
         @field_validator("use_attack", mode="before")
         @classmethod
-        def normalize_use_attack(cls, value:object) -> object:
-            """Normalize ordinary RAPID aliases before validating source names."""
-            if isinstance(value, str):
-                value = value.strip().lower()
-                if value in {"none", "rapid"}:
-                    return None
-                from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA  # noqa: PLC0415
-                for name in AttackFactoryMIA.attack_classes:
-                    if name.lower() == value:
-                        return name
-                raise ValueError(f"Unknown MIA source: {value}")
-            if value is not None:
-                raise ValueError("use_attack must be a registered MIA name or None.")
-            return value
+        def normalize_use_attack(cls, value:object) -> None:
+            """Accept legacy selectors for ordinary RAPID."""
+            if value is None or isinstance(value, str) and value.strip().lower() in {"none", "rapid"}:
+                return
+            raise ValueError("RAPID computes losses directly. Remove the use_attack setting.")
 
         @model_validator(mode="after")
-        def validate_source_config(self:Self) -> Self:
-            """Keep reference ownership and source configuration explicit."""
-            if self.use_attack is None and self.use_attack_config:
-                raise ValueError("use_attack_config requires use_attack.")
-            if self.use_attack is None and self.use_attack_output is not None:
-                raise ValueError("use_attack_output requires use_attack.")
+        def validate_reference_count(self:Self) -> Self:
+            """Require enough references for both sides of online calibration."""
             if self.online and self.num_reference_models < 2:
                 raise ValueError("Online RAPID needs at least two references per rotation for IN and OUT coverage.")
-            if self.use_attack is not None:
-                from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA  # noqa: PLC0415
-                source = AttackFactoryMIA.attack_classes[self.use_attack]
-                if not source.requires_shadow_models or not callable(getattr(source, "get_audit_logits", None)):
-                    raise ValueError(f"{self.use_attack} does not provide audit reference logits.")
-            controlled = {"num_shadow_models", "training_data_fraction", "online"} & self.use_attack_config.keys()
-            if controlled:
-                raise ValueError(f"RAPID owns reference training; configure {sorted(controlled)} through RAPID instead.")
             return self
 
     def __init__(self: Self, handler: MIAHandler, configs: Optional[dict] = None) -> None:
@@ -120,21 +90,6 @@ class AttackRAPID(AbstractMIA):
         self.configs = self.AttackConfig(**{**seed_config, **(configs if configs is not None else {})})
         for key, value in self.configs.model_dump().items():
             setattr(self, key, value)
-        self.source_configs = None
-        if self.use_attack is not None:
-            from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA  # noqa: PLC0415
-            config_cls = AttackFactoryMIA.attack_classes[self.use_attack].AttackConfig
-            source_config = self.use_attack_config.copy()
-            controlled = {"num_shadow_models": self.num_reference_models + 1,
-                          "training_data_fraction": self.training_data_fraction, "online": self.online}
-            for key, value in controlled.items():
-                if key in config_cls.model_fields:
-                    source_config[key] = value
-            self.source_configs = config_cls(**source_config)
-            effective = self.source_configs.model_dump()
-            for key in controlled:
-                effective.pop(key, None)
-            self.configs = self.configs.model_copy(update={"use_attack_config": effective})
         super().__init__(handler)
         self.scoring_model = None
         self.signal_data = None
@@ -161,10 +116,7 @@ class AttackRAPID(AbstractMIA):
         # Cache hits skip model training. Use the same seed for queries and scorer fitting.
         seed_everything(self.random_seed)
         membership = ShadowModelHandler().get_in_indices_mask(self.reference_model_indices, self.shadow_population).T
-        original, references = self._query_losses(
-            reference_models[0], reference_models[1:], self.reference_model_indices[1:], self.shadow_population,
-        )
-        losses = np.concatenate((original[None, :], references))
+        losses = self._query_losses(reference_models, self.shadow_population)
         features, covered = self._loss_features(losses, losses, membership, rotate=True)
         validation = self._validation_records(membership, covered)
         train_rows, val_rows = covered & ~validation, covered & validation
@@ -190,9 +142,7 @@ class AttackRAPID(AbstractMIA):
             self.num_reference_models + 1, np.arange(self.population_size), training_fraction=self.training_data_fraction,
             precompute_logits=False, seed=self.random_seed,
         )
-        # A logits source loads the other pool members through its cache.
-        model_indices = self.reference_model_indices[:1] if self.use_attack else self.reference_model_indices
-        reference_models, _ = models.get_shadow_models(model_indices)
+        reference_models, _ = models.get_shadow_models(self.reference_model_indices)
         return reference_models
 
     def _validation_records(self: Self, membership: np.ndarray, covered: np.ndarray) -> np.ndarray:
@@ -238,7 +188,7 @@ class AttackRAPID(AbstractMIA):
 
     @staticmethod
     def _classification_losses(logits:np.ndarray, labels:Union[np.ndarray, torch.Tensor]) -> np.ndarray:
-        """Compute per-record classification losses for direct or source queries."""
+        """Compute per-record classification losses from each query."""
         logits = torch.as_tensor(logits)
         if logits.ndim == 1:
             logits = logits.unsqueeze(1)
@@ -274,8 +224,8 @@ class AttackRAPID(AbstractMIA):
         membership = ShadowModelHandler().get_in_indices_mask(self.reference_model_indices, indices).T
         if not audit_points_with_reference_models(~membership, require_in_models=self.online).all():
             raise ValueError("RAPID references must cover every requested sample on the required IN/OUT sides.")
-        original, reference_losses = self._query_losses(model, references, self.reference_model_indices, indices)
-        features, _ = self._loss_features(original, reference_losses, membership)
+        losses = self._query_losses([model, *references], indices)
+        features, _ = self._loss_features(losses[0], losses[1:], membership)
         return features
 
     def _loss_features(self: Self, losses: np.ndarray, references: np.ndarray, membership: np.ndarray,
@@ -300,99 +250,9 @@ class AttackRAPID(AbstractMIA):
             raise ValueError("RAPID features must be finite.")
         return features, covered
 
-    def _query_losses(self: Self, model: PytorchModel, references: list[PytorchModel],
-                      reference_indices: list[int], indices: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """Query each requested model once per loss pass."""
-        if self.use_attack is not None:
-            return self._get_source_losses(model, reference_indices, indices)
-        return self._get_mean_loss(model, indices), np.array([self._get_mean_loss(ref, indices) for ref in references])
-
-    @staticmethod
-    def _source_positions(source_ids:Optional[np.ndarray], indices:np.ndarray) -> np.ndarray:
-        """Align source rows by their population IDs."""
-        if source_ids is None:
-            raise ValueError("Source results must identify every requested sample exactly once.")
-        order = np.argsort(source_ids)
-        sorted_ids = source_ids[order]
-        if not np.array_equal(sorted_ids, np.sort(indices)) or np.any(sorted_ids[:-1] == sorted_ids[1:]):
-            raise ValueError("Source results must identify every requested sample exactly once.")
-        return order[np.searchsorted(sorted_ids, indices)]
-
-    def _get_source_losses(self:Self, model:PytorchModel, reference_indices:list[int],
-                           indices:np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """Use the logit inputs that the selected source reads when scoring."""
-        with self._source_attack(model, indices) as source:
-            positions = self._source_positions(source.audit_dataset["data"], indices)
-
-            def loss(query: LogitQuery) -> np.ndarray:
-                if not isinstance(query, tuple) or len(query) != 2:
-                    raise ValueError("RAPID's logits source must provide labels from each model query.")
-                values = self._classification_losses(*query)
-                if values.shape != indices.shape:
-                    raise ValueError("Source queries must return one logit and label row per requested record.")
-                return values[positions]
-
-            target, references = source.get_audit_logits(reference_indices)
-            original = loss(target)
-            reference_losses = np.array([loss(query) for query in references])
-            if len(reference_losses) != len(reference_indices):
-                raise ValueError("Source queries must return one prediction array per reference model.")
-            return original, reference_losses
-
-    def _get_source_handler(self:Self, model:PytorchModel, indices:np.ndarray) -> MIAHandler:
-        """Copy mutable source settings and partition record IDs without membership labels."""
-        order = np.random.default_rng(self.random_seed).permutation(np.argsort(indices))
-        source_handler = copy(self.handler)
-        # Input handlers attach trainer methods to each instance.
-        for name, method in vars(self.handler).items():
-            if isinstance(method, MethodType) and method.__self__ is self.handler:
-                setattr(source_handler, name, MethodType(method.__func__, source_handler))
-        split = len(indices) // 2
-        source_handler.train_indices = indices[order[:split]]
-        source_handler.test_indices = indices[order[split:]]
-        # Recreate the model so that caller-registered hooks stay on the caller's instance.
-        models = ShadowModelHandler()
-        if model is self.target_model:
-            blueprint = self.handler.target_model_blueprint
-            init_params = self.handler.target_model_metadata.init_params or {}
-        else:
-            blueprint, init_params = models.model_blueprint, models.init_params
-        source_handler.target_model = models.load_model_state(blueprint(**init_params), unwrapped_state_dict(model.model_obj))
-        source_handler._criterion = deepcopy(model.loss_fn)
-        source_handler.target_model_metadata = self.handler.target_model_metadata.model_copy(update={
-            "train_indices": source_handler.train_indices, "test_indices": source_handler.test_indices
-        }, deep=True)
-        source_handler.dataloader_config = deepcopy(self.handler.dataloader_config)
-        source_handler.configs = self.handler.configs.model_copy(deep=True)
-        source_handler.configs.audit.random_seed = self.random_seed
-        stage = "shadow" if np.array_equal(indices, self.shadow_population) else "target"
-        # Use a separate cache for source queries with verified loader order.
-        source_handler.configs.audit.output_dir = str(Path(self.handler.configs.audit.output_dir) /
-                                                    "attack_objects" / "rapid" / "sources" / self.attack_id / stage)
-        get_loader = source_handler.get_dataloader
-
-        def source_loader(dataset_indices:np.ndarray, params:Optional[dict]=None, batch_size:Optional[int]=None,
-                          shuffle:Optional[bool]=None) -> DataLoader:
-            """Preserve source query order and delegate training loaders as requested."""
-            if shuffle is False:
-                return ordered_query_dataloader(get_loader, dataset_indices, params, batch_size)
-            return get_loader(dataset_indices, params=params, batch_size=batch_size, shuffle=shuffle)
-
-        source_handler.get_dataloader = source_loader
-        return source_handler
-
-    @contextmanager
-    def _source_attack(self:Self, model:PytorchModel, indices:np.ndarray) -> Iterator[AbstractMIA]:
-        """Scope the factory's shared handlers to a private source audit."""
-        from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA  # noqa: PLC0415
-
-        source_handler = self._get_source_handler(model, indices)
-        source_cls = AttackFactoryMIA.attack_classes[self.use_attack]
-        storage_path = ShadowModelHandler().storage_path
-        with AttackFactoryMIA._model_handlers(source_cls, source_handler, isolated=True) as (shadow_handler, _):
-            # The source reads shared weights and keeps its own query cache.
-            shadow_handler.storage_path = storage_path
-            yield source_cls(source_handler, self.source_configs.model_dump())
+    def _query_losses(self: Self, models: list[PytorchModel], indices: np.ndarray) -> np.ndarray:
+        """Query each model for mean per-record losses."""
+        return np.array([self._get_mean_loss(model, indices) for model in models])
 
     def _train_mia_classifier(self: Self, features: np.ndarray, membership: np.ndarray,
                               val_features: np.ndarray, val_membership: np.ndarray) -> nn.Module:

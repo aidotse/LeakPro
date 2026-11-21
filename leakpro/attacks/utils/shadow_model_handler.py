@@ -8,16 +8,13 @@ import os
 import pickle
 import re
 import struct
-from contextlib import contextmanager
-from contextvars import ContextVar
 from pathlib import Path
-from typing import Iterator
 
 import numpy as np
 import torch
 from torch import Tensor, jit, save
 
-from leakpro.attacks.utils.model_handler import LogitQuery, ModelHandler
+from leakpro.attacks.utils.model_handler import ModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
 from leakpro.schemas import ShadowModelTrainingSchema, TrainingOutput
 from leakpro.signals.signal_extractor import PytorchModel
@@ -31,37 +28,25 @@ from leakpro.utils.seed import seed_everything
 def singleton(cls):  # noqa: ANN001, ANN201
     """Decorator to create a singleton with initialization parameters."""
     instances = {}
-    scope = ContextVar(cls.__name__)
 
     def get_instance(*args, **kwargs):  # noqa: ANN003, ANN002, ANN202
-        active = scope.get(instances)
-        if cls not in active:
-            active[cls] = cls(*args, **kwargs)  # Create the singleton instance
+        if cls not in instances:
+            instances[cls] = cls(*args, **kwargs)  # Create the singleton instance
         elif args or kwargs:
             # Call init again to update states such as model path, target hash etc
-            active[cls].__init__(*args, **kwargs)
-        return active[cls]
+            instances[cls].__init__(*args, **kwargs)
+        return instances[cls]
 
     def is_created() -> bool:
-        return cls in scope.get(instances)
+        return cls in instances
 
     def delete_instance() -> None:
         """Delete the singleton instance (for resetting or testing purposes)."""
-        scope.get(instances).pop(cls, None)
-
-    @contextmanager
-    def isolated_instance() -> Iterator[None]:
-        """Use a fresh instance within a nested audit."""
-        token = scope.set({})
-        try:
-            yield
-        finally:
-            scope.reset(token)
+        instances.pop(cls, None)
 
     # Attach methods to the class
     get_instance.is_created = is_created
     get_instance.delete_instance = delete_instance
-    get_instance.isolated_instance = isolated_instance
 
     return get_instance
 
@@ -464,7 +449,7 @@ class ShadowModelHandler(ModelHandler):
             with atomic_output_path(metadata_path) as pending, pending.open("wb") as stream:
                 pickle.dump(meta_data, stream)
             if precompute_logits:
-                self.cache_logits(PytorchModel(shadow_model, criterion), name=f"sm_{indx}_{self.population_hash}", refresh=True)
+                self.cache_logits(PytorchModel(shadow_model, criterion), name=f"sm_{indx}_{self.population_hash}")
 
             meta_dic = meta_data.model_dump()
             filtered_meta_data = {
@@ -517,27 +502,30 @@ class ShadowModelHandler(ModelHandler):
             metadata.append(self._load_shadow_metadata(i))
         return metadata
 
-    def load_logit_query(self:Self, name:str=None, indx:int=None) -> LogitQuery:
-        """Load paired audit logits and labels, querying saved weights on a cache miss."""
+    def load_logits(self:Self, name:str=None, indx:int=None) -> np.ndarray:
+        """Load model logits, realigning rows to current index order if needed."""
         if name is None and indx is not None:
             name = f"sm_{indx}_{self.population_hash}"
         elif name == "target":
             name = f"target_{self.target_model_hash}"
 
-        query = super().load_logit_query(name)
-        if query is not None:
-            return query
+        logits = super().load_logits(name)
+        if logits is not None:
+            return logits
 
         # Cache miss — recompute.
         logger.info(f"Cache miss for logits '{name}' — recomputing")
         if indx is not None:
-            return self.cache_logits(lambda: self._load_shadow_model(indx), name=name, refresh=True)
-        return self.cache_logits(lambda: PytorchModel(self.handler.target_model, self.handler.get_criterion()),
-                                 name=name, refresh=True)
+            self.cache_logits(self._load_shadow_model(indx), name=name)
+        else:
+            # Target model logits: re-cache using target model.
+            criterion = self.handler.get_criterion()
+            self.cache_logits(PytorchModel(self.handler.target_model, criterion), name=name)
 
-    def load_logits(self:Self, name:str=None, indx:int=None) -> np.ndarray:
-        """Load only the model logits."""
-        return self.load_logit_query(name=name, indx=indx)[0]
+        logits = super().load_logits(name)
+        if logits is None:
+            raise RuntimeError(f"Logits for '{name}' could not be loaded after recomputation.")
+        return logits
 
     def get_in_indices_mask(self:Self, shadow_model_indices:list[int], dataset_indices:np.ndarray) -> np.ndarray:
         """Get the mask indicating which indices in the dataset are present in the shadow model training set.

@@ -4,8 +4,6 @@
 #
 """Module that contains the AttackFactory class which is responsible for creating the attack objects."""
 
-from contextlib import ExitStack, contextmanager
-from typing import Iterator
 
 from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.mia_attacks.attack_p import AttackP
@@ -27,6 +25,7 @@ from leakpro.attacks.mia_attacks.yoqo import AttackYOQO
 from leakpro.attacks.utils.distillation_model_handler import DistillationModelHandler
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.mia_handler import MIAHandler
+from leakpro.utils.logger import logger
 
 
 class AttackFactoryMIA:
@@ -79,27 +78,24 @@ class AttackFactoryMIA:
         if attack_cls is None:
             raise ValueError(f"Unknown attack type: {name}")
 
-        with cls._model_handlers(attack_cls, handler) as (shadow, distillation):
-            if shadow is not None:
-                cls.shadow_model_handler = shadow
-            if distillation is not None:
-                cls.distillation_model_handler = distillation
-            attack_object = attack_cls(handler, attack_config)
+        # Auxiliary-model handlers are only built for attacks that declare they need them.
+        # Every pre-existing attack inherits True from AbstractMIA, so their behaviour is unchanged.
+        if getattr(attack_cls, "requires_shadow_models", True):
+            if AttackFactoryMIA.shadow_model_handler is None:
+                logger.info("Creating shadow model handler singleton")
+            else:
+                logger.info("Shadow model handler singleton already exists, updating state")
+            AttackFactoryMIA.shadow_model_handler = ShadowModelHandler(
+                handler, precompute_logits=getattr(attack_cls, "precompute_shadow_logits", True),
+            )
+
+        if getattr(attack_cls, "requires_distillation_models", True):
+            if AttackFactoryMIA.distillation_model_handler is None:
+                logger.info("Creating distillation model handler singleton")
+            else:
+                logger.info("Distillation model handler singleton already exists, updating state")
+            AttackFactoryMIA.distillation_model_handler = DistillationModelHandler(handler)
+
+        attack_object = attack_cls(handler, attack_config)
         attack_object.set_effective_optuna_metadata(attack_config) # remove optuna metadata if params not will be optimized
         return attack_object
-
-    @staticmethod
-    @contextmanager
-    def _model_handlers(attack_cls: type[AbstractMIA], handler: MIAHandler, *, isolated: bool = False) -> Iterator[tuple]:
-        """Set up the requested model handlers within the audit's scope."""
-        with ExitStack() as scope:
-            shadow, distillation = None, None
-            if getattr(attack_cls, "requires_shadow_models", True):
-                if isolated:
-                    scope.enter_context(ShadowModelHandler.isolated_instance())
-                shadow = ShadowModelHandler(handler, precompute_logits=getattr(attack_cls, "precompute_shadow_logits", True))
-            if getattr(attack_cls, "requires_distillation_models", True):
-                if isolated:
-                    scope.enter_context(DistillationModelHandler.isolated_instance())
-                distillation = DistillationModelHandler(handler)
-            yield shadow, distillation

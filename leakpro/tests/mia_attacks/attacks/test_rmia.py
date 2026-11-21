@@ -269,7 +269,7 @@ def test_signal_probability_should_raise_when_scale_is_unresolved() -> None:
 def test_resolve_scale_should_map_user_sigma_to_family_scale(family, huber_delta, expected_scale) -> None:
     stub = SimpleNamespace(sigma=3.0, epsilon=1e-6, likelihood_family=family, _huber_delta=huber_delta, _scale=None)
 
-    AttackRMIA._resolve_scale(stub, [(np.zeros((5, 2)), np.ones((5, 2)))])
+    AttackRMIA._resolve_scale(stub, [np.zeros((5, 2))], np.ones((5, 2)))
 
     assert np.isclose(stub._scale, expected_scale)
 
@@ -278,9 +278,9 @@ def test_resolve_scale_should_estimate_mean_squared_residual_when_gaussian() -> 
     stub = SimpleNamespace(sigma=None, epsilon=1e-6, likelihood_family="gaussian", _huber_delta=None, _scale=None)
     z_labels = np.zeros((4, 3))
     shadow_one = np.full((4, 3), 1.0)   # squared residual 1 everywhere
-    shadow_two = np.full((4, 3), 4.0)   # squared residual 9 with label 1
+    shadow_two = np.full((4, 3), 3.0)   # squared residual 9 everywhere
 
-    AttackRMIA._resolve_scale(stub, [(shadow_one, z_labels), (shadow_two, z_labels + 1)])
+    AttackRMIA._resolve_scale(stub, [shadow_one, shadow_two], z_labels)
 
     assert np.isclose(stub._scale, 5.0)  # mean of (1, 9)
 
@@ -291,7 +291,7 @@ def test_resolve_scale_should_estimate_mean_absolute_residual_when_laplace() -> 
     shadow_one = np.full((4, 3), 1.0)   # absolute residual 1 everywhere
     shadow_two = np.full((4, 3), 3.0)   # absolute residual 3 everywhere
 
-    AttackRMIA._resolve_scale(stub, [(shadow_one, z_labels), (shadow_two, z_labels)])
+    AttackRMIA._resolve_scale(stub, [shadow_one, shadow_two], z_labels)
 
     assert np.isclose(stub._scale, 2.0)  # mean of (1, 3), the Laplace scale MLE
 
@@ -302,7 +302,7 @@ def test_resolve_scale_should_estimate_mean_huber_energy_when_huber() -> None:
     shadow_one = np.full((4, 3), 1.0)   # |r| = 1 <= delta: energy 0.5 * 1^2 = 0.5
     shadow_two = np.full((4, 3), 3.0)   # |r| = 3 > delta: energy 1 * (3 - 0.5) = 2.5
 
-    AttackRMIA._resolve_scale(stub, [(shadow_one, z_labels), (shadow_two, z_labels)])
+    AttackRMIA._resolve_scale(stub, [shadow_one, shadow_two], z_labels)
 
     assert np.isclose(stub._scale, 1.5)  # mean of (0.5, 2.5)
 
@@ -311,6 +311,6 @@ def test_resolve_scale_should_fall_back_to_epsilon_when_shadow_residuals_are_zer
     stub = SimpleNamespace(sigma=None, epsilon=1e-6, likelihood_family="gaussian", _huber_delta=None, _scale=None)
     z_labels = np.ones((3, 2))
 
-    AttackRMIA._resolve_scale(stub, [(z_labels.copy(), z_labels)])
+    AttackRMIA._resolve_scale(stub, [z_labels.copy()], z_labels)
 
     assert stub._scale == 1e-6

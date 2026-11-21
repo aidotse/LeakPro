@@ -26,14 +26,11 @@ from torch.utils.data import DataLoader, SequentialSampler, TensorDataset, defau
 from torchvision.transforms import RandomHorizontalFlip
 
 from leakpro import LeakPro
-from leakpro.attacks.mia_attacks.abstract_mia import AbstractMIA
 from leakpro.attacks.mia_attacks.attack_factory_mia import AttackFactoryMIA
 from leakpro.attacks.mia_attacks.rapid import AttackRAPID
-from leakpro.attacks.utils.distillation_model_handler import DistillationModelHandler
 from leakpro.attacks.utils.shadow_model_handler import ShadowModelHandler
 from leakpro.input_handler.mia_handler import ordered_query_dataloader
 from leakpro.reporting.mia_result import MIAResult
-from leakpro.signals.signal import ModelLogits
 from leakpro.tests.mia_attacks.attacks.test_all_attacks_end_to_end import (
     TinyImageInputHandler,
     TinyImageTargetModel,
@@ -104,8 +101,6 @@ def test_worker_publishes_rapid_ids_or_reports_dropped_rows(
         metadata = joblib.load(metadata_path)
         metadata.data_loader.params["drop_last"] = True
         metadata_path.write_bytes(pickle.dumps(metadata))
-    else:
-        params.update(use_attack="lira", use_attack_output="logits")
 
     if "leakpro.dataset" not in sys.modules:
         monkeypatch.setitem(sys.modules, "leakpro.dataset", ModuleType("leakpro.dataset"))
@@ -156,14 +151,12 @@ def check_cached_replay(audit: LeakPro, attack: AttackRAPID, result: MIAResult, 
         torch.testing.assert_close(value, before[name], rtol=0, atol=0)
 
 
-@pytest.mark.parametrize("source", [None, "lira", "rmia", "custom_source"])
 @pytest.mark.parametrize("online", [False, True])
 def test_rapid_runtime(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: Optional[str], online: bool
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, online: bool
 ) -> None:
-    """Verify every rotation and split against saved training IDs, then replay with swapped reporting labels."""
-    monkeypatch.setitem(AttackFactoryMIA.attack_classes, "custom_source", AttackFactoryMIA.attack_classes["lira"])
-    audit = create_audit(tmp_path, monkeypatch, use_attack=source, online=online)
+    """Verify each rotation and split against training IDs, then replay with swapped reporting labels."""
+    audit = create_audit(tmp_path, monkeypatch, online=online)
     attack, = audit.attack_scheduler.attacks
     parent, handler = attack.target_model.model_obj, ShadowModelHandler().handler
     fit = Mock(wraps=attack._train_mia_classifier)
@@ -171,10 +164,10 @@ def test_rapid_runtime(
     query, split = attack._query_losses, attack._validation_records
     queried, splits = [], []
 
-    def record_losses(model, refs, ids, records):
-        original, references = query(model, refs, ids, records)
-        queried.append((model is attack.target_model, records.copy(), np.vstack([original, references])))
-        return original, references
+    def record_losses(models, records):
+        losses = query(models, records)
+        queried.append((models[0] is attack.target_model, records.copy(), losses.copy()))
+        return losses
 
     monkeypatch.setattr(attack, "_query_losses", record_losses)
 
@@ -184,10 +177,6 @@ def test_rapid_runtime(
         return validation
 
     monkeypatch.setattr(attack, "_validation_records", record_validation)
-    if source:
-        cls = AttackFactoryMIA.attack_classes[source]
-        monkeypatch.setattr(cls, "prepare_attack", lambda *_args: pytest.fail("RAPID prepared a source attack"))
-        monkeypatch.setattr(cls, "run_attack", lambda *_args: pytest.fail("RAPID requested source scores"))
 
     parent.train()
     parent.linear.eval()
@@ -245,13 +234,9 @@ def test_rapid_runtime(
 
 
 @pytest.mark.parametrize("source", ["lira", "rmia"])
-@pytest.mark.parametrize("output", ["ordinary", "logits"])
-def test_reuses_shared_references(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str, output: str
-) -> None:
-    """Existing LiRA/RMIA references need no retraining for ordinary RAPID or logits calibration."""
-    options = {} if output == "ordinary" else {"use_attack": source, "use_attack_output": output}
-    audit = create_audit(tmp_path, monkeypatch, **options)
+def test_reuses_shared_references(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str) -> None:
+    """RAPID reuses existing LiRA and RMIA references."""
+    audit = create_audit(tmp_path, monkeypatch)
     attack = audit.attack_scheduler.attacks[0]
     previous = AttackFactoryMIA.attack_classes[source](audit.handler, {
         "num_shadow_models": attack.num_reference_models + 1, "training_data_fraction": attack.training_data_fraction,
@@ -280,7 +265,7 @@ def test_rapid_references_supply_logits_on_demand(tmp_path: Path, monkeypatch: p
     audit = create_audit(tmp_path, monkeypatch)
     attack, = audit.attack_scheduler.attacks
     audit.run_audit(create_pdf=False, use_optuna=False)
-    assert not list(Path(audit.handler.configs.audit.output_dir).rglob("*_logits.npz"))
+    assert not list(Path(audit.handler.configs.audit.output_dir).rglob("*_logits.npy"))
 
     other = AttackFactoryMIA.attack_classes[source](audit.handler, {
         "num_shadow_models": attack.num_reference_models + 1, "training_data_fraction": attack.training_data_fraction,
@@ -292,12 +277,15 @@ def test_rapid_references_supply_logits_on_demand(tmp_path: Path, monkeypatch: p
 
     models = ShadowModelHandler()
     for index in attack.reference_model_indices:
-        assert list(Path(models.attack_cache_folder_path).rglob(f"sm_{index}_{models.population_hash}_logits.npz"))
+        prefix = Path(models.attack_cache_folder_path) / f"sm_{index}_{models.population_hash}"
+        assert prefix.with_name(f"{prefix.name}_logits.npy").is_file()
+        cached_ids = np.load(prefix.with_name(f"{prefix.name}_indices.npy"))
+        np.testing.assert_array_equal(cached_ids, attack.audit_dataset["data"])
 
 
-def test_cached_logits_respect_query_preprocessing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A changed query collator must produce fresh indexed losses using the same trained references."""
-    audit = create_audit(tmp_path, monkeypatch, num_classes=2, use_attack="lira", use_attack_output="logits")
+def test_direct_losses_follow_query_preprocessing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Changing the collator changes the queried losses and preserves trained references."""
+    audit = create_audit(tmp_path, monkeypatch, num_classes=2)
     attack, = audit.attack_scheduler.attacks
     audit.handler.population.augment = None
     seen = []
@@ -317,23 +305,9 @@ def test_cached_logits_respect_query_preprocessing(tmp_path: Path, monkeypatch: 
     assert not np.allclose(*seen)
 
 
-def test_source_query_does_not_call_caller_hooks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Source replicas have their own instrumentation and preserve the caller's output buffers."""
-    audit = create_audit(tmp_path, monkeypatch, use_attack="lira", use_attack_output="logits")
-    attack, = audit.attack_scheduler.attacks
-    parent = attack.target_model
-    marker = torch.tensor([-123.])
-    parent.intermediate_outputs["linear"] = marker
-    called = []
-    with parent.model_obj.linear.register_forward_hook(lambda *_args: called.append(True)):
-        audit.run_audit(create_pdf=False, use_optuna=False)
-    assert not called
-    assert parent.intermediate_outputs["linear"] is marker
-
-
 def test_reference_metadata_retry_uses_complete_weights(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A partial metadata write never publishes, and an older truncated entry is skipped on retry."""
-    audit = create_audit(tmp_path, monkeypatch, use_attack="lira", use_attack_output="logits")
+    audit = create_audit(tmp_path, monkeypatch)
     attack, = audit.attack_scheduler.attacks
     models = ShadowModelHandler()
     storage = Path(models.storage_path)
@@ -365,7 +339,7 @@ def test_reference_metadata_retry_uses_complete_weights(tmp_path: Path, monkeypa
 @pytest.mark.parametrize("completed_models", [1, 2])
 def test_restart_preserves_reference_training(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, completed_models: int) -> None:
     """Resume after a partial shared pool without changing membership or scores."""
-    audit = create_audit(tmp_path, monkeypatch, use_attack="lira", use_attack_output="logits")
+    audit = create_audit(tmp_path, monkeypatch)
     expected, = audit.run_audit(create_pdf=False, use_optuna=False)
     attack, = audit.attack_scheduler.attacks
     metadata = ShadowModelHandler().get_shadow_model_metadata(attack.reference_model_indices)
@@ -420,59 +394,6 @@ def test_rapid_reuses_sparse_reference_cache(tmp_path: Path, monkeypatch: pytest
 
     np.testing.assert_array_equal(attack.reference_model_indices, retained)
     np.testing.assert_array_equal(attack.run_attack().signal_values, original.signal_values)
-
-
-@pytest.mark.parametrize("source", ["lira", "rmia"])
-def test_partial_source_cache_retry_preserves_scores(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str
-) -> None:
-    """A missing, corrupt, or interrupted reference query leaves saved audit scores reproducible."""
-    audit = create_audit(tmp_path, monkeypatch, use_attack=source, use_attack_output="logits")
-    attack, = audit.attack_scheduler.attacks
-    original, = audit.run_audit(create_pdf=False, use_optuna=False)
-    features = attack.signal_data.copy()
-    target_cache = tmp_path / "output" / "attack_objects" / "rapid" / "sources" / attack.attack_id / "target" / "attack_cache"
-    reference = attack.reference_model_indices[-1]
-    path, = target_cache.rglob(f"sm_{reference}_*_logits.npz")
-    with np.load(path) as entry:
-        legacy_entry = {key: entry[key] for key in ("indices", "logits")}
-    corrupt_bytes = b"PK\x03\x04"
-    path.write_bytes(corrupt_bytes)
-    models = ShadowModelHandler()
-    monkeypatch.setattr(audit.handler, "train", lambda *_args, **_kwargs: pytest.fail("Retry retrained a model"))
-
-    def interrupt_write(pending: Path, **_entry: np.ndarray) -> None:
-        pending.write_bytes(corrupt_bytes)
-        raise InterruptedError("incomplete logit entry")
-
-    with monkeypatch.context() as patch:
-        patch.setattr(np, "savez", interrupt_write)
-        with pytest.raises(InterruptedError, match="incomplete logit entry"):
-            audit.run_audit(create_pdf=False, use_optuna=False)
-    assert ShadowModelHandler() is models and models.handler is audit.handler
-    assert path.read_bytes() == corrupt_bytes
-    assert not list(path.parent.glob(".write-*"))
-
-    for delete_entry in (False, True):
-        if delete_entry:
-            path.unlink()
-        repeated, = audit.run_audit(create_pdf=False, use_optuna=False)
-        np.testing.assert_array_equal(attack.signal_data, features)
-        np.testing.assert_array_equal(repeated.signal_values, original.signal_values)
-    np.savez(path, **legacy_entry)
-    repeated, = audit.run_audit(create_pdf=False, use_optuna=False)
-    np.testing.assert_array_equal(repeated.signal_values, original.signal_values)
-    with np.load(path) as entry:
-        assert len(entry["labels"]) == len(original.signal_values)
-    saved = MIAResult.load(str(tmp_path / "output" / "data_objects" / f"{attack.attack_id}.json"))
-    np.testing.assert_array_equal(saved.signal_values, original.signal_values)
-    np.testing.assert_array_equal(saved.audit_indices, original.audit_indices)
-    restarted = LeakPro(TinyImageInputHandler, str(tmp_path / "audit.yaml"))
-    monkeypatch.setattr(restarted.handler, "train", lambda *_args, **_kwargs: pytest.fail("Warm restart retrained a model"))
-    monkeypatch.setattr(ModelLogits, "__call__", lambda *_args, **_kwargs: pytest.fail("Warm restart queried logits"))
-    warm, = restarted.run_audit(create_pdf=False, use_optuna=False)
-    np.testing.assert_array_equal(warm.signal_values, original.signal_values)
-    np.testing.assert_array_equal(warm.audit_indices, original.audit_indices)
 
 
 def test_rapid_references_respect_a_following_offline_pool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -568,7 +489,6 @@ def unit_attack(labels: list) -> AttackRAPID:
     attack.configs = AttackRAPID.AttackConfig(batch_size=2, query_num=2)
     for key, value in attack.configs.model_dump().items():
         setattr(attack, key, value)
-    attack.source_configs = None
     dataset = TensorDataset(torch.arange(len(labels)).reshape(-1, 1), torch.as_tensor(labels))
     attack._handler = SimpleNamespace(get_dataloader=lambda *_args, **kwargs: DataLoader(
         dataset, batch_size=kwargs["batch_size"], shuffle=kwargs["shuffle"]
@@ -650,15 +570,12 @@ def test_losses_preserve_handler_outputs(monkeypatch: pytest.MonkeyPatch, scenar
     np.testing.assert_allclose(values, np.column_stack((original, original - reference_loss)), rtol=1e-6, atol=1e-7)
 
 
-@pytest.mark.parametrize(("attack_name", "source", "num_classes"), [
-    ("rapid", None, 3), ("rapid", "lira", 3),
-    ("population", None, 3),
-])
+@pytest.mark.parametrize("attack_name", ["rapid", "population"])
 def test_custom_collation_preserves_record_identity(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, attack_name: str, source: Optional[str], num_classes: int
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, attack_name: str
 ) -> None:
     """A collate function that reverses batches must preserve each score's record ID."""
-    audit = create_audit(tmp_path, monkeypatch, num_classes=num_classes, use_attack=source)
+    audit = create_audit(tmp_path, monkeypatch)
     audit.handler.population.augment = None
     audit.handler.dataloader_config.params["collate_fn"] = lambda batch: default_collate(batch[::-1])
     scheduler = audit.attack_scheduler
@@ -696,10 +613,9 @@ def test_classification_losses(labels: list, logits: list, error: Optional[str])
         np.testing.assert_allclose(attack._get_mean_loss(QueryModel([logits]), np.arange(3)), [0, 1000, np.log(2)])
 
 
-@pytest.mark.parametrize("source", [None, "lira", "rmia"])
-def test_probability_targets_from_query_collation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: Optional[str]) -> None:
+def test_probability_targets_from_query_collation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Losses follow randomly flipped inputs and their paired probability labels."""
-    audit = create_audit(tmp_path, monkeypatch, num_classes=2, use_attack=source)
+    audit = create_audit(tmp_path, monkeypatch, num_classes=2)
     audit.handler.population.augment = None
     attack, = audit.attack_scheduler.attacks
     with torch.no_grad():
@@ -720,14 +636,6 @@ def test_probability_targets_from_query_collation(tmp_path: Path, monkeypatch: p
     np.testing.assert_allclose(attack.signal_data[:, 0], logsumexp(raw, axis=1) - (raw * probabilities).sum(axis=1), atol=3e-7)
 
 
-@pytest.mark.parametrize("ids", [None, [17, 99], [17, 17]])
-def test_source_query_rejects_unaligned_ids(ids: Optional[list]) -> None:
-    """Reject missing, foreign and duplicate record IDs."""
-    source_ids = None if ids is None else np.asarray(ids)
-    with pytest.raises(ValueError, match="identify every requested sample"):
-        AttackRAPID._source_positions(source_ids, np.array([17, 4]))
-
-
 def test_query_augmentation_overrides_inherited_transform(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Pass the requested strength to the dataset and keep its normalization."""
     audit = create_audit(tmp_path, monkeypatch, augment_strength="easy")
@@ -741,8 +649,7 @@ def test_query_augmentation_overrides_inherited_transform(tmp_path: Path, monkey
 @pytest.mark.parametrize(("options", "error", "message"), [
     ({"shadow_data_fraction": 0.01}, ValueError, "at least two auxiliary records"),
     ({"online": True, "training_data_fraction": 0.1}, ValueError, "both scorer splits"),
-    ({"use_attack": "lira"}, RuntimeError, "source failed"),
-    ({"use_attack": "lira"}, FileExistsError, "cache failed"),
+    ({}, RuntimeError, "target query failed"),
 ])
 def test_preparation_failure_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, options: dict, error: type[Exception], message: str
@@ -750,33 +657,14 @@ def test_preparation_failure_cleanup(
     """Failed prepares restore parent state and leave no usable result."""
     audit = create_audit(tmp_path, monkeypatch, **options)
     attack, handler = audit.attack_scheduler.attacks[0], ShadowModelHandler()
-    distillation = DistillationModelHandler(audit.handler)
     model, data, owner = attack.target_model, attack.audit_dataset, handler.handler
     paths = handler.storage_path, handler.attack_cache_folder_path
     if error is RuntimeError:
-        clazz = AttackFactoryMIA.attack_classes["lira"]
-        get_queries = clazz.get_audit_logits
+        def fail_query(_inputs: torch.Tensor) -> np.ndarray:
+            model.model_obj.eval()
+            raise RuntimeError("target query failed")
 
-        def fail(child: AbstractMIA, refs: list) -> tuple:
-            assert child.handler is not owner
-            assert child.handler.target_model is not owner.target_model
-            assert DistillationModelHandler().handler is child.handler
-            assert ShadowModelHandler() is not handler
-            child.handler.dataloader_config.params["batch_size"] = 3
-            if np.array_equal(np.sort(child.audit_dataset["data"]), np.sort(data["data"])):
-                raise RuntimeError("source failed")
-            return get_queries(child, refs)
-
-        monkeypatch.setattr(clazz, "get_audit_logits", fail)
-    elif error is FileExistsError:
-        mkdir = Path.mkdir
-
-        def fail_cache(path: Path, *args: object, **kwargs: object) -> None:
-            if "sources" in path.parts:
-                raise FileExistsError("cache failed")
-            mkdir(path, *args, **kwargs)
-
-        monkeypatch.setattr(Path, "mkdir", fail_cache)
+        monkeypatch.setattr(model, "get_logits", fail_query)
     elif "auxiliary" in message:
         monkeypatch.setattr(owner, "train", lambda *_args, **_kwargs: pytest.fail("Invalid pool trained a model"))
     batch_size = owner.dataloader_config.params["batch_size"]
@@ -788,8 +676,6 @@ def test_preparation_failure_cleanup(
     assert model.model_obj.training and not model.model_obj.linear.training
     assert owner.dataloader_config.params["batch_size"] == batch_size
     assert handler.handler is owner
-    assert DistillationModelHandler() is distillation
-    assert distillation.handler is owner
     assert (handler.storage_path, handler.attack_cache_folder_path) == paths
     with pytest.raises(RuntimeError, match="prepare_attack"):
         attack.run_attack()
@@ -844,23 +730,19 @@ def test_early_stopping_restores_best_weights(monkeypatch: pytest.MonkeyPatch) -
         torch.testing.assert_close(value, checkpoints[1][key], rtol=0, atol=0)
 
 
-@pytest.mark.parametrize(("options", "expected"), [
-    *[({"use_attack": name}, None) for name in (None, "None", "RAPID", " RaPiD ")],
-    ({"use_attack": "LIRA"}, "lira"), ({"use_attack": "RMIA"}, "rmia"),
-    ({"use_attack": "unknown"}, False), ({"use_attack_output": "logits"}, False),
-    ({"use_attack": "population"}, False),
-    ({"use_attack": "lira", "use_attack_output": "scores"}, False),
-    ({"online": True, "num_reference_models": 1}, False),
-    ({"use_attack": "rmia", "use_attack_config": {"num_shadow_models": 3}}, False),
-    ({"query_num": 0}, False), ({"learning_rtae": 0.1}, False),
+@pytest.mark.parametrize("selector", [None, "None", "RAPID", " RaPiD "])
+def test_ordinary_setup_accepts_legacy_selectors(selector: Optional[str]) -> None:
+    """Existing selectors for ordinary RAPID produce the default configuration."""
+    config = AttackRAPID.AttackConfig(use_attack=selector)
+    assert config.model_dump() == AttackRAPID.AttackConfig().model_dump()
+
+
+@pytest.mark.parametrize("options", [
+    {"use_attack": "lira"}, {"use_attack": "rmia"}, {"use_attack_output": "logits"},
+    {"use_attack_config": {}}, {"online": True, "num_reference_models": 1},
+    {"query_num": 0}, {"learning_rtae": 0.1},
 ])
-def test_configuration(options: dict, expected: object) -> None:
-    """Keep selectors dynamic, normalize fallbacks, and reject invalid ownership and query settings."""
-    if expected is False:
-        with pytest.raises(ValidationError):
-            AttackRAPID.AttackConfig(**options)
-    else:
-        config = AttackRAPID.AttackConfig(**options)
-        assert config.use_attack == expected
-        if expected is None:
-            assert config.model_dump() == AttackRAPID.AttackConfig().model_dump()
+def test_configuration_rejects_unsupported_settings(options: dict) -> None:
+    """Alternate sources, invalid reference counts, and unknown settings raise config errors."""
+    with pytest.raises(ValidationError):
+        AttackRAPID.AttackConfig(**options)

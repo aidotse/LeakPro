@@ -66,7 +66,7 @@ def _reset_factory_singletons(image_handler: ImageInputHandler) -> None:  # noqa
 
 
 def test_registered_classifier_attack_handler_requirements() -> None:
-    """Preserve existing requirements and let RAPID manage its source distillation handler."""
+    """RAPID requires shadow models and skips distillation setup."""
     for name, attack_cls in AttackFactoryMIA.attack_classes.items():
         if issubclass(attack_cls, (_NoAuxAttack, AbstractLLMMIA)):
             continue
