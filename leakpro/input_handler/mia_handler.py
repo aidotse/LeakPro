@@ -7,19 +7,54 @@
 import inspect
 import pickle
 import types
+from collections.abc import Callable
+from functools import partial
+from hashlib import sha256
+from os import fstat
+from typing import BinaryIO
 
 import joblib
 import numpy as np
 import torch
 from pydantic import BaseModel
 from torch import nn, optim
-from torch.utils.data import DataLoader
+from torch.utils.data import BatchSampler, DataLoader, SequentialSampler, default_collate
 
 from leakpro.input_handler.abstract_input_handler import AbstractInputHandler
 from leakpro.input_handler.user_imports import get_class_from_module, import_module_from_file
 from leakpro.schemas import DataLoaderConfig, LossConfig, MIAMetaDataSchema, OptimizerConfig
 from leakpro.utils.import_helper import Any, Self, Tuple
 from leakpro.utils.logger import logger
+
+
+def _collate_one(collate:Callable, batch:list) -> tuple:
+    """Keep one output row for the one record passed to custom collation."""
+    data, labels = collate(batch)
+    label_shape = torch.as_tensor(labels).shape
+    if label_shape and label_shape[0] != 1:
+        raise ValueError("Custom query collation must return one label row per record.")
+    return data, labels
+
+
+def ordered_query_dataloader(get_loader:Callable, indices:np.ndarray, params:dict=None, batch_size:int=None) -> DataLoader:
+    """Use one record per custom-collated batch to preserve the order of query results."""
+    loader = get_loader(indices, params=params, batch_size=batch_size, shuffle=False)
+    if loader.collate_fn is not default_collate and loader.batch_size != 1:
+        loader = get_loader(indices, params=params, batch_size=1, shuffle=False)
+    batches = loader.batch_sampler
+    if (not isinstance(batches, BatchSampler) or type(batches).__iter__ is not BatchSampler.__iter__
+        or not isinstance(batches.sampler, SequentialSampler)
+        or type(batches.sampler).__iter__ is not SequentialSampler.__iter__) or (
+        loader.num_workers > 0 and not getattr(loader, "in_order", True)
+    ):
+        raise ValueError("Record-aligned queries require sequential batches and in_order=True.")
+    collate = loader.collate_fn
+    if collate is not default_collate:
+        if batches.batch_size != 1:
+            raise ValueError("Record-aligned queries require batch_size=1 with custom collation.")
+        if not isinstance(collate, partial) or collate.func is not _collate_one:
+            loader.collate_fn = partial(_collate_one, collate)
+    return loader
 
 
 class _DatasetStub:
@@ -59,19 +94,24 @@ def load_dataset_file(path: str) -> Any:  # noqa: ANN401 - arbitrary user datase
     of the fallback's generic "invalid load key".
     """
     with open(path, "rb") as file:
+        return _load_dataset(file)
+
+
+def _load_dataset(file: BinaryIO) -> Any:  # noqa: ANN401 - arbitrary user dataset object
+    """Read the dataset from an open file."""
+    try:
+        return joblib.load(file)
+    except Exception as joblib_error:
+        file.seek(0)
         try:
-            return joblib.load(file)
-        except Exception as joblib_error:
-            file.seek(0)
-            try:
-                obj = _SafeUnpickler(file).load()
-            except Exception as pickle_error:
-                raise RuntimeError(
-                    f"Could not load dataset file '{path}': joblib failed with {joblib_error!r}; "
-                    f"pickle fallback failed with {pickle_error!r}"
-                ) from joblib_error
-            logger.info("Loaded dataset via safe unpickler (missing module stub)")
-            return obj
+            obj = _SafeUnpickler(file).load()
+        except Exception as pickle_error:
+            raise RuntimeError(
+                f"Could not load dataset file '{file.name}': joblib failed with {joblib_error!r}; "
+                f"pickle fallback failed with {pickle_error!r}"
+            ) from joblib_error
+        logger.info("Loaded dataset via safe unpickler (missing module stub)")
+        return obj
 
 
 def _fix_bn_inplace(model: torch.nn.Module) -> None:
@@ -116,7 +156,19 @@ class MIAHandler:
     def _load_population(self:Self) -> None:
         """Default implementation of the population loading."""
         try:
-            self.population = load_dataset_file(self.configs.target.data_path)
+            with open(self.configs.target.data_path, "rb") as file:
+                before = fstat(file.fileno())
+                self.population = _load_dataset(file)
+                file.seek(0)
+                digest = sha256()
+                for chunk in iter(lambda: file.read(1024 * 1024), b""):
+                    digest.update(chunk)
+                after = fstat(file.fileno())
+                if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
+                    after.st_size, after.st_mtime_ns, after.st_ctime_ns
+                ):
+                    raise ValueError("The population file changed while it was being loaded.")
+            self.population_digest = digest.hexdigest()
             try:
                 self.population_size = len(self.population)
             except TypeError as e:

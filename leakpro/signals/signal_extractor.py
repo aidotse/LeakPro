@@ -100,6 +100,25 @@ class Model(ABC):
         """
         pass
 
+def align_loss_targets(output: Tensor, labels: Tensor, criterion: type[nn.Module]) -> Tensor:
+    """Match label shape to the criterion while preserving dense class targets."""
+    if issubclass(criterion, (nn.BCELoss, nn.BCEWithLogitsLoss)):
+        labels = labels.to(output)
+        if 0 < output.ndim <= 2 and output.numel() == len(output) == labels.numel():
+            labels = labels.reshape_as(output)
+    elif issubclass(criterion, (nn.CrossEntropyLoss, nn.NLLLoss)):
+        if output.ndim == 2 and labels.shape == (len(output), 1) and (
+            output.shape != labels.shape or not labels.is_floating_point()
+        ):
+            labels = labels.squeeze(1)
+    elif output.ndim == 2 and output.shape[1] <= 2:
+        if labels.ndim == 1:
+            labels = labels.unsqueeze(1)
+        if output.shape[1] == 1:
+            labels = labels.float()
+    return labels
+
+
 class PytorchModel(Model):
     """Inherits from the Model class, an interface to query a model without any assumption on how it is implemented.
 
@@ -169,27 +188,17 @@ class PytorchModel(Model):
         """
         batch_samples_tensor = batch_samples.clone().detach() if isinstance(batch_samples, Tensor) else tensor(batch_samples)
         batch_labels_tensor = batch_labels.clone().detach()
-
+        criterion = self.loss_fn_no_reduction if per_point else self.loss_fn
         with no_grad():
             self.model_obj.eval()
-            dummy_input = batch_samples_tensor[:1] # adapt input shape
-            output = self.model_obj(dummy_input)
-            num_classes = output.shape[1]  # assume (batch_size, num_classes)
-
-        if num_classes <= 2 and batch_labels_tensor.dim() == 1:
-            batch_labels_tensor = batch_labels_tensor.unsqueeze(1)
-        if num_classes == 1:
-            # Single-logit binary head (BCE-style loss): targets must be float
-            batch_labels_tensor = batch_labels_tensor.float()
+            output = self.model_obj(batch_samples_tensor)
+            loss = criterion(output, align_loss_targets(output, batch_labels_tensor, type(criterion)))
 
         if per_point:
-            losses = (self.loss_fn_no_reduction(self.model_obj(batch_samples_tensor),batch_labels_tensor,)
-                .detach()
-                .numpy()
-            )
+            losses = loss.numpy()
             # BCE no-reduction returns (B, 1) — flatten to (B,) like CrossEntropy
             return losses.reshape(-1) if losses.ndim == 2 and losses.shape[1] == 1 else losses
-        return self.loss_fn(self.model_obj(Tensor(batch_samples_tensor)),Tensor(batch_labels_tensor),).item()
+        return loss.item()
 
     def get_grad(self:Self, batch_samples:np.ndarray, batch_labels:np.ndarray)->np.ndarray:
         """Get the gradient of the model loss with respect to the model parameters, given an input and expected output.

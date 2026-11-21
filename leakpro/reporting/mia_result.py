@@ -7,6 +7,7 @@
 import json
 import logging
 import os
+from pathlib import Path
 from typing import Optional
 
 import matplotlib.pyplot as plt
@@ -17,7 +18,7 @@ from leakpro.reporting.report_utils import reduce_to_unique_labels
 from leakpro.schemas import MIAResultSchema
 from leakpro.utils.import_helper import Any, Self, Union
 from leakpro.utils.logger import logger
-from leakpro.utils.save_load import hash_config
+from leakpro.utils.save_load import atomic_output_path, hash_config
 
 
 class MIAResult:
@@ -58,14 +59,7 @@ class MIAResult:
         obj._init_common(true_membership, result_name, metadata)
         obj.roc_mode = "full"
         obj.signal_values = np.ravel(signal_values)
-        if audit_indices is not None:
-            audit_indices = np.ravel(audit_indices).astype(int)
-            if len(audit_indices) != len(obj.signal_values):
-                raise ValueError(
-                    f"audit_indices has {len(audit_indices)} entries but signal_values has "
-                    f"{len(obj.signal_values)}; they must line up one-to-one."
-                )
-            obj.audit_indices = audit_indices
+        obj.audit_indices = obj._validate_audit_indices(audit_indices)
         obj._compute_confusion_arrays()
         obj._compute_metrics()
         obj.result = obj._make_result_object()
@@ -77,7 +71,8 @@ class MIAResult:
                               signal_values: list,
                               thresholds: list,
                               result_name: str = None,
-                              metadata: dict = None) -> Self:
+                              metadata: dict = None,
+                              audit_indices: list = None) -> Self:
         """Create MIAResult from fixed threshold scores.
 
         Args:
@@ -87,6 +82,7 @@ class MIAResult:
             thresholds: A list of fixed thresholds at which to evaluate confusion values.
             result_name: The name of the attack and result.
             metadata: Metadata about the result.
+            audit_indices: Population index of each score, in the same order.
 
         Returns:
         -------
@@ -99,6 +95,7 @@ class MIAResult:
         obj._init_common(true_membership, result_name, metadata)
         obj.roc_mode = "fixed"
         obj.signal_values = np.ravel(signal_values)
+        obj.audit_indices = obj._validate_audit_indices(audit_indices)
         obj._compute_fixed_threshold_confusions(thresholds)
         obj._compute_metrics()
         obj.result = obj._make_result_object()
@@ -152,7 +149,7 @@ class MIAResult:
     def _init_common(self, true_membership: list, result_name: str, metadata: dict) -> None:
         """Initialize common attributes."""
         self.true = np.ravel(true_membership)
-        #: Population index per scored point (set by from_full_scores when the attack reports it).
+        #: Population index per scored point, when the attack reports it.
         self.audit_indices = None
         self.result_name = result_name
         self.metadata = metadata
@@ -162,6 +159,33 @@ class MIAResult:
         hased_config = hash_config(self.result_config)[:16]
         logger.info(f"Generated hash for {self.result_name} MIAResult config: {hased_config} with config: {self.result_config}")
         self.id = f"{self.result_name}-{hased_config}"
+
+    def _validate_audit_indices(self, audit_indices: Optional[list]) -> Optional[np.ndarray]:
+        """Check that each reported population index corresponds to one score."""
+        if audit_indices is None:
+            return None
+        # Keep mixed Python values uncoerced until their types have been checked.
+        dtype = None if isinstance(audit_indices, np.ndarray) else object
+        indices = np.asarray(audit_indices, dtype=dtype).ravel()
+        max_index = np.iinfo(np.intp).max
+        if indices.dtype.kind == "O":
+            valid = all(
+                ((isinstance(index, int) and not isinstance(index, bool))
+                 or (isinstance(index, np.generic) and index.dtype.kind in "iu"))
+                and 0 <= int(index) <= max_index
+                for index in indices
+            )
+        else:
+            valid = indices.dtype.kind in "iu" and np.all((indices >= 0) & (indices <= max_index))
+        if indices.size and not valid:
+            raise ValueError("audit_indices must contain nonnegative integer population indices.")
+        score_count = 0 if self.signal_values is None else len(self.signal_values)
+        if len(indices) != score_count:
+            raise ValueError(
+                f"audit_indices has {len(indices)} entries but signal_values has "
+                f"{score_count}; they must line up one-to-one."
+            )
+        return indices.astype(np.intp)
 
     def _make_result_object(self) -> MIAResultSchema:
         return MIAResultSchema(
@@ -173,6 +197,7 @@ class MIAResult:
             config = self.metadata,
             fixed_fpr = self.fixed_fpr_table,
             signal_values = self.signal_values,
+            audit_indices = self.audit_indices.tolist() if self.audit_indices is not None else None,
             true_labels = self.true,
             tp = self.tp,
             fp = self.fp,
@@ -402,17 +427,20 @@ class MIAResult:
                 return obj.item()
             raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
+        result_data = self.result.model_dump(exclude={"audit_indices"} if self.audit_indices is None else None)
+
         # Save the results to a file in data objects using attack hash
-        with open(f"{data_obj_storage}{attack_obj.attack_id}.json", "w") as f:
-            json.dump(self.result.model_dump(), f, default=json_fallback)
+        path = Path(data_obj_storage) / f"{attack_obj.attack_id}.json"
+        with atomic_output_path(path) as pending, pending.open("w") as f:
+            json.dump(result_data, f, default=json_fallback)
 
         # Store results for user output
         with open(f"{save_path}/result.txt", "w") as f:
-            f.write(str(self.result.model_dump()))
+            f.write(str(result_data))
 
         # Store config as JSON
         with open(f"{save_path}/config.json", "w") as f:
-            json.dump(self.result.model_dump()["config"], f, default=json_fallback)
+            json.dump(result_data["config"], f, default=json_fallback)
 
         # Create ROC plot
         if self._has_roc():
@@ -481,6 +509,7 @@ class MIAResult:
         obj.fixed_fpr_table = mia_data.fixed_fpr if mia_data.fixed_fpr else None
         obj.bootstrap = mia_data.bootstrap
         obj.signal_values = mia_data.signal_values if mia_data.signal_values else None
+        obj.audit_indices = obj._validate_audit_indices(mia_data.audit_indices)
         obj.true = mia_data.true_labels
         obj.tp = mia_data.tp
         obj.fp = mia_data.fp
